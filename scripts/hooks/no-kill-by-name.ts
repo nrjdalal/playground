@@ -4,6 +4,7 @@ import { input } from "./input"
 import { fromFactory } from "./role"
 import {
   examine,
+  globSpells,
   lex,
   parse,
   program,
@@ -18,6 +19,8 @@ import {
 } from "./shell"
 
 const BY_NAME = new Set(["killall", "pkill"])
+// The programs whose name in a call, written out or as a glob that may match it (`pk?ll`), sends the call to the full read
+const KILLS = ["fuser", "kill", "killall", "pkill"]
 const SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"])
 const READS_ONLY = new Set(["--help", "--version", "-V", "-h"])
 
@@ -51,14 +54,19 @@ async function inspect(raw: string) {
     tool_name?: unknown
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
-  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill, and an ANSI-C string's words are read as the lexer decodes them, since `$'pkill\x20-f'` holds pkill behind an escape; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows
+  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill, and an ANSI-C string's words are read as the lexer decodes them, since `$'pkill\x20-f'` holds pkill behind an escape; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows, and so does a glob that may match a kill program (`/usr/bin/pk?ll`), which the reader matches on the disk
   const decoded = toolInput.command.includes("$'")
     ? lex(toolInput.command)
         .commands.flatMap((c) => c.words.map((w) => w.value))
         .join(" ")
     : ""
   const bare = `${toolInput.command} ${decoded}`.replace(/["'\\]/g, "")
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare)) return
+  if (
+    !/\b(?:fuser|kill|killall|pkill)\b/.test(bare) &&
+    !/(?:\$\{?\w+\}?){2,}/.test(bare) &&
+    !globSpells(bare, KILLS)
+  )
+    return
   const lexed = lex(toolInput.command)
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
   // the whole call is read for a search first, since a loop's `done < <(pgrep …)` is read after the kill it feeds

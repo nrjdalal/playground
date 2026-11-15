@@ -62,6 +62,12 @@ describe("a delete the hook lets run", () => {
     "$R/scripts/spawn.sh column reviewer $W --pr 1",
     "gh pr checks $N -R owner/repo",
     "'/bin/r?' -rf sub",
+    // #2244's controls: a glob used only as an argument, a glob that matches no file, an array the reader resolves, and an array the reader cannot read in a call that names no delete
+    "ls /bin/r?",
+    "/no/such/folder/r? notes.txt",
+    'A=(rm notes.txt); "${A[@]}"',
+    'A=(echo hi); A+=(there); "${A[@]}"',
+    `~/.playground/ops/run-slot.sh me -- git commit -m "fix(PG-1): playground rm moves a file" -m "a (b) c"`,
     'rmdir "${S:?}/${m:?}"',
     "mv web/next/.next .turbo /tmp/claude-501/p/s/scratchpad/cold-1/",
     "playground rm sub/old",
@@ -134,6 +140,12 @@ describe("a delete the hook refuses, naming playground rm", () => {
     const reason = await check(input("rm -rf node_modules"))
     expect(reason).toContain("leave a bigger tree or a scratch folder in place")
     expect(reason).toContain("bun install rebuild a node_modules in place")
+  })
+
+  test("a command built from a value it cannot read, in a call that names a delete, is pointed at a script file", async () => {
+    const reason = await check(input(`A=(echo -rf ${NEVER_MADE}); A[0]=rm; "\${A[@]}"`))
+    expect(reason).toContain("a command built from a value it cannot read")
+    expect(reason).toContain("write the script to a file and run it")
   })
 
   test("a word it cannot read is named by its variable", async () => {

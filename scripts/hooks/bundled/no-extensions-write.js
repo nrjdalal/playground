@@ -6289,7 +6289,7 @@ async function input(name, kind, deadline = DEADLINE) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, normalize, resolve as resolve4, sep } from "path";
 
 // packages/settings/src/live.ts
@@ -6410,7 +6410,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
-import { realpathSync, statSync as statSync2 } from "fs";
+import { lstatSync, readdirSync as readdirSync2, realpathSync, statSync as statSync2 } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
@@ -7950,7 +7950,7 @@ function change(cmd, env) {
         setVar(env.vars, key, CHANGED);
       return;
     }
-    const variants = array ? [array] : splitHeld(cmd, name, env).filter((variant) => !marked(parse3(variant).name));
+    const variants = array ? [array] : [...splitHeld(cmd, name, env), ...splitHeld(cmd, name, env, true)].filter((variant) => !marked(parse3(variant).name));
     for (const variant of variants)
       change(variant, env);
     if (variants.length > 0)
@@ -8042,6 +8042,82 @@ function arrayRun(cmd, first, env) {
     return null;
   return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
+function globRun(cmd, first, env, glob = !!first?.glob) {
+  const pattern = first?.value ?? "";
+  if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
+    return;
+  if (!GLOB_PATTERN.test(pattern))
+    return;
+  const absolute = isAbsolute3(pattern);
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
+    return null;
+  const base = absolute ? "/" : env.cwd;
+  let paths = [""];
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path, name) => k === 0 ? name : `${path}/${name}`;
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part));
+      continue;
+    }
+    const glob = shellGlob(part);
+    const next = [];
+    for (const path of paths) {
+      let names;
+      try {
+        names = readdirSync2(resolve3(base, path || "."));
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+          continue;
+        return null;
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name));
+    }
+    if (next.length > READINGS)
+      return null;
+    paths = next;
+  }
+  const found = [];
+  for (const path of paths) {
+    try {
+      lstatSync(resolve3(base, path));
+      found.push(path);
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+        return null;
+    }
+  }
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function heldGlob(cmd, first, env) {
+  if (!first?.glob || !first.raw || !marked(first.value))
+    return;
+  const value = relexedValue(first.raw, heldKnown(env));
+  if (value === undefined || marked(value))
+    return;
+  const word = { ...first, value };
+  return globRun({ ...cmd, words: cmd.words.map((w) => w === first ? word : w) }, word, env, true);
+}
+var GLOB_PATTERN = /[*?]|\[[^\]]*\]/;
+var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!").replace(BRACKET, (bracket) => bracket.slice(1, -1).replace(/\[:([a-z]+):\]/g, (_, name) => POSIX_CLASSES[name] ?? " -~").replace(/\[([=.])(.)\1\]/g, "$2").replace(/^/, "[").concat("]")));
+var BRACKET = /\[[!^]?\]?(?:\[:[a-z]+:\]|\[([=.]).\1\]|[^\]])*\]/g;
+var POSIX_CLASSES = {
+  alnum: "0-9A-Za-z",
+  alpha: "A-Za-z",
+  blank: " \t",
+  digit: "0-9",
+  lower: "a-z",
+  space: ` 	
+\r\f\v`,
+  upper: "A-Z",
+  xdigit: "0-9A-Fa-f"
+};
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
@@ -8071,15 +8147,32 @@ function bind(commands, k, env, unbind) {
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined;
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
-  const before = names.map((name) => [name, env.vars.get(name)]);
   const value = close ? loopWord(cmd) : undefined;
+  const held = close ? heldKnown(env) : {};
+  const prior = names.flatMap((name) => (name in held) ? [[name, held[name]]] : []);
   for (const name of names)
     setVar(env.vars, name, value ?? unknown2("a value a builtin gives"));
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before)
-        held ? setVar(env.vars, name, held) : env.vars.delete(name);
-    });
+  if (!close)
+    return;
+  for (const name of names)
+    capture(env, name, value);
+  unbind.set(close, () => {
+    for (const name of names)
+      setVar(env.vars, name, CHANGED);
+    if (prior.length === 0)
+      return;
+    let record = loopBefore.get(env.vars);
+    if (!record)
+      loopBefore.set(env.vars, record = {});
+    for (const [name, was] of prior)
+      record[name] = was;
+  });
+}
+function capture(env, key, value) {
+  if (value)
+    recordHeld(env, key, value);
+  else
+    delete heldResolved.get(env.vars)?.[key];
 }
 function loopWord({ words }) {
   const at = words.findIndex((w) => w.value === "in" && !w.quoted);
@@ -8122,17 +8215,26 @@ async function examine(cmd, env, visit, builtins) {
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
   const array = arrayRun(cmd, primary.first, env);
-  const resolving = [
-    ...splitHeld(cmd, primary.name, env),
-    ...array ? [array] : [],
-    ...heldScripts(cmd, primary, env)
+  const prior = splitHeld(cmd, primary.name, env, true);
+  const split = splitHeld(cmd, primary.name, env);
+  const globs = [
+    globRun(cmd, primary.first, env),
+    heldGlob(cmd, primary.first, env),
+    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true))
   ];
-  if (unreadCommand(cmd, primary, resolving))
+  const resolving = [
+    ...split,
+    ...array ? [array] : [],
+    ...heldScripts(cmd, primary, env),
+    ...globs.flatMap((globbed) => globbed ?? [])
+  ];
+  if (globs.includes(null) || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others])
       parsed.unread = true;
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...resolving,
+    ...prior,
     ...vanished,
     ...await xargsFilled(cmd, [primary, ...others], env)
   ];
@@ -8286,7 +8388,7 @@ function expandTilde(cmd, name, env) {
   });
 }
 var holdsCommand = (w) => !!w.source && /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${").replace(/\$[=~^](?=\w)/g, "$"));
-function splitHeld(cmd, name, env) {
+function splitHeld(cmd, name, env, prior = false) {
   if (name === "cd" || name === "popd" || name === "pushd")
     return [];
   const first = cmd.words.some((w) => w.splits && w.raw && !holdsCommand(w)) ? parse3(cmd).first : undefined;
@@ -8295,20 +8397,26 @@ function splitHeld(cmd, name, env) {
     return [];
   const known = heldKnown(env);
   const seps = ifsSplit(env);
-  let split = false;
-  const words = cmd.words.flatMap((w) => {
-    if (!holds(w) || !w.raw)
-      return [w];
-    const value = relexedValue(w.raw, known);
-    if (value === undefined)
-      return [w];
-    const parts = splitValue(value, seps);
-    if (!parts.some((part) => !part.unknown))
-      return [w];
-    split = true;
-    return parts;
-  });
-  return split ? [{ ...cmd, words }] : [];
+  const splitWith = (known) => {
+    let split = false;
+    const words = cmd.words.flatMap((w) => {
+      if (!holds(w) || !w.raw)
+        return [w];
+      const value = relexedValue(w.raw, known);
+      if (value === undefined)
+        return [w];
+      const parts = splitValue(value, seps);
+      if (!parts.some((part) => !part.unknown))
+        return [w];
+      split = true;
+      return parts;
+    });
+    return split ? [{ ...cmd, words }] : [];
+  };
+  if (!prior)
+    return splitWith(known);
+  const before = loopBefore.get(env.vars);
+  return before && Object.keys(before).length > 0 ? splitWith({ ...known, ...before }) : [];
 }
 function relexedValue(raw, known) {
   const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words;
@@ -8329,8 +8437,10 @@ function heldKnown(env) {
   }
   return Object.assign(known, heldResolved.get(env.vars));
 }
+var loopBefore = new WeakMap;
 var heldResolved = new WeakMap;
 function recordHeld(env, key, value) {
+  delete loopBefore.get(env.vars)?.[key];
   let record = heldResolved.get(env.vars);
   if (!record)
     heldResolved.set(env.vars, record = {});
@@ -9011,6 +9121,37 @@ function knownVariables(command, environment, cwd) {
       known[name] = value;
   }
   return known;
+}
+var BRACE_WORDS = 64;
+function braceWords(word) {
+  const done = [];
+  const todo = [word];
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS)
+      return;
+    const next = todo.pop();
+    let split;
+    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open];
+      let depth = 0;
+      for (let k = open;k < next.length; k++) {
+        if (next[k] === "{")
+          depth++;
+        else if (next[k] === "," && depth === 1)
+          cuts.push(k);
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
+          break;
+        }
+      }
+    }
+    if (split)
+      todo.push(...split.reverse());
+    else
+      done.push(next);
+  }
+  return done;
 }
 
 // scripts/hooks/steady.ts
@@ -10802,39 +10943,15 @@ var removerWord = (word) => {
   const name = word.split(sep2).at(-1) ?? "";
   return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
 };
-var BRACE_WORDS = 64;
-function braceWords(word) {
-  const done = [];
-  const todo = [word];
-  while (todo.length > 0) {
-    if (done.length + todo.length > BRACE_WORDS)
-      return;
-    const next = todo.pop();
-    let split;
-    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
-      const cuts = [open];
-      let depth = 0;
-      for (let k = open;k < next.length; k++) {
-        if (next[k] === "{")
-          depth++;
-        else if (next[k] === "," && depth === 1)
-          cuts.push(k);
-        else if (next[k] === "}" && --depth === 0) {
-          if (cuts.length > 1)
-            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
-          break;
-        }
-      }
-    }
-    if (split)
-      todo.push(...split);
-    else
-      done.push(next);
-  }
-  return done;
-}
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
-var sedText = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
+var coded = (digits, base, escape) => {
+  const clean = digits.replace(/[\s_]/g, "");
+  if (!(base === 16 ? /^[\da-f]+$/i : base === 8 ? /^[0-7]+$/ : /^\d+$/).test(clean))
+    return "*";
+  const point = Number.parseInt(clean, base);
+  return point <= 1114111 ? String.fromCodePoint(point) : escape;
+};
+var sedText = (text) => text.replace(/\\(?:x([\da-fA-F]{1,2})|o([0-7]{1,3})|d(\d{1,3})|(.))|&/gs, (m, hex, octal, decimal, c) => hex ? coded(hex, 16, m) : octal ? coded(octal, 8, m) : decimal ? coded(decimal, 10, m) : m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
 function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
   const writes = [];
@@ -10846,6 +10963,8 @@ function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
       return [read(script)];
     if (item[1])
       writes.push(read(item[1].slice(0, -1)));
+    if (item[2])
+      writes.push(read(printText(item[2])));
   }
   return writes;
 }
@@ -10937,13 +11056,45 @@ var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
 var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
 var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
-var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
+var PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*))?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
 var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`;
-var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
+var PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
+var PRINT_VALUE = new RegExp(PERL_VALUE, "g");
+var printText = (values) => [...values.matchAll(PRINT_VALUE)].map(([v]) => v.startsWith('"') ? v.slice(1, -1) : "$1").join("");
 var PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y");
-var perlText = (text) => text.replace(/\\(.)|\$[1-9&]/gs, (m, c) => c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
-` : c === "t" ? "\t" : c);
+function charName(name) {
+  const spelled = name.trim().toUpperCase().replace(/\s+/g, " ");
+  const fixed = {
+    "FULL STOP": ".",
+    "HYPHEN-MINUS": "-",
+    "LOW LINE": "_",
+    SOLIDUS: "/"
+  };
+  const digits = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"];
+  const letter = /^LATIN (SMALL|CAPITAL) LETTER ([A-Z])$/.exec(spelled);
+  const digit = /^DIGIT ([A-Z]+)$/.exec(spelled);
+  if (letter)
+    return letter[1] === "SMALL" ? letter[2].toLowerCase() : letter[2];
+  if (digit && digits.includes(digit[1]))
+    return String(digits.indexOf(digit[1]));
+  return fixed[spelled] ?? "*";
+}
+var PERL_ESCAPE = /\\(?:x\{(?<hexBraced>[^}]*)\}|x(?<hex>[\da-fA-F]{1,2})|N\{\s*U\+(?<point>[^}]*)\}|N\{(?<name>[^}]*)\}|o\{(?<octalBraced>[^}]*)\}|(?<octal>0[0-7]{0,2}|[1-7][0-7]{1,2})|(?<char>.))|\$[1-9&]/gs;
+var perlText = (text) => text.replace(PERL_ESCAPE, (m, ...rest) => {
+  const g = rest.at(-1);
+  const hex = g.hexBraced ?? g.hex ?? g.point;
+  const octal = g.octalBraced ?? g.octal;
+  if (hex !== undefined)
+    return coded(hex, 16, m);
+  if (octal !== undefined)
+    return coded(octal, 8, m);
+  if (g.name !== undefined)
+    return charName(g.name);
+  const c = g.char;
+  return c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
+` : c === "t" ? "\t" : c;
+});
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
 function perlReadScripts({ args, local }, env) {
   if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
@@ -10972,12 +11123,12 @@ function perlReadScripts({ args, local }, env) {
 var perlReads = (parsed, env) => !!perlReadScripts(parsed, env);
 function escapedWrites(parsed, env) {
   const tool = program(parsed.name);
-  const unescaped = () => parsed.args.map((word) => word.value.replaceAll("\\/", "/"));
+  const unescaped = (read) => parsed.args.map((word) => read(word.value));
   if (SEDS.has(tool))
-    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped();
+    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped(sedText);
   if (tool !== "perl")
     return [];
-  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped();
+  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped(perlText);
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -11038,6 +11189,84 @@ function xargsGrep(cmd, parsed, env) {
   const lead = cmd.words.find((word) => /(?:^|\/)xargs$/.test(word.value));
   const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/;
   return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && (xargs.replace === undefined || !first.value.includes(xargs.replace)) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value)) && !/^--process-slot-var(?:=|$)/.test(value)) && reads(parsed, env);
+}
+function fdFiles(redirects, inherited) {
+  const fds = new Map(inherited);
+  const fdOf = (r) => r.fd === "&" || r.fd === "" && r.op !== "<>" ? "1" : r.fd || "0";
+  const opened = (fd) => redirects.flatMap((r) => r.target && writer(r) && fdOf(r) === fd ? [r.target] : []);
+  for (const r of redirects) {
+    if (!r.target || !(r.op.startsWith(">") || r.op === "<>"))
+      continue;
+    const fd = fdOf(r);
+    const n = r.target.value;
+    const dup = r.op === ">&" && /^\d+$/.test(n);
+    const files = dup ? [...fds.get(n) ?? [], ...opened(n)] : writer(r) ? [r.target] : [];
+    fds.set(fd, files);
+    if (r.fd === "&" || r.op === ">&" && r.fd === "" && !dup)
+      fds.set("2", files);
+  }
+  return fds;
+}
+var LEADS2 = new Set(["!", "(", "do", "elif", "else", "then", "{"]);
+var OPENERS = new Set(["case", "for", "if", "select", "until", "while"]);
+var CLOSERS = new Set(["done", "esac", "fi"]);
+function compoundBodies(commands, bodies = new WeakMap) {
+  const open = [];
+  commands.forEach((cmd, k) => {
+    const lead = cmd.words.find((w) => w.quoted || !LEADS2.has(w.value));
+    if (lead && !lead.quoted && OPENERS.has(lead.value))
+      open.push(k);
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
+      bodies.set(cmd, commands.slice(open.pop(), k));
+    if (cmd.inner)
+      compoundBodies(cmd.inner(), bodies);
+  });
+  return bodies;
+}
+async function printed(cmd, env, kids) {
+  const held = kids(cmd);
+  if (held) {
+    const own = held.filter((c) => !fdFiles(c.redirects, new Map).has("1"));
+    return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat();
+  }
+  const parsed = parse3(cmd);
+  if (PRINTERS.has(parsed.name)) {
+    const out = await outputOf(cmd, env);
+    return out.unknown ? [] : [out.value];
+  }
+  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name;
+  return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
+}
+function readHookFolder(dir) {
+  let at = dir;
+  while (!existsSync4(at) && dirname4(at) !== at)
+    at = dirname4(at);
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_") && key !== "LC_ALL"));
+  try {
+    const read = Bun.spawnSync(["git", "-C", at, "rev-parse", "--git-path", "hooks"], {
+      env: { ...env, LC_ALL: "C" },
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 2000
+    });
+    if (read.exitCode === 0)
+      return real(resolve5(at, read.stdout.toString().trim()));
+    return read.exitCode !== 128 || !read.stderr.toString().includes("not a git repository");
+  } catch {
+    return true;
+  }
+}
+var hookFolders = new Map;
+function hookFile(path) {
+  if (!path)
+    return false;
+  if (/(?:^|\/)\.git\/hooks\//.test(path))
+    return true;
+  const dir = dirname4(path);
+  if (!hookFolders.has(dir))
+    hookFolders.set(dir, readHookFolder(dir));
+  const folder = hookFolders.get(dir);
+  return folder === true || folder === real(dir);
 }
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
@@ -11392,6 +11621,8 @@ async function inspect(raw, environment, unknown = false) {
   let whole = false;
   let rootLine = false;
   let patterns = new Set;
+  let bodies = new WeakMap;
+  let execFds = new Map;
   let lineWrites = false;
   let nearEval;
   let textDepth = 0;
@@ -11470,6 +11701,37 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
+    const kids = (c) => c.inner?.() ?? bodies.get(c);
+    const intoHook = async (targets, source) => {
+      if (targets.length === 0)
+        return;
+      for (const text of await printed(source, env, kids))
+        for (const here of places(env)) {
+          const named = scriptNames(text, here);
+          const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
+          if (hook)
+            return `${shown(hook)}, a hook file, written with a script that names ${named}`;
+        }
+    };
+    const outOf = async (c, inherited) => {
+      const fds = fdFiles(c.redirects, inherited);
+      if (fds.size === 0)
+        return;
+      const held = kids(c);
+      if (!held)
+        return intoHook(fds.get("1") ?? [], c);
+      for (const each of held) {
+        const named = await outOf(each, fds);
+        if (named)
+          return named;
+      }
+    };
+    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+      execFds = fdFiles(cmd.redirects, execFds);
+    const teeTool = program(name);
+    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin) : undefined);
+    if (hookWrite)
+      return refuse(hookWrite);
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
@@ -11700,6 +11962,8 @@ async function inspect(raw, environment, unknown = false) {
     return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
+  bodies = compoundBodies(lexed.commands);
+  execFds = new Map;
   lineWrites = redirectsWrite(lexed.commands);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);

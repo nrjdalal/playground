@@ -1,6 +1,6 @@
 // The Bash reader the PreToolUse hooks share: it lexes a command and walks it as the shell would run it, reading the heredocs, files and substitutions it can see and marking the rest unknown.
 import { AsyncLocalStorage } from "node:async_hooks"
-import { realpathSync, statSync } from "node:fs"
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
@@ -1873,7 +1873,9 @@ function change(cmd: Command, env: Env): void {
     }
     const variants = array
       ? [array]
-      : splitHeld(cmd, name, env).filter((variant) => !marked(parse(variant).name))
+      : [...splitHeld(cmd, name, env), ...splitHeld(cmd, name, env, true)].filter(
+          (variant) => !marked(parse(variant).name),
+        )
     for (const variant of variants) change(variant, env)
     if (variants.length > 0) return
     const known = heldKnown(env)
@@ -1996,6 +1998,110 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
+// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed
+function globRun(
+  cmd: Command,
+  first: Word | undefined,
+  env: Env,
+  glob = !!first?.glob,
+): Command[] | null | undefined {
+  const pattern = first?.value ?? ""
+  if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
+  if (!GLOB_PATTERN.test(pattern)) return
+  const absolute = isAbsolute(pattern)
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere)) return null
+  const base = absolute ? "/" : (env.cwd as string)
+  let paths = [""]
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path: string, name: string) => (k === 0 ? name : `${path}/${name}`)
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part))
+      continue
+    }
+    const glob = shellGlob(part)
+    const next: string[] = []
+    for (const path of paths) {
+      let names: string[]
+      try {
+        names = readdirSync(resolve(base, path || "."))
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test((error as { code?: string }).code ?? "")) continue
+        return null
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name))
+    }
+    if (next.length > READINGS) return null
+    paths = next
+  }
+  const found: string[] = []
+  for (const path of paths) {
+    try {
+      lstatSync(resolve(base, path))
+      found.push(path)
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test((error as { code?: string }).code ?? "")) return null
+    }
+  }
+  if (found.length === 0) return
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => (w === first ? { quoted: true, value } : w)),
+  }))
+}
+
+// A program word that joins a read the split reading leaves whole (a quoted `"$X"`) to a typed glob part (`"$X"/pk?ll`), its read resolved with the held variables and then globbed; a glob character inside the held value is matched too, which errs toward a match
+function heldGlob(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {
+  if (!first?.glob || !first.raw || !marked(first.value)) return
+  const value = relexedValue(first.raw, heldKnown(env))
+  if (value === undefined || marked(value)) return
+  const word = { ...first, value }
+  return globRun({ ...cmd, words: cmd.words.map((w) => (w === first ? word : w)) }, word, env, true)
+}
+
+// The characters a glob reads as a pattern, a lone `[` aside, which is test's own name
+const GLOB_PATTERN = /[*?]|\[[^\]]*\]/
+
+// One path part's pattern as the shell reads it, where a leading `!` is a plain character rather than Bun.Glob's negation, and a POSIX class (`[:alpha:]`), equivalence class (`[=a=]`) or collating symbol (`[.a.]`) inside a bracket is the set it names, which Bun.Glob does not read; a class it cannot spell as ranges takes every printable character, so it errs toward a match
+const shellGlob = (part: string) =>
+  new Bun.Glob(
+    part.replace(/^!/, "\\!").replace(BRACKET, (bracket: string) =>
+      bracket
+        .slice(1, -1)
+        .replace(/\[:([a-z]+):\]/g, (_, name: string) => POSIX_CLASSES[name] ?? " -~")
+        .replace(/\[([=.])(.)\1\]/g, "$2")
+        .replace(/^/, "[")
+        .concat("]"),
+    ),
+  )
+
+// A bracket expression, its classes inside it whole, so `[[:alpha:]]` is one set while a lone `[:k:]` is a set of `:` and `k`
+const BRACKET = /\[[!^]?\]?(?:\[:[a-z]+:\]|\[([=.]).\1\]|[^\]])*\]/g
+
+// The POSIX bracket classes as Bun.Glob's ranges, in the C locale
+const POSIX_CLASSES: Record<string, string> = {
+  alnum: "0-9A-Za-z",
+  alpha: "A-Za-z",
+  blank: " \t",
+  digit: "0-9",
+  lower: "a-z",
+  space: " \t\n\r\f\v",
+  upper: "A-Z",
+  xdigit: "0-9A-Fa-f",
+}
+
+// Whether a call's text holds a glob whose last path part may match one of these program names (`pk?ll`, `/usr/bin/g*`, `[p][k]ill`), so a guard's first look at a call, and its rule for a command it cannot read, count the call as naming that program; a part of `*` and `?` alone names none, since it matches every name of its length
+export function globSpells(text: string, names: string[]): boolean {
+  for (const token of text.split(/[\s;&|<>()`"'\\]+/)) {
+    const part = token.slice(token.lastIndexOf("/") + 1)
+    if (!GLOB_PATTERN.test(part) || /^[*?]+$/.test(part)) continue
+    const glob = shellGlob(part)
+    if (names.some((name) => glob.match(name))) return true
+  }
+  return false
+}
+
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
 function repass(commands: Command[], envs: Map<number, Env>): void {
   for (const cmd of commands) {
@@ -2016,20 +2122,32 @@ function printsText(words: string[]): boolean {
   return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format)
 }
 
-// A binder (`binds`) gives its names a value the reader cannot read in walk order, or a for or select list's one literal word (loopWord), in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
+// A binder (`binds`) gives its names a value the reader cannot read in walk order, or a for or select list's one literal word (loopWord), in its own scope: a for or select header for its body, its value captured in place of the one held before (heldResolved), and changed at its close, where its captured value (the loop's word, or the one its body set) and the one held before the loop (loopBefore) are both read, since its list may be empty and its body may set them; any other binder for the commands after it, where the shell runs it unconditionally there
 function bind(commands: Command[], k: number, env: Env, unbind: Map<Command, () => void>): void {
   const cmd = commands[k]
   const names = binds(cmd)
   if (names.length === 0 || cmd.detached) return
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept)) return
-  const before = names.map((name) => [name, env.vars.get(name)] as const)
   const value = close ? loopWord(cmd) : undefined
+  const held = close ? heldKnown(env) : {}
+  const prior = names.flatMap((name) => (name in held ? [[name, held[name]] as const] : []))
   for (const name of names) setVar(env.vars, name, value ?? unknown("a value a builtin gives"))
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before) held ? setVar(env.vars, name, held) : env.vars.delete(name)
-    })
+  if (!close) return
+  for (const name of names) capture(env, name, value)
+  unbind.set(close, () => {
+    for (const name of names) setVar(env.vars, name, CHANGED)
+    if (prior.length === 0) return
+    let record = loopBefore.get(env.vars)
+    if (!record) loopBefore.set(env.vars, (record = {}))
+    for (const [name, was] of prior) record[name] = was
+  })
+}
+
+// A loop's name captured as its one literal word, or with no capture, so a value set before the loop is not read in its place
+function capture(env: Env, key: string, value?: Word): void {
+  if (value) recordHeld(env, key, value)
+  else delete heldResolved.get(env.vars)?.[key]
 }
 
 // The one word a for or select header's literal list holds (`for c in git`, `for c in 'git push'`), which its body reads as written; undefined for any other list, which binds a value the reader cannot read
@@ -2084,16 +2202,27 @@ export async function examine(
   const [primary, ...others] = readings(parse(cmd))
   const vanished = emptyProgram(cmd, env)
   const array = arrayRun(cmd, primary.first, env)
+  // a name a loop bound reads after its done as the value it held before the loop too (loopBefore), as canary's reader read it; that reading is judged but resolves nothing, so a loop value the reader cannot read still marks the command unread
+  const prior = splitHeld(cmd, primary.name, env, true)
+  const split = splitHeld(cmd, primary.name, env)
+  // a held value split into the program word is globbed as the shell globs an unquoted expansion (`X=/usr/bin; $X/pk?ll`)
+  const globs = [
+    globRun(cmd, primary.first, env),
+    heldGlob(cmd, primary.first, env),
+    ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
+  ]
   const resolving = [
-    ...splitHeld(cmd, primary.name, env),
+    ...split,
     ...(array ? [array] : []),
     ...heldScripts(cmd, primary, env),
+    ...globs.flatMap((globbed) => globbed ?? []),
   ]
-  if (unreadCommand(cmd, primary, resolving))
+  if (globs.includes(null) || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others]) parsed.unread = true
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...resolving,
+    ...prior,
     ...vanished,
     ...(await xargsFilled(cmd, [primary, ...others], env)),
   ]
@@ -2158,6 +2287,20 @@ function unreadCommand(cmd: Command, parsed: Parsed, resolving: Command[]): bool
   if (!scriptWords(parsed).some((w) => marked(w.value))) return false
   return others.every((p) => scriptWords(p).some((w) => marked(w.value)))
 }
+
+// A call's text, then again with each ANSI-C string decoded in its place, so a guard's look for a program's name in the text sees `$'\x67it'` and `g$'\x69't` as git, in an array's list too
+export const decodedText = (command: string): string =>
+  command.includes("$'")
+    ? `${command} ${command.replace(/\$'(?:[^'\\]|\\[\s\S])*'/g, (ansiC) =>
+        lex(ansiC)
+          .commands.flatMap((c) => c.words.map((w) => w.value))
+          .join(" "),
+      )}`
+    : command
+
+// Whether an unread reading's program word is an array run whole (`"${A[@]}"`) or a glob, the unread commands no-stash and no-raw-delete refuse in a call that names their program
+export const unreadRun = ({ first, unread }: Parsed): boolean =>
+  !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
 function stdinScript({ args, name }: Parsed): boolean {
@@ -2270,7 +2413,7 @@ const holdsCommand = (w: Word): boolean =>
   )
 
 // The split readings of a command: each word that holds a command (holdsCommand), and the program word where it holds a read among literal text (`$C/x`, `/usr/bin/$C`), re-lexed with the variables the line set, resolved through one another, and split at blanks and the line's IFS, each unread part kept as one unread word so the program word is still judged (`C="git push"; $C`, `$C""`, `${=C}`, a copy `A=git; C=$A; $C`, a partial `C="git push $X"; $C`). A word whose read resolves to nothing the reader can build (an unset variable, a loop's own `$n`) keeps its typed reading, so the split never hands a guard an unread word the typed reading did not already hold. It is judged beside the typed reading, so a verdict only moves to refused; none when no word resolves to a readable part, and a cd keeps its own words, which chdirTo reads.
-export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
+export function splitHeld(cmd: Command, name: string, env: Env, prior = false): Command[] {
   if (name === "cd" || name === "popd" || name === "pushd") return []
   // the program word is resolved only when a read sharing its word with literal text could be it, so an ordinary line pays no extra parse
   const first = cmd.words.some((w) => w.splits && w.raw && !holdsCommand(w))
@@ -2280,18 +2423,23 @@ export function splitHeld(cmd: Command, name: string, env: Env): Command[] {
   if (!cmd.words.some(holds)) return []
   const known = heldKnown(env)
   const seps = ifsSplit(env)
-  let split = false
-  const words = cmd.words.flatMap((w): Word[] => {
-    if (!holds(w) || !w.raw) return [w]
-    const value = relexedValue(w.raw, known)
-    if (value === undefined) return [w]
-    const parts = splitValue(value, seps)
-    // nothing the reader could build, so the word stays as typed and the split adds no unread word of its own
-    if (!parts.some((part) => !part.unknown)) return [w]
-    split = true
-    return parts
-  })
-  return split ? [{ ...cmd, words }] : []
+  const splitWith = (known: Record<string, string>): Command[] => {
+    let split = false
+    const words = cmd.words.flatMap((w): Word[] => {
+      if (!holds(w) || !w.raw) return [w]
+      const value = relexedValue(w.raw, known)
+      if (value === undefined) return [w]
+      const parts = splitValue(value, seps)
+      // nothing the reader could build, so the word stays as typed and the split adds no unread word of its own
+      if (!parts.some((part) => !part.unknown)) return [w]
+      split = true
+      return parts
+    })
+    return split ? [{ ...cmd, words }] : []
+  }
+  if (!prior) return splitWith(known)
+  const before = loopBefore.get(env.vars)
+  return before && Object.keys(before).length > 0 ? splitWith({ ...known, ...before }) : []
 }
 
 // A raw word re-lexed with the known variables, its value kept even where an unread part stays; undefined when the lexer makes other than one word (a substitution of its own), as relexed drops it. zsh's `${=V}` split flag is stripped so the braced read resolves, since the split reading splits the value anyway.
@@ -2319,9 +2467,13 @@ function heldKnown(env: Env): Record<string, string> {
   return Object.assign(known, heldResolved.get(env.vars))
 }
 
+// Each scope's loop names after their loop's done, each with the value it held before the loop, which the split reading reads beside its captured one, so a read after the loop is judged as both the loop's word and the value before it
+const loopBefore = new WeakMap<Map<string, Text>, Record<string, string>>()
+
 // Each scope's variables resolved to the value they held where they were set, so a copy reads its source's value at the copy and a later reassignment of that source does not change it; recordHeld fills it at each assignment the reader reads.
 const heldResolved = new WeakMap<Map<string, Text>, Record<string, string>>()
 function recordHeld(env: Env, key: string, value: Text): void {
+  delete loopBefore.get(env.vars)?.[key]
   let record = heldResolved.get(env.vars)
   if (!record) heldResolved.set(env.vars, (record = {}))
   if (!value.unknown && !marked(value.value))
@@ -3011,7 +3163,7 @@ async function existing(path: string, env: Env): Promise<Text> {
   return env.files.get(path) ?? (await readFile(path)) ?? { value: "" }
 }
 
-async function outputOf(cmd: Command, env: Env): Promise<Text> {
+export async function outputOf(cmd: Command, env: Env): Promise<Text> {
   tick()
   const { args, name, xargs } = parse(cmd)
   // xargs hands the program words from its stdin, which the hook does not split as xargs does
@@ -3360,4 +3512,36 @@ export function knownVariables(
     if (value && !command.includes(`${name}=`)) known[name] = value
   }
   return known
+}
+
+const BRACE_WORDS = 64
+// The words a shell's brace expansion makes of a word, in the shell's order, each list's prefix and suffix kept and nested lists expanded, or undefined past BRACE_WORDS; a brace with no comma at its own depth stays text
+export function braceWords(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS) return undefined
+    const next = todo.pop()!
+    let split: string[] | undefined
+    for (let open = next.indexOf("{"); open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open]
+      let depth = 0
+      for (let k = open; k < next.length; k++) {
+        if (next[k] === "{") depth++
+        else if (next[k] === "," && depth === 1) cuts.push(k)
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k]
+              .slice(1)
+              .map(
+                (end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1),
+              )
+          break
+        }
+      }
+    }
+    if (split) todo.push(...split.reverse())
+    else done.push(next)
+  }
+  return done
 }
