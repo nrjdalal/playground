@@ -125,10 +125,12 @@ The notes take ZeroStarter's shape: the compare link, one emoji section per comm
 ```bash
 gh api -X POST repos/{owner}/{repo}/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$MERGE"
 bun run release:notes vX.Y.W vX.Y.Z > /tmp/notes-vX.Y.Z.md   # vX.Y.W is the last tag
-gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
+gh release create vX.Y.Z --verify-tag --latest --title vX.Y.Z --notes-file /tmp/notes-vX.Y.Z.md
+bun run ship:title vX.Y.Z
 ```
 
 When a guard refuses the notes, edit the file in a call of its own, then create the release again in the next: an edit and the create in one call are refused again, since the guard read the file before the edit. Cut a refused contributor line to `- @<login>` and keep the section; delete a line only when the guard refuses its login itself.
+`--title` names the version by its tag, since GitHub otherwise takes the tagged commit's subject (the ship PR's merge line); `ship:title` (`packages/scripts/src/ship/title.ts`) reads the name back and, when it is not the tag, prints the `gh release edit vX.Y.Z --title vX.Y.Z` line that fixes it and exits 1: run that line, then `ship:title` again.
 Then end step 1's freeze with `bun run ship:freeze --end`.
 
 Then deploy the hosted Yard from the tag with `bun run ship:yard vX.Y.Z` (`packages/scripts/src/ship/yard.ts`), the Ops lead's call alone: no-raw-vercel reads it as a production move, and the step itself stops unless the claude process it runs under is the Ops lead's (`PLAYGROUND_ROLE` lead, the roster's ops kind, read from that process), naming what it found.
@@ -138,7 +140,7 @@ When the tag changes `packages/db`'s schema or migrations since the recorded tag
 With no record yet it stops once and asks for `--since <the tag live now>`.
 A failed deploy or check stops it before the next project, naming the URL and the status it answered: send that line up the chain.
 
-Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, its page opens with the compare link, `--end` printed `removed the "*" line` or that a line Ops wrote by hand stays for Ops to remove; and `ship:yard` exited 0, both projects' live checks passing.
+Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, `ship:title` printed `ship:title: vX.Y.Z is named vX.Y.Z`, its page opens with the compare link, `--end` printed `removed the "*" line` or that a line Ops wrote by hand stays for Ops to remove; and `ship:yard` exited 0, both projects' live checks passing.
 
 ## 5. Pull the main checkout
 
