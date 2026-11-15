@@ -3301,3 +3301,35 @@ export function knownVariables(
   }
   return known
 }
+
+const BRACE_WORDS = 64
+// The words a shell's brace expansion makes of a word, in the shell's order, each list's prefix and suffix kept and nested lists expanded, or undefined past BRACE_WORDS; a brace with no comma at its own depth stays text
+export function braceWords(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS) return undefined
+    const next = todo.pop()!
+    let split: string[] | undefined
+    for (let open = next.indexOf("{"); open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open]
+      let depth = 0
+      for (let k = open; k < next.length; k++) {
+        if (next[k] === "{") depth++
+        else if (next[k] === "," && depth === 1) cuts.push(k)
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k]
+              .slice(1)
+              .map(
+                (end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1),
+              )
+          break
+        }
+      }
+    }
+    if (split) todo.push(...split.reverse())
+    else done.push(next)
+  }
+  return done
+}

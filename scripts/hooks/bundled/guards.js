@@ -2933,6 +2933,37 @@ function knownVariables(command, environment, cwd) {
   }
   return known;
 }
+var BRACE_WORDS = 64;
+function braceWords(word) {
+  const done = [];
+  const todo = [word];
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS)
+      return;
+    const next = todo.pop();
+    let split;
+    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open];
+      let depth = 0;
+      for (let k = open;k < next.length; k++) {
+        if (next[k] === "{")
+          depth++;
+        else if (next[k] === "," && depth === 1)
+          cuts.push(k);
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
+          break;
+        }
+      }
+    }
+    if (split)
+      todo.push(...split.reverse());
+    else
+      done.push(next);
+  }
+  return done;
+}
 
 // scripts/hooks/no-desktop-owner-app.ts
 var GUARD = "no-desktop-owner-app";
@@ -16416,7 +16447,9 @@ if (false) {}
 // scripts/hooks/no-ours-merge.ts
 var SUBS = new Set(["merge", "pull"]);
 var VERIFIED = new Set(["commit", "merge", "pull"]);
-var SHORT_TAKES = new Set(["F", "X", "j", "m", "o", "s"]);
+var SHORT_TAKES = new Set(["F", "X", "m", "o", "s"]);
+var ATTACHED = new Set(["S", "j", "u"]);
+var ALIAS_DEPTH = 8;
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
 var TAKES3 = {
@@ -16445,14 +16478,17 @@ var TAKES3 = {
   pull: new Set(["--cleanup", "--file", "--strategy", "--strategy-option", "--upload-pack"])
 };
 var COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"]);
-function hooksOff(sub, args) {
+function walk2(sub, args) {
   let off;
+  let help = false;
   const commit = sub === "commit";
   for (let k = 0;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--")
       break;
-    if (v.startsWith("--")) {
+    if (v === "-h" || v === "--help")
+      help = true;
+    else if (v.startsWith("--")) {
       if (v === "--verify")
         off = undefined;
       else if (v === "--no-verify" || commit && v.length > 8 && "--no-verify".startsWith(v))
@@ -16467,7 +16503,7 @@ function hooksOff(sub, args) {
       const letter = v[c];
       if (commit && letter === "n")
         off = "-n";
-      else if (letter === "S" || letter === "u")
+      else if (ATTACHED.has(letter))
         break;
       else if ((commit ? COMMIT_SHORT : SHORT_TAKES).has(letter)) {
         if (c === v.length - 1)
@@ -16476,7 +16512,7 @@ function hooksOff(sub, args) {
       }
     }
   }
-  return off;
+  return { help, off };
 }
 var strategyLong = (name) => name === "strategy" || name.length > "strategy".length && "strategy-option".startsWith(name);
 function strategies(args) {
@@ -16500,7 +16536,7 @@ function strategies(args) {
       continue;
     for (let c = 1;c < v.length; c++) {
       const letter = v[c];
-      if (letter === "S")
+      if (ATTACHED.has(letter))
         break;
       if (!SHORT_TAKES.has(letter))
         continue;
@@ -16513,23 +16549,35 @@ function strategies(args) {
   }
   return found;
 }
-function judgeGit2(args) {
+var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+var aliasLine = (text, before, typed) => {
+  const words = typed.map((w) => quote(w.value)).join(" ");
+  if (text.startsWith("!"))
+    return `${text.slice(1)} ${words}`;
+  return `git ${before.map((w) => quote(w.value)).join(" ")} ${text} ${words}`;
+};
+async function judgeGit2(args, env, depth) {
   const { aliases, rest, sub } = gitCommand(args);
   if (!sub)
     return;
   if (marked(sub.value)) {
-    return rest.some((a) => a.value === "ours") ? `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD3}` : undefined;
+    if (rest.some((a) => a.value === "ours"))
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD3}`;
+    if (rest.some((a) => a.value.startsWith("--no-veri")))
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside --no-verify. ${AGAIN}`;
+    return;
   }
-  const alias = aliases.find((a) => a.startsWith(`alias.${sub.value}=`));
-  if (alias && /\b(?:merge|pull)\b/.test(alias) && /\bours\b/.test(alias))
-    return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a merge with ours. ${INSTEAD3}`;
-  if (alias && /\b(?:commit|merge|pull)\b/.test(alias) && /--no-verify\b/.test(alias))
-    return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a git call with --no-verify, which turns its hooks off. ${AGAIN}`;
+  const name = `alias.${sub.value}=`;
+  const text = aliases.findLast((a) => a.startsWith(name))?.slice(name.length);
+  if (text !== undefined && !VERIFIED.has(sub.value) && depth < ALIAS_DEPTH) {
+    const line = aliasLine(text, args.slice(0, args.indexOf(sub)), rest);
+    return run2(lex(line, env.known), env, visitor2(depth + 1));
+  }
   if (!VERIFIED.has(sub.value))
     return;
-  if (rest.some((a) => a.value === "-h" || a.value === "--help"))
+  const { help, off } = walk2(sub.value, rest);
+  if (help)
     return;
-  const off = hooksOff(sub.value, rest);
   if (off)
     return `no-ours-merge hook refuses git ${sub.value} ${off}, which turns its hooks off. ${AGAIN}`;
   if (!SUBS.has(sub.value))
@@ -16541,29 +16589,31 @@ function judgeGit2(args) {
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
   }
 }
-var merges = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
-var visit6 = async (_cmd, { args, first, name }) => {
+var verified = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
+var expanded = (args) => args.flatMap((w) => w.unknown === "a brace expansion" ? braceWords(w.value)?.map((value) => ({ ...w, unknown: undefined, value })) ?? [w] : [w]);
+var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
+  const args = expanded(typed);
   if (name === "git")
-    return judgeGit2(args);
-  if (first && (first.unknown || marked(first.value)) && merges(args))
-    return judgeGit2(args);
+    return judgeGit2(args, env, depth);
+  if (first && (first.unknown || marked(first.value)) && verified(args))
+    return judgeGit2(args, env, depth);
   if (PRINTERS.has(name))
     return;
-  const nested = args.findIndex((a, j) => program(a.value) === "git" && merges(args.slice(j + 1)));
+  const nested = args.findIndex((a, j) => program(a.value) === "git" && verified(args.slice(j + 1)));
   if (nested !== -1)
-    return judgeGit2(args.slice(nested + 1));
+    return judgeGit2(args.slice(nested + 1), env, depth);
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|\s)-[^\s-]*n/.test(BARE4(command));
+var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*,/.test(BARE4(command));
 var mergeCall = (command) => {
   const bare = BARE4(command);
   if (!/\bgit\b/i.test(bare))
     return false;
   if (/\b(?:merge|pull)\b/.test(bare) && /ours/.test(bare))
     return true;
-  if (/\b(?:commit|merge|pull)\b/.test(bare) && /--no-verify\b/.test(bare))
+  if (/\b(?:commit|merge|pull)\b/.test(bare) && /--no-veri/.test(bare))
     return true;
-  return /\bcommit\b/.test(bare) && /(?:^|\s)-n\b/.test(bare);
+  return /\bcommit\b/.test(bare) && /(?:^|[\s{,])-[^\s-]*n/.test(bare);
 };
 async function inspect12(raw, environment) {
   let payload;
@@ -16588,7 +16638,7 @@ async function inspect12(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit6);
+  return run2(lex(command, env.known), env, visitor2(0));
 }
 async function check17(raw, environment = process.env) {
   try {
@@ -17050,7 +17100,7 @@ var AT_ROOT_FIX = {
   rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again."
 };
 var refuseAtRoot = (name, path) => `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. ${AT_ROOT_FIX[name]}`;
-var visit7 = async (_cmd, { args, name }) => {
+var visit6 = async (_cmd, { args, name }) => {
   if (name !== "rm" && name !== "rmdir")
     return;
   const operands = args.filter((a) => !a.value.startsWith("-"));
@@ -17080,7 +17130,7 @@ async function inspect14(raw) {
     process: {},
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit7);
+  return run2(lex(command, env.known), env, visit6);
 }
 async function check19(raw) {
   try {
@@ -17325,7 +17375,7 @@ var RUNS2 = {
 };
 var QUEUES = new Set(["at", "batch"]);
 var unversioned = (name) => name.replace(/(?<=.)@[^@/]*$/, "");
-var ATTACHED = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
+var ATTACHED2 = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
 var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
 var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive3(part));
 var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test(word.value);
@@ -17484,7 +17534,7 @@ async function inspect15(raw, environment) {
       if (args.some((a) => a.value === "-delete"))
         return refuse13(`${name} -delete`);
       for (const [k, a] of args.entries()) {
-        const attached = name === "fd" ? ATTACHED.exec(a.value) : null;
+        const attached = name === "fd" ? ATTACHED2.exec(a.value) : null;
         if (!runs.has(a.value) && !attached)
           continue;
         const value = attached?.[1] || undefined;
@@ -17742,7 +17792,7 @@ function judgeHerdr(args, local, env, program) {
     return refuseHerdr(`\`${verb}\` whose program is ${program.unknown ?? "a word it cannot read"}, which it cannot tell from herdr; type the program by its literal name, such as \`agent-browser\` or \`herdr\`, so the hook can read it`);
   return refuseHerdr(`a herdr ${verb}, which is not one of its reads`);
 }
-var visit8 = async (cmd, { args, first, local, name }, env) => {
+var visit7 = async (cmd, { args, first, local, name }, env) => {
   const texts = [...args, ...cmd.redirects.flatMap((r) => [r.target ?? [], r.body ?? []].flat())];
   const socket = (t) => {
     if (HERDR_SOCKET.test(t.value) || t.variable === "HERDR_SOCKET_PATH")
@@ -17819,7 +17869,7 @@ async function inspect16(raw, environment) {
     vars: new Map,
     visitShells: true
   };
-  return run2(lex(command, env.known), env, visit8, true);
+  return run2(lex(command, env.known), env, visit7, true);
 }
 async function check22(raw, environment = process.env) {
   try {
