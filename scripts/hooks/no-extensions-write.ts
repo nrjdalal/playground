@@ -600,11 +600,19 @@ const gitPlaced = (args: Word[], env: Env): string | undefined => {
   return cwd
 }
 
+// read at each call rather than once, so a test's stub of process.platform reaches every site
+const onLinux = () => process.platform === "linux"
+// whether a GNU build stops its options at its first operand: on Linux both readings, since POSIXLY_CORRECT can reach a bare build by a route the hook does not carry; elsewhere the one the call gives
+const gnuReadings = (stops: boolean) => (onLinux() ? [false, true] : [stops])
+
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
 const CHMOD_DASH_MODE = /^-[gorstuwXx]/
-// a word GNU chmod reads as setting the mode: a cluster past its -R, -c, -f and -v flags that reaches a mode letter, operator or digit (-w, -=r, -0, -Rw), or --reference by any prefix down to --ref
-const GNU_CHMOD_MODE =
-  /^-[Rcfv]*[rwxXstugoa,+=0-7]|^--ref(?:e(?:r(?:e(?:n(?:c(?:e)?)?)?)?)?)?(?:=|$)/
+// a word GNU chmod reads as setting the mode: a cluster past its -R, -c, -f and -v flags that reaches a mode letter, operator or digit (-w, -=r, -0, -Rw), or --reference by any prefix down to --ref, the shortest --recursive does not share
+const GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]/
+const gnuChmodMode = (value: string) => {
+  const long = value.split("=")[0]
+  return GNU_CHMOD_MODE.test(value) || (long.length >= 5 && "--reference".startsWith(long))
+}
 
 // The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
 function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: boolean): Word[] {
@@ -615,11 +623,8 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
     const files = stopsAtOperand
       ? args.slice(at === -1 ? args.length : at)
       : operandsPast(args, "", [])
-    // GNU chmod, Linux's, takes its mode from a dash-led word or --reference when the call gives one (GNU_CHMOD_MODE), so its first operand is then a file
-    const given =
-      process.platform === "linux" &&
-      !stopsAtOperand &&
-      args.some((w) => GNU_CHMOD_MODE.test(w.value))
+    // GNU chmod, Linux's, takes its mode from a dash-led word or --reference when the call gives one (gnuChmodMode), so its first operand is then a file
+    const given = onLinux() && !stopsAtOperand && args.some((w) => gnuChmodMode(w.value))
     return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }
   if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])
@@ -729,9 +734,11 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
-  // on Linux, install -d with no operand writes nothing only because GNU's operand check fails, so the values its options took are judged as targets; read by the platform rather than `gnu`, so a g-named install on macOS keeps canary's verdict
-  if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
-    targets.push(...values)
+  // on Linux, install -d with a -t folder or no operand writes nothing only because a GNU check after its parse fails, so that folder and the values its options took are judged as targets; read by the platform rather than `gnu`, so a g-named install on macOS keeps canary's verdict
+  if (onLinux() && name === "install" && folders) {
+    if (folder) targets.push(folder)
+    if (operands.length === 0) targets.push(...values)
+  }
   // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
   const moved = into && !gnu && name !== "install" ? [] : splits
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
@@ -1154,7 +1161,7 @@ function textFlagValues({ args, name }: Parsed): Word[] {
   )
 }
 
-// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word, which GNU sed, Linux's, reads as no suffix (sedEdits)
+// sed's in-place option: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, macOS's next word (sedEdits reads Linux's)
 const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
@@ -1195,7 +1202,7 @@ function sedWrites(script: string): string[] {
   return writes
 }
 
-// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it, or GNU's on Linux: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX) on macOS and none on Linux, every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it, or GNU's on Linux (sedEdits): sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX) on macOS, every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   const { args, local, name } = parsed
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
@@ -1218,7 +1225,7 @@ function sedEdits(args: Word[]): Set<Word> | undefined {
     } else if (suffix) {
       inPlace = true
       // GNU sed, Linux's, takes a suffix only attached, so the word after its bare -i is a script or a file
-      if (suffix[1] || process.platform === "linux") continue
+      if (suffix[1] || onLinux()) continue
       const word = args[++k]
       if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
     } else if (value.startsWith("-") && value !== "-") {
@@ -2084,7 +2091,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const verb = name && !marked(name) ? name : "a program it cannot read"
     // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options, as every bare build does on Linux, whose builds are GNU's
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
-    const gnu = tool !== name || first.value.includes("/gnubin/") || process.platform === "linux"
+    const gnu = tool !== name || first.value.includes("/gnubin/") || onLinux()
     const remover = REMOVERS.has(tool)
     // an in-place sed's scripts for the root reading (scriptNames): sedInPlace's, the sed half of sedScripts but on a line read whole too, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
     const edited = new Set(inPlace(tool, args))
@@ -2093,8 +2100,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
-    // on Linux POSIXLY_CORRECT can reach a bare build by a route the hook does not carry (a shell's -c, eval, a function, a sourced file), so its words are judged under both of GNU's readings: permuted, and stopped at the first operand
-    const readings = process.platform === "linux" ? [false, true] : [posix]
+    // on Linux POSIXLY_CORRECT can reach a bare build by a route the hook does not carry (a shell's -c, eval, a function, a sourced file), so gnuReadings judges its words both permuted and stopped at the first operand
+    const readings = gnuReadings(posix)
     const writes = (typed: Word[]) =>
       readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
@@ -2305,9 +2312,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const unlisted =
       !remover && !WRITERS.has(tool)
         ? shapes.flatMap((typed) =>
-            (process.platform === "linux" ? [false, true] : [!gnu || posix]).flatMap((stops) =>
-              unreadCdWrites(tool, typed, env, stops),
-            ),
+            gnuReadings(!gnu || posix).flatMap((stops) => unreadCdWrites(tool, typed, env, stops)),
           )
         : []
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(

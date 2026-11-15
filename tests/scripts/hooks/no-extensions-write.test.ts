@@ -3606,9 +3606,18 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
   test.each([
     ["install -d of no folder past a suffix from a variable", `install -d -S "$D"`],
     ["install -d of no folder past a group from a variable", `install -d -Tg "$D"`],
-  ])("%s, which only GNU's operand check stops, stays refused on Linux", async (_, command) => {
-    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
-  })
+    ["install -d with a target folder from a variable past -D", `install -d -Dt "$D"`],
+    ["install -d with a target folder from a variable past -T", `install -d -Tt "$D"`],
+    ["install -d of a folder with a target folder from a variable", `install -d -Dt "$D" x`],
+    ["install -d of no folder past macOS's -x and a group from a variable", `install -d -Dxg "$D"`],
+    ["install -d of no folder past macOS's -h and a group from a variable", `install -d -hg "$D"`],
+    ["install -d of no folder past macOS's -l and a group from a variable", `install -d -lg "$D"`],
+  ])(
+    "%s, which only a GNU check after its parse stops, stays refused on Linux",
+    async (_, command) => {
+      expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+    },
+  )
 
   test("GNU sed's glob script after a bare -i edits a work file on Linux and stays refused on a file in the root", async () => {
     expect(await as("linux", () => bash(`sed -i '/a*b/d' ${WORK}/a.ts`))).toBeUndefined()

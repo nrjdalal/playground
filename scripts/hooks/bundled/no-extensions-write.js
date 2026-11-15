@@ -10144,15 +10144,21 @@ var gitPlaced = (args, env) => {
   }
   return cwd;
 };
+var onLinux = () => process.platform === "linux";
+var gnuReadings = (stops) => onLinux() ? [false, true] : [stops];
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
-var GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]|^--ref(?:e(?:r(?:e(?:n(?:c(?:e)?)?)?)?)?)?(?:=|$)/;
+var GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]/;
+var gnuChmodMode = (value) => {
+  const long = value.split("=")[0];
+  return GNU_CHMOD_MODE.test(value) || long.length >= 5 && "--reference".startsWith(long);
+};
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
     const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
     const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
-    const given = process.platform === "linux" && !stopsAtOperand && args.some((w) => GNU_CHMOD_MODE.test(w.value));
+    const given = onLinux() && !stopsAtOperand && args.some((w) => gnuChmodMode(w.value));
     return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
   if (tool === "truncate")
@@ -10250,8 +10256,12 @@ function writeTargets(name, args, gnu, posix = false) {
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
-  if (process.platform === "linux" && name === "install" && folders && operands.length === 0)
-    targets.push(...values);
+  if (onLinux() && name === "install" && folders) {
+    if (folder)
+      targets.push(folder);
+    if (operands.length === 0)
+      targets.push(...values);
+  }
   const moved = into && !gnu && name !== "install" ? [] : splits;
   return [...new Set([...targets, ...maybe, ...logs, ...moved])];
 }
@@ -10648,7 +10658,7 @@ function sedEdits(args) {
       break;
     } else if (suffix) {
       inPlace = true;
-      if (suffix[1] || process.platform === "linux")
+      if (suffix[1] || onLinux())
         continue;
       const word = args[++k];
       if (!word || !literal2(word) || !SED_SUFFIX.test(word.value))
@@ -11280,12 +11290,12 @@ async function inspect(raw, environment, unknown = false) {
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
-    const gnu = tool !== name || first.value.includes("/gnubin/") || process.platform === "linux";
+    const gnu = tool !== name || first.value.includes("/gnubin/") || onLinux();
     const remover = REMOVERS.has(tool);
     const edited = new Set(inPlace(tool, args));
     const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
-    const readings = process.platform === "linux" ? [false, true] : [posix];
+    const readings = gnuReadings(posix);
     const writes = (typed) => readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops));
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
@@ -11390,7 +11400,7 @@ async function inspect(raw, environment, unknown = false) {
         ...values
       ] : WRITERS.has(tool) ? writes(given) : [];
     };
-    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => (process.platform === "linux" ? [false, true] : [!gnu || posix]).flatMap((stops) => unreadCdWrites(tool, typed, env, stops))) : [];
+    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => gnuReadings(!gnu || posix).flatMap((stops) => unreadCdWrites(tool, typed, env, stops))) : [];
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
     if (!loose)
       return;
