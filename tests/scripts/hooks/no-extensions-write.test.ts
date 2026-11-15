@@ -3698,6 +3698,11 @@ describe("an echo into the folder core.hooksPath names is judged as one into a g
   const OTHER = repo("hooked-other", "h2")
   const BROKEN = repo("hooked-broken", "githooks")
   writeFileSync(join(BROKEN, ".git", "config"), "[core\n")
+  // a repo whose core.hooksPath names a folder not made yet
+  const LATER = join(HOME, "hooked-later")
+  mkdirSync(LATER)
+  Bun.spawnSync(["git", "-C", LATER, "init", "-q"])
+  Bun.spawnSync(["git", "-C", LATER, "config", "core.hooksPath", "newhooks"])
 
   test.each([
     ["by its path", `echo 'touch ~/.playground/extensions/x' > ${REPO}/githooks/pre-commit`, HOME],
@@ -3723,6 +3728,27 @@ describe("an echo into the folder core.hooksPath names is judged as one into a g
       if (before === undefined) delete process.env.GIT_DIR
       else process.env.GIT_DIR = before
     }
+  })
+
+  test.each([
+    [
+      "made by a mkdir before it",
+      "mkdir hooked-later/newhooks && echo 'touch ~/.playground/extensions/x' > hooked-later/newhooks/pre-commit",
+    ],
+    [
+      "made after a cd into the repo",
+      "cd hooked-later && mkdir -p newhooks && echo 'touch ~/.playground/extensions/x' > newhooks/pre-commit",
+    ],
+  ])("an echo of the data folder into the hook folder %s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("an echo of the data folder into another folder the same line makes runs", async () => {
+    expect(
+      await bash(
+        "mkdir hooked-later/other && echo 'touch ~/.playground/extensions/x' > hooked-later/other/x.sh",
+      ),
+    ).toBeUndefined()
   })
 
   test("an echo of the data folder into a repo whose config git cannot read is refused", async () => {
