@@ -65,10 +65,9 @@ const TAKES: Record<string, Set<string>> = {
 // A commit's short options that take a value, attached or as the next word
 const COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"])
 
-// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: the first word read there, an option's value included, that holds a brace list braceWords cannot expand, since its words may be options, whether it asks for help (-h or --help read as an option), and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
-function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?: Word } {
+// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: the first word read there, an option's value included, that holds a brace list braceWords cannot expand, since its words may be options, and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
+function walk(sub: string, args: Word[]): { off?: string; unread?: Word } {
   let off: string | undefined
-  let help = false
   let unread: Word | undefined
   const commit = sub === "commit"
   const value = (k: number) => {
@@ -79,7 +78,6 @@ function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?
     const v = args[k].value
     if (v === "--") break
     if (args[k].unknown === BRACE) unread ??= args[k]
-    else if (v === "-h" || v === "--help") help = true
     else if (v.startsWith("--")) {
       if (v === "--verify") off = undefined
       else if (v === "--no-verify" || (commit && v.length > 8 && "--no-verify".startsWith(v)))
@@ -98,7 +96,7 @@ function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?
       }
     }
   }
-  return { help, off, unread }
+  return { off, unread }
 }
 
 // A long option git reads as --strategy or --strategy-option: either name whole, or an abbreviation of --strategy-option longer than --strategy (a shorter one is ambiguous, which git refuses).
@@ -164,13 +162,17 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
   if (marked(sub.value)) {
     if (rest.some((a) => a.value === "ours"))
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD}`
-    if (rest.some((a) => a.value.startsWith("--no-veri")))
-      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside --no-verify. ${AGAIN}`
+    const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value))
+    if (off)
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`
     return
   }
-  // git runs an alias only for a name that is no git command of its own, the last -c for it winning
-  const name = `alias.${sub.value}=`
-  const text = aliases.findLast((a) => a.startsWith(name))?.slice(name.length)
+  // git runs an alias only for a name that is no git command of its own, the last -c for it winning, its key read in any case
+  const key = `alias.${sub.value.toLowerCase()}`
+  const found = aliases.findLast(
+    (a) => a.includes("=") && a.slice(0, a.indexOf("=")).toLowerCase() === key,
+  )
+  const text = found?.slice(found.indexOf("=") + 1)
   if (text !== undefined && !VERIFIED.has(sub.value)) {
     if (depth >= ALIAS_DEPTH)
       return `no-ours-merge hook refuses git ${sub.value}: it is an alias chain deeper than the ${ALIAS_DEPTH} aliases the hook follows, so it cannot read what runs. Call the git command the chain ends in. ${AGAIN}`
@@ -191,10 +193,10 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
     return judgeGit([...args.slice(0, args.indexOf(sub)), ...own, ...rest], env, depth + 1)
   }
   if (!VERIFIED.has(sub.value)) return
-  const { help, off, unread } = walk(sub.value, rest)
+  // a -h or --help lets no call through, since the walk may read a word as help that git takes as an option's value
+  const { off, unread } = walk(sub.value, rest)
   if (unread)
     return `no-ours-merge hook refuses git ${sub.value} with a brace list it cannot expand (${visible(unread.source ?? unread.value)}), which may spell --no-verify${SUBS.has(sub.value) ? " or ours" : ""}: write the words out. ${SUBS.has(sub.value) ? `${INSTEAD} ` : ""}${AGAIN}`
-  if (help) return
   if (off)
     return `no-ours-merge hook refuses git ${sub.value} ${off}, which turns its hooks off. ${AGAIN}`
   if (!SUBS.has(sub.value)) return

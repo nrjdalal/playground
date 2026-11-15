@@ -16540,7 +16540,6 @@ var TAKES3 = {
 var COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"]);
 function walk2(sub, args) {
   let off;
-  let help = false;
   let unread;
   const commit = sub === "commit";
   const value = (k) => {
@@ -16554,8 +16553,6 @@ function walk2(sub, args) {
       break;
     if (args[k].unknown === BRACE)
       unread ??= args[k];
-    else if (v === "-h" || v === "--help")
-      help = true;
     else if (v.startsWith("--")) {
       if (v === "--verify")
         off = undefined;
@@ -16580,7 +16577,7 @@ function walk2(sub, args) {
       }
     }
   }
-  return { help, off, unread };
+  return { off, unread };
 }
 var strategyLong = (name) => name === "strategy" || name.length > "strategy".length && "strategy-option".startsWith(name);
 function strategies(args) {
@@ -16651,12 +16648,14 @@ async function judgeGit2(args, env, depth) {
   if (marked(sub.value)) {
     if (rest.some((a) => a.value === "ours"))
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD3}`;
-    if (rest.some((a) => a.value.startsWith("--no-veri")))
-      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside --no-verify. ${AGAIN}`;
+    const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value));
+    if (off)
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`;
     return;
   }
-  const name = `alias.${sub.value}=`;
-  const text = aliases.findLast((a) => a.startsWith(name))?.slice(name.length);
+  const key = `alias.${sub.value.toLowerCase()}`;
+  const found = aliases.findLast((a) => a.includes("=") && a.slice(0, a.indexOf("=")).toLowerCase() === key);
+  const text = found?.slice(found.indexOf("=") + 1);
   if (text !== undefined && !VERIFIED.has(sub.value)) {
     if (depth >= ALIAS_DEPTH)
       return `no-ours-merge hook refuses git ${sub.value}: it is an alias chain deeper than the ${ALIAS_DEPTH} aliases the hook follows, so it cannot read what runs. Call the git command the chain ends in. ${AGAIN}`;
@@ -16678,11 +16677,9 @@ async function judgeGit2(args, env, depth) {
   }
   if (!VERIFIED.has(sub.value))
     return;
-  const { help, off, unread } = walk2(sub.value, rest);
+  const { off, unread } = walk2(sub.value, rest);
   if (unread)
     return `no-ours-merge hook refuses git ${sub.value} with a brace list it cannot expand (${visible(unread.source ?? unread.value)}), which may spell --no-verify${SUBS.has(sub.value) ? " or ours" : ""}: write the words out. ${SUBS.has(sub.value) ? `${INSTEAD3} ` : ""}${AGAIN}`;
-  if (help)
-    return;
   if (off)
     return `no-ours-merge hook refuses git ${sub.value} ${off}, which turns its hooks off. ${AGAIN}`;
   if (!SUBS.has(sub.value))
