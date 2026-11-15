@@ -7986,7 +7986,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return false;
     try {
       const stat = lstatSync(path);
-      if (stat.isSymbolicLink() || stat.nlink > 1)
+      if (stat.isSymbolicLink() || !stat.isDirectory() && stat.nlink > 1)
         return false;
     } catch {}
     ownWrites = true;
@@ -8196,7 +8196,11 @@ var runnerOf = (line) => {
 };
 function trackedIn(main, script) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
-  const git = (...args) => Bun.spawnSync(["git", "-C", main, ...args], { env, stderr: "ignore", stdout: "ignore" }).exitCode === 0;
+  const git = (...args) => Bun.spawnSync(["git", "--literal-pathspecs", "-C", main, ...args], {
+    env,
+    stderr: "ignore",
+    stdout: "ignore"
+  }).exitCode === 0;
   return git("ls-files", "--error-unmatch", "--", script) && git("diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--", script);
 }
 function live(environment) {

@@ -310,7 +310,7 @@ export async function inspect(
     // a link as the last part, dangling or not, carries the write where it points, and a file with a second link changes a file elsewhere too
     try {
       const stat = lstatSync(path)
-      if (stat.isSymbolicLink() || stat.nlink > 1) return false
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && stat.nlink > 1)) return false
     } catch {}
     ownWrites = true
     return true
@@ -531,14 +531,17 @@ export const runnerOf = (line: string | undefined): string | undefined => {
   return ""
 }
 
-// Whether git, in the main checkout, reports a file tracked and unchanged from HEAD, with the session's GIT_ variables dropped, so the repository asked is the main checkout itself.
+// Whether git, in the main checkout, reports a file tracked and unchanged from HEAD, with the session's GIT_ variables dropped, so the repository asked is the main checkout itself, and the path read literally, so a folder named as a glob matches no tracked file.
 export function trackedIn(main: string, script: string): boolean {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
   )
   const git = (...args: string[]) =>
-    Bun.spawnSync(["git", "-C", main, ...args], { env, stderr: "ignore", stdout: "ignore" })
-      .exitCode === 0
+    Bun.spawnSync(["git", "--literal-pathspecs", "-C", main, ...args], {
+      env,
+      stderr: "ignore",
+      stdout: "ignore",
+    }).exitCode === 0
   return (
     git("ls-files", "--error-unmatch", "--", script) &&
     git("diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--", script)
