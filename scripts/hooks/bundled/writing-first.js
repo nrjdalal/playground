@@ -130,6 +130,7 @@ var budget = new AsyncLocalStorage;
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
 var PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/;
+var PLAYGROUND_UNIT = /^com\.playground\.[\w.-]+\.service$/;
 var CARVE_OUTS = {
   "dashboard-supervisor": {
     bytes: 256 * 1024 ** 2,
@@ -143,6 +144,13 @@ var CARVE_OUTS = {
     folder: "Library/LaunchAgents",
     home: true,
     name: PLAYGROUND_AGENT
+  },
+  "jobs-units": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: ".config/systemd/user",
+    home: true,
+    name: PLAYGROUND_UNIT
   }
 };
 
@@ -6104,6 +6112,77 @@ function mktempPath(cmd, known) {
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`;
 }
 var SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/;
+var XARGS_LONG = [
+  "arg-file",
+  "delimiter",
+  "eof",
+  "exit",
+  "help",
+  "interactive",
+  "max-args",
+  "max-chars",
+  "max-lines",
+  "max-procs",
+  "no-run-if-empty",
+  "null",
+  "open-tty",
+  "process-slot-var",
+  "replace",
+  "show-limits",
+  "verbose",
+  "version"
+];
+var XARGS_FLAGS = "0oprtx";
+function delimiterOf(word) {
+  if (!word || word.unknown)
+    return;
+  if (word.value.length === 1)
+    return word.value;
+  const [, hex, octal, letter] = /^\\(?:x([\da-f]+)|([0-7]+)|(.))$/i.exec(word.value) ?? [];
+  const code = hex ? parseInt(hex, 16) : octal ? parseInt(octal, 8) : undefined;
+  if (code !== undefined)
+    return code < 256 ? String.fromCharCode(code) : undefined;
+  return letter ? ESCAPES[letter] : undefined;
+}
+var XARGS_REPLACE = /^(?:-[IiJ]|--replace)/;
+function xargsOption(xargs, w, next, state) {
+  const split = (delimiter) => {
+    xargs.delimiters = [...xargs.delimiters ?? [], delimiter];
+  };
+  if (XARGS_REPLACE.test(w.value))
+    return;
+  const long = /^--([^=]+)(=?)/.exec(w.value);
+  let name;
+  let value;
+  if (long) {
+    const names = XARGS_LONG.filter((n) => n.startsWith(long[1]));
+    name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined;
+    if (long[2])
+      value = slice(w, long[0].length);
+  } else if (w.value.startsWith("-")) {
+    let k = 1;
+    while (XARGS_FLAGS.includes(w.value[k] ?? "-"))
+      k++;
+    if (w.value.slice(1, k).includes("0"))
+      split("\x00");
+    name = w.value[k];
+    if (k + 1 < w.value.length)
+      value = slice(w, k + 1);
+  }
+  if (name === "i" || name === "replace")
+    xargs.replace = value?.value || "{}";
+  else if (name === "null")
+    split("\x00");
+  else if (name === "I" || name === "J")
+    xargs.replace = (value ?? next)?.value;
+  else if (name === "a" || name === "arg-file")
+    xargs.files = [
+      ...xargs.files ?? [],
+      ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
+    ];
+  else if (name === "d" || name === "delimiter")
+    split(delimiterOf(value ?? next));
+}
 var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown("a second env -C") } : word;
 var READINGS = 16;
@@ -6132,6 +6211,7 @@ var assign = (local, w) => {
 function unwrap(state, inside, budget) {
   const { local, rest } = state;
   const peek = () => rest[rest.length - 1];
+  const next = () => rest[rest.length - 2];
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
@@ -6143,6 +6223,7 @@ function unwrap(state, inside, budget) {
     also.push(unwrap({
       chdir: state.chdir,
       local: new Map(local),
+      moved: state.moved,
       rest: rest.slice(0, Math.max(0, rest.length - drop)),
       xargs: state.xargs && { ...state.xargs }
     }, wrapper, budget));
@@ -6162,6 +6243,8 @@ function unwrap(state, inside, budget) {
       wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
+      if (ROOT_SHELLS.has(wrapper))
+        state.moved = true;
       if (wrapper === "xargs" && state.xargs?.replace)
         state.xargs = { ...state.xargs, outer: [...state.xargs.outer ?? [], state.xargs.replace] };
       if (wrapper === "xargs")
@@ -6171,6 +6254,8 @@ function unwrap(state, inside, budget) {
     const options = WRAPPERS.get(wrapper);
     for (let w = peek();w; w = peek()) {
       const v = w.value;
+      if (wrapper === "xargs")
+        xargsOption(state.xargs ??= {}, w, next(), state);
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -6190,7 +6275,7 @@ function unwrap(state, inside, budget) {
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length));
         take();
-      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && XARGS_REPLACE.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs ??= {};
@@ -6206,7 +6291,7 @@ function unwrap(state, inside, budget) {
         const end = wrapper === "nice" && /^-\d+$/.test(v) ? "own" : marked(v) ? undefined : optionValue(v, options);
         if (!end)
           fork(wrapper, 2);
-        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+        else if (end === "next" && marked(next()?.value ?? "")) {
           fork(wrapper, 1);
           fork(wrapper, 3);
         }
@@ -6558,17 +6643,46 @@ function stdinScript({ args, name }) {
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
+async function argFile({ chdir, file, moved }, cmd, env) {
+  if (file.procs)
+    return held2(await outputs(file.procs, env));
+  if (moved)
+    return unknown(`${file.value}, which a privilege wrapper before xargs may read from another folder or root`);
+  const cwd = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
+  return held2(await readPath(file, chdir && !isAbsolute3(file.value) ? { ...env, cwd } : env));
+}
+var itemsOf = (fed, split) => {
+  if (fed.unknown || split === undefined)
+    return;
+  if (split === null)
+    return [fed.value, ...fed.value.split(`
+`), ...fed.value.split(/\s+/)];
+  return [fed.value, ...fed.value.split(split)];
+};
 async function xargsFilled(cmd, parsed, env) {
   const filled = new Map;
   for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
     filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
   if (filled.size === 0)
     return [];
-  const fed = await stdinOf(cmd, env);
-  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split(`
-`), ...fed.value.split(/\s+/)];
-  const quoted = raw.some((text) => /["'\\]/.test(text));
-  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+  const xargs = parsed.map((p) => p.xargs);
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value));
+  const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
+  const inputs = [
+    await stdinOf(cmd, env),
+    ...await Promise.all(files.map((f) => argFile(f, cmd, env)))
+  ];
+  const texts = new Set;
+  for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {
+    const items = [...new Set(raw?.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean);
+    if (!raw || items.length > READINGS)
+      texts.add(undefined);
+    else
+      for (const text of items)
+        texts.add(text);
+    if (raw?.some((text) => /["'\\]/.test(text)))
+      texts.add(undefined);
+  }
   const fill = (text) => ({
     ...cmd,
     words: cmd.words.flatMap((w) => {
@@ -6580,9 +6694,7 @@ async function xargsFilled(cmd, parsed, env) {
       return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     })
   });
-  if (fed.unknown || texts.length > READINGS)
-    return [fill(undefined)];
-  return [...texts.map(fill), ...quoted ? [fill(undefined)] : []];
+  return [...texts].map(fill);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {

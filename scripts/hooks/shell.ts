@@ -1461,8 +1461,16 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from stdin.
-export type Xargs = { filled?: [Word, string][]; outer?: string[]; replace?: string } | undefined
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+export type Xargs =
+  | {
+      delimiters?: (string | undefined)[]
+      files?: { chdir?: Word; file: Word; moved?: boolean }[]
+      filled?: [Word, string][]
+      outer?: string[]
+      replace?: string
+    }
+  | undefined
 
 export type Parsed = {
   // the other readings of a wrapper's option it cannot read, each judged as the command too
@@ -1479,10 +1487,85 @@ export type Parsed = {
 
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
+// GNU xargs' long options, each of which it takes by any unique prefix (`--delim=,`)
+const XARGS_LONG = [
+  "arg-file",
+  "delimiter",
+  "eof",
+  "exit",
+  "help",
+  "interactive",
+  "max-args",
+  "max-chars",
+  "max-lines",
+  "max-procs",
+  "no-run-if-empty",
+  "null",
+  "open-tty",
+  "process-slot-var",
+  "replace",
+  "show-limits",
+  "verbose",
+  "version",
+]
+// GNU's and BSD's short xargs options that take no value, as a cluster (`-rJ`, `-0I`) reads them before the one that takes a value
+const XARGS_FLAGS = "0oprtx"
+// The one character GNU xargs' -d names, itself or a backslash escape: a letter $'…' reads, an octal number, or \x and a hex one; undefined when the reader cannot decode it
+function delimiterOf(word: Word | undefined): string | undefined {
+  if (!word || word.unknown) return
+  if (word.value.length === 1) return word.value
+  const [, hex, octal, letter] = /^\\(?:x([\da-f]+)|([0-7]+)|(.))$/i.exec(word.value) ?? []
+  const code = hex ? parseInt(hex, 16) : octal ? parseInt(octal, 8) : undefined
+  if (code !== undefined) return code < 256 ? String.fromCharCode(code) : undefined
+  return letter ? ESCAPES[letter] : undefined
+}
+
+// xargs' replace options as unwrap reads and takes them itself: -I, -J, -i and --replace, each leading its word
+const XARGS_REPLACE = /^(?:-[IiJ]|--replace)/
+
+// Records what one xargs option word sets beside unwrap's own reading, which still takes the word and forks as before, so the parse keeps every reading it made: GNU's -a and --arg-file (the input), -d, --delimiter, -0 and --null (its split), and a replace string XARGS_REPLACE misses, at the end of a cluster of flags (`-rJ`) or by a long prefix GNU takes (`--repl=`); its value attached or the next word, and a file with the folder `state` holds before xargs
+function xargsOption(
+  xargs: NonNullable<Xargs>,
+  w: Word,
+  next: Word | undefined,
+  state: State,
+): void {
+  const split = (delimiter: string | undefined) => {
+    xargs.delimiters = [...(xargs.delimiters ?? []), delimiter]
+  }
+  if (XARGS_REPLACE.test(w.value)) return
+  const long = /^--([^=]+)(=?)/.exec(w.value)
+  let name: string | undefined
+  let value: Word | undefined
+  if (long) {
+    const names = XARGS_LONG.filter((n) => n.startsWith(long[1]))
+    name = names.includes(long[1]) ? long[1] : names.length === 1 ? names[0] : undefined
+    if (long[2]) value = slice(w, long[0].length)
+  } else if (w.value.startsWith("-")) {
+    let k = 1
+    while (XARGS_FLAGS.includes(w.value[k] ?? "-")) k++
+    if (w.value.slice(1, k).includes("0")) split("\0")
+    name = w.value[k]
+    if (k + 1 < w.value.length) value = slice(w, k + 1)
+  }
+  if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
+  else if (name === "null") split("\0")
+  else if (name === "I" || name === "J") xargs.replace = (value ?? next)?.value
+  else if (name === "a" || name === "arg-file")
+    xargs.files = [
+      ...(xargs.files ?? []),
+      ...[value ?? next]
+        .filter((file) => file !== undefined)
+        .map((file) => ({ chdir: state.chdir, file, moved: state.moved })),
+    ]
+  else if (name === "d" || name === "delimiter") split(delimiterOf(value ?? next))
+}
+
 // Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
 const splitFrom = new WeakMap<Word, Word>()
 
-type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// `moved`: a privilege wrapper came before, which may run the rest in another folder or root (sudo -D, -i or -R, pkexec without --keep-cwd)
+type State = { chdir?: Word; local: Map<string, Text>; moved?: boolean; rest: Word[]; xargs: Xargs }
 // env's folder word, which a second -C leaves unread, since one env moves by each in turn and another by the last alone
 const chdirOf = (state: State, word: Word | undefined): Word | undefined =>
   state.chdir && word ? { ...word, ...unknown("a second env -C") } : word
@@ -1517,6 +1600,7 @@ const assign = (local: Map<string, Text>, w: Word) => {
 function unwrap(state: State, inside: string | undefined, budget: Budget): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
+  const next = (): Word | undefined => rest[rest.length - 2]
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) => {
@@ -1530,6 +1614,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         {
           chdir: state.chdir,
           local: new Map(local),
+          moved: state.moved,
           rest: rest.slice(0, Math.max(0, rest.length - drop)),
           xargs: state.xargs && { ...state.xargs },
         },
@@ -1552,6 +1637,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         }
       wrapper = program(word?.value ?? "")
       if (!WRAPPERS.has(wrapper)) break
+      if (ROOT_SHELLS.has(wrapper)) state.moved = true
       if (wrapper === "xargs" && state.xargs?.replace)
         state.xargs = { ...state.xargs, outer: [...(state.xargs.outer ?? []), state.xargs.replace] }
       if (wrapper === "xargs") state.xargs ??= {}
@@ -1560,6 +1646,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     const options = WRAPPERS.get(wrapper) as Options
     for (let w = peek(); w; w = peek()) {
       const v = w.value
+      if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1578,7 +1665,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else if (wrapper === "env" && /^(?:-C|--chdir=)./.test(v)) {
         state.chdir = chdirOf(state, slice(w, v.startsWith("-C") ? 2 : "--chdir=".length))
         take()
-      } else if (wrapper === "xargs" && /^(?:-[IiJ]|--replace)/.test(v)) {
+      } else if (wrapper === "xargs" && XARGS_REPLACE.test(v)) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
         state.xargs ??= {}
@@ -1599,7 +1686,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
               ? undefined
               : optionValue(v, options)
         if (!end) fork(wrapper, 2)
-        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+        else if (end === "next" && marked(next()?.value ?? "")) {
           fork(wrapper, 1)
           fork(wrapper, 3)
         }
@@ -2019,16 +2106,50 @@ function stdinScript({ args, name }: Parsed): boolean {
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from stdin, so it runs a program no typed word names: each such word filled with stdin's text, as a whole, line by line and item by item (-n), a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read stdin, stdin holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
+async function argFile(
+  { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
+  cmd: Command,
+  env: Env,
+): Promise<Text> {
+  if (file.procs) return held(await outputs(file.procs, env))
+  if (moved)
+    return unknown(
+      `${file.value}, which a privilege wrapper before xargs may read from another folder or root`,
+    )
+  const cwd = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
+  return held(await readPath(file, chdir && !isAbsolute(file.value) ? { ...env, cwd } : env))
+}
+
+// The texts xargs may fill in from one input: by default (`split` null) the whole, each line and each blank-separated item (-n), and under a -d or -0 delimiter the whole and each item it splits off; undefined when the reader cannot read the input or decode the delimiter
+const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefined => {
+  if (fed.unknown || split === undefined) return
+  if (split === null) return [fed.value, ...fed.value.split("\n"), ...fed.value.split(/\s+/)]
+  return [fed.value, ...fed.value.split(split)]
+}
+
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
 async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
   const filled = new Map<Word, string[]>()
   for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
   if (filled.size === 0) return []
-  const fed = await stdinOf(cmd, env)
-  const raw = fed.unknown ? [] : [fed.value, ...fed.value.split("\n"), ...fed.value.split(/\s+/)]
-  const quoted = raw.some((text) => /["'\\]/.test(text))
-  const texts = [...new Set(raw.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(Boolean)
+  const xargs = parsed.map((p) => p.xargs)
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value))
+  const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
+  const inputs = [
+    await stdinOf(cmd, env),
+    ...(await Promise.all(files.map((f) => argFile(f, cmd, env)))),
+  ]
+  const texts = new Set<string | undefined>()
+  for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {
+    const items = [...new Set(raw?.map((text) => text.replace(/["'\\]/g, "").trim()))].filter(
+      Boolean,
+    )
+    if (!raw || items.length > READINGS) texts.add(undefined)
+    else for (const text of items) texts.add(text)
+    if (raw?.some((text) => /["'\\]/.test(text))) texts.add(undefined)
+  }
   const fill = (text: string | undefined) => ({
     ...cmd,
     words: cmd.words.flatMap((w): Word[] => {
@@ -2043,8 +2164,7 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
         .map((value) => ({ quoted: false, value }))
     }),
   })
-  if (fed.unknown || texts.length > READINGS) return [fill(undefined)]
-  return [...texts.map(fill), ...(quoted ? [fill(undefined)] : [])]
+  return [...texts].map(fill)
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"

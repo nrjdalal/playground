@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 import { overBaseline, stepsOf } from "./pace"
+import { as, pinPlatform } from "./platform"
 
 // A home whose data folder holds an extensions root, with a list, policy.json and a scope's sources, as a machine with extensions has.
 const HOME = mkdtempSync(join(tmpdir(), "no-extensions-write-"))
@@ -31,6 +32,7 @@ symlinkSync(ROOT, LINK)
 symlinkSync(ROOT, join(DATA, "store"))
 symlinkSync(DATA, join(HOME, "pg"))
 afterAll(() => rmSync(HOME, { force: true, recursive: true }))
+pinPlatform("darwin")
 
 const ENV = { HOME }
 const CHECKOUT = join(import.meta.dir, "..", "..", "..")
@@ -3480,6 +3482,151 @@ describe("an xargs-led grep and bun -e from the data folder", () => {
   })
 })
 
+describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2204)", () => {
+  test.each([
+    ["cp of a variable GNU may read as its target folder", "cp $X /tmp/y"],
+    ["cp of a quoted variable GNU may read as its target folder", `cp "$S" /tmp/y`],
+    ["ln of a variable GNU may read as its target folder", "ln $X /tmp/y"],
+    ["ln -s of a variable GNU may read as its target folder", "ln -s $X /tmp/y"],
+    ["cp of a substitution GNU may read as its target folder", "cp $(cat /tmp/a) /tmp/y"],
+    ["cp of a backtick substitution GNU may read as its target folder", "cp `cat /tmp/a` /tmp/y"],
+  ])("%s is refused on Linux and allowed on macOS", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+    expect(await as("darwin", () => bash(command))).toBeUndefined()
+  })
+
+  test.each([
+    ["an in-place sed beside another call", `bun x.ts; sed -i '/(a) .*/d' ${WORK}/f`],
+    [
+      "an in-place sed of an absolute file after a cd to a variable",
+      `cd "$X"; sed -i s/a/b/ /tmp/p.json`,
+    ],
+    [
+      "an in-place sed of a file through a variable the line holds",
+      `F=${WORK}/f; bun x.ts; sed -i '/x (a)/d' "$F"`,
+    ],
+    [
+      "an in-place sed of parenthesised addresses beside a writing redirect",
+      `sed -i '/item 5 (a, after item 4)/d; /item 5 note: carry it/d' ${WORK}/queue.md; echo "$(date -u +%FT%TZ) x" >> ${WORK}/notes.md`,
+    ],
+  ])(
+    "GNU sed's script after a bare -i: %s is allowed on Linux and refused on macOS",
+    async (_, command) => {
+      expect(await as("linux", () => bash(command))).toBeUndefined()
+      expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+    },
+  )
+
+  test.each([
+    ["cp into the root as its target folder", `cp -t ${ROOT} /tmp/f`],
+    ["cp into the root by its long target option", `cp --target-directory=${ROOT} /tmp/f`],
+    [
+      "cp into the root by its long target option and the next word",
+      `cp --target-directory ${ROOT} /tmp/f`,
+    ],
+    ["ln into the root as its target folder", `ln -t ${ROOT} /tmp/f`],
+    ["ln -s into the root as its target folder", `ln -s -t ${ROOT} /tmp/f`],
+    ["mv into the root as its target folder", `mv -t ${ROOT} /tmp/f`],
+    ["install into the root as its target folder", `install -t ${ROOT} /tmp/f`],
+    ["cp with its target folder after an operand", `cp /tmp/f -t ${ROOT}`],
+    ["mv with its target folder after an operand", `mv /tmp/f -t ${ROOT}`],
+    ["cp to a file in the root", `cp /tmp/f ${ROOT}/x`],
+    ["an in-place GNU-form sed of a file in the root", `bun x.ts; sed -i '/(a) .*/d' ${LIST}`],
+  ])("%s stays refused on both", async (_, command) => {
+    for (const platform of ["darwin", "linux"] as const)
+      expect(await as(platform, () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test("cp to a literal path elsewhere stays allowed on both", async () => {
+    for (const platform of ["darwin", "linux"] as const)
+      expect(await as(platform, () => bash("cp /tmp/f /tmp/y"))).toBeUndefined()
+  })
+
+  // POSIXLY_CORRECT can reach a call by a route the hook does not carry, so on Linux a later dashed word is judged as a file too, as GNU reads it with the variable set; each route made GNU coreutils 9.4's mkdir write where its variable named
+  test.each([
+    [
+      "a remover's option after its first operand after a cd to a variable",
+      `cd "$X"; rm /tmp/x -f`,
+    ],
+    ["a writer's value option after its first operand", `mkdir /tmp/x -m "$M"`],
+    ["a prefix on a shell's -c", `POSIXLY_CORRECT=1 bash -c 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on sh's -c", `POSIXLY_CORRECT=1 sh -c 'mkdir /tmp/x -m "$M"'`],
+    ["env's prefix on a shell's -c", `env POSIXLY_CORRECT=1 bash -c 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on a shell reading stdin", `echo 'mkdir /tmp/x -m "$M"' | POSIXLY_CORRECT=1 bash`],
+    ["a prefix on eval", `POSIXLY_CORRECT=1 eval 'mkdir /tmp/x -m "$M"'`],
+    ["a prefix on a function call", `f() { mkdir /tmp/x -m "$M"; }; POSIXLY_CORRECT=1 f`],
+    [
+      "a := default then an export",
+      `: \${POSIXLY_CORRECT:=1}; export POSIXLY_CORRECT; mkdir /tmp/x -m "$M"`,
+    ],
+    ["an export of a word the hook cannot read", `export "$V"; mkdir /tmp/x -m "$M"`],
+    ["a sourced file", `. /tmp/env.sh; mkdir /tmp/x -m "$M"`],
+    ["BASH_ENV on a shell's -c", `BASH_ENV=/tmp/e bash -c 'mkdir /tmp/x -m "$M"'`],
+    [
+      "a prefix on a shell's -c holding a remover after a cd",
+      `POSIXLY_CORRECT=1 bash -c 'cd "$X"; rm /tmp/x -f'`,
+    ],
+    [
+      "a prefix on a shell's -c holding touch -r",
+      `POSIXLY_CORRECT=1 bash -c 'touch /tmp/x -r "$D"'`,
+    ],
+    ["a prefix on the call itself", `POSIXLY_CORRECT=1 mkdir /tmp/x -m "$M"`],
+  ])("a later dashed word under %s stays refused on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  // GNU chmod takes its mode from a dash-led word or --reference, so its first operand is then a file: GNU coreutils 9.4 turned a file named 644 from 644 to 444
+  test.each([
+    ["an octal word after a dash mode", `cd "$X"; chmod 644 -w`],
+    ["an octal word before a dash mode", `cd "$X"; chmod -w 644`],
+    ["an octal word before a two-letter dash mode", `cd "$X"; chmod 644 -wx`],
+    ["a symbolic word beside a dash mode", `cd "$X"; chmod u+x -w`],
+    ["an octal word after --reference", `cd "$X"; chmod --reference=/tmp/r 644`],
+    ["an octal word after an = mode option", `cd "$X"; chmod -=r 644`],
+    ["an octal word after a bare = mode option", `cd "$X"; chmod -= 644`],
+    ["an octal word after --reference's --ref prefix", `cd "$X"; chmod --ref=/tmp/r 644`],
+    ["an octal word after --reference's --refer prefix", `cd "$X"; chmod --refer=/tmp/r 644`],
+    ["an octal word after a + mode option", `cd "$X"; chmod -+w 644`],
+    ["an octal word after a , mode option", `cd "$X"; chmod -,u+w 644`],
+    ["an octal word after a digit mode option", `cd "$X"; chmod -0 644`],
+  ])("chmod of %s after a cd to a variable stays refused on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each([
+    ["chmod of an absolute file past its mode", `cd "$X"; chmod 644 /tmp/f`],
+    ["chmod of an absolute file past a dash mode", `cd "$X"; chmod -w /tmp/f`],
+    ["chmod of an absolute file past a non-mode option", `cd "$X"; chmod -R 644 /tmp/f`],
+    // GNU coreutils 9.4 exits 1 on -M, an option it does not know, before it writes
+    ["install with macOS's metalog option", `cd "$X"; install -Mlog x /tmp/y`],
+  ])("%s after a cd to a variable is allowed on Linux", async (_, command) => {
+    expect(await as("linux", () => bash(command))).toBeUndefined()
+  })
+
+  test.each([
+    ["install -d of no folder past a suffix from a variable", `install -d -S "$D"`],
+    ["install -d of no folder past a group from a variable", `install -d -Tg "$D"`],
+    ["install -d with a target folder from a variable past -D", `install -d -Dt "$D"`],
+    ["install -d with a target folder from a variable past -T", `install -d -Tt "$D"`],
+    ["install -d of a folder with a target folder from a variable", `install -d -Dt "$D" x`],
+    ["install -d of no folder past macOS's -x and a group from a variable", `install -d -Dxg "$D"`],
+    ["install -d of no folder past macOS's -h and a group from a variable", `install -d -hg "$D"`],
+    ["install -d of no folder past macOS's -l and a group from a variable", `install -d -lg "$D"`],
+  ])(
+    "%s, which only a GNU check after its parse stops, stays refused on Linux",
+    async (_, command) => {
+      expect(await as("linux", () => bash(command))).toContain("no-extensions-write hook refuses")
+    },
+  )
+
+  test("GNU sed's glob script after a bare -i edits a work file on Linux and stays refused on a file in the root", async () => {
+    expect(await as("linux", () => bash(`sed -i '/a*b/d' ${WORK}/a.ts`))).toBeUndefined()
+    expect(await as("linux", () => bash(`sed -i '/a*b/d' ${LIST}`))).toContain(
+      "no-extensions-write hook refuses",
+    )
+  })
+})
+
 // #2158: an xargs replace string that sits in the program's arguments alone leaves the program typed, so each keeps canary's verdict
 describe("an xargs replace string outside the program word keeps the call's verdict", () => {
   test.each([
@@ -3506,6 +3653,30 @@ describe("an xargs replace string outside the program word keeps the call's verd
 
   test("cp into the root under xargs -J % stays refused", async () => {
     expect(await bash("echo a | xargs -J % cp % $HOME/.playground/extensions/", WORK)).toContain(
+      "no-extensions-write hook refuses",
+    )
+  })
+})
+
+// #2198: GNU xargs' input options, and a replace option at the end of a cluster of flags, beside a typed program leave it typed, so each keeps canary's verdict
+describe("an xargs input option beside a typed program keeps the call's verdict", () => {
+  test.each([
+    ["echo under xargs -d,", "printf 'a,b' | xargs -d, echo"],
+    ["echo under xargs --delimiter given apart", "printf 'a,b' | xargs --delimiter , echo"],
+    ["echo under xargs -d, fed a program's name", "printf 'a,playground' | xargs -d, echo"],
+    ["grep under xargs -0 fed by find -print0", "find . -print0 | xargs -0 grep -l x"],
+    ["echo under xargs -a of a process substitution", "xargs -a <(echo a) echo"],
+    ["echo under a shortened --arg=", "xargs --arg=/tmp/list echo"],
+    ["echo under xargs -d, -I %", "printf 'a,b' | xargs -d, -I % echo %"],
+    ["cat under xargs -0I %", "printf a | xargs -0I % cat %"],
+    ["cat under nice under xargs -rJ %", "echo a | xargs -rJ % nice cat %"],
+    ["echo under a shortened --repl=%", "echo a | xargs --repl=% echo %"],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test("cp into the root under xargs -rJ % stays refused", async () => {
+    expect(await bash("echo a | xargs -rJ % cp % $HOME/.playground/extensions/", WORK)).toContain(
       "no-extensions-write hook refuses",
     )
   })

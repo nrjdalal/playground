@@ -112,6 +112,65 @@ describe("the job registry", () => {
     expect(plist).toContain("<key>WorkingDirectory</key><string>/c/desk</string>")
   })
 
+  // #2203: Linux has no launchd, so each launchd job also renders a systemd user unit that runs what its plist runs
+  describe("each launchd job's systemd user unit", () => {
+    const fields = (unit: string) =>
+      Object.fromEntries(
+        unit
+          .split("\n")
+          .filter((line) => /^\w+=/.test(line))
+          .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+      )
+    const words = (value: string) =>
+      [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) =>
+        match[1]!.replace(/\\(.)/g, "$1").replaceAll("%%", "%").replaceAll("$$", "$"),
+      )
+    const launchdJobs = Object.entries(JOBS).filter(([, job]) => job.launchd)
+
+    test.each(launchdJobs)(
+      "%s runs its plist's program from its folder, logs where it logs, and restarts always",
+      (name, job) => {
+        const { plists, units } = renderJobs(
+          { [jobKey(name)]: { ...job, enabled: true } },
+          [],
+          fill,
+        )
+        const plist = plists.get(job.launchd!)!
+        const unit = fields(units.get(job.launchd!)!)
+        const log = /<key>StandardOutPath<\/key><string>([^<]*)</.exec(plist)![1]
+        expect(words(unit.ExecStart!)).toEqual(plistProgram(plist)!.program)
+        expect(unit.WorkingDirectory).toBe(plistProgram(plist)!.cwd!)
+        expect([unit.StandardOutput, unit.StandardError]).toEqual([
+          `append:${log}`,
+          `append:${log}`,
+        ])
+        expect(unit.Restart).toBe("always")
+        expect(unit.KillMode).toBe("process")
+        expect(unit.WantedBy).toBe("default.target")
+        expect(words(unit.Environment!)).toEqual([`PATH=%h/.bun/bin:${fill.path}`])
+        expect([...units.keys()]).toEqual([...plists.keys()])
+      },
+    )
+
+    test("a job turned off renders no unit", () => {
+      expect(renderJobs({}, [], fill).units.size).toBe(0)
+    })
+
+    test("a path holding a space, a quote, a % or a $ reaches systemd as written", () => {
+      const odd = { ...fill, checkout: '/c d/"q"%h$X' }
+      const tick = { ...JOBS["ops-tick"]!, enabled: true }
+      const unit = renderJobs({ [jobKey("ops-tick")]: tick }, [], odd).units.get(
+        "com.playground.ops-tick",
+      )!
+      expect(words(fields(unit).ExecStart!)).toEqual([
+        "/b/bun",
+        "--no-env-file",
+        '/c d/"q"%h$X/packages/scripts/src/ops-tick/cli.ts',
+      ])
+      expect(fields(unit).WorkingDirectory).toBe('/c d/"q"%%h$X')
+    })
+  })
+
   test("a value its schema refuses falls back to the default, and a job the registry does not know is kept as it stands", () => {
     const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
     const { jobs } = renderJobs(

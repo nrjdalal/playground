@@ -43,6 +43,7 @@ import {
   NEVER_MADE,
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
+import { pinPlatform } from "./platform"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -50,6 +51,8 @@ const CHECKOUT = join(import.meta.dir, "..", "..", "..")
 // where it lands, since no-outside-pr-code judges a skill script's path past this Mac's /var link
 const SCRATCH = realpathSync(mkdtempSync(join(tmpdir(), "refused-forms-")))
 afterAll(() => rmSync(SCRATCH, { force: true, recursive: true }))
+// every row holds macOS's reading of a bare build, which no-extensions-write reads as GNU's on Linux
+pinPlatform("darwin")
 
 // A home whose data folder holds an extensions root, its links and files, as the guards' own tests build it.
 const HOME = join(SCRATCH, "home")
@@ -952,6 +955,14 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2104 git with a spaced git folder alone after a cd to a variable | git --git-dir, it moves folders",
       "#2104 git with a work tree alone after a cd to a variable | git --work-tree, it moves folders",
       "#2106 a write under env with two -C options, the second relative | env -C, no folder",
+      "#2198 an unslotted build by a program xargs puts in place of a typed word, read from --arg-file's file in env --chdir's folder | env --chdir, no folder",
+      "#2198 an unslotted build by a program xargs puts in place of a typed word, read from -a's file in env --chdir='s folder | env --chdir, no folder",
+      "#2198 an unslotted build by a program xargs puts in place of a typed word, read from -a's file in env -C's attached folder | env -C, no folder",
+      "#2198 an unslotted build by a program xargs puts in place of a typed word, read from -a's file in env -C's folder | env -C, no folder",
+      "#2198 ext add by a program xargs puts in place of a typed word, read from --arg-file's file in env --chdir's folder | env --chdir, no folder",
+      "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env --chdir='s folder | env --chdir, no folder",
+      "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's attached folder | env -C, no folder",
+      "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's folder | env -C, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
