@@ -399,12 +399,15 @@ export function canaryTree({
   return dir
 }
 
-// The error a module throws as a fresh bun process imports it, else undefined: a hook's Worker resolves its packages again at each call, so a package the tree lost after the run loaded it fails there and the hook's onerror allows the call; a process of its own, since Bun keeps a failed resolution for every later Worker in the same process
+// The error a module throws as a fresh bun process imports it, else undefined: a hook's Worker resolves its packages again at each call, so a package the tree lost after the run loaded it fails there and the hook's onerror allows the call; a process of its own, since Bun keeps a failed resolution for every later Worker in the same process, and it exits once the import ends, since a Worker module's onmessage keeps a process open
 const loadError = async (file: string) => {
-  const run = Bun.spawn(["bun", "--no-env-file", "-e", `await import(${JSON.stringify(file)})`], {
-    stderr: "pipe",
-    stdout: "ignore",
-  })
+  const run = Bun.spawn(
+    ["bun", "--no-env-file", "-e", `await import(${JSON.stringify(file)}); process.exit()`],
+    {
+      stderr: "pipe",
+      stdout: "ignore",
+    },
+  )
   const [code, stderr] = await Promise.all([run.exited, new Response(run.stderr).text()])
   return code === 0
     ? undefined
