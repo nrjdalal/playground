@@ -382,6 +382,10 @@ describe("xargs fills its program from the input GNU's input options name", () =
   afterAll(() => rmSync(dir, { force: true, recursive: true }))
   writeFileSync(join(dir, "f"), "turbo\n")
   writeFileSync(join(dir, "big"), "turbo ".repeat(200_000))
+  writeFileSync(join(dir, "h"), "zz\n")
+  mkdirSync(join(dir, "sub"))
+  writeFileSync(join(dir, "sub", "h"), "turbo\n")
+  Bun.spawnSync(["mkfifo", join(dir, "fifo")])
   const filled = async (line: string) => {
     const env: Env = { cwd: dir, files: new Map(), known: {}, process: {}, vars: new Map() }
     const seen: string[] = []
@@ -399,6 +403,15 @@ describe("xargs fills its program from the input GNU's input options name", () =
     ["an item -0 splits off", "printf 'a\\0turbo' | xargs -0 -I X nice X run"],
     ["a line of -a's file", "echo a | xargs -a f -I X nice X run"],
     ["a line of -a's process substitution", "echo a | xargs -a <(echo turbo) -I X nice X run"],
+    ["a line of -a's file in env -C's folder", "echo a | env -C sub xargs -a h -I X nice X run"],
+    [
+      "a line of -a's file in env --chdir='s folder",
+      "echo a | env --chdir=sub xargs -a h -I X nice X run",
+    ],
+    [
+      "a line of -a's absolute file after sudo -D",
+      `echo a | sudo -D sub xargs -a ${dir}/sub/h -I X nice X run`,
+    ],
   ])("%s fills the program", async (_, line) => {
     expect(await filled(line)).toContain("turbo run")
   })
@@ -412,6 +425,15 @@ describe("xargs fills its program from the input GNU's input options name", () =
     ["an -a descriptor other than stdin", "echo a | xargs -a /dev/fd/3 -I X nice X run"],
     ["an -a file over the reader's size cap", "echo a | xargs -a big -I X nice X run"],
     ["an -a file in a variable", 'echo a | xargs -a "$F" -I X nice X run'],
+    ["an -a named fifo", "echo a | xargs -a fifo -I X nice X run"],
+    [
+      "an -a relative file sudo -D may read from its folder",
+      "echo a | sudo -D sub xargs -a h -I X nice X run",
+    ],
+    [
+      "an -a relative file sudo --chdir= may read from its folder",
+      "echo a | sudo --chdir=sub xargs -a h -I X nice X run",
+    ],
   ])("%s reads the program as unread", async (_, line) => {
     expect(await filled(line)).toContain(`${UNKNOWN} run`)
   })

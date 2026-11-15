@@ -37,9 +37,39 @@ const FORMS: [what: string, form: string][] = [
   ["read by -J at the end of a cluster with -0", "printf {P} | xargs -0J cat cat {T}"],
   ["read by -I at the end of a cluster with -t", "echo {P} | xargs -tI cat nice cat {T}"],
 ]
+// A relative -a file read from the folder env -C moves xargs to, where the shell's own folder holds a harmless word
+const MOVED: [what: string, form: string][] = [
+  [
+    "read from -a's file in env -C's folder",
+    "echo zz > f; echo {P} > x/f; env -C x xargs -a f -I cat nice cat {T}",
+  ],
+  [
+    "read from -a's file in env -C's attached folder",
+    "echo zz > f; echo {P} > x/f; env -Cx xargs -a f -I cat nice cat {T}",
+  ],
+  [
+    "read from -a's file in env --chdir='s folder",
+    "echo zz > f; echo {P} > x/f; env --chdir=x xargs -a f -I cat nice cat {T}",
+  ],
+  [
+    "read from --arg-file's file in env --chdir's folder",
+    "echo zz > f; echo {P} > x/f; env --chdir x xargs --arg-file=f -I cat nice cat {T}",
+  ],
+]
+// A relative -a file a privilege wrapper before xargs may read from another folder, which the reader leaves unread
+const PRIVILEGED: [what: string, form: string][] = [
+  [
+    "read from -a's file in sudo -D's folder",
+    "echo zz > f; echo {P} > x/f; sudo -D x xargs -a f -I cat nice cat {T}",
+  ],
+  [
+    "read from -a's file in sudo --chdir='s folder",
+    "echo zz > f; echo {P} > x/f; sudo --chdir=x xargs -a f -I cat nice cat {T}",
+  ],
+]
 
-const rows = (what: string, program: string, args: string): Row[] =>
-  FORMS.map(([how, form]) => [
+const rows = (what: string, program: string, args: string, forms = FORMS): Row[] =>
+  forms.map(([how, form]) => [
     `${what} by a program xargs puts in place of a typed word, ${how}`,
     form.replaceAll("{P}", program).replaceAll("{T}", args),
   ])
@@ -48,7 +78,10 @@ export const groups: Group[] = [
   {
     folders: ["checkout", "home"],
     guards: ["no-extensions-write"],
-    rows: () => rows("ext add", "playground", "ext add login list x y"),
+    rows: () =>
+      [FORMS, MOVED, PRIVILEGED].flatMap((forms) =>
+        rows("ext add", "playground", "ext add login list x y", forms),
+      ),
   },
   {
     folders: ["main checkout"],
@@ -58,6 +91,7 @@ export const groups: Group[] = [
   {
     folders: ["checkout"],
     guards: ["no-unslotted-run"],
-    rows: () => rows("an unslotted build", "turbo", "run build"),
+    rows: () =>
+      [FORMS, MOVED].flatMap((forms) => rows("an unslotted build", "turbo", "run build", forms)),
   },
 ]
