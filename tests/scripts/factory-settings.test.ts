@@ -81,14 +81,17 @@ describe("a session cmux restored in a dispatcher checkout keeps the factory's h
     expect(new RegExp(hook?.matcher ?? "^$").test(tool)).toBe(true)
   })
 
-  // #1280: guards runs on Bash alone, so a Monitor's command reaches no-outside-pr-code only through its own entry
+  // #1280: guards runs on Bash alone, so a Monitor's command reaches no-outside-pr-code only through its own entry, and #2261: so does a file tool's write into a git folder
   test.each([join("scripts", "factory-settings.json"), join(".claude", "settings.json")])(
-    "%s runs no-outside-pr-code on Monitor",
+    "%s runs no-outside-pr-code on Monitor and the file tools",
     async (file) => {
-      const hook = (await preToolUse(file)).find((h) =>
+      const hooks = (await preToolUse(file)).filter((h) =>
         h.hooks.some((x) => x.command.includes("scripts/hooks/bundled/no-outside-pr-code.js")),
       )
-      expect(hook?.matcher).toBe("^Monitor$")
+      expect(hooks.map((h) => h.matcher)).toEqual([
+        "^Monitor$",
+        "^(Edit|MultiEdit|NotebookEdit|Write)$",
+      ])
     },
   )
 })
