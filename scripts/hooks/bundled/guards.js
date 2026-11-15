@@ -16689,6 +16689,8 @@ function gitAllows(words, folder, lookup, environment) {
   const verb = all.find(plain);
   if (sub === "remote" && verb !== undefined && verb !== "get-url" && verb !== "show")
     return false;
+  if (sub === "diff" && all.includes("--no-index"))
+    return all.includes("--no-ext-diff") && all.includes("--no-textconv");
   if (readsWords(words) || GIT_READS2.has(sub))
     return true;
   if (sub === "fetch") {

@@ -1082,6 +1082,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   An extension item's reviewer, whose row names no PR, finishes its review in read mode, and the item's tests stay refused.
   `playground rm`, with no option, and `cp`, with no `-t`, pass when every path removed or the copy's target sits in the session's own `scratch/<name>` or `scratchpad/<name>` folder, found by its registry name, a `..` step refused.
   `cmp`, `du` and a `find` with no action that runs, deletes or writes (`FIND_ACTIONS`) pass anywhere.
+  It compares two revisions with `git diff --no-index` only beside `--no-ext-diff` and `--no-textconv`, since a folder can ship the attributes that start a diff program, and a scratch repo's `git init`, `add` and `commit` stay refused, since a copied item can carry its own `.git` and hooks.
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
   Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.

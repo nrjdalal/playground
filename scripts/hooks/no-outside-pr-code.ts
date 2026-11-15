@@ -232,6 +232,9 @@ function gitAllows(
   // a remote takes no verb but the two that read it, since `remote add` names a source a fetch then reads
   const verb = all.find(plain)
   if (sub === "remote" && verb !== undefined && verb !== "get-url" && verb !== "show") return false
+  // a diff of two folders reads no repository, so it names neither a diff program nor a textconv for the attributes the folders can ship to start
+  if (sub === "diff" && all.includes("--no-index"))
+    return all.includes("--no-ext-diff") && all.includes("--no-textconv")
   if (readsWords(words) || GIT_READS.has(sub)) return true
   if (sub === "fetch") {
     const options = rest.filter((w) => w.startsWith("-"))
