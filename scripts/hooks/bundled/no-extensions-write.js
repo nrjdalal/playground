@@ -10097,7 +10097,9 @@ var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's wr
 var HOOK_TEXT = "which a hook file may not hold";
 var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove.";
 var hookRemoval = (file, what) => `${file} written with ${what}, ${HOOK_TEXT}`;
-var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE}`;
+var LINE_TEXT = "which the hook reads as the hook's own text";
+var LINE_ROUTE = "a line that writes a hook file has every text on it read as the hook's, since text can reach a hook by many paths. Run the hook's write as a call of its own, apart from the command that holds that text.";
+var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : what.endsWith(LINE_TEXT) ? LINE_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
@@ -10282,6 +10284,19 @@ var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
 function redirectsWrite(commands) {
   return commands.some((cmd) => cmd.redirects.some(writer) || !!cmd.inner && redirectsWrite(cmd.inner()));
+}
+var STDIN_PATH = /^\/dev\/(?:stdin|fd\/0)$/;
+function writtenWords(commands) {
+  return commands.flatMap((cmd) => {
+    const { args, name } = parse3(cmd);
+    const tool = GNU_NAMED.exec(program(name))?.[1] ?? program(name);
+    return [
+      ...cmd.redirects.flatMap((r) => r.target && writer(r) ? [r.target] : []),
+      ...["cp", "dd", "install", "ln", "mv"].includes(tool) ? writeTargets(tool, args, tool !== program(name) || onLinux()) : [],
+      ...cmd.words.flatMap((word) => word.procs ? writtenWords(word.procs) : []),
+      ...cmd.inner ? writtenWords(cmd.inner()) : []
+    ];
+  });
 }
 function lineTextsOf(commands) {
   return commands.flatMap((cmd) => [
@@ -11849,6 +11864,7 @@ async function inspect(raw, environment, unknown = false) {
   let execFds = new Map;
   let lineWrites = false;
   let lineTexts = [];
+  let lineWritten = [];
   let nearEval;
   let textDepth = 0;
   const varsRead = new WeakMap;
@@ -11974,9 +11990,10 @@ async function inspect(raw, environment, unknown = false) {
       ...hookEdits
     ];
     const sources = copies || copier === "sed" || copier === "perl" ? args.flatMap((word) => copier === "dd" ? word.value.startsWith("if=") ? [after(word, 3)] : [] : !word.value.startsWith("-") && !into.includes(word) && !hookEdits.includes(word) ? [word] : []) : [];
+    const readsStdin = copier === "dd" ? sources.length === 0 || sources.some((word) => STDIN_PATH.test(word.value)) : copies && sources.some((word) => STDIN_PATH.test(word.value));
     const ownText = cmd.words.map((word) => word.value).join(" ");
     const ownTexts = [
-      args.map((word) => word.value).join(" "),
+      ...copies ? [] : [args.map((word) => word.value).join(" ")],
       ...cmd.redirects.flatMap((r) => r.body ? [r.body.value] : [])
     ];
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
@@ -11985,28 +12002,56 @@ async function inspect(raw, environment, unknown = false) {
         return hookFile(path, true) || copies && !!path && hookFile(join7(path, "x"), true);
       });
       const copied = [];
+      let unread = false;
       for (const word of sources) {
+        if (STDIN_PATH.test(word.value))
+          continue;
+        const path = pathOf(word, here);
+        const written = !!path && lineWritten.some((each) => pathOf(each, here) === path);
+        if (written && !here.files.has(path)) {
+          if (copies)
+            unread = true;
+          continue;
+        }
+        if (path && !written && !existsSync4(path))
+          continue;
         const read = await readPath(word, here).catch(() => {
           return;
         });
         if (read && !read.unknown)
           copied.push(read.value);
+        else if (read && copies)
+          unread = true;
       }
+      if (readsStdin && (cmd.stdin || cmd.redirects.some((r) => r.op.startsWith("<")))) {
+        const input = await stdinOf(cmd, here);
+        if (input.unknown)
+          unread = true;
+        else
+          copied.push(input.value);
+      }
+      const unreadInto = unread && hookAt();
+      if (unreadInto)
+        return refuse(hookRemoval(shown(unreadInto), "text it cannot read"));
       const key = here.cwd ?? "";
       if (!lineFindings.has(key))
         lineFindings.set(key, lineTexts.flatMap((text) => hookFinding(text, here) ?? []));
-      const found = [
-        ...(lineFindings.get(key) ?? []).filter((each) => each.text !== ownText).map((each) => ({ ...each, how: "on a line whose text" })),
-        ...ownTexts.flatMap((text) => hookFinding(text, here) ?? []).map((each) => ({ ...each, how: "on a line whose text" })),
-        ...copied.flatMap((text) => hookFinding(text, here) ?? []).map((each) => ({ ...each, how: "copied from a file whose text" }))
-      ];
-      for (const { how, named, removes } of found) {
+      for (const { named, removes } of (lineFindings.get(key) ?? []).filter((each) => each.text !== ownText)) {
         const hook = hookAt();
-        if (hook && removes)
-          return refuse(hookRemoval(shown(hook), removes));
         if (hook)
-          return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`);
+          return refuse(`${shown(hook)}, a hook file, on a line whose other text ${removes ? `holds ${removes}` : `names ${named}`}, ${LINE_TEXT}`);
       }
+      for (const [texts, how] of [
+        [ownTexts, "written with a text that"],
+        [copied, "copied from a file whose text"]
+      ])
+        for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
+          const hook = hookAt();
+          if (hook && removes)
+            return refuse(hookRemoval(shown(hook), removes));
+          if (hook)
+            return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`);
+        }
     }
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
@@ -12252,6 +12297,7 @@ async function inspect(raw, environment, unknown = false) {
   execFds = new Map;
   lineWrites = redirectsWrite(lexed.commands);
   lineTexts = lineTextsOf(lexed.commands);
+  lineWritten = writtenWords(lexed.commands);
   lineFindings = new Map;
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);

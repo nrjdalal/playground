@@ -3769,6 +3769,44 @@ describe("hook text that reaches a hook by another path", () => {
   writeFileSync(join(FILES, "names.sh"), "#!/bin/sh\ntouch ~/.playground/extensions/x\n")
   writeFileSync(join(FILES, "removes.sh"), "#!/bin/sh\nrm old.log\n")
   writeFileSync(join(FILES, "plain.sh"), "#!/bin/sh\nbun test\n")
+  // each held text and its near twins as a file's text: as written, in a comment, after a header line, and joined across a backslash-newline
+  const TWINS = (text: string, joined: string) => [text, `# ${text}`, `#!/bin/sh\n${text}`, joined]
+  const HELD = [
+    ...TWINS("touch ~/.playground/extensions/x", "touch ~/.playground/ext\\\nensions/x"),
+    ...TWINS("rm -rf build", "r\\\nm -rf build"),
+  ].map((text, k) => {
+    const file = join(FILES, `held-${k}.sh`)
+    writeFileSync(file, `${text}\n`)
+    const folder = join(FILES, `held-folder-${k}`)
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, "pre-commit"), `${text}\n`)
+    return { file, folder, k }
+  })
+  const COPIED = join(HOME, "copied-on-the-line")
+  // a copy into a hook whose source the hook reads by another way than an operand: stdin from a file, a piped reader, a file the line wrote first, a variable, a folder
+  const SHAPES: [string, (file: string, folder: string) => string][] = [
+    ["dd's stdin from a file", (file) => `dd of=.git/hooks/pre-commit < ${file}`],
+    ["a copy of /dev/stdin from a file", (file) => `cp /dev/stdin .git/hooks/pre-commit < ${file}`],
+    ["a reader piped into dd", (file) => `cat ${file} | dd of=.git/hooks/pre-commit`],
+    [
+      "a file an earlier copy on the line wrote",
+      (file) => `cp ${file} ${COPIED} && cp ${COPIED} .git/hooks/pre-commit`,
+    ],
+    ["a source in a variable", (file) => `F=${file}; cp "$F" .git/hooks/pre-commit`],
+    ["a folder copied into the hook folder", (_, folder) => `cp -R ${folder}/ .git/hooks/`],
+  ]
+  test.each(
+    SHAPES.flatMap(([shape, form]) =>
+      HELD.flatMap(({ file, folder, k }) =>
+        [HOME, DATA, WORK].map((cwd) => [shape, k, cwd, form(file, folder)] as const),
+      ),
+    ),
+  )(
+    "a copy into a git hook by %s (held text %i, from %s) is refused",
+    async (_, __, cwd, command) => {
+      expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+    },
+  )
 
   test.each([
     ["cp", "cp hook-sources/names.sh .git/hooks/pre-commit"],
@@ -3801,6 +3839,19 @@ describe("hook text that reaches a hook by another path", () => {
     ],
     ["a file that names the data folder copied into a note", "cp hook-sources/names.sh notes.sh"],
     ["a source the hook cannot find copied into a git hook", "cp no-such.sh .git/hooks/pre-commit"],
+    ["a file named rm, not there, copied into a git hook", "cp rm .git/hooks/pre-commit"],
+    [
+      "a script named for rmdir, not there, copied into a git hook",
+      "cp scripts/rmdir.sh .git/hooks/pre-commit",
+    ],
+    [
+      "a plain file piped into dd into a git hook",
+      "cat hook-sources/plain.sh | dd of=.git/hooks/pre-commit",
+    ],
+    [
+      "a plain file fed to dd into a git hook",
+      "dd of=.git/hooks/pre-commit < hook-sources/plain.sh",
+    ],
     [
       "an echo of a home folder in upper case into a git hook",
       "echo 'touch ~/NOTES/x' > .git/hooks/pre-commit",
@@ -3812,7 +3863,7 @@ describe("hook text that reaches a hook by another path", () => {
   test("a line that names the data folder in one command and writes a hook in another is refused, a known limit", async () => {
     expect(
       await bash("ls ~/.playground/extensions; echo 'bun test' > .git/hooks/pre-commit"),
-    ).toContain("on a line whose text names")
+    ).toContain("on a line whose other text names")
   })
 
   test("a bash -c that pipes the data folder into a git hook by dd is refused", async () => {
@@ -3834,8 +3885,14 @@ describe("hook text that reaches a hook by another path", () => {
   })
 
   test("a line that runs a remover in one command and writes a hook in another is refused, a known limit", async () => {
-    expect(await bash("rm -f old.log; echo 'bun test' > .git/hooks/pre-commit")).toContain(
-      "written with rm, which a hook file may not hold",
-    )
+    const reason = await bash("rm -f old.log; echo 'bun test' > .git/hooks/pre-commit")
+    expect(reason).toContain("on a line whose other text holds rm")
+    expect(reason).toContain("Run the hook's write as a call of its own")
+  })
+
+  test("a line that removes a tracked file with git rm and copies a plain file into a hook is refused, a known limit", async () => {
+    expect(
+      await bash("git rm old.txt && cp hook-sources/plain.sh .git/hooks/pre-commit"),
+    ).toContain("on a line whose other text holds")
   })
 })
