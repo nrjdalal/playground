@@ -103,7 +103,8 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
 - An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once, on a scratch repo of the base revision then the proposed one, since an item has no git clone.
-- A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
+- An extension item's reviewer judges it by reading alone, since its row names no PR and no-outside-pr-code's read mode refuses the item's tests and check-types; the verdict says the item was read, not run.
+- A PR's 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
   For an extension repository's PR, `bun run ext:merge <owner>/<repo> <n> --explain` runs in its place and reads ✓ on every gate of its own but ready, ci and review.
 - A finding about the PR body alone is fixed by the worker's body edit at the same head, with no push and no new round, since a body fix during one round let its 5/5 post at that head and saved a round.
