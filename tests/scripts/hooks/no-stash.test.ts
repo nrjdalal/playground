@@ -141,6 +141,10 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ],
     ["a brace list used only as an argument", "git stash list && echo {a,b}"],
     ["a brace list in a path used only as an argument", "ls /usr/bin/g{i,x}t; git stash list"],
+    [
+      "a zsh group of more alternatives than the reader reads, used only as an argument",
+      "echo g(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q)t && git stash list",
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })

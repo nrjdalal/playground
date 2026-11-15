@@ -69,6 +69,7 @@ describe("a delete the hook lets run", () => {
     'A=(echo hi); A+=(there); "${A[@]}"',
     // #2259's controls: a commit subject holding (…), a brace list or a subshell used only as an argument or a group, code with braces and parens a spaced word holds, and a commit scope read as a line after a cd into a folder that is gone
     "git commit -m 'fix(PG-1): rm (a|b) files'",
+    'git commit -m "fix(#12): rm stale files"',
     "mkdir -p /tmp/zz/{a,b}",
     "(cd /tmp && ls)",
     `agent-browser eval 'JSON.stringify({rm: f("(a: b)"), h: g()})'`,

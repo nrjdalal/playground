@@ -2013,9 +2013,7 @@ function globRun(
   const pattern = first?.value ?? ""
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
   // a paren the shell sees, its backslash-newlines joined and its quoted parts masked at their length, since zsh reads a quoted paren as a plain character
-  const seen = (first.source ?? "")
-    .replace(/\\\n/g, "")
-    .replace(QUOTED, (part) => "\uE005".repeat(part.length))
+  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, maskQuoted)
   const grouped = seen.includes("(")
   // zsh reads a closing group with no | or ( in it as glob qualifiers, which pick among the files the rest matches and may run code there, and whose N lets a pattern that matches nothing vanish
   const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null
@@ -2023,9 +2021,9 @@ function globRun(
   const groups = grouped
     ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined)
     : [pattern]
+  if (groups === null || qualifiers?.[1].includes("N")) return null
   // a pattern groupWords reads as bad keeps canary's glob reading, so the group reading only adds refusals
   const patterns = groups ?? [pattern]
-  if (patterns === null || qualifiers?.[1].includes("N")) return null
   if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern)) return
   const [only, ...more] = patterns
   // a group with no | and no glob character names one path (`docs(PG-1):`, a commit scope a guard reads as a line), so under a folder the reader cannot read it keeps its typed word
@@ -2086,10 +2084,10 @@ function globMatches(pattern: string, env: Env): string[] | null {
   return found
 }
 
-// The patterns a zsh group makes of a pattern word, each alternative of `(a|b)` in its place, nested groups expanded, a quoted part's parens and bars kept as text and its quotes dropped, as zsh's glob matches it against files; undefined for a pattern zsh refuses as bad (an unclosed group, a / inside one), which globRun reads as canary did; null for one the reader cannot read: an extended glob character (#, ^, ~) inside a group, or more patterns than READINGS
-function groupWords(pattern: string): string[] | null | undefined {
+// The patterns a zsh group makes of a pattern word, each alternative of `(a|b)` in its place, nested groups expanded, a quoted part still in the word (a call's text, or a raw paren span the lexer keeps) holding its parens and bars as text and its quotes dropped, as zsh's glob matches it against files; undefined for a pattern zsh refuses as bad (an unclosed group, a / inside one), which globRun reads as canary did; null for one the reader cannot read: an extended glob character (#, ^, ~) inside a group, or more patterns than READINGS; spelling, for a guard's first look, reads #, ^ and ~ as text, as zsh does without EXTENDED_GLOB, and their alternative as any text too, up to braceWords' cap
+function groupWords(pattern: string, spelling = false): string[] | null | undefined {
   // a quoted part, masked at its length, keeps its parens, bars and glob characters as text
-  const seen = pattern.replace(QUOTED, (part) => "\uE005".repeat(part.length))
+  const seen = pattern.replace(QUOTED, maskQuoted)
   const open = seen.indexOf("(")
   if (open < 0) return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)]
   const cuts = [open]
@@ -2100,12 +2098,17 @@ function groupWords(pattern: string): string[] | null | undefined {
     else if (seen[k] === ")" && --depth === 0) close = k
   }
   if (close < 0 || pattern.slice(open, close).includes("/")) return undefined
-  if (/[#^~]/.test(seen.slice(open, close))) return null
+  if (!spelling && /[#^~]/.test(seen.slice(open, close))) return null
   const out: string[] = []
   for (const [n, from] of cuts.entries()) {
     const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close)
-    const words = groupWords(pattern.slice(0, open) + alternative + pattern.slice(close + 1))
-    if (!words || out.push(...words) > READINGS) return words === undefined ? undefined : null
+    // an alternative that holds an extended glob character spells as itself and as any text, which EXTENDED_GLOB may let it match
+    const extended = spelling && /[#^~]/.test(seen.slice(from + 1, cuts[n + 1] ?? close))
+    for (const each of extended ? [alternative, "*"] : [alternative]) {
+      const words = groupWords(pattern.slice(0, open) + each + pattern.slice(close + 1), spelling)
+      if (!words || out.push(...words) > (spelling ? BRACE_WORDS : READINGS))
+        return words === undefined ? undefined : null
+    }
   }
   return out
 }
@@ -2140,6 +2143,8 @@ const QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g
 
 // A brace, comma or paren as a private character braceWords passes over, put back once the words are made
 const HIDDEN = "{,}()"
+// A quoted part as one private character per character, past HIDDEN's, so a paren or bar inside it is never read as the shell's
+const maskQuoted = (part: string) => "\uE005".repeat(part.length)
 const hide = (c: string) => String.fromCharCode(0xe000 + HIDDEN.indexOf(c))
 const HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide).join("")}]`, "g")
 const unhide = (text: string) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 0xe000])
@@ -2204,7 +2209,7 @@ export function spelledText(text: string): string {
     .filter((token) => /[{(]/.test(token))
     .flatMap((token) =>
       (braceWords(token) ?? []).flatMap(
-        (word) => groupWords(word.replace(/\([^()|]*\)$/, "")) ?? [word],
+        (word) => groupWords(word.replace(/\([^()|]*\)$/, ""), true) ?? [word],
       ),
     )
     .map((word) => word.replace(/["']/g, ""))

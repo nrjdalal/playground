@@ -1908,14 +1908,14 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, (part) => "\uE005".repeat(part.length));
+  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, maskQuoted);
   const grouped = seen.includes("(");
   const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null;
   const joined = pattern.replace(/\\\n/g, "");
   const groups = grouped ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined) : [pattern];
-  const patterns = groups ?? [pattern];
-  if (patterns === null || qualifiers?.[1].includes("N"))
+  if (groups === null || qualifiers?.[1].includes("N"))
     return null;
+  const patterns = groups ?? [pattern];
   if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern))
     return;
   const [only, ...more] = patterns;
@@ -1981,8 +1981,8 @@ function globMatches(pattern, env) {
   }
   return found;
 }
-function groupWords(pattern) {
-  const seen = pattern.replace(QUOTED, (part) => "\uE005".repeat(part.length));
+function groupWords(pattern, spelling = false) {
+  const seen = pattern.replace(QUOTED, maskQuoted);
   const open = seen.indexOf("(");
   if (open < 0)
     return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)];
@@ -1998,14 +1998,17 @@ function groupWords(pattern) {
   }
   if (close < 0 || pattern.slice(open, close).includes("/"))
     return;
-  if (/[#^~]/.test(seen.slice(open, close)))
+  if (!spelling && /[#^~]/.test(seen.slice(open, close)))
     return null;
   const out = [];
   for (const [n, from] of cuts.entries()) {
     const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close);
-    const words = groupWords(pattern.slice(0, open) + alternative + pattern.slice(close + 1));
-    if (!words || out.push(...words) > READINGS)
-      return words === undefined ? undefined : null;
+    const extended = spelling && /[#^~]/.test(seen.slice(from + 1, cuts[n + 1] ?? close));
+    for (const each of extended ? [alternative, "*"] : [alternative]) {
+      const words = groupWords(pattern.slice(0, open) + each + pattern.slice(close + 1), spelling);
+      if (!words || out.push(...words) > (spelling ? BRACE_WORDS : READINGS))
+        return words === undefined ? undefined : null;
+    }
   }
   return out;
 }
@@ -2035,6 +2038,7 @@ function braceRun(cmd, first) {
 }
 var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
 var HIDDEN = "{,}()";
+var maskQuoted = (part) => "\uE005".repeat(part.length);
 var hide = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
 var HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide).join("")}]`, "g");
 var unhide = (text) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 57344]);

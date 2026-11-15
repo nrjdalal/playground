@@ -107,6 +107,31 @@ export const groups: Group[] = [
         "a kill by name at a path split by a backslash-newline, with glob qualifiers",
         "/usr/bin/pk\\\nill(x) -f watcher",
       ],
+      // round 2: a group the reader cannot read, an extended glob character inside it or more alternatives than READINGS, reads as unread
+      [
+        "a kill by name at a path a zsh group holding a caret matches",
+        "/usr/bin/pk(i|^x)ll -f watcher",
+      ],
+      [
+        "a kill by name at a path a zsh group holding a hash matches",
+        "/usr/bin/pk(i|#x)ll -f watcher",
+      ],
+      [
+        "a kill by name at a path a zsh group holding a tilde matches",
+        "/usr/bin/pk(i|x~y)ll -f watcher",
+      ],
+      [
+        "a kill by name at a path a glob and a zsh group holding a caret match",
+        "/usr/bin/pk?(i|^x)l -f watcher",
+      ],
+      [
+        "a kill by name at a relative path a zsh group holding a caret matches",
+        "cd /usr/bin && ./pk(i|^x)ll -f watcher",
+      ],
+      [
+        "a kill by name at a path a zsh group of more alternatives than the reader reads matches",
+        "/usr/bin/pk(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q)ll -f watcher",
+      ],
     ],
   },
   {
@@ -135,6 +160,22 @@ export const groups: Group[] = [
         "a stash pop by a git path a glob matches, with glob qualifiers before a backslash-newline",
         "/usr/bin/g?t(x)\\\n stash pop",
       ],
+      [
+        "a stash pop by a git path a zsh group holding a caret matches",
+        "/usr/bin/g(i|^x)t stash pop",
+      ],
+      [
+        "a stash pop by a git path a zsh group holding a hash matches",
+        "/usr/bin/g(i|#x)t stash pop",
+      ],
+      [
+        "a stash pop by a git path a glob and a zsh group holding a caret match",
+        "/usr/bin/g?(i|^x) stash pop",
+      ],
+      [
+        "a stash pop by a git path a zsh group of more alternatives than the reader reads matches",
+        "/usr/bin/g(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q)t stash pop",
+      ],
     ],
   },
   {
@@ -154,6 +195,11 @@ export const groups: Group[] = [
       [
         "a plain rm by a path a zsh alternation matches, with glob qualifiers before a backslash-newline",
         `/bin/r(m|x)(x)\\\n ${NEVER_MADE}`,
+      ],
+      ["a plain rm by a path a zsh group holding a caret matches", `/bin/r(m|^x) ${NEVER_MADE}`],
+      [
+        "a plain rm by a path a zsh group of more alternatives than the reader reads matches",
+        `/bin/r(a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q) ${NEVER_MADE}`,
       ],
     ],
   },
