@@ -1827,7 +1827,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const rootParts = needle.split(sep).filter(Boolean)
   // the home's part count (1 when the root is not under the home), which a folder holding the root must pass, so the home itself and every folder above it are no such folder
   const floor = needle === root ? 1 : real(home).split(sep).length
-  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it starts with a dot, as the shell's globs do
+  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
   const reaches = (path: string) => {
     const parts = path.split(sep)
     const at = parts.findIndex((part) => GLOB.test(part))
@@ -1837,7 +1837,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
     if (spelled.length > floor && spelled.length < want.length)
       return (
-        spelled.every((part, k) => !want[k].startsWith(".") || part.startsWith(".")) &&
+        spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
         follows(spelled, want.slice(0, spelled.length))
       )
     return at < 0 ? inRoot(path) : follows(have, want)
