@@ -181,9 +181,10 @@ describe("a canary tree the temp cleaner emptied", () => {
     return at
   }
 
-  test("a guards Worker loads in a whole tree, and in an emptied one names the package it cannot find", async () => {
+  test("guards and its Worker module load in a whole tree, and an emptied one names the package they cannot find", async () => {
     expect(await unloaded(tree("whole", false), ["guards"])).toBeUndefined()
     expect(await unloaded(tree("emptied", true), ["guards"])).toContain("Cannot find package 'zod'")
+    expect(await unloaded(tree("emptied", true), [])).toContain("no-extensions-write-worker.ts")
   })
 
   test("an emptied tree is moved aside and built again, and one that stays emptied fails the run", async () => {
