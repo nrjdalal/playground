@@ -2012,7 +2012,7 @@ function printsText(words: string[]): boolean {
   return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format)
 }
 
-// A binder (`binds`) gives its names a value the reader cannot read in walk order, in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
+// A binder (`binds`) gives its names a value the reader cannot read in walk order, or a for or select list's one literal word (loopWord), in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
 function bind(commands: Command[], k: number, env: Env, unbind: Map<Command, () => void>): void {
   const cmd = commands[k]
   const names = binds(cmd)
