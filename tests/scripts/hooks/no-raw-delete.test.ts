@@ -68,8 +68,6 @@ describe("a delete the hook lets run", () => {
     'A=(rm notes.txt); "${A[@]}"',
     'A=(echo hi); A+=(there); "${A[@]}"',
     `~/.playground/ops/run-slot.sh me -- git commit -m "fix(PG-1): playground rm moves a file" -m "a (b) c"`,
-    // a bare * re-lexed from prose matches more files than the reader reads, yet names no delete, so it is not refused as unread
-    'note() { echo "$1"; }; note "run `*` then rm notes.txt"',
     'rmdir "${S:?}/${m:?}"',
     "mv web/next/.next .turbo /tmp/claude-501/p/s/scratchpad/cold-1/",
     "playground rm sub/old",

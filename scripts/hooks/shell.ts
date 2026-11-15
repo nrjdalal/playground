@@ -2300,9 +2300,7 @@ export const decodedText = (command: string): string =>
 
 // Whether an unread reading's program word is an array run whole (`"${A[@]}"`) or a glob, the unread commands no-stash and no-raw-delete refuse in a call that names their program
 export const unreadRun = ({ first, unread }: Parsed): boolean =>
-  !!unread &&
-  ((!!first?.glob && !/(?:^|\/)[*?]+$/.test(first.value)) ||
-    WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
+  !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
 function stdinScript({ args, name }: Parsed): boolean {

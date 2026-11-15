@@ -2172,7 +2172,7 @@ function unreadCommand(cmd, parsed, resolving) {
   return others.every((p) => scriptWords(p).some((w) => marked(w.value)));
 }
 var decodedText = (command) => command.includes("$'") ? `${command} ${command.replace(/\$'(?:[^'\\]|\\[\s\S])*'/g, (ansiC) => lex(ansiC).commands.flatMap((c) => c.words.map((w) => w.value)).join(" "))}` : command;
-var unreadRun = ({ first, unread }) => !!unread && (!!first?.glob && !/(?:^|\/)[*?]+$/.test(first.value) || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""));
+var unreadRun = ({ first, unread }) => !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""));
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
     return STDIN_PATHS.has(args[0]?.value ?? "");
