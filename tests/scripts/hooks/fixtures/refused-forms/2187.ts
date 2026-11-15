@@ -68,6 +68,22 @@ const rows = (): Row[] => [
     String.raw`sed -i '' 's/a/rm ~\/.playground\//' .git/hooks/pre-commit`,
   ],
   [
+    "an in-place sed whose s/// writes the data folder as a brace list's first part",
+    String.raw`sed -i '' 's/a/rm ~\/{.playground,x}/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes the data folder as a brace list's later part",
+    String.raw`sed -i '' 's/a/rm ~\/{x,.playground}/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a glob of the data folder in a brace list",
+    String.raw`sed -i '' 's/a/rm ~\/{.p*,x}/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes the data folder in a zsh (…) group",
+    String.raw`sed -i '' 's/a/rm ~\/(.playground|x)/' .git/hooks/pre-commit`,
+  ],
+  [
     "an in-place sed whose c\\ text writes a glob of the root",
     "sed -i '' '1c\\\ntouch ~/.play*/extensions/x' .git/hooks/pre-commit",
   ],
@@ -145,6 +161,10 @@ const rows = (): Row[] => [
     String.raw`perl -pi -e 's/a/\1b/' notes.md`,
   ],
   [
+    "an in-place sed whose s/// writes a brace list of plain names under the home",
+    String.raw`sed -i '' 's/a/ls ~\/{a,b}/' notes.md`,
+  ],
+  [
     "an in-place sed whose s/// writes a * glob of the home, which no dot name matches",
     String.raw`sed -i '' 's/a/ls ~\/*/' notes.md`,
   ],
@@ -183,6 +203,7 @@ const allowedCalls = [
   "an in-place sed whose s/// writes a folder of the home",
   "an in-place sed whose s/// writes a lone slash",
   "an in-place perl whose s/// writes its group by \\1",
+  "an in-place sed whose s/// writes a brace list of plain names under the home",
   "an in-place sed whose s/// writes a * glob of the home, which no dot name matches",
   "an in-place sed whose s/// writes a path under /usr",
 ]
