@@ -16524,8 +16524,45 @@ async function check17(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
-import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
+import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
+import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join20, relative as relative4, resolve as resolve10 } from "path";
+
+// packages/scripts/src/playground/plugin-id.ts
+import { createHash } from "crypto";
+import { lstatSync, readdirSync as readdirSync5, readFileSync as readFileSync7 } from "fs";
+import { join as join19, relative as relative3 } from "path";
+var setId = (skills) => {
+  const hash = createHash("sha256");
+  for (const skill of [...skills].sort((a, b) => a.name.localeCompare(b.name)))
+    for (const file of skill.files)
+      hash.update(`${skill.name}/${file}\x00`).update(readFileSync7(join19(skill.dir, file)));
+  return hash.digest("hex").slice(0, 16);
+};
+var installedSkills = (skills) => {
+  const walk = (dir, root, files) => readdirSync5(dir).every((entry) => {
+    const path = join19(dir, entry);
+    const stat = lstatSync(path);
+    if (stat.isDirectory())
+      return walk(path, root, files);
+    files.push(relative3(root, path));
+    return stat.isFile() && stat.nlink === 1;
+  });
+  try {
+    const found = [];
+    for (const name of readdirSync5(skills)) {
+      const dir = join19(skills, name);
+      const files = [];
+      if (!lstatSync(dir).isDirectory() || !walk(dir, dir, files))
+        return;
+      found.push({ dir, files: files.sort(), name });
+    }
+    return found;
+  } catch {
+    return;
+  }
+};
+
+// scripts/hooks/no-outside-pr-code.ts
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
 var PULL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
@@ -16626,6 +16663,9 @@ var FIND_ACTIONS = new Set([
   "-ok",
   "-okdir"
 ]);
+var DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"]);
+var UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"]);
+var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? "");
 var GITHUB_URL2 = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
 var unread3 = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`;
 var REASONS = {
@@ -16664,7 +16704,7 @@ function placed(written) {
   const path = resolve10(written);
   for (let at = path;; at = dirname9(at)) {
     if (existsSync10(at))
-      return join19(real3(at), path.slice(at.length));
+      return join20(real3(at), path.slice(at.length));
     if (dirname9(at) === at)
       return path;
   }
@@ -16707,14 +16747,19 @@ function gitAllows(words, folder, lookup, environment) {
 }
 async function inspect13(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
-  const skills = [join19(data, "orgs"), join19(lookup.main, "extensions")];
-  const slot = join19(data, "ops", "run-slot.sh");
+  const orgs = real3(join20(data, "orgs"));
+  const extensions = join20(lookup.main, "extensions");
+  const slot = join20(data, "ops", "run-slot.sh");
   let allowed = true;
+  let ownWrites = false;
+  let reshapes = false;
   const skillScript = (written) => {
     if (written === undefined)
       return false;
     const path = real3(written);
-    return skills.some((root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"));
+    if (under(path, orgs))
+      return lookup.shipped(path);
+    return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/");
   };
   const inMain = (folder) => {
     if (folder === undefined)
@@ -16734,6 +16779,19 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return at !== undefined && under(path, at);
     });
   };
+  const ownTarget = (text, here) => {
+    const path = text && !text.glob ? pathOf(text, here) : undefined;
+    if (path === undefined || !existsSync10(dirname9(resolve10(path))) || !ownPath(text, here))
+      return false;
+    ownWrites = true;
+    return true;
+  };
+  const writesOwn = (cmd, here) => cmd.redirects.every((r) => {
+    if (!writer(r))
+      return true;
+    const path = r.target && !r.target.glob ? pathOf(r.target, here) : undefined;
+    return path !== undefined && DEVICES.has(path) || ownTarget(r.target, here);
+  });
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -16750,8 +16808,26 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd);
     }
     const words = [name, ...args.map((a) => a.value)];
-    if (name === "git")
+    if (name === "git") {
+      const sub = words[words[1] === "-C" ? 3 : 1];
+      if (["checkout", "clone", "switch", "worktree"].includes(sub))
+        reshapes = true;
       return gitAllows(words, here.cwd, lookup, environment);
+    }
+    if (name === "uniq") {
+      const operands = [];
+      let ended = false;
+      for (let i = 0;i < args.length; i++) {
+        const v = args[i].value;
+        if (ended || v === "-" || !v.startsWith("-"))
+          operands.push(args[i]);
+        else if (v === "--")
+          ended = true;
+        else if (UNIQ_VALUED.has(v))
+          i++;
+      }
+      return operands.length < 2 || operands.length === 2 && ownTarget(operands[1], here);
+    }
     if (UTILITIES.has(name) || readsWords(words))
       return true;
     if (name === "find")
@@ -16760,17 +16836,36 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return !(words[1] in environment);
     if (name === "read")
       return words.slice(1).every((w) => w.startsWith("-") || !(w in environment));
-    if (name === "sed")
-      return words[1] === "-n" ? SED_PRINT.test(words[2] ?? "") : SED_SUBSTITUTE.test(words[1] ?? "");
+    if (name === "sed") {
+      const print = words[1] === "-n";
+      return (print ? SED_PRINT : SED_SUBSTITUTE).test(words[print ? 2 : 1] ?? "") && words.slice(print ? 3 : 2).every((w) => w === "-" || !w.startsWith("-"));
+    }
     if (SHELLS.has(name)) {
       const { inline, operand } = shellOperand(args, name);
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
-    if (name === "playground")
+    if (name === "playground") {
+      if (words[1] === "rm")
+        reshapes = true;
       return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
+    }
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");
+      if (group === "repo" && rest.some((w) => w === "clone" || w === "fork"))
+        reshapes = true;
+      if (group === "run" && rest.includes("download")) {
+        const folders = args.flatMap((a, i) => {
+          if (a.value === "-D" || a.value === "--dir")
+            return args[i + 1] ? [args[i + 1]] : [a];
+          if (a.value.startsWith("--dir="))
+            return [slice(a, 6)];
+          return a.value.startsWith("-D") ? [slice(a, a.value.startsWith("-D=") ? 3 : 2)] : [];
+        });
+        const into = folders.length > 0 ? folders : [{ value: "." }];
+        if (!into.every((folder) => ownTarget(folder, here)))
+          return false;
+      }
       return GH2.has(group) && !checkout && !words.includes("--");
     }
     if (INTERPRETERS2.has(name) && args[0] && !args[0].value.startsWith("-"))
@@ -16778,6 +16873,8 @@ async function inspect13(command, directory, environment, lookup, own = []) {
     return false;
   };
   const visit = async (cmd, parsed, env) => {
+    if (!writesOwn(cmd, env))
+      allowed = false;
     if (parsed.name === "run-slot.sh" && parsed.first && permitted(cmd, parsed, env)) {
       const at = parsed.args.findIndex((a) => a.value === "--");
       return at === -1 ? undefined : examine({ ...cmd, words: parsed.args.slice(at + 1) }, env, visit, false);
@@ -16798,7 +16895,7 @@ async function inspect13(command, directory, environment, lookup, own = []) {
     visitShells: true
   };
   await run2(lex(command, variables), env, visit, true);
-  return allowed;
+  return allowed && !(ownWrites && reshapes);
 }
 async function readMode(sessionId, lookup) {
   const prs = (await lookup.prsOf(sessionId)).flatMap((url) => {
@@ -16838,12 +16935,12 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
   try {
     const name = await lookup.name(sessionId);
     const data = dataDirOf(environment);
-    const own = name ? [join19(data, "scratch", name), join19(data, "scratchpad", name)] : [];
+    const own = name ? [join20(data, "scratch", name), join20(data, "scratchpad", name)] : [];
     allowed = await inspect13(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts, and writes a file only into a folder already in its own scratch or scratchpad: ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
@@ -16858,7 +16955,7 @@ async function output(argv) {
 var isPr = (read) => typeof read === "object" && read !== null && ["author", "owner", "ownerType"].every((key) => typeof read[key] === "string");
 var firstLine = (script) => {
   try {
-    return readFileSync7(script, "utf8").split(`
+    return readFileSync8(script, "utf8").split(`
 `, 1)[0];
   } catch {
     return;
@@ -16893,11 +16990,11 @@ var runnerOf = (line) => {
 };
 function live2(environment) {
   const data = dataDirOf(environment);
-  const cache = join19(data, "hook-outside-pr");
+  const cache = join20(data, "hook-outside-pr");
   const HOUR = 3600 * 1000;
   return {
     author: async (repo, pr) => {
-      const file = join19(cache, `${repo.replace("/", "__")}__${pr}.json`);
+      const file = join20(cache, `${repo.replace("/", "__")}__${pr}.json`);
       try {
         const kept = await Bun.file(file).json();
         if (isPr(kept))
@@ -16917,7 +17014,7 @@ function live2(environment) {
       } catch {}
       return isPr(read) ? read : undefined;
     },
-    holds: (folder, entry) => existsSync10(join19(folder, entry)),
+    holds: (folder, entry) => existsSync10(join20(folder, entry)),
     main: mainCheckout2(process.cwd()),
     name: async (sessionId) => {
       if (typeof sessionId !== "string")
@@ -16933,7 +17030,7 @@ function live2(environment) {
         const name = await registryName(sessionId, environment);
         if (!name)
           return [];
-        const roster = await Bun.file(join19(data, "roster.json")).json();
+        const roster = await Bun.file(join20(data, "roster.json")).json();
         const row = roster.agents?.find((agent) => agent?.name === name);
         const listed = Array.isArray(row?.prs) ? row.prs : [];
         return [...new Set([row?.pr, ...listed])].filter((url) => typeof url === "string");
@@ -16944,6 +17041,15 @@ function live2(environment) {
     runner: (script) => {
       const line = firstLine(script);
       return line === undefined ? "" : runnerOf(line);
+    },
+    shipped: (script) => {
+      const orgs = real3(join20(data, "orgs"));
+      const at = relative4(orgs, real3(script));
+      const [set, id, folder, skill, ...file] = at.split("/");
+      if (isAbsolute7(at) || set === ".." || folder !== "skills" || file.length === 0)
+        return false;
+      const skills = installedSkills(join20(orgs, set, id, folder));
+      return skills !== undefined && setId(skills) === id && skills.some((s) => s.name === skill && s.files.includes(file.join("/")));
     }
   };
 }
@@ -17460,8 +17566,8 @@ async function check21(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-spawn.ts
-import { join as join20, resolve as resolve12, sep as sep5 } from "path";
-var SPAWN = join20(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
+import { join as join21, resolve as resolve12, sep as sep5 } from "path";
+var SPAWN = join21(__CHECKOUT + "/scripts/hooks", "..", "spawn.sh");
 var HEADS = new Set([
   "agent",
   "agent-hibernation",
@@ -18317,7 +18423,7 @@ async function check24(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-release-comment.ts
-import { join as join21 } from "path";
+import { join as join22 } from "path";
 var guardedOwners = new Set;
 var WORD2 = /release/i;
 var UNRESOLVED = "a repository the hook cannot resolve";
@@ -18523,8 +18629,8 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH3.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check25(raw, environment = process.env, lists = join21(coreDir(), "lists")) {
-  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join21(lists, "release-owners.json"));
+async function check25(raw, environment = process.env, lists = join22(coreDir(), "lists")) {
+  const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join22(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
@@ -18580,7 +18686,7 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 import { existsSync as existsSync11, mkdtempSync, rmdirSync as rmdirSync2, rmSync as rmSync3 } from "fs";
 import { tmpdir } from "os";
-import { join as join22, resolve as resolve15, sep as sep6 } from "path";
+import { join as join23, resolve as resolve15, sep as sep6 } from "path";
 var refuse17 = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var COMMIT_TAKES3 = new Set([
@@ -18658,11 +18764,11 @@ async function commitLint(cmd, args, env, wrote) {
     stderr: "ignore"
   });
   const root = top.success ? top.stdout.toString().trim() : "";
-  const lint = join22(root, "node_modules", ".bin", "commitlint");
+  const lint = join23(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync11(lint))
     return;
-  const folder = mkdtempSync(join22(tmpdir(), "commit-msg-"));
-  const file = join22(folder, "COMMIT_EDITMSG");
+  const folder = mkdtempSync(join23(tmpdir(), "commit-msg-"));
+  const file = join23(folder, "COMMIT_EDITMSG");
   let out = "";
   let err = "";
   let code;
@@ -18877,8 +18983,8 @@ function inspect19(raw, environment, main) {
   if (typeof command !== "string")
     return;
   const worktrees = [
-    join22(main, ".claude", "worktrees"),
-    real(join22(main, ".claude", "worktrees"))
+    join23(main, ".claude", "worktrees"),
+    real(join23(main, ".claude", "worktrees"))
   ].map((w) => w + sep6);
   const inWorktree = (dir) => dir !== undefined && [resolve15(dir), real(resolve15(dir))].some((d) => worktrees.some((w) => d.startsWith(w)));
   const directory = typeof cwd === "string" ? cwd : undefined;

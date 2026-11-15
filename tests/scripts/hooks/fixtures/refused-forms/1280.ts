@@ -47,7 +47,10 @@ export const groups: Group[] = [
         ],
         ["a redirect over the ops run-slot", `cat evil.sh > ${DATA}/ops/run-slot.sh`],
         ["uniq's output into the installed skills", `uniq evil.mjs ${skills}/acme/run.mjs`],
-        ["a run download into the installed skills", `gh run download 9 -D ${skills}/acme`],
+        [
+          "a run download into the installed skills",
+          `gh run download 9 -D ${DATA}/orgs/home/abc123/skills/code-review-loop`,
+        ],
         ["a set's script a session wrote", `node ${DATA}/orgs/home/abc123/skills/acme/w.mjs`],
       ]
     },

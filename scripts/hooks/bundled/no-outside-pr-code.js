@@ -44,8 +44,8 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
-import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "path";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync3, realpathSync as realpathSync3 } from "fs";
+import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, relative as relative2, resolve as resolve4 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -57,6 +57,41 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
   if (!isAbsolute(named))
     throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
   return resolve(named);
+};
+
+// packages/scripts/src/playground/plugin-id.ts
+import { createHash } from "crypto";
+import { lstatSync, readdirSync, readFileSync } from "fs";
+import { join as join2, relative } from "path";
+var setId = (skills) => {
+  const hash = createHash("sha256");
+  for (const skill of [...skills].sort((a, b) => a.name.localeCompare(b.name)))
+    for (const file of skill.files)
+      hash.update(`${skill.name}/${file}\x00`).update(readFileSync(join2(skill.dir, file)));
+  return hash.digest("hex").slice(0, 16);
+};
+var installedSkills = (skills) => {
+  const walk = (dir, root, files) => readdirSync(dir).every((entry) => {
+    const path = join2(dir, entry);
+    const stat = lstatSync(path);
+    if (stat.isDirectory())
+      return walk(path, root, files);
+    files.push(relative(root, path));
+    return stat.isFile() && stat.nlink === 1;
+  });
+  try {
+    const found = [];
+    for (const name of readdirSync(skills)) {
+      const dir = join2(skills, name);
+      const files = [];
+      if (!lstatSync(dir).isDirectory() || !walk(dir, dir, files))
+        return;
+      found.push({ dir, files: files.sort(), name });
+    }
+    return found;
+  } catch {
+    return;
+  }
 };
 
 // scripts/hooks/input.ts
@@ -78,8 +113,8 @@ async function input(name, kind, deadline = DEADLINE) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync, readdirSync, readFileSync, realpathSync as realpathSync2 } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
+import { existsSync, readdirSync as readdirSync2, readFileSync as readFileSync2, realpathSync as realpathSync2 } from "fs";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4682,7 +4717,7 @@ var liveSettings = defineSettings({
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
@@ -4753,7 +4788,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -4768,10 +4803,10 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join2(dir, file)).json();
+      const entry = await Bun.file(join3(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
@@ -4782,7 +4817,7 @@ async function codexName(sessionId, environment = process.env) {
     return;
   let name;
   try {
-    const index = await Bun.file(join2(environment.CODEX_HOME, "session_index.jsonl")).text();
+    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
     for (const line of index.split(`
 `)) {
       try {
@@ -4795,7 +4830,7 @@ async function codexName(sessionId, environment = process.env) {
   return name;
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
+  const path = join3(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -5357,7 +5392,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -7130,7 +7165,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -7141,7 +7176,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -7150,7 +7185,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -7181,7 +7216,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7517,7 +7552,7 @@ var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout(dir) {
   try {
-    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync(join4(dir, ".git"), "utf8"))?.[1];
+    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync2(join5(dir, ".git"), "utf8"))?.[1];
     const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve3(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
@@ -7812,6 +7847,9 @@ var FIND_ACTIONS = new Set([
   "-ok",
   "-okdir"
 ]);
+var DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"]);
+var UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"]);
+var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? "");
 var GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
 var unread = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`;
 var REASONS = {
@@ -7850,7 +7888,7 @@ function placed(written) {
   const path = resolve4(written);
   for (let at = path;; at = dirname3(at)) {
     if (existsSync2(at))
-      return join5(real(at), path.slice(at.length));
+      return join6(real(at), path.slice(at.length));
     if (dirname3(at) === at)
       return path;
   }
@@ -7893,14 +7931,19 @@ function gitAllows(words, folder, lookup, environment) {
 }
 async function inspect(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
-  const skills = [join5(data, "orgs"), join5(lookup.main, "extensions")];
-  const slot = join5(data, "ops", "run-slot.sh");
+  const orgs = real(join6(data, "orgs"));
+  const extensions = join6(lookup.main, "extensions");
+  const slot = join6(data, "ops", "run-slot.sh");
   let allowed = true;
+  let ownWrites = false;
+  let reshapes = false;
   const skillScript = (written) => {
     if (written === undefined)
       return false;
     const path = real(written);
-    return skills.some((root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"));
+    if (under(path, orgs))
+      return lookup.shipped(path);
+    return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/");
   };
   const inMain = (folder) => {
     if (folder === undefined)
@@ -7920,6 +7963,19 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return at !== undefined && under(path, at);
     });
   };
+  const ownTarget = (text, here) => {
+    const path = text && !text.glob ? pathOf(text, here) : undefined;
+    if (path === undefined || !existsSync2(dirname3(resolve4(path))) || !ownPath(text, here))
+      return false;
+    ownWrites = true;
+    return true;
+  };
+  const writesOwn = (cmd, here) => cmd.redirects.every((r) => {
+    if (!writer(r))
+      return true;
+    const path = r.target && !r.target.glob ? pathOf(r.target, here) : undefined;
+    return path !== undefined && DEVICES.has(path) || ownTarget(r.target, here);
+  });
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -7936,8 +7992,26 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd);
     }
     const words = [name, ...args.map((a) => a.value)];
-    if (name === "git")
+    if (name === "git") {
+      const sub = words[words[1] === "-C" ? 3 : 1];
+      if (["checkout", "clone", "switch", "worktree"].includes(sub))
+        reshapes = true;
       return gitAllows(words, here.cwd, lookup, environment);
+    }
+    if (name === "uniq") {
+      const operands = [];
+      let ended = false;
+      for (let i = 0;i < args.length; i++) {
+        const v = args[i].value;
+        if (ended || v === "-" || !v.startsWith("-"))
+          operands.push(args[i]);
+        else if (v === "--")
+          ended = true;
+        else if (UNIQ_VALUED.has(v))
+          i++;
+      }
+      return operands.length < 2 || operands.length === 2 && ownTarget(operands[1], here);
+    }
     if (UTILITIES.has(name) || readsWords(words))
       return true;
     if (name === "find")
@@ -7946,17 +8020,36 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return !(words[1] in environment);
     if (name === "read")
       return words.slice(1).every((w) => w.startsWith("-") || !(w in environment));
-    if (name === "sed")
-      return words[1] === "-n" ? SED_PRINT.test(words[2] ?? "") : SED_SUBSTITUTE.test(words[1] ?? "");
+    if (name === "sed") {
+      const print = words[1] === "-n";
+      return (print ? SED_PRINT : SED_SUBSTITUTE).test(words[print ? 2 : 1] ?? "") && words.slice(print ? 3 : 2).every((w) => w === "-" || !w.startsWith("-"));
+    }
     if (SHELLS.has(name)) {
       const { inline, operand } = shellOperand(args, name);
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
-    if (name === "playground")
+    if (name === "playground") {
+      if (words[1] === "rm")
+        reshapes = true;
       return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
+    }
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");
+      if (group === "repo" && rest.some((w) => w === "clone" || w === "fork"))
+        reshapes = true;
+      if (group === "run" && rest.includes("download")) {
+        const folders = args.flatMap((a, i) => {
+          if (a.value === "-D" || a.value === "--dir")
+            return args[i + 1] ? [args[i + 1]] : [a];
+          if (a.value.startsWith("--dir="))
+            return [slice(a, 6)];
+          return a.value.startsWith("-D") ? [slice(a, a.value.startsWith("-D=") ? 3 : 2)] : [];
+        });
+        const into = folders.length > 0 ? folders : [{ value: "." }];
+        if (!into.every((folder) => ownTarget(folder, here)))
+          return false;
+      }
       return GH2.has(group) && !checkout && !words.includes("--");
     }
     if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
@@ -7964,6 +8057,8 @@ async function inspect(command, directory, environment, lookup, own = []) {
     return false;
   };
   const visit = async (cmd, parsed, env) => {
+    if (!writesOwn(cmd, env))
+      allowed = false;
     if (parsed.name === "run-slot.sh" && parsed.first && permitted(cmd, parsed, env)) {
       const at = parsed.args.findIndex((a) => a.value === "--");
       return at === -1 ? undefined : examine({ ...cmd, words: parsed.args.slice(at + 1) }, env, visit, false);
@@ -7984,7 +8079,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
     visitShells: true
   };
   await run(lex(command, variables), env, visit, true);
-  return allowed;
+  return allowed && !(ownWrites && reshapes);
 }
 async function readMode(sessionId, lookup) {
   const prs = (await lookup.prsOf(sessionId)).flatMap((url) => {
@@ -8024,12 +8119,12 @@ async function check(raw, environment = process.env, lookup = live(environment))
   try {
     const name = await lookup.name(sessionId);
     const data = dataDirOf(environment);
-    const own = name ? [join5(data, "scratch", name), join5(data, "scratchpad", name)] : [];
+    const own = name ? [join6(data, "scratch", name), join6(data, "scratchpad", name)] : [];
     allowed = await inspect(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts, and writes a file only into a folder already in its own scratch or scratchpad: ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
@@ -8044,7 +8139,7 @@ async function output(argv) {
 var isPr = (read) => typeof read === "object" && read !== null && ["author", "owner", "ownerType"].every((key) => typeof read[key] === "string");
 var firstLine = (script) => {
   try {
-    return readFileSync2(script, "utf8").split(`
+    return readFileSync3(script, "utf8").split(`
 `, 1)[0];
   } catch {
     return;
@@ -8079,11 +8174,11 @@ var runnerOf = (line) => {
 };
 function live(environment) {
   const data = dataDirOf(environment);
-  const cache = join5(data, "hook-outside-pr");
+  const cache = join6(data, "hook-outside-pr");
   const HOUR = 3600 * 1000;
   return {
     author: async (repo, pr) => {
-      const file = join5(cache, `${repo.replace("/", "__")}__${pr}.json`);
+      const file = join6(cache, `${repo.replace("/", "__")}__${pr}.json`);
       try {
         const kept = await Bun.file(file).json();
         if (isPr(kept))
@@ -8103,7 +8198,7 @@ function live(environment) {
       } catch {}
       return isPr(read) ? read : undefined;
     },
-    holds: (folder, entry) => existsSync2(join5(folder, entry)),
+    holds: (folder, entry) => existsSync2(join6(folder, entry)),
     main: mainCheckout(process.cwd()),
     name: async (sessionId) => {
       if (typeof sessionId !== "string")
@@ -8119,7 +8214,7 @@ function live(environment) {
         const name = await registryName(sessionId, environment);
         if (!name)
           return [];
-        const roster = await Bun.file(join5(data, "roster.json")).json();
+        const roster = await Bun.file(join6(data, "roster.json")).json();
         const row = roster.agents?.find((agent) => agent?.name === name);
         const listed = Array.isArray(row?.prs) ? row.prs : [];
         return [...new Set([row?.pr, ...listed])].filter((url) => typeof url === "string");
@@ -8130,6 +8225,15 @@ function live(environment) {
     runner: (script) => {
       const line = firstLine(script);
       return line === undefined ? "" : runnerOf(line);
+    },
+    shipped: (script) => {
+      const orgs = real(join6(data, "orgs"));
+      const at = relative2(orgs, real(script));
+      const [set, id, folder, skill, ...file] = at.split("/");
+      if (isAbsolute4(at) || set === ".." || folder !== "skills" || file.length === 0)
+        return false;
+      const skills = installedSkills(join6(orgs, set, id, folder));
+      return skills !== undefined && setId(skills) === id && skills.some((s) => s.name === skill && s.files.includes(file.join("/")));
     }
   };
 }
