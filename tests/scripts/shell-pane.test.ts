@@ -74,6 +74,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-main-checkout": [`touch ${join(MAIN, "made-up-file")}`],
   "no-off-palette-label": [`gh label create made-up --color 123456`],
   "no-ours-merge": ["git merge -s ours origin/canary"],
+  "no-outside-pr-code": ["bun test"],
   "no-prepare-write": ["gh pr create --fill"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
   "no-protected-push": [`git push https://github.com/${UNSET_REPOS.public[0]}.git main`],
@@ -114,6 +115,12 @@ const CWDS: Record<string, string> = { "no-glm-heavy-path": GLM_REPO }
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },
+  // a reviewer whose row names no PR, which read mode holds, read from a scratch registry and data folder
+  "no-outside-pr-code": {
+    CLAUDE_CONFIG_DIR: join(SCRATCH, "outside-pr", "claude"),
+    PLAYGROUND_DATA_DIR: join(SCRATCH, "outside-pr", "playground"),
+    PLAYGROUND_ROLE: "reviewer",
+  },
   "no-prepare-write": {
     CLAUDE_CONFIG_DIR: PREPARE,
     PLAYGROUND_DATA_DIR: join(PREPARE, "playground"),

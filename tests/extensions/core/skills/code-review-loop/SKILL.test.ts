@@ -546,10 +546,13 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     expect(text).toContain("`set -o pipefail`")
   })
 
-  test("an extension item's fresh read takes a scratch repo of the base and the proposed revision", async () => {
+  // #1280: read mode refuses an item reviewer's export and its git init, add and commit, so each revision is read from ext show
+  test("an extension item's fresh read reads each revision from ext show", async () => {
     const text = await last()
     expect(text).toContain(
-      "build a scratch repo in your scratch folder, the base revision's commit then the proposed one's",
+      "`playground ext show <scope> <kind> <key> --rev <sha> | jq -r '.content.files | keys[]'`",
     )
+    expect(text).toContain("`jq -r '.content.files[\"<path>\"]'`")
+    expect(text).not.toContain("playground ext export")
   })
 })
