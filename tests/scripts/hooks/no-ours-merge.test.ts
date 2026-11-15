@@ -159,6 +159,18 @@ describe("a git call that defines an alias on its own line is refused", () => {
     ["an alias after a git the hook cannot read", "$G -c 'alias.ci=commit -n' ci -m x"],
     ["an ours alias behind a wrapper", "uv run git -c 'alias.m=merge -s ours' m x"],
     [
+      "an alias beside an option word the hook cannot read",
+      "git $OPT 'alias.ci=commit -n' ci -m x",
+    ],
+    [
+      "an ours alias beside an option word the hook cannot read",
+      "git $OPT 'alias.m=merge -s ours' m x",
+    ],
+    [
+      "an alias set with --config-env beside an option word the hook cannot read",
+      "git $OPT --config-env=alias.ci=VALUE ci -m x",
+    ],
+    [
       "a shell alias calling an alias the call defines",
       "git -c 'alias.a=!git b' -c 'alias.b=commit -n' a -m x",
     ],
