@@ -250,6 +250,14 @@ describe("every other call runs", () => {
     ["a grep for git with -n after it", 'grep git "$f" -n'],
     ["an rg for git with -n after it", "rg git $D -n"],
     ["a grep -c for git with -n after it", 'grep -c git "$f" -n'],
+    ["a grep for git with -c after it", 'grep git -c "$f"'],
+    ["a grep -e for git with -c after it", 'grep -e git -c "$f"'],
+    ["an rg for git with -c after it", "rg git -c $D"],
+    ["a grep for git with -c and a file after it", 'grep git -c "$f" x.ts'],
+    [
+      "a wrapped git with a -c it cannot read, a residual",
+      '~/.playground/ops/run-slot.sh w -- git -c "$K" ci',
+    ],
     ["an unread subcommand behind a wrapper", "uv run git $X status"],
     [
       "an unread subcommand behind run-slot",
