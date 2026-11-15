@@ -471,6 +471,13 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["cmp, which diff -q answers", `cmp ${PAD}/repo/a.md ${HOME}/.playground/a.md`],
     ["find that deletes", `find ${PAD} -name x -delete`],
     ["find that runs a program", `find ${PAD} -exec sh {} ;`],
+    ["find that runs a program in each folder", `find ${PAD} -execdir sh {} ;`],
+    ["find that asks, then runs a program", `find ${PAD} -ok sh {} ;`],
+    ["find that asks, then runs a program in each folder", `find ${PAD} -okdir sh {} ;`],
+    ["find that writes its list", `find ${PAD} -fprint ${HOME}/.playground/ops/run-slot.sh`],
+    ["find that writes its list, nul-ended", `find ${PAD} -fprint0 ${HOME}/.playground/ops/x`],
+    ["find that writes a formatted list", `find ${PAD} -fprintf ${HOME}/.playground/ops/x %p`],
+    ["find that writes a long list", `find ${PAD} -fls ${HOME}/.playground/ops/x`],
     ["git init of a scratch repo", `git -C ${PAD}/repo init -q`],
     ["git commit in a scratch repo", `git -C ${PAD}/repo commit -qm base`],
     ["git add in a scratch repo", `git -C ${PAD}/repo add -A`],
@@ -481,6 +488,10 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     [
       "a --no-index diff that leaves textconv on",
       `git diff --no-index --no-ext-diff ${PAD}/base ${PAD}/proposed`,
+    ],
+    [
+      "a --no-index diff with both flags under a -c setting",
+      `git -c diff.external=${PAD}/x.sh diff --no-index --no-ext-diff --no-textconv ${PAD}/base ${PAD}/proposed`,
     ],
   ])("%s is refused", async (_, command) => {
     expect(await item(command)).toContain("no-outside-pr-code")
@@ -533,6 +544,12 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
     ],
   ])("a checker with %s is in read mode", async (_, session, words) => {
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
+  })
+
+  test("an item's reviewer, whose row names no PR, is told to read each revision with ext show", async () => {
+    expect(await judge(call("bun test", OUTSIDE, "s-none"))).toContain(
+      "playground ext show <scope> <kind> <key> --rev <sha>",
+    )
   })
 
   test("a GIT_DIR the session exports keeps git out, since the walk would not find that repository", async () => {
