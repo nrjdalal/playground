@@ -96,6 +96,38 @@ const rows = (): Row[] => [
     String.raw`sed -i '' 's/a/X=~; rm $X/' .git/hooks/pre-commit`,
   ],
   [
+    "an in-place sed whose s/// writes a remover of the home by ${HOME%/}",
+    "sed -i '' 's/a/rm ${HOME%\\/}/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by a substitution that runs a bare cd",
+    String.raw`sed -i '' 's/a/rm $(cd; pwd)/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the data folder by a variable the text sets to it",
+    String.raw`sed -i '' 's/a/X=~\/.playground; rm "$X"/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by a for loop over it",
+    String.raw`sed -i '' 's/a/for d in ~; do rm $d; done/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes the home piped into xargs rm",
+    String.raw`sed -i '' 's/a/echo ~ | xargs rm/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of a folder of the home by a variable",
+    String.raw`sed -i '' 's/a/C=$HOME\/.cache\/x; rm -rf $C/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of each log a for loop lists",
+    String.raw`sed -i '' 's/a/for f in *.log; do rm -f $f; done/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of a quoted variable",
+    String.raw`sed -i '' 's/a/rm -rf "$tmp"/' .git/hooks/pre-commit`,
+  ],
+  [
     "an in-place sed whose s/// writes a code comment naming find",
     String.raw`sed -i '' 's/old/\/\/ find the first match/' src/a.ts`,
   ],
@@ -194,6 +226,9 @@ const allowedCalls = [
   "an in-place sed whose s/// writes a remover of node_modules",
   "an in-place sed whose s/// writes a find that deletes logs below the folder it runs in",
   "an in-place sed whose s/// writes a remover of the folder it runs in",
+  "an in-place sed whose s/// writes a remover of a folder of the home by a variable",
+  "an in-place sed whose s/// writes a remover of each log a for loop lists",
+  "an in-place sed whose s/// writes a remover of a quoted variable",
   "an in-place sed whose s/// writes a code comment naming find",
   "an in-place sed whose s/// writes a code comment naming mv and rm",
   "an in-place perl whose s/// writes a block comment naming find",
