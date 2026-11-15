@@ -3682,14 +3682,22 @@ describe("an xargs input option beside a typed program keeps the call's verdict"
   })
 })
 
-// #2248: a printer's text written into a file of the folder core.hooksPath names is judged as text written into .git/hooks is, while the same text into another file of that repo keeps canary's verdict
+// #2248: a printer's text written into a file of the folder core.hooksPath names is judged as text written into .git/hooks is, while the same text into another file of that repo keeps canary's verdict; git answers with every GIT_ variable dropped, and a folder git cannot answer for reads as a hook folder
 describe("an echo into the folder core.hooksPath names is judged as one into a git hook (PG-2248)", () => {
-  const REPO = join(HOME, "hooked")
-  mkdirSync(join(REPO, "githooks"), { recursive: true })
-  const git = (...args: string[]) =>
-    Bun.spawnSync(["git", "-C", REPO, ...args], { stderr: "ignore", stdout: "ignore" })
-  git("init", "-q")
-  git("config", "core.hooksPath", "githooks")
+  const repo = (name: string, hooks: string) => {
+    const dir = join(HOME, name)
+    mkdirSync(join(dir, hooks), { recursive: true })
+    mkdirSync(join(dir, "notes"), { recursive: true })
+    const git = (...args: string[]) =>
+      Bun.spawnSync(["git", "-C", dir, ...args], { stderr: "ignore", stdout: "ignore" })
+    git("init", "-q")
+    git("config", "core.hooksPath", hooks)
+    return dir
+  }
+  const REPO = repo("hooked", "githooks")
+  const OTHER = repo("hooked-other", "h2")
+  const BROKEN = repo("hooked-broken", "githooks")
+  writeFileSync(join(BROKEN, ".git", "config"), "[core\n")
 
   test.each([
     ["by its path", `echo 'touch ~/.playground/extensions/x' > ${REPO}/githooks/pre-commit`, HOME],
@@ -3702,5 +3710,24 @@ describe("an echo into the folder core.hooksPath names is judged as one into a g
     expect(
       await bash("echo 'touch ~/.playground/extensions/x' > notes/run.sh", REPO),
     ).toBeUndefined()
+  })
+
+  test("a GIT_DIR in the hook's environment leaves the repo's own hook folder read", async () => {
+    const before = process.env.GIT_DIR
+    process.env.GIT_DIR = join(REPO, ".git")
+    try {
+      expect(
+        await bash(`echo 'touch ~/.playground/extensions/x' > ${OTHER}/h2/pre-commit`),
+      ).toContain("no-extensions-write hook refuses")
+    } finally {
+      if (before === undefined) delete process.env.GIT_DIR
+      else process.env.GIT_DIR = before
+    }
+  })
+
+  test("an echo of the data folder into a repo whose config git cannot read is refused", async () => {
+    expect(
+      await bash(`echo 'touch ~/.playground/extensions/x' > ${BROKEN}/notes/run.sh`),
+    ).toContain("no-extensions-write hook refuses")
   })
 })
