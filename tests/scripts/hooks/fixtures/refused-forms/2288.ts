@@ -13,6 +13,14 @@ const controls = (): Row[] => [
   ["an echo of text that opens with a stash pop", `echo "git stash pop"`],
   ["a subshell that changes folder and lints", "(cd x && bun run lint)"],
   ["a glob qualifier in an argument", "ls *(.)"],
+  // round 1: a quoted alternation of guarded names, and a substitution inside an assignment before a read-only command
+  ["a search for an alternation of guarded names", `grep -E "rm|pkill|stash" notes.txt`],
+  [
+    "a search for a grouped alternation of guarded names",
+    `grep -E "(rm|pkill)|(git stash)" notes.txt`,
+  ],
+  ["a date read into an assignment before a status", "d=$(date) git status"],
+  ["a date read into an assignment, then listed", `x=$(date); ls "$x"`],
 ]
 
 const deleteControls = (): Row[] => [
@@ -20,12 +28,46 @@ const deleteControls = (): Row[] => [
     "a delete a brace sequence spells, glued to a subshell's paren, in a comment",
     `# (/bin/r{m..m} ${NEVER_MADE})`,
   ],
+  // round 1: a comment twin for each class
+  [
+    "a delete a brace sequence spells, glued to a substitution's paren, in a comment",
+    `# echo $(/bin/r{m..m} ${NEVER_MADE})`,
+  ],
+  [
+    "a delete a brace sequence spells, glued to a -c script's quote, in a comment",
+    `# bash -c '/bin/r{m..m} ${NEVER_MADE}'`,
+  ],
+  [
+    "a delete a brace sequence spells, glued to a substitution's paren after an =, in a comment",
+    `# x=$(/bin/r{m..m} ${NEVER_MADE})`,
+  ],
+  [
+    "a delete a brace sequence spells, glued to a subshell's paren after a pipe, in a comment",
+    `# true|(/bin/r{m..m} ${NEVER_MADE})`,
+  ],
 ]
 
 const killControls = (): Row[] => [
   [
     "a kill by name a zsh alternation spells, glued to a -c script's quote, in a comment",
     `# zsh -c 'pk(i|x)ll -f watcher'`,
+  ],
+  // round 1: a comment twin for each class
+  [
+    "a kill by name a one-word zsh group spells after a cd, glued to a subshell's paren, in a comment",
+    `# cd "$Q" && (pk(i)ll -f watcher)`,
+  ],
+  [
+    "a kill by name a zsh alternation spells, glued to a substitution's paren, in a comment",
+    "# echo $(pk(i|x)ll -f watcher)",
+  ],
+  [
+    "a kill by name a zsh alternation spells, glued to a substitution's paren after an =, in a comment",
+    "# x=$(pk(i|x)ll -f watcher)",
+  ],
+  [
+    "a kill by name a zsh alternation spells, glued to a subshell's paren after a pipe, in a comment",
+    "# true|(/usr/bin/pk(i|x)ll -f watcher)",
   ],
 ]
 
@@ -69,6 +111,60 @@ export const groups: Group[] = [
       [
         "a plain rm by a path a brace sequence spells, glued to a -c script's quote",
         `bash -c '/bin/r{m..m} ${NEVER_MADE}'`,
+      ],
+      // round 1: the twins each class lacked
+      [
+        "a plain rm by a path a brace sequence spells across a backslash-newline, glued to a substitution's paren",
+        `echo $(/bin/r{m..\\\nm} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a -c script's quote, after a header line",
+        `#!/bin/sh\nbash -c '/bin/r{m..m} ${NEVER_MADE}'`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells across a backslash-newline, glued to a -c script's quote",
+        `bash -c '/bin/r{m..\\\nm} ${NEVER_MADE}'`,
+      ],
+      // round 1: a substitution's paren glued after an = or other word text, and a subshell's paren glued after a pipe
+      [
+        "a plain rm by a path a brace sequence spells, glued to a substitution's paren after an =",
+        `x=$(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a substitution's paren after an =, after a header line",
+        `#!/bin/sh\nx=$(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells across a backslash-newline, glued to a substitution's paren after an =",
+        `x=$(/bin/r{m..\\\nm} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a substitution's paren after word text",
+        `echo a$(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a subshell's paren after a pipe",
+        `true|(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a subshell's paren after an or",
+        `true||(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, glued to a subshell's paren after a pipe, after a header line",
+        `#!/bin/sh\ntrue|(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells across a backslash-newline, glued to a subshell's paren after a pipe",
+        `true|(/bin/r{m..\\\nm} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, spaced from a substitution's paren after an =",
+        `x=$( /bin/r{m..m} ${NEVER_MADE} )`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells, spaced from a subshell's paren after a pipe",
+        `true|( /bin/r{m..m} ${NEVER_MADE} )`,
       ],
       // the spaced twins, refused at canary
       [
@@ -134,6 +230,72 @@ export const groups: Group[] = [
       [
         "a kill by name a zsh alternation spells across a backslash-newline, glued to a -c script's quote",
         `zsh -c 'pk(i|\\\nx)ll -f watcher'`,
+      ],
+      // round 1: the twins each class lacked
+      [
+        "a kill by name a one-word zsh group spells after a header line and a cd, glued to a subshell's paren",
+        `#!/bin/sh\ncd "$Q" && (pk(i)ll -f watcher)`,
+      ],
+      // round 1: a substitution's paren glued after an = or other word text, and a subshell's paren glued after a pipe
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a substitution's paren after an =",
+        "x=$(/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a quoted substitution's paren after an =",
+        `x="$(/usr/bin/pk(i|x)ll -f watcher)"`,
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a substitution's paren after word text",
+        "echo a$(/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name a zsh alternation spells, glued to a substitution's paren after an =",
+        "x=$(pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name a zsh alternation spells, glued to a substitution's paren after an option's =",
+        "echo --x=$(pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name a zsh alternation spells, glued to a substitution's paren inside a quote",
+        `echo "x$(pk(i|x)ll -f watcher)"`,
+      ],
+      [
+        "a kill by name a zsh alternation spells, glued to a substitution's paren inside a zsh expansion flag",
+        `echo \${(f)"$(pk(i|x)ll -f watcher)"}`,
+      ],
+      [
+        "a kill by name a zsh alternation spells, glued to a substitution's paren after an =, after a header line",
+        "#!/bin/sh\nx=$(pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name a zsh alternation spells across a backslash-newline, glued to a substitution's paren after an =",
+        "x=$(pk(i|\\\nx)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a subshell's paren after a pipe",
+        "true|(/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a subshell's paren after an or",
+        "true||(/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, glued to a subshell's paren after a pipe, after a header line",
+        "#!/bin/sh\ntrue|(/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches across a backslash-newline, glued to a subshell's paren after a pipe",
+        "true|(/usr/bin/pk(i|\\\nx)ll -f watcher)",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, spaced from a subshell's paren after a pipe",
+        "true | (/usr/bin/pk(i|x)ll -f watcher)",
+      ],
+      [
+        "a kill by name a zsh alternation spells, spaced from a substitution's paren after an =",
+        "x=$( pk(i|x)ll -f watcher )",
       ],
       // the spaced twin, refused at canary
       [
