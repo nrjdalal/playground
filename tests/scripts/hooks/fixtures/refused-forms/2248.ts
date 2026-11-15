@@ -175,6 +175,10 @@ const held = (): Row[] => [
     `echo 'touch ~/.playground/extensions/x' >&3 3> .git/hooks/pre-commit`,
   ],
   [
+    "an echo whose stdout is duplicated to stdin, which a bare <> opens on a git hook",
+    `echo 'touch ~/.playground/extensions/x' <> .git/hooks/pre-commit >&0`,
+  ],
+  [
     "an echo whose stdout is duplicated to a descriptor an earlier exec opened on a git hook",
     `exec 3> .git/hooks/pre-commit; echo 'touch ~/.playground/extensions/x' >&3`,
   ],
