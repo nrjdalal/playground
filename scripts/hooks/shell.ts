@@ -2203,16 +2203,18 @@ export function globSpells(text: string, names: string[]): boolean {
   return false
 }
 
-// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again without a leading paren, `$(` or quote, beside its typed form
+// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again cut before each `$(` and at a pipe before a paren, each part without a leading paren, `$(` or quote, beside its typed form
 export function spelledText(text: string): string {
   const spelled = text
     .replace(/\\\n/g, "")
     .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
     .flatMap((token) => {
-      // a subshell's or a substitution's opening paren, or a script's opening quote, glued to the program word after it
-      const opened = token.replace(/^(?:\$?\(|['"])+/, "")
-      return opened === token ? [token] : [token, opened]
+      // a subshell's or a substitution's opening paren, a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
+      const parts = token
+        .split(/(?=\$\()|\|+(?=\()/)
+        .map((part) => part.replace(/^(?:\$?\(|['"])+/, ""))
+      return [token, ...parts.filter((part) => part !== token)]
     })
     .filter((token) => /[{(]/.test(token))
     .flatMap((token) =>
