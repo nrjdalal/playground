@@ -407,10 +407,6 @@ describe("xargs fills its program from the input GNU's input options name", () =
       "a line of -a's file in env --chdir='s folder",
       "echo a | env --chdir=sub xargs -a h -I X nice X run",
     ],
-    [
-      "a line of -a's absolute file after sudo -D",
-      `echo a | sudo -D sub xargs -a ${dir}/sub/h -I X nice X run`,
-    ],
   ])("%s fills the program", async (_, line) => {
     expect(await filled(line)).toContain("turbo run")
   })
@@ -431,6 +427,18 @@ describe("xargs fills its program from the input GNU's input options name", () =
     [
       "an -a relative file sudo --chdir= may read from its folder",
       "echo a | sudo --chdir=sub xargs -a h -I X nice X run",
+    ],
+    [
+      "an -a absolute file after sudo -D",
+      `echo a | sudo -D sub xargs -a ${dir}/sub/h -I X nice X run`,
+    ],
+    [
+      "an -a absolute file sudo -R reads under its root",
+      `echo a | sudo -R sub xargs -a ${dir}/h -I X nice X run`,
+    ],
+    [
+      "an -a absolute file sudo --chroot= reads under its root",
+      `echo a | sudo --chroot=sub xargs -a ${dir}/h -I X nice X run`,
     ],
   ])("%s reads the program as unread", async (_, line) => {
     expect(await filled(line)).toContain(`${UNKNOWN} run`)

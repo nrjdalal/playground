@@ -56,8 +56,16 @@ const MOVED: [what: string, form: string][] = [
     "echo zz > f; echo {P} > x/f; env --chdir x xargs --arg-file=f -I cat nice cat {T}",
   ],
 ]
-// A relative -a file a privilege wrapper before xargs may read from another folder, which the reader leaves unread
+// An -a file a privilege wrapper before xargs may read from another folder or root, which the reader leaves unread
 const PRIVILEGED: [what: string, form: string][] = [
+  [
+    "read from -a's absolute file under sudo -R's root",
+    "echo zz > /tmp/f; echo {P} > x/tmp/f; sudo -R x xargs -a /tmp/f -I cat nice cat {T}",
+  ],
+  [
+    "read from -a's absolute file under sudo --chroot='s root",
+    "echo zz > /tmp/f; echo {P} > x/tmp/f; sudo --chroot=x xargs -a /tmp/f -I cat nice cat {T}",
+  ],
   [
     "read from -a's file in sudo -D's folder",
     "echo zz > f; echo {P} > x/f; sudo -D x xargs -a f -I cat nice cat {T}",
