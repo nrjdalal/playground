@@ -169,7 +169,10 @@ describe("a canary tree the temp cleaner emptied", () => {
       join(hooks, "no-extensions-write.ts"),
       'import "../../packages/settings/src/settings"\nexport const check = () => undefined\n',
     )
-    writeFileSync(join(hooks, "no-extensions-write-worker.ts"), 'import "./no-extensions-write"\n')
+    writeFileSync(
+      join(hooks, "no-extensions-write-worker.ts"),
+      'import "./no-extensions-write"\nself.onmessage = () => {}\n',
+    )
     writeFileSync(
       join(hooks, "guards.ts"),
       'import "./no-extensions-write"\nexport const check = () => undefined\n',
