@@ -205,9 +205,13 @@ export const removePage = (
     return { error: `${target} is not in the previews folder ${folder}` }
   const page = CARVE_OUTS.page!
   const index = lstatSync(join(folder, PAGES_FILE), { throwIfNoEntry: false })
-  if (index && (!index.isFile() || index.nlink !== 1 || index.size > page.bytes))
+  if (index && (!index.isFile() || index.nlink !== 1))
     return {
-      error: `${PAGES_FILE} is not a regular file with one link of at most ${page.bytes / 1024 ** 2} MB (a symlink or a hard link), so nothing is removed`,
+      error: `${PAGES_FILE} is not a regular file with one link (a symlink or a hard link), so nothing is removed`,
+    }
+  if (index && index.size > page.bytes)
+    return {
+      error: `${PAGES_FILE} is over ${page.bytes / 1024 ** 2} MiB, so nothing is removed`,
     }
   if (!listedPages(folder).has(name))
     return { error: `pages.jsonl lists no page ${name}, so nothing is removed` }
@@ -224,7 +228,7 @@ export const removePage = (
       }
     if (info.size > page.bytes)
       return {
-        error: `${file} is over ${page.bytes / 1024 ** 2} MB, the most one page's file may hold, so the page stays`,
+        error: `${file} is over ${page.bytes / 1024 ** 2} MiB, the most one page's file may hold, so the page stays`,
       }
   }
   const now = deps.now ?? new Date()

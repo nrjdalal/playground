@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   linkSync,
@@ -188,7 +189,7 @@ describe("playground page --remove (#2191)", () => {
       [outside, "not in the previews folder"],
       [`${previews}/../previews/report.html`, "a .. step"],
       ["pages.jsonl", "not an HTML file"],
-      ["big.html", "over 20 MB"],
+      ["big.html", "over 20 MiB"],
       ["linked.html", "not a regular file with one link"],
       ["symlinked.html", "not a regular file with one link"],
     ]
@@ -198,6 +199,20 @@ describe("playground page --remove (#2191)", () => {
     }
     expect(snapshot(previews)).toEqual(before)
     expect(readFileSync(target, "utf8")).toBe("<p>target</p>")
+    expect(listTrash(roots.trash)).toEqual([])
+  })
+
+  // #2237's review: an index that is only too big is refused for its size, never blamed on a link.
+  test("refuses an index over 20 MiB by its size alone, and leaves every file as it was", () => {
+    const { data, previews, roots, root } = fakeMachine()
+    keep(data, root, "report.html")
+    appendFileSync(join(previews, "pages.jsonl"), " ".repeat(20 * 1024 * 1024))
+    const before = snapshot(previews)
+    const refused = removePage("report.html", data, { now: NOW, roots, session: "tester" })
+    const error = "error" in refused ? refused.error : "moved"
+    expect(error).toContain("pages.jsonl is over 20 MiB")
+    expect(error).not.toContain("link")
+    expect(snapshot(previews)).toEqual(before)
     expect(listTrash(roots.trash)).toEqual([])
   })
 

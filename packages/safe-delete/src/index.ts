@@ -91,14 +91,13 @@ export const PURGE = { days: 7, minFree: 50e9 }
 // The cap's window, which a burst's recent moves read and a told mark outlives by at most: past it no try can meet the key again, since the key is a stamp that never recurs.
 const CAP_WINDOW_MS = 60_000
 
-// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, with name set only a plain file whose name it matches, and with noLink set only while that folder is no symlink and sits behind none; the folder itself, its parent, a sibling and anything deeper stay protected.
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, with name set only a plain file whose name it matches, and only while that folder is no symlink and sits behind none from its base; the folder itself, its parent, a sibling and anything deeper stay protected.
 export type CarveOut = {
   bytes: number
   files: number
   folder: string
   home?: true
   name?: RegExp
-  noLink?: true
 }
 
 // The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
@@ -139,7 +138,6 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 1,
     folder: "previews",
     name: /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.(?:html|pdf|txt)$/,
-    noLink: true,
   },
 }
 
@@ -219,14 +217,23 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-// The caller's own scratch folders in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, none for a name no session may hold.
-const ownScratchOf = (home: string, session: string): string[] =>
-  SESSION.test(session)
-    ? [
-        join(home, ".playground", "scratch", session),
-        join(home, ".playground", "scratchpad", session),
-      ].map(real)
-    : []
+// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path); none for a name no session may hold.
+const ownScratchOf = (home: string, session: string, path: string): string[] => {
+  if (!SESSION.test(session)) return []
+  const name = basename(path)
+  const stat = lstat(path)
+  const loose =
+    dirname(path) === real(join(home, ".playground", "scratch")) &&
+    (name.startsWith(`${session}-`) || name.startsWith(`${session}.`)) &&
+    (!stat || stat.isFile())
+  return [
+    ...[
+      join(home, ".playground", "scratch", session),
+      join(home, ".playground", "scratchpad", session),
+    ].map(real),
+    ...(loose ? [path] : []),
+  ]
+}
 
 // What tells an ended session's scratchpad folder: the roster's path and the statuses it counts as live.
 export type Ended = { live: string[]; roster: string }
@@ -282,7 +289,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders and its own loose scratch file (ownScratchOf), and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -292,13 +299,23 @@ export function isProtected(
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   const scratch = [
-    ...(session === undefined ? [] : ownScratchOf(real(roots.home), session)),
+    ...(session === undefined ? [] : ownScratchOf(real(roots.home), session, own)),
     ...ended,
   ]
   return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
 }
 
-// The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
+// The first symlink on the way from base down a carve-out's folder, a path relative to base.
+const linkOn = (base: string, folder: string): string => {
+  const parts = folder.split("/")
+  for (let i = 1; i <= parts.length; i++) {
+    const at = join(base, ...parts.slice(0, i))
+    if (lstat(at)?.isSymbolicLink()) return at
+  }
+  return join(base, folder)
+}
+
+// The carve-out named name when path is an entry directly in its folder, real and reached through no symlink from its base, that is not and holds no protected root; else the refusal's text.
 const carveOutAt = (
   path: string,
   name: string,
@@ -307,10 +324,11 @@ const carveOutAt = (
 ): CarveOut | string => {
   const carve = Object.hasOwn(table, name) ? table[name]! : undefined
   if (!carve) return `no carve-out is named ${name}`
-  const named = join(real(carve.home ? roots.home : dirname(roots.trash)), carve.folder)
+  const base = real(carve.home ? roots.home : dirname(roots.trash))
+  const named = join(base, carve.folder)
   const folder = real(named)
-  if (carve.noLink && folder !== named)
-    return `${named} is a symlink or sits behind one, which the ${name} carve-out does not follow`
+  if (folder !== named)
+    return `${named}, the ${name} carve-out's folder, goes through the symlink ${linkOn(base, carve.folder)} and leads to ${folder}, and a carve-out takes only a real folder`
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (dirname(own) !== folder || dirname(real(abs)) !== folder)
