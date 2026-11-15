@@ -6290,7 +6290,7 @@ async function input(name, kind, deadline = DEADLINE) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
+import { existsSync as existsSync3, readdirSync as readdirSync3, readFileSync as readFileSync3, realpathSync as realpathSync2 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, normalize, resolve as resolve4, sep } from "path";
 
 // packages/settings/src/live.ts
@@ -6411,7 +6411,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
-import { realpathSync, statSync as statSync2 } from "fs";
+import { lstatSync, readdirSync as readdirSync2, realpathSync, statSync as statSync2 } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
@@ -8043,6 +8043,63 @@ function arrayRun(cmd, first, env) {
     return null;
   return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
+function globRun(cmd, first, env) {
+  const pattern = first?.value ?? "";
+  if (!first?.glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
+    return;
+  if (!GLOB_PATTERN.test(pattern))
+    return;
+  if (pattern.includes("("))
+    return null;
+  const absolute = isAbsolute3(pattern);
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
+    return null;
+  const base = absolute ? "/" : env.cwd;
+  let paths = [""];
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path, name) => k === 0 ? name : `${path}/${name}`;
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part));
+      continue;
+    }
+    const glob = shellGlob(part);
+    const next = [];
+    for (const path of paths) {
+      let names;
+      try {
+        names = readdirSync2(resolve3(base, path || "."));
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+          continue;
+        return null;
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name));
+    }
+    if (next.length > READINGS)
+      return null;
+    paths = next;
+  }
+  const found = [];
+  for (const path of paths) {
+    try {
+      lstatSync(resolve3(base, path));
+      found.push(path);
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+        return null;
+    }
+  }
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+var GLOB_PATTERN = /[*?(]|\[[^\]]*\]/;
+var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!"));
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
@@ -8072,15 +8129,25 @@ function bind(commands, k, env, unbind) {
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined;
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
-  const before = names.map((name) => [name, env.vars.get(name)]);
   const value = close ? loopWord(cmd) : undefined;
   for (const name of names)
     setVar(env.vars, name, value ?? unknown2("a value a builtin gives"));
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before)
-        held ? setVar(env.vars, name, held) : env.vars.delete(name);
-    });
+  if (!close)
+    return;
+  for (const name of names)
+    capture(env, name, value);
+  unbind.set(close, () => {
+    for (const name of names) {
+      setVar(env.vars, name, CHANGED);
+      capture(env, name);
+    }
+  });
+}
+function capture(env, key, value) {
+  if (value)
+    recordHeld(env, key, value);
+  else
+    delete heldResolved.get(env.vars)?.[key];
 }
 function loopWord({ words }) {
   const at = words.findIndex((w) => w.value === "in" && !w.quoted);
@@ -8123,12 +8190,14 @@ async function examine(cmd, env, visit, builtins) {
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
   const array = arrayRun(cmd, primary.first, env);
+  const globbed = globRun(cmd, primary.first, env);
   const resolving = [
     ...splitHeld(cmd, primary.name, env),
     ...array ? [array] : [],
-    ...heldScripts(cmd, primary, env)
+    ...heldScripts(cmd, primary, env),
+    ...globbed ?? []
   ];
-  if (unreadCommand(cmd, primary, resolving))
+  if (globbed === null || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others])
       parsed.unread = true;
   const expanded = [

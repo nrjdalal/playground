@@ -1,6 +1,6 @@
 // The Bash reader the PreToolUse hooks share: it lexes a command and walks it as the shell would run it, reading the heredocs, files and substitutions it can see and marking the rest unknown.
 import { AsyncLocalStorage } from "node:async_hooks"
-import { realpathSync, statSync } from "node:fs"
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
@@ -1996,6 +1996,72 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
+// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a relative pattern under a folder it cannot read, zsh's `(a|b)`, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed
+function globRun(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {
+  const pattern = first?.value ?? ""
+  if (!first?.glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
+  if (!GLOB_PATTERN.test(pattern)) return
+  if (pattern.includes("(")) return null
+  const absolute = isAbsolute(pattern)
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere)) return null
+  const base = absolute ? "/" : (env.cwd as string)
+  let paths = [""]
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path: string, name: string) => (k === 0 ? name : `${path}/${name}`)
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part))
+      continue
+    }
+    const glob = shellGlob(part)
+    const next: string[] = []
+    for (const path of paths) {
+      let names: string[]
+      try {
+        names = readdirSync(resolve(base, path || "."))
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test((error as { code?: string }).code ?? "")) continue
+        return null
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name))
+    }
+    if (next.length > READINGS) return null
+    paths = next
+  }
+  const found: string[] = []
+  for (const path of paths) {
+    try {
+      lstatSync(resolve(base, path))
+      found.push(path)
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test((error as { code?: string }).code ?? "")) return null
+    }
+  }
+  if (found.length === 0) return
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => (w === first ? { quoted: true, value } : w)),
+  }))
+}
+
+// The characters a glob reads as a pattern, zsh's `(` included, a lone `[` aside, which is test's own name
+const GLOB_PATTERN = /[*?(]|\[[^\]]*\]/
+
+// One path part's pattern as the shell reads it, where a leading `!` is a plain character rather than Bun.Glob's negation
+const shellGlob = (part: string) => new Bun.Glob(part.replace(/^!/, "\\!"))
+
+// Whether a call's text holds a glob whose last path part may match one of these program names (`pk?ll`, `/usr/bin/g*`), so a guard's first look at a call, and its rule for a command it cannot read, count the call as naming that program
+export function globSpells(text: string, names: string[]): boolean {
+  for (const token of text.split(/[\s;&|<>()`"'\\]+/)) {
+    const part = token.slice(token.lastIndexOf("/") + 1)
+    if (!GLOB_PATTERN.test(part)) continue
+    const glob = shellGlob(part)
+    if (names.some((name) => glob.match(name))) return true
+  }
+  return false
+}
+
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
 function repass(commands: Command[], envs: Map<number, Env>): void {
   for (const cmd of commands) {
@@ -2016,20 +2082,29 @@ function printsText(words: string[]): boolean {
   return v >= 0 && format !== undefined && !marked(format) && /^[^%\\]*\S[^%\\]*$/.test(format)
 }
 
-// A binder (`binds`) gives its names a value the reader cannot read in walk order, or a for or select list's one literal word (loopWord), in its own scope: a for or select header for its own body alone, back to what they held at its close, since its body runs only once it has bound and its list may be empty; any other binder for the commands after it, where the shell runs it unconditionally there
+// A binder (`binds`) gives its names a value the reader cannot read in walk order, or a for or select list's one literal word (loopWord), in its own scope: a for or select header for its body, its value captured in place of the one held before (heldResolved), and changed at its close, since its list may be empty and its body may set them; any other binder for the commands after it, where the shell runs it unconditionally there
 function bind(commands: Command[], k: number, env: Env, unbind: Map<Command, () => void>): void {
   const cmd = commands[k]
   const names = binds(cmd)
   if (names.length === 0 || cmd.detached) return
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept)) return
-  const before = names.map((name) => [name, env.vars.get(name)] as const)
   const value = close ? loopWord(cmd) : undefined
   for (const name of names) setVar(env.vars, name, value ?? unknown("a value a builtin gives"))
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before) held ? setVar(env.vars, name, held) : env.vars.delete(name)
-    })
+  if (!close) return
+  for (const name of names) capture(env, name, value)
+  unbind.set(close, () => {
+    for (const name of names) {
+      setVar(env.vars, name, CHANGED)
+      capture(env, name)
+    }
+  })
+}
+
+// A loop's name captured as its one literal word, or with no capture, so a value set before the loop is not read in its place
+function capture(env: Env, key: string, value?: Word): void {
+  if (value) recordHeld(env, key, value)
+  else delete heldResolved.get(env.vars)?.[key]
 }
 
 // The one word a for or select header's literal list holds (`for c in git`, `for c in 'git push'`), which its body reads as written; undefined for any other list, which binds a value the reader cannot read
@@ -2084,12 +2159,14 @@ export async function examine(
   const [primary, ...others] = readings(parse(cmd))
   const vanished = emptyProgram(cmd, env)
   const array = arrayRun(cmd, primary.first, env)
+  const globbed = globRun(cmd, primary.first, env)
   const resolving = [
     ...splitHeld(cmd, primary.name, env),
     ...(array ? [array] : []),
     ...heldScripts(cmd, primary, env),
+    ...(globbed ?? []),
   ]
-  if (unreadCommand(cmd, primary, resolving))
+  if (globbed === null || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others]) parsed.unread = true
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
@@ -2158,6 +2235,10 @@ function unreadCommand(cmd: Command, parsed: Parsed, resolving: Command[]): bool
   if (!scriptWords(parsed).some((w) => marked(w.value))) return false
   return others.every((p) => scriptWords(p).some((w) => marked(w.value)))
 }
+
+// Whether an unread reading's program word is an array run whole (`"${A[@]}"`) or a glob, the unread commands no-stash and no-raw-delete refuse in a call that names their program
+export const unreadRun = ({ first, unread }: Parsed): boolean =>
+  !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
 function stdinScript({ args, name }: Parsed): boolean {

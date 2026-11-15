@@ -5,12 +5,14 @@ import { fromFactory } from "./role"
 import {
   type Env,
   GIT_TAKES,
+  globSpells,
   knownVariables,
   lex,
   marked,
   PRINTERS,
   program,
   run,
+  unreadRun,
   visible,
   type Visit,
   type Word,
@@ -23,6 +25,11 @@ const WRITES = new Set(["create", "store"])
 const INSTEAD = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`
 
 const refuse = (what: string, why: string) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`
+
+const UNREAD = refuse(
+  "a command built from a value it cannot read, in a call that names git stash",
+  "it may be a stash by position. Write the program and its words out in the call, or write the script to a file and run it",
+)
 
 // agent-browser's close and its aliases; with --all it closes every session's browser, not only this session's.
 const BROWSER_CLOSE = new Set(["close", "exit", "quit"])
@@ -194,7 +201,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any stash, in a call that names stash and git, written out or as a glob that may match it
+  const named =
+    /\bstash\b/.test(BARE(command)) &&
+    (/\bgit\b/i.test(BARE(command)) || globSpells(BARE(command), ["git"]))
+  return run(lex(command, env.known), env, (cmd, parsed, at) =>
+    named && unreadRun(parsed) ? Promise.resolve(UNREAD) : visit(cmd, parsed, at),
+  )
 }
 
 // Fails closed only on a call that reads as a git stash: an error on any other call lets it run, so a parser bug cannot block every Bash command.

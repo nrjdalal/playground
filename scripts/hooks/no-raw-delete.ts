@@ -9,6 +9,7 @@ import {
   type Command,
   type Env,
   examine,
+  globSpells,
   known,
   knownVariables,
   lex,
@@ -26,6 +27,7 @@ import {
   stdinFed,
   stdinOf,
   unreadable,
+  unreadRun,
   visible,
   type Visit,
   withDeadline,
@@ -253,6 +255,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   if (typeof command !== "string" || !CANDIDATE.test(bare(command))) return
   const directory = typeof cwd === "string" ? cwd : undefined
   const roots = rootsOf(directory, session)
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one or holds a glob that may match a delete program
+  const named = DELETES.test(bare(command)) || globSpells(bare(command), SPELLED)
   const env: Env = {
     cwd: directory,
     files: new Map(),
@@ -321,6 +325,12 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   ): Promise<string | undefined> => {
     const { args, first, xargs } = parsed
     const name = unversioned(parsed.name)
+    if (named && unreadRun(parsed))
+      return refuse(
+        "a command built from a value it cannot read, in a call that names a delete",
+        "it may be any delete",
+        `Write the program and its words out in the call, or write the script to a file and run it. ${INSTEAD}`,
+      )
     // a program word the hook cannot read (a variable, a brace, a glob) given -r, or led by a word it cannot read either (`$RM $FLAGS`), may be a recursive rm; a readable word ends the lead (`$T git clone $S/x`)
     const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a))
     const lead = end < 0 ? args : args.slice(0, end)
@@ -421,6 +431,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
 }
 
 const bare = (command: string) => command.replace(/[\\'"]/g, "")
+
+// The delete programs a glob in a call may spell (`/bin/r?`), which counts the call as naming a delete
+const SPELLED = [...RM, ...DELETER_PROGRAMS, ...SHRED, "chflags", "chmod"]
 
 // The cheap first look: a name the hook judges, in any case as macOS runs it, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =

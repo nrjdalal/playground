@@ -45,7 +45,7 @@ applyEnvAliases();
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { existsSync as existsSync3, readdirSync, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync2, statSync as statSync2 } from "fs";
 import { basename as basename2, join as join6 } from "path";
 
 // packages/env/src/data-dir.ts
@@ -6335,7 +6335,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
-import { realpathSync, statSync } from "fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -7954,6 +7954,63 @@ function arrayRun(cmd, first, env) {
     return null;
   return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
+function globRun(cmd, first, env) {
+  const pattern = first?.value ?? "";
+  if (!first?.glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
+    return;
+  if (!GLOB_PATTERN.test(pattern))
+    return;
+  if (pattern.includes("("))
+    return null;
+  const absolute = isAbsolute2(pattern);
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
+    return null;
+  const base = absolute ? "/" : env.cwd;
+  let paths = [""];
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path, name) => k === 0 ? name : `${path}/${name}`;
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part));
+      continue;
+    }
+    const glob = shellGlob(part);
+    const next = [];
+    for (const path of paths) {
+      let names;
+      try {
+        names = readdirSync(resolve2(base, path || "."));
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+          continue;
+        return null;
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name));
+    }
+    if (next.length > READINGS)
+      return null;
+    paths = next;
+  }
+  const found = [];
+  for (const path of paths) {
+    try {
+      lstatSync(resolve2(base, path));
+      found.push(path);
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+        return null;
+    }
+  }
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+var GLOB_PATTERN = /[*?(]|\[[^\]]*\]/;
+var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!"));
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
@@ -7983,15 +8040,25 @@ function bind(commands, k, env, unbind) {
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined;
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
-  const before = names.map((name) => [name, env.vars.get(name)]);
   const value = close ? loopWord(cmd) : undefined;
   for (const name of names)
     setVar(env.vars, name, value ?? unknown2("a value a builtin gives"));
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before)
-        held ? setVar(env.vars, name, held) : env.vars.delete(name);
-    });
+  if (!close)
+    return;
+  for (const name of names)
+    capture(env, name, value);
+  unbind.set(close, () => {
+    for (const name of names) {
+      setVar(env.vars, name, CHANGED);
+      capture(env, name);
+    }
+  });
+}
+function capture(env, key, value) {
+  if (value)
+    recordHeld(env, key, value);
+  else
+    delete heldResolved.get(env.vars)?.[key];
 }
 function loopWord({ words }) {
   const at = words.findIndex((w) => w.value === "in" && !w.quoted);
@@ -8034,12 +8101,14 @@ async function examine(cmd, env, visit, builtins) {
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
   const array = arrayRun(cmd, primary.first, env);
+  const globbed = globRun(cmd, primary.first, env);
   const resolving = [
     ...splitHeld(cmd, primary.name, env),
     ...array ? [array] : [],
-    ...heldScripts(cmd, primary, env)
+    ...heldScripts(cmd, primary, env),
+    ...globbed ?? []
   ];
-  if (unreadCommand(cmd, primary, resolving))
+  if (globbed === null || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others])
       parsed.unread = true;
   const expanded = [
@@ -9042,6 +9111,9 @@ function knownVariables(command, environment, cwd) {
 // scripts/hooks/no-stash.ts
 var READS = new Set(["list", "show"]);
 var WRITES = new Set(["create", "store"]);
+var INSTEAD = `Every worktree shares one stash list, so a stash taken by position or without a name can be another session's work. Commit a WIP commit on your own branch instead (git commit -m 'chore: wip <what>'), or take before-shots from a separate worktree on origin/canary, made by absolute path under the main checkout so it nests in no other worktree (git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" origin/canary). git stash list, git stash show, git stash push -m <message> and git stash apply <full sha> stay allowed.`;
+var refuse = (what, why) => `no-stash hook refuses ${what}: ${why}. ${INSTEAD}`;
+var UNREAD = refuse("a command built from a value it cannot read, in a call that names git stash", "it may be a stash by position. Write the program and its words out in the call, or write the script to a file and run it");
 var BROWSER_CLOSE = new Set(["close", "exit", "quit"]);
 function gitCommand(args) {
   const aliases = [];
@@ -9076,7 +9148,7 @@ var WRITES2 = [
   [/linear/i, new Set(["save_comment", "save_issue"])],
   [/slack/i, new Set(["chat_post_message"])]
 ];
-var refuse = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push, no file write, no pull request and no merge. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
+var refuse2 = (what) => `no-prepare-write hook refused ${what}: this session is preparing a ticket it has not claimed (its roster row reads mode=prepare), so nothing reaches the org yet: no tracker write, no chat post, no push, no file write, no pull request and no merge. Work on the local branch alone. Its waiter clears the mode the moment it prints its Claim line, and this call then runs.`;
 var log = (environment, entry) => {
   try {
     const dir = join5(dataDirOf(environment), "ops");
@@ -9172,7 +9244,7 @@ async function check(raw, environment = process.env) {
     write = await writeOf(tool, toolInput, cwd, environment);
     if (!write)
       return;
-    return await marked2(session, environment) ? refuse(write) : undefined;
+    return await marked2(session, environment) ? refuse2(write) : undefined;
   } catch (error) {
     log(environment, { error: String(error), session, tool, write });
     return;
@@ -10007,7 +10079,7 @@ function judge(args, parsed, env, factory, settled) {
     const where = lands(undefined, dir, factory, carried);
     if (where === false)
       return;
-    return refuse2(other ? `it runs git ${sub.value}, a push the hook does not read` : alias ? `it runs git ${sub.value}, an alias that may push` : "it runs a git command the hook cannot read", where);
+    return refuse3(other ? `it runs git ${sub.value}, a push the hook does not read` : alias ? `it runs git ${sub.value}, an alias that may push` : "it runs a git command the hook cannot read", where);
   }
   const { positionals, flags } = parseFlags(rest, PUSH_TAKES);
   const remote = positionals[0] ?? flags.findLast((f) => f.name === "--repo")?.value;
@@ -10020,9 +10092,9 @@ function judge(args, parsed, env, factory, settled) {
     return;
   if (hit && where === true)
     return `no-protected-push hook refuses this git push: it writes ${hit} of ${factory}. ${ROUTE} ${FIX}`;
-  return refuse2(written.unread ?? `it writes ${hit}`, where);
+  return refuse3(written.unread ?? `it writes ${hit}`, where);
 }
-var refuse2 = (what, where) => `no-protected-push hook refuses this git push: ${what}, ${where === true ? "in the factory's repository" : `and ${where}`}, so it may write main or canary there. ${ROUTE} ${FIX}`;
+var refuse3 = (what, where) => `no-protected-push hook refuses this git push: ${what}, ${where === true ? "in the factory's repository" : `and ${where}`}, so it may write main or canary there. ${ROUTE} ${FIX}`;
 var MCP_TOOL2 = /^mcp__(.+?)__(.+)$/;
 var FILE_TOOLS = new Set(["create_or_update_file", "delete_file", "push_files"]);
 var MERGE_TAKES = new Set([
@@ -10519,7 +10591,7 @@ var notEveryday = (name) => HANDLE.test(name) && !terms.everyday.some((w) => w.t
 function skillNames(checkout = CHECKOUT2) {
   const ours = join6(checkout, "skills", "playground");
   try {
-    return readdirSync(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
+    return readdirSync2(ours, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync3(join6(ours, d.name, "SKILL.md"))).map((d) => d.name).filter(notEveryday);
   } catch {
     return [];
   }
@@ -10730,11 +10802,11 @@ var IDLE = {
 };
 var state = () => calls.getStore() ?? IDLE;
 var lower = (text) => text[0].toLowerCase() + text.slice(1);
-function refuse3(what, target, detail, fix) {
+function refuse4(what, target, detail, fix) {
   return `${state().policy.guard} hook refused ${what} to ${target.label}: ${detail}. ${state().policy.why} ${fix}`;
 }
 function refuseAny(what, target, fix = NOT_RUN) {
-  return target.where === "guarded" ? refuse3(what, target, `it writes to ${state().policy.place}`, fix) : refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
+  return target.where === "guarded" ? refuse4(what, target, `it writes to ${state().policy.place}`, fix) : refuse4(what, target, `the hook cannot tell whether it writes to ${state().policy.place}`, PLACE_FIX);
 }
 async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "other")
@@ -10752,13 +10824,13 @@ async function judge2(what, target, texts, env, extras = []) {
   if (target.where === "unknown") {
     if (!hit)
       return;
-    return refuse3(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
+    return refuse4(what, target, `the hook cannot tell whether it writes to ${state().policy.place}, and its text holds ${holds}`, `Name where it goes by its literal value in a call of its own (gh -R <owner>/<repo>, the pull request number or URL, git -C /abs/checkout, the URL itself, or a REST endpoint naming the repository in place of a GraphQL node id), or ${lower(fix ?? "")} ${NOT_RUN}`);
   }
   if (hit)
-    return refuse3(what, target, `its text holds ${holds}`, fix ?? hit.fix);
+    return refuse4(what, target, `its text holds ${holds}`, fix ?? hit.fix);
   const hidden = resolved.find((t) => t.unknown);
   if (hidden) {
-    return refuse3(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
+    return refuse4(what, target, `the hook cannot read its text before it runs (it comes from ${hidden.unknown}), so it may hold ${state().policy.what}`, READABLE);
   }
 }
 function decide(candidates) {
@@ -10853,7 +10925,7 @@ async function gh(args, cmd, env, local, xargs) {
   const key = head.join(" ");
   if (state().policy.anyWrite) {
     if (key === "alias import" || key === "alias set") {
-      return refuse3(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
+      return refuse4(`gh ${key}`, decide([]), "an alias can run any gh write under a name the hook does not read", `Run the gh command itself, in a call of its own. ${NOT_RUN}`);
     }
     if (head[0] === "issue" || head[0] === "label" || CONVERSATION.has(key))
       return;
@@ -10959,8 +11031,8 @@ function unplaced(what, source, env) {
   if (!lost && source.every(Boolean))
     return;
   if (state().policy.anyWrite && state().changed)
-    return refuse3(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
-  return refuse3(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
+    return refuse4(what, decide([]), "an earlier command in the call changes the git or gh state it is placed by", PLACE_FIX);
+  return refuse4(what, decide([]), lost ? "the hook cannot tell which repository it writes to, since it names none and runs in a directory the hook lost (after a cd, popd or env -C it cannot follow)" : "the hook cannot tell which repository it writes to, since it names it through a value the hook cannot read", `Name the repository by its literal value (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api), or cd to a literal path, in a call of its own. ${NOT_RUN}`);
 }
 function prCreate2(rest, flags, env) {
   const values = rest.map((w) => w.value);
@@ -11302,11 +11374,11 @@ async function git2(args, cmd, env, local = new Map, depth = 0) {
     const words = value === undefined || value.trim().startsWith("!") ? undefined : splitCmdline(value);
     const head = words?.[0]?.value;
     if (!words || !head || aliases.has(head.toLowerCase()) || depth > 8)
-      return refuse3("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
+      return refuse4("git", decide([]), `its alias ${sub}, set with -c or --config-env, runs a command, holds a value the hook cannot read, or names another alias`, `Write the git command out in full in place of the alias, then run it again. ${NOT_RUN}`);
     return git2([...args.slice(0, k), ...words, ...rest], cmd, env, local, depth + 1);
   }
   if (state().policy.anyWrite) {
-    const cannot = (detail) => refuse3("git", decide([]), detail, PLACE_FIX);
+    const cannot = (detail) => refuse4("git", decide([]), detail, PLACE_FIX);
     if (aliasSet)
       return cannot("it sets a git alias with -c or --config-env, which can run a push under a name the hook does not read");
     if (sub && marked(sub))
@@ -11329,7 +11401,7 @@ async function git2(args, cmd, env, local = new Map, depth = 0) {
     const subtree = sub === "subtree" && rest[0]?.value === "push";
     if (sub === "push" || sub === "send-pack" || subtree) {
       if (carried)
-        return refuse3("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
+        return refuse4("git push", decide([]), "it carries -c, --config-env, --git-dir or a GIT_ variable, which can change where it pushes", PLACE_FIX);
       return subtree ? push(rest.slice(1), here, [], SUBTREE_TAKES) : push(rest, here, [], PUSH_TAKES2, sub === "push");
     }
   }
@@ -11621,7 +11693,7 @@ function mcp(tool, input) {
   const what = tool.replace(/^mcp__/, "");
   let target = { label: surface, where: "guarded" };
   if (!input)
-    return refuse3(what, target, "its input is not an object the hook can read", MCP_READABLE);
+    return refuse4(what, target, "its input is not an object the hook can read", MCP_READABLE);
   if (surface === "Slack" && (CHAT_TOOL.test(name) || name === CONNECTOR_TOOL)) {
     const connector = name === CONNECTOR_TOOL;
     const verdict = clearedPost(what, input, connector ? CONNECTOR_KEYS : POST_KEYS, connector);
@@ -11638,7 +11710,7 @@ function mcp(tool, input) {
     if (owner === undefined)
       return;
     if (typeof owner !== "string") {
-      return refuse3(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
+      return refuse4(what, { label: "GitHub", where: "unknown" }, "its owner is not text the hook can read", MCP_READABLE);
     }
     const repo = { owner, repo: typeof input.repo === "string" ? input.repo : "*" };
     if (!state().policy.guarded(repo))
@@ -11649,7 +11721,7 @@ function mcp(tool, input) {
   }
   const hit = strings(input).map(state().policy.find).find(Boolean);
   if (hit)
-    return refuse3(what, target, `its text holds ${hit.detail}`, hit.fix);
+    return refuse4(what, target, `its text holds ${hit.detail}`, hit.fix);
 }
 function candidate(command) {
   const maybe = state().policy.anyWrite ? MAYBE_ANY : MAYBE;
