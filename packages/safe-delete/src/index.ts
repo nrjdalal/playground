@@ -91,8 +91,15 @@ export const PURGE = { days: 7, minFree: 50e9 }
 // The cap's window, which a burst's recent moves read and a told mark outlives by at most: past it no try can meet the key again, since the key is a stamp that never recurs.
 const CAP_WINDOW_MS = 60_000
 
-// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, and with name set only a plain file whose name it matches; the folder itself, its parent, a sibling and anything deeper stay protected.
-export type CarveOut = { bytes: number; files: number; folder: string; home?: true; name?: RegExp }
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, with name set only a plain file whose name it matches, and with noLink set only while that folder is no symlink and sits behind none; the folder itself, its parent, a sibling and anything deeper stay protected.
+export type CarveOut = {
+  bytes: number
+  files: number
+  folder: string
+  home?: true
+  name?: RegExp
+  noLink?: true
+}
 
 // The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
 export const PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/
@@ -132,6 +139,7 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     files: 1,
     folder: "previews",
     name: /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.(?:html|pdf|txt)$/,
+    noLink: true,
   },
 }
 
@@ -299,7 +307,10 @@ const carveOutAt = (
 ): CarveOut | string => {
   const carve = Object.hasOwn(table, name) ? table[name]! : undefined
   if (!carve) return `no carve-out is named ${name}`
-  const folder = real(join(carve.home ? roots.home : dirname(roots.trash), carve.folder))
+  const named = join(real(carve.home ? roots.home : dirname(roots.trash)), carve.folder)
+  const folder = real(named)
+  if (carve.noLink && folder !== named)
+    return `${named} is a symlink or sits behind one, which the ${name} carve-out does not follow`
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (dirname(own) !== folder || dirname(real(abs)) !== folder)

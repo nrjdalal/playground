@@ -174,6 +174,10 @@ export const removePage = (
   const folder = join(data, "previews")
   if (target.split("/").includes(".."))
     return { error: `${target} takes a .. step; name the page by its file name or its kept path` }
+  if (existsSync(folder) && realOrSelf(folder) !== join(realOrSelf(data), "previews"))
+    return {
+      error: `${folder} is a symlink or sits behind one, so it leads out of the data folder and nothing is removed`,
+    }
   const name = basename(target)
   if (!PAGE_NAME.test(name) || name.includes(".."))
     return {
