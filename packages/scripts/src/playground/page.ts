@@ -19,6 +19,7 @@ import {
   restore,
   type Roots,
 } from "@packages/safe-delete"
+import { z } from "zod"
 
 // The record of every page `playground page` kept, one JSON line each, beside the pages in the previews folder.
 export const PAGES_FILE = "pages.jsonl"
@@ -138,7 +139,21 @@ export type RemoveDeps = {
   session: string
 }
 
-// The pages pages.jsonl lists: a later line for the same file wins, and a tombstone drops it, as the Previews app reads it.
+// A page's record and a tombstone, as pageLine and tombstoneLine in api/hono/src/lib/apps/previews.ts read them.
+const pageLine = z.object({
+  at: z.iso.datetime(),
+  by: z.string().min(1),
+  file: z.string(),
+  for: z.string().min(1).nullable(),
+  title: z.string().min(1),
+})
+const tombstoneLine = z.strictObject({
+  at: z.iso.datetime(),
+  deleted: z.literal(true),
+  file: z.string(),
+})
+
+// The pages pages.jsonl lists, as the Previews app's readPages reads it: a later line for the same file wins, a tombstone drops it, and any other line counts for nothing.
 const listedPages = (folder: string): Set<string> => {
   const pages = new Set<string>()
   let text = ""
@@ -146,13 +161,16 @@ const listedPages = (folder: string): Set<string> => {
     text = readFileSync(join(folder, PAGES_FILE), "utf8")
   } catch {}
   for (const line of text.split("\n")) {
-    let json: { deleted?: unknown; file?: unknown; title?: unknown } | null = null
+    let json: unknown
     try {
       json = JSON.parse(line)
     } catch {}
-    if (typeof json?.file !== "string") continue
-    if (json.deleted === true) pages.delete(json.file)
-    else if (typeof json.title === "string") pages.add(json.file)
+    const tombstone = tombstoneLine.safeParse(json)
+    if (tombstone.success) pages.delete(tombstone.data.file)
+    else {
+      const record = pageLine.safeParse(json)
+      if (record.success) pages.add(record.data.file)
+    }
   }
   return pages
 }
@@ -194,7 +212,8 @@ export const removePage = (
   )
   for (const file of files) {
     const info = lstatSync(join(folder, file), { throwIfNoEntry: false })
-    if (!info?.isFile() || info.nlink !== 1)
+    if (!info) return { error: `${file} is not in the previews folder, so the page stays` }
+    if (!info.isFile() || info.nlink !== 1)
       return {
         error: `${file} is not a regular file with one link (a symlink or a hard link), so the page stays`,
       }
