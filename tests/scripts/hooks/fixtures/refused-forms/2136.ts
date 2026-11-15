@@ -21,6 +21,12 @@ const built = (command: string, program: string, rest: string) => [
   ["a loop variable over a literal list as the command", `for c in '${command}'; do $c; done`],
 ]
 
+// An array whose elements hold a blank or are empty, run whole unquoted, which bash splits again and drops an empty word of
+const split = (elements: string[]) =>
+  elements.map(
+    (list) => [`an array of (${list}) run whole unquoted`, `A=(${list}); \${A[@]}`] as const,
+  )
+
 // The forms the review of this file's source found refused; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
@@ -33,6 +39,19 @@ export const groups: Group[] = [
       ["a killall in an array run whole", `A=(killall watcher); "\${A[@]}"`],
       ["a kill beside a search in an array run whole", `A=(kill $(pgrep -f watcher)); "\${A[@]}"`],
       ["a kill by name an ANSI-C string's escaped blank holds", `C=$'pkill\\x20-f'; $C watcher`],
+      // an unquoted run splits each element again at blanks, as bash does
+      ...split([
+        "'pkill -f' watcher",
+        '"pkill -f" watcher',
+        "pkill\\ -f watcher",
+        "'pkill -f watcher'",
+      ]).map(([what, call]) => [`a kill by name in ${what}`, call] as const),
+      [
+        "a kill by name in an element holding a blank, its joined run unquoted",
+        "A=('pkill -f' watcher); ${A[*]}",
+      ],
+      ["a kill by name an eval runs past its --, quoted", "eval -- 'pkill -f watcher'"],
+      ["a kill by name an eval runs past its --", "eval -- pkill -f watcher"],
       // the reader cannot resolve these, so each is an unread command in a call that names a kill
       [
         "a loop variable over a list it cannot read",
@@ -51,6 +70,9 @@ export const groups: Group[] = [
         .filter(([what]) => !/set -A|loop/.test(what))
         .map(([what, call]) => [`a recursive delete in ${what}`, call] as const),
       ["a recursive delete by -R in an array run whole", `A=(rm -R ${NEVER_MADE}); "\${A[@]}"`],
+      ...split([`'rm -rf' ${NEVER_MADE}`]).map(
+        ([what, call]) => [`a recursive delete in ${what}`, call] as const,
+      ),
     ],
   },
   {
@@ -63,6 +85,13 @@ export const groups: Group[] = [
       ],
       ["a stash pop in an array run whole", `A=(git stash pop); "\${A[@]}"`],
       ["a stash pop in a held script an eval runs", `S='git stash pop'; eval "$S"`],
+      ...split(["'git stash' pop", "'git stash pop'", "'' git stash pop"]).map(
+        ([what, call]) => [`a stash pop in ${what}`, call] as const,
+      ),
+      [
+        "a stash pop in an element holding a blank, its joined run unquoted",
+        "A=('git stash' pop); ${A[*]}",
+      ],
     ],
   },
 ]
