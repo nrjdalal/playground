@@ -40,6 +40,8 @@ export const groups: Group[] = [
       ],
       ["a kill by name at a held folder and a glob", "X=/usr/bin; $X/pk?ll -f watcher"],
       ["a kill by name at a held glob", "X=/usr/bin/pk?ll; $X -f watcher"],
+      ["a kill by name at a path a lone colon bracket matches", "/usr/bin/p[:k:]ill -f watcher"],
+      ["a kill by name at a quoted held folder and a glob", 'X=/usr/bin; "$X"/pk?ll -f watcher'],
     ],
   },
   {
@@ -86,6 +88,7 @@ export const groups: Group[] = [
         "c='git stash'; for c in echo; do :; done; $c pop",
       ],
       ["a stash pop by a git path a POSIX class glob matches", "/usr/bin/g[[:alpha:]]t stash pop"],
+      ["a stash pop by a git path a lone colon bracket matches", "/usr/bin/g[:i:]t stash pop"],
       [
         "a stash pop in an array an append changed, git in an ANSI-C string",
         `A=($'\\x67it' stash); A+=(pop); "\${A[@]}"`,
@@ -144,6 +147,8 @@ export const groups: Group[] = [
       ["a plain rm by a path a POSIX class glob matches", `/bin/r[[:alpha:]] ${NEVER_MADE}`],
       ["a plain rm at a held folder and a glob", `X=/bin; $X/r? ${NEVER_MADE}`],
       ["a plain rm at a held glob", `X=/bin/r?; $X ${NEVER_MADE}`],
+      ["a plain rm by a path a lone colon bracket matches", `/bin/r[:m:] ${NEVER_MADE}`],
+      ["a plain rm at a quoted held folder and a glob", `X=/bin; "$X"/r? ${NEVER_MADE}`],
       [
         "a plain rm in an array an element's assignment set from an ANSI-C string",
         `A=(echo ${NEVER_MADE}); A[0]=$'\\x72m'; "\${A[@]}"`,

@@ -1957,8 +1957,18 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
     words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
   }));
 }
+function heldGlob(cmd, first, env) {
+  if (!first?.glob || !first.raw || !marked(first.value))
+    return;
+  const value = relexedValue(first.raw, heldKnown(env));
+  if (value === undefined || marked(value))
+    return;
+  const word = { ...first, value };
+  return globRun({ ...cmd, words: cmd.words.map((w) => w === first ? word : w) }, word, env, true);
+}
 var GLOB_PATTERN = /[*?]|\[[^\]]*\]/;
-var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!").replace(/\[:([a-z]+):\]/g, (_, name) => POSIX_CLASSES[name] ?? " -~").replace(/\[([=.])(.)\1\]/g, "$2"));
+var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!").replace(BRACKET, (bracket) => bracket.slice(1, -1).replace(/\[:([a-z]+):\]/g, (_, name) => POSIX_CLASSES[name] ?? " -~").replace(/\[([=.])(.)\1\]/g, "$2").replace(/^/, "[").concat("]")));
+var BRACKET = /\[[!^]?\]?(?:\[:[a-z]+:\]|\[([=.]).\1\]|[^\]])*\]/g;
 var POSIX_CLASSES = {
   alnum: "0-9A-Za-z",
   alpha: "A-Za-z",
@@ -2082,6 +2092,7 @@ async function examine(cmd, env, visit, builtins) {
   const split = splitHeld(cmd, primary.name, env);
   const globs = [
     globRun(cmd, primary.first, env),
+    heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true))
   ];
   const resolving = [
@@ -2161,7 +2172,7 @@ function unreadCommand(cmd, parsed, resolving) {
   return others.every((p) => scriptWords(p).some((w) => marked(w.value)));
 }
 var decodedText = (command) => command.includes("$'") ? `${command} ${command.replace(/\$'(?:[^'\\]|\\[\s\S])*'/g, (ansiC) => lex(ansiC).commands.flatMap((c) => c.words.map((w) => w.value)).join(" "))}` : command;
-var unreadRun = ({ first, unread }) => !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""));
+var unreadRun = ({ first, unread }) => !!unread && (!!first?.glob && !/(?:^|\/)[*?]+$/.test(first.value) || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""));
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
     return STDIN_PATHS.has(args[0]?.value ?? "");

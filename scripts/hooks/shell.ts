@@ -2051,17 +2051,33 @@ function globRun(
   }))
 }
 
+// A program word that joins a read the split reading leaves whole (a quoted `"$X"`) to a typed glob part (`"$X"/pk?ll`), its read resolved with the held variables and then globbed; a glob character inside the held value is matched too, which errs toward a match
+function heldGlob(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {
+  if (!first?.glob || !first.raw || !marked(first.value)) return
+  const value = relexedValue(first.raw, heldKnown(env))
+  if (value === undefined || marked(value)) return
+  const word = { ...first, value }
+  return globRun({ ...cmd, words: cmd.words.map((w) => (w === first ? word : w)) }, word, env, true)
+}
+
 // The characters a glob reads as a pattern, a lone `[` aside, which is test's own name
 const GLOB_PATTERN = /[*?]|\[[^\]]*\]/
 
 // One path part's pattern as the shell reads it, where a leading `!` is a plain character rather than Bun.Glob's negation, and a POSIX class (`[:alpha:]`), equivalence class (`[=a=]`) or collating symbol (`[.a.]`) inside a bracket is the set it names, which Bun.Glob does not read; a class it cannot spell as ranges takes every printable character, so it errs toward a match
 const shellGlob = (part: string) =>
   new Bun.Glob(
-    part
-      .replace(/^!/, "\\!")
-      .replace(/\[:([a-z]+):\]/g, (_, name: string) => POSIX_CLASSES[name] ?? " -~")
-      .replace(/\[([=.])(.)\1\]/g, "$2"),
+    part.replace(/^!/, "\\!").replace(BRACKET, (bracket: string) =>
+      bracket
+        .slice(1, -1)
+        .replace(/\[:([a-z]+):\]/g, (_, name: string) => POSIX_CLASSES[name] ?? " -~")
+        .replace(/\[([=.])(.)\1\]/g, "$2")
+        .replace(/^/, "[")
+        .concat("]"),
+    ),
   )
+
+// A bracket expression, its classes inside it whole, so `[[:alpha:]]` is one set while a lone `[:k:]` is a set of `:` and `k`
+const BRACKET = /\[[!^]?\]?(?:\[:[a-z]+:\]|\[([=.]).\1\]|[^\]])*\]/g
 
 // The POSIX bracket classes as Bun.Glob's ranges, in the C locale
 const POSIX_CLASSES: Record<string, string> = {
@@ -2192,6 +2208,7 @@ export async function examine(
   // a held value split into the program word is globbed as the shell globs an unquoted expansion (`X=/usr/bin; $X/pk?ll`)
   const globs = [
     globRun(cmd, primary.first, env),
+    heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
   ]
   const resolving = [
@@ -2283,7 +2300,9 @@ export const decodedText = (command: string): string =>
 
 // Whether an unread reading's program word is an array run whole (`"${A[@]}"`) or a glob, the unread commands no-stash and no-raw-delete refuse in a call that names their program
 export const unreadRun = ({ first, unread }: Parsed): boolean =>
-  !!unread && (!!first?.glob || WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
+  !!unread &&
+  ((!!first?.glob && !/(?:^|\/)[*?]+$/.test(first.value)) ||
+    WHOLE_RUN.test(first?.raw ?? first?.source ?? ""))
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
 function stdinScript({ args, name }: Parsed): boolean {
