@@ -1098,7 +1098,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `du` and a `find` with no action that runs, deletes or writes (`FIND_ACTIONS`) pass anywhere, and two files compare with `diff -q`.
   It compares two revisions with `git diff --no-index` only beside `--no-ext-diff` and `--no-textconv`, since a folder can ship the attributes that start a diff program, and a scratch repo's `git init`, `add` and `commit` stay refused, since a copied item can carry its own `.git` and hooks.
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
-  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and where read mode writes, and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
+  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and where read mode writes (a folder made in one call, written in the next), and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
   [guards](#guards) runs it on Bash, and both settings files register its own bundle on Monitor, which guards does not hear.
   Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts tests/scripts/hooks/guards.test.ts tests/scripts/factory-settings.test.ts`, the last two holding it to guards' entry and the Monitor one.

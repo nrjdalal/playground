@@ -677,7 +677,9 @@ describe("no-outside-pr-code's read mode writes only into its own folders", () =
   })
 
   test("the reason says where read mode writes", async () => {
-    expect(await judgeIn(`cat ${EVIL} > ${TARGET}`, "s-out-named")).toContain("own scratch")
+    expect(await judgeIn(`cat ${EVIL} > ${TARGET}`, "s-out-named")).toContain(
+      "own scratch or scratchpad (make the folder in one call, then write in the next)",
+    )
   })
 })
 

@@ -8124,7 +8124,7 @@ async function check(raw, environment = process.env, lookup = live(environment))
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts, and writes a file only into a folder already in its own scratch or scratchpad: ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
