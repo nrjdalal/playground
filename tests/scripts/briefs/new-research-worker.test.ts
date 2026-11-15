@@ -24,7 +24,7 @@ test("the research worker template's last step reports, then the planner closes 
   const steps = (await read()).split("\n").filter((l) => /^\d+\. /.test(l))
   const last = steps.at(-1) ?? ""
   expect(last).toMatch(
-    /^4\. Clear `~\/\.playground\/scratch\/<your name>\/` with `playground rm <path>`/,
+    /^5\. Clear `~\/\.playground\/scratch\/<your name>\/` with `playground rm <path>`/,
   )
   expect(last).toContain("then report the answer or the plan to the planner by `SendMessage`")
   expect(last).toContain("so the planner closes your pane with `spawn.sh close <your name>`")
