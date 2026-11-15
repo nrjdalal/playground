@@ -16880,6 +16880,13 @@ function live2(environment) {
     },
     holds: (folder, entry) => existsSync10(join19(folder, entry)),
     main: mainCheckout2(process.cwd()),
+    name: async (sessionId) => {
+      if (typeof sessionId !== "string")
+        return;
+      try {
+        return await registryName(sessionId, environment);
+      } catch {}
+    },
     prsOf: async (sessionId) => {
       if (typeof sessionId !== "string")
         return [];

@@ -34,6 +34,8 @@ export type Lookup = {
     entry: ".git" | "bunfig.toml" | "HEAD" | "node_modules" | "objects" | "refs",
   ) => boolean
   main: string
+  // the session's registry name, which names its own scratch and scratchpad folders
+  name: (sessionId: unknown) => Promise<string | undefined>
   prsOf: (sessionId: unknown) => Promise<string[]>
   // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
   runner: (script: string) => string | undefined
@@ -442,6 +444,12 @@ export function live(environment: Environment): Lookup {
     holds: (folder, entry) => existsSync(join(folder, entry)),
     // a guard runs from the main checkout (the settings' command cds there), so its folder is the checkout whose extensions hold the factory's own skills
     main: mainCheckout(process.cwd()),
+    name: async (sessionId) => {
+      if (typeof sessionId !== "string") return
+      try {
+        return await registryName(sessionId, environment)
+      } catch {}
+    },
     prsOf: async (sessionId) => {
       if (typeof sessionId !== "string") return []
       try {

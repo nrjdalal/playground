@@ -33,6 +33,7 @@ const PRS: Record<string, { author: string; owner: string; ownerType: string }> 
 }
 const SESSIONS: Record<string, string[]> = {
   "s-issue": ["https://github.com/acme-owner/widgets/issues/77"],
+  "s-item": ["acme-owner/skill/triage"],
   "s-mixed": [pull("acme-owner/widgets", 502), pull("acme-owner/widgets", 501)],
   "s-none": [],
   "s-org": [pull("acme-org/tools", 504)],
@@ -62,10 +63,16 @@ const SHEBANGS: Record<string, string> = {
   [`${SHAPES}/shell`]: "#!/bin/sh",
 }
 
+// an extension item's reviewer, whose row names the item and no PR, and its own scratch and scratchpad folders
+const ITEM_REVIEWER = "p7w3zc-reviewer"
+const PAD = `${HOME}/.playground/scratchpad/${ITEM_REVIEWER}`
+const SCRATCH = `${HOME}/.playground/scratch/${ITEM_REVIEWER}`
+
 const lookup: Lookup = {
   author: async (repo, pr) => PRS[`${repo}#${pr}`],
   holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
+  name: async (sessionId) => (sessionId === "s-item" ? ITEM_REVIEWER : undefined),
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
   // each made-up script's shebang by its extension, as a skill's scripts name theirs
   runner: (script) =>
@@ -369,6 +376,54 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
 
   test("a tool other than Bash and Monitor", async () => {
     expect(await judge(call("bun test", OUTSIDE, "s-out", "Read"))).toBeUndefined()
+  })
+})
+
+// #1280: an item reviewer is in read mode, as its row names no PR, and finishes its review by reading, copying into and clearing its own folders, and posting its verdict
+describe("no-outside-pr-code lets an item reviewer finish its review by reading", () => {
+  const item = (command: string, cwd = MAIN) => judge(call(command, cwd, "s-item"))
+  // the main checkout holds a bunfig.toml of its own, which the playground command reads there
+  const mainBunfig: Lookup = {
+    ...lookup,
+    holds: (folder, entry) =>
+      (folder === MAIN && entry === "bunfig.toml") || lookup.holds(folder, entry),
+  }
+
+  test.each([
+    ["playground ext show", "playground ext show acme-owner script triage --rev abc123"],
+    ["playground ext export into its scratchpad", `playground ext export ${PAD}/store/`],
+    ["playground ext score", 'playground ext score acme-owner skill triage abc123 5 --reason "r"'],
+    ["playground rm of its scratchpad", `playground rm ${PAD}`],
+    ["playground rm inside its scratch folder", `playground rm ${SCRATCH}/store/node_modules`],
+    ["cmp", `cmp ${PAD}/repo/a.md ${HOME}/.playground/a.md && echo SAME`],
+    ["du", `du -sh ${PAD}/*`],
+    ["find with no action", `find ${PAD} -type f | wc -l`],
+    ["git diff in its scratchpad's repo", `git -C ${PAD}/repo diff HEAD^ HEAD -- a.ts`],
+    ["cp into its scratchpad", `mkdir -p ${PAD}/repo && cp -R ${HOME}/x/scripts ${PAD}/repo/`],
+    ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
+  ])("%s passes", async (_, command) => {
+    expect(await item(command)).toBeUndefined()
+  })
+
+  test("a playground verb from the main checkout, whose bunfig.toml is its own, passes", async () => {
+    const raw = call("playground ext score acme-owner skill triage abc123 5", MAIN, "s-item")
+    expect(await check(raw, as("reviewer"), mainBunfig)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "the item's tests through run-slot",
+      `${SLOT} ${ITEM_REVIEWER} -- bun --cwd ${PAD}/store test.ts x`,
+    ],
+    ["playground rm outside its own folders", `playground rm ${HOME}/.playground/scratchpad/other`],
+    ["playground rm that climbs out of its folder", `playground rm ${PAD}/../other-reviewer`],
+    ["playground rm with an option", `playground rm --force ${PAD}`],
+    ["cp out of its own folders", `cp ${PAD}/a.ts ${HOME}/.playground/ops/a.ts`],
+    ["cp with a target directory option", `cp -t ${HOME}/.playground/ops ${PAD}/a.ts`],
+    ["find that deletes", `find ${PAD} -name x -delete`],
+    ["find that runs a program", `find ${PAD} -exec sh {} ;`],
+  ])("%s is refused", async (_, command) => {
+    expect(await item(command)).toContain("no-outside-pr-code")
   })
 })
 

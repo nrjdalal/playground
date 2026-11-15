@@ -8068,6 +8068,13 @@ function live(environment) {
     },
     holds: (folder, entry) => existsSync2(join5(folder, entry)),
     main: mainCheckout(process.cwd()),
+    name: async (sessionId) => {
+      if (typeof sessionId !== "string")
+        return;
+      try {
+        return await registryName(sessionId, environment);
+      } catch {}
+    },
     prsOf: async (sessionId) => {
       if (typeof sessionId !== "string")
         return [];
