@@ -45,6 +45,17 @@ describe("a merge or pull with ours is refused", () => {
     ["a shell alias for an ours merge", "git -c 'alias.m=!git merge -s ours' m origin/canary"],
     ["in a brace list", "git merge {-s,ours,origin/canary}"],
     ["in a brace sequence", "git merge -s our{s..s} x"],
+    ["beside --help", "git merge -s ours --help"],
+    [
+      "--help after an option git takes a value for",
+      "git pull --server-option -h -s ours origin canary",
+    ],
+    ["an alias whose key is in capitals", "git -c ALIAS.M=merge m -s ours x"],
+    [
+      "an alias for an ours merge whose key is in another case",
+      "git -c 'Alias.m=merge -s ours' m x",
+    ],
+    ["--help as an abbreviated --strategy's value", "git merge --strat -h -s ours x"],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-ours-merge hook refuses")
@@ -106,6 +117,23 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
     ["a brace sequence as -m's value", "git commit -m -{m..n}"],
     ["a brace sequence as --message's value", "git commit --message -{m..n}"],
     ["a brace sequence as a merge's -m value", "git merge -m -{m..n} origin/canary"],
+    ["merge --no-verify --help", "git merge --no-verify --help"],
+    ["commit -n --help", "git commit -n --help"],
+    ["--help as an abbreviated --message's value", "git commit --mess -h -n"],
+    ["--help as --server-option's value", "git pull --server-option -h --no-verify origin canary"],
+    ["an alias whose key is in another case", "git -c 'Alias.C=commit -n' c -m x"],
+    ["an alias called in another case", "git -c 'alias.ci=commit -n' CI -m x"],
+    ["an alias in capitals with the flag after it", "git -c ALIAS.CI=commit Ci --no-verify -m x"],
+    ["an unread subcommand beside -n", "git $X -n -m x"],
+    ["an alias whose section is in capitals", "git -c 'ALIAS.ci=commit --no-verify' ci -m x"],
+    ["an alias whose name is in capitals", "git -c 'alias.CI=commit -n' ci -m x"],
+    ["--help as --refmap's value", "git pull --refmap -h --no-verify origin canary"],
+    ["--help as an abbreviated --message's value, spelled long", "git commit --mess --help -n"],
+    [
+      "--help as a merge's abbreviated --message value",
+      "git merge --mess -h --no-verify origin/canary",
+    ],
+    ["an unread subcommand beside -n in a cluster", "git $(echo commit) -nm x"],
     [
       "an alias chain past the depth the hook follows",
       "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=a8 -c alias.a8=a9 -c alias.a9=commit a1 -n -m x",
@@ -127,7 +155,6 @@ describe("every other call runs", () => {
     ["ours in an attached message", "git merge -m'ours' origin/canary"],
     ["a branch named ours", "git merge ours"],
     ["ours after --", "git merge -- ours"],
-    ["help", "git merge -s ours --help"],
     ["a checkout of ours", "git checkout --ours file.ts"],
     ["echo", "echo git merge -s ours"],
     ["a commit message", "git commit -m 'refuse -s ours merges'"],
@@ -136,7 +163,6 @@ describe("every other call runs", () => {
     ["merge -n, which is --no-stat", "git merge -n origin/canary"],
     ["pull -n, which is --no-stat", "git pull -n origin canary"],
     ["--verify after --no-verify", "git merge --no-verify --verify origin/canary"],
-    ["merge --no-verify --help", "git merge --no-verify --help"],
     ["a commit", "git commit -m 'fix: x'"],
     ["--no-verify in a commit message", "git commit -m 'refuse --no-verify'"],
     ["n as a commit's message", "git commit -mn"],
@@ -144,7 +170,6 @@ describe("every other call runs", () => {
     ["commit --verify after -n", "git commit -n --verify -m 'fix: x'"],
     ["echo of a merge", "echo git merge --no-verify"],
     ["a push", "git push --no-verify origin HEAD:x"],
-    ["commit -n --help", "git commit -n --help"],
     ["an alias for a plain commit", "git -c alias.c=commit c -m 'fix: x'"],
     [
       "an alias named for a git command, which git runs as the command",
