@@ -9,6 +9,7 @@ import { basename, dirname, join } from "node:path"
 
 import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
+import { dataDir } from "../../../packages/env/src/data-dir"
 import { freedOf, type Pr, type RmDeps } from "../../../packages/scripts/src/playground/rm"
 import STATUSES from "../../roster-statuses.json"
 import {
@@ -43,6 +44,7 @@ export type EndDeps = {
   cleanup?: (target: Target) => Promise<string[]>
   close: (name: string) => Promise<{ ok: boolean; out: string }>
   report: (name: string, text: string) => Promise<void>
+  resumeDir?: string
   unsaved: (target: Target) => Promise<string | null>
 }
 
@@ -59,7 +61,7 @@ export function endsOn(row: Row): string | null {
 const leadOf = (lead?: string, worker?: string) =>
   lead ?? (managerKindOfName(worker ?? "") === "ops" ? "ops" : "builder")
 
-// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it.
+// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it on the account its resume record names, read before the close.
 export async function endOne(target: Target, why: string, deps: EndDeps): Promise<Line[]> {
   const to = leadOf(target.lead, target.worker)
   if (!ENDABLE.has(target.kind ?? ""))
@@ -67,17 +69,18 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const unsaved = await deps.unsaved(target)
   if (unsaved)
     return [{ text: `Not ended ${target.name} (${why}): ${unsaved}; push it, then close it`, to }]
+  const idle = why.startsWith("checker-nothing")
+  const account = idle ? await accountOf(target.name, deps.resumeDir) : undefined
   const closed = await deps.close(target.name)
   if (!closed.ok)
     return [
       { text: `Not ended ${target.name} (${why}): spawn.sh close refused: ${closed.out}`, to },
     ]
   await deps.report(target.name, `ended automatically: ${why}`)
-  const idle = why.startsWith("checker-nothing")
   const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
-  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --pr ${target.pr ?? "<PR url>"}`
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
   return target.worker && target.worker !== to
     ? [
         { text, to },
@@ -182,6 +185,17 @@ const runIn = async (argv: string[]): Promise<{ code: number; out: string }> => 
 const git = async (dir: string, args: string[]) => {
   const { code, out } = await runIn(["git", "-C", dir, ...args])
   return code === 0 ? out : null
+}
+
+// The account a session's resume record names, which spawn.sh writes at every herdr start and resume: its account line, a login the usage gate picked included, else its --account, as no-headless-login reads it.
+async function accountOf(name: string, resumeDir?: string): Promise<string | undefined> {
+  if (!resumeDir) return
+  try {
+    const record = await Bun.file(join(resumeDir, `${name}.sh`)).text()
+    return /^# account: (\S+)/m.exec(record)?.[1] ?? /--account (\S+)/.exec(record)?.[1]
+  } catch {
+    return
+  }
 }
 
 // The folders a session's transcript ran in, or null when it could not be read.
@@ -524,6 +538,7 @@ export const liveDeps = (projectsDir: string): EndDeps => ({
       text,
       "status=ended",
     ])),
+  resumeDir: join(dataDir(), "resume"),
   unsaved: async (target) => unsavedLive(target, projectsDir, (await cleanupDeps()) ?? undefined),
 })
 
