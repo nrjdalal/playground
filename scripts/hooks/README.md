@@ -1080,8 +1080,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
   Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
-  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
-  Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  [guards](#guards) runs it on Bash, and both settings files register its own bundle on Monitor, which guards does not hear.
+  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts tests/scripts/hooks/guards.test.ts tests/scripts/factory-settings.test.ts`, the last two holding it to guards' entry and the Monitor one.
 
 ## no-prepare-write
 
