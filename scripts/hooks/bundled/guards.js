@@ -16716,7 +16716,10 @@ async function readGit(args, env, depth) {
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
   }
 }
-var verified = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
+var judged = (args) => {
+  const sub = gitCommand(args).sub?.value;
+  return sub !== undefined && (VERIFIED.has(sub) || marked(sub));
+};
 var expanded = (args) => args.flatMap((w) => {
   if (w.unknown !== BRACE)
     return [w];
@@ -16729,11 +16732,11 @@ var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
   const args = expanded(typed);
   if (name === "git")
     return judgeGit2(args, env, depth);
-  if (first && (first.unknown || marked(first.value)) && (verified(args) || aliasDefined(args, false)))
+  if (first && (first.unknown || marked(first.value)) && (judged(args) || aliasDefined(args, false)))
     return judgeGit2(args, env, depth, false);
   if (PRINTERS.has(name))
     return;
-  const nested = args.findIndex((a, j) => program(a.value) === "git" && (verified(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))));
+  const nested = args.findIndex((a, j) => program(a.value) === "git" && (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))));
   if (nested !== -1)
     return judgeGit2(args.slice(nested + 1), env, depth);
 };

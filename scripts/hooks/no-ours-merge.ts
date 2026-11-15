@@ -244,7 +244,11 @@ async function readGit(args: Word[], env: Env, depth: number): Promise<string | 
   }
 }
 
-const verified = (args: Word[]) => VERIFIED.has(gitCommand(args).sub?.value ?? "")
+// A subcommand the hook judges: commit, merge, pull, or one it cannot read, as a plain git call has it judged
+const judged = (args: Word[]) => {
+  const sub = gitCommand(args).sub?.value
+  return sub !== undefined && (VERIFIED.has(sub) || marked(sub))
+}
 
 // Each word as the shell's brace expansion makes it; a list past braceWords' cap or holding a sequence keeps its BRACE mark, as a word the hook cannot read
 const expanded = (args: Word[]): Word[] =>
@@ -264,14 +268,14 @@ const visitor =
     if (
       first &&
       (first.unknown || marked(first.value)) &&
-      (verified(args) || aliasDefined(args, false))
+      (judged(args) || aliasDefined(args, false))
     )
       return judgeGit(args, env, depth, false)
     if (PRINTERS.has(name)) return
     const nested = args.findIndex(
       (a, j) =>
         program(a.value) === "git" &&
-        (verified(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))),
+        (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))),
     )
     if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth)
   }
