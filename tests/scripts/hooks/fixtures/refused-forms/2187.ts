@@ -48,6 +48,10 @@ const rows = (): Row[] => [
     String.raw`perl -pi -e 's/a/touch $HOME\/.play*\/extensions\/x/' .git/hooks/pre-commit`,
   ],
   [
+    "an in-place perl whose s/// spells the root by a group it matched, read by \\1",
+    String.raw`perl -pi -e 's/^(.*)$/touch ~\/.play\1\/extensions\/x/' .git/hooks/pre-commit`,
+  ],
+  [
     "an in-place sed whose s/// writes a glob of the data folder that holds the root",
     String.raw`sed -i '' 's/a/rm ~\/.p*/' .git/hooks/pre-commit`,
   ],
@@ -137,6 +141,14 @@ const rows = (): Row[] => [
   ],
   ["an in-place sed whose s/// writes a lone slash", String.raw`sed -i '' 's/a/x \/ y/' notes.md`],
   [
+    "an in-place perl whose s/// writes its group by \\1",
+    String.raw`perl -pi -e 's/a/\1b/' notes.md`,
+  ],
+  [
+    "an in-place sed whose s/// writes a * glob of the home, which no dot name matches",
+    String.raw`sed -i '' 's/a/ls ~\/*/' notes.md`,
+  ],
+  [
     "an in-place sed whose s/// writes a path under /usr",
     String.raw`sed -i '' 's/a/\/usr\/local\/bin/' run.sh`,
   ],
@@ -170,6 +182,8 @@ const allowedCalls = [
   "an in-place sed whose s/// writes the home itself",
   "an in-place sed whose s/// writes a folder of the home",
   "an in-place sed whose s/// writes a lone slash",
+  "an in-place perl whose s/// writes its group by \\1",
+  "an in-place sed whose s/// writes a * glob of the home, which no dot name matches",
   "an in-place sed whose s/// writes a path under /usr",
 ]
 
