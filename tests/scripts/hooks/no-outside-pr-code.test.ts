@@ -669,6 +669,10 @@ describe("no-outside-pr-code's read mode writes only into its own folders", () =
         `git -C ${MAIN} worktree add --detach ${CLONED} abc123 && ${CLONED}/x.sh`,
       ],
       ["a tracked skill script edited in place", `node ${EDITED}`],
+      [
+        "a skill script named through a variable the reader does not expand",
+        '"$PLAYGROUND_REPO"/extensions/core/skills/code-review-loop/scripts/state.ts pr 501',
+      ],
     ])("%s is refused", async (_, command) => {
       expect(await judgeIn(command, session)).toContain("no-outside-pr-code")
     })
@@ -968,6 +972,13 @@ describe("no-outside-pr-code's live lookup", () => {
     test("the tracked state.ts passes", async () => {
       expect(trackedIn(repo, join(skills, "code-review-loop", STATE))).toBe(true)
       expect(await judgeHere(`${join(skills, "code-review-loop", STATE)} pr 501`)).toBeUndefined()
+    })
+
+    // code-review-loop's read-mode form: the path written out absolute, and the waiter started from the main checkout by a cd from anywhere
+    test("the waiter, started by a cd to the main checkout's absolute path, passes", async () => {
+      const state = join(skills, "code-review-loop", STATE)
+      const raw = call(`cd ${repo} && ${state} wait acme-owner/widgets 501 abc`, scratch)
+      expect(await check(raw, as("reviewer"), real)).toBeUndefined()
     })
   })
 

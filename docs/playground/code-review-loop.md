@@ -35,7 +35,8 @@ The reviewer pastes the spec's text beside its path into the `code-review` call 
 
 A reviewer session keeps nothing it cannot read back: the skill's `state.ts` asks GitHub and git each time for the head, the newest verdict, the open threads and what others said since.
 So a session that restarts, or a new reviewer taking over, picks up exactly where the last verdict left off, and when GitHub cuts a list at its page size the script says so rather than reading the rest as absent.
-A reviewer in no-outside-pr-code's read mode runs `state.ts` by the main checkout's path, `$PLAYGROUND_REPO/extensions/core/skills/code-review-loop/scripts/state.ts`, from the main checkout, its waiters included, since read mode runs a skill's script only where git in the main checkout tracks it unchanged.
+A reviewer in no-outside-pr-code's read mode runs `state.ts` by the main checkout's path, `$PLAYGROUND_REPO/extensions/core/skills/code-review-loop/scripts/state.ts` written out as an absolute path, from the main checkout, its waiters included, since read mode runs a skill's script only where git in the main checkout tracks it unchanged, and reads no variable in a command but `HOME`,
+`PWD` and `TMPDIR`.
 When the shared GraphQL budget is spent it reads the same facts over REST and says so, marking each review thread's resolution unknown rather than reading it as settled.
 The same script tells a base merge apart from new work: any commit of the PR's own in the push is new work, and otherwise it compares the PR's own changed lines on each side of the push, because a range diff across a merge of `canary` shows `canary`'s work as the PR's; a conflict resolved by hand that kept both sides reads as a base merge too.
 After a `canary` merge into a JSON fixture whose rows are near-identical, the reviewer reads the merged rows by key with `jq` and checks each added field on its own row against both sides.
