@@ -51,8 +51,13 @@ async function inspect(raw: string) {
     tool_name?: unknown
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
-  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows
-  const bare = toolInput.command.replace(/["'\\]/g, "")
+  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill, and an ANSI-C string's words are read as the lexer decodes them, since `$'pkill\x20-f'` holds pkill behind an escape; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows
+  const decoded = toolInput.command.includes("$'")
+    ? lex(toolInput.command)
+        .commands.flatMap((c) => c.words.map((w) => w.value))
+        .join(" ")
+    : ""
+  const bare = `${toolInput.command} ${decoded}`.replace(/["'\\]/g, "")
   if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare)) return
   const lexed = lex(toolInput.command)
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
@@ -82,6 +87,12 @@ async function inspect(raw: string) {
       )
     }
     const { args, first, name, xargs } = parsed
+    // a command the shell builds from a value the reader cannot read may be any kill, in a call whose text names one
+    if (parsed.unread)
+      return refuse(
+        "a command built from a value it cannot read, in a call that names a kill",
+        " Write the program and its words out in the call.",
+      )
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")

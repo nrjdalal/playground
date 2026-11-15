@@ -1,6 +1,6 @@
-// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
+// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names and every file it writes lands in the session's own folders, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -20,8 +20,10 @@ import {
   run,
   SHELLS,
   shellOperand,
+  slice,
   type Text,
   type Visit,
+  type Word,
 } from "./shell"
 
 type Environment = Record<string, string | undefined>
@@ -40,6 +42,8 @@ export type Lookup = {
   prsOf: (sessionId: unknown) => Promise<string[]>
   // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
   runner: (script: string) => string | undefined
+  // whether git, in the main checkout, reports a file tracked and unchanged from HEAD
+  tracked: (script: string) => boolean
 }
 
 const CHECKERS = new Set(["reviewer", "tester"])
@@ -79,7 +83,7 @@ const UTILITIES = new Set([
   "uniq",
   "wc",
 ])
-// Interpreters that read no config from the folder they run in, so an installed skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
+// Interpreters that read no config from the folder they run in, so a skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
 const INTERPRETERS = new Set(["node", "python", "python3"])
 // gh's command groups a checker posts and reads with, A to Z; a checkout (`pr checkout` or `pr co`, wherever the verb sits among gh's flags, and `issue develop`) is left out, since it runs the git hooks of the folder it lands in, and so is any `--`, which hands gh's clone git's own options.
 const GH = new Set(["api", "issue", "label", "pr", "repo", "run", "search"])
@@ -151,6 +155,13 @@ const FIND_ACTIONS = new Set([
   "-ok",
   "-okdir",
 ])
+// The devices a redirect writes to that hold no file
+const DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"])
+// uniq's options that take the next word as their value, BSD's and GNU's
+const UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"])
+// Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd, as no-extensions-write reads it
+const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
+  [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? ""))
 const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/
 
 // Read mode's reason, by why the session is in it; a PR GitHub did not answer for names its kept answer, which a read retries an hour after the failure.
@@ -255,15 +266,20 @@ export async function inspect(
   own: string[] = [],
 ): Promise<boolean> {
   const data = dataDirOf(environment)
-  const skills = [join(data, "orgs"), join(lookup.main, "extensions")]
+  const extensions = join(lookup.main, "extensions")
   const slot = join(data, "ops", "run-slot.sh")
   let allowed = true
-  // A script of a skill installed in the data folder or kept in the main checkout's extensions, run as a program or by an interpreter with no option of its own.
+  // whether the line writes into the session's own folders, and whether it also runs a move that can put a link or a folder there first
+  let ownWrites = false
+  let reshapes = false
+  // A script of a skill in the main checkout's extensions that git there reports tracked and unchanged, run as a program or by an interpreter with no option of its own; the data folder's installed copies are left out, since any tool can write a folder there.
   const skillScript = (written: string | undefined) => {
     if (written === undefined) return false
     const path = real(written)
-    return skills.some(
-      (root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"),
+    return (
+      under(path, extensions) &&
+      path.slice(extensions.length).toLowerCase().includes("/skills/") &&
+      lookup.tracked(path)
     )
   }
   // Whether a folder sits in the main checkout's own work tree: the first folder up from it that holds .git is the main checkout, so another clone or worktree inside it, a folder outside any, and an unknown one are not.
@@ -286,6 +302,25 @@ export async function inspect(
       })
     )
   }
+  // Whether a file a command writes lands in the session's own folders, in a folder there already, since a write makes no folder and one the line makes first can be a link; a glob is refused, since it can expand to a link.
+  const ownTarget = (text: Text | undefined, here: Env): boolean => {
+    const path = text && !(text as Word).glob ? pathOf(text, here) : undefined
+    if (path === undefined || !existsSync(dirname(resolve(path))) || !ownPath(text, here))
+      return false
+    // a link as the last part, dangling or not, carries the write where it points, and a file with a second link changes a file elsewhere too
+    try {
+      const stat = lstatSync(path)
+      if (stat.isSymbolicLink() || (!stat.isDirectory() && stat.nlink > 1)) return false
+    } catch {}
+    ownWrites = true
+    return true
+  }
+  const writesOwn = (cmd: Command, here: Env): boolean =>
+    cmd.redirects.every((r) => {
+      if (!writer(r)) return true
+      const path = r.target && !r.target.glob ? pathOf(r.target, here) : undefined
+      return (path !== undefined && DEVICES.has(path)) || ownTarget(r.target, here)
+    })
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
     const { args, first, local, name } = parsed
     // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
@@ -302,24 +337,45 @@ export async function inspect(
     }
     const words = [name, ...args.map((a) => a.value)]
     // git first, since read-only.ts's git reads say nothing of the folder git takes its repository from
-    if (name === "git") return gitAllows(words, here.cwd, lookup, environment)
+    if (name === "git") {
+      const sub = words[words[1] === "-C" ? 3 : 1]
+      if (["checkout", "clone", "switch", "worktree"].includes(sub)) reshapes = true
+      return gitAllows(words, here.cwd, lookup, environment)
+    }
+    // uniq writes its second operand, wherever an option sits
+    if (name === "uniq") {
+      const operands: Word[] = []
+      let ended = false
+      for (let i = 0; i < args.length; i++) {
+        const v = args[i].value
+        if (ended || v === "-" || !v.startsWith("-")) operands.push(args[i])
+        else if (v === "--") ended = true
+        else if (UNIQ_VALUED.has(v)) i++
+      }
+      return operands.length < 2 || (operands.length === 2 && ownTarget(operands[1], here))
+    }
     if (UTILITIES.has(name) || readsWords(words)) return true
     if (name === "find") return !words.some((w) => FIND_ACTIONS.has(w))
     // a loop's or a read's variable reaches a later program only when the session exports it, as a bare assignment's does
     if (name === "for") return !(words[1] in environment)
     if (name === "read")
       return words.slice(1).every((w) => w.startsWith("-") || !(w in environment))
-    if (name === "sed")
-      return words[1] === "-n"
-        ? SED_PRINT.test(words[2] ?? "")
-        : SED_SUBSTITUTE.test(words[1] ?? "")
-    // a shell's -c script is walked on its own, and a script file only an installed skill's runs
+    // GNU sed takes an option after its script, -i among them
+    if (name === "sed") {
+      const print = words[1] === "-n"
+      return (
+        (print ? SED_PRINT : SED_SUBSTITUTE).test(words[print ? 2 : 1] ?? "") &&
+        words.slice(print ? 3 : 2).every((w) => w === "-" || !w.startsWith("-"))
+      )
+    }
+    // a shell's -c script is walked on its own, and a script file only a tracked skill's runs
     if (SHELLS.has(name)) {
       const { inline, operand } = shellOperand(args, name)
       return inline || (operand !== undefined && skillScript(pathOf(operand, here)))
     }
     // the playground command runs under bun, which reads the folder's bunfig.toml first, the main checkout's being its own; its rm removes only inside the session's own folders
-    if (name === "playground")
+    if (name === "playground") {
+      if (words[1] === "rm") reshapes = true
       return (
         (PLAYGROUND_READS.has(words[1]) ||
           PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) ||
@@ -329,11 +385,23 @@ export async function inspect(
         here.cwd !== undefined &&
         (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd))
       )
+    }
     if (name === "gh") {
       const [group, ...rest] = words.slice(1)
       const checkout =
         (group === "pr" && rest.some((w) => w === "checkout" || w === "co")) ||
         (group === "issue" && rest.includes("develop"))
+      if (group === "repo" && rest.some((w) => w === "clone" || w === "fork")) reshapes = true
+      // a run's artifacts land in -D's folder, else the one it runs in, which an artifact alone fills
+      if (group === "run" && rest.includes("download")) {
+        const folders = args.flatMap((a, i) => {
+          if (a.value === "-D" || a.value === "--dir") return args[i + 1] ? [args[i + 1]] : [a]
+          if (a.value.startsWith("--dir=")) return [slice(a, 6)]
+          return a.value.startsWith("-D") ? [slice(a, a.value.startsWith("-D=") ? 3 : 2)] : []
+        })
+        const into = folders.length > 0 ? folders : [{ value: "." }]
+        if (!into.every((folder) => ownTarget(folder, here))) return false
+      }
       return GH.has(group) && !checkout && !words.includes("--")
     }
     if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
@@ -341,6 +409,7 @@ export async function inspect(
     return false
   }
   const visit: Visit = async (cmd, parsed, env) => {
+    if (!writesOwn(cmd, env)) allowed = false
     // the factory's run-slot runs its command after `--`, which is judged in its place
     if (parsed.name === "run-slot.sh" && parsed.first && permitted(cmd, parsed, env)) {
       const at = parsed.args.findIndex((a) => a.value === "--")
@@ -363,7 +432,7 @@ export async function inspect(
     visitShells: true,
   }
   await run(lex(command, variables), env, visit, true)
-  return allowed
+  return allowed && !(ownWrites && reshapes)
 }
 
 // Why the session is in read mode, or undefined when it serves the owner's own PRs alone: an outside PR's author is not the repo's owner, on a repo a user owns (an org repo's PRs are its colleagues'), and a PR the hook cannot read counts as outside.
@@ -408,7 +477,7 @@ export async function check(
     allowed = await inspect(command, directory, environment, lookup, own)
   } catch {}
   if (allowed) return
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${why}`
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`
 }
 
 async function output(argv: string[]): Promise<string | undefined> {
@@ -460,6 +529,23 @@ export const runnerOf = (line: string | undefined): string | undefined => {
     else if (!word.includes("=")) return /[$\\]/.test(word) ? "" : basename(word)
   }
   return ""
+}
+
+// Whether git, in the main checkout, reports a file tracked and unchanged from HEAD, with the session's GIT_ variables dropped, so the repository asked is the main checkout itself, and the path read literally, so a folder named as a glob matches no tracked file.
+export function trackedIn(main: string, script: string): boolean {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  )
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "--literal-pathspecs", "-C", main, ...args], {
+      env,
+      stderr: "ignore",
+      stdout: "ignore",
+    }).exitCode === 0
+  return (
+    git("ls-files", "--error-unmatch", "--", script) &&
+    git("diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--", script)
+  )
 }
 
 // The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
@@ -518,6 +604,7 @@ export function live(environment: Environment): Lookup {
       const line = firstLine(script)
       return line === undefined ? "" : runnerOf(line)
     },
+    tracked: (script) => trackedIn(mainCheckout(process.cwd()), script),
   }
 }
 
