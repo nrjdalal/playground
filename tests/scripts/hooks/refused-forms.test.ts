@@ -15,7 +15,6 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
-import { writePlugin } from "../../../packages/scripts/src/playground/orgs"
 import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
@@ -340,9 +339,8 @@ for (const folder of [CLONE, join(CLONE, "own"), UNDER_BUNFIG, PATHS.MAIN])
   writeFileSync(join(folder, "bunfig.toml"), 'preload = ["./pre.ts"]\n')
 // an env file bun loads into the script's variables, a harmless one: the hook judges the folder, never the file's lines
 for (const folder of [ENV_CLONE, PATHS.MAIN]) writeFileSync(join(folder, ".env"), "MADE_UP=1\n")
-// the data folder's set is installed as a ship installs it, its folder named by the id of what it holds, and orgs/home/abc123 a link to it, the path the rows name
 for (const skills of [
-  join(SCRATCH, "set-source"),
+  join(DATA, "orgs", "home", "abc123", "skills"),
   join(PATHS.MAIN, "extensions", "core", "skills"),
 ]) {
   const scripts = join(skills, "code-review-loop", "scripts")
@@ -354,16 +352,6 @@ for (const skills of [
   writeFileSync(join(scripts, "glued.ts"), "#!/usr/bin/env -SFOO=1 bun\n")
   writeFileSync(join(scripts, "quoted.ts"), "#!/usr/bin/env -S'bun'\n")
 }
-symlinkSync(
-  writePlugin(DATA, "home", [
-    {
-      dir: join(SCRATCH, "set-source", "code-review-loop"),
-      from: "home",
-      name: "code-review-loop",
-    },
-  ]),
-  join(DATA, "orgs", "home", "abc123"),
-)
 const OUTSIDE_PR = {
   author: "ext-dev",
   owner: "acme-owner",
@@ -476,6 +464,10 @@ const guardsOf = (
         author: async () => OUTSIDE_PR,
         main: PATHS.MAIN,
         prsOf: async () => ["https://github.com/acme-owner/widgets/pull/501"],
+        // the made-up main checkout is no git repo, so the core skills' scripts it writes stand for the tracked and unchanged files of the real one
+        tracked: (script: string) =>
+          script.startsWith(join(PATHS.MAIN, "extensions", "core", "skills") + "/") &&
+          existsSync(script),
       })
     },
   },
