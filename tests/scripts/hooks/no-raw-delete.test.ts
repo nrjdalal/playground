@@ -67,6 +67,7 @@ describe("a delete the hook lets run", () => {
     "/no/such/folder/r? notes.txt",
     'A=(rm notes.txt); "${A[@]}"',
     'A=(echo hi); A+=(there); "${A[@]}"',
+    `~/.playground/ops/run-slot.sh me -- git commit -m "fix(PG-1): playground rm moves a file" -m "a (b) c"`,
     'rmdir "${S:?}/${m:?}"',
     "mv web/next/.next .turbo /tmp/claude-501/p/s/scratchpad/cold-1/",
     "playground rm sub/old",

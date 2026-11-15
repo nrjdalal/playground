@@ -168,6 +168,8 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "ls /usr/bin/pk?ll",
     "/usr/bin/pgrep -f watcher",
     "/no/such/folder/pk?ll -f watcher",
+    // a bare * names no program, so a case arm the reader takes for a program word passes
+    'cd x && for f in *.ts; do case "$f" in *" a "*) ;; esac; done',
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

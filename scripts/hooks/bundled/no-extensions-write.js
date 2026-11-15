@@ -8049,8 +8049,6 @@ function globRun(cmd, first, env) {
     return;
   if (!GLOB_PATTERN.test(pattern))
     return;
-  if (pattern.includes("("))
-    return null;
   const absolute = isAbsolute3(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -8098,7 +8096,7 @@ function globRun(cmd, first, env) {
     words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
   }));
 }
-var GLOB_PATTERN = /[*?(]|\[[^\]]*\]/;
+var GLOB_PATTERN = /[*?]|\[[^\]]*\]/;
 var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!"));
 function repass(commands, envs) {
   for (const cmd of commands) {

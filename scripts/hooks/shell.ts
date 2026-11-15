@@ -1996,12 +1996,11 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
-// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a relative pattern under a folder it cannot read, zsh's `(a|b)`, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed
+// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed
 function globRun(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {
   const pattern = first?.value ?? ""
   if (!first?.glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
   if (!GLOB_PATTERN.test(pattern)) return
-  if (pattern.includes("(")) return null
   const absolute = isAbsolute(pattern)
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere)) return null
   const base = absolute ? "/" : (env.cwd as string)
@@ -2045,17 +2044,17 @@ function globRun(cmd: Command, first: Word | undefined, env: Env): Command[] | n
   }))
 }
 
-// The characters a glob reads as a pattern, zsh's `(` included, a lone `[` aside, which is test's own name
-const GLOB_PATTERN = /[*?(]|\[[^\]]*\]/
+// The characters a glob reads as a pattern, a lone `[` aside, which is test's own name
+const GLOB_PATTERN = /[*?]|\[[^\]]*\]/
 
 // One path part's pattern as the shell reads it, where a leading `!` is a plain character rather than Bun.Glob's negation
 const shellGlob = (part: string) => new Bun.Glob(part.replace(/^!/, "\\!"))
 
-// Whether a call's text holds a glob whose last path part may match one of these program names (`pk?ll`, `/usr/bin/g*`), so a guard's first look at a call, and its rule for a command it cannot read, count the call as naming that program
+// Whether a call's text holds a glob whose last path part, with a literal character of its own, may match one of these program names (`pk?ll`, `/usr/bin/g*`), so a guard's first look at a call, and its rule for a command it cannot read, count the call as naming that program; a part of pattern alone (`*`, `?*`) names none, since it matches every name
 export function globSpells(text: string, names: string[]): boolean {
   for (const token of text.split(/[\s;&|<>()`"'\\]+/)) {
     const part = token.slice(token.lastIndexOf("/") + 1)
-    if (!GLOB_PATTERN.test(part)) continue
+    if (!GLOB_PATTERN.test(part) || !part.replace(/[*?]|\[[^\]]*\]/g, "")) continue
     const glob = shellGlob(part)
     if (names.some((name) => glob.match(name))) return true
   }

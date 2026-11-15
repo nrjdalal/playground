@@ -1910,8 +1910,6 @@ function globRun(cmd, first, env) {
     return;
   if (!GLOB_PATTERN.test(pattern))
     return;
-  if (pattern.includes("("))
-    return null;
   const absolute = isAbsolute2(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -1959,12 +1957,12 @@ function globRun(cmd, first, env) {
     words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
   }));
 }
-var GLOB_PATTERN = /[*?(]|\[[^\]]*\]/;
+var GLOB_PATTERN = /[*?]|\[[^\]]*\]/;
 var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!"));
 function globSpells(text, names) {
   for (const token of text.split(/[\s;&|<>()`"'\\]+/)) {
     const part = token.slice(token.lastIndexOf("/") + 1);
-    if (!GLOB_PATTERN.test(part))
+    if (!GLOB_PATTERN.test(part) || !part.replace(/[*?]|\[[^\]]*\]/g, ""))
       continue;
     const glob = shellGlob(part);
     if (names.some((name) => glob.match(name)))
