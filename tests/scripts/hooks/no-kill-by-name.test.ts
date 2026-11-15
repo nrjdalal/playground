@@ -80,6 +80,29 @@ describe("a kill beside a search", () => {
   })
 })
 
+describe("a command built from a value the reader cannot read, in a call that names a kill", () => {
+  // each program word is an expansion no reading resolves, so it may be any kill (#2136)
+  test.each([
+    '"$X" pkill -f watch',
+    '$X"" pkill -f watch',
+    '"$*" pkill -f watch',
+    '"${X:-}" pkill -f watch',
+    '"${@:-}" pkill -f watch',
+    '"$1" pkill -f watch',
+    "$((0)) pkill -f watch",
+    "$X''$'' pkill -f watch",
+    "${X^^} pkill -f watch",
+    "${#X} pkill -f watch",
+    "${X:-a} pkill -f watch",
+    "${X:?} pkill -f watch",
+    "for s in a b; do $s pkill -f watch; done",
+    "getopts ab s; $s pkill -f watch",
+    "printf -v s x; $s pkill -f watch",
+  ])("%s is refused", async (command) => {
+    expect(await bash(command)).toContain("a command built from a value it cannot read")
+  })
+})
+
 describe("a signal to a pid you hold, and a read, pass", () => {
   test.each([
     "kill 1234",
@@ -104,25 +127,10 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "command -v pkill",
     "echo $X",
     "git log $X",
-    '"$X" pkill -f watch',
-    '$X"" pkill -f watch',
-    '"$*" pkill -f watch',
-    '"${X:-}" pkill -f watch',
-    '"${@:-}" pkill -f watch',
-    '"$1" pkill -f watch',
-    "$((0)) pkill -f watch",
-    "$X''$'' pkill -f watch",
-    "${X^^} pkill -f watch",
-    "${#X} pkill -f watch",
-    "${X:-a} pkill -f watch",
-    "${X:?} pkill -f watch",
-    "for s in a b; do $s pkill -f watch; done",
     "for f in a b; do $f --version; done",
     "if true; then for s in a; do $s pkill -f watch; done; fi",
     "for s in a; do for t in b; do $t pkill -f watch; done; done",
     "select s in a; do $s pkill -f watch; done",
-    "getopts ab s; $s pkill -f watch",
-    "printf -v s x; $s pkill -f watch",
     "pkill --help",
     "killall -V",
     "sleep 60 & pid=$!; ps -q $pid && kill $pid",
