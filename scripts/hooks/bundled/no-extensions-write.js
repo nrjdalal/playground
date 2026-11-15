@@ -8048,10 +8048,11 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  const seen = (first.source ?? "").replace(QUOTED, (part) => "\uE005".repeat(part.length));
+  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, (part) => "\uE005".repeat(part.length));
   const grouped = seen.includes("(");
   const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null;
-  const groups = grouped ? groupWords(qualifiers ? pattern.slice(0, pattern.length - qualifiers[0].length) : pattern) : [pattern];
+  const joined = pattern.replace(/\\\n/g, "");
+  const groups = grouped ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined) : [pattern];
   const patterns = groups ?? [pattern];
   if (patterns === null || qualifiers?.[1].includes("N"))
     return null;

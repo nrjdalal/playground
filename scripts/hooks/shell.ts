@@ -2012,13 +2012,16 @@ function globRun(
 ): Command[] | null | undefined {
   const pattern = first?.value ?? ""
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
-  // a paren the shell sees, its quoted parts masked at their length, since zsh reads a quoted paren as a plain character
-  const seen = (first.source ?? "").replace(QUOTED, (part) => "\uE005".repeat(part.length))
+  // a paren the shell sees, its backslash-newlines joined and its quoted parts masked at their length, since zsh reads a quoted paren as a plain character
+  const seen = (first.source ?? "")
+    .replace(/\\\n/g, "")
+    .replace(QUOTED, (part) => "\uE005".repeat(part.length))
   const grouped = seen.includes("(")
   // zsh reads a closing group with no | or ( in it as glob qualifiers, which pick among the files the rest matches and may run code there, and whose N lets a pattern that matches nothing vanish
   const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null
+  const joined = pattern.replace(/\\\n/g, "")
   const groups = grouped
-    ? groupWords(qualifiers ? pattern.slice(0, pattern.length - qualifiers[0].length) : pattern)
+    ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined)
     : [pattern]
   // a pattern groupWords reads as bad keeps canary's glob reading, so the group reading only adds refusals
   const patterns = groups ?? [pattern]

@@ -86,6 +86,27 @@ export const groups: Group[] = [
         "a kill by name at a path a glob matches, with glob qualifiers holding a quoted paren",
         `/usr/bin/pk?ll(e:'(true)':) -f watcher`,
       ],
+      // round 2: a backslash-newline right after the qualifiers joins the word, so they still close it
+      [
+        "a kill by name at a path with glob qualifiers before a backslash-newline",
+        "/usr/bin/pkill(x)\\\n -f watcher",
+      ],
+      [
+        "a kill by name at a path a glob matches, with glob qualifiers before a backslash-newline",
+        "/usr/bin/pk?ll(x)\\\n -f watcher",
+      ],
+      [
+        "a kill by name at a path a zsh alternation matches, with glob qualifiers before a backslash-newline",
+        "/usr/bin/pk(i|x)ll(x)\\\n -f watcher",
+      ],
+      [
+        "a kill by name at a path with glob qualifiers split by a backslash-newline",
+        "/usr/bin/pkill(\\\nx) -f watcher",
+      ],
+      [
+        "a kill by name at a path split by a backslash-newline, with glob qualifiers",
+        "/usr/bin/pk\\\nill(x) -f watcher",
+      ],
     ],
   },
   {
@@ -106,6 +127,14 @@ export const groups: Group[] = [
         "a stash pop by a git path a zsh alternation holding a quoted paren matches",
         `/usr/bin/g(it|x')') stash pop`,
       ],
+      [
+        "a stash pop by a git path with glob qualifiers before a backslash-newline",
+        "/usr/bin/git(x)\\\n stash pop",
+      ],
+      [
+        "a stash pop by a git path a glob matches, with glob qualifiers before a backslash-newline",
+        "/usr/bin/g?t(x)\\\n stash pop",
+      ],
     ],
   },
   {
@@ -118,6 +147,14 @@ export const groups: Group[] = [
         `/bin/r(m|x)(x) ${NEVER_MADE}`,
       ],
       ["a plain rm by a path a brace list spells", `/bin/r{m,x} ${NEVER_MADE}`],
+      [
+        "a plain rm by a path with glob qualifiers before a backslash-newline",
+        `/bin/rm(x)\\\n ${NEVER_MADE}`,
+      ],
+      [
+        "a plain rm by a path a zsh alternation matches, with glob qualifiers before a backslash-newline",
+        `/bin/r(m|x)(x)\\\n ${NEVER_MADE}`,
+      ],
     ],
   },
   {
