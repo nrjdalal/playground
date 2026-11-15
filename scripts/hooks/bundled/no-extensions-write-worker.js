@@ -10720,7 +10720,7 @@ function follows(have, want) {
   return true;
 }
 var SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g;
-var HOME_NAMED = /~|\$\{?HOME\b|\bcd\s*(?:$|[;&|)`])/;
+var HOME_NAMED = /(?:^|[\s(`])(~[\w.-]*|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})\/?(?=$|[\s;&|)`])|\bcd\s*(?:$|[;&|)`])/;
 var HOME_WORD = /^(?:~|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})(?=[/*]|$)/;
 var LOGIN_HOME = /^~([A-Za-z_][\w.-]*)(?=[/*]|$)/;
 var removerWord = (word) => {
@@ -11261,7 +11261,10 @@ async function inspect(raw, environment, unknown = false) {
       ]);
     }
     const filled = plain.replace(/\$\{([A-Za-z_]\w*)[^}]*\}|\$([A-Za-z_]\w*)/g, (spelled, braced, bare) => values.get(braced ?? bare ?? "")?.join(" ") ?? spelled);
-    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => HOME_NAMED.test(sub) ? "~" : sub);
+    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => {
+      const named = HOME_NAMED.exec(sub);
+      return named ? named[1] ?? "~" : sub;
+    });
     const fed = homed.split(/(\|\||[;&\n])/).map((chunk) => /\|\s*\S*xargs\b/.test(chunk) && chunk.slice(chunk.search(/\S*xargs\b/)).split(/\s+/).some(removerWord) ? `rm ${chunk.replace(/\|/g, " ")}` : chunk).join("");
     for (const source of new Set([plain, filled, homed, fed])) {
       let removing = false;

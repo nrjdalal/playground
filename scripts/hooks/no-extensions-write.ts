@@ -1188,8 +1188,9 @@ function follows(have: string[], want: string[]): boolean {
 }
 // a variable a script's text sets, by an assignment or a for loop, its name and its value or list captured
 const SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g
-// a text that names the home or can print it: ~, HOME, or a bare cd (to the home) before a pwd
-const HOME_NAMED = /~|\$\{?HOME\b|\bcd\s*(?:$|[;&|)`])/
+// a substitution that prints the home itself: a ~, ~login, $HOME or ${HOME…} word with at most a / after it, or a bare cd (to the home) before a pwd
+const HOME_NAMED =
+  /(?:^|[\s(`])(~[\w.-]*|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})\/?(?=$|[\s;&|)`])|\bcd\s*(?:$|[;&|)`])/
 // a word the shell expands to the home: ~, $HOME, or ${HOME} with any operator (${HOME:?}, ${HOME:-x})
 const HOME_WORD = /^(?:~|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})(?=[/*]|$)/
 // ~ and a login name, the home of the login it names, which for the caller's own is its home
@@ -1846,11 +1847,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped, read as written, with each variable it sets filled in, with a substitution naming the home read as the home and with a pipeline into an xargs remover read as that remover's command: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME (any ${HOME…}), ~<login> or / that can name the root, a path in it or a folder between the home and it, or, for a word after a remover in its own command (REMOVERS), the home or any other folder that holds the root (reaches), a relative one holding a / or a glob that can from the cwd, its .. collapsed, or, after a remover, a relative one that names the root, a path in it or a folder between the home and it from the home, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
+  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped, read as written, with each variable it sets filled in, with a substitution that names the home itself read as the home and with a pipeline into an xargs remover read as that remover's command: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME (any ${HOME…}), ~<login> or / that can name the root, a path in it or a folder between the home and it, or, for a word after a remover in its own command (REMOVERS), the home or any other folder that holds the root (reaches), a relative one holding a / or a glob that can from the cwd, its .. collapsed, or, after a remover, a relative one that names the root, a path in it or a folder between the home and it from the home, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
   const scriptNames = (text: string, env: Env): string | undefined => {
     const plain = text.replace(/['"]/g, "")
     if (holds(plain, env)) return `${root} in its text`
-    // each variable the text sets, by an assignment or a for loop, read as the values it is set to, and then a substitution whose text names the home as the home it may print
+    // each variable the text sets, by an assignment or a for loop, read as the values it is set to, and then a substitution that names the home itself (HOME_NAMED) as the home word it prints
     const values = new Map<string, string[]>()
     for (const set of plain.matchAll(SETS_NAME)) {
       const name = set[1] ?? set[3]
@@ -1864,9 +1865,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       (spelled, braced?: string, bare?: string) =>
         values.get(braced ?? bare ?? "")?.join(" ") ?? spelled,
     )
-    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) =>
-      HOME_NAMED.test(sub) ? "~" : sub,
-    )
+    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => {
+      const named = HOME_NAMED.exec(sub)
+      return named ? (named[1] ?? "~") : sub
+    })
     // a pipeline that feeds xargs running a remover reads as that remover's command, the words fed to it after it
     const fed = homed
       .split(/(\|\||[;&\n])/)
