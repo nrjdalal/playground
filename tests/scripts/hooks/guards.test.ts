@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -25,6 +26,7 @@ const BASH_GUARDS = [
   "no-main-checkout",
   "no-off-palette-label",
   "no-ours-merge",
+  "no-outside-pr-code",
   "no-playground-leak",
   "no-prepare-write",
   "no-prompt-stop",
@@ -195,6 +197,65 @@ describe("check", () => {
     const env = { ...process.env, ...worker }
     expect(await check(input("git stash"), env)).toContain("no-stash hook ")
     expect(await check(input("true"), env)).toBe(undefined)
+  })
+})
+
+// #1280: a reviewer of a made-up outside author's PR, read through the hook's live lookup from a scratch registry, roster and kept PR answers, so no call reaches GitHub
+describe("guards runs no-outside-pr-code", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "guards-outside-pr-"))
+  const environment = {
+    CLAUDE_CONFIG_DIR: join(scratch, "claude"),
+    HOME: scratch,
+    PATH: "/usr/bin:/bin",
+    PLAYGROUND_DATA_DIR: join(scratch, "data"),
+    PLAYGROUND_ROLE: "reviewer",
+  }
+  const pull = (n: number) => `https://github.com/acme-owner/widgets/pull/${n}`
+  const PRS = {
+    501: { author: "ext-dev", owner: "acme-owner", ownerType: "User" },
+    502: { author: "acme-owner", owner: "acme-owner", ownerType: "User" },
+  }
+  const sessions = { "s-outside": ["q7v2kd-reviewer", 501], "s-own": ["r3m8wx-reviewer", 502] }
+  const ready = Promise.all([
+    ...Object.entries(PRS).map(([n, pr]) =>
+      Bun.write(
+        join(scratch, "data", "hook-outside-pr", `acme-owner__widgets__${n}.json`),
+        JSON.stringify(pr),
+      ),
+    ),
+    ...Object.entries(sessions).map(([sessionId, [name]]) =>
+      Bun.write(
+        join(scratch, "claude", "sessions", `${sessionId}.json`),
+        JSON.stringify({ name, sessionId }),
+      ),
+    ),
+    Bun.write(
+      join(scratch, "data", "roster.json"),
+      JSON.stringify({
+        agents: Object.values(sessions).map(([name, n]) => ({
+          kind: "reviewer",
+          name,
+          pr: pull(n as number),
+        })),
+      }),
+    ),
+  ])
+  const outsidePrCode = GUARDS.filter(({ name }) => name === "no-outside-pr-code")
+  const judge = async (command: string, session: string) => {
+    await ready
+    return check(input(command, { cwd: scratch, session_id: session }), environment, outsidePrCode)
+  }
+
+  test("a reviewer of an outside author's PR running its tests is refused", async () => {
+    expect(await judge("bun test", "s-outside")).toContain("no-outside-pr-code hook")
+  })
+
+  test("the same reviewer reading the PR's code passes", async () => {
+    expect(await judge("cat package.json", "s-outside")).toBe(undefined)
+  })
+
+  test("a reviewer of the owner's own PR keeps running its tests", async () => {
+    expect(await judge("bun test", "s-own")).toBe(undefined)
   })
 })
 
