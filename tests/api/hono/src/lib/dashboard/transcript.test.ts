@@ -19,6 +19,7 @@ import {
   sentIn,
   shownTasks,
   subagentPath,
+  TAIL_CEILING,
   taskOf,
   toolSummary,
   type SessionTask,
@@ -571,6 +572,14 @@ describe("readTail and readTask", () => {
     ]
     writeFileSync(path, `${lines.join("\n")}\n`)
     expect((await readTail(path, 10)).map((e) => e.text)).toEqual(["new"])
+  })
+
+  test("a step further back than TAIL_CEILING is not read", async () => {
+    const path = join(dir, "past-ceiling.jsonl")
+    const count = Math.ceil(TAIL_CEILING / 10_000) + 1
+    const lines = [human("early", "h1"), ...Array.from({ length: count }, (_, i) => progress(i))]
+    writeFileSync(path, `${lines.join("\n")}\n`)
+    expect(await readTail(path, 10)).toEqual([])
   })
 })
 
