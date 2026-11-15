@@ -10821,7 +10821,7 @@ var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gim
 var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
 var PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y");
-var perlText = (text) => text.replace(/\\(.)|\$[1-9&]/gs, (m, c) => c === undefined ? "*" : c === "n" ? `
+var perlText = (text) => text.replace(/\\(.)|\$[1-9&]/gs, (m, c) => c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
 ` : c === "t" ? "\t" : c);
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
 function perlReadScripts({ args, local }, env) {
@@ -11230,7 +11230,7 @@ async function inspect(raw, environment, unknown = false) {
     const have = [...base === sep2 ? [""] : base.split(sep2), ...at < 0 ? [] : parts.slice(at)];
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have;
     if (spelled.length > floor && spelled.length < want.length)
-      return follows(spelled, want.slice(0, spelled.length));
+      return spelled.every((part, k) => !want[k].startsWith(".") || part.startsWith(".")) && follows(spelled, want.slice(0, spelled.length));
     return at < 0 ? inRoot(path) : follows(have, want);
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;

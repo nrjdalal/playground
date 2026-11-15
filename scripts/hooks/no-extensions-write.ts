@@ -1303,10 +1303,10 @@ const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
 const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
 // one item of a PERL_SCRIPT one-liner and its separator, its s/// replacement captured, read in turn from where the last ended
 const PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y")
-// a perl replacement as perl writes it, a double-quoted string: a backslash dropped (`\/` reads as /, `\n` and `\t` as a line break and a tab) and a match variable ($1 to $9, $&) read as a *
+// a perl replacement as perl writes it, a double-quoted string: a backslash dropped (`\/` reads as /, `\n` and `\t` as a line break and a tab) and the matched text ($1 to $9, $&, and \1 to \9, which perl reads as $1 to $9) read as a *
 const perlText = (text: string) =>
   text.replace(/\\(.)|\$[1-9&]/gs, (m, c?: string) =>
-    c === undefined ? "*" : c === "n" ? "\n" : c === "t" ? "\t" : c,
+    c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? "\n" : c === "t" ? "\t" : c,
   )
 
 // a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
@@ -1825,9 +1825,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   }
   // the root's parts as a script may spell them: from the home when the root is under it, else from /
   const rootParts = needle.split(sep).filter(Boolean)
-  // how many parts a folder holding the root has past the home's (or the filesystem root's, when the root is not under the home), so the home itself and every folder above it are no such folder
+  // the home's part count (1 when the root is not under the home), which a folder holding the root must pass, so the home itself and every folder above it are no such folder
   const floor = needle === root ? 1 : real(home).split(sep).length
-  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any
+  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it starts with a dot, as the shell's globs do
   const reaches = (path: string) => {
     const parts = path.split(sep)
     const at = parts.findIndex((part) => GLOB.test(part))
@@ -1836,7 +1836,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const have = [...(base === sep ? [""] : base.split(sep)), ...(at < 0 ? [] : parts.slice(at))]
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
     if (spelled.length > floor && spelled.length < want.length)
-      return follows(spelled, want.slice(0, spelled.length))
+      return (
+        spelled.every((part, k) => !want[k].startsWith(".") || part.startsWith(".")) &&
+        follows(spelled, want.slice(0, spelled.length))
+      )
     return at < 0 ? inRoot(path) : follows(have, want)
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
