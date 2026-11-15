@@ -761,6 +761,8 @@ describe("no-outside-pr-code's read mode writes nothing into a git folder", () =
       ["Edit", { file_path: path, new_string: "y", old_string: "x" }],
       ["MultiEdit", { edits: [{ new_string: "y", old_string: "x" }], file_path: path }],
       ["NotebookEdit", { new_source: "x", notebook_path: path }],
+      // a Codex session's edit, whose command is the patch
+      ["apply_patch", { command: `*** Begin Patch\n*** Add File: ${path}\n+x\n*** End Patch` }],
     ] as const
 
   describe.each(sessions)("%s", (_, session, name) => {
@@ -827,6 +829,26 @@ describe("no-outside-pr-code's read mode writes nothing into a git folder", () =
         "no-outside-pr-code",
       )
     })
+
+    test.each([
+      ["no file", { command: "*** Begin Patch\n*** End Patch" }],
+      ["no patch", {}],
+    ])("an apply_patch with %s is refused", async (_, input) => {
+      expect(await check(fileCall("apply_patch", input, session), environment, lookup)).toContain(
+        "no-outside-pr-code",
+      )
+    })
+
+    test("an apply_patch's relative file is placed from the folder it runs in", async () => {
+      const input = { command: "*** Begin Patch\n*** Add File: .git/config\n+x\n*** End Patch" }
+      const raw = JSON.stringify({
+        cwd: `${own}/c`,
+        session_id: session,
+        tool_input: input,
+        tool_name: "apply_patch",
+      })
+      expect(await check(raw, environment, lookup)).toContain("no-outside-pr-code")
+    })
   })
 
   // the rule is read mode's alone, so a factory PR's checker and every other session write a git folder as before
@@ -851,6 +873,7 @@ describe("no-outside-pr-code's read mode writes nothing into a git folder", () =
     async (_, session, role) => {
       const env = { ...environment, PLAYGROUND_ROLE: role }
       expect(await check(fileCall("Write", { content: "x" }, session), env, lookup)).toBeUndefined()
+      expect(await check(fileCall("apply_patch", {}, session), env, lookup)).toBeUndefined()
     },
   )
 
