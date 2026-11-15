@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-unslotted-run"
+import { type Env, lex, run, UNKNOWN } from "../../../scripts/hooks/shell"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-unslotted-run.ts")
@@ -581,5 +582,44 @@ describe("an xargs replace string outside the program word keeps the call's verd
     expect(await bash("echo a | xargs -I {} turbo run build {}")).toContain(
       "no-unslotted-run hook refuses",
     )
+  })
+})
+
+// #2198: GNU xargs' input options, and a replace option at the end of a cluster of flags, beside a typed program leave it typed, so each keeps canary's verdict
+describe("an xargs input option beside a typed program keeps the call's verdict", () => {
+  test.each([
+    ["echo under xargs -d,", "printf 'a,b' | xargs -d, echo"],
+    ["echo under xargs --delimiter given apart", "printf 'a,b' | xargs --delimiter , echo"],
+    ["echo under xargs -d, fed a program's name", "printf 'a,turbo' | xargs -d, echo"],
+    ["grep under xargs -0 fed by find -print0", "find . -print0 | xargs -0 grep -l x"],
+    ["echo under xargs -a of a process substitution", "xargs -a <(echo a) echo"],
+    ["echo under a shortened --arg=", "xargs --arg=/tmp/list echo"],
+    ["echo under xargs -d, -I %", "printf 'a,b' | xargs -d, -I % echo %"],
+    ["cat under xargs -0I %", "printf a | xargs -0I % cat %"],
+    ["cat under nice under xargs -rJ %", "echo a | xargs -rJ % nice cat %"],
+    ["echo under a shortened --repl=%", "echo a | xargs --repl=% echo %"],
+  ])("%s runs in a worktree", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a build under xargs -d, -I {} with the string in its arguments stays refused", async () => {
+    expect(await bash("printf a,b | xargs -d, -I {} turbo run build {}")).toContain(
+      "no-unslotted-run hook refuses",
+    )
+  })
+
+  // shell.test.ts imports the refused-forms fixture, so it names no way to run a command, and mkfifo runs here
+  test("an -a named fifo reads as unread, and the hook returns without opening it", async () => {
+    const fifo = join(OUTSIDE, "fifo")
+    Bun.spawnSync(["mkfifo", fifo])
+    const line = `echo a | xargs -a ${fifo} -I X nice X run build`
+    const env: Env = { cwd: WORKTREE, files: new Map(), known: {}, process: {}, vars: new Map() }
+    const seen: string[] = []
+    await run(lex(line), env, async (_cmd, parsed) => {
+      seen.push([parsed.name, ...parsed.args.map((a) => a.value)].join(" "))
+      return undefined
+    })
+    expect(seen).toContain(`${UNKNOWN} run build`)
+    expect(await bash(line)).toBeUndefined()
   })
 })
