@@ -17,6 +17,9 @@ const killControls = (): Row[] => [
   ["an echo of a zsh group past the cap", `echo /usr/bin/pk${overCap("i")}ll -f watcher`],
   ["a kill by name past the cap in a comment", "# pk{i,x}{a,}{b,}{c,}{d,}{e,}{f,}ll -f watcher"],
   ["a plain program word beside a kill's words", "echo -f watcher"],
+  // round 2: a number sequence as an argument, beside a program word the reader cannot read
+  ["a loop over a number sequence running a variable", "for i in {1..3}; do $X status; done"],
+  ["a list of a number sequence beside a variable's program", "ls /tmp/{1..3}; $EDITOR notes"],
   // round 1: a brace list fused with a zsh group, and a one-word group after a cd, in a comment
   [
     "a kill by name a brace list fused with a zsh group spells, in a comment",
@@ -40,6 +43,11 @@ const killControls = (): Row[] => [
 const deleteControls = (): Row[] => [
   ["an echo of a delete path a brace sequence spells", `echo /bin/r{m..m} ${NEVER_MADE}`],
   ["a brace sequence as a list's argument", "ls {a..c}"],
+  // round 2: a number sequence as an argument, beside a program word the reader cannot read
+  [
+    "a loop over a number sequence running an array whole",
+    `for i in {1..3}; do "\${A[@]}" ${NEVER_MADE}; done`,
+  ],
   ["a delete a brace sequence spells in a comment", `# /bin/r{m..m} ${NEVER_MADE}`],
   ["an echo of a delete path a zsh group past the cap matches", `echo /bin/r${overCap("m")}`],
   // round 1: every letter of the name inside a list or group past the cap, and a sequence to a bracket-negation character, as an argument and in a comment
