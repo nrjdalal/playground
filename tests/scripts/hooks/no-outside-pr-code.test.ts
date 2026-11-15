@@ -399,8 +399,6 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["du", `du -sh ${PAD}/*`],
     ["find with no action", `find ${PAD} -type f | wc -l`],
     ["git diff in its scratchpad's repo", `git -C ${PAD}/repo diff HEAD^ HEAD -- a.ts`],
-    ["cp into a new path in its scratchpad", `cp -R ${HOME}/x/scripts ${PAD}/repo/scripts`],
-    ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
     [
       "the two revisions compared with no repository and no diff program",
       `git diff --no-index --no-ext-diff --no-textconv ${PAD}/base ${PAD}/proposed`,
@@ -435,6 +433,11 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["playground rm outside its own folders", `playground rm ${HOME}/.playground/scratchpad/other`],
     ["playground rm that climbs out of its folder", `playground rm ${PAD}/../other-reviewer`],
     ["playground rm with an option", `playground rm --force ${PAD}`],
+    [
+      "cp into its own scratchpad, which the item's review needs none of",
+      `cp ${PAD}/a.ts ${PAD}/b.ts`,
+    ],
+    ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
     ["cp out of its own folders", `cp ${PAD}/a.ts ${HOME}/.playground/ops/a.ts`],
     ["cp with a target directory option", `cp -t ${HOME}/.playground/ops ${PAD}/a.ts`],
     [
@@ -469,7 +472,7 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
 })
 
 // #1280 round 1: a write lands where the system resolves it, so a folder or a link already in its own folders can carry it out
-describe("no-outside-pr-code's item reviewer writes only new paths in its own folders", () => {
+describe("no-outside-pr-code's item reviewer exports only to a new path in its own folders", () => {
   const data = mkdtempSync(join(tmpdir(), "outside-pr-own-"))
   const own = join(data, "scratchpad", ITEM_REVIEWER)
   mkdirSync(join(own, "dir"), { recursive: true })
@@ -490,11 +493,12 @@ describe("no-outside-pr-code's item reviewer writes only new paths in its own fo
     expect(await judgeOwn(command)).toContain("no-outside-pr-code")
   })
 
-  test.each([
-    ["cp to a new path", `cp a.sh ${own}/dir/new.sh`],
-    ["playground ext export into a new folder", `playground ext export ${own}/store`],
-  ])("%s passes", async (_, command) => {
-    expect(await judgeOwn(command)).toBeUndefined()
+  test("playground ext export into a new folder, then a worktree of a revision from its scope's clone, passes", async () => {
+    mkdirSync(join(own, "store", "acme", ".git"), { recursive: true })
+    expect(await judgeOwn(`playground ext export ${own}/new-store`)).toBeUndefined()
+    expect(
+      await judgeOwn(`git -C ${own}/store/acme worktree add --detach ${own}/base abc123`),
+    ).toBeUndefined()
   })
 })
 

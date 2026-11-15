@@ -16522,7 +16522,7 @@ async function check17(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
+import { existsSync as existsSync10, lstatSync, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
 import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
@@ -16612,14 +16612,7 @@ var QUIET = new Set(["-q", "--quiet"]);
 var SED_ADDRESS2 = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 var SED_PRINT = new RegExp(`^${SED_ADDRESS2}(?:,${SED_ADDRESS2})?p$`);
 var SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/;
-var PLAYGROUND_READS = new Set([
-  "ext export",
-  "ext score",
-  "ext search",
-  "ext show",
-  "ext which",
-  "rules"
-]);
+var PLAYGROUND_READS = new Set(["ext score", "ext search", "ext show", "ext which", "rules"]);
 var FIND_ACTIONS = new Set([
   "-delete",
   "-exec",
@@ -16739,6 +16732,17 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return at !== undefined && under(path, at);
     });
   };
+  const ownNew = (text, here) => {
+    const written = text && pathOf(text, here);
+    if (!written || !ownPath(text, here))
+      return false;
+    try {
+      lstatSync(written);
+      return false;
+    } catch {
+      return true;
+    }
+  };
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -16761,10 +16765,6 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return true;
     if (name === "find")
       return !words.some((w) => FIND_ACTIONS.has(w));
-    if (name === "cp") {
-      const operands = args.filter((a) => !a.value.startsWith("-"));
-      return operands.length >= 2 && !words.some((w) => /^-[^-]*t/.test(w) || w.startsWith("--target-directory")) && ownPath(operands.at(-1), here);
-    }
     if (name === "for")
       return !(words[1] in environment);
     if (name === "read")
@@ -16776,7 +16776,7 @@ async function inspect13(command, directory, environment, lookup, own = []) {
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
     if (name === "playground")
-      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
+      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here)) || words.slice(1, 3).join(" ") === "ext export" && args.length === 3 && !args[2].value.startsWith("-") && ownNew(args[2], here)) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");
