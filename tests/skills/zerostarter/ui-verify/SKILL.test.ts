@@ -57,3 +57,23 @@ describe("ui-verify names the sign-in cookie's plain form and a Yard page's shot
     expect(line).toContain("`network route`")
   })
 })
+
+// issue 2180: a new test browser build asks macOS for notification rights on its first run
+describe("ui-verify's Cross-browser bullet reuses one decided copy per browser", () => {
+  test("Firefox and WebKit run a pinned Playwright from its shared cache, never a scratch folder", async () => {
+    const line = await bullet("Cross-browser")
+    expect(line).toContain("`bunx playwright@1.65.1 install firefox webkit`")
+    expect(line).toContain("`~/Library/Caches/ms-playwright`")
+    expect(line).toContain("never set `PLAYWRIGHT_BROWSERS_PATH`")
+    expect(line).toContain("agent-browser's own Chrome for Testing")
+  })
+
+  test("a pin bump or an agent-browser upgrade is a new build that can ask once, so the session waits and tells its lead", async () => {
+    const line = await bullet("Cross-browser")
+    expect(line).toContain("new build")
+    expect(line).toContain("Playwright pin bump")
+    expect(line).toContain("agent-browser upgrade")
+    expect(line).toContain("tells its lead")
+    expect(line).toContain("Inbox")
+  })
+})

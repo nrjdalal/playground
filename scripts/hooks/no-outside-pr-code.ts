@@ -20,6 +20,7 @@ import {
   run,
   SHELLS,
   shellOperand,
+  type Text,
   type Visit,
 } from "./shell"
 
@@ -34,6 +35,8 @@ export type Lookup = {
     entry: ".git" | "bunfig.toml" | "HEAD" | "node_modules" | "objects" | "refs",
   ) => boolean
   main: string
+  // the session's registry name, which names its own scratch and scratchpad folders
+  name: (sessionId: unknown) => Promise<string | undefined>
   prsOf: (sessionId: unknown) => Promise<string[]>
   // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
   runner: (script: string) => string | undefined
@@ -56,6 +59,7 @@ const UTILITIES = new Set([
   "date",
   "diff",
   "dirname",
+  "du",
   "echo",
   "exit",
   "false",
@@ -133,15 +137,27 @@ const QUIET = new Set(["-q", "--quiet"])
 const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
 const SED_PRINT = new RegExp(`^${SED_ADDRESS}(?:,${SED_ADDRESS})?p$`)
 const SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/
-// The playground command's verbs a checker reads with, A to Z; `add` and the manager verbs start a session that no read mode holds.
-const PLAYGROUND_READS = new Set(["ext search", "ext which", "rules"])
+// The playground command's verbs a checker reads with, A to Z; an item's reviewer shows and scores the item with ext's, reading a revision through `ext show --rev`; `add` and the manager verbs start a session that no read mode holds.
+const PLAYGROUND_READS = new Set(["ext score", "ext search", "ext show", "ext which", "rules"])
+// find's actions that run a program, delete or write a file, A to Z, BSD's and GNU's
+const FIND_ACTIONS = new Set([
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-fls",
+  "-fprint",
+  "-fprint0",
+  "-fprintf",
+  "-ok",
+  "-okdir",
+])
 const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/
 
 // Read mode's reason, by why the session is in it; a PR GitHub did not answer for names its kept answer, which a read retries an hour after the failure.
 const unread = (repo: string, n: number) =>
   `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`
 const REASONS = {
-  none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>.",
+  none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>. An extension item's reviewer has no PR and stays in read mode: read each revision with playground ext show <scope> <kind> <key> --rev <sha> piped into jq (.content.files, .content.body), and say in the verdict that the item was read, not run.",
   outside:
     "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move a clone with no node_modules (a fresh one, never an installed one, whose git hooks would run) with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }
@@ -177,6 +193,16 @@ function installedAt(folder: string, lookup: Lookup): boolean {
 const under = (path: string, folder: string) =>
   (path + "/").toLowerCase().startsWith(folder.toLowerCase().replace(/\/?$/, "/"))
 
+// Where a path a command writes or removes lands: its deepest folder that exists with its symlinks resolved, then the rest as written; a `..` step is left unplaced, since the system takes it after a link.
+function placed(written: string | undefined): string | undefined {
+  if (written === undefined || written.split("/").includes("..")) return undefined
+  const path = resolve(written)
+  for (let at = path; ; at = dirname(at)) {
+    if (existsSync(at)) return join(real(at), path.slice(at.length))
+    if (dirname(at) === at) return path
+  }
+}
+
 // git's reads, and the literal forms that fetch or place a PR's code without running a file it holds: a fetch, a fresh clone of a GitHub repo, a worktree add or list, and a detached checkout or switch in a folder with no node_modules for a git hook's lefthook to load.
 function gitAllows(
   words: string[],
@@ -198,6 +224,9 @@ function gitAllows(
   // a remote takes no verb but the two that read it, since `remote add` names a source a fetch then reads
   const verb = all.find(plain)
   if (sub === "remote" && verb !== undefined && verb !== "get-url" && verb !== "show") return false
+  // a diff of two folders reads no repository, so it names neither a diff program nor a textconv for the attributes the folders can ship to start
+  if (sub === "diff" && all.includes("--no-index"))
+    return all.includes("--no-ext-diff") && all.includes("--no-textconv")
   if (readsWords(words) || GIT_READS.has(sub)) return true
   if (sub === "fetch") {
     const options = rest.filter((w) => w.startsWith("-"))
@@ -223,6 +252,7 @@ export async function inspect(
   directory: string | undefined,
   environment: Environment,
   lookup: Lookup,
+  own: string[] = [],
 ): Promise<boolean> {
   const data = dataDirOf(environment)
   const skills = [join(data, "orgs"), join(lookup.main, "extensions")]
@@ -245,6 +275,17 @@ export async function inspect(
       if (dirname(at) === at) return false
     }
   }
+  // Whether a path a command writes or removes sits in the session's own scratch or scratchpad folder.
+  const ownPath = (text: Text | undefined, here: Env) => {
+    const path = text && placed(pathOf(text, here))
+    return (
+      path !== undefined &&
+      own.some((folder) => {
+        const at = placed(folder)
+        return at !== undefined && under(path, at)
+      })
+    )
+  }
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
     const { args, first, local, name } = parsed
     // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
@@ -263,6 +304,7 @@ export async function inspect(
     // git first, since read-only.ts's git reads say nothing of the folder git takes its repository from
     if (name === "git") return gitAllows(words, here.cwd, lookup, environment)
     if (UTILITIES.has(name) || readsWords(words)) return true
+    if (name === "find") return !words.some((w) => FIND_ACTIONS.has(w))
     // a loop's or a read's variable reaches a later program only when the session exports it, as a bare assignment's does
     if (name === "for") return !(words[1] in environment)
     if (name === "read")
@@ -276,12 +318,16 @@ export async function inspect(
       const { inline, operand } = shellOperand(args, name)
       return inline || (operand !== undefined && skillScript(pathOf(operand, here)))
     }
-    // the playground command runs under bun, which reads the folder's bunfig.toml first
+    // the playground command runs under bun, which reads the folder's bunfig.toml first, the main checkout's being its own; its rm removes only inside the session's own folders
     if (name === "playground")
       return (
-        (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" "))) &&
+        (PLAYGROUND_READS.has(words[1]) ||
+          PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) ||
+          (words[1] === "rm" &&
+            args.length > 1 &&
+            args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here)))) &&
         here.cwd !== undefined &&
-        !lookup.holds(here.cwd, "bunfig.toml")
+        (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd))
       )
     if (name === "gh") {
       const [group, ...rest] = words.slice(1)
@@ -356,7 +402,10 @@ export async function check(
   const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : undefined
   let allowed = false
   try {
-    allowed = await inspect(command, directory, environment, lookup)
+    const name = await lookup.name(sessionId)
+    const data = dataDirOf(environment)
+    const own = name ? [join(data, "scratch", name), join(data, "scratchpad", name)] : []
+    allowed = await inspect(command, directory, environment, lookup, own)
   } catch {}
   if (allowed) return
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${why}`
@@ -442,6 +491,12 @@ export function live(environment: Environment): Lookup {
     holds: (folder, entry) => existsSync(join(folder, entry)),
     // a guard runs from the main checkout (the settings' command cds there), so its folder is the checkout whose extensions hold the factory's own skills
     main: mainCheckout(process.cwd()),
+    name: async (sessionId) => {
+      if (typeof sessionId !== "string") return
+      try {
+        return await registryName(sessionId, environment)
+      } catch {}
+    },
     prsOf: async (sessionId) => {
       if (typeof sessionId !== "string") return []
       try {

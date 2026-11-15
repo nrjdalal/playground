@@ -32,6 +32,7 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/herdr"
 import {
   clip,
+  readTail,
   TEXT_LIMIT,
   type Entry,
 } from "../../../../../../api/hono/src/lib/dashboard/transcript"
@@ -1937,6 +1938,47 @@ describe("deliver to a herdr session", () => {
       )
       expect(next).toMatchObject({ code: "INPUT_NOT_EMPTY", ok: false })
       expect(enters).toEqual([])
+      expect(sent).toHaveLength(1)
+    })
+
+    // a transcript read through readTail whose newest 512 KB holds no step reaches back past the paste, so it shows the paste did not go and the paste gets its Enter
+    test("a remembered paste behind a stepless tail longer than 512 KB is shown not to have gone, and gets its Enter", async () => {
+      const { deps, sent } = herdr(undefined, "s-stepless-tail")
+      const dir = await mkdtemp(join(tmpdir(), "deliver-said-"))
+      const path = join(dir, "s.jsonl")
+      const person = JSON.stringify({
+        message: { content: "earlier", role: "user" },
+        origin: { kind: "human" },
+        timestamp: OLDER.at,
+        type: "user",
+        uuid: "e0",
+      })
+      const progress = (i: number) =>
+        JSON.stringify({ data: { blob: "p".repeat(10_000) }, type: "progress", uuid: `g${i}` })
+      await writeFile(
+        path,
+        `${[person, ...Array.from({ length: 60 }, (_, i) => progress(i))].join("\n")}\n`,
+      )
+      const enters: string[] = []
+      let drawn = false
+      deps.pressEnter = async (surface) => {
+        enters.push(surface)
+      }
+      deps.said = () => readTail(path, Number.POSITIVE_INFINITY)
+      deps.readScreen = async () => (drawn ? screen("❯ behind a stepless tail") : EMPTY)
+      const first = {
+        actor,
+        id: "11111111-2222-4333-8444-0000000000a1",
+        text: "behind a stepless tail",
+      }
+      expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ code: "QUEUED" })
+      drawn = true
+      const next = await deliver(
+        { actor, id: "11111111-2222-4333-8444-0000000000a2", text: "the next", to: "dispatcher" },
+        deps,
+      )
+      expect(next).toMatchObject({ code: "INPUT_NOT_EMPTY", ok: false })
+      expect(enters).toEqual([HERDR])
       expect(sent).toHaveLength(1)
     })
 
