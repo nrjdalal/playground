@@ -175,8 +175,7 @@ function aliasDefined(args: Word[], git = true): Word | undefined {
   }
 }
 
-// A factory session's git call that defines an alias on its own line is refused, whatever it runs, once the reading below finds nothing more precise
-// git: the program is surely git, so an unread -c value counts; cluster: a short option holding n beside an unread subcommand counts, which a git nested in another program's words (grep git "$f" -n) leaves out
+// A factory session's git call that defines an alias on its own line is refused, whatever it runs, once the reading below finds nothing more precise; git (the program is surely git) counts an unread -c value, and cluster a short option holding n beside an unread subcommand, both of which a git nested in another program's words (grep git -c "$f") leaves out
 async function judgeGit(
   args: Word[],
   env: Env,
@@ -286,9 +285,9 @@ const visitor =
     const nested = args.findIndex(
       (a, j) =>
         program(a.value) === "git" &&
-        (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))),
+        (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1), false)),
     )
-    if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth, true, false)
+    if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth, false, false)
   }
 
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")

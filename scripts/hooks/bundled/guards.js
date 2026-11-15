@@ -16742,9 +16742,9 @@ var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
     return judgeGit2(args, env, depth, false);
   if (PRINTERS.has(name))
     return;
-  const nested = args.findIndex((a, j) => program(a.value) === "git" && (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))));
+  const nested = args.findIndex((a, j) => program(a.value) === "git" && (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1), false)));
   if (nested !== -1)
-    return judgeGit2(args.slice(nested + 1), env, depth, true, false);
+    return judgeGit2(args.slice(nested + 1), env, depth, false, false);
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
 var candidate5 = (command) => command.includes("$'") || /ours|veri|alias|config-env|(?:^|\s)-c\s|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/i.test(BARE4(command));

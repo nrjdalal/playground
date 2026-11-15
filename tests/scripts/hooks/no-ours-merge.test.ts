@@ -254,6 +254,7 @@ describe("every other call runs", () => {
     ["a grep -e for git with -c after it", 'grep -e git -c "$f"'],
     ["an rg for git with -c after it", "rg git -c $D"],
     ["a grep for git with -c and a file after it", 'grep git -c "$f" x.ts'],
+    ["a git behind uv run with a -c it cannot read, a residual", 'uv run git -c "$K" commit -m x'],
     [
       "a wrapped git with a -c it cannot read, a residual",
       '~/.playground/ops/run-slot.sh w -- git -c "$K" ci',

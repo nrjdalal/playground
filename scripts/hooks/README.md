@@ -1081,7 +1081,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   since such a commit skips commit-msg and a commit's pre-commit.
   A merge's and a pull's `-n` is `--no-stat` and runs, and so do a branch named `no-verify` and a value that reads as one (`git commit -mn`, `-Sn`).
   Its reason names the fix: the same call without `--no-verify`, and for a reviewer's local merge of canary `git -C <clone> merge --no-edit origin/canary` (code-review-loop's The last 5/5), which runs the clone's own commit-msg; this repo installs no pre-merge-commit hook, so a clean merge runs commit-msg alone.
-- A factory session's git call that defines an alias on its own line is refused, whatever it runs, through the same wrappers: `-c alias.<name>=` or `--config-env alias.<name>=` (attached with `=` too), the key in any case, a `-c` value the hook cannot read where the program is surely git, and an `alias.` word beside a git option word the hook cannot read (`git $OPT alias.ci=…`),
+- A factory session's git call that defines an alias on its own line is refused, whatever it runs, through the same wrappers: `-c alias.<name>=` or `--config-env alias.<name>=` (attached with `=` too), the key in any case, a `-c` value the hook cannot read where the program is surely git (git itself, not one behind a wrapper or in another program's words, so `grep git -c "$f"` runs),
+  and an `alias.` word beside a git option word the hook cannot read (`git $OPT alias.ci=…`),
   since an alias can carry a merge, pull or commit past any reading.
   The reading above runs first and gives its more precise reason; this one names the fix: run the git command directly, its words written out in place of the alias.
   A `-c` or `--config-env` of another key runs, and so does an alias set in a config file, whose class, with the alias a `GIT_CONFIG_` variable sets and hooks moved by `core.hooksPath`, is the config class's issue.
