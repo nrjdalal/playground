@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   cpSync,
   existsSync,
@@ -30,8 +31,6 @@ import {
   scopeDir,
   within,
 } from "@packages/settings"
-
-import { setId } from "./plugin-id"
 
 // The core scope's skill folders in the checkout, read in this order; the last holds core's own skills beside upstream's, vendored as published.
 export const CORE_SKILLS = ["skills/playground", "skills/zerostarter", "extensions/core/skills"]
@@ -148,7 +147,11 @@ const filesOf = (dir: string): string[] =>
 
 // One merged plugin for a set of winners, under <data>/orgs/<set>/<hash>/: the folder is named by what it holds, so a session already running on an older one keeps it whole, and a second spawn with the same winners reuses it. It is built in a scratch folder beside it and renamed into place, losing the scratch marker once there.
 export const writePlugin = (data: string, set: string, winners: Winner[]): string => {
-  const id = setId(winners.map(({ dir, name }) => ({ dir, files: filesOf(dir), name })))
+  const hash = createHash("sha256")
+  for (const winner of [...winners].sort((a, b) => a.name.localeCompare(b.name)))
+    for (const file of filesOf(winner.dir))
+      hash.update(`${winner.name}/${file}\0`).update(readFileSync(join(winner.dir, file)))
+  const id = hash.digest("hex").slice(0, 16)
   const dir = join(data, "orgs", set, id)
   if (existsSync(dir)) return dir
   const parent = dirname(dir)

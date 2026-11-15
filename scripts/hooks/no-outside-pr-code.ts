@@ -1,10 +1,9 @@
 // PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names and every file it writes lands in the session's own folders, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
-import { installedSkills, setId } from "../../packages/scripts/src/playground/plugin-id"
 import { input } from "./input"
 import { mainCheckout } from "./no-main-checkout"
 import { readsWords } from "./read-only"
@@ -43,8 +42,8 @@ export type Lookup = {
   prsOf: (sessionId: unknown) => Promise<string[]>
   // the program a script's first line runs it with (runnerOf): `env`'s program for an env line, "" for one it cannot read or a script it cannot open, undefined with no shebang
   runner: (script: string) => string | undefined
-  // whether a script under the data folder's orgs, its path resolved, sits in a set whose files still hash to the id writePlugin named its folder by, and is one of those files
-  shipped: (script: string) => boolean
+  // whether git, in the main checkout, reports a file tracked and unchanged from HEAD
+  tracked: (script: string) => boolean
 }
 
 const CHECKERS = new Set(["reviewer", "tester"])
@@ -84,7 +83,7 @@ const UTILITIES = new Set([
   "uniq",
   "wc",
 ])
-// Interpreters that read no config from the folder they run in, so an installed skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
+// Interpreters that read no config from the folder they run in, so a skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
 const INTERPRETERS = new Set(["node", "python", "python3"])
 // gh's command groups a checker posts and reads with, A to Z; a checkout (`pr checkout` or `pr co`, wherever the verb sits among gh's flags, and `issue develop`) is left out, since it runs the git hooks of the folder it lands in, and so is any `--`, which hands gh's clone git's own options.
 const GH = new Set(["api", "issue", "label", "pr", "repo", "run", "search"])
@@ -267,20 +266,20 @@ export async function inspect(
   own: string[] = [],
 ): Promise<boolean> {
   const data = dataDirOf(environment)
-  const orgs = real(join(data, "orgs"))
   const extensions = join(lookup.main, "extensions")
   const slot = join(data, "ops", "run-slot.sh")
   let allowed = true
   // whether the line writes into the session's own folders, and whether it also runs a move that can put a link or a folder there first
   let ownWrites = false
   let reshapes = false
-  // A script of a skill a ship installed in the data folder, or kept in the main checkout's extensions, run as a program or by an interpreter with no option of its own.
+  // A script of a skill in the main checkout's extensions that git there reports tracked and unchanged, run as a program or by an interpreter with no option of its own; the data folder's installed copies are left out, since any tool can write a folder there.
   const skillScript = (written: string | undefined) => {
     if (written === undefined) return false
     const path = real(written)
-    if (under(path, orgs)) return lookup.shipped(path)
     return (
-      under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/")
+      under(path, extensions) &&
+      path.slice(extensions.length).toLowerCase().includes("/skills/") &&
+      lookup.tracked(path)
     )
   }
   // Whether a folder sits in the main checkout's own work tree: the first folder up from it that holds .git is the main checkout, so another clone or worktree inside it, a folder outside any, and an unknown one are not.
@@ -308,6 +307,11 @@ export async function inspect(
     const path = text && !(text as Word).glob ? pathOf(text, here) : undefined
     if (path === undefined || !existsSync(dirname(resolve(path))) || !ownPath(text, here))
       return false
+    // a link as the last part, dangling or not, carries the write where it points, and a file with a second link changes a file elsewhere too
+    try {
+      const stat = lstatSync(path)
+      if (stat.isSymbolicLink() || stat.nlink > 1) return false
+    } catch {}
     ownWrites = true
     return true
   }
@@ -364,7 +368,7 @@ export async function inspect(
         words.slice(print ? 3 : 2).every((w) => w === "-" || !w.startsWith("-"))
       )
     }
-    // a shell's -c script is walked on its own, and a script file only an installed skill's runs
+    // a shell's -c script is walked on its own, and a script file only a tracked skill's runs
     if (SHELLS.has(name)) {
       const { inline, operand } = shellOperand(args, name)
       return inline || (operand !== undefined && skillScript(pathOf(operand, here)))
@@ -473,7 +477,7 @@ export async function check(
     allowed = await inspect(command, directory, environment, lookup, own)
   } catch {}
   if (allowed) return
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`
 }
 
 async function output(argv: string[]): Promise<string | undefined> {
@@ -525,6 +529,20 @@ export const runnerOf = (line: string | undefined): string | undefined => {
     else if (!word.includes("=")) return /[$\\]/.test(word) ? "" : basename(word)
   }
   return ""
+}
+
+// Whether git, in the main checkout, reports a file tracked and unchanged from HEAD, with the session's GIT_ variables dropped, so the repository asked is the main checkout itself.
+export function trackedIn(main: string, script: string): boolean {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+  )
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", main, ...args], { env, stderr: "ignore", stdout: "ignore" })
+      .exitCode === 0
+  return (
+    git("ls-files", "--error-unmatch", "--", script) &&
+    git("diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--", script)
+  )
 }
 
 // The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
@@ -583,18 +601,7 @@ export function live(environment: Environment): Lookup {
       const line = firstLine(script)
       return line === undefined ? "" : runnerOf(line)
     },
-    shipped: (script) => {
-      const orgs = real(join(data, "orgs"))
-      const at = relative(orgs, real(script))
-      const [set, id, folder, skill, ...file] = at.split("/")
-      if (isAbsolute(at) || set === ".." || folder !== "skills" || file.length === 0) return false
-      const skills = installedSkills(join(orgs, set, id, folder))
-      return (
-        skills !== undefined &&
-        setId(skills) === id &&
-        skills.some((s) => s.name === skill && s.files.includes(file.join("/")))
-      )
-    },
+    tracked: (script) => trackedIn(mainCheckout(process.cwd()), script),
   }
 }
 
