@@ -44,7 +44,7 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync2, lstatSync, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "path";
 
 // packages/env/src/data-dir.ts
@@ -7867,6 +7867,9 @@ var FIND_ACTIONS = new Set([
   "-ok",
   "-okdir"
 ]);
+var DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"]);
+var UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"]);
+var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? "");
 var GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
 var unread = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`;
 var REASONS = {
@@ -7948,14 +7951,16 @@ function gitAllows(words, folder, lookup, environment) {
 }
 async function inspect(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
-  const skills = [join5(data, "orgs"), join5(lookup.main, "extensions")];
+  const extensions = join5(lookup.main, "extensions");
   const slot = join5(data, "ops", "run-slot.sh");
   let allowed = true;
+  let ownWrites = false;
+  let reshapes = false;
   const skillScript = (written) => {
     if (written === undefined)
       return false;
     const path = real(written);
-    return skills.some((root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"));
+    return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/") && lookup.tracked(path);
   };
   const inMain = (folder) => {
     if (folder === undefined)
@@ -7975,6 +7980,24 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return at !== undefined && under(path, at);
     });
   };
+  const ownTarget = (text, here) => {
+    const path = text && !text.glob ? pathOf(text, here) : undefined;
+    if (path === undefined || !existsSync2(dirname3(resolve4(path))) || !ownPath(text, here))
+      return false;
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink() || !stat.isDirectory() && stat.nlink > 1)
+        return false;
+    } catch {}
+    ownWrites = true;
+    return true;
+  };
+  const writesOwn = (cmd, here) => cmd.redirects.every((r) => {
+    if (!writer(r))
+      return true;
+    const path = r.target && !r.target.glob ? pathOf(r.target, here) : undefined;
+    return path !== undefined && DEVICES.has(path) || ownTarget(r.target, here);
+  });
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -7991,8 +8014,26 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd);
     }
     const words = [name, ...args.map((a) => a.value)];
-    if (name === "git")
+    if (name === "git") {
+      const sub = words[words[1] === "-C" ? 3 : 1];
+      if (["checkout", "clone", "switch", "worktree"].includes(sub))
+        reshapes = true;
       return gitAllows(words, here.cwd, lookup, environment);
+    }
+    if (name === "uniq") {
+      const operands = [];
+      let ended = false;
+      for (let i = 0;i < args.length; i++) {
+        const v = args[i].value;
+        if (ended || v === "-" || !v.startsWith("-"))
+          operands.push(args[i]);
+        else if (v === "--")
+          ended = true;
+        else if (UNIQ_VALUED.has(v))
+          i++;
+      }
+      return operands.length < 2 || operands.length === 2 && ownTarget(operands[1], here);
+    }
     if (UTILITIES.has(name) || readsWords(words))
       return true;
     if (name === "find")
@@ -8001,17 +8042,36 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return !(words[1] in environment);
     if (name === "read")
       return words.slice(1).every((w) => w.startsWith("-") || !(w in environment));
-    if (name === "sed")
-      return words[1] === "-n" ? SED_PRINT.test(words[2] ?? "") : SED_SUBSTITUTE.test(words[1] ?? "");
+    if (name === "sed") {
+      const print = words[1] === "-n";
+      return (print ? SED_PRINT : SED_SUBSTITUTE).test(words[print ? 2 : 1] ?? "") && words.slice(print ? 3 : 2).every((w) => w === "-" || !w.startsWith("-"));
+    }
     if (SHELLS.has(name)) {
       const { inline, operand } = shellOperand(args, name);
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
-    if (name === "playground")
+    if (name === "playground") {
+      if (words[1] === "rm")
+        reshapes = true;
       return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
+    }
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");
+      if (group === "repo" && rest.some((w) => w === "clone" || w === "fork"))
+        reshapes = true;
+      if (group === "run" && rest.includes("download")) {
+        const folders = args.flatMap((a, i) => {
+          if (a.value === "-D" || a.value === "--dir")
+            return args[i + 1] ? [args[i + 1]] : [a];
+          if (a.value.startsWith("--dir="))
+            return [slice(a, 6)];
+          return a.value.startsWith("-D") ? [slice(a, a.value.startsWith("-D=") ? 3 : 2)] : [];
+        });
+        const into = folders.length > 0 ? folders : [{ value: "." }];
+        if (!into.every((folder) => ownTarget(folder, here)))
+          return false;
+      }
       return GH2.has(group) && !checkout && !words.includes("--");
     }
     if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
@@ -8019,6 +8079,8 @@ async function inspect(command, directory, environment, lookup, own = []) {
     return false;
   };
   const visit = async (cmd, parsed, env) => {
+    if (!writesOwn(cmd, env))
+      allowed = false;
     if (parsed.name === "run-slot.sh" && parsed.first && permitted(cmd, parsed, env)) {
       const at = parsed.args.findIndex((a) => a.value === "--");
       return at === -1 ? undefined : examine({ ...cmd, words: parsed.args.slice(at + 1) }, env, visit, false);
@@ -8039,7 +8101,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
     visitShells: true
   };
   await run(lex(command, variables), env, visit, true);
-  return allowed;
+  return allowed && !(ownWrites && reshapes);
 }
 async function readMode(sessionId, lookup) {
   const prs = (await lookup.prsOf(sessionId)).flatMap((url) => {
@@ -8084,7 +8146,7 @@ async function check(raw, environment = process.env, lookup = live(environment))
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
@@ -8132,6 +8194,15 @@ var runnerOf = (line) => {
   }
   return "";
 };
+function trackedIn(main, script) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
+  const git = (...args) => Bun.spawnSync(["git", "--literal-pathspecs", "-C", main, ...args], {
+    env,
+    stderr: "ignore",
+    stdout: "ignore"
+  }).exitCode === 0;
+  return git("ls-files", "--error-unmatch", "--", script) && git("diff", "--quiet", "--no-ext-diff", "--no-textconv", "HEAD", "--", script);
+}
 function live(environment) {
   const data = dataDirOf(environment);
   const cache = join5(data, "hook-outside-pr");
@@ -8185,7 +8256,8 @@ function live(environment) {
     runner: (script) => {
       const line = firstLine(script);
       return line === undefined ? "" : runnerOf(line);
-    }
+    },
+    tracked: (script) => trackedIn(mainCheckout(process.cwd()), script)
   };
 }
 if (import.meta.main) {
@@ -8200,5 +8272,6 @@ export {
   inspect,
   live,
   readMode,
-  runnerOf
+  runnerOf,
+  trackedIn
 };

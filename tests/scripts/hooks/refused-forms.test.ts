@@ -464,6 +464,10 @@ const guardsOf = (
         author: async () => OUTSIDE_PR,
         main: PATHS.MAIN,
         prsOf: async () => ["https://github.com/acme-owner/widgets/pull/501"],
+        // the made-up main checkout is no git repo, so the core skills' scripts it writes stand for the tracked and unchanged files of the real one
+        tracked: (script: string) =>
+          script.startsWith(join(PATHS.MAIN, "extensions", "core", "skills") + "/") &&
+          existsSync(script),
       })
     },
   },
