@@ -1089,12 +1089,19 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Any other (bun, bun-canary, an `env` line read as another word, a script the hook cannot open) passes only where the working folder sits in the main checkout's own tree, the first folder up from it holding `.git` being the main checkout.
   bun reads files from the folder it runs in before the script (`bunfig.toml`'s preload, `.env`'s variables, and whatever a later bun adds), so the rule judges the place rather than each file; the PR's clone at any depth, a scratch folder outside every work tree and a folder the hook cannot read are refused, and a reviewer runs `state.ts` from the main checkout.
   It holds a shell's `-c` script, whose commands are judged one by one, and a shell running such a skill script; `shell.ts`'s `visitShells` shows the hook each shell a line starts, since the walk follows a script file it cannot read as an empty one.
-  It holds the factory's own run-slot, `<data folder>/ops/run-slot.sh`, whose command after `--` is judged in its place, and the `playground` command's read verbs (`PLAYGROUND_READS`) in a folder with no `bunfig.toml`, since it runs under bun and `playground add` starts a session no read mode holds.
+  It holds the factory's own run-slot, `<data folder>/ops/run-slot.sh`, whose command after `--` is judged in its place.
+  It holds the `playground` command's read verbs (`PLAYGROUND_READS`, an item reviewer's `ext show` and `score` among them) in a folder with no `bunfig.toml` or in the main checkout's own tree, whose `bunfig.toml` is the factory's,
+  since it runs under bun and `playground add` starts a session no read mode holds.
+  An extension item's reviewer, whose row names no PR, finishes its review in read mode, and the item's tests stay refused.
+  `playground rm`, with no option, passes when every path it removes sits in the session's own `scratch/<name>` or `scratchpad/<name>` folder, found by its registry name, a `..` step refused.
+  `playground ext export` and `cp` stay refused, since a clone or a worktree the same line checks out can hold a link that carries the write out of those folders; an item's reviewer reads a revision with `playground ext show <scope> <kind> <key> --rev <sha>` piped into `jq` (`.content.files`, `.content.body`), which every guard on Bash passes.
+  `du` and a `find` with no action that runs, deletes or writes (`FIND_ACTIONS`) pass anywhere, and two files compare with `diff -q`.
+  It compares two revisions with `git diff --no-index` only beside `--no-ext-diff` and `--no-textconv`, since a folder can ship the attributes that start a diff program, and a scratch repo's `git init`, `add` and `commit` stay refused, since a copied item can carry its own `.git` and hooks.
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
   Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
-  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
-  Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+  [guards](#guards) runs it on Bash, and both settings files register its own bundle on Monitor, which guards does not hear.
+  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts tests/scripts/hooks/guards.test.ts tests/scripts/factory-settings.test.ts`, the last two holding it to guards' entry and the Monitor one.
 
 ## no-prepare-write
 

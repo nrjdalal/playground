@@ -16,6 +16,7 @@ import { check as macWebBuild } from "./no-mac-web-build"
 import { check as mainCheckout } from "./no-main-checkout"
 import { check as offPaletteLabel } from "./no-off-palette-label"
 import { check as oursMerge } from "./no-ours-merge"
+import { check as outsidePrCode } from "./no-outside-pr-code"
 import { check as playgroundLeak } from "./no-playground-leak"
 import { check as prepareWrite } from "./no-prepare-write"
 import { check as promptStop } from "./no-prompt-stop"
@@ -59,6 +60,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-main-checkout", run: (raw, env) => mainCheckout(raw, env) },
   { factory: false, name: "no-off-palette-label", run: (raw) => offPaletteLabel(raw) },
   { factory: true, name: "no-ours-merge", run: (raw, env) => oursMerge(raw, env) },
+  { factory: false, name: "no-outside-pr-code", run: (raw, env) => outsidePrCode(raw, env) },
   { factory: true, name: "no-playground-leak", run: (raw, env) => playgroundLeak(raw, env) },
   { factory: true, name: "no-prepare-write", run: (raw, env) => prepareWrite(raw, env) },
   { factory: true, name: "no-prompt-stop", run: (raw) => promptStop(raw) },

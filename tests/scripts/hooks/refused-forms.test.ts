@@ -215,6 +215,7 @@ const CHECK_NAMES = [
   "killByName",
   "linearTicket",
   "mainCheckout",
+  "outsidePrCode",
   "playgroundLeak",
   "protectedPush",
   "publicLeak",
@@ -234,6 +235,7 @@ const SOURCE: Checks = {
   killByName,
   linearTicket,
   mainCheckout,
+  outsidePrCode,
   playgroundLeak,
   protectedPush,
   publicLeak,
@@ -253,6 +255,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   killByName: "no-kill-by-name",
   linearTicket: "no-linear-ticket",
   mainCheckout: "no-main-checkout",
+  outsidePrCode: "no-outside-pr-code",
   playgroundLeak: "no-playground-leak",
   protectedPush: "no-protected-push",
   publicLeak: "no-public-leak",
@@ -441,7 +444,6 @@ const guardsOf = (
     },
     run: (raw, home) => c.mainCheckout(raw, { HOME: home }, PATHS.MAIN),
   },
-  // run from its source alone, since this guard has no bundle
   "no-outside-pr-code": {
     folders: {
       "main checkout": [PATHS.MAIN, HOME],
@@ -457,7 +459,7 @@ const guardsOf = (
     },
     run: (raw, home) => {
       const environment = { HOME: home, PATH: "/usr/bin:/bin", PLAYGROUND_ROLE: "reviewer" }
-      return outsidePrCode(raw, environment, {
+      return c.outsidePrCode(raw, environment, {
         ...live(environment),
         author: async () => OUTSIDE_PR,
         main: PATHS.MAIN,
@@ -878,6 +880,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
 
   test("the rows whose path flag keeps its single spelling are the ones pinned here", () => {
     expect([...UNSPELT].sort()).toEqual([
+      // the folder the row's git -C names is the one its own copy makes, so no spelling finds it before the line runs
+      "#1280 a copy that makes a repository git then reads | git -C, no folder",
       // the row's cd moves the shell, and the -C is a value tar's own option takes, so no spelling of it names a folder tar uses
       "#1340 tar whose --exclude value is a -C after a cd to a variable | tar -C, it moves folders",
       "#1340 tar whose --include value is a -C after a cd to a variable | tar -C, it moves folders",

@@ -33,6 +33,7 @@ const PRS: Record<string, { author: string; owner: string; ownerType: string }> 
 }
 const SESSIONS: Record<string, string[]> = {
   "s-issue": ["https://github.com/acme-owner/widgets/issues/77"],
+  "s-item": ["acme-owner/skill/triage"],
   "s-mixed": [pull("acme-owner/widgets", 502), pull("acme-owner/widgets", 501)],
   "s-none": [],
   "s-org": [pull("acme-org/tools", 504)],
@@ -62,10 +63,16 @@ const SHEBANGS: Record<string, string> = {
   [`${SHAPES}/shell`]: "#!/bin/sh",
 }
 
+// an extension item's reviewer, whose row names the item and no PR, and its own scratch and scratchpad folders
+const ITEM_REVIEWER = "p7w3zc-reviewer"
+const PAD = `${HOME}/.playground/scratchpad/${ITEM_REVIEWER}`
+const SCRATCH = `${HOME}/.playground/scratch/${ITEM_REVIEWER}`
+
 const lookup: Lookup = {
   author: async (repo, pr) => PRS[`${repo}#${pr}`],
   holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
+  name: async (sessionId) => (sessionId === "s-item" ? ITEM_REVIEWER : undefined),
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
   // each made-up script's shebang by its extension, as a skill's scripts name theirs
   runner: (script) =>
@@ -372,6 +379,152 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
   })
 })
 
+// #1280: an item reviewer is in read mode, as its row names no PR, and finishes its review by reading, copying into and clearing its own folders, and posting its verdict
+describe("no-outside-pr-code lets an item reviewer finish its review by reading", () => {
+  const item = (command: string, cwd = MAIN) => judge(call(command, cwd, "s-item"))
+  // the main checkout holds a bunfig.toml of its own, which the playground command reads there
+  const mainBunfig: Lookup = {
+    ...lookup,
+    holds: (folder, entry) =>
+      (folder === MAIN && entry === "bunfig.toml") || lookup.holds(folder, entry),
+  }
+
+  test.each([
+    ["playground ext show", "playground ext show acme-owner script triage --rev abc123"],
+    [
+      "one file of a revision, read from ext show",
+      `playground ext show acme-owner script triage --rev abc123 | jq -r '.content.files["cli.ts"]'`,
+    ],
+    [
+      "a revision's file names, read from ext show",
+      "playground ext show acme-owner script triage --rev abc123 | jq -r '.content.files | keys[]'",
+    ],
+    ["playground ext score", 'playground ext score acme-owner skill triage abc123 5 --reason "r"'],
+    ["playground rm of its scratchpad", `playground rm ${PAD}`],
+    ["playground rm inside its scratch folder", `playground rm ${SCRATCH}/store/node_modules`],
+    ["diff -q, which compares two files", `diff -q ${PAD}/repo/a.md ${HOME}/.playground/a.md`],
+    ["du", `du -sh ${PAD}/*`],
+    ["find with no action", `find ${PAD} -type f | wc -l`],
+    ["git diff in its scratchpad's repo", `git -C ${PAD}/repo diff HEAD^ HEAD -- a.ts`],
+    [
+      "the two revisions compared with no repository and no diff program",
+      `git diff --no-index --no-ext-diff --no-textconv ${PAD}/base ${PAD}/proposed`,
+    ],
+  ])("%s passes", async (_, command) => {
+    expect(await item(command)).toBeUndefined()
+  })
+
+  test("a playground verb from the main checkout, whose bunfig.toml is its own, passes", async () => {
+    const raw = call("playground ext score acme-owner skill triage abc123 5", MAIN, "s-item")
+    expect(await check(raw, as("reviewer"), mainBunfig)).toBeUndefined()
+  })
+
+  test.each([
+    ["the PR's clone", OUTSIDE],
+    ["a scratch folder", `${PAD}/store`],
+  ])("a playground verb from %s holding its own bunfig.toml is refused", async (_, cwd) => {
+    const raw = call("playground ext score acme-owner skill triage abc123 5", cwd, "s-item")
+    const held: Lookup = {
+      ...mainBunfig,
+      holds: (folder, entry) =>
+        (folder === `${PAD}/store` && entry === "bunfig.toml") || mainBunfig.holds(folder, entry),
+    }
+    expect(await check(raw, as("reviewer"), held)).toContain("no-outside-pr-code")
+  })
+
+  test.each([
+    [
+      "the item's tests through run-slot",
+      `${SLOT} ${ITEM_REVIEWER} -- bun --cwd ${PAD}/store test.ts x`,
+    ],
+    ["playground rm outside its own folders", `playground rm ${HOME}/.playground/scratchpad/other`],
+    ["playground rm that climbs out of its folder", `playground rm ${PAD}/../other-reviewer`],
+    ["playground rm with an option", `playground rm --force ${PAD}`],
+    [
+      "cp into its own scratchpad, which the item's review needs none of",
+      `cp ${PAD}/a.ts ${PAD}/b.ts`,
+    ],
+    ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
+    ["cp out of its own folders", `cp ${PAD}/a.ts ${HOME}/.playground/ops/a.ts`],
+    ["cp with a target directory option", `cp -t ${HOME}/.playground/ops ${PAD}/a.ts`],
+    [
+      "cp with a suffix option, whose value reads as its target",
+      `cp a.sh ${HOME}/.playground/ops -S ${PAD}/x`,
+    ],
+    ["cp with a long option", `cp --backup=numbered a.sh ${PAD}/x`],
+    ["cp with -- before its operands", `cp -- a.sh ${PAD}/x`],
+    ["cp of two sources into a folder", `cp a.sh b.sh ${PAD}/dir`],
+    [
+      "playground ext export outside its own folders",
+      `playground ext export ${HOME}/.playground/ops/x`,
+    ],
+    ["playground ext export with two folders", `playground ext export ${PAD}/a ${HOME}/x`],
+    ["playground ext export into its own scratchpad", `playground ext export ${PAD}/store/`],
+    [
+      "a worktree of the PR whose link an export then writes through",
+      `git -C ${OUTSIDE} worktree add --detach ${PAD}/w HEAD && playground ext export ${PAD}/w/l/new`,
+    ],
+    [
+      "a clone whose link an export then writes through",
+      `git clone https://github.com/ext-dev/widgets ${PAD}/c && playground ext export ${PAD}/c/l/new`,
+    ],
+    ["cmp, which diff -q answers", `cmp ${PAD}/repo/a.md ${HOME}/.playground/a.md`],
+    ["find that deletes", `find ${PAD} -name x -delete`],
+    ["find that runs a program", `find ${PAD} -exec sh {} ;`],
+    ["find that runs a program in each folder", `find ${PAD} -execdir sh {} ;`],
+    ["find that asks, then runs a program", `find ${PAD} -ok sh {} ;`],
+    ["find that asks, then runs a program in each folder", `find ${PAD} -okdir sh {} ;`],
+    ["find that writes its list", `find ${PAD} -fprint ${HOME}/.playground/ops/run-slot.sh`],
+    ["find that writes its list, nul-ended", `find ${PAD} -fprint0 ${HOME}/.playground/ops/x`],
+    ["find that writes a formatted list", `find ${PAD} -fprintf ${HOME}/.playground/ops/x %p`],
+    ["find that writes a long list", `find ${PAD} -fls ${HOME}/.playground/ops/x`],
+    ["git init of a scratch repo", `git -C ${PAD}/repo init -q`],
+    ["git commit in a scratch repo", `git -C ${PAD}/repo commit -qm base`],
+    ["git add in a scratch repo", `git -C ${PAD}/repo add -A`],
+    [
+      "a --no-index diff that leaves a diff program on",
+      `git diff --no-index ${PAD}/base ${PAD}/proposed`,
+    ],
+    [
+      "a --no-index diff that leaves textconv on",
+      `git diff --no-index --no-ext-diff ${PAD}/base ${PAD}/proposed`,
+    ],
+    [
+      "a --no-index diff with both flags under a -c setting",
+      `git -c diff.external=${PAD}/x.sh diff --no-index --no-ext-diff --no-textconv ${PAD}/base ${PAD}/proposed`,
+    ],
+  ])("%s is refused", async (_, command) => {
+    expect(await item(command)).toContain("no-outside-pr-code")
+  })
+})
+
+// #1280 round 1: a write lands where the system resolves it, so a folder or a link already in its own folders can carry it out
+describe("no-outside-pr-code's item reviewer writes nothing through a folder or a link in its own folders", () => {
+  const data = mkdtempSync(join(tmpdir(), "outside-pr-own-"))
+  const own = join(data, "scratchpad", ITEM_REVIEWER)
+  mkdirSync(join(own, "dir"), { recursive: true })
+  symlinkSync(join(data, "elsewhere"), join(own, "link"))
+  const environment = {
+    HOME,
+    PATH: "/usr/bin:/bin",
+    PLAYGROUND_DATA_DIR: data,
+    PLAYGROUND_ROLE: "reviewer",
+  }
+  const judgeOwn = (command: string) => check(call(command, MAIN, "s-item"), environment, lookup)
+
+  test.each([
+    ["cp into a folder that exists, whose entries can be links", `cp a.sh ${own}/dir`],
+    ["cp onto a link", `cp a.sh ${own}/link`],
+    ["playground ext export into a folder that exists", `playground ext export ${own}/dir`],
+  ])("%s is refused", async (_, command) => {
+    expect(await judgeOwn(command)).toContain("no-outside-pr-code")
+  })
+
+  test("playground ext export into a new folder of its own is refused, since a link the line makes first can carry it out", async () => {
+    expect(await judgeOwn(`playground ext export ${own}/new-store`)).toContain("no-outside-pr-code")
+  })
+})
+
 describe("no-outside-pr-code reads the session's PRs to choose read mode", () => {
   test.each([
     ["a checker of the owner's own PR", "s-own"],
@@ -391,6 +544,12 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
     ],
   ])("a checker with %s is in read mode", async (_, session, words) => {
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
+  })
+
+  test("an item's reviewer, whose row names no PR, is told to read each revision with ext show", async () => {
+    expect(await judge(call("bun test", OUTSIDE, "s-none"))).toContain(
+      "playground ext show <scope> <kind> <key> --rev <sha>",
+    )
   })
 
   test("a GIT_DIR the session exports keeps git out, since the walk would not find that repository", async () => {
