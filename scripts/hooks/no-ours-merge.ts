@@ -198,6 +198,9 @@ async function readGit(args: Word[], env: Env, depth: number): Promise<string | 
     const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value))
     if (off)
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`
+    const alias = rest.find((a) => /^(?:--config-env=)?alias\./i.test(a.value))
+    if (alias)
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(alias.value)}, which may define a git alias. Run the git command directly, its words written out in place of the alias.`
     return
   }
   // git runs an alias for any name but its own commands, which the hook applies to the three it judges, commit, merge and pull; the last -c for a name wins, its key read in any case

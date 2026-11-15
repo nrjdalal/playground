@@ -16673,6 +16673,9 @@ async function readGit(args, env, depth) {
     const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value));
     if (off)
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`;
+    const alias = rest.find((a) => /^(?:--config-env=)?alias\./i.test(a.value));
+    if (alias)
+      return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(alias.value)}, which may define a git alias. Run the git command directly, its words written out in place of the alias.`;
     return;
   }
   const key = `alias.${sub.value.toLowerCase()}`;
