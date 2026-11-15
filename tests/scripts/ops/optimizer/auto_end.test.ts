@@ -255,7 +255,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       const { deps } = fakes({
         close: async () => (writeFileSync(path, `${head}${exec}\n`), { ok: true, out: "" }),
         resumeDir,
-      } as Partial<EndDeps>)
+      })
       return (await endOne(target, "checker-nothing (head scored)", deps)).map((l) => l.text)
     }
 
