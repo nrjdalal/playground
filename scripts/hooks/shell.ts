@@ -1461,11 +1461,11 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
       delimiters?: (string | undefined)[]
-      files?: Word[]
+      files?: { chdir?: Word; file: Word; moved?: boolean }[]
       filled?: [Word, string][]
       outer?: string[]
       replace?: string
@@ -1487,7 +1487,7 @@ export type Parsed = {
 
 // env's split-string option, attached or not, with the text it carries attached
 const SPLIT = /^(?:-[0iv]*S|--split-string(?:=|$))(.*)$/
-// GNU xargs' long options, each of which it takes by any unique prefix (`--delim=,`), and the ones among them xargsOption reads
+// GNU xargs' long options, each of which it takes by any unique prefix (`--delim=,`)
 const XARGS_LONG = [
   "arg-file",
   "delimiter",
@@ -1508,7 +1508,6 @@ const XARGS_LONG = [
   "verbose",
   "version",
 ]
-const XARGS_READ = new Set(["arg-file", "delimiter", "null", "replace"])
 // GNU's and BSD's short xargs options that take no value, as a cluster (`-rJ`, `-0I`) reads them before the one that takes a value
 const XARGS_FLAGS = "0oprtx"
 // The one character GNU xargs' -d names, itself or a backslash escape: a letter $'…' reads, an octal number, or \x and a hex one; undefined when the reader cannot decode it
@@ -1524,8 +1523,16 @@ function delimiterOf(word: Word | undefined): string | undefined {
 // xargs' replace options as unwrap reads and takes them itself: -I, -J, -i and --replace, each leading its word
 const XARGS_REPLACE = /^(?:-[IiJ]|--replace)/
 
-// Records what one xargs option word sets beside unwrap's own reading, which still takes the word and forks as before, so the parse keeps every reading it made: GNU's -a and --arg-file (the input), -d, --delimiter, -0 and --null (its split), and a replace string XARGS_REPLACE misses, at the end of a cluster of flags (`-rJ`) or by a long prefix GNU takes (`--repl=`); its value attached or the next word
-function xargsOption(xargs: NonNullable<Xargs>, w: Word, next: Word | undefined): void {
+// Records what one xargs option word sets beside unwrap's own reading, which still takes the word and forks as before, so the parse keeps every reading it made: GNU's -a and --arg-file (the input), -d, --delimiter, -0 and --null (its split), and a replace string XARGS_REPLACE misses, at the end of a cluster of flags (`-rJ`) or by a long prefix GNU takes (`--repl=`); its value attached or the next word, and a file with the folder `state` holds before xargs
+function xargsOption(
+  xargs: NonNullable<Xargs>,
+  w: Word,
+  next: Word | undefined,
+  state: State,
+): void {
+  const split = (delimiter: string | undefined) => {
+    xargs.delimiters = [...(xargs.delimiters ?? []), delimiter]
+  }
   if (XARGS_REPLACE.test(w.value)) return
   const long = /^--([^=]+)(=?)/.exec(w.value)
   let name: string | undefined
@@ -1537,23 +1544,28 @@ function xargsOption(xargs: NonNullable<Xargs>, w: Word, next: Word | undefined)
   } else if (w.value.startsWith("-")) {
     let k = 1
     while (XARGS_FLAGS.includes(w.value[k] ?? "-")) k++
-    if (w.value.slice(1, k).includes("0")) xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
+    if (w.value.slice(1, k).includes("0")) split("\0")
     name = w.value[k]
     if (k + 1 < w.value.length) value = slice(w, k + 1)
   }
   if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
-  else if (name === "null") xargs.delimiters = [...(xargs.delimiters ?? []), "\0"]
+  else if (name === "null") split("\0")
   else if (name === "I" || name === "J") xargs.replace = (value ?? next)?.value
   else if (name === "a" || name === "arg-file")
-    xargs.files = [...(xargs.files ?? []), ...[value ?? next].filter((f) => f !== undefined)]
-  else if (name === "d" || name === "delimiter")
-    xargs.delimiters = [...(xargs.delimiters ?? []), delimiterOf(value ?? next)]
+    xargs.files = [
+      ...(xargs.files ?? []),
+      ...[value ?? next]
+        .filter((file) => file !== undefined)
+        .map((file) => ({ chdir: state.chdir, file, moved: state.moved })),
+    ]
+  else if (name === "d" || name === "delimiter") split(delimiterOf(value ?? next))
 }
 
 // Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
 const splitFrom = new WeakMap<Word, Word>()
 
-type State = { chdir?: Word; local: Map<string, Text>; rest: Word[]; xargs: Xargs }
+// `moved`: a privilege wrapper came before, which may run the rest in another folder (sudo -D or -i, pkexec without --keep-cwd)
+type State = { chdir?: Word; local: Map<string, Text>; moved?: boolean; rest: Word[]; xargs: Xargs }
 // env's folder word, which a second -C leaves unread, since one env moves by each in turn and another by the last alone
 const chdirOf = (state: State, word: Word | undefined): Word | undefined =>
   state.chdir && word ? { ...word, ...unknown("a second env -C") } : word
@@ -1588,6 +1600,7 @@ const assign = (local: Map<string, Text>, w: Word) => {
 function unwrap(state: State, inside: string | undefined, budget: Budget): Parsed {
   const { local, rest } = state
   const peek = (): Word | undefined => rest[rest.length - 1]
+  const next = (): Word | undefined => rest[rest.length - 2]
   const take = (): Word | undefined => rest.pop()
   const also: Parsed[] = []
   const fork = (wrapper: string, drop: number) => {
@@ -1601,6 +1614,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         {
           chdir: state.chdir,
           local: new Map(local),
+          moved: state.moved,
           rest: rest.slice(0, Math.max(0, rest.length - drop)),
           xargs: state.xargs && { ...state.xargs },
         },
@@ -1623,6 +1637,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         }
       wrapper = program(word?.value ?? "")
       if (!WRAPPERS.has(wrapper)) break
+      if (ROOT_SHELLS.has(wrapper)) state.moved = true
       if (wrapper === "xargs" && state.xargs?.replace)
         state.xargs = { ...state.xargs, outer: [...(state.xargs.outer ?? []), state.xargs.replace] }
       if (wrapper === "xargs") state.xargs ??= {}
@@ -1631,7 +1646,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     const options = WRAPPERS.get(wrapper) as Options
     for (let w = peek(); w; w = peek()) {
       const v = w.value
-      if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, rest[rest.length - 2])
+      if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1671,7 +1686,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
               ? undefined
               : optionValue(v, options)
         if (!end) fork(wrapper, 2)
-        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+        else if (end === "next" && marked(next()?.value ?? "")) {
           fork(wrapper, 1)
           fork(wrapper, 3)
         }
@@ -2091,9 +2106,17 @@ function stdinScript({ args, name }: Parsed): boolean {
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
-// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread
-const argFile = async (file: Word, env: Env): Promise<Text> =>
-  held(file.procs ? await outputs(file.procs, env) : await readPath(file, env))
+// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and from no folder after a privilege wrapper, which may move it
+async function argFile(
+  { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
+  cmd: Command,
+  env: Env,
+): Promise<Text> {
+  if (file.procs) return held(await outputs(file.procs, env))
+  const relative = !isAbsolute(file.value)
+  const cwd = moved ? undefined : chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
+  return held(await readPath(file, relative && (moved || chdir) ? { ...env, cwd } : env))
+}
 
 // The texts xargs may fill in from one input: by default (`split` null) the whole, each line and each blank-separated item (-n), and under a -d or -0 delimiter the whole and each item it splits off; undefined when the reader cannot read the input or decode the delimiter
 const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefined => {
@@ -2109,11 +2132,11 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
   if (filled.size === 0) return []
   const xargs = parsed.map((p) => p.xargs)
-  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.value))
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
   const inputs = [
     await stdinOf(cmd, env),
-    ...(await Promise.all(files.map((f) => argFile(f, env)))),
+    ...(await Promise.all(files.map((f) => argFile(f, cmd, env)))),
   ]
   const texts = new Set<string | undefined>()
   for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {

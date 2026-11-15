@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-unslotted-run"
+import { type Env, lex, run, UNKNOWN } from "../../../scripts/hooks/shell"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-unslotted-run.ts")
@@ -605,5 +606,20 @@ describe("an xargs input option beside a typed program keeps the call's verdict"
     expect(await bash("printf a,b | xargs -d, -I {} turbo run build {}")).toContain(
       "no-unslotted-run hook refuses",
     )
+  })
+
+  // shell.test.ts imports the refused-forms fixture, so it names no way to run a command, and mkfifo runs here
+  test("an -a named fifo reads as unread, and the hook returns without opening it", async () => {
+    const fifo = join(OUTSIDE, "fifo")
+    Bun.spawnSync(["mkfifo", fifo])
+    const line = `echo a | xargs -a ${fifo} -I X nice X run build`
+    const env: Env = { cwd: WORKTREE, files: new Map(), known: {}, process: {}, vars: new Map() }
+    const seen: string[] = []
+    await run(lex(line), env, async (_cmd, parsed) => {
+      seen.push([parsed.name, ...parsed.args.map((a) => a.value)].join(" "))
+      return undefined
+    })
+    expect(seen).toContain(`${UNKNOWN} run build`)
+    expect(await bash(line)).toBeUndefined()
   })
 })

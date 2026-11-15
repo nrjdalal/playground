@@ -8192,7 +8192,6 @@ var XARGS_LONG = [
   "verbose",
   "version"
 ];
-var XARGS_READ = new Set(["arg-file", "delimiter", "null", "replace"]);
 var XARGS_FLAGS = "0oprtx";
 function delimiterOf(word) {
   if (!word || word.unknown)
@@ -8206,7 +8205,10 @@ function delimiterOf(word) {
   return letter ? ESCAPES[letter] : undefined;
 }
 var XARGS_REPLACE = /^(?:-[IiJ]|--replace)/;
-function xargsOption(xargs, w, next) {
+function xargsOption(xargs, w, next, state) {
+  const split = (delimiter) => {
+    xargs.delimiters = [...xargs.delimiters ?? [], delimiter];
+  };
   if (XARGS_REPLACE.test(w.value))
     return;
   const long = /^--([^=]+)(=?)/.exec(w.value);
@@ -8222,7 +8224,7 @@ function xargsOption(xargs, w, next) {
     while (XARGS_FLAGS.includes(w.value[k] ?? "-"))
       k++;
     if (w.value.slice(1, k).includes("0"))
-      xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
+      split("\x00");
     name = w.value[k];
     if (k + 1 < w.value.length)
       value = slice(w, k + 1);
@@ -8230,13 +8232,16 @@ function xargsOption(xargs, w, next) {
   if (name === "i" || name === "replace")
     xargs.replace = value?.value || "{}";
   else if (name === "null")
-    xargs.delimiters = [...xargs.delimiters ?? [], "\x00"];
+    split("\x00");
   else if (name === "I" || name === "J")
     xargs.replace = (value ?? next)?.value;
   else if (name === "a" || name === "arg-file")
-    xargs.files = [...xargs.files ?? [], ...[value ?? next].filter((f) => f !== undefined)];
+    xargs.files = [
+      ...xargs.files ?? [],
+      ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
+    ];
   else if (name === "d" || name === "delimiter")
-    xargs.delimiters = [...xargs.delimiters ?? [], delimiterOf(value ?? next)];
+    split(delimiterOf(value ?? next));
 }
 var splitFrom = new WeakMap;
 var chdirOf = (state, word) => state.chdir && word ? { ...word, ...unknown2("a second env -C") } : word;
@@ -8266,6 +8271,7 @@ var assign = (local, w) => {
 function unwrap(state, inside, budget) {
   const { local, rest } = state;
   const peek = () => rest[rest.length - 1];
+  const next = () => rest[rest.length - 2];
   const take = () => rest.pop();
   const also = [];
   const fork = (wrapper, drop) => {
@@ -8277,6 +8283,7 @@ function unwrap(state, inside, budget) {
     also.push(unwrap({
       chdir: state.chdir,
       local: new Map(local),
+      moved: state.moved,
       rest: rest.slice(0, Math.max(0, rest.length - drop)),
       xargs: state.xargs && { ...state.xargs }
     }, wrapper, budget));
@@ -8296,6 +8303,8 @@ function unwrap(state, inside, budget) {
       wrapper = program(word?.value ?? "");
       if (!WRAPPERS.has(wrapper))
         break;
+      if (ROOT_SHELLS.has(wrapper))
+        state.moved = true;
       if (wrapper === "xargs" && state.xargs?.replace)
         state.xargs = { ...state.xargs, outer: [...state.xargs.outer ?? [], state.xargs.replace] };
       if (wrapper === "xargs")
@@ -8306,7 +8315,7 @@ function unwrap(state, inside, budget) {
     for (let w = peek();w; w = peek()) {
       const v = w.value;
       if (wrapper === "xargs")
-        xargsOption(state.xargs ??= {}, w, rest[rest.length - 2]);
+        xargsOption(state.xargs ??= {}, w, next(), state);
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -8342,7 +8351,7 @@ function unwrap(state, inside, budget) {
         const end = wrapper === "nice" && /^-\d+$/.test(v) ? "own" : marked(v) ? undefined : optionValue(v, options);
         if (!end)
           fork(wrapper, 2);
-        else if (end === "next" && marked(rest[rest.length - 2]?.value ?? "")) {
+        else if (end === "next" && marked(next()?.value ?? "")) {
           fork(wrapper, 1);
           fork(wrapper, 3);
         }
@@ -8694,7 +8703,13 @@ function stdinScript({ args, name }) {
   const { inline, operand } = shellOperand(args, name);
   return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
-var argFile = async (file, env) => held2(file.procs ? await outputs(file.procs, env) : await readPath(file, env));
+async function argFile({ chdir, file, moved }, cmd, env) {
+  if (file.procs)
+    return held2(await outputs(file.procs, env));
+  const relative = !isAbsolute2(file.value);
+  const cwd = moved ? undefined : chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
+  return held2(await readPath(file, relative && (moved || chdir) ? { ...env, cwd } : env));
+}
 var itemsOf = (fed, split) => {
   if (fed.unknown || split === undefined)
     return;
@@ -8710,11 +8725,11 @@ async function xargsFilled(cmd, parsed, env) {
   if (filled.size === 0)
     return [];
   const xargs = parsed.map((p) => p.xargs);
-  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.value));
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
     await stdinOf(cmd, env),
-    ...await Promise.all(files.map((f) => argFile(f, env)))
+    ...await Promise.all(files.map((f) => argFile(f, cmd, env)))
   ];
   const texts = new Set;
   for (const raw of inputs.flatMap((fed) => splits.map((split) => itemsOf(fed, split)))) {

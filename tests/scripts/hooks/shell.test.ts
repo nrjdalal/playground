@@ -385,7 +385,6 @@ describe("xargs fills its program from the input GNU's input options name", () =
   writeFileSync(join(dir, "h"), "zz\n")
   mkdirSync(join(dir, "sub"))
   writeFileSync(join(dir, "sub", "h"), "turbo\n")
-  Bun.spawnSync(["mkfifo", join(dir, "fifo")])
   const filled = async (line: string) => {
     const env: Env = { cwd: dir, files: new Map(), known: {}, process: {}, vars: new Map() }
     const seen: string[] = []
@@ -425,7 +424,6 @@ describe("xargs fills its program from the input GNU's input options name", () =
     ["an -a descriptor other than stdin", "echo a | xargs -a /dev/fd/3 -I X nice X run"],
     ["an -a file over the reader's size cap", "echo a | xargs -a big -I X nice X run"],
     ["an -a file in a variable", 'echo a | xargs -a "$F" -I X nice X run'],
-    ["an -a named fifo", "echo a | xargs -a fifo -I X nice X run"],
     [
       "an -a relative file sudo -D may read from its folder",
       "echo a | sudo -D sub xargs -a h -I X nice X run",
