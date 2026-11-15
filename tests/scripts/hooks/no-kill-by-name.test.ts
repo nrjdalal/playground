@@ -145,6 +145,15 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "X=a; $X pkill -f watcher",
     "X=a; $X pkill -f watcher; unset X",
     "X=a; $X pkill -f watcher; read X < /dev/null",
+    // #2136's controls: a program word the reader resolves, and an expansion used only as an argument
+    "C=echo; $C pkill -f watcher",
+    'A=(echo pkill -f watcher); "${A[@]}"',
+    'A=(agent-browser --session w); "${A[@]}" open about:blank; kill 1234',
+    "S='echo pkill'; eval \"$S\"",
+    "S='echo pkill'; sh -c \"$S\"",
+    "for c in echo; do $c pkill -f watcher; done",
+    'echo "$X" pkill',
+    'kill "$PID"',
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
