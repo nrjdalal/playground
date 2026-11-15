@@ -10131,14 +10131,22 @@ var gitPlaced = (args, env) => {
   }
   return cwd;
 };
+var onLinux = () => process.platform === "linux";
+var gnuReadings = (stops) => onLinux() ? [false, true] : [stops];
 var CHMOD_DASH_MODE = /^-[gorstuwXx]/;
+var GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]/;
+var gnuChmodMode = (value) => {
+  const long = value.split("=")[0];
+  return GNU_CHMOD_MODE.test(value) || long.length >= 5 && "--reference".startsWith(long);
+};
 function unreadCdWrites(tool, args, env, stopsAtOperand) {
   if (tool === "sed" || tool === "perl")
     return inPlace(tool, args);
   if (tool === "chmod") {
     const at = args.findIndex((w) => !/^-./.test(w.value) || CHMOD_DASH_MODE.test(w.value));
     const files = stopsAtOperand ? args.slice(at === -1 ? args.length : at) : operandsPast(args, "", []);
-    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
+    const given = onLinux() && !stopsAtOperand && args.some((w) => gnuChmodMode(w.value));
+    return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files;
   }
   if (tool === "truncate")
     return operandsPast(args, "rs", ["--reference", "--size"]);
@@ -10192,6 +10200,7 @@ function writeTargets(name, args, gnu, posix = false) {
   let folders = false;
   const maybe = [];
   const logs = [];
+  const values = [];
   for (let k = 0, options = true;k < args.length; k++) {
     const word = args[k];
     const { value } = word;
@@ -10209,8 +10218,8 @@ function writeTargets(name, args, gnu, posix = false) {
         folder = attached ? after(word, long.length + 3) : args[++k];
       else if (name === "install" && "directory".startsWith(long))
         folders = true;
-      else if (!attached && !takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
-        k++;
+      else if (!takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
+        values.push(...attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1));
     } else
       for (let i = 1;i < value.length; i++) {
         const letter = value[i];
@@ -10226,8 +10235,7 @@ function writeTargets(name, args, gnu, posix = false) {
             if (log)
               logs.push(log);
           }
-          if (!rest)
-            k++;
+          values.push(...rest ? [after(word, i + 1)] : args.slice(++k, k + 1));
           break;
         }
       }
@@ -10235,6 +10243,12 @@ function writeTargets(name, args, gnu, posix = false) {
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
+  if (onLinux() && name === "install" && folders) {
+    if (folder)
+      targets.push(folder);
+    if (operands.length === 0)
+      targets.push(...values);
+  }
   const moved = into && !gnu && name !== "install" ? [] : splits;
   return [...new Set([...targets, ...maybe, ...logs, ...moved])];
 }
@@ -10631,7 +10645,7 @@ function sedEdits(args) {
       break;
     } else if (suffix) {
       inPlace = true;
-      if (suffix[1])
+      if (suffix[1] || onLinux())
         continue;
       const word = args[++k];
       if (!word || !literal2(word) || !SED_SUFFIX.test(word.value))
@@ -11263,11 +11277,13 @@ async function inspect(raw, environment, unknown = false) {
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const tool = GNU_NAMED.exec(name)?.[1] ?? name;
-    const gnu = tool !== name || first.value.includes("/gnubin/");
+    const gnu = tool !== name || first.value.includes("/gnubin/") || onLinux();
     const remover = REMOVERS.has(tool);
     const edited = new Set(inPlace(tool, args));
     const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
+    const readings = gnuReadings(posix);
+    const writes = (typed) => readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops));
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
@@ -11277,7 +11293,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
       if (unheld)
         return refuse(unheld.splits ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -11355,8 +11371,8 @@ async function inspect(raw, environment, unknown = false) {
       const lead = typed.findIndex((word, i) => !/^-(?:[EHLPXdsx]+|O\d*|D)$/.test(word.value) && typed[i - 1]?.value !== "-D");
       const given = tool === "find" && (lead === -1 || /^[-(!]/.test(typed[lead].value) && typed[lead].value !== "-f") ? [{ quoted: false, value: "." }, ...typed] : typed;
       const end = given.findIndex((word) => word.value === "--");
-      const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(given[0]?.value === "--") : given.findIndex((word) => !option(word));
-      const values = tool === "mv" ? writeTargets(tool, given, gnu, posix) : tool === "rsync" ? given.flatMap((word, k) => {
+      const stop = !GETOPT_REMOVERS.has(tool) || gnu && !readings.includes(true) ? -1 : tool === "unlink" && !gnu ? Number(given[0]?.value === "--") : given.findIndex((word) => !option(word));
+      const values = tool === "mv" ? writes(given) : tool === "rsync" ? given.flatMap((word, k) => {
         const long = /^--([^=]+)=?/.exec(word.value);
         const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
         const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
@@ -11369,9 +11385,9 @@ async function inspect(raw, environment, unknown = false) {
       return remover ? [
         ...given.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
         ...values
-      ] : WRITERS.has(tool) ? writeTargets(tool, given, gnu, posix) : [];
+      ] : WRITERS.has(tool) ? writes(given) : [];
     };
-    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix)) : [];
+    const unlisted = !remover && !WRITERS.has(tool) ? shapes.flatMap((typed) => gnuReadings(!gnu || posix).flatMap((stops) => unreadCdWrites(tool, typed, env, stops))) : [];
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find((word) => !placed(word, env, steady));
     if (!loose)
       return;
