@@ -17,6 +17,12 @@ const bash = (command: string) => check(input(command), {})
 
 describe("a merge or pull with ours is refused", () => {
   test.each([
+    ["an unread variable subcommand beside ours behind a wrapper", "uv run git $X -s ours x"],
+    [
+      "an unread subcommand beside ours behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git $(echo merge) -s ours x",
+    ],
+    ["an unread subcommand beside ours behind a wrapper", "uv run git $(echo merge) -s ours x"],
     ["-s ours", "git merge -s ours origin/canary"],
     ["git in capitals", "GIT merge -s ours origin/canary"],
     ["-sours", "git merge -sours origin/canary"],
@@ -69,6 +75,16 @@ describe("a merge or pull with ours is refused", () => {
 
 describe("a merge, pull or commit that skips its hooks is refused", () => {
   test.each([
+    [
+      "an unread variable subcommand with --no-verify behind a wrapper",
+      "uv run git $X --no-verify -m x",
+    ],
+    [
+      "an unread subcommand behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git $(echo commit) --no-verify -m x",
+    ],
+    ["an unread subcommand with -nm behind a wrapper", "uv run git $X -nm x"],
+    ["an unread subcommand after a git the hook cannot read", "$G $(echo commit) --no-verify -m x"],
     ["merge --no-verify", "git merge --no-verify origin/canary"],
     ["merge --no-edit --no-verify", "git merge origin/canary --no-edit --no-verify"],
     ["a quoted --no-verify", "git merge '--no-verify' origin/canary"],
@@ -148,6 +164,18 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
 describe("a git call that defines an alias on its own line is refused", () => {
   test.each([
     [
+      "an alias beside an unread option word behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git $OPT 'alias.ci=commit -n' ci -m x",
+    ],
+    [
+      "an alias beside an unread option word behind a wrapper",
+      "uv run git $OPT 'alias.ci=commit -n' ci -m x",
+    ],
+    [
+      "an ours alias beside an unread option word behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git $OPT 'alias.m=merge -s ours' m x",
+    ],
+    [
       "an alias behind run-slot",
       "~/.playground/ops/run-slot.sh w -- git -c 'alias.ci=commit -n' ci -m x",
     ],
@@ -210,6 +238,11 @@ describe("a git call that defines an alias on its own line is refused", () => {
 
 describe("every other call runs", () => {
   test.each([
+    ["an unread subcommand behind a wrapper", "uv run git $X status"],
+    [
+      "an unread subcommand behind run-slot",
+      "~/.playground/ops/run-slot.sh w -- git $(echo status) --short",
+    ],
     ["a plain merge", "git merge origin/canary"],
     ["a plain merge with no edit", "git merge --no-edit origin/canary"],
     ["-X theirs", "git merge -X theirs origin/canary"],
