@@ -52,6 +52,8 @@ export const groups: Group[] = [
       ],
       ["a kill by name an eval runs past its --, quoted", "eval -- 'pkill -f watcher'"],
       ["a kill by name an eval runs past its --", "eval -- pkill -f watcher"],
+      ["a held kill by name an eval runs past its --, quoted", `S='${KILL}'; eval -- "$S"`],
+      ["a held kill by name an eval runs past its --", `S='${KILL}'; eval -- $S`],
       // the reader cannot resolve these, so each is an unread command in a call that names a kill
       [
         "a loop variable over a list it cannot read",
