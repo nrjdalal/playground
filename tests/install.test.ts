@@ -23,24 +23,38 @@ const REPO = /^REPO=(\S+)$/m.exec(readFileSync(join(root, "install.sh"), "utf8")
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "playground-install-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// What install.sh reads from the checkout it clones; the CLI is a stub that says it started.
-const SOURCE_FILES = [
-  ".gitignore",
-  "api/hono/src/lib/dev/proxy.ts",
-  "install.sh",
-  "package.json",
-  "packages/env/src/aliases.ts",
-  "packages/env/src/data-dir.ts",
-  "packages/scripts/src/ops-herdr/pin.json",
-  "packages/scripts/src/ops-herdr/pin.ts",
-  "packages/scripts/src/playground/doctor.ts",
-  "packages/scripts/src/playground/links.ts",
-  "packages/scripts/src/playground/orgs.ts",
-  "packages/scripts/src/playground/unlinked.ts",
-  "packages/settings/src/rendered.ts",
-  "scripts/factory-settings.json",
-  "scripts/link-skills.sh",
-]
+const scanner = new Bun.Transpiler({ loader: "ts" })
+// Each file, and every file inside dir its relative imports reach, walked from the entries; a stub the test writes is neither copied nor walked.
+const withImports = (dir: string, entries: string[], stubs: string[] = []): string[] => {
+  const found = new Set(entries)
+  for (const file of found) {
+    if (!file.endsWith(".ts")) continue
+    const code = readFileSync(join(dir, file), "utf8").replace(/^#!.*/, "")
+    for (const { path } of scanner.scanImports(code)) {
+      if (!path.startsWith(".")) continue
+      const imported = relative(dir, Bun.resolveSync(path, dirname(join(dir, file))))
+      if (!imported.startsWith("..") && !stubs.includes(imported)) found.add(imported)
+    }
+  }
+  return [...found].sort()
+}
+
+// What install.sh reads from the checkout it clones: these files and every file their relative imports reach; the CLI and herdr-pin.ts are stubs the test writes.
+const SOURCE_FILES = withImports(
+  root,
+  [
+    ".gitignore",
+    "install.sh",
+    "package.json",
+    "packages/scripts/src/ops-herdr/pin.json",
+    "packages/scripts/src/playground/doctor.ts",
+    "packages/scripts/src/playground/orgs.ts",
+    "packages/scripts/src/playground/unlinked.ts",
+    "scripts/factory-settings.json",
+    "scripts/link-skills.sh",
+  ],
+  ["packages/scripts/src/playground/herdr-pin.ts"],
+)
 
 // The tools install.sh checks and the installers it calls: a run reaches only their fakes, so the system's own folders are linked in without them.
 const FAKED = [
@@ -960,5 +974,30 @@ describe("install.sh", () => {
       expect(guard![1]).toContain(name)
       expect(script.replace(guard![1], "")).not.toContain(name)
     }
+  })
+})
+
+describe("the files the test copies", () => {
+  const tree = join(scratch, "imports")
+  write(join(tree, "repo/entry.ts"), '#!/usr/bin/env bun\nimport "./lib/a"\nimport "./stub"\n')
+  write(join(tree, "repo/lib/a.ts"), 'import { b } from "../b"\nexport const a = b\n')
+  write(join(tree, "repo/b.ts"), "export const b = 1\n")
+  write(join(tree, "repo/stub.ts"), 'import "./never"\n')
+  write(
+    join(tree, "repo/out.ts"),
+    'import "../outside"\nimport "@packages/env/data-dir"\nimport "node:fs"\n',
+  )
+  write(join(tree, "outside.ts"), "export {}\n")
+
+  test("take every file an entry's relative imports reach, and no stub", () => {
+    expect(withImports(join(tree, "repo"), ["entry.ts"], ["stub.ts"])).toEqual([
+      "b.ts",
+      "entry.ts",
+      "lib/a.ts",
+    ])
+  })
+
+  test("leave out an import outside the repo and a workspace package's", () => {
+    expect(withImports(join(tree, "repo"), ["out.ts"])).toEqual(["out.ts"])
   })
 })
