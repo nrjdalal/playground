@@ -704,13 +704,16 @@ const added = (text: string) =>
     .split("\n")
     .map((line) => `+${line}`)
     .join("\n")
-// The patch Codex sends for an edit row: a Write adds its file, every other edit updates it.
+// The patch Codex sends for an edit row: a Write adds its file, every other edit updates it, a MultiEdit by its first edit.
 const patchOf = ({ input }: { input: Record<string, unknown> }) => {
   const path = String(input.file_path ?? input.notebook_path)
+  const edit = Array.isArray(input.edits)
+    ? ((input.edits[0] ?? input) as Record<string, unknown>)
+    : input
   const body =
     typeof input.content === "string"
       ? `*** Add File: ${path}\n${added(input.content)}`
-      : `*** Update File: ${path}\n@@\n-${String(input.old_string ?? "x")}\n${added(String(input.new_string ?? "y"))}`
+      : `*** Update File: ${path}\n@@\n-${String(edit.old_string ?? "x")}\n${added(String(edit.new_string ?? "y"))}`
   return `*** Begin Patch\n${body}\n*** End Patch`
 }
 type Shape = { input: Record<string, unknown>; shape: string; tool: string }
