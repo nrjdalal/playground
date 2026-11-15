@@ -234,7 +234,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
 })
 
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
-const DELETED = `${LOAD}listing = sys.argv[2]
+const DELETED = `${LOAD}sys.platform = "darwin"
+listing = sys.argv[2]
 calls, kills, started = [], [], []
 up.healthy = lambda job: (True, "ok")
 up.ptable.table = lambda: {pid: None for pid in (4301, 4302, 4401, 4501, 4601, 4602, 4701)}
@@ -319,7 +320,8 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
 })
 
 // Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
-const DOWN = `${LOAD}calls = []
+const DOWN = `${LOAD}sys.platform = "darwin"
+calls = []
 up.render_jobs = lambda: None
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None
@@ -358,6 +360,40 @@ test("a launchd job down 3 passes in a row is told to ops once, and again only a
     "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
   ]
   expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
+// #2203: on Linux systemd holds the job as a user unit of the same label, so the report names that unit
+test("on Linux a launchd job down 3 passes in a row is told to ops as its systemd user unit", () => {
+  const config = mkdtempSync(join(scratch, "down-linux-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({ jobs: [{ heartbeat: "ops-l", launchd: "com.x.ops-l", name: "ops-l" }] }),
+  )
+  const down = [false, "no heartbeat"]
+  const linux = DOWN.replace('sys.platform = "darwin"', 'sys.platform = "linux"')
+  const child = Bun.spawnSync(
+    ["python3", "-I", "-c", linux, upPy, JSON.stringify([down, down, down])],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: "/usr/bin:/bin",
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toEqual([
+    [
+      join(dirname(upPy), "notify.sh"),
+      "up",
+      "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; systemd unit com.x.ops-l.service is not bringing it back, so check it is installed and loaded (playground doctor)",
+    ],
+  ])
 })
 
 // Loads up.py and starts one herdr job, recording every herdr call rather than making it.
@@ -621,7 +657,14 @@ test("a pass hands the render HOME's LaunchAgents folder to install into", () =>
     `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
   )
   const pass = Bun.spawnSync(
-    ["python3", "-I", "-c", `${LOAD}up.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`, upPy, render],
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}sys.platform = "darwin"\nup.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`,
+      upPy,
+      render,
+    ],
     {
       env: {
         CLAUDE_CONFIG_DIR: config,
@@ -635,6 +678,40 @@ test("a pass hands the render HOME's LaunchAgents folder to install into", () =>
   expect(pass.stderr.toString()).toBe("")
   const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
   expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, "Library", "LaunchAgents"))
+})
+
+// #2203: Linux has no LaunchAgents, so systemd's user unit folder in HOME is where the render installs
+test("on Linux a pass hands the render HOME's systemd user unit folder to install into", () => {
+  const config = join(scratch, "config-install-linux")
+  mkdirSync(dataOf(config), { recursive: true })
+  const render = join(scratch, "argv-render-linux.ts")
+  const argv = join(scratch, "argv-render-linux.json")
+  writeFileSync(
+    render,
+    `require("node:fs").writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)))\n`,
+  )
+  const pass = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}sys.platform = "linux"\nup.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`,
+      upPy,
+      render,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).toBe("")
+  const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
+  expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, ".config", "systemd", "user"))
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {

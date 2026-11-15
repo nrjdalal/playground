@@ -52,6 +52,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A launchd job turned off has its plist there moved to the trash through safe-delete's `jobs-installed` carve-out, which moves `com.playground.*.plist` files alone.
   It is then booted out while `launchctl print` finds it loaded, plist or not; the plist goes first, since ops-tick's pass runs the render and its own bootout ends it.
   A launchd job still unhealthy 3 passes in a row is told to ops once, and told again only after a healthy pass, since launchd alone brings it back.
+  On Linux each launchd job runs as the systemd user unit `<label>.service` in `~/.config/systemd/user` instead, enabled with `systemctl --user enable --now` while `is-active` finds it down.
+  Turned off, it is disabled, trashed through the `jobs-units` carve-out (`com.playground.*.service` alone), reloaded out of systemd, then stopped; lingering (`loginctl enable-linger`, the machine's sudo bootstrap) keeps it past logout.
   ops-dashboard runs the dashboard checkout's own `scripts/ops/dashboard/`, swapping onto it in the same pid at each start and after a roll that changes it (`.agents/dashboard/live.md`).
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.

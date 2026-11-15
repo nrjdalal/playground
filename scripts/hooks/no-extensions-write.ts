@@ -600,8 +600,19 @@ const gitPlaced = (args: Word[], env: Env): string | undefined => {
   return cwd
 }
 
+// read at each call rather than once, so a test's stub of process.platform reaches every site
+const onLinux = () => process.platform === "linux"
+// whether a GNU build stops its options at its first operand: on Linux both readings, since POSIXLY_CORRECT can reach a bare build by a route the hook does not carry; elsewhere the one the call gives
+const gnuReadings = (stops: boolean) => (onLinux() ? [false, true] : [stops])
+
 // a word macOS chmod takes as a dash-led mode (-w, -go+x) rather than an option
 const CHMOD_DASH_MODE = /^-[gorstuwXx]/
+// a word GNU chmod reads as setting the mode: a cluster past its -R, -c, -f and -v flags that reaches a mode letter, operator or digit (-w, -=r, -0, -Rw), or --reference by any prefix down to --ref, the shortest --recursive does not share
+const GNU_CHMOD_MODE = /^-[Rcfv]*[rwxXstugoa,+=0-7]/
+const gnuChmodMode = (value: string) => {
+  const long = value.split("=")[0]
+  return GNU_CHMOD_MODE.test(value) || (long.length >= 5 && "--reference".startsWith(long))
+}
 
 // The words a program on neither REMOVERS nor WRITERS writes after a cd the hook cannot read: an in-place sed's or perl's files, every file chmod, truncate or shred names, tar's -C folder or the shell's when it extracts, curl's and sort's output files, git rm's pathspecs from git's own folder or its pathspec file's, and a mktemp template outside the temp folder
 function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: boolean): Word[] {
@@ -612,7 +623,9 @@ function unreadCdWrites(tool: string, args: Word[], env: Env, stopsAtOperand: bo
     const files = stopsAtOperand
       ? args.slice(at === -1 ? args.length : at)
       : operandsPast(args, "", [])
-    return MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
+    // GNU chmod, Linux's, takes its mode from a dash-led word or --reference when the call gives one (gnuChmodMode), so its first operand is then a file
+    const given = onLinux() && !stopsAtOperand && args.some((w) => gnuChmodMode(w.value))
+    return !given && MODE.test(files[0]?.value ?? "") ? files.slice(1) : files
   }
   if (tool === "truncate") return operandsPast(args, "rs", ["--reference", "--size"])
   if (tool === "shred")
@@ -676,6 +689,8 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   const maybe: Word[] = []
   // the file macOS's install writes its metalog to
   const logs: Word[] = []
+  // the words an option took as its value
+  const values: Word[] = []
   for (let k = 0, options = true; k < args.length; k++) {
     const word = args[k]
     const { value } = word
@@ -691,12 +706,8 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
       if (into && "target-directory".startsWith(long))
         folder = attached ? after(word, long.length + 3) : args[++k]
       else if (name === "install" && "directory".startsWith(long)) folders = true
-      else if (
-        !attached &&
-        !takes?.flags?.includes(long) &&
-        takes?.long.some((take) => take.startsWith(long))
-      )
-        k++
+      else if (!takes?.flags?.includes(long) && takes?.long.some((take) => take.startsWith(long)))
+        values.push(...(attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1)))
     } else
       // a short cluster read letter by letter up to the first that takes a value, whose value is the cluster's rest or else the next word
       for (let i = 1; i < value.length; i++) {
@@ -714,7 +725,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
             const log = rest ? after(word, i + 1) : args[k + 1]
             if (log) logs.push(log)
           }
-          if (!rest) k++
+          values.push(...(rest ? [after(word, i + 1)] : args.slice(++k, k + 1)))
           break
         }
       }
@@ -723,6 +734,11 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  // on Linux, install -d with a -t folder or no operand writes nothing only because a GNU check after its parse fails, so that folder and the values its options took are judged as targets; read by the platform rather than `gnu`, so a g-named install on macOS keeps canary's verdict
+  if (onLinux() && name === "install" && folders) {
+    if (folder) targets.push(folder)
+    if (operands.length === 0) targets.push(...values)
+  }
   // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
   const moved = into && !gnu && name !== "install" ? [] : splits
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
@@ -1145,7 +1161,7 @@ function textFlagValues({ args, name }: Parsed): Word[] {
   )
 }
 
-// sed's in-place option as macOS sed reads it: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, the next word
+// sed's in-place option: -i after any of -E, -n, -r, -s, -u and -z, its backup suffix attached (holding no / or *, which GNU writes into another folder) or, when nothing is attached, macOS's next word (sedEdits reads Linux's)
 const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
@@ -1186,7 +1202,7 @@ function sedWrites(script: string): string[] {
   return writes
 }
 
-// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it: sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX), every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
+// The scripts of a sed call that edits its files in place and writes nothing else, or undefined, its argv read as macOS sed reads it, or GNU's on Linux (sedEdits): sed as its own program (ownProgram) with no variable set in the call, an in-place option (SED_IN_PLACE) whose bare form takes the next word as its suffix (SED_SUFFIX) on macOS, every other option on -E, -n, -r, -s, -u and -z, and every script (each -e value, else the first operand) a literal word that SED_EDIT holds, while each other operand, a file it edits, is judged as any word is
 function sedInPlace(cmd: Command, parsed: Parsed): Set<Word> | undefined {
   const { args, local, name } = parsed
   if (!SEDS.has(program(name)) || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
@@ -1208,7 +1224,8 @@ function sedEdits(args: Word[]): Set<Word> | undefined {
       break
     } else if (suffix) {
       inPlace = true
-      if (suffix[1]) continue
+      // GNU sed, Linux's, takes a suffix only attached, so the word after its bare -i is a script or a file
+      if (suffix[1] || onLinux()) continue
       const word = args[++k]
       if (!word || !literal(word) || !SED_SUFFIX.test(word.value)) return undefined
     } else if (value.startsWith("-") && value !== "-") {
@@ -2072,9 +2089,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options
+    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options, as every bare build does on Linux, whose builds are GNU's
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
-    const gnu = tool !== name || first.value.includes("/gnubin/")
+    const gnu = tool !== name || first.value.includes("/gnubin/") || onLinux()
     const remover = REMOVERS.has(tool)
     // an in-place sed's scripts for the root reading (scriptNames): sedInPlace's, the sed half of sedScripts but on a line read whole too, else on a sed spelled off its list (-I, --in-place=, s|||) every word but the files inPlace reads, each read whole by sedWrites
     const edited = new Set(inPlace(tool, args))
@@ -2083,6 +2100,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
+    // on Linux POSIXLY_CORRECT can reach a bare build by a route the hook does not carry (a shell's -c, eval, a function, a sourced file), so gnuReadings judges its words both permuted and stopped at the first operand
+    const readings = gnuReadings(posix)
+    const writes = (typed: Word[]) =>
+      readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -2097,13 +2118,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = (
-        remover
-          ? args
-          : WRITERS.has(tool)
-            ? writeTargets(tool, args, gnu, posix)
-            : inPlace(tool, args)
-      ).find((word) => !held(word, here, steady))
+      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find(
+        (word) => !held(word, here, steady),
+      )
       if (unheld)
         return refuse(
           unheld.splits
@@ -2253,7 +2270,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       const end = given.findIndex((word) => word.value === "--")
       // macOS unlink reads no option but a leading --
       const stop =
-        !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        !GETOPT_REMOVERS.has(tool) || (gnu && !readings.includes(true))
           ? -1
           : tool === "unlink" && !gnu
             ? Number(given[0]?.value === "--")
@@ -2261,7 +2278,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
       const values =
         tool === "mv"
-          ? writeTargets(tool, given, gnu, posix)
+          ? writes(given)
           : tool === "rsync"
             ? given.flatMap((word, k) => {
                 const long = /^--([^=]+)=?/.exec(word.value)
@@ -2288,13 +2305,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             ...values,
           ]
         : WRITERS.has(tool)
-          ? writeTargets(tool, given, gnu, posix)
+          ? writes(given)
           : []
     }
     // a program on neither list is judged in every call xargs may build too (unreadCdWrites), so a file an in-place edit takes from stdin counts
     const unlisted =
       !remover && !WRITERS.has(tool)
-        ? shapes.flatMap((typed) => unreadCdWrites(tool, typed, env, !gnu || posix))
+        ? shapes.flatMap((typed) =>
+            gnuReadings(!gnu || posix).flatMap((stops) => unreadCdWrites(tool, typed, env, stops)),
+          )
         : []
     const loose = [...shapes.flatMap(operandsOf), ...unlisted].find(
       (word) => !placed(word, env, steady),
