@@ -547,10 +547,11 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
   })
 
   // #1280: read mode refuses an item reviewer's git init, add and commit, so the two revisions are compared as folders
-  test("an extension item's fresh read takes a --no-index diff of the base and the proposed revision", async () => {
+  test("an extension item's fresh read takes a worktree of the proposed revision in an export of the store", async () => {
     const text = await last()
+    expect(text).toContain("`playground ext export <your scratchpad>/store`")
     expect(text).toContain(
-      "`git diff --no-index --no-ext-diff --no-textconv <base dir> <proposed dir>`",
+      "`git -C <your scratchpad>/store/<scope> worktree add --detach <your scratchpad>/proposed <proposed rev>`",
     )
     expect(text).not.toContain("build a scratch repo")
   })

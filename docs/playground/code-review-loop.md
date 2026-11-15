@@ -102,7 +102,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
-- An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once, on a `git diff --no-index --no-ext-diff --no-textconv` of the base and the proposed revision's folders, since an item has no git clone.
+- An extension item's fresh full read runs before `playground ext score … 5`, since a 5 accepts the item at once, on a worktree of the proposed revision in a `playground ext export` of the store, the base revision its fixed point, since an item has no git clone.
 - An extension item's reviewer judges it by reading alone, since its row names no PR and no-outside-pr-code's read mode refuses the item's tests and check-types; the verdict says the item was read, not run.
 - A PR's 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - Before a 5/5 posts, `bun run pr:merge <n> --explain`, bare and unpiped, reads ✓ on every gate but ready, ci and review, since the body gate also needs a doc that a reviewer's patch or the last commit changed named in the Evidence; a ✗ is a finding for the worker.
