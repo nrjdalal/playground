@@ -7958,7 +7958,7 @@ function change(cmd, env) {
   const nameWords = prints ? vNames : words.map((w) => w.split("=")[0]);
   const all = RUNS_TEXT.has(name) && (name !== "eval" || args.some(unreadWord)) || NAME_SETTERS.has(name) && nameWords.some(marked) || name === "unset" && options.some((w) => w.includes("m"));
   const read = name === "read" ? binds(cmd) : [];
-  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
+  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.some((o) => o !== "-a") || !ASSIGN.test(w) && (options.length > 0 || name !== "export" && name !== "readonly")) : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
   for (const key of names.map((w) => w.split("=")[0].replace(/\[[\s\S]*$/, ""))) {
     if (!NAME.test(key))
       continue;
@@ -7999,7 +7999,8 @@ function namings(commands) {
   return counts;
 }
 function arrayRun(cmd, first, env) {
-  const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1];
+  const run = (first?.raw ?? first?.source)?.match(WHOLE_RUN);
+  const key = run?.[1] ?? run?.[2];
   const set = key ? env.vars.get(key) : undefined;
   if (!key || !set)
     return;
@@ -8012,9 +8013,14 @@ function arrayRun(cmd, first, env) {
     return;
   const { commands } = lex(inner);
   const elements = commands.length === 1 ? commands[0].words : [];
-  if (elements.length === 0 || commands[0].redirects.length > 0 || elements.some(unreadWord))
+  const asWritten = (w) => !unreadWord({ ...w, source: w.source?.replace(/^~(?=\/|$)/, "") });
+  if (elements.length === 0 || commands[0].redirects.length > 0 || !elements.every(asWritten))
     return null;
-  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? elements : [w]) };
+  const seps = ifsSplit(env);
+  const words = run?.[2] ? elements.flatMap((w) => splitValue(w.value, seps)) : elements;
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
 function repass(commands, envs) {
   for (const cmd of commands) {
@@ -8046,13 +8052,19 @@ function bind(commands, k, env, unbind) {
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
   const before = names.map((name) => [name, env.vars.get(name)]);
+  const value = close ? loopWord(cmd) : undefined;
   for (const name of names)
-    setVar(env.vars, name, unknown2("a value a builtin gives"));
+    setVar(env.vars, name, value ?? unknown2("a value a builtin gives"));
   if (close)
     unbind.set(close, () => {
       for (const [name, held] of before)
         held ? setVar(env.vars, name, held) : env.vars.delete(name);
     });
+}
+function loopWord({ words }) {
+  const at = words.findIndex((w) => w.value === "in" && !w.quoted);
+  const list = at < 0 ? [] : words.slice(at + 1);
+  return list.length === 1 && !unreadWord(list[0]) ? list[0] : undefined;
 }
 function heads({ words }) {
   const out = [];
@@ -8089,9 +8101,18 @@ async function examine(cmd, env, visit, builtins) {
   }
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
+  const array = arrayRun(cmd, primary.first, env);
+  const resolving = [
+    ...splitHeld(cmd, primary.name, env),
+    ...array ? [array] : [],
+    ...heldScripts(cmd, primary, env)
+  ];
+  if (unreadCommand(cmd, primary, resolving))
+    for (const parsed of [primary, ...others])
+      parsed.unread = true;
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
-    ...splitHeld(cmd, primary.name, env),
+    ...resolving,
     ...vanished,
     ...await xargsFilled(cmd, [primary, ...others], env)
   ];
@@ -8121,6 +8142,39 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+}
+function heldScripts(cmd, parsed, env) {
+  const scripts = scriptWords(parsed).filter((w) => w.raw && marked(w.value));
+  if (scripts.length === 0)
+    return [];
+  const known = heldKnown(env);
+  let resolved = false;
+  const words = cmd.words.map((w) => {
+    if (!scripts.includes(w) || !w.raw)
+      return w;
+    const value = relexedValue(w.raw, known);
+    if (value === undefined || value === w.value)
+      return w;
+    resolved = true;
+    return { quoted: true, value };
+  });
+  return resolved ? [{ ...cmd, words }] : [];
+}
+function scriptWords({ args, name }) {
+  if (name === "eval")
+    return args[0]?.value === "--" ? args.slice(1) : args;
+  if (!SHELLS.has(name))
+    return [];
+  const { inline, operand } = shellOperand(args, name);
+  return inline && operand ? [operand] : [];
+}
+function unreadCommand(cmd, parsed, resolving) {
+  const others = resolving.map(parse3);
+  if (marked(parsed.name))
+    return /[$`]/.test(parsed.first?.source ?? "") && others.every((p) => marked(p.name));
+  if (!scriptWords(parsed).some((w) => marked(w.value)))
+    return false;
+  return others.every((p) => scriptWords(p).some((w) => marked(w.value)));
 }
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
@@ -8290,7 +8344,7 @@ var vanishingParts = (source) => {
 var READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"]);
 var NAME = /^[A-Za-z_]\w*$/;
 var SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/;
-var WHOLE_RUN = /^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/;
+var WHOLE_RUN = /^(?:"\$\{([A-Za-z_]\w*)\[@\]\}"|\$\{([A-Za-z_]\w*)\[[@*]\]\})$/;
 function binds({ words }) {
   let at = 0;
   while (at < words.length && (!words[at].quoted && RESERVED.has(words[at].value) || ASSIGN.test(words[at].value)))
@@ -8415,12 +8469,13 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
   return verdict;
 }
+var evalText = (args) => (args[0]?.value === "--" ? args.slice(1) : args).map((a) => a.value).join(" ");
 function again(lexed, cmd, parsed) {
   if (!manyTimes(cmd, parsed))
     return lexed;
@@ -10719,6 +10774,45 @@ function follows(have, want) {
   }
   return true;
 }
+var SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g;
+var HOME_NAMED = /(?:^|[\s(`])(~[\w.-]*|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})\/?(?=$|[\s;&|)`])|\bcd\s*(?:$|[;&|)`])/;
+var HOME_WORD = /^(?:~|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})(?=[/*]|$)/;
+var LOGIN_HOME = /^~([A-Za-z_][\w.-]*)(?=[/*]|$)/;
+var removerWord = (word) => {
+  const name = word.split(sep2).at(-1) ?? "";
+  return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
+};
+var BRACE_WORDS = 64;
+function braceWords(word) {
+  const done = [];
+  const todo = [word];
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS)
+      return;
+    const next = todo.pop();
+    let split;
+    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open];
+      let depth = 0;
+      for (let k = open;k < next.length; k++) {
+        if (next[k] === "{")
+          depth++;
+        else if (next[k] === "," && depth === 1)
+          cuts.push(k);
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
+          break;
+        }
+      }
+    }
+    if (split)
+      todo.push(...split);
+    else
+      done.push(next);
+  }
+  return done;
+}
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
 var sedText = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
@@ -11213,32 +11307,62 @@ async function inspect(raw, environment, unknown = false) {
     const plain = text.replace(/['"]/g, "");
     if (holds(plain, env))
       return `${root} in its text`;
-    for (const token of plain.split(/[\s;&<>=]+/))
-      for (const word of [token, ...token.split(/[{},]/)]) {
-        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
-        const value = tilde ? home + word.slice(tilde[0].length) : word;
-        if (value.startsWith(sep2) && reaches(value))
-          return value;
-        if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
-          return word;
-        const parts = word.split(sep2);
-        const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
-        if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
-          return word;
+    const values = new Map;
+    for (const set of plain.matchAll(SETS_NAME)) {
+      const name = set[1] ?? set[3];
+      values.set(name, [
+        ...values.get(name) ?? [],
+        ...set[1] ? [set[2]] : set[4].split(/\s+/).filter(Boolean)
+      ]);
+    }
+    const filled = plain.replace(/\$\{([A-Za-z_]\w*)[^}]*\}|\$([A-Za-z_]\w*)/g, (spelled, braced, bare) => values.get(braced ?? bare ?? "")?.join(" ") ?? spelled);
+    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => {
+      const named = HOME_NAMED.exec(sub);
+      return named ? named[1] ?? "~" : sub;
+    });
+    const fed = homed.split(/(\|\||[;&\n])/).map((chunk) => /\|\s*\S*xargs\b/.test(chunk) && chunk.slice(chunk.search(/\S*xargs\b/)).split(/\s+/).some(removerWord) ? `rm ${chunk.replace(/\|/g, " ")}` : chunk).join("");
+    for (const source of new Set([plain, filled, homed, fed])) {
+      let removing = false;
+      for (const [token] of source.matchAll(/[^\s;&<>=]+|[\s;&<>=]+/g)) {
+        if (/^[\s;&<>=]/.test(token)) {
+          if (/[;&\n]/.test(token))
+            removing = false;
+          continue;
+        }
+        const expanded = braceWords(token);
+        if (!expanded)
+          return `${token}, a brace list of more words than the hook reads`;
+        const parts = token.split(/[|()`]/);
+        const removed = removing || parts.some(removerWord) || expanded.some((word) => removerWord(word));
+        removing = parts.length > 1 ? removerWord(parts.at(-1)) : removed;
+        for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
+          const tilde = HOME_WORD.exec(word);
+          const login = LOGIN_HOME.exec(word);
+          const value = tilde ? home + word.slice(tilde[0].length) : login ? join7(dirname4(home), login[1]) + word.slice(login[0].length) : word;
+          if (value.startsWith(sep2) && reaches(value, removed))
+            return value;
+          if (!value.startsWith(sep2) && (env.cwd && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)) || removed && reaches(resolve5(home, value))))
+            return word;
+          const parts = word.split(sep2);
+          const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
+            return word;
+        }
       }
+    }
   };
   const rootParts = needle.split(sep2).filter(Boolean);
   const floor = needle === root ? 1 : real(home).split(sep2).length;
-  const reaches = (path) => {
+  const reaches = (path, remover = false) => {
     const parts = path.split(sep2);
     const at = parts.findIndex((part) => GLOB.test(part));
     const want = root.split(sep2);
     const base = real(at < 0 ? path : parts.slice(0, at).join(sep2) || sep2);
     const have = [...base === sep2 ? [""] : base.split(sep2), ...at < 0 ? [] : parts.slice(at)];
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have;
-    if (spelled.length > floor && spelled.length < want.length && spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) && follows(spelled, want.slice(0, spelled.length)))
+    if (spelled.length > (remover ? 1 : floor) && spelled.length < want.length && spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) && follows(spelled, want.slice(0, spelled.length)))
       return true;
-    return at < 0 ? inRoot(path) : follows(have, want);
+    return at < 0 ? inRoot(path) || remover && above(path, true) : follows(have, want);
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
