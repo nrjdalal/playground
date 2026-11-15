@@ -157,6 +157,58 @@ describe("isProtected", () => {
     symlinkSync(join(roots.home, ".ssh"), join(own, "keys"))
     expect(isProtected(join(own, "keys"), roots, opts.session)).toBeString()
   })
+
+  // #2229: a loose regular file directly in scratch/ named after the session, then - or ., is that session's own, as the nightly clean already reads it.
+  test("lets the caller's own loose scratch file go, and refuses another's, a link, a folder, a longer name and one in a subfolder", () => {
+    const roots = machine()
+    const scratch = join(roots.home, ".playground", "scratch")
+    for (const name of [`${opts.session}-probe.txt`, `${opts.session}.tmp`]) {
+      const path = file(join(scratch, name))
+      expect(isProtected(path, roots, opts.session)).toBeNull()
+      expect(isProtected(path, roots)).toBeString()
+    }
+    const link = join(scratch, `${opts.session}-link.txt`)
+    symlinkSync(file(join(roots.root, "elsewhere.txt")), link)
+    const folder = join(scratch, `${opts.session}-dir`)
+    file(join(folder, "a"))
+    for (const path of [
+      file(join(scratch, "a4b5c6-worker-probe.txt")),
+      link,
+      folder,
+      file(join(scratch, `${opts.session}x.txt`)),
+      file(join(scratch, "sub", `${opts.session}-probe.txt`)),
+    ])
+      expect(isProtected(path, roots, opts.session)).toBeString()
+  })
+
+  // #2247's review: a scratch/ that is a symlink would carry the own loose file's exemption into the link's target, so it holds only while scratch/ is a real folder reached through no link from HOME.
+  test.each([".ssh", ".playground/elsewhere"])(
+    "refuses the caller's own loose file name through a scratch/ linked into %s, by either path",
+    (target) => {
+      const roots = machine()
+      const into = join(roots.home, target)
+      const kept = file(join(into, `${opts.session}-key`), "secret")
+      symlinkSync(into, join(roots.home, ".playground", "scratch"))
+      const linked = join(roots.home, ".playground", "scratch", `${opts.session}-key`)
+      expect(isProtected(linked, roots, opts.session)).toBeString()
+      expect(isProtected(kept, roots, opts.session)).toBeString()
+      expect(quarantine(linked, opts, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+      expect(readFileSync(kept, "utf8")).toBe("secret")
+    },
+  )
+
+  test("moves the caller's own loose scratch file to the trash, and restore puts it back", () => {
+    const roots = machine()
+    const path = file(
+      join(roots.home, ".playground", "scratch", `${opts.session}-probe.txt`),
+      "probe",
+    )
+    expect(quarantine(path, opts, roots, { now: NOW })).toMatchObject({ files: 1 })
+    expect(existsSync(path)).toBe(false)
+    const [entry] = listTrash(roots.trash)
+    expect(restore(entry!.id, roots)).toEqual({ path })
+    expect(readFileSync(path, "utf8")).toBe("probe")
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
@@ -679,6 +731,34 @@ describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
       },
     )
   })
+
+  // #2238: a carve-out whose folder is a symlink into a protected folder would move a file out of the link's target, so every carve-out takes its folder only as a real one, and its refusal names the link and where it leads.
+  test.each([".ssh", ".config"])(
+    "refuses its folder as a symlink into %s, and the target keeps its file",
+    (target) => {
+      const roots = machine()
+      const folder = join(roots.home, carve.home ? "" : ".playground", carve.folder)
+      const into = join(roots.home, target)
+      const entry = carve.name
+        ? [`com.playground.x.plist`, `com.playground.x.service`, `notes.html`].find((n) =>
+            carve.name!.test(n),
+          )!
+        : "notes"
+      const kept = file(join(into, entry), "secret")
+      mkdirSync(dirname(folder), { recursive: true })
+      symlinkSync(into, folder)
+      const moved = quarantine(join(folder, entry), { ...opts, carveOut: name }, roots, {
+        now: NOW,
+      })
+      expect(moved).toMatchObject({
+        kind: "protected",
+        refused: expect.stringContaining(
+          `${folder}, the ${name} carve-out's folder, goes through the symlink ${folder} and leads to ${into}`,
+        ),
+      })
+      expect(readFileSync(kept, "utf8")).toBe("secret")
+    },
+  )
 })
 
 // jobs.ts boots out a turned-off launchd job and moves its installed plist from HOME's LaunchAgents, which holds every other app's agents too.
@@ -704,6 +784,31 @@ test("the jobs-installed carve-out moves only a plain com.playground plist, and 
   const [entry] = listTrash(roots.trash)
   expect(restore(entry!.id, roots)).toEqual({ path: ours })
   expect(readFileSync(ours, "utf8")).toBe("ours")
+})
+
+// #2238: on Linux ~/.config is often a dotfiles link. Into a protected folder the jobs-units refusal names the link on the way and where it leads, for Ops to act on; into a folder nothing protects, the unit moves as before.
+test("the jobs-units carve-out names the link and its real path behind a linked parent, and a link to an unprotected folder still moves", () => {
+  const roots = machine()
+  const link = join(roots.home, ".config", "systemd")
+  const folder = join(link, "user")
+  const unit = "com.playground.x.service"
+  const units = { ...opts, carveOut: "jobs-units" }
+  const protectedDots = join(roots.home, ".playground", "dotfiles", "systemd")
+  const kept = file(join(protectedDots, "user", unit), "unit")
+  symlinkSync(protectedDots, link)
+  expect(quarantine(join(folder, unit), units, roots, { now: NOW })).toMatchObject({
+    kind: "protected",
+    refused: expect.stringContaining(
+      `${folder}, the jobs-units carve-out's folder, goes through the symlink ${link} and leads to ${join(protectedDots, "user")}`,
+    ),
+  })
+  expect(readFileSync(kept, "utf8")).toBe("unit")
+  const plainDots = join(roots.root, "dotfiles", "systemd")
+  file(join(plainDots, "user", unit), "unit")
+  rmSync(link)
+  symlinkSync(plainDots, link)
+  expect(quarantine(join(folder, unit), units, roots, { now: NOW })).toMatchObject({ files: 1 })
+  expect(existsSync(join(plainDots, "user", unit))).toBe(false)
 })
 
 // #2203: on Linux jobs.ts disables a turned-off job and moves its unit from ~/.config/systemd/user, which holds every other user unit too.
@@ -1721,25 +1826,4 @@ test("movesLeft counts a session's own moves inside the minute and changes nothi
     LIMITS.perMinute,
   )
   expect(readdirSync(roots.trash).sort()).toEqual(before)
-})
-
-// #2237's review: a previews folder that is a symlink would let the page carve-out move a file out of the link's target, so the carve-out takes previews only as a real folder of the data folder.
-test("the page carve-out refuses a previews folder that is a symlink into a protected folder, and the target keeps its file", () => {
-  for (const target of [".ssh", ".config"]) {
-    const roots = machine()
-    const folder = join(roots.home, target)
-    const kept = file(join(folder, "notes.txt"), "secret")
-    symlinkSync(folder, join(roots.home, ".playground", "previews"))
-    expect(
-      quarantine(
-        join(roots.home, ".playground", "previews", "notes.txt"),
-        { ...opts, carveOut: "page" },
-        roots,
-        {
-          now: NOW,
-        },
-      ),
-    ).toMatchObject({ kind: "protected", refused: expect.stringContaining("symlink") })
-    expect(readFileSync(kept, "utf8")).toBe("secret")
-  }
 })
