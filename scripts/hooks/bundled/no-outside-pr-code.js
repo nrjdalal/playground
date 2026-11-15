@@ -44,7 +44,7 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync2, lstatSync, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "path";
 
 // packages/env/src/data-dir.ts
@@ -7920,17 +7920,6 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return at !== undefined && under(path, at);
     });
   };
-  const ownNew = (text, here) => {
-    const written = text && pathOf(text, here);
-    if (!written || !ownPath(text, here))
-      return false;
-    try {
-      lstatSync(written);
-      return false;
-    } catch {
-      return true;
-    }
-  };
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -7964,7 +7953,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
     if (name === "playground")
-      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here)) || words.slice(1, 3).join(" ") === "ext export" && args.length === 3 && !args[2].value.startsWith("-") && ownNew(args[2], here)) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
+      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");

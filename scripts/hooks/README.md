@@ -1081,8 +1081,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   since it runs under bun and `playground add` starts a session no read mode holds.
   An extension item's reviewer, whose row names no PR, finishes its review in read mode, and the item's tests stay refused.
   `playground rm`, with no option, passes when every path it removes sits in the session's own `scratch/<name>` or `scratchpad/<name>` folder, found by its registry name, a `..` step refused.
-  `playground ext export <folder>` passes when its one folder is a new path there, since a folder or a link already there, dangling or not, can carry the write out, and `cp` stays refused.
-  The export's clones take no config or hook from a scope (`exportTo` in `packages/settings/src/items.ts`, a fresh `git clone` run with `core.hooksPath=/dev/null`), so a `git worktree add` of an item's revision there runs none of its author's code.
+  `playground ext export` and `cp` stay refused, since a clone or a worktree the same line checks out can hold a link that carries the write out of those folders; an item's reviewer reads a revision with `playground ext show <scope> <kind> <key> --rev <sha>` piped into `jq` (`.content.files`, `.content.body`), which every guard on Bash passes.
   `du` and a `find` with no action that runs, deletes or writes (`FIND_ACTIONS`) pass anywhere, and two files compare with `diff -q`.
   It compares two revisions with `git diff --no-index` only beside `--no-ext-diff` and `--no-textconv`, since a folder can ship the attributes that start a diff program, and a scratch repo's `git init`, `add` and `commit` stay refused, since a copied item can carry its own `.git` and hooks.
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.

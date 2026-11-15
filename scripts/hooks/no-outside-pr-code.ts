@@ -1,6 +1,6 @@
 // PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -137,7 +137,7 @@ const QUIET = new Set(["-q", "--quiet"])
 const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
 const SED_PRINT = new RegExp(`^${SED_ADDRESS}(?:,${SED_ADDRESS})?p$`)
 const SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/
-// The playground command's verbs a checker reads with, A to Z; an item's reviewer shows and scores the item with ext's, and exports it only into its own folders (below); `add` and the manager verbs start a session that no read mode holds.
+// The playground command's verbs a checker reads with, A to Z; an item's reviewer shows and scores the item with ext's, reading a revision through `ext show --rev`; `add` and the manager verbs start a session that no read mode holds.
 const PLAYGROUND_READS = new Set(["ext score", "ext search", "ext show", "ext which", "rules"])
 // find's actions that run a program, delete or write a file, A to Z, BSD's and GNU's
 const FIND_ACTIONS = new Set([
@@ -286,17 +286,6 @@ export async function inspect(
       })
     )
   }
-  // Whether an export's folder is a new path in the session's own folders: one that exists, a folder or a link, dangling or not, can carry the write out of them.
-  const ownNew = (text: Text | undefined, here: Env) => {
-    const written = text && pathOf(text, here)
-    if (!written || !ownPath(text, here)) return false
-    try {
-      lstatSync(written)
-      return false
-    } catch {
-      return true
-    }
-  }
   const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
     const { args, first, local, name } = parsed
     // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
@@ -336,11 +325,7 @@ export async function inspect(
           PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) ||
           (words[1] === "rm" &&
             args.length > 1 &&
-            args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) ||
-          (words.slice(1, 3).join(" ") === "ext export" &&
-            args.length === 3 &&
-            !args[2]!.value.startsWith("-") &&
-            ownNew(args[2], here))) &&
+            args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here)))) &&
         here.cwd !== undefined &&
         (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd))
       )
