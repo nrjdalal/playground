@@ -10683,8 +10683,9 @@ var SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`;
 var SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`;
 var SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`;
 var SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`;
+var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}(${SED_TEXT})[giImMp0-9]*)[ \t]*`;
 var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
+var SED_STEP = new RegExp(String.raw`${SED_ITEM}(?:[;\n]|$)`, "y");
 function sedReadScripts(args) {
   const scripts = [];
   const operands = [];
@@ -10733,15 +10734,15 @@ function follows(have, want) {
   return true;
 }
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
-function sedWrites(script) {
-  const read = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
+var sedText = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
+function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
   const writes = [];
-  SED_EDIT_STEP.lastIndex = 0;
-  while (SED_EDIT_STEP.lastIndex < script.length) {
-    const at = SED_EDIT_STEP.lastIndex;
-    const item = SED_EDIT_STEP.exec(script);
-    if (!item || SED_EDIT_STEP.lastIndex === at)
+  step.lastIndex = 0;
+  while (step.lastIndex < script.length) {
+    const at = step.lastIndex;
+    const item = step.exec(script);
+    if (!item || step.lastIndex === at)
       return [read(script)];
     if (item[1])
       writes.push(read(item[1].slice(0, -1)));
@@ -10837,13 +10838,16 @@ var PERL_RE = `/${PERL_BODY}`;
 var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
 var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
 var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
-var PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`;
+var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`;
 var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
+var PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y");
+var perlText = (text) => text.replace(/\\(.)|\$[1-9&]/gs, (m, c) => c === undefined ? "*" : c === "n" ? `
+` : c === "t" ? "\t" : c);
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
-function perlReads({ args, local }, env) {
+function perlReadScripts({ args, local }, env) {
   if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
-    return false;
+    return;
   const scripts = [];
   let k = 0;
   for (;k < args.length; k++) {
@@ -10855,15 +10859,25 @@ function perlReads({ args, local }, env) {
     if (!value.startsWith("-") || value === "-")
       break;
     if (!PERL_FLAG.test(value))
-      return false;
+      return;
     if (/[eE]$/.test(value)) {
       if (!args[k + 1])
-        return false;
+        return;
       scripts.push(args[++k]);
     }
   }
   const files = args.slice(k);
-  return scripts.length > 0 && scripts.every((w) => literal2(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal2(w) && PERL_FILE.test(w.value));
+  return scripts.length > 0 && scripts.every((w) => literal2(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal2(w) && PERL_FILE.test(w.value)) ? scripts : undefined;
+}
+var perlReads = (parsed, env) => !!perlReadScripts(parsed, env);
+function escapedWrites(parsed, env) {
+  const tool = program(parsed.name);
+  const unescaped = () => parsed.args.map((word) => word.value.replaceAll("\\/", "/"));
+  if (SEDS.has(tool))
+    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped();
+  if (tool !== "perl")
+    return [];
+  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped();
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -11209,35 +11223,36 @@ async function inspect(raw, environment, unknown = false) {
       }
     }
   };
-  const scriptNames = (script, env) => {
-    for (const text of sedWrites(script)) {
-      const plain = text.replace(/['"]/g, "");
-      if (holds(plain, env))
-        return `${root} in its text`;
-      for (const token of plain.split(/[\s;&<>=]+/))
-        for (const word of [token, ...token.split(/[{},]/)]) {
-          const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
-          const value = tilde ? home + word.slice(tilde[0].length) : word;
-          if (value.startsWith(sep2) && reaches(value))
-            return value;
-          if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
-            return word;
-          const parts = word.split(sep2);
-          const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
-          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
-            return word;
-        }
-    }
+  const scriptNames = (text, env) => {
+    const plain = text.replace(/['"]/g, "");
+    if (holds(plain, env))
+      return `${root} in its text`;
+    for (const token of plain.split(/[\s;&<>=]+/))
+      for (const word of [token, ...token.split(/[{},]/)]) {
+        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
+        const value = tilde ? home + word.slice(tilde[0].length) : word;
+        if (value.startsWith(sep2) && reaches(value))
+          return value;
+        if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
+          return word;
+        const parts = word.split(sep2);
+        const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
+        if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
+          return word;
+      }
   };
   const rootParts = needle.split(sep2).filter(Boolean);
+  const floor = needle === root ? 1 : real(home).split(sep2).length;
   const reaches = (path) => {
     const parts = path.split(sep2);
     const at = parts.findIndex((part) => GLOB.test(part));
-    if (at < 0)
-      return inRoot(path);
-    const base = real(parts.slice(0, at).join(sep2) || sep2);
-    const have = [...base === sep2 ? [""] : base.split(sep2), ...parts.slice(at)];
-    return follows(have, root.split(sep2));
+    const want = root.split(sep2);
+    const base = real(at < 0 ? path : parts.slice(0, at).join(sep2) || sep2);
+    const have = [...base === sep2 ? [""] : base.split(sep2), ...at < 0 ? [] : parts.slice(at)];
+    const spelled = have.at(-1) === "" ? have.slice(0, -1) : have;
+    if (spelled.length > floor && spelled.length < want.length)
+      return follows(spelled, want.slice(0, spelled.length));
+    return at < 0 ? inRoot(path) : follows(have, want);
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
@@ -11406,6 +11421,14 @@ async function inspect(raw, environment, unknown = false) {
     const remover = REMOVERS.has(tool);
     const edited = new Set(inPlace(tool, args));
     const sedEdit = sedInPlace(cmd, parsed) ?? (tool === "sed" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : []);
+    const perlEdit = [
+      ...perlInPlace(cmd, parsed, env) ?? (tool === "perl" && edited.size > 0 ? args.filter((word) => !edited.has(word)) : [])
+    ];
+    const written = [
+      ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
+      ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
+    ];
+    const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     const readings = gnuReadings(posix);
     const writes = (typed) => readings.flatMap((stops) => writeTargets(tool, typed, gnu, stops));
@@ -11443,11 +11466,13 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
       }
-      for (const script of sedEdit) {
-        const named = scriptNames(script.value, here);
+      for (const text of written) {
+        const named = scriptNames(text, here);
         if (named)
           return refuse(`${verb} with a script that names ${named}`);
       }
+      if (escaped.some((text) => holds(text, here)))
+        return refuse(`${verb} with a script that names ${root} in its text`);
       const literal = !whole && narrow(cmd, here);
       for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;

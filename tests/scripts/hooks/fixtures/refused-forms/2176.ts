@@ -40,7 +40,7 @@ const rows = ({ DATA }: Paths): Row[] => [
     String.raw`sed -i '' 's/a/touch ~\/.playground\/extensions\/x/' .git/hooks/pre-commit`,
   ],
   [
-    "an in-place sed whose s/// writes a glob of the root, on a line read whole for its redirect into a git hook",
+    "an in-place sed whose s/// writes a glob of the root, with a redirect into a git hook after it",
     String.raw`sed -i '' 's/a/touch ~\/.play*\/extensions\/x/' run.sh; echo x >> .git/hooks/pre-commit`,
   ],
   [
