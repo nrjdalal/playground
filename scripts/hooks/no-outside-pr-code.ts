@@ -1,4 +1,4 @@
-// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
+// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names and every file it writes lands in the session's own folders, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
 import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
