@@ -1923,7 +1923,9 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const [only, ...more] = patterns;
   const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
   if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute2(only) && unsure)
-    return;
+    return [
+      { ...cmd, words: cmd.words.map((w) => w === first ? { quoted: true, value: only } : w) }
+    ];
   const found = [];
   for (const each of patterns) {
     const matched = globMatches(each, env);
@@ -2022,8 +2024,7 @@ function braceRun(cmd, first) {
   if (/[$`]/.test(source))
     return null;
   const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide));
-  if (masked.includes("("))
-    return;
+  const grouped = masked.includes("(");
   const expanded = braceWords(masked);
   if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
     return null;
@@ -2031,7 +2032,7 @@ function braceRun(cmd, first) {
   for (const each of expanded) {
     const { commands } = lex(unhide(each));
     if (commands.length > 1 || commands[0]?.redirects.length)
-      return null;
+      return grouped ? undefined : null;
     words.push(...commands[0]?.words ?? []);
   }
   if (words.length === 0)
@@ -2079,9 +2080,22 @@ function globSpells(text, names) {
   return false;
 }
 function spelledText(text) {
-  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? []).flatMap((word) => groupWords(word.replace(/\([^()|]*\)$/, ""), true) ?? [word])).map((word) => word.replace(/["']/g, ""));
+  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
+    const sequenced = word.replace(SEQUENCE, sequenceSpelling);
+    const unqualified = sequenced.replace(/\([^()|]*\)$/, "");
+    const words = groupWords(unqualified, true);
+    const out = words === null ? anyText(unqualified, /\([^()]*\)/g) : words ?? [word];
+    return sequenced === word ? out : [word, ...out];
+  })).map((word) => word.replace(/["']/g, "")).flatMap((word) => /^[*?]+$/.test(word.slice(word.lastIndexOf("/") + 1)) ? [word, ANY_NAME] : [word]);
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
+var SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g;
+var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : /^-?\d+$/.test(from) && /^-?\d+$/.test(to) ? "[0-9-]*" : "*";
+function anyText(word, part) {
+  const spelled = word.replace(part, "*");
+  return spelled === word ? [word] : anyText(spelled, part);
+}
+var ANY_NAME = "[!.]*";
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
@@ -16756,7 +16770,7 @@ var VERIFIED = new Set(["commit", "merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "m", "o", "s"]);
 var ATTACHED = new Set(["S", "j", "u"]);
 var ALIAS_DEPTH = 8;
-var SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/;
+var SEQUENCE2 = /\{[^{}]*\.\.[^{}]*\}/;
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
 var TAKES3 = {
@@ -16977,7 +16991,7 @@ var expanded = (args) => args.flatMap((w) => {
   if (w.unknown !== BRACE)
     return [w];
   const words = braceWords(w.value);
-  if (!words || words.some((v) => SEQUENCE.test(v)))
+  if (!words || words.some((v) => SEQUENCE2.test(v)))
     return [w];
   return words.map((value) => ({ ...w, unknown: undefined, value }));
 });
