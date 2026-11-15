@@ -65,12 +65,16 @@ const TAKES: Record<string, Set<string>> = {
 // A commit's short options that take a value, attached or as the next word
 const COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"])
 
-// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: the first word read there that holds a brace list braceWords cannot expand, whether it asks for help (-h or --help read as an option), and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
+// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: the first word read there, an option's value included, that holds a brace list braceWords cannot expand, since its words may be options, whether it asks for help (-h or --help read as an option), and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
 function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?: Word } {
   let off: string | undefined
   let help = false
   let unread: Word | undefined
   const commit = sub === "commit"
+  const value = (k: number) => {
+    if (args[k]?.unknown === BRACE) unread ??= args[k]
+    return k
+  }
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
     if (v === "--") break
@@ -80,7 +84,7 @@ function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?
       if (v === "--verify") off = undefined
       else if (v === "--no-verify" || (commit && v.length > 8 && "--no-verify".startsWith(v)))
         off = v
-      else if (TAKES[sub]?.has(v)) k++
+      else if (TAKES[sub]?.has(v)) k = value(k + 1)
       continue
     }
     if (!v.startsWith("-") || v === "-") continue
@@ -89,7 +93,7 @@ function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?
       if (commit && letter === "n") off = "-n"
       else if (ATTACHED.has(letter)) break
       else if ((commit ? COMMIT_SHORT : SHORT_TAKES).has(letter)) {
-        if (c === v.length - 1) k++
+        if (c === v.length - 1) k = value(k + 1)
         break
       }
     }

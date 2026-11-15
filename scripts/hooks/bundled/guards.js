@@ -16543,6 +16543,11 @@ function walk2(sub, args) {
   let help = false;
   let unread;
   const commit = sub === "commit";
+  const value = (k) => {
+    if (args[k]?.unknown === BRACE)
+      unread ??= args[k];
+    return k;
+  };
   for (let k = 0;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--")
@@ -16557,7 +16562,7 @@ function walk2(sub, args) {
       else if (v === "--no-verify" || commit && v.length > 8 && "--no-verify".startsWith(v))
         off = v;
       else if (TAKES3[sub]?.has(v))
-        k++;
+        k = value(k + 1);
       continue;
     }
     if (!v.startsWith("-") || v === "-")
@@ -16570,7 +16575,7 @@ function walk2(sub, args) {
         break;
       else if ((commit ? COMMIT_SHORT : SHORT_TAKES).has(letter)) {
         if (c === v.length - 1)
-          k++;
+          k = value(k + 1);
         break;
       }
     }
