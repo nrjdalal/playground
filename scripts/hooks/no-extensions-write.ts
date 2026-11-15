@@ -1835,11 +1835,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const base = real(at < 0 ? path : parts.slice(0, at).join(sep) || sep)
     const have = [...(base === sep ? [""] : base.split(sep)), ...(at < 0 ? [] : parts.slice(at))]
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
-    if (spelled.length > floor && spelled.length < want.length)
-      return (
-        spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
-        follows(spelled, want.slice(0, spelled.length))
-      )
+    // a folder below the floor that holds the root only adds a refusal, so canary's reading stands for every other path
+    if (
+      spelled.length > floor &&
+      spelled.length < want.length &&
+      spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
+      follows(spelled, want.slice(0, spelled.length))
+    )
+      return true
     return at < 0 ? inRoot(path) : follows(have, want)
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
