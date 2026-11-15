@@ -1,8 +1,8 @@
-import type { Group, Row } from "./_shared"
+import type { Group, Paths, Row } from "./_shared"
 
 // #2187: a sed's or perl's script whose written text spells the root behind escaped slashes, a perl -pi replacement that spells it by a glob, and an in-place sed replacement naming a folder between the home and the root, which holds it; each row also runs after a sleep, on a line read whole; rows are data, as refused-forms.ts says.
 const WHOLE = ", on a line read whole"
-const rows = (): Row[] => [
+const rows = ({ HOME }: Paths): Row[] => [
   [
     "a read-only sed whose s/// writes the root behind escaped slashes into a git hook by tee",
     String.raw`sed -n 's/a/touch ~\/.playground\/extensions\/x/p' run.sh | tee .git/hooks/pre-commit`,
@@ -82,6 +82,15 @@ const rows = (): Row[] => [
   [
     "an in-place sed whose s/// writes the data folder in a zsh (…) group",
     String.raw`sed -i '' 's/a/rm ~\/(.playground|x)/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a ** glob of the absolute home",
+    `sed -i '' 's/a/ls ${HOME.replaceAll("/", "\\/")}\\/**/' .git/hooks/pre-commit`,
+    "home",
+  ],
+  [
+    "an in-place sed whose s/// writes a ** glob of the home in a brace list",
+    String.raw`sed -i '' 's/a/ls ~\/{**,x}/' .git/hooks/pre-commit`,
   ],
   [
     "an in-place sed whose c\\ text writes a glob of the root",
@@ -179,8 +188,12 @@ export const groups: Group[] = [
   {
     folders: ["home", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: () =>
-      rows().map(([what, call, folder]): Row => [`${what}${WHOLE}`, `sleep 1; ${call}`, folder]),
+    rows: (paths) =>
+      rows(paths).map(([what, call, folder]): Row => [
+        `${what}${WHOLE}`,
+        `sleep 1; ${call}`,
+        folder,
+      ]),
   },
 ]
 
