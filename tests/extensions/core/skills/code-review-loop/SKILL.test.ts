@@ -546,10 +546,12 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     expect(text).toContain("`set -o pipefail`")
   })
 
-  test("an extension item's fresh read takes a scratch repo of the base and the proposed revision", async () => {
+  // #1280: read mode refuses an item reviewer's git init, add and commit, so the two revisions are compared as folders
+  test("an extension item's fresh read takes a --no-index diff of the base and the proposed revision", async () => {
     const text = await last()
     expect(text).toContain(
-      "build a scratch repo in your scratch folder, the base revision's commit then the proposed one's",
+      "`git diff --no-index --no-ext-diff --no-textconv <base dir> <proposed dir>`",
     )
+    expect(text).not.toContain("build a scratch repo")
   })
 })
