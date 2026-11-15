@@ -391,7 +391,14 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
 
   test.each([
     ["playground ext show", "playground ext show acme-owner script triage --rev abc123"],
-    ["playground ext export into its scratchpad", `playground ext export ${PAD}/store/`],
+    [
+      "one file of a revision, read from ext show",
+      `playground ext show acme-owner script triage --rev abc123 | jq -r '.content.files["cli.ts"]'`,
+    ],
+    [
+      "a revision's file names, read from ext show",
+      "playground ext show acme-owner script triage --rev abc123 | jq -r '.content.files | keys[]'",
+    ],
     ["playground ext score", 'playground ext score acme-owner skill triage abc123 5 --reason "r"'],
     ["playground rm of its scratchpad", `playground rm ${PAD}`],
     ["playground rm inside its scratch folder", `playground rm ${SCRATCH}/store/node_modules`],
@@ -452,6 +459,15 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
       `playground ext export ${HOME}/.playground/ops/x`,
     ],
     ["playground ext export with two folders", `playground ext export ${PAD}/a ${HOME}/x`],
+    ["playground ext export into its own scratchpad", `playground ext export ${PAD}/store/`],
+    [
+      "a worktree of the PR whose link an export then writes through",
+      `git -C ${OUTSIDE} worktree add --detach ${PAD}/w HEAD && playground ext export ${PAD}/w/l/new`,
+    ],
+    [
+      "a clone whose link an export then writes through",
+      `git clone https://github.com/ext-dev/widgets ${PAD}/c && playground ext export ${PAD}/c/l/new`,
+    ],
     ["cmp, which diff -q answers", `cmp ${PAD}/repo/a.md ${HOME}/.playground/a.md`],
     ["find that deletes", `find ${PAD} -name x -delete`],
     ["find that runs a program", `find ${PAD} -exec sh {} ;`],
@@ -472,7 +488,7 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
 })
 
 // #1280 round 1: a write lands where the system resolves it, so a folder or a link already in its own folders can carry it out
-describe("no-outside-pr-code's item reviewer exports only to a new path in its own folders", () => {
+describe("no-outside-pr-code's item reviewer writes nothing through a folder or a link in its own folders", () => {
   const data = mkdtempSync(join(tmpdir(), "outside-pr-own-"))
   const own = join(data, "scratchpad", ITEM_REVIEWER)
   mkdirSync(join(own, "dir"), { recursive: true })
@@ -493,12 +509,8 @@ describe("no-outside-pr-code's item reviewer exports only to a new path in its o
     expect(await judgeOwn(command)).toContain("no-outside-pr-code")
   })
 
-  test("playground ext export into a new folder, then a worktree of a revision from its scope's clone, passes", async () => {
-    mkdirSync(join(own, "store", "acme", ".git"), { recursive: true })
-    expect(await judgeOwn(`playground ext export ${own}/new-store`)).toBeUndefined()
-    expect(
-      await judgeOwn(`git -C ${own}/store/acme worktree add --detach ${own}/base abc123`),
-    ).toBeUndefined()
+  test("playground ext export into a new folder of its own is refused, since a link the line makes first can carry it out", async () => {
+    expect(await judgeOwn(`playground ext export ${own}/new-store`)).toContain("no-outside-pr-code")
   })
 })
 

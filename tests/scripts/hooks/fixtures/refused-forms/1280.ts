@@ -18,6 +18,10 @@ export const groups: Group[] = [
         ],
         ["an export into a folder outside its own", "playground ext export /tmp/anywhere"],
         [
+          "an export through a link a clone on the same line checked out",
+          `git clone https://github.com/ext-dev/widgets ${pad}/c && playground ext export ${pad}/c/l/new`,
+        ],
+        [
           "a copy whose GNU target-folder option is shortened",
           `cp --target=${DATA}/ops evil.sh ${pad}/a`,
         ],
