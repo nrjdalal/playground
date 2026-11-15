@@ -80,6 +80,14 @@ describe("a git stash that can take another worktree's work is refused", () => {
   })
 })
 
+describe("a command built from a value the reader cannot read, in a call that names git stash", () => {
+  test("is refused, naming a script file as the way out", async () => {
+    const reason = await bash('A=(git stash); A+=(pop); "${A[@]}"')
+    expect(reason).toContain("a command built from a value it cannot read")
+    expect(reason).toContain("write the script to a file and run it")
+  })
+})
+
 describe("a long run of closing braces", () => {
   // a scan back for each brace's open grows with the square of their count, where the stack of opens grows with the count
   test("ahead of a stash is read in a time linear in its length", async () => {
@@ -114,6 +122,18 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
     ["grep for the word", "grep -rn 'git stash' scripts"],
     ["a printer that names it", "echo git stash pop"],
     ["a name it cannot read with no stash after it", "$EDITOR notes.md"],
+    // #2244's controls
+    ["a glob used only as an argument", "ls /usr/bin/g?t; git stash list"],
+    ["a program path with no glob", "/usr/bin/git stash list"],
+    [
+      "a program glob that matches no file, which keeps its typed word",
+      "/no/such/folder/g?t stash pop",
+    ],
+    ["an array the reader resolves", 'A=(git stash list); "${A[@]}"'],
+    [
+      "an array a shell's -c sets and runs, which names no stash",
+      `bash -c 'A=(echo hi); "\${A[@]}"'`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })

@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-glm-heavy-path.ts
 import {
   existsSync as existsSync2,
-  readdirSync,
+  readdirSync as readdirSync2,
   readFileSync as readFileSync2,
   readlinkSync,
   realpathSync as realpathSync2,
@@ -5512,7 +5512,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
-import { realpathSync, statSync } from "fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "fs";
 import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -7051,7 +7051,7 @@ function change(cmd, env) {
         setVar(env.vars, key, CHANGED);
       return;
     }
-    const variants = array ? [array] : splitHeld(cmd, name, env).filter((variant) => !marked(parse3(variant).name));
+    const variants = array ? [array] : [...splitHeld(cmd, name, env), ...splitHeld(cmd, name, env, true)].filter((variant) => !marked(parse3(variant).name));
     for (const variant of variants)
       change(variant, env);
     if (variants.length > 0)
@@ -7143,6 +7143,82 @@ function arrayRun(cmd, first, env) {
     return null;
   return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
+function globRun(cmd, first, env, glob = !!first?.glob) {
+  const pattern = first?.value ?? "";
+  if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
+    return;
+  if (!GLOB_PATTERN.test(pattern))
+    return;
+  const absolute = isAbsolute2(pattern);
+  if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
+    return null;
+  const base = absolute ? "/" : env.cwd;
+  let paths = [""];
+  for (const [k, part] of pattern.split("/").entries()) {
+    const join = (path, name) => k === 0 ? name : `${path}/${name}`;
+    if (!GLOB_PATTERN.test(part)) {
+      paths = paths.map((path) => join(path, part));
+      continue;
+    }
+    const glob = shellGlob(part);
+    const next = [];
+    for (const path of paths) {
+      let names;
+      try {
+        names = readdirSync(resolve2(base, path || "."));
+      } catch (error) {
+        if (/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+          continue;
+        return null;
+      }
+      for (const name of names)
+        if ((part.startsWith(".") || !name.startsWith(".")) && glob.match(name))
+          next.push(join(path, name));
+    }
+    if (next.length > READINGS)
+      return null;
+    paths = next;
+  }
+  const found = [];
+  for (const path of paths) {
+    try {
+      lstatSync(resolve2(base, path));
+      found.push(path);
+    } catch (error) {
+      if (!/^(?:ENOENT|ENOTDIR)$/.test(error.code ?? ""))
+        return null;
+    }
+  }
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function heldGlob(cmd, first, env) {
+  if (!first?.glob || !first.raw || !marked(first.value))
+    return;
+  const value = relexedValue(first.raw, heldKnown(env));
+  if (value === undefined || marked(value))
+    return;
+  const word = { ...first, value };
+  return globRun({ ...cmd, words: cmd.words.map((w) => w === first ? word : w) }, word, env, true);
+}
+var GLOB_PATTERN = /[*?]|\[[^\]]*\]/;
+var shellGlob = (part) => new Bun.Glob(part.replace(/^!/, "\\!").replace(BRACKET, (bracket) => bracket.slice(1, -1).replace(/\[:([a-z]+):\]/g, (_, name) => POSIX_CLASSES[name] ?? " -~").replace(/\[([=.])(.)\1\]/g, "$2").replace(/^/, "[").concat("]")));
+var BRACKET = /\[[!^]?\]?(?:\[:[a-z]+:\]|\[([=.]).\1\]|[^\]])*\]/g;
+var POSIX_CLASSES = {
+  alnum: "0-9A-Za-z",
+  alpha: "A-Za-z",
+  blank: " \t",
+  digit: "0-9",
+  lower: "a-z",
+  space: ` 	
+\r\f\v`,
+  upper: "A-Z",
+  xdigit: "0-9A-Fa-f"
+};
 function repass(commands, envs) {
   for (const cmd of commands) {
     if (!cmd.repeated)
@@ -7172,15 +7248,32 @@ function bind(commands, k, env, unbind) {
   const close = loopHeader(cmd) ? loopClose(commands, k) : undefined;
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
-  const before = names.map((name) => [name, env.vars.get(name)]);
   const value = close ? loopWord(cmd) : undefined;
+  const held = close ? heldKnown(env) : {};
+  const prior = names.flatMap((name) => (name in held) ? [[name, held[name]]] : []);
   for (const name of names)
     setVar(env.vars, name, value ?? unknown("a value a builtin gives"));
-  if (close)
-    unbind.set(close, () => {
-      for (const [name, held] of before)
-        held ? setVar(env.vars, name, held) : env.vars.delete(name);
-    });
+  if (!close)
+    return;
+  for (const name of names)
+    capture(env, name, value);
+  unbind.set(close, () => {
+    for (const name of names)
+      setVar(env.vars, name, CHANGED);
+    if (prior.length === 0)
+      return;
+    let record = loopBefore.get(env.vars);
+    if (!record)
+      loopBefore.set(env.vars, record = {});
+    for (const [name, was] of prior)
+      record[name] = was;
+  });
+}
+function capture(env, key, value) {
+  if (value)
+    recordHeld(env, key, value);
+  else
+    delete heldResolved.get(env.vars)?.[key];
 }
 function loopWord({ words }) {
   const at = words.findIndex((w) => w.value === "in" && !w.quoted);
@@ -7223,17 +7316,26 @@ async function examine(cmd, env, visit, builtins) {
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
   const array = arrayRun(cmd, primary.first, env);
-  const resolving = [
-    ...splitHeld(cmd, primary.name, env),
-    ...array ? [array] : [],
-    ...heldScripts(cmd, primary, env)
+  const prior = splitHeld(cmd, primary.name, env, true);
+  const split = splitHeld(cmd, primary.name, env);
+  const globs = [
+    globRun(cmd, primary.first, env),
+    heldGlob(cmd, primary.first, env),
+    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true))
   ];
-  if (unreadCommand(cmd, primary, resolving))
+  const resolving = [
+    ...split,
+    ...array ? [array] : [],
+    ...heldScripts(cmd, primary, env),
+    ...globs.flatMap((globbed) => globbed ?? [])
+  ];
+  if (globs.includes(null) || unreadCommand(cmd, primary, resolving))
     for (const parsed of [primary, ...others])
       parsed.unread = true;
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
     ...resolving,
+    ...prior,
     ...vanished,
     ...await xargsFilled(cmd, [primary, ...others], env)
   ];
@@ -7387,7 +7489,7 @@ function expandTilde(cmd, name, env) {
   });
 }
 var holdsCommand = (w) => !!w.source && /^(?:\$\{\w+\}|\$\w+)+$/.test(w.source.replace(/["']/g, "").replace(/\$\{[=~^]+/g, "${").replace(/\$[=~^](?=\w)/g, "$"));
-function splitHeld(cmd, name, env) {
+function splitHeld(cmd, name, env, prior = false) {
   if (name === "cd" || name === "popd" || name === "pushd")
     return [];
   const first = cmd.words.some((w) => w.splits && w.raw && !holdsCommand(w)) ? parse3(cmd).first : undefined;
@@ -7396,20 +7498,26 @@ function splitHeld(cmd, name, env) {
     return [];
   const known = heldKnown(env);
   const seps = ifsSplit(env);
-  let split = false;
-  const words = cmd.words.flatMap((w) => {
-    if (!holds(w) || !w.raw)
-      return [w];
-    const value = relexedValue(w.raw, known);
-    if (value === undefined)
-      return [w];
-    const parts = splitValue(value, seps);
-    if (!parts.some((part) => !part.unknown))
-      return [w];
-    split = true;
-    return parts;
-  });
-  return split ? [{ ...cmd, words }] : [];
+  const splitWith = (known) => {
+    let split = false;
+    const words = cmd.words.flatMap((w) => {
+      if (!holds(w) || !w.raw)
+        return [w];
+      const value = relexedValue(w.raw, known);
+      if (value === undefined)
+        return [w];
+      const parts = splitValue(value, seps);
+      if (!parts.some((part) => !part.unknown))
+        return [w];
+      split = true;
+      return parts;
+    });
+    return split ? [{ ...cmd, words }] : [];
+  };
+  if (!prior)
+    return splitWith(known);
+  const before = loopBefore.get(env.vars);
+  return before && Object.keys(before).length > 0 ? splitWith({ ...known, ...before }) : [];
 }
 function relexedValue(raw, known) {
   const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words;
@@ -7430,8 +7538,10 @@ function heldKnown(env) {
   }
   return Object.assign(known, heldResolved.get(env.vars));
 }
+var loopBefore = new WeakMap;
 var heldResolved = new WeakMap;
 function recordHeld(env, key, value) {
+  delete loopBefore.get(env.vars)?.[key];
   let record = heldResolved.get(env.vars);
   if (!record)
     heldResolved.set(env.vars, record = {});
@@ -9337,7 +9447,7 @@ function checkoutBelow(path, orgs, roots) {
 }
 function folderEntries(at) {
   try {
-    return readdirSync(at, { withFileTypes: true }).filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
+    return readdirSync2(at, { withFileTypes: true }).filter((entry) => entry.isDirectory() || entry.isSymbolicLink());
   } catch {
     return [];
   }
@@ -9653,7 +9763,7 @@ function globbed(value, cwd, deep = []) {
       for (const at of candidates) {
         let entries;
         try {
-          entries = readdirSync(at);
+          entries = readdirSync2(at);
         } catch {
           continue;
         }
