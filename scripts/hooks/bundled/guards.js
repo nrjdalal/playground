@@ -16534,12 +16534,14 @@ var UTILITIES = new Set([
   "case",
   "cat",
   "cd",
+  "cmp",
   "comm",
   "continue",
   "cut",
   "date",
   "diff",
   "dirname",
+  "du",
   "echo",
   "exit",
   "false",
@@ -16611,7 +16613,25 @@ var QUIET = new Set(["-q", "--quiet"]);
 var SED_ADDRESS2 = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 var SED_PRINT = new RegExp(`^${SED_ADDRESS2}(?:,${SED_ADDRESS2})?p$`);
 var SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/;
-var PLAYGROUND_READS = new Set(["ext search", "ext which", "rules"]);
+var PLAYGROUND_READS = new Set([
+  "ext export",
+  "ext score",
+  "ext search",
+  "ext show",
+  "ext which",
+  "rules"
+]);
+var FIND_ACTIONS = new Set([
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-fls",
+  "-fprint",
+  "-fprint0",
+  "-fprintf",
+  "-ok",
+  "-okdir"
+]);
 var GITHUB_URL2 = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
 var unread3 = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`;
 var REASONS = {
@@ -16644,6 +16664,17 @@ function installedAt(folder, lookup) {
   }
 }
 var under = (path, folder) => (path + "/").toLowerCase().startsWith(folder.toLowerCase().replace(/\/?$/, "/"));
+function placed(written) {
+  if (written === undefined || written.split("/").includes(".."))
+    return;
+  const path = resolve10(written);
+  for (let at = path;; at = dirname9(at)) {
+    if (existsSync10(at))
+      return join19(real3(at), path.slice(at.length));
+    if (dirname9(at) === at)
+      return path;
+  }
+}
 function gitAllows(words, folder, lookup, environment) {
   if ("GIT_DIR" in environment || "GIT_WORK_TREE" in environment)
     return false;
@@ -16678,7 +16709,7 @@ function gitAllows(words, folder, lookup, environment) {
   const operands = rest[1] === "--detach" ? rest.slice(2) : rest.slice(1);
   return operands.length === 2 && operands.every(plain);
 }
-async function inspect13(command, directory, environment, lookup) {
+async function inspect13(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
   const skills = [join19(data, "orgs"), join19(lookup.main, "extensions")];
   const slot = join19(data, "ops", "run-slot.sh");
@@ -16700,6 +16731,13 @@ async function inspect13(command, directory, environment, lookup) {
         return false;
     }
   };
+  const ownPath = (text, here) => {
+    const path = text && placed(pathOf(text, here));
+    return path !== undefined && own.some((folder) => {
+      const at = placed(folder);
+      return at !== undefined && under(path, at);
+    });
+  };
   const permitted = (cmd, parsed, here) => {
     const { args, first, local, name } = parsed;
     if (name === "")
@@ -16720,6 +16758,12 @@ async function inspect13(command, directory, environment, lookup) {
       return gitAllows(words, here.cwd, lookup, environment);
     if (UTILITIES.has(name) || readsWords(words))
       return true;
+    if (name === "find")
+      return !words.some((w) => FIND_ACTIONS.has(w));
+    if (name === "cp") {
+      const operands = args.filter((a) => !a.value.startsWith("-"));
+      return operands.length >= 2 && !words.some((w) => /^-[^-]*t/.test(w) || w.startsWith("--target-directory")) && ownPath(operands.at(-1), here);
+    }
     if (name === "for")
       return !(words[1] in environment);
     if (name === "read")
@@ -16731,7 +16775,7 @@ async function inspect13(command, directory, environment, lookup) {
       return inline || operand !== undefined && skillScript(pathOf(operand, here));
     }
     if (name === "playground")
-      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" "))) && here.cwd !== undefined && !lookup.holds(here.cwd, "bunfig.toml");
+      return (PLAYGROUND_READS.has(words[1]) || PLAYGROUND_READS.has(words.slice(1, 3).join(" ")) || words[1] === "rm" && args.length > 1 && args.slice(1).every((a) => !a.value.startsWith("-") && ownPath(a, here))) && here.cwd !== undefined && (!lookup.holds(here.cwd, "bunfig.toml") || inMain(here.cwd));
     if (name === "gh") {
       const [group, ...rest] = words.slice(1);
       const checkout = group === "pr" && rest.some((w) => w === "checkout" || w === "co") || group === "issue" && rest.includes("develop");
@@ -16800,7 +16844,10 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
   const directory = typeof cwd === "string" && isAbsolute7(cwd) ? cwd : undefined;
   let allowed = false;
   try {
-    allowed = await inspect13(command, directory, environment, lookup);
+    const name = await lookup.name(sessionId);
+    const data = dataDirOf(environment);
+    const own = name ? [join19(data, "scratch", name), join19(data, "scratchpad", name)] : [];
+    allowed = await inspect13(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
     return;
