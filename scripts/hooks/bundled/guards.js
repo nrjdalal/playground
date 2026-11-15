@@ -2090,7 +2090,7 @@ function spelledText(text) {
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
 var SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g;
-var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : "*";
+var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : /^-?\d+$/.test(from) && /^-?\d+$/.test(to) ? "[0-9-]*" : "*";
 function anyText(word, part) {
   const spelled = word.replace(part, "*");
   return spelled === word ? [word] : anyText(spelled, part);

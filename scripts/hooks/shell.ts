@@ -2229,11 +2229,13 @@ export function spelledText(text: string): string {
 // A brace sequence (`{a..c}`, `{1..9..2}`), which braceWords leaves as written
 const SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g
 
-// A sequence of letters as the bracket of its range, any increment read as 1, and any other as any text, since a bracket can read its ends as a negation or a close
+// A sequence of letters as the bracket of its range, any increment read as 1, one of numbers as text led by a digit or a minus, which no program name is, and any other as any text, since a bracket can read its ends as a negation or a close
 const sequenceSpelling = (_: string, from: string, to: string): string =>
   /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to)
     ? `[${from < to ? from : to}-${from < to ? to : from}]`
-    : "*"
+    : /^-?\d+$/.test(from) && /^-?\d+$/.test(to)
+      ? "[0-9-]*"
+      : "*"
 
 // A word whose lists or groups make more words than the cap, each innermost one as any text until none is left, so a guard's first look reads it as a glob that may spell its program
 function anyText(word: string, part: RegExp): string[] {
