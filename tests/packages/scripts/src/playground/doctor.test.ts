@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -183,13 +191,23 @@ describe("jobChecks", () => {
   })
 
   test("each launchd job turned on is checked loaded, and one not loaded is MISSING", () => {
-    expect(jobChecks(jobs, (label) => label === "com.x.ops-awake")).toEqual([
+    expect(jobChecks(jobs, (label) => label === "com.x.ops-awake", "darwin")).toEqual([
       { detail: "com.x.ops-awake loaded", name: "job ops-awake", status: "ok" },
     ])
-    const [check] = jobChecks(jobs, () => false)
+    const [check] = jobChecks(jobs, () => false, "darwin")
     expect(check!.status).toBe("MISSING")
     expect(check!.detail).toContain("launchctl bootstrap")
     expect(check!.detail).toContain("com.x.ops-awake.plist")
+  })
+
+  // #2203: on Linux each launchd job runs as a systemd user unit of the same label
+  test("on Linux each job turned on is checked active as its systemd user unit, with systemctl's fix", () => {
+    expect(jobChecks(jobs, () => true, "linux")).toEqual([
+      { detail: "com.x.ops-awake.service active", name: "job ops-awake", status: "ok" },
+    ])
+    const [check] = jobChecks(jobs, () => false, "linux")
+    expect(check!.status).toBe("MISSING")
+    expect(check!.detail).toContain("systemctl --user enable --now com.x.ops-awake.service")
   })
 
   test("a turned-off job and one with no launchd label are left alone", () => {
@@ -206,6 +224,50 @@ describe("jobChecks", () => {
   })
 })
 
+// #2203: a fake systemctl first on PATH answers is-active, exit 0 for the one unit it runs, so no real systemctl is called
+describe("jobLoaded", () => {
+  test("on Linux reads systemctl --user is-active --quiet for the label's unit", () => {
+    const bin = mkdtempSync(join(scratch, "systemctl-"))
+    const said = join(bin, "said")
+    writeFileSync(
+      join(bin, "systemctl"),
+      `#!/bin/sh\necho "$*" >> "${said}"\n[ "$4" = com.x.ops-tick.service ]\n`,
+    )
+    chmodSync(join(bin, "systemctl"), 0o755)
+    // a child of its own, since bun finds a program on the PATH it started with
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        "--no-env-file",
+        "-e",
+        `const { jobLoaded } = await import(${JSON.stringify(DOCTOR)}); console.log(JSON.stringify(["com.x.ops-tick", "com.x.ops-off"].map(jobLoaded("linux"))))`,
+      ],
+      { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+    )
+    expect(child.stderr.toString()).toBe("")
+    expect(JSON.parse(child.stdout.toString())).toEqual([true, false])
+    expect(readFileSync(said, "utf8")).toBe(
+      "--user is-active --quiet com.x.ops-tick.service\n--user is-active --quiet com.x.ops-off.service\n",
+    )
+  })
+})
+
+// A Linux with no systemd: the probe reads the job as down, so doctor prints its MISSING line rather than crashing.
+test("jobLoaded on Linux with no systemctl on PATH reads the job as not running", () => {
+  const empty = mkdtempSync(join(scratch, "no-systemctl-"))
+  const child = Bun.spawnSync(
+    [
+      process.execPath,
+      "--no-env-file",
+      "-e",
+      `const { jobLoaded } = await import(${JSON.stringify(DOCTOR)}); console.log(JSON.stringify(jobLoaded("linux")("com.x.ops-tick")))`,
+    ],
+    { env: { ...process.env, PATH: empty } },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toBe(false)
+})
+
 describe("the jobs check on a machine with a store", () => {
   const policy = JSON.stringify({
     values: {
@@ -217,7 +279,7 @@ describe("the jobs check on a machine with a store", () => {
   })
 
   test("reads the registry's values: each launchd job turned on, by its job name", () => {
-    expect(jobChecks(registryJobsText(policy), () => true)).toEqual([
+    expect(jobChecks(registryJobsText(policy), () => true, "darwin")).toEqual([
       { detail: "com.x.ops-tick loaded", name: "job ops-tick", status: "ok" },
       { detail: "com.x.ops-zai-usage loaded", name: "job ops-zai-usage", status: "ok" },
     ])
@@ -228,9 +290,9 @@ describe("the jobs check on a machine with a store", () => {
 
   test("a launchd job its row turns on by enabled alone reads its label from the registry (PG-1196)", () => {
     const rows = [{ key: "jobs.opsTick", scope: "made-up-me", value: { enabled: true } }]
-    expect(jobChecks(registryJobsText(policyJson(rows, "made-up-me")), () => true)).toEqual([
-      { detail: "com.playground.ops-tick loaded", name: "job ops-tick", status: "ok" },
-    ])
+    expect(
+      jobChecks(registryJobsText(policyJson(rows, "made-up-me")), () => true, "darwin"),
+    ).toEqual([{ detail: "com.playground.ops-tick loaded", name: "job ops-tick", status: "ok" }])
   })
 
   test("takes the store's policy.json over jobs.json, and a store that lacks it reads jobs.json", async () => {

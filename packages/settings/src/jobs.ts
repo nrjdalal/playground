@@ -4,7 +4,7 @@ import { z } from "zod"
 import { CORE } from "./rendered"
 import { defineSettings } from "./settings"
 
-// The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
+// The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist, and on Linux its systemd user unit, from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
 // A job row as a write takes it, every field named and none it does not have; a stored row reads through fromStored first.
 export const jobSchema = z.strictObject({
   callsModel: z.boolean(),
@@ -17,7 +17,7 @@ export const jobSchema = z.strictObject({
   disabledWhy: z.string().optional(),
   enabled: z.boolean(),
   heartbeat: z.string().min(1),
-  // A job launchd holds: its label, and the program its plist runs from cwd.
+  // A job launchd holds, or on Linux systemd as the user unit <label>.service: its label, and the program its plist or unit runs from cwd.
   launchd: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   neverPause: z.boolean().optional(),
@@ -222,9 +222,13 @@ const filled = (text: string, fill: Fill) =>
 const xml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
 
+// A launchd job's log, which its plist and its systemd unit both write to.
+export const logOf = (name: string, fill: Fill) =>
+  `${fill.data}/ops/${name.replace(/^ops-/, "")}/launchd.log`
+
 // A launchd job's plist: its label, its program from its cwd, kept alive, logging into its own folder under ops.
 const plistOf = (name: string, job: Job, fill: Fill): string => {
-  const log = `${fill.data}/ops/${name.replace(/^ops-/, "")}/launchd.log`
+  const log = logOf(name, fill)
   const string = (text: string) => `<string>${xml(text)}</string>`
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -245,20 +249,48 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
+// The same job as a systemd user unit, for Linux, which has no launchd: its plist's program, folder and log, its PATH with ~/.bun/bin (%h, the home folder) first, restarted always 10 s apart as launchd throttles, so systemd's start limit never parks it, and started at login; a stop ends its own process alone, so a server it started detached (ops-herdr's herdr servers) outlives it, as under launchd. % is systemd's specifier and $ its variable sign, so each is doubled where systemd reads it.
+const unitOf = (name: string, job: Job, fill: Fill): string => {
+  const spec = (text: string) => text.replaceAll("%", "%%")
+  const quoted = (text: string) => `"${text.replace(/["\\]/g, "\\$&")}"`
+  const log = spec(logOf(name, fill))
+  return [
+    "[Unit]",
+    `Description=Playground's ${name} ops job`,
+    "",
+    "[Service]",
+    `Environment=${quoted(`PATH=%h/.bun/bin:${spec(fill.path)}`)}`,
+    `ExecStart=${job.program!.map((arg) => quoted(spec(filled(arg, fill)).replaceAll("$", () => "$$"))).join(" ")}`,
+    "KillMode=process",
+    "Restart=always",
+    "RestartSec=10",
+    `StandardError=append:${log}`,
+    `StandardOutput=append:${log}`,
+    `WorkingDirectory=${spec(filled(job.cwd ?? fill.checkout, fill))}`,
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+    "",
+  ].join("\n")
+}
+
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist and systemd user unit by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
   fill: Fill,
   org: Record<string, OrgJob> | null = {},
-): { jobs: Record<string, unknown>[]; plists: Map<string, string> } => {
+): { jobs: Record<string, unknown>[]; plists: Map<string, string>; units: Map<string, string> } => {
   const plists = new Map<string, string>()
+  const units = new Map<string, string>()
   const row = (
     name: string,
     { command, cwd, enabled, program, ...job }: Job & { org?: string },
   ) => {
-    if (enabled && job.launchd && program)
+    if (enabled && job.launchd && program) {
       plists.set(job.launchd, plistOf(name, { ...job, cwd, enabled, program }, fill))
+      units.set(job.launchd, unitOf(name, { ...job, cwd, enabled, program }, fill))
+    }
     return {
       name,
       ...job,
@@ -281,7 +313,7 @@ export const renderJobs = (
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
       .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
-  return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
+  return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists, units }
 }
 
 // A word an org job's command passes its script, and each segment of its paths: plain text, never a shell operator, a quote or a placeholder.
