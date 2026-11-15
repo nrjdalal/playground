@@ -11082,11 +11082,12 @@ function xargsGrep(cmd, parsed, env) {
 }
 function fdFiles(redirects, inherited) {
   const fds = new Map(inherited);
-  const opened = (fd) => redirects.flatMap((r) => r.target && writer(r) && r.fd === fd ? [r.target] : []);
+  const fdOf = (r) => r.fd === "&" || r.fd === "" && r.op !== "<>" ? "1" : r.fd || "0";
+  const opened = (fd) => redirects.flatMap((r) => r.target && writer(r) && fdOf(r) === fd ? [r.target] : []);
   for (const r of redirects) {
     if (!r.target || !(r.op.startsWith(">") || r.op === "<>"))
       continue;
-    const fd = r.fd === "" || r.fd === "&" ? "1" : r.fd;
+    const fd = fdOf(r);
     const n = r.target.value;
     const dup = r.op === ">&" && /^\d+$/.test(n);
     const files = dup ? [...fds.get(n) ?? [], ...opened(n)] : writer(r) ? [r.target] : [];

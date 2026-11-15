@@ -1553,11 +1553,13 @@ function xargsGrep(cmd: Command, parsed: Parsed, env: Env): boolean {
 // Each descriptor's file words once a command's redirects apply, from those it inherits (a group around it, an earlier exec): a writing redirect names its file (&> and >&<file> for stdout and stderr both), a duplicate (>&N) takes N's, or the file a later redirect of the same command opens on N, and any other redirect onto a descriptor leaves it no file
 function fdFiles(redirects: Command["redirects"], inherited: Map<string, Word[]>) {
   const fds = new Map(inherited)
+  const fdOf = (r: Command["redirects"][number]) =>
+    r.fd === "&" || (r.fd === "" && r.op !== "<>") ? "1" : r.fd || "0"
   const opened = (fd: string) =>
-    redirects.flatMap((r) => (r.target && writer(r) && r.fd === fd ? [r.target] : []))
+    redirects.flatMap((r) => (r.target && writer(r) && fdOf(r) === fd ? [r.target] : []))
   for (const r of redirects) {
     if (!r.target || !(r.op.startsWith(">") || r.op === "<>")) continue
-    const fd = r.fd === "" || r.fd === "&" ? "1" : r.fd
+    const fd = fdOf(r)
     const n = r.target.value
     const dup = r.op === ">&" && /^\d+$/.test(n)
     const files = dup ? [...(fds.get(n) ?? []), ...opened(n)] : writer(r) ? [r.target] : []
