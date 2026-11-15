@@ -42,6 +42,10 @@ const SOURCE_FILES = [
   "scripts/link-skills.sh",
 ]
 
+// Each file, and every file inside dir its relative imports reach, walked from the entries; a stub the test writes is neither copied nor walked.
+const withImports = (dir: string, entries: string[], stubs: string[] = []): string[] =>
+  [...entries].sort()
+
 // The tools install.sh checks and the installers it calls: a run reaches only their fakes, so the system's own folders are linked in without them.
 const FAKED = [
   "brew",
@@ -960,5 +964,30 @@ describe("install.sh", () => {
       expect(guard![1]).toContain(name)
       expect(script.replace(guard![1], "")).not.toContain(name)
     }
+  })
+})
+
+describe("the files the test copies", () => {
+  const tree = join(scratch, "imports")
+  write(join(tree, "repo/entry.ts"), '#!/usr/bin/env bun\nimport "./lib/a"\nimport "./stub"\n')
+  write(join(tree, "repo/lib/a.ts"), 'import { b } from "../b"\nexport const a = b\n')
+  write(join(tree, "repo/b.ts"), "export const b = 1\n")
+  write(join(tree, "repo/stub.ts"), 'import "./never"\n')
+  write(
+    join(tree, "repo/out.ts"),
+    'import "../outside"\nimport "@packages/env/data-dir"\nimport "node:fs"\n',
+  )
+  write(join(tree, "outside.ts"), "export {}\n")
+
+  test("take every file an entry's relative imports reach, and no stub", () => {
+    expect(withImports(join(tree, "repo"), ["entry.ts"], ["stub.ts"])).toEqual([
+      "b.ts",
+      "entry.ts",
+      "lib/a.ts",
+    ])
+  })
+
+  test("leave out an import outside the repo and a workspace package's", () => {
+    expect(withImports(join(tree, "repo"), ["out.ts"])).toEqual(["out.ts"])
   })
 })
