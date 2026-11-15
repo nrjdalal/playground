@@ -32,6 +32,7 @@ import {
 } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
+  BRACE,
   braceWords,
   codeFed,
   type Command,
@@ -102,8 +103,14 @@ const PRIVACY = "at your login's scope, which Privacy on the Dashboard's Setting
 const PRIVACY_ROUTE =
   "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand."
 
+// A hook file written with a remover or text the hook cannot read (hookRemover), which names its own route
+const HOOK_TEXT = "which a hook file may not hold"
+const HOOK_ROUTE =
+  "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove."
+const hookRemoval = (file: string, what: string) => `${file} written with ${what}, ${HOOK_TEXT}`
+
 const refuse = (what: string) =>
-  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
+  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE}`
 
 // A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
 const refuseUnwritten = (what: string) =>
@@ -212,6 +219,84 @@ const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU builds under their g prefix (gcp, grm, gfind, gsed, gtar): a g name reads as the program it names, a remover, a writer or one unreadCdWrites reads, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
 const GNU_NAMED =
   /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/
+// GNU sed's long options, which getopt_long reads by any unique prefix (longOf); --file sorts before --follow-symlinks, so their shared prefix reads as a script file, failing closed
+const SED_LONG = [
+  "--debug",
+  "--expression",
+  "--file",
+  "--follow-symlinks",
+  "--help",
+  "--in-place",
+  "--line-length",
+  "--null-data",
+  "--posix",
+  "--quiet",
+  "--regexp-extended",
+  "--sandbox",
+  "--separate",
+  "--silent",
+  "--unbuffered",
+  "--version",
+  "--zero-terminated",
+]
+// Whether perl takes its script from an -e or -E: a letter of an option cluster before its first operand, read as perl reads one, so a letter that takes the rest of its cluster as its value (-i's suffix, -M's module, -I's folder) ends it, so -pie is -p and -i with the suffix e
+function perlInline(args: Word[]): boolean {
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "--" || v === "-" || !v.startsWith("-")) return false
+    // -l and -0 take only the digits after them, so a letter past those digits is an option of its own (-lne)
+    const cluster = v.slice(1).replace(/l\d*|0(?:x[\da-f]*|\d*)/gi, (m) => m[0])
+    for (const c of cluster) {
+      if (c === "e" || c === "E") return true
+      if ("CdDFiImMVx".includes(c)) break
+    }
+  }
+  return false
+}
+// The words a text written into a hook file may not hold, whatever they name, since a hook learns its targets only when it runs: REMOVERS, find's -delete, shred, and their kin in other tools and languages
+const HOOK_REMOVERS = new Set([
+  ...REMOVERS,
+  "-delete",
+  "rimraf",
+  "rm_f",
+  "rm_r",
+  "rm_rf",
+  "rmdirsync",
+  "rmsync",
+  "rmtree",
+  "shred",
+  "srm",
+  "trash",
+  "trash-put",
+  "unlinksync",
+  "wipe",
+])
+// whether a word, in any case as macOS's filesystem reads a program's name, is a remover (HOOK_REMOVERS), a GNU build's g name read as the tool it builds
+const hookRemoverWord = (word: string) => {
+  const lower = word.toLowerCase()
+  return HOOK_REMOVERS.has(GNU_NAMED.exec(lower)?.[1] ?? lower)
+}
+// What of a text makes it one a hook file may not hold, `hook` asked whether the file is one only once the text holds such a thing: a remover word anywhere in it, its quotes and backslashes dropped, else, in a text holding an expansion, a glob, a brace, a paren or an eval, a command of it whose program the shell reads as a remover, an eval, a program built from a variable or a substitution, or one named by a glob, a zsh group or a brace list, which may be any remover; text the hook cannot read (undefined) counts for a file `hook` is sure of
+function hookRemover(
+  text: string | undefined,
+  hook: (sure: boolean) => boolean,
+): string | undefined {
+  if (text === undefined) return hook(true) ? "text it cannot read" : undefined
+  // read with each backslash-newline joined, since the shell joins a word across one, and as typed, since a comment ends at its newline even after a backslash
+  const word = [text.replace(/\\\n/g, ""), text]
+    .flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/))
+    .find(hookRemoverWord)
+  if (word) return hook(false) ? word : undefined
+  if (!/[$`?*{(]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false)) return
+  for (const cmd of lex(text).commands) {
+    const { first, name } = parse(cmd)
+    if (marked(name)) return "a program built from a variable or a substitution"
+    // a glob the shell sees in the program word (`/bin/r?`) or a zsh group (`/bin/r(m|x)`) picks the program at run time, and a brace list (`/bin/r{m,}`) spells it; test's own `[` and `[[` hold no pattern
+    if (first?.unknown === BRACE) return "a program named by a brace list"
+    if (first?.glob && /[?*(]|\[[^\]]*\]/.test(name)) return "a program named by a glob"
+    if (name === "eval" || hookRemoverWord(program(name))) return program(name)
+  }
+}
 // A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
@@ -1554,21 +1639,28 @@ function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Comma
   })
   return bodies
 }
+// Programs that print nothing to their stdout, so a hook file takes no text from them
+const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
 // the commands a group, a subshell or a compound's closer holds, none for any other command
 type Kids = (cmd: Command) => Command[] | undefined
-// What a command prints that a hook file may take: a printer's output as the shell prints it (outputOf), a sed's or perl's that edits no file in place (escapedWrites), or the commands' a group, subshell or compound holds whose stdout is its own; none for another program or text the hook cannot read
-async function printed(cmd: Command, env: Env, kids: Kids): Promise<string[]> {
+// What a command prints that a hook file may take: a printer's, a bare cat's or tee's output as the shell prints it (outputOf), a sed's or perl's that edits no file in place (escapedWrites), or the commands' a group, subshell or compound holds whose stdout is its own; none for a program that prints nothing (SILENT), and undefined for another program or text the hook cannot read
+async function printed(cmd: Command, env: Env, kids: Kids): Promise<(string | undefined)[]> {
   const held = kids(cmd)
   if (held) {
     const own = held.filter((c) => !fdFiles(c.redirects, new Map()).has("1"))
     return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat()
   }
   const parsed = parse(cmd)
-  if (PRINTERS.has(parsed.name)) {
+  const { args, name } = parsed
+  if (SILENT.has(name)) return []
+  // cat's text is its stdin's alone, since the hook reads no file's text into a hook
+  const files = name === "cat" && args.some((a) => a.value !== "-" && !a.value.startsWith("-"))
+  if (!files && (name === "" || PRINTERS.has(name) || name === "cat" || name === "tee")) {
     const out = await outputOf(cmd, env)
-    return out.unknown ? [] : [out.value]
+    return [out.unknown ? undefined : out.value]
   }
-  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name
+  const tool = GNU_NAMED.exec(name)?.[1] ?? name
+  if (files || (!SEDS.has(program(name)) && tool !== "perl")) return [undefined]
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env)
 }
 // the folder git runs a folder's repo's hooks from (core.hooksPath, else .git/hooks), read by git itself with every GIT_ variable dropped, in the C locale and under a 2 s cap, at its nearest folder that exists, so a folder the same line makes is read too: false outside a repo, and true, any folder may be one, when git fails another way or runs past the cap
@@ -1593,14 +1685,15 @@ function readHookFolder(dir: string): string | boolean {
 }
 // each folder's hook folder (readHookFolder), read once a folder
 const hookFolders = new Map<string, string | boolean>()
-// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or any file in a folder git could not answer for
-function hookFile(path: string | undefined): boolean {
+// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
+function hookFile(path: string | undefined, sure = false): boolean {
   if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//.test(path)) return true
+  if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
   const folder = hookFolders.get(dir)
-  return folder === true || folder === real(dir)
+  return (!sure && folder === true) || folder === real(dir)
 }
 
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
@@ -1884,7 +1977,12 @@ const texts = (word: Word): Word[] => {
 
 // unknown: the line names HOME, TMPDIR or PWD other than by expanding them, so it is read a second time with those unknown, since the shell's value may not be the environment's
 async function inspect(raw: string, environment: Environment, unknown = false) {
-  const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool,
+    turn_id: turn,
+  } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
   const root = real(extensionsDir(dataDir(environment)))
@@ -1904,7 +2002,30 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
-    return inRoot(resolve(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined
+    const path = resolve(directory ?? "", expanded)
+    if (inRoot(path)) return refuse(`a write to ${file}`)
+    // the text a file tool writes is judged as a shell's text written into a hook file is, and a Codex patch's (codex.ts) (a Write with codex.ts's turn_id) by the lines it adds in any of its files, read apart from its headers and the shell command an apply_patch heredoc stands in
+    const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
+    const patch =
+      typeof turn === "string" &&
+      typeof input.content === "string" &&
+      input.content.includes("*** Begin Patch")
+    const removes = [
+      patch
+        ? String(input.content)
+            .split("\n")
+            .filter((line) => line.startsWith("+"))
+            .map((line) => line.slice(1))
+            .join("\n")
+        : input.content,
+      input.new_string,
+      input.new_source,
+      ...edits.map((e) => e?.new_string),
+    ]
+      .filter((text): text is string => typeof text === "string")
+      .map((text) => hookRemover(text, () => hookFile(path)))
+      .find(Boolean)
+    return removes ? refuse(hookRemoval(file, removes)) : undefined
   }
   if (tool !== "Bash") return
   const { command } = input
@@ -2196,12 +2317,20 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
-    // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, is judged as an in-place edit's script is (scriptNames)
+    // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, piped or fed a heredoc or here-string, is refused when it holds a remover or text the hook cannot read (hookRemover), else judged as an in-place edit's script is (scriptNames)
     const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
       for (const text of await printed(source, env, kids))
         for (const here of places(env)) {
+          // text the hook cannot read counts only for a file it is sure is a hook, since every write of another program's output asks git where its folder's hooks run
+          let into: Word | undefined
+          const removes = hookRemover(
+            text,
+            (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))),
+          )
+          if (removes && into) return hookRemoval(shown(into), removes)
+          if (text === undefined) continue
           const named = scriptNames(text, here)
           const hook = named && targets.find((word) => hookFile(pathOf(word, here)))
           if (hook) return `${shown(hook)}, a hook file, written with a script that names ${named}`
@@ -2225,10 +2354,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const teeTool = program(name)
     const hookWrite =
       (await outOf(cmd, execFds)) ??
-      ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin
+      ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee"
         ? await intoHook(
             args.filter((word) => !/^-./.test(word.value)),
-            cmd.stdin,
+            cmd.stdin ?? cmd,
           )
         : undefined)
     if (hookWrite) return refuse(hookWrite)
@@ -2387,6 +2516,26 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText)),
     ]
+    // a sed's script from a file (-f after any of GNU's and macOS's no-value flags, -l counted as one so GNU's -l value fails closed, or --file by any prefix getopt_long reads) and its in-place edit by any spelling (-i, or a prefix of --in-place), which inPlace reads by their full names alone
+    const sedLong = (word: Word) => longOf(word.value.split("=")[0], SED_LONG)
+    const sedFile =
+      tool === "sed" && args.some((w) => /^-[Eablnrsuz]*f/.test(w.value) || sedLong(w) === "--file")
+    const sedEditFlag =
+      tool === "sed" &&
+      args.some((w) => /^-[Eablnrsuz]*i/.test(w.value) || sedLong(w) === "--in-place")
+    // the files an in-place edit edits (inPlace), else for such a sed every operand, since none of them is its script
+    const editedFiles =
+      edited.size > 0
+        ? [...edited]
+        : sedFile && sedEditFlag
+          ? args.filter((w) => !w.value.startsWith("-"))
+          : []
+    // what makes an in-place edit's text one a hook file may not hold: a script it cannot read (a word built from a variable or a substitution, sed's script file, a perl given no -e, whose first operand is its script), else a remover in what it writes (hookRemover)
+    const unreadScript =
+      editedFiles.length > 0 &&
+      (args.some((word) => !edited.has(word) && marked(word.value)) ||
+        sedFile ||
+        (tool === "perl" && !perlInline(args)))
     // what any other sed or perl call writes, judged for the root as its literal twin is (escapedWrites)
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env)
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
@@ -2453,6 +2602,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         const named = names({ ...value, quoted: false }, here, remover)
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
+      let hook: Word | undefined
+      const isHook = () => !!(hook = editedFiles.find((file) => hookFile(pathOf(file, here))))
+      const hookText =
+        editedFiles.length === 0
+          ? undefined
+          : unreadScript
+            ? isHook() && "a script it cannot read"
+            : written.map((text) => hookRemover(text, isHook)).find(Boolean)
+      if (hookText && hook) return refuse(hookRemoval(shown(hook), hookText))
       for (const text of written) {
         const named = scriptNames(text, here)
         if (named) return refuse(`${verb} with a script that names ${named}`)

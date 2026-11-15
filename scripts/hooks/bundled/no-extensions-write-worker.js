@@ -7410,8 +7410,8 @@ function word(lx) {
       lx.i++;
     }
   }
-  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
-    out.unknown ??= "a brace expansion";
+  if (BRACE_LIST.test(bare))
+    out.unknown ??= BRACE;
   if (GLOB_CHARS.test(bare))
     out.glob = true;
   out.source = src.slice(start, lx.i);
@@ -7422,6 +7422,8 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
+var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
 var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
@@ -8025,8 +8027,37 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  if (!GLOB_PATTERN.test(pattern))
+  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, maskQuoted);
+  const grouped = seen.includes("(");
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null;
+  const joined = pattern.replace(/\\\n/g, "");
+  const groups = grouped ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined) : [pattern];
+  if (groups === null || qualifiers?.[1].includes("N"))
+    return null;
+  const patterns = groups ?? [pattern];
+  if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern))
     return;
+  const [only, ...more] = patterns;
+  const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute3(only) && unsure)
+    return;
+  const found = [];
+  for (const each of patterns) {
+    const matched = globMatches(each, env);
+    if (matched === null)
+      return null;
+    found.push(...matched);
+  }
+  if (found.length > READINGS || qualifiers && found.length > 0)
+    return null;
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function globMatches(pattern, env) {
   const absolute = isAbsolute3(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -8067,13 +8098,69 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
         return null;
     }
   }
-  if (found.length === 0)
-    return;
-  return found.map((value) => ({
-    ...cmd,
-    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
-  }));
+  return found;
 }
+function groupWords(pattern, spelling = false) {
+  const seen = pattern.replace(QUOTED, maskQuoted);
+  const open = seen.indexOf("(");
+  if (open < 0)
+    return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)];
+  const cuts = [open];
+  let close = -1;
+  for (let k = open, depth = 0;k < seen.length && close < 0; k++) {
+    if (seen[k] === "(")
+      depth++;
+    else if (seen[k] === "|" && depth === 1)
+      cuts.push(k);
+    else if (seen[k] === ")" && --depth === 0)
+      close = k;
+  }
+  if (close < 0 || pattern.slice(open, close).includes("/"))
+    return;
+  if (!spelling && /[#^~]/.test(seen.slice(open, close)))
+    return null;
+  const out = [];
+  for (const [n, from] of cuts.entries()) {
+    const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close);
+    const extended = spelling && /[#^~]/.test(seen.slice(from + 1, cuts[n + 1] ?? close));
+    for (const each of extended ? [alternative, "*"] : [alternative]) {
+      const words = groupWords(pattern.slice(0, open) + each + pattern.slice(close + 1), spelling);
+      if (!words || out.push(...words) > (spelling ? BRACE_WORDS : READINGS))
+        return words === undefined ? undefined : null;
+    }
+  }
+  return out;
+}
+var unquote = (part) => part.startsWith("\\") ? part.slice(1) : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined);
+function braceRun(cmd, first) {
+  if (first?.unknown !== BRACE)
+    return;
+  const source = (first.source ?? "").replace(/\\\n/g, "");
+  if (/[$`]/.test(source))
+    return null;
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide2));
+  if (masked.includes("("))
+    return;
+  const expanded = braceWords(masked);
+  if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
+    return null;
+  const words = [];
+  for (const each of expanded) {
+    const { commands } = lex(unhide(each));
+    if (commands.length > 1 || commands[0]?.redirects.length)
+      return null;
+    words.push(...commands[0]?.words ?? []);
+  }
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
+}
+var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
+var HIDDEN = "{,}()";
+var maskQuoted = (part) => "\uE005".repeat(part.length);
+var hide2 = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
+var HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide2).join("")}]`, "g");
+var unhide = (text) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 57344]);
 function heldGlob(cmd, first, env) {
   if (!first?.glob || !first.raw || !marked(first.value))
     return;
@@ -8196,14 +8283,18 @@ async function examine(cmd, env, visit, builtins) {
   const array = arrayRun(cmd, primary.first, env);
   const prior = splitHeld(cmd, primary.name, env, true);
   const split = splitHeld(cmd, primary.name, env);
+  const brace = braceRun(cmd, primary.first);
   const globs = [
+    brace === null ? null : undefined,
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
-    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true))
+    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true)),
+    ...brace ? [globRun(brace, parse3(brace).first, env)] : []
   ];
   const resolving = [
     ...split,
     ...array ? [array] : [],
+    ...brace ? [brace] : [],
     ...heldScripts(cmd, primary, env),
     ...globs.flatMap((globbed) => globbed ?? [])
   ];
@@ -9982,7 +10073,10 @@ var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typ
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var HOOK_TEXT = "which a hook file may not hold";
+var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove.";
+var hookRemoval = (file, what) => `${file} written with ${what}, ${HOOK_TEXT}`;
+var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
@@ -10074,6 +10168,81 @@ var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/;
+var SED_LONG = [
+  "--debug",
+  "--expression",
+  "--file",
+  "--follow-symlinks",
+  "--help",
+  "--in-place",
+  "--line-length",
+  "--null-data",
+  "--posix",
+  "--quiet",
+  "--regexp-extended",
+  "--sandbox",
+  "--separate",
+  "--silent",
+  "--unbuffered",
+  "--version",
+  "--zero-terminated"
+];
+function perlInline(args) {
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--" || v === "-" || !v.startsWith("-"))
+      return false;
+    const cluster = v.slice(1).replace(/l\d*|0(?:x[\da-f]*|\d*)/gi, (m) => m[0]);
+    for (const c of cluster) {
+      if (c === "e" || c === "E")
+        return true;
+      if ("CdDFiImMVx".includes(c))
+        break;
+    }
+  }
+  return false;
+}
+var HOOK_REMOVERS = new Set([
+  ...REMOVERS,
+  "-delete",
+  "rimraf",
+  "rm_f",
+  "rm_r",
+  "rm_rf",
+  "rmdirsync",
+  "rmsync",
+  "rmtree",
+  "shred",
+  "srm",
+  "trash",
+  "trash-put",
+  "unlinksync",
+  "wipe"
+]);
+var hookRemoverWord = (word) => {
+  const lower = word.toLowerCase();
+  return HOOK_REMOVERS.has(GNU_NAMED.exec(lower)?.[1] ?? lower);
+};
+function hookRemover(text, hook) {
+  if (text === undefined)
+    return hook(true) ? "text it cannot read" : undefined;
+  const word = [text.replace(/\\\n/g, ""), text].flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/)).find(hookRemoverWord);
+  if (word)
+    return hook(false) ? word : undefined;
+  if (!/[$`?*{(]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false))
+    return;
+  for (const cmd of lex(text).commands) {
+    const { first, name } = parse3(cmd);
+    if (marked(name))
+      return "a program built from a variable or a substitution";
+    if (first?.unknown === BRACE)
+      return "a program named by a brace list";
+    if (first?.glob && /[?*(]|\[[^\]]*\]/.test(name))
+      return "a program named by a glob";
+    if (name === "eval" || hookRemoverWord(program(name)))
+      return program(name);
+  }
+}
 var WRITER_TAKES = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
@@ -11202,6 +11371,7 @@ function compoundBodies(commands, bodies = new WeakMap) {
   });
   return bodies;
 }
+var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 async function printed(cmd, env, kids) {
   const held = kids(cmd);
   if (held) {
@@ -11209,11 +11379,17 @@ async function printed(cmd, env, kids) {
     return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat();
   }
   const parsed = parse3(cmd);
-  if (PRINTERS.has(parsed.name)) {
+  const { args, name } = parsed;
+  if (SILENT.has(name))
+    return [];
+  const files = name === "cat" && args.some((a) => a.value !== "-" && !a.value.startsWith("-"));
+  if (!files && (name === "" || PRINTERS.has(name) || name === "cat" || name === "tee")) {
     const out = await outputOf(cmd, env);
-    return out.unknown ? [] : [out.value];
+    return [out.unknown ? undefined : out.value];
   }
-  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name;
+  const tool = GNU_NAMED.exec(name)?.[1] ?? name;
+  if (files || !SEDS.has(program(name)) && tool !== "perl")
+    return [undefined];
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
 }
 function readHookFolder(dir) {
@@ -11236,16 +11412,18 @@ function readHookFolder(dir) {
   }
 }
 var hookFolders = new Map;
-function hookFile(path) {
+function hookFile(path, sure = false) {
   if (!path)
     return false;
   if (/(?:^|\/)\.git\/hooks\//.test(path))
     return true;
+  if (resolve5(path).startsWith("/dev/"))
+    return false;
   const dir = dirname4(path);
   if (!hookFolders.has(dir))
     hookFolders.set(dir, readHookFolder(dir));
   const folder = hookFolders.get(dir);
-  return folder === true || folder === real(dir);
+  return !sure && folder === true || folder === real(dir);
 }
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
@@ -11466,7 +11644,12 @@ var texts = (word) => {
   return out;
 };
 async function inspect(raw, environment, unknown = false) {
-  const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool,
+    turn_id: turn
+  } = JSON.parse(raw);
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const root = real(extensionsDir(dataDir(environment)));
@@ -11487,7 +11670,20 @@ async function inspect(raw, environment, unknown = false) {
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
-    return inRoot(resolve5(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
+    const path = resolve5(directory ?? "", expanded);
+    if (inRoot(path))
+      return refuse(`a write to ${file}`);
+    const edits = Array.isArray(input.edits) ? input.edits : [];
+    const patch = typeof turn === "string" && typeof input.content === "string" && input.content.includes("*** Begin Patch");
+    const removes = [
+      patch ? String(input.content).split(`
+`).filter((line) => line.startsWith("+")).map((line) => line.slice(1)).join(`
+`) : input.content,
+      input.new_string,
+      input.new_source,
+      ...edits.map((e) => e?.new_string)
+    ].filter((text) => typeof text === "string").map((text) => hookRemover(text, () => hookFile(path))).find(Boolean);
+    return removes ? refuse(hookRemoval(file, removes)) : undefined;
   }
   if (tool !== "Bash")
     return;
@@ -11686,6 +11882,12 @@ async function inspect(raw, environment, unknown = false) {
         return;
       for (const text of await printed(source, env, kids))
         for (const here of places(env)) {
+          let into;
+          const removes = hookRemover(text, (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))));
+          if (removes && into)
+            return hookRemoval(shown(into), removes);
+          if (text === undefined)
+            continue;
           const named = scriptNames(text, here);
           const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
           if (hook)
@@ -11708,7 +11910,7 @@ async function inspect(raw, environment, unknown = false) {
     if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
       execFds = fdFiles(cmd.redirects, execFds);
     const teeTool = program(name);
-    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin) : undefined);
+    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined);
     if (hookWrite)
       return refuse(hookWrite);
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
@@ -11799,6 +12001,11 @@ async function inspect(raw, environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
     ];
+    const sedLong = (word) => longOf(word.value.split("=")[0], SED_LONG);
+    const sedFile = tool === "sed" && args.some((w) => /^-[Eablnrsuz]*f/.test(w.value) || sedLong(w) === "--file");
+    const sedEditFlag = tool === "sed" && args.some((w) => /^-[Eablnrsuz]*i/.test(w.value) || sedLong(w) === "--in-place");
+    const editedFiles = edited.size > 0 ? [...edited] : sedFile && sedEditFlag ? args.filter((w) => !w.value.startsWith("-")) : [];
+    const unreadScript = editedFiles.length > 0 && (args.some((word) => !edited.has(word) && marked(word.value)) || sedFile || tool === "perl" && !perlInline(args));
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     const readings = gnuReadings(posix);
@@ -11837,6 +12044,11 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
       }
+      let hook;
+      const isHook = () => !!(hook = editedFiles.find((file) => hookFile(pathOf(file, here))));
+      const hookText = editedFiles.length === 0 ? undefined : unreadScript ? isHook() && "a script it cannot read" : written.map((text) => hookRemover(text, isHook)).find(Boolean);
+      if (hookText && hook)
+        return refuse(hookRemoval(shown(hook), hookText));
       for (const text of written) {
         const named = scriptNames(text, here);
         if (named)

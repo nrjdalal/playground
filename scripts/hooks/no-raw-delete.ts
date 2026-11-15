@@ -25,6 +25,7 @@ import {
   run,
   scriptStdin,
   slotWords,
+  spelledText,
   stdinFed,
   stdinOf,
   unreadable,
@@ -253,11 +254,11 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   const { cwd, session_id: session, tool_input: input, tool_name: tool } = payload
   if (tool !== "Bash") return
   const command = (input as { command?: unknown } | null)?.command
-  if (typeof command !== "string" || !CANDIDATE.test(bare(command))) return
+  if (typeof command !== "string" || !CANDIDATE.test(bare(spelledText(command)))) return
   const directory = typeof cwd === "string" ? cwd : undefined
   const roots = rootsOf(directory, session)
-  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one, in its text or an ANSI-C string, or holds a glob that may match a delete program
-  const text = bare(decodedText(command))
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one, in its text, an ANSI-C string or a brace list or zsh group spelled out (spelledText), or holds a glob that may match a delete program
+  const text = bare(spelledText(decodedText(command)))
   const named = DELETES.test(text) || globSpells(text, SPELLED)
   const env: Env = {
     cwd: directory,
@@ -437,7 +438,7 @@ const bare = (command: string) => command.replace(/[\\'"]/g, "")
 // The delete programs a glob in a call may spell (`/bin/r?`), which counts the call as naming a delete
 const SPELLED = [...RM, ...DELETER_PROGRAMS, ...SHRED, "chflags", "chmod"]
 
-// The cheap first look: a name the hook judges, in any case as macOS runs it, or a $, a backtick, a brace or a glob that can spell one.
+// The cheap first look, read on the call with its brace lists and zsh groups spelled out (spelledText): a name the hook judges, in any case as macOS runs it, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =
   /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i
 

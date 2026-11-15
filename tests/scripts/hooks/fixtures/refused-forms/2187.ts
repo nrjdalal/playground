@@ -154,7 +154,7 @@ const rows = ({ HOME }: Paths): Row[] => [
   ],
   [
     "an in-place sed whose s/// writes a folder beside the root",
-    String.raw`sed -i '' 's/a/rm ~\/.playground\/scratch\/w/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm ~\/.playground\/scratch\/w/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes another folder of the data folder",
@@ -198,6 +198,7 @@ export const groups: Group[] = [
   },
 ]
 
+// #2245 refuses any remover written into a hook, so each control here that writes one edits run.sh, a script a shell may run later, which the in-place reading judges as it judges a hook
 const allowedCalls = [
   "a read-only sed whose regex address names the root behind escaped slashes",
   "a read-only sed whose s/// pattern names the root behind escaped slashes",

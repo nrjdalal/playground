@@ -121,15 +121,15 @@ const rows = (): Row[] => [
   ],
   [
     "an in-place sed whose s/// writes a remover of a folder of the home by a variable",
-    String.raw`sed -i '' 's/a/C=$HOME\/.cache\/x; rm -rf $C/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/C=$HOME\/.cache\/x; rm -rf $C/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of each log a for loop lists",
-    String.raw`sed -i '' 's/a/for f in *.log; do rm -f $f; done/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/for f in *.log; do rm -f $f; done/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of a quoted variable",
-    String.raw`sed -i '' 's/a/rm -rf "$tmp"/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf "$tmp"/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a code comment naming find",
@@ -141,27 +141,27 @@ const rows = (): Row[] => [
   ],
   [
     "an in-place sed whose s/// writes a change into the home after a remover's own command",
-    String.raw`sed -i '' 's/X/rm -f build.log; cd ~/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/X/rm -f build.log; cd ~/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes an echo of $HOME after a find's own command",
-    String.raw`sed -i '' 's/X/find . -name x; echo $HOME/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/X/find . -name x; echo $HOME/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of a path under a variable",
-    String.raw`sed -i '' 's/a/rm -rf $TMPDIR\/x/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf $TMPDIR\/x/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of the files a substitution lists",
-    String.raw`sed -i '' 's/a/rm -f $(git ls-files -d)/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -f $(git ls-files -d)/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of the files a substitution lists under the home",
-    String.raw`sed -i '' 's/x/rm -f $(ls ~\/.cache\/*.tmp)/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/x/rm -f $(ls ~\/.cache\/*.tmp)/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of the files a backtick substitution lists under $HOME",
-    "sed -i '' 's/x/rm -f `ls $HOME\\/.cache\\/*.tmp`/' .git/hooks/pre-commit",
+    "sed -i '' 's/x/rm -f `ls $HOME\\/.cache\\/*.tmp`/' run.sh",
   ],
   [
     "an in-place sed whose s/// writes a change into the home into a git hook",
@@ -173,27 +173,27 @@ const rows = (): Row[] => [
   ],
   [
     "an in-place sed whose s/// writes a remover of a folder of the home outside the data folder",
-    String.raw`sed -i '' 's/a/rm ~\/.config\/x/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm ~\/.config\/x/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of a * glob of the home",
-    String.raw`sed -i '' 's/a/rm ~\/*.log/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm ~\/*.log/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of a path under /tmp",
-    String.raw`sed -i '' 's/a/rm -rf \/tmp\/x/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf \/tmp\/x/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of node_modules",
-    String.raw`sed -i '' 's/a/rm -rf node_modules/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf node_modules/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a find that deletes logs below the folder it runs in",
-    String.raw`sed -i '' 's/a/find . -name "*.log" -delete/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/find . -name "*.log" -delete/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of the folder it runs in",
-    String.raw`sed -i '' 's/a/rm -rf ./' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf ./' run.sh`,
   ],
 ]
 // a block comment's closing */, which from the data folder canary already reads as a glob of the root, so these rows run call by call from every other folder
@@ -211,11 +211,11 @@ const comments = (): Row[] => [
 const away = (): Row[] => [
   [
     "an in-place sed whose s/// writes a remover of a repo's own extensions folder",
-    String.raw`sed -i '' 's/a/rm -rf extensions/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf extensions/' run.sh`,
   ],
   [
     "an in-place sed whose s/// writes a remover of a build folder in a repo's own extensions folder",
-    String.raw`sed -i '' 's/a/rm -rf .\/extensions\/dist/' .git/hooks/pre-commit`,
+    String.raw`sed -i '' 's/a/rm -rf .\/extensions\/dist/' run.sh`,
   ],
 ]
 const whole = (of: () => Row[]) => () =>
@@ -233,6 +233,7 @@ export const groups: Group[] = [
   { folders: ["home", "process worktree"], guards: ["no-extensions-write"], rows: comments },
 ]
 
+// #2245 refuses any remover written into a hook, so each control here that writes one edits run.sh, a script a shell may run later, which the in-place reading judges as it judges a hook
 const allowedCalls = [
   "an in-place sed whose s/// writes a change into the home into a git hook",
   "an in-place sed whose s/// writes a read of a file of the home into a git hook",

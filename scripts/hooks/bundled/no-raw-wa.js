@@ -1297,8 +1297,8 @@ function word(lx) {
       lx.i++;
     }
   }
-  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
-    out.unknown ??= "a brace expansion";
+  if (BRACE_LIST.test(bare))
+    out.unknown ??= BRACE;
   if (GLOB_CHARS.test(bare))
     out.glob = true;
   out.source = src.slice(start, lx.i);
@@ -1309,6 +1309,8 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
+var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
 var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
@@ -1906,8 +1908,37 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  if (!GLOB_PATTERN.test(pattern))
+  const seen = (first.source ?? "").replace(/\\\n/g, "").replace(QUOTED, maskQuoted);
+  const grouped = seen.includes("(");
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null;
+  const joined = pattern.replace(/\\\n/g, "");
+  const groups = grouped ? groupWords(qualifiers ? joined.slice(0, joined.length - qualifiers[0].length) : joined) : [pattern];
+  if (groups === null || qualifiers?.[1].includes("N"))
+    return null;
+  const patterns = groups ?? [pattern];
+  if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern))
     return;
+  const [only, ...more] = patterns;
+  const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute3(only) && unsure)
+    return;
+  const found = [];
+  for (const each of patterns) {
+    const matched = globMatches(each, env);
+    if (matched === null)
+      return null;
+    found.push(...matched);
+  }
+  if (found.length > READINGS || qualifiers && found.length > 0)
+    return null;
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function globMatches(pattern, env) {
   const absolute = isAbsolute3(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -1948,13 +1979,69 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
         return null;
     }
   }
-  if (found.length === 0)
-    return;
-  return found.map((value) => ({
-    ...cmd,
-    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
-  }));
+  return found;
 }
+function groupWords(pattern, spelling = false) {
+  const seen = pattern.replace(QUOTED, maskQuoted);
+  const open = seen.indexOf("(");
+  if (open < 0)
+    return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)];
+  const cuts = [open];
+  let close = -1;
+  for (let k = open, depth = 0;k < seen.length && close < 0; k++) {
+    if (seen[k] === "(")
+      depth++;
+    else if (seen[k] === "|" && depth === 1)
+      cuts.push(k);
+    else if (seen[k] === ")" && --depth === 0)
+      close = k;
+  }
+  if (close < 0 || pattern.slice(open, close).includes("/"))
+    return;
+  if (!spelling && /[#^~]/.test(seen.slice(open, close)))
+    return null;
+  const out = [];
+  for (const [n, from] of cuts.entries()) {
+    const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close);
+    const extended = spelling && /[#^~]/.test(seen.slice(from + 1, cuts[n + 1] ?? close));
+    for (const each of extended ? [alternative, "*"] : [alternative]) {
+      const words = groupWords(pattern.slice(0, open) + each + pattern.slice(close + 1), spelling);
+      if (!words || out.push(...words) > (spelling ? BRACE_WORDS : READINGS))
+        return words === undefined ? undefined : null;
+    }
+  }
+  return out;
+}
+var unquote = (part) => part.startsWith("\\") ? part.slice(1) : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined);
+function braceRun(cmd, first) {
+  if (first?.unknown !== BRACE)
+    return;
+  const source = (first.source ?? "").replace(/\\\n/g, "");
+  if (/[$`]/.test(source))
+    return null;
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide));
+  if (masked.includes("("))
+    return;
+  const expanded = braceWords(masked);
+  if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
+    return null;
+  const words = [];
+  for (const each of expanded) {
+    const { commands } = lex(unhide(each));
+    if (commands.length > 1 || commands[0]?.redirects.length)
+      return null;
+    words.push(...commands[0]?.words ?? []);
+  }
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
+}
+var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
+var HIDDEN = "{,}()";
+var maskQuoted = (part) => "\uE005".repeat(part.length);
+var hide = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
+var HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide).join("")}]`, "g");
+var unhide = (text) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 57344]);
 function heldGlob(cmd, first, env) {
   if (!first?.glob || !first.raw || !marked(first.value))
     return;
@@ -2077,14 +2164,18 @@ async function examine(cmd, env, visit, builtins) {
   const array = arrayRun(cmd, primary.first, env);
   const prior = splitHeld(cmd, primary.name, env, true);
   const split = splitHeld(cmd, primary.name, env);
+  const brace = braceRun(cmd, primary.first);
   const globs = [
+    brace === null ? null : undefined,
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
-    ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true))
+    ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
+    ...brace ? [globRun(brace, parse(brace).first, env)] : []
   ];
   const resolving = [
     ...split,
     ...array ? [array] : [],
+    ...brace ? [brace] : [],
     ...heldScripts(cmd, primary, env),
     ...globs.flatMap((globbed) => globbed ?? [])
   ];
@@ -2981,6 +3072,37 @@ function knownVariables(command, environment, cwd) {
       known[name] = value;
   }
   return known;
+}
+var BRACE_WORDS = 64;
+function braceWords(word) {
+  const done = [];
+  const todo = [word];
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS)
+      return;
+    const next = todo.pop();
+    let split;
+    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open];
+      let depth = 0;
+      for (let k = open;k < next.length; k++) {
+        if (next[k] === "{")
+          depth++;
+        else if (next[k] === "," && depth === 1)
+          cuts.push(k);
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
+          break;
+        }
+      }
+    }
+    if (split)
+      todo.push(...split.reverse());
+    else
+      done.push(next);
+  }
+  return done;
 }
 
 // scripts/hooks/no-raw-wa.ts
