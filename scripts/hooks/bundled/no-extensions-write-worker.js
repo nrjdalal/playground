@@ -10077,6 +10077,40 @@ var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/;
+var SED_LONG = [
+  "--debug",
+  "--expression",
+  "--file",
+  "--follow-symlinks",
+  "--help",
+  "--in-place",
+  "--line-length",
+  "--null-data",
+  "--posix",
+  "--quiet",
+  "--regexp-extended",
+  "--sandbox",
+  "--separate",
+  "--silent",
+  "--unbuffered",
+  "--version",
+  "--zero-terminated"
+];
+function perlInline(args) {
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--" || v === "-" || !v.startsWith("-"))
+      return false;
+    const cluster = v.slice(1).replace(/l\d*|0(?:x[\da-f]*|\d*)/gi, (m) => m[0]);
+    for (const c of cluster) {
+      if (c === "e" || c === "E")
+        return true;
+      if ("CdDiImMx".includes(c))
+        break;
+    }
+  }
+  return false;
+}
 var HOOK_REMOVERS = new Set([
   ...REMOVERS,
   "-delete",
@@ -11284,10 +11318,12 @@ function readHookFolder(dir) {
 }
 var hookFolders = new Map;
 function hookFile(path, sure = false) {
-  if (!path || path.startsWith("/dev/"))
+  if (!path)
     return false;
   if (/(?:^|\/)\.git\/hooks\//.test(path))
     return true;
+  if (resolve5(path).startsWith("/dev/"))
+    return false;
   const dir = dirname4(path);
   if (!hookFolders.has(dir))
     hookFolders.set(dir, readHookFolder(dir));
@@ -11866,7 +11902,11 @@ async function inspect(raw, environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
     ];
-    const unreadScript = edited.size > 0 && (args.some((word) => !edited.has(word) && marked(word.value)) || (tool === "sed" ? args.some((word) => /^-[^-i]*f|^--file(?:=|$)/.test(word.value)) : tool === "perl" && !args.some((word) => /^-[^-]*[eE]/.test(word.value))));
+    const sedLong = (word) => longOf(word.value.split("=")[0], SED_LONG);
+    const sedFile = tool === "sed" && args.some((w) => /^-[^-i]*f/.test(w.value) || sedLong(w) === "--file");
+    const sedEdits = tool === "sed" && args.some((w) => /^-[^-]*i/.test(w.value) || sedLong(w) === "--in-place");
+    const editedFiles = edited.size > 0 ? [...edited] : sedFile && sedEdits ? args.filter((w) => !w.value.startsWith("-")) : [];
+    const unreadScript = editedFiles.length > 0 && (args.some((word) => !edited.has(word) && marked(word.value)) || sedFile || tool === "perl" && !perlInline(args));
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     const readings = gnuReadings(posix);
@@ -11906,8 +11946,8 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       let hook;
-      const isHook = () => !!(hook = [...edited].find((file) => hookFile(pathOf(file, here))));
-      const hookText = edited.size === 0 ? undefined : unreadScript ? isHook() && "a script it cannot read" : written.map((text) => hookRemover(text, isHook)).find(Boolean);
+      const isHook = () => !!(hook = editedFiles.find((file) => hookFile(pathOf(file, here))));
+      const hookText = editedFiles.length === 0 ? undefined : unreadScript ? isHook() && "a script it cannot read" : written.map((text) => hookRemover(text, isHook)).find(Boolean);
       if (hookText && hook)
         return refuse(hookRemoval(shown(hook), hookText));
       for (const text of written) {

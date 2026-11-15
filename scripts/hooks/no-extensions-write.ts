@@ -218,6 +218,40 @@ const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU builds under their g prefix (gcp, grm, gfind, gsed, gtar): a g name reads as the program it names, a remover, a writer or one unreadCdWrites reads, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
 const GNU_NAMED =
   /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/
+// GNU sed's long options, which getopt_long reads by any unique prefix (longOf); --file sorts before --follow-symlinks, so their shared prefix reads as a script file, failing closed
+const SED_LONG = [
+  "--debug",
+  "--expression",
+  "--file",
+  "--follow-symlinks",
+  "--help",
+  "--in-place",
+  "--line-length",
+  "--null-data",
+  "--posix",
+  "--quiet",
+  "--regexp-extended",
+  "--sandbox",
+  "--separate",
+  "--silent",
+  "--unbuffered",
+  "--version",
+  "--zero-terminated",
+]
+// Whether perl takes its script from an -e or -E: a letter of an option cluster before its first operand, read as perl reads one, so a letter that takes the rest of its cluster as its value (-i's suffix, -M's module, -I's folder) ends it, so -pie is -p and -i with the suffix e
+function perlInline(args: Word[]): boolean {
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "--" || v === "-" || !v.startsWith("-")) return false
+    // -l and -0 take only the digits after them, so a letter past those digits is an option of its own (-lne)
+    const cluster = v.slice(1).replace(/l\d*|0(?:x[\da-f]*|\d*)/gi, (m) => m[0])
+    for (const c of cluster) {
+      if (c === "e" || c === "E") return true
+      if ("CdDiImMx".includes(c)) break
+    }
+  }
+  return false
+}
 // The words a text written into a hook file may not hold, whatever they name, since a hook learns its targets only when it runs: REMOVERS, find's -delete, shred, and their kin in other tools and languages
 const HOOK_REMOVERS = new Set([
   ...REMOVERS,
@@ -1649,8 +1683,9 @@ function readHookFolder(dir: string): string | boolean {
 const hookFolders = new Map<string, string | boolean>()
 // Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
 function hookFile(path: string | undefined, sure = false): boolean {
-  if (!path || path.startsWith("/dev/")) return false
+  if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//.test(path)) return true
+  if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
   const folder = hookFolders.get(dir)
@@ -2470,13 +2505,25 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText)),
     ]
+    // a sed's script from a file (-f, or --file by any prefix getopt_long reads) and its in-place edit by any spelling (-i, or a prefix of --in-place), which inPlace reads by their full names alone
+    const sedLong = (word: Word) => longOf(word.value.split("=")[0], SED_LONG)
+    const sedFile =
+      tool === "sed" && args.some((w) => /^-[^-i]*f/.test(w.value) || sedLong(w) === "--file")
+    const sedEdits =
+      tool === "sed" && args.some((w) => /^-[^-]*i/.test(w.value) || sedLong(w) === "--in-place")
+    // the files an in-place edit edits (inPlace), else for such a sed every operand, since none of them is its script
+    const editedFiles =
+      edited.size > 0
+        ? [...edited]
+        : sedFile && sedEdits
+          ? args.filter((w) => !w.value.startsWith("-"))
+          : []
     // what makes an in-place edit's text one a hook file may not hold: a script it cannot read (a word built from a variable or a substitution, sed's script file, a perl given no -e, whose first operand is its script), else a remover in what it writes (hookRemover)
     const unreadScript =
-      edited.size > 0 &&
+      editedFiles.length > 0 &&
       (args.some((word) => !edited.has(word) && marked(word.value)) ||
-        (tool === "sed"
-          ? args.some((word) => /^-[^-i]*f|^--file(?:=|$)/.test(word.value))
-          : tool === "perl" && !args.some((word) => /^-[^-]*[eE]/.test(word.value))))
+        sedFile ||
+        (tool === "perl" && !perlInline(args)))
     // what any other sed or perl call writes, judged for the root as its literal twin is (escapedWrites)
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env)
     // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
@@ -2544,9 +2591,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
       let hook: Word | undefined
-      const isHook = () => !!(hook = [...edited].find((file) => hookFile(pathOf(file, here))))
+      const isHook = () => !!(hook = editedFiles.find((file) => hookFile(pathOf(file, here))))
       const hookText =
-        edited.size === 0
+        editedFiles.length === 0
           ? undefined
           : unreadScript
             ? isHook() && "a script it cannot read"
