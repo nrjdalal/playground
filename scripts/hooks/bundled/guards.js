@@ -2080,7 +2080,10 @@ function globSpells(text, names) {
   return false;
 }
 function spelledText(text) {
-  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
+  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).flatMap((token) => {
+    const opened = token.replace(/^(?:\$?\(|['"])+/, "");
+    return opened === token ? [token] : [token, opened];
+  }).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
     const sequenced = word.replace(SEQUENCE, sequenceSpelling);
     const unqualified = sequenced.replace(/\([^()|]*\)$/, "");
     const words = groupWords(unqualified, true);

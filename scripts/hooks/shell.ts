@@ -2203,12 +2203,17 @@ export function globSpells(text: string, names: string[]): boolean {
   return false
 }
 
-// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too
+// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again without a leading paren, `$(` or quote, beside its typed form
 export function spelledText(text: string): string {
   const spelled = text
     .replace(/\\\n/g, "")
     .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
+    .flatMap((token) => {
+      // a subshell's or a substitution's opening paren, or a script's opening quote, glued to the program word after it
+      const opened = token.replace(/^(?:\$?\(|['"])+/, "")
+      return opened === token ? [token] : [token, opened]
+    })
     .filter((token) => /[{(]/.test(token))
     .flatMap((token) =>
       (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
@@ -2229,7 +2234,7 @@ export function spelledText(text: string): string {
 // A brace sequence (`{a..c}`, `{1..9..2}`), which braceWords leaves as written
 const SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g
 
-// A sequence of letters as the bracket of its range, any increment read as 1, one of numbers as text led by a digit or a minus, which no program name is, and any other as any text, since a bracket can read its ends as a negation or a close
+// A sequence of letters as the bracket of its range, any increment read as 1, one of numbers as text led by a digit or a minus, which no guarded program's name is, and any other as any text, since a bracket can read its ends as a negation or a close
 const sequenceSpelling = (_: string, from: string, to: string): string =>
   /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to)
     ? `[${from < to ? from : to}-${from < to ? to : from}]`
