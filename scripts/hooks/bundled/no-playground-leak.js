@@ -9213,6 +9213,13 @@ var CARVE_OUTS = {
     folder: ".config/systemd/user",
     home: true,
     name: PLAYGROUND_UNIT
+  },
+  page: {
+    bytes: 20 * 1024 ** 2,
+    files: 1,
+    folder: "previews",
+    name: /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.(?:html|pdf|txt)$/,
+    noLink: true
   }
 };
 
