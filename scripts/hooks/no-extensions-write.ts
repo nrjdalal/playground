@@ -43,6 +43,7 @@ import {
   lex,
   marked,
   onlyReserved,
+  outputOf,
   ownFirst,
   parse,
   type Parsed,
@@ -1188,7 +1189,7 @@ function follows(have: string[], want: string[]): boolean {
 }
 // a variable a script's text sets, by an assignment or a for loop, its name and its value or list captured
 const SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g
-// a substitution that prints the home itself: a ~, ~login, $HOME or ${HOME…} word with at most a / after it, or a bare cd (to the home) before a pwd
+// a substitution that prints the home itself: a ~, ~login, $HOME or ${HOME…} word with at most a / after it, or a bare cd (to the home)
 const HOME_NAMED =
   /(?:^|[\s(`])(~[\w.-]*|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})\/?(?=$|[\s;&|)`])|\bcd\s*(?:$|[;&|)`])/
 // a word the shell expands to the home: ~, $HOME, or ${HOME} with any operator (${HOME:?}, ${HOME:-x})
@@ -1233,12 +1234,31 @@ function braceWords(word: string): string[] | undefined {
 }
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
 const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
-// a sed replacement as sed writes it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything
+// the character a code spells in its base, its blanks and underscores dropped as perl drops them, a * for a code that is no number in that base, or the escape as written when no character has that code
+const coded = (digits: string, base: number, escape: string) => {
+  const clean = digits.replace(/[\s_]/g, "")
+  if (!(base === 16 ? /^[\da-f]+$/i : base === 8 ? /^[0-7]+$/ : /^\d+$/).test(clean)) return "*"
+  const point = Number.parseInt(clean, base)
+  return point <= 0x10ffff ? String.fromCodePoint(point) : escape
+}
+// a sed replacement as sed writes it: GNU's \xHH, \oNNN and \dNNN as the character they spell on every platform, any other backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything
 const sedText = (text: string) =>
-  text.replace(/\\(.)|&/gs, (m, c?: string) =>
-    m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? "\n" : (c ?? m),
+  text.replace(
+    /\\(?:x([\da-fA-F]{1,2})|o([0-7]{1,3})|d(\d{1,3})|(.))|&/gs,
+    (m, hex?: string, octal?: string, decimal?: string, c?: string) =>
+      hex
+        ? coded(hex, 16, m)
+        : octal
+          ? coded(octal, 8, m)
+          : decimal
+            ? coded(decimal, 10, m)
+            : m === "&" || /[1-9]/.test(c ?? "")
+              ? "*"
+              : c === "n"
+                ? "\n"
+                : (c ?? m),
   )
-// The text each s/// of a sed script writes (or a perl one's, by its step and its read), its items read in turn by `step`, which captures each replacement, and spelled as `read` writes it; the whole script read so when its items do not read in turn
+// The text each s/// of a sed script writes (or a perl one's, by its step and its read, its print's text too), its items read in turn by `step`, which captures each replacement and a print's values, and spelled as `read` writes it; the whole script read so when its items do not read in turn
 function sedWrites(script: string, step = SED_EDIT_STEP, read = sedText): string[] {
   const writes: string[] = []
   step.lastIndex = 0
@@ -1247,6 +1267,7 @@ function sedWrites(script: string, step = SED_EDIT_STEP, read = sedText): string
     const item = step.exec(script)
     if (!item || step.lastIndex === at) return [read(script)]
     if (item[1]) writes.push(read(item[1].slice(0, -1)))
+    if (item[2]) writes.push(read(printText(item[2])))
   }
   return writes
 }
@@ -1341,18 +1362,52 @@ const PERL_RE = `/${PERL_BODY}`
 const PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`
 // a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
 const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`
-const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
+// a print's values are captured, the text it writes
+const PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*))?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
 const PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`
-const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
+// s/// first, so its replacement is the first capture and a print's values the second, as sedWrites reads them
+const PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`
 // a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
 const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
+// the text a print of its values writes: perl joins them with nothing ($, is empty), each string as its text and each variable as $1, which perlText reads as a *
+const PRINT_VALUE = new RegExp(PERL_VALUE, "g")
+const printText = (values: string) =>
+  [...values.matchAll(PRINT_VALUE)]
+    .map(([v]) => (v.startsWith('"') ? v.slice(1, -1) : "$1"))
+    .join("")
 // one item of a PERL_SCRIPT one-liner and its separator, its s/// replacement captured, read in turn from where the last ended
 const PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y")
-// a perl replacement as perl writes it, a double-quoted string: a backslash dropped (`\/` reads as /, `\n` and `\t` as a line break and a tab) and the matched text ($1 to $9, $&, and \1 to \9, which perl reads as $1 to $9) read as a *
+// the characters of the root's path perl's \N{NAME} spells by a Unicode name, as perl's charnames reads one: SOLIDUS, FULL STOP, HYPHEN-MINUS, LOW LINE, a DIGIT and a LATIN SMALL or CAPITAL LETTER; any other name reads as a *, since it spells some character
+function charName(name: string): string {
+  const spelled = name.trim().toUpperCase().replace(/\s+/g, " ")
+  const fixed: Record<string, string> = {
+    "FULL STOP": ".",
+    "HYPHEN-MINUS": "-",
+    "LOW LINE": "_",
+    SOLIDUS: "/",
+  }
+  const digits = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"]
+  const letter = /^LATIN (SMALL|CAPITAL) LETTER ([A-Z])$/.exec(spelled)
+  const digit = /^DIGIT ([A-Z]+)$/.exec(spelled)
+  if (letter) return letter[1] === "SMALL" ? letter[2].toLowerCase() : letter[2]
+  if (digit && digits.includes(digit[1])) return String(digits.indexOf(digit[1]))
+  return fixed[spelled] ?? "*"
+}
+// a perl escape and what it spells: a code (\xHH, \x{…}, \N{U+…}, \o{…}, an octal of up to three digits led by 0 or of two or three led by 1 to 7, blanks and underscores in braces dropped), a Unicode name (\N{NAME}), or any other escaped character; or a match variable ($1 to $9, $&)
+const PERL_ESCAPE =
+  /\\(?:x\{(?<hexBraced>[^}]*)\}|x(?<hex>[\da-fA-F]{1,2})|N\{\s*U\+(?<point>[^}]*)\}|N\{(?<name>[^}]*)\}|o\{(?<octalBraced>[^}]*)\}|(?<octal>0[0-7]{0,2}|[1-7][0-7]{1,2})|(?<char>.))|\$[1-9&]/gs
+// a perl replacement as perl writes it, a double-quoted string: each code as the character it spells, each name by charName, any other backslash dropped (`\/` reads as /, `\n` and `\t` as a line break and a tab) and the matched text ($1 to $9, $&, and \1 to \9, which perl reads as $1 to $9) read as a *
 const perlText = (text: string) =>
-  text.replace(/\\(.)|\$[1-9&]/gs, (m, c?: string) =>
-    c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? "\n" : c === "t" ? "\t" : c,
-  )
+  text.replace(PERL_ESCAPE, (m, ...rest) => {
+    const g = rest.at(-1) as Record<string, string | undefined>
+    const hex = g.hexBraced ?? g.hex ?? g.point
+    const octal = g.octalBraced ?? g.octal
+    if (hex !== undefined) return coded(hex, 16, m)
+    if (octal !== undefined) return coded(octal, 8, m)
+    if (g.name !== undefined) return charName(g.name)
+    const c = g.char
+    return c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? "\n" : c === "t" ? "\t" : c
+  })
 
 // a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
 const PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/
@@ -1385,16 +1440,19 @@ function perlReadScripts({ args, local }: Parsed, env: Env): Word[] | undefined 
 // Whether a perl call only reads and prints, by perlReadScripts' reading of it
 const perlReads = (parsed: Parsed, env: Env) => !!perlReadScripts(parsed, env)
 
-// What a sed or perl call that edits no file in place writes, for the root reading its literal twin gets: a read's s/// replacements as sed or perl writes them (sedWrites), else, off both grammars, each word with its escaped slashes read as the slashes they spell; none for any other program
+// What a sed or perl call that edits no file in place writes, for the root reading its literal twin gets: a read's s/// replacements and perl's print text as sed or perl writes them (sedWrites), else, off both grammars, each word with its escaped slashes and the characters its codes spell read as written (sedText, perlText); none for any other program
 function escapedWrites(parsed: Parsed, env: Env): string[] {
   const tool = program(parsed.name)
-  const unescaped = () => parsed.args.map((word) => word.value.replaceAll("\\/", "/"))
+  const unescaped = (read: (text: string) => string) => parsed.args.map((word) => read(word.value))
   if (SEDS.has(tool))
-    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped()
+    return (
+      sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ??
+      unescaped(sedText)
+    )
   if (tool !== "perl") return []
   return (
     perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ??
-    unescaped()
+    unescaped(perlText)
   )
 }
 
@@ -1490,6 +1548,89 @@ function xargsGrep(cmd: Command, parsed: Parsed, env: Env): boolean {
     ) &&
     reads(parsed, env)
   )
+}
+
+// Each descriptor's file words once a command's redirects apply, from those it inherits (a group around it, an earlier exec): a writing redirect names its file (&> and >&<file> for stdout and stderr both), a duplicate (>&N) takes N's, or the file a later redirect of the same command opens on N, and any other redirect onto a descriptor leaves it no file
+function fdFiles(redirects: Command["redirects"], inherited: Map<string, Word[]>) {
+  const fds = new Map(inherited)
+  const fdOf = (r: Command["redirects"][number]) =>
+    r.fd === "&" || (r.fd === "" && r.op !== "<>") ? "1" : r.fd || "0"
+  const opened = (fd: string) =>
+    redirects.flatMap((r) => (r.target && writer(r) && fdOf(r) === fd ? [r.target] : []))
+  for (const r of redirects) {
+    if (!r.target || !(r.op.startsWith(">") || r.op === "<>")) continue
+    const fd = fdOf(r)
+    const n = r.target.value
+    const dup = r.op === ">&" && /^\d+$/.test(n)
+    const files = dup ? [...(fds.get(n) ?? []), ...opened(n)] : writer(r) ? [r.target] : []
+    fds.set(fd, files)
+    if (r.fd === "&" || (r.op === ">&" && r.fd === "" && !dup)) fds.set("2", files)
+  }
+  return fds
+}
+// reserved words a command's opener or closer may follow
+const LEADS = new Set(["!", "(", "do", "elif", "else", "then", "{"])
+const OPENERS = new Set(["case", "for", "if", "select", "until", "while"])
+const CLOSERS = new Set(["done", "esac", "fi"])
+// The commands each compound's closer (fi, done, esac) holds, its opener's included, in every scope of a line, so a redirect on the closer writes what they print
+function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Command[]>()) {
+  const open: number[] = []
+  commands.forEach((cmd, k) => {
+    const lead = cmd.words.find((w) => w.quoted || !LEADS.has(w.value))
+    if (lead && !lead.quoted && OPENERS.has(lead.value)) open.push(k)
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
+      bodies.set(cmd, commands.slice(open.pop(), k))
+    if (cmd.inner) compoundBodies(cmd.inner(), bodies)
+  })
+  return bodies
+}
+// the commands a group, a subshell or a compound's closer holds, none for any other command
+type Kids = (cmd: Command) => Command[] | undefined
+// What a command prints that a hook file may take: a printer's output as the shell prints it (outputOf), a sed's or perl's that edits no file in place (escapedWrites), or the commands' a group, subshell or compound holds whose stdout is its own; none for another program or text the hook cannot read
+async function printed(cmd: Command, env: Env, kids: Kids): Promise<string[]> {
+  const held = kids(cmd)
+  if (held) {
+    const own = held.filter((c) => !fdFiles(c.redirects, new Map()).has("1"))
+    return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat()
+  }
+  const parsed = parse(cmd)
+  if (PRINTERS.has(parsed.name)) {
+    const out = await outputOf(cmd, env)
+    return out.unknown ? [] : [out.value]
+  }
+  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name
+  return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env)
+}
+// the folder git runs a folder's repo's hooks from (core.hooksPath, else .git/hooks), read by git itself with every GIT_ variable dropped, in the C locale and under a 2 s cap, at its nearest folder that exists, so a folder the same line makes is read too: false outside a repo, and true, any folder may be one, when git fails another way or runs past the cap
+function readHookFolder(dir: string): string | boolean {
+  let at = dir
+  while (!existsSync(at) && dirname(at) !== at) at = dirname(at)
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_") && key !== "LC_ALL"),
+  )
+  try {
+    const read = Bun.spawnSync(["git", "-C", at, "rev-parse", "--git-path", "hooks"], {
+      env: { ...env, LC_ALL: "C" },
+      stderr: "pipe",
+      stdout: "pipe",
+      timeout: 2000,
+    })
+    if (read.exitCode === 0) return real(resolve(at, read.stdout.toString().trim()))
+    return read.exitCode !== 128 || !read.stderr.toString().includes("not a git repository")
+  } catch {
+    return true
+  }
+}
+// each folder's hook folder (readHookFolder), read once a folder
+const hookFolders = new Map<string, string | boolean>()
+// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or any file in a folder git could not answer for
+function hookFile(path: string | undefined): boolean {
+  if (!path) return false
+  if (/(?:^|\/)\.git\/hooks\//.test(path)) return true
+  const dir = dirname(path)
+  if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
+  const folder = hookFolders.get(dir)
+  return folder === true || folder === real(dir)
 }
 
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
@@ -1847,7 +1988,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped, read as written, with each variable it sets filled in, with a substitution that names the home itself read as the home and with a pipeline into an xargs remover read as that remover's command: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME (any ${HOME…}), ~<login> or / that can name the root, a path in it or a folder between the home and it, or, for a word after a remover in its own command (REMOVERS), the home or any other folder that holds the root (reaches), a relative one holding a / or a glob that can from the cwd, its .. collapsed, or, after a remover, a relative one that names the root, a path in it or a folder between the home and it from the home, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
+  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), or what a printer or another sed or perl writes into a hook file (printed), its quotes dropped, read as written, with each variable it sets filled in, with a substitution that names the home itself read as the home and with a pipeline into an xargs remover read as that remover's command: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME (any ${HOME…}), ~<login> or / that can name the root, a path in it or a folder between the home and it, or, for a word after a remover in its own command (REMOVERS), the home or any other folder that holds the root (reaches), a relative one holding a / or a glob that can from the cwd, its .. collapsed, or, after a remover, a relative one that names the root, a path in it or a folder between the home and it from the home, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
   const scriptNames = (text: string, env: Env): string | undefined => {
     const plain = text.replace(/['"]/g, "")
     if (holds(plain, env)) return `${root} in its text`
@@ -1952,6 +2093,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let whole = false
   let rootLine = false
   let patterns = new Set<Command>()
+  // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
+  let bodies = new WeakMap<Command, Command[]>()
+  let execFds = new Map<string, Word[]>()
   let lineWrites = false
   // the inline evaluator (bun or node) whose code the walk reads from a folder in or above the root, so a likely false positive in it names the form that runs
   let nearEval: string | undefined
@@ -2082,6 +2226,42 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
+    // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, is judged as an in-place edit's script is (scriptNames)
+    const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
+    const intoHook = async (targets: Word[], source: Command) => {
+      if (targets.length === 0) return
+      for (const text of await printed(source, env, kids))
+        for (const here of places(env)) {
+          const named = scriptNames(text, here)
+          const hook = named && targets.find((word) => hookFile(pathOf(word, here)))
+          if (hook) return `${shown(hook)}, a hook file, written with a script that names ${named}`
+        }
+    }
+    const outOf = async (
+      c: Command,
+      inherited: Map<string, Word[]>,
+    ): Promise<string | undefined> => {
+      const fds = fdFiles(c.redirects, inherited)
+      if (fds.size === 0) return
+      const held = kids(c)
+      if (!held) return intoHook(fds.get("1") ?? [], c)
+      for (const each of held) {
+        const named = await outOf(each, fds)
+        if (named) return named
+      }
+    }
+    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+      execFds = fdFiles(cmd.redirects, execFds)
+    const teeTool = program(name)
+    const hookWrite =
+      (await outOf(cmd, execFds)) ??
+      ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin
+        ? await intoHook(
+            args.filter((word) => !/^-./.test(word.value)),
+            cmd.stdin,
+          )
+        : undefined)
+    if (hookWrite) return refuse(hookWrite)
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
     const reader =
       !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
@@ -2508,6 +2688,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
+  bodies = compoundBodies(lexed.commands)
+  execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
