@@ -323,3 +323,22 @@ test("playground page --remove counts a page as listed only by a record the Page
     true,
   )
 })
+
+// #2237's review, round 2: --remove reads and appends to pages.jsonl only as a regular file with one link, as readPages reads it, so no tombstone lands in a file outside the previews folder.
+test("playground page --remove refuses a pages.jsonl that is a symlink or a hard link, before any move", () => {
+  for (const kind of ["symlink", "hard link"]) {
+    const { data, previews, roots, root } = fakeMachine()
+    keep(data, root, "report.html")
+    const outside = join(root, "outside.jsonl")
+    renameSync(join(previews, "pages.jsonl"), outside)
+    if (kind === "symlink") symlinkSync(outside, join(previews, "pages.jsonl"))
+    else linkSync(outside, join(previews, "pages.jsonl"))
+    const before = readFileSync(outside, "utf8")
+    const files = readdirSync(previews).sort()
+    const refused = removePage("report.html", data, { now: NOW, roots, session: "tester" })
+    expect("error" in refused ? refused.error : "moved").toContain("one link")
+    expect(readFileSync(outside, "utf8")).toBe(before)
+    expect(readdirSync(previews).sort()).toEqual(files)
+    expect(listTrash(roots.trash)).toEqual([])
+  }
+})
