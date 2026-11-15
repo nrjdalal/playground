@@ -3,13 +3,22 @@ import {
   constants,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs"
-import { basename, join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 
-import { quarantine, type Roots } from "@packages/safe-delete"
+import {
+  CARVE_OUTS,
+  LIMITS,
+  movesLeft,
+  quarantine,
+  restore,
+  type Roots,
+} from "@packages/safe-delete"
 
 // The record of every page `playground page` kept, one JSON line each, beside the pages in the previews folder.
 export const PAGES_FILE = "pages.jsonl"
@@ -17,15 +26,17 @@ export const PAGES_FILE = "pages.jsonl"
 export type PageLine = { at: string; by: string; file: string; for: string | null; title: string }
 
 export const PAGE_USAGE =
-  'usage: playground page <file.html> --title "<title>" --by <session> [--for <session>]'
+  'usage: playground page <file.html> --title "<title>" --by <session> [--for <session>] | --remove <file.html>'
 
 // A name the Previews app serves: a letter or digit, then letters, digits, ., _ or -, ending .html, as PREVIEW_NAME_PATTERN in api/hono/src/lib/apps/previews.ts reads it.
 const PAGE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.html$/
 
 type PageArgs = { by: string; file: string; for: string | null; title: string }
 
-// The file and options `playground page` was given, or why they are refused.
-export const pageArgs = (args: string[]): PageArgs | { error: string } => {
+// The file and options `playground page` was given, the page --remove names, or why they are refused.
+export const pageArgs = (args: string[]): PageArgs | { remove: string } | { error: string } => {
+  if (args[0] === "--remove")
+    return args.length === 2 ? { remove: args[1]! } : { error: PAGE_USAGE }
   const options: Record<string, string> = {}
   const words: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -119,6 +130,7 @@ export const keepPage = (
   return { path }
 }
 
+// What removePage moves with: the trash's move (a test's stand-in), the time, the machine's roots and the calling session, whose name the trash batch takes.
 export type RemoveDeps = {
   move?: typeof quarantine
   now?: Date
@@ -126,11 +138,110 @@ export type RemoveDeps = {
   session: string
 }
 
-// Takes one kept page off the Pages tab and moves its files to the trash. The trash ids of the moved files, or why it is refused.
+// The pages pages.jsonl lists: a later line for the same file wins, and a tombstone drops it, as the Previews app reads it.
+const listedPages = (folder: string): Set<string> => {
+  const pages = new Set<string>()
+  let text = ""
+  try {
+    text = readFileSync(join(folder, PAGES_FILE), "utf8")
+  } catch {}
+  for (const line of text.split("\n")) {
+    let json: { deleted?: unknown; file?: unknown; title?: unknown } | null = null
+    try {
+      json = JSON.parse(line)
+    } catch {}
+    if (typeof json?.file !== "string") continue
+    if (json.deleted === true) pages.delete(json.file)
+    else if (typeof json.title === "string") pages.add(json.file)
+  }
+  return pages
+}
+
+const realOrSelf = (path: string): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+// Takes one kept page off the Pages tab: its line leaves pages.jsonl by a tombstone, as the Pages tab's delete writes it, and its HTML, caption and the PDF beside it move to the trash through safe-delete's page carve-out, each move scoped to that one file. Every check runs before the first move. The trash ids of the moved files, or why it is refused.
 export const removePage = (
-  _target: string,
-  _data: string,
-  _deps: RemoveDeps,
-): { moved: { file: string; id: string }[] } | { error: string } => ({
-  error: "playground page --remove is not built yet",
-})
+  target: string,
+  data: string,
+  deps: RemoveDeps,
+): { moved: { file: string; id: string }[] } | { error: string } => {
+  const folder = join(data, "previews")
+  if (target.split("/").includes(".."))
+    return { error: `${target} takes a .. step; name the page by its file name or its kept path` }
+  const name = basename(target)
+  if (!PAGE_NAME.test(name) || name.includes(".."))
+    return {
+      error: `${name} is not an HTML file with a plain name (letters, digits, ., _ and -, ending .html)`,
+    }
+  if (target !== name && realOrSelf(dirname(resolve(target))) !== realOrSelf(folder))
+    return { error: `${target} is not in the previews folder ${folder}` }
+  if (!listedPages(folder).has(name))
+    return { error: `pages.jsonl lists no page ${name}, so nothing is removed` }
+  const page = CARVE_OUTS.page!
+  const stem = name.slice(0, -".html".length)
+  const files = [name, `${stem}.txt`, `${stem}.pdf`].filter(
+    (file, i) => i === 0 || lstatSync(join(folder, file), { throwIfNoEntry: false }),
+  )
+  for (const file of files) {
+    const info = lstatSync(join(folder, file), { throwIfNoEntry: false })
+    if (!info?.isFile() || info.nlink !== 1)
+      return {
+        error: `${file} is not a regular file with one link (a symlink or a hard link), so the page stays`,
+      }
+    if (info.size > page.bytes)
+      return {
+        error: `${file} is over ${page.bytes / 1024 ** 2} MB, the most one page's file may hold, so the page stays`,
+      }
+  }
+  const now = deps.now ?? new Date()
+  const left = movesLeft(deps.roots.trash, deps.session, now)
+  if (left < files.length)
+    return {
+      error: `${name} takes ${files.length} moves and ${deps.session} has ${left} of the trash's ${LIMITS.perMinute} a minute left: try again in a minute`,
+    }
+  const move = deps.move ?? quarantine
+  const toTrash = (file: string) =>
+    move(
+      join(folder, file),
+      { carveOut: "page", reason: `playground page --remove ${name}`, session: deps.session },
+      deps.roots,
+      {
+        carveOuts: { page: { ...page, name: new RegExp(`^${file.replaceAll(".", "\\.")}$`) } },
+        now,
+      },
+    )
+  // the HTML moves before the tombstone, unlike the Pages tab's delete, so a refused move leaves the index as it was
+  const html = toTrash(name)
+  if ("refused" in html)
+    return { error: `${name} did not move, so the page stays: ${html.refused}` }
+  try {
+    appendFileSync(
+      join(folder, PAGES_FILE),
+      `${JSON.stringify({ at: now.toISOString(), deleted: true, file: name })}\n`,
+    )
+  } catch (error) {
+    const back = restore(html.id, deps.roots)
+    return {
+      error:
+        "refused" in back
+          ? `pages.jsonl took no tombstone (${(error as Error).message}) and ${name} did not come back (${back.refused}): playground rm --restore ${html.id} brings it back`
+          : `pages.jsonl took no tombstone (${(error as Error).message}), so ${name} was put back and the page stays`,
+    }
+  }
+  const moved = [{ file: name, id: html.id }]
+  for (const file of files.slice(1)) {
+    const done = toTrash(file)
+    if ("refused" in done)
+      return {
+        error: `${name} left the Pages tab, but ${file} stays in the previews folder as an unlisted file: ${done.refused}`,
+      }
+    moved.push({ file, id: done.id })
+  }
+  return { moved }
+}

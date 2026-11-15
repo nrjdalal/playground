@@ -185,7 +185,7 @@ describe("playground page --remove (#2191)", () => {
     const refusals: [string, string][] = [
       ["unlisted.html", "pages.jsonl lists no page"],
       [outside, "not in the previews folder"],
-      [join(previews, "..", "previews", "report.html"), "a .. step"],
+      [`${previews}/../previews/report.html`, "a .. step"],
       ["pages.jsonl", "not an HTML file"],
       ["big.html", "over 20 MB"],
       ["linked.html", "not a regular file with one link"],
