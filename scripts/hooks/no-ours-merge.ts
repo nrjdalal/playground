@@ -157,20 +157,22 @@ function aliasWords(text: string): string[] | undefined {
   return words
 }
 
-// The word on git's own line, before its subcommand, that defines an alias: a -c or --config-env value whose key is alias.<name> in any case, or, when the program is surely git, a -c value the hook cannot read
+// Whether a -c or --config-env value may define an alias: its key (the part before the first =) reads alias.<name> in any case, or, when the program is surely git, holds a part the hook cannot read
+const aliasKey = (value: string, git: boolean): boolean => {
+  const key = value.split("=")[0]
+  return /^alias\./i.test(key) || (git && (marked(key) || key.includes("{")))
+}
+
+// The word on git's own line, before its subcommand, that defines an alias by aliasKey
 function aliasDefined(args: Word[], git = true): Word | undefined {
   for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value
     if (v.startsWith("--config-env=")) {
-      if (/^--config-env=alias\./i.test(v) || (git && marked(v))) return args[k]
+      if (aliasKey(v.slice("--config-env=".length), git)) return args[k]
     } else if (GIT_TAKES.has(v)) {
       const value = args[++k]
       if (!value || (v !== "-c" && v !== "--config-env")) continue
-      if (
-        /^alias\./i.test(value.value) ||
-        (git && (marked(value.value) || value.unknown === BRACE))
-      )
-        return value
+      if (aliasKey(value.value, git)) return value
     }
   }
 }

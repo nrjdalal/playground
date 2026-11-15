@@ -16645,17 +16645,21 @@ function aliasWords(text) {
     words.push(word);
   return words;
 }
+var aliasKey = (value, git) => {
+  const key = value.split("=")[0];
+  return /^alias\./i.test(key) || git && (marked(key) || key.includes("{"));
+};
 function aliasDefined(args, git = true) {
   for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
     const v = args[k].value;
     if (v.startsWith("--config-env=")) {
-      if (/^--config-env=alias\./i.test(v) || git && marked(v))
+      if (aliasKey(v.slice("--config-env=".length), git))
         return args[k];
     } else if (GIT_TAKES.has(v)) {
       const value = args[++k];
       if (!value || v !== "-c" && v !== "--config-env")
         continue;
-      if (/^alias\./i.test(value.value) || git && (marked(value.value) || value.unknown === BRACE))
+      if (aliasKey(value.value, git))
         return value;
     }
   }
