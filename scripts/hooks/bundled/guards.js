@@ -16670,7 +16670,7 @@ async function check17(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync10, lstatSync, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
+import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
 import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
@@ -16890,7 +16890,7 @@ async function inspect13(command, directory, environment, lookup, own = []) {
     if (path === undefined || !existsSync10(dirname9(resolve10(path))) || !ownPath(text, here))
       return false;
     try {
-      const stat = lstatSync(path);
+      const stat = lstatSync2(path);
       if (stat.isSymbolicLink() || !stat.isDirectory() && stat.nlink > 1)
         return false;
     } catch {}

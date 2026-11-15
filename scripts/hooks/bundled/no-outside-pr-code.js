@@ -44,7 +44,7 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync2, lstatSync, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync2, lstatSync as lstatSync2, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
 import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "path";
 
 // packages/env/src/data-dir.ts
@@ -8052,7 +8052,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
     if (path === undefined || !existsSync2(dirname3(resolve4(path))) || !ownPath(text, here))
       return false;
     try {
-      const stat = lstatSync(path);
+      const stat = lstatSync2(path);
       if (stat.isSymbolicLink() || !stat.isDirectory() && stat.nlink > 1)
         return false;
     } catch {}
