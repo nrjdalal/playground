@@ -83,8 +83,6 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
       "an unread subcommand behind run-slot",
       "~/.playground/ops/run-slot.sh w -- git $(echo commit) --no-verify -m x",
     ],
-    ["an unread subcommand with -nm behind a wrapper", "uv run git $X -nm x"],
-    ["an unread subcommand after a git the hook cannot read", "$G $(echo commit) --no-verify -m x"],
     ["merge --no-verify", "git merge --no-verify origin/canary"],
     ["merge --no-edit --no-verify", "git merge origin/canary --no-edit --no-verify"],
     ["a quoted --no-verify", "git merge '--no-verify' origin/canary"],
@@ -238,6 +236,12 @@ describe("a git call that defines an alias on its own line is refused", () => {
 
 describe("every other call runs", () => {
   test.each([
+    ["a program the hook cannot read with -name", '$FIND "$d" -name x'],
+    ["a program the hook cannot read with -n", '$HEAD "$f" -n 20'],
+    ["a script run by a program the hook cannot read with -n", '$PY "$S" -n 3'],
+    ["a grep for git with -n after it", 'grep git "$f" -n'],
+    ["an rg for git with -n after it", "rg git $D -n"],
+    ["a grep -c for git with -n after it", 'grep -c git "$f" -n'],
     ["an unread subcommand behind a wrapper", "uv run git $X status"],
     [
       "an unread subcommand behind run-slot",
