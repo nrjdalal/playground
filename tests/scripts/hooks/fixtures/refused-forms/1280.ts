@@ -1,6 +1,6 @@
 import { type Group } from "./_shared"
 
-// A reviewer in read mode writing where a later call runs it: an export of the extensions into a folder the hook trusts as an installed skill's or into any folder, a copy whose target GNU reads from a target-folder or suffix option, and a copy into the session's own folders that makes a repository git then reads or carries a link a later copy writes through.
+// A reviewer in read mode writing where a later call runs it: an export of the extensions into a folder the hook trusts as an installed skill's or into any folder, a copy whose target GNU reads from a target-folder or suffix option, a copy into the session's own folders that makes a repository git then reads or carries a link a later copy writes through, a redirect, uniq's output or a run download outside its own folders, and a script a session wrote into an installed set.
 const NAME = "p7w3zc-reviewer"
 
 export const groups: Group[] = [
@@ -41,6 +41,14 @@ export const groups: Group[] = [
           "a copy that carries a link a second copy writes through",
           `cp -R linkdir ${pad}/y && cp evil.sh ${pad}/y/l/run-slot.sh`,
         ],
+        [
+          "a redirect into the installed skills, then its script",
+          `cat evil.mjs > ${skills}/acme/run.mjs; node ${skills}/acme/run.mjs`,
+        ],
+        ["a redirect over the ops run-slot", `cat evil.sh > ${DATA}/ops/run-slot.sh`],
+        ["uniq's output into the installed skills", `uniq evil.mjs ${skills}/acme/run.mjs`],
+        ["a run download into the installed skills", `gh run download 9 -D ${skills}/acme`],
+        ["a set's script a session wrote", `node ${DATA}/orgs/home/abc123/skills/acme/w.mjs`],
       ]
     },
   },

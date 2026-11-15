@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
+import { linkSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
+import { writePlugin } from "../../../packages/scripts/src/playground/orgs"
 import {
   check,
   live,
@@ -38,6 +39,7 @@ const SESSIONS: Record<string, string[]> = {
   "s-none": [],
   "s-org": [pull("acme-org/tools", 504)],
   "s-out": [pull("acme-owner/widgets", 501)],
+  "s-out-named": [pull("acme-owner/widgets", 501)],
   "s-own": [pull("acme-owner/widgets", 502)],
   "s-unread": [pull("acme-owner/widgets", 509)],
 }
@@ -67,19 +69,28 @@ const SHEBANGS: Record<string, string> = {
 const ITEM_REVIEWER = "p7w3zc-reviewer"
 const PAD = `${HOME}/.playground/scratchpad/${ITEM_REVIEWER}`
 const SCRATCH = `${HOME}/.playground/scratch/${ITEM_REVIEWER}`
+// a reviewer of the outside author's PR whose registry name the hook reads, for its own folders
+const OUT_REVIEWER = "k8d2vn-reviewer"
+// a script a session wrote into a shipped set, whose files then no longer hash to the set's id
+const WRITTEN = `${SKILLS}/triage/written.mjs`
 
-const lookup: Lookup = {
-  author: async (repo, pr) => PRS[`${repo}#${pr}`],
-  holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
+// a variable of its own, so the shipped seam stays a plain field until the hook's Lookup names it
+const seams = {
+  author: async (repo: string, pr: number) => PRS[`${repo}#${pr}`],
+  holds: (folder: string, entry: string) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
-  name: async (sessionId) => (sessionId === "s-item" ? ITEM_REVIEWER : undefined),
-  prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
+  name: async (sessionId: unknown) =>
+    sessionId === "s-item" ? ITEM_REVIEWER : sessionId === "s-out-named" ? OUT_REVIEWER : undefined,
+  prsOf: async (sessionId: unknown) => SESSIONS[String(sessionId)] ?? [],
   // each made-up script's shebang by its extension, as a skill's scripts name theirs
-  runner: (script) =>
+  runner: (script: string) =>
     script in SHEBANGS
       ? runnerOf(SHEBANGS[script])
       : RUNNERS[script.slice(script.lastIndexOf("."))],
+  // every made-up set's script is one a ship installed, but the one a session wrote
+  shipped: (script: string) => script.startsWith(`${SKILLS}/`) && script !== WRITTEN,
 }
+const lookup: Lookup = seams
 
 const call = (
   command: string,
@@ -525,6 +536,151 @@ describe("no-outside-pr-code's item reviewer writes nothing through a folder or 
   })
 })
 
+// #1280: read mode writes a file only into the session's own folders, so no line puts an outside author's file where the hook trusts a script, and runs a set's script only while the set holds what a ship installed
+describe("no-outside-pr-code's read mode writes only into its own folders", () => {
+  const data = mkdtempSync(join(tmpdir(), "outside-pr-writes-"))
+  const environment = {
+    HOME,
+    PATH: "/usr/bin:/bin",
+    PLAYGROUND_DATA_DIR: data,
+    PLAYGROUND_ROLE: "reviewer",
+  }
+  // a set a ship installed, and a script a session wrote into it, whose files then no longer hash to the set's id
+  const SET = `${data}/orgs/home/abc123/skills`
+  const SET_STATE = `${SET}/code-review-loop/scripts/state.ts`
+  const SET_WRITTEN = `${SET}/triage/written.mjs`
+  const TARGET = `${SET}/triage/evil.mjs`
+  const EVIL = `${OUTSIDE}/evil.mjs`
+  const writes = {
+    ...seams,
+    shipped: (script: string) => script.startsWith(`${SET}/`) && script !== SET_WRITTEN,
+  }
+  const sessions = [
+    ["an outside PR's reviewer", "s-out-named", OUT_REVIEWER],
+    ["an item reviewer", "s-item", ITEM_REVIEWER],
+  ] as const
+  // each session's own folders, a real folder in one and a link in it that leads out
+  for (const [, , name] of sessions) {
+    mkdirSync(join(data, "scratch", name, "c", "l"), { recursive: true })
+    mkdirSync(join(data, "scratchpad", name), { recursive: true })
+    symlinkSync(join(data, "elsewhere"), join(data, "scratch", name, "out"))
+  }
+  mkdirSync(join(data, "elsewhere"))
+  const judgeIn = (command: string, session: string, cwd = MAIN) =>
+    check(call(command, cwd, session), environment, writes)
+
+  describe.each(sessions)("%s", (_, session, name) => {
+    const own = join(data, "scratch", name)
+    const pad = join(data, "scratchpad", name)
+
+    test.each([
+      ["a redirect into the installed skills", `cat ${EVIL} > ${TARGET}`],
+      ["an append into the installed skills", `cat ${EVIL} >> ${TARGET}`],
+      ["a clobbering redirect into the installed skills", `cat ${EVIL} >| ${TARGET}`],
+      ["both streams into the installed skills", `cat ${EVIL} &> ${TARGET}`],
+      ["both streams appended into the installed skills", `cat ${EVIL} &>> ${TARGET}`],
+      ["stderr into the installed skills", `cat ${EVIL} 2> ${TARGET}`],
+      ["a read-write open of the installed skills", `cat ${EVIL} 1<> ${TARGET}`],
+      ["a duplication onto a file name", `cat ${EVIL} >& ${TARGET}`],
+      ["a group's redirect", `{ cat ${EVIL}; } > ${TARGET}`],
+      ["a subshell's redirect", `(cat ${EVIL}) > ${TARGET}`],
+      ["a loop's redirect", `for f in ${EVIL}; do cat $f; done > ${TARGET}`],
+      ["a redirect in a shell's -c script", `bash -c "cat ${EVIL} > ${TARGET}"`],
+      ["a relative redirect after a cd", `cd ${SET}/triage && cat ${EVIL} > evil.mjs`],
+      ["a redirect over the ops run-slot", `cat ${EVIL} > ${data}/ops/run-slot.sh`],
+      [
+        "a redirect into the main checkout's skills",
+        `cat ${EVIL} > ${MAIN}/extensions/core/skills/x/e.mjs`,
+      ],
+      ["a redirect outside its own folders", "gh pr diff 501 > /tmp/pr.diff"],
+      ["a redirect to a name it cannot read", `cat ${EVIL} > $OUT`],
+      ["a redirect to a glob in its own folder", `cat ${EVIL} > ${own}/*`],
+      ["a redirect through a link in its own folder that leads out", `cat ${EVIL} > ${own}/out/x`],
+      [
+        "a redirect into a folder the line makes first",
+        `mkdir -p ${own}/new && cat ${EVIL} > ${own}/new/f`,
+      ],
+      [
+        "a redirect through a link a clone on the same line checks out",
+        `git clone https://github.com/ext-dev/widgets ${own}/c2 && cat ${EVIL} > ${own}/c2/l/run-slot.sh`,
+      ],
+      [
+        "a redirect into its own folder on a line that checks out a tree there",
+        `git -C ${own}/c checkout --detach abc && cat ${EVIL} > ${own}/c/l/f`,
+      ],
+      [
+        "a redirect into its own folder on a line that removes one there",
+        `playground rm ${own}/c && cat ${EVIL} > ${own}/f`,
+      ],
+      [
+        "a write, then the shipped script it overwrote",
+        `cat ${EVIL} > ${SET_STATE}; ${SET_STATE} pr 501`,
+      ],
+      ["uniq's output into the installed skills", `uniq ${EVIL} ${TARGET}`],
+      ["uniq's output after a valued option", `uniq -f 1 ${EVIL} ${TARGET}`],
+      ["uniq's output before its options", `uniq ${EVIL} ${TARGET} -c`],
+      ["gh run download into the installed skills", `gh run download 9 -D ${SET}/triage`],
+      ["gh run download, its folder by --dir=", `gh run download 9 --dir=${SET}/triage`],
+      ["gh run download, its folder glued", `gh run download 9 -D${SET}/triage`],
+      [
+        "gh run download after gh's repo option",
+        `gh run -R acme-owner/widgets download 9 -D ${SET}`,
+      ],
+      ["sed with an in-place option after its script", `sed 's/a/b/' -i ${SET_STATE}`],
+      [
+        "sed printing with an in-place option after its script",
+        `sed -n 1p --in-place ${SET_STATE}`,
+      ],
+      ["node on a script a session wrote into a shipped set", `node ${SET_WRITTEN}`],
+      ["a script a session wrote, run by its path", SET_WRITTEN],
+      ["a shell on a script a session wrote", `sh ${SET_WRITTEN}`],
+    ])("%s is refused", async (_, command) => {
+      expect(await judgeIn(command, session)).toContain("no-outside-pr-code")
+    })
+
+    test("gh run download into the folder it runs in, outside its own, is refused", async () => {
+      expect(await judgeIn("gh run download 9", session, `${SET}/triage`)).toContain(
+        "no-outside-pr-code",
+      )
+    })
+
+    test.each([
+      ["a redirect into its own scratch folder", `cat ${OUTSIDE}/a.ts > ${own}/a.ts`],
+      ["an append into its own scratchpad", `gh pr diff 501 >> ${pad}/pr.diff`],
+      ["a redirect into a folder in its own", `cat ${OUTSIDE}/a.ts > ${own}/c/l/a.ts`],
+      [
+        "a relative redirect after a cd into its own folder",
+        `cd ${own} && cat ${OUTSIDE}/a.ts > a.ts`,
+      ],
+      ["stderr to /dev/null", `ls ${OUTSIDE} 2>/dev/null`],
+      ["both streams to /dev/null", `ls ${OUTSIDE} &>/dev/null`],
+      ["stderr onto stdout", `ls ${OUTSIDE} 2>&1 | head`],
+      ["stdout onto stderr", "echo note >&2"],
+      ["a line to /dev/stderr", "echo note > /dev/stderr"],
+      ["a closed stdin", "cat <&-"],
+      ["uniq in a pipeline", `grep -h x ${OUTSIDE}/a.ts | uniq -c`],
+      ["uniq on one file", `uniq ${OUTSIDE}/a.ts`],
+      ["uniq's output into its own folder", `uniq -c ${OUTSIDE}/a.ts ${own}/a.txt`],
+      ["gh run download into its own folder", `gh run download 9 -D ${own}/art`],
+      ["gh run view's log", "gh run view 9 --log"],
+      ["sed printing a range", `sed -n 1,5p ${OUTSIDE}/a.ts`],
+      ["sed's plain substitution on a file", `sed 's/a/b/' ${OUTSIDE}/a.ts`],
+      ["node on a shipped skill's script", `node ${SET}/triage/scripts/shipped.mjs`],
+      ["a shipped skill's script by its path", `${SET_STATE} pr 501`],
+      [
+        "the item review's ext show of a revision into jq",
+        "playground ext show acme-owner skill triage --rev abc123 | jq .content.files",
+      ],
+    ])("%s passes", async (_, command) => {
+      expect(await judgeIn(command, session)).toBeUndefined()
+    })
+  })
+
+  test("the reason says where read mode writes", async () => {
+    expect(await judgeIn(`cat ${EVIL} > ${TARGET}`, "s-out-named")).toContain("own scratch")
+  })
+})
+
 describe("no-outside-pr-code reads the session's PRs to choose read mode", () => {
   test.each([
     ["a checker of the owner's own PR", "s-own"],
@@ -677,6 +833,62 @@ describe("no-outside-pr-code's live lookup", () => {
     )
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
+  })
+
+  // #1280: a set writePlugin installed, whose folder's name is the id of what it holds
+  describe("a set's script is shipped while the set holds what a ship installed", () => {
+    const install = (tag: string) => {
+      const source = join(scratch, "sources", tag, "triage")
+      mkdirSync(join(source, "scripts"), { recursive: true })
+      writeFileSync(join(source, "SKILL.md"), `---\nname: triage\n---\n${tag}\n`)
+      writeFileSync(join(source, "scripts", "run.mjs"), "#!/usr/bin/env node\n")
+      const set = writePlugin(join(scratch, "data"), "home", [
+        { dir: source, from: "home", name: "triage" },
+      ])
+      return { script: join(set, "skills", "triage", "scripts", "run.mjs"), set }
+    }
+    const shipped = (script: string) =>
+      (live(environment) as Lookup & { shipped: (s: string) => boolean }).shipped(script)
+
+    test("the hook's recompute of a set's id agrees with writePlugin's", () => {
+      const { script, set } = install("agrees")
+      expect(shipped(script)).toBe(true)
+      expect(basename(set)).toMatch(/^[0-9a-f]{16}$/)
+    })
+
+    test.each([
+      [
+        "a file a session added",
+        (set: string) => writeFileSync(join(set, "skills", "triage", "w.mjs"), "x"),
+      ],
+      [
+        "a changed file",
+        (set: string) => writeFileSync(join(set, "skills", "triage", "SKILL.md"), "changed"),
+      ],
+      [
+        "a link to a file outside it",
+        (set: string) =>
+          symlinkSync(join(scratch, "elsewhere.mjs"), join(set, "skills", "triage", "l.mjs")),
+      ],
+      [
+        "a hard-linked file",
+        (set: string) =>
+          linkSync(
+            join(set, "skills", "triage", "SKILL.md"),
+            join(scratch, `hard-${basename(set)}`),
+          ),
+      ],
+    ])("a set holding %s fails closed", (tag, change) => {
+      const { script, set } = install(tag)
+      change(set)
+      expect(shipped(script)).toBe(false)
+    })
+
+    test("a script the set does not hold, and a path outside a set's shape, are not shipped", () => {
+      const { set } = install("absent")
+      expect(shipped(join(set, "skills", "triage", "scripts", "new.mjs"))).toBe(false)
+      expect(shipped(join(scratch, "data", "orgs", "home", "run.mjs"))).toBe(false)
+    })
   })
 
   test('a script\'s runner is read from its first line, and one it cannot open reads as "", held to the main checkout', async () => {
