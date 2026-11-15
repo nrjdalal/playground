@@ -50,6 +50,33 @@ describe("a merge or pull with ours is refused", () => {
   })
 })
 
+describe("a merge, pull or commit that skips its hooks is refused", () => {
+  test.each([
+    ["merge --no-verify", "git merge --no-verify origin/canary"],
+    ["merge --no-edit --no-verify", "git merge origin/canary --no-edit --no-verify"],
+    ["a quoted --no-verify", "git merge '--no-verify' origin/canary"],
+    ["--no-verify after --verify", "git merge --verify --no-verify origin/canary"],
+    ["git -C <dir>", "git -C /tmp/other merge --no-edit --no-verify origin/canary"],
+    ["git -c <key>=<value>", "git -c core.editor=true merge --no-verify origin/canary"],
+    ["through bash -c", "bash -c 'git merge --no-verify origin/canary'"],
+    ["through run-slot", "~/.playground/ops/run-slot.sh w -- git merge --no-verify origin/canary"],
+    ["git pull", "git pull --no-verify origin canary"],
+    ["an alias for a merge", "git -c 'alias.m=merge --no-verify' m origin/canary"],
+    ["commit --no-verify", "git commit --no-verify -m 'fix: x'"],
+    ["commit -n", "git commit -n -m 'fix: x'"],
+    ["commit -n finishing a merge", "git commit -n --no-edit"],
+    ["commit -n in a cluster", "git commit -nm 'fix: x'"],
+    ["commit -n inside a cluster", "git commit -anm 'fix: x'"],
+    ["an abbreviated commit --no-verify", "git commit --no-veri -m 'fix: x'"],
+    ["commit -n after --verify", "git commit --verify -n -m 'fix: x'"],
+    ["an alias for a commit", "git -c 'alias.c=commit --no-verify' c -m 'fix: x'"],
+  ])("%s", async (_, command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-ours-merge hook refuses")
+    expect(reason).toContain("without --no-verify")
+  })
+})
+
 describe("every other call runs", () => {
   test.each([
     ["a plain merge", "git merge origin/canary"],
@@ -64,6 +91,19 @@ describe("every other call runs", () => {
     ["a checkout of ours", "git checkout --ours file.ts"],
     ["echo", "echo git merge -s ours"],
     ["a commit message", "git commit -m 'refuse -s ours merges'"],
+    ["merge --no-ff", "git merge --no-ff origin/canary"],
+    ["a branch named no-verify", "git merge no-verify"],
+    ["merge -n, which is --no-stat", "git merge -n origin/canary"],
+    ["pull -n, which is --no-stat", "git pull -n origin canary"],
+    ["--verify after --no-verify", "git merge --no-verify --verify origin/canary"],
+    ["merge --no-verify --help", "git merge --no-verify --help"],
+    ["a commit", "git commit -m 'fix: x'"],
+    ["--no-verify in a commit message", "git commit -m 'refuse --no-verify'"],
+    ["n as a commit's message", "git commit -mn"],
+    ["n as a commit's signing key", "git commit -Sn -m 'fix: x'"],
+    ["commit --verify after -n", "git commit -n --verify -m 'fix: x'"],
+    ["echo of a merge", "echo git merge --no-verify"],
+    ["a push", "git push --no-verify origin HEAD:x"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -85,6 +125,12 @@ describe("the hook as Claude Code runs it", () => {
     const proc = runHook("git merge -s ours origin/canary", "worker")
     expect(proc.exitCode).toBe(2)
     expect(proc.stderr.toString()).toContain("no-ours-merge hook refuses")
+  })
+
+  test("a factory session's merge --no-verify is refused with exit 2", () => {
+    const proc = runHook("git merge --no-edit --no-verify origin/canary", "worker")
+    expect(proc.exitCode).toBe(2)
+    expect(proc.stderr.toString()).toContain("without --no-verify")
   })
 
   test("input it cannot parse that reads as an ours merge is refused", async () => {
