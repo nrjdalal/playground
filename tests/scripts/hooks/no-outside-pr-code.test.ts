@@ -399,7 +399,7 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["du", `du -sh ${PAD}/*`],
     ["find with no action", `find ${PAD} -type f | wc -l`],
     ["git diff in its scratchpad's repo", `git -C ${PAD}/repo diff HEAD^ HEAD -- a.ts`],
-    ["cp into its scratchpad", `mkdir -p ${PAD}/repo && cp -R ${HOME}/x/scripts ${PAD}/repo/`],
+    ["cp into a new path in its scratchpad", `cp -R ${HOME}/x/scripts ${PAD}/repo/scripts`],
     ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
     [
       "the two revisions compared with no repository and no diff program",
@@ -437,6 +437,18 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["playground rm with an option", `playground rm --force ${PAD}`],
     ["cp out of its own folders", `cp ${PAD}/a.ts ${HOME}/.playground/ops/a.ts`],
     ["cp with a target directory option", `cp -t ${HOME}/.playground/ops ${PAD}/a.ts`],
+    [
+      "cp with a suffix option, whose value reads as its target",
+      `cp a.sh ${HOME}/.playground/ops -S ${PAD}/x`,
+    ],
+    ["cp with a long option", `cp --backup=numbered a.sh ${PAD}/x`],
+    ["cp with -- before its operands", `cp -- a.sh ${PAD}/x`],
+    ["cp of two sources into a folder", `cp a.sh b.sh ${PAD}/dir`],
+    [
+      "playground ext export outside its own folders",
+      `playground ext export ${HOME}/.playground/ops/x`,
+    ],
+    ["playground ext export with two folders", `playground ext export ${PAD}/a ${HOME}/x`],
     ["cmp, which diff -q answers", `cmp ${PAD}/repo/a.md ${HOME}/.playground/a.md`],
     ["find that deletes", `find ${PAD} -name x -delete`],
     ["find that runs a program", `find ${PAD} -exec sh {} ;`],
@@ -453,6 +465,36 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ],
   ])("%s is refused", async (_, command) => {
     expect(await item(command)).toContain("no-outside-pr-code")
+  })
+})
+
+// #1280 round 1: a write lands where the system resolves it, so a folder or a link already in its own folders can carry it out
+describe("no-outside-pr-code's item reviewer writes only new paths in its own folders", () => {
+  const data = mkdtempSync(join(tmpdir(), "outside-pr-own-"))
+  const own = join(data, "scratchpad", ITEM_REVIEWER)
+  mkdirSync(join(own, "dir"), { recursive: true })
+  symlinkSync(join(data, "elsewhere"), join(own, "link"))
+  const environment = {
+    HOME,
+    PATH: "/usr/bin:/bin",
+    PLAYGROUND_DATA_DIR: data,
+    PLAYGROUND_ROLE: "reviewer",
+  }
+  const judgeOwn = (command: string) => check(call(command, MAIN, "s-item"), environment, lookup)
+
+  test.each([
+    ["cp into a folder that exists, whose entries can be links", `cp a.sh ${own}/dir`],
+    ["cp onto a link", `cp a.sh ${own}/link`],
+    ["playground ext export into a folder that exists", `playground ext export ${own}/dir`],
+  ])("%s is refused", async (_, command) => {
+    expect(await judgeOwn(command)).toContain("no-outside-pr-code")
+  })
+
+  test.each([
+    ["cp to a new path", `cp a.sh ${own}/dir/new.sh`],
+    ["playground ext export into a new folder", `playground ext export ${own}/store`],
+  ])("%s passes", async (_, command) => {
+    expect(await judgeOwn(command)).toBeUndefined()
   })
 })
 
