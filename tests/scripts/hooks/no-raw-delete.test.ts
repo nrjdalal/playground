@@ -96,6 +96,12 @@ describe("a delete the hook lets run", () => {
     "pkexec <<< 'ls'",
     "echo ls | pkexec su",
     "{ echo ls | bash; } <<< 'rm -rf x'",
+    // #2136's controls: a program word the reader resolves, and an expansion used only as an argument
+    'A=(echo hi); "${A[@]}"',
+    "S='echo hi'; eval \"$S\"",
+    "S='ls -la'; sh -c \"$S\"",
+    "for c in echo; do $c hi; done",
+    'cat "$F"',
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })

@@ -7079,7 +7079,7 @@ function change(cmd, env) {
   const nameWords = prints ? vNames : words.map((w) => w.split("=")[0]);
   const all = RUNS_TEXT.has(name) && (name !== "eval" || args.some(unreadWord)) || NAME_SETTERS.has(name) && nameWords.some(marked) || name === "unset" && options.some((w) => w.includes("m"));
   const read = name === "read" ? binds(cmd) : [];
-  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.length > 0 || !ASSIGN.test(w) && name !== "export" && name !== "readonly") : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
+  const names = all ? [...env.vars.keys()] : name === "unset" ? options.some((w) => w.includes("f")) ? [] : words : name === "read" ? read.length > 0 ? read : ["REPLY"] : prints ? printsText(words) ? [] : vNames : DECLARES.has(name) ? words.filter((w) => options.some((o) => o !== "-a") || !ASSIGN.test(w) && (options.length > 0 || name !== "export" && name !== "readonly")) : name === "set" ? words.flatMap((w, k) => /^[-+]\w*A$/.test(w) && words[k + 1] ? [words[k + 1]] : []) : NAME_SETTERS.has(name) && name !== "getopts" ? words.flatMap((w) => w.match(/[A-Za-z_]\w*/g) ?? []) : [];
   for (const key of names.map((w) => w.split("=")[0].replace(/\[[\s\S]*$/, ""))) {
     if (!NAME.test(key))
       continue;
@@ -7120,7 +7120,8 @@ function namings(commands) {
   return counts;
 }
 function arrayRun(cmd, first, env) {
-  const key = (first?.raw ?? first?.source)?.match(WHOLE_RUN)?.[1];
+  const run = (first?.raw ?? first?.source)?.match(WHOLE_RUN);
+  const key = run?.[1] ?? run?.[2];
   const set = key ? env.vars.get(key) : undefined;
   if (!key || !set)
     return;
@@ -7133,9 +7134,14 @@ function arrayRun(cmd, first, env) {
     return;
   const { commands } = lex(inner);
   const elements = commands.length === 1 ? commands[0].words : [];
-  if (elements.length === 0 || commands[0].redirects.length > 0 || elements.some(unreadWord))
+  const asWritten = (w) => !unreadWord({ ...w, source: w.source?.replace(/^~(?=\/|$)/, "") });
+  if (elements.length === 0 || commands[0].redirects.length > 0 || !elements.every(asWritten))
     return null;
-  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? elements : [w]) };
+  const seps = ifsSplit(env);
+  const words = run?.[2] ? elements.flatMap((w) => splitValue(w.value, seps)) : elements;
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
 function repass(commands, envs) {
   for (const cmd of commands) {
@@ -7167,13 +7173,19 @@ function bind(commands, k, env, unbind) {
   if (!close && (loopHeader(cmd) || cmd.unsure || cmd.chained || cmd.kept))
     return;
   const before = names.map((name) => [name, env.vars.get(name)]);
+  const value = close ? loopWord(cmd) : undefined;
   for (const name of names)
-    setVar(env.vars, name, unknown("a value a builtin gives"));
+    setVar(env.vars, name, value ?? unknown("a value a builtin gives"));
   if (close)
     unbind.set(close, () => {
       for (const [name, held] of before)
         held ? setVar(env.vars, name, held) : env.vars.delete(name);
     });
+}
+function loopWord({ words }) {
+  const at = words.findIndex((w) => w.value === "in" && !w.quoted);
+  const list = at < 0 ? [] : words.slice(at + 1);
+  return list.length === 1 && !unreadWord(list[0]) ? list[0] : undefined;
 }
 function heads({ words }) {
   const out = [];
@@ -7210,9 +7222,18 @@ async function examine(cmd, env, visit, builtins) {
   }
   const [primary, ...others] = readings(parse3(cmd));
   const vanished = emptyProgram(cmd, env);
+  const array = arrayRun(cmd, primary.first, env);
+  const resolving = [
+    ...splitHeld(cmd, primary.name, env),
+    ...array ? [array] : [],
+    ...heldScripts(cmd, primary, env)
+  ];
+  if (unreadCommand(cmd, primary, resolving))
+    for (const parsed of [primary, ...others])
+      parsed.unread = true;
   const expanded = [
     ...expandTilde(cmd, primary.name, env),
-    ...splitHeld(cmd, primary.name, env),
+    ...resolving,
     ...vanished,
     ...await xargsFilled(cmd, [primary, ...others], env)
   ];
@@ -7242,6 +7263,39 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+}
+function heldScripts(cmd, parsed, env) {
+  const scripts = scriptWords(parsed).filter((w) => w.raw && marked(w.value));
+  if (scripts.length === 0)
+    return [];
+  const known = heldKnown(env);
+  let resolved = false;
+  const words = cmd.words.map((w) => {
+    if (!scripts.includes(w) || !w.raw)
+      return w;
+    const value = relexedValue(w.raw, known);
+    if (value === undefined || value === w.value)
+      return w;
+    resolved = true;
+    return { quoted: true, value };
+  });
+  return resolved ? [{ ...cmd, words }] : [];
+}
+function scriptWords({ args, name }) {
+  if (name === "eval")
+    return args[0]?.value === "--" ? args.slice(1) : args;
+  if (!SHELLS.has(name))
+    return [];
+  const { inline, operand } = shellOperand(args, name);
+  return inline && operand ? [operand] : [];
+}
+function unreadCommand(cmd, parsed, resolving) {
+  const others = resolving.map(parse3);
+  if (marked(parsed.name))
+    return /[$`]/.test(parsed.first?.source ?? "") && others.every((p) => marked(p.name));
+  if (!scriptWords(parsed).some((w) => marked(w.value)))
+    return false;
+  return others.every((p) => scriptWords(p).some((w) => marked(w.value)));
 }
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
@@ -7411,7 +7465,7 @@ var vanishingParts = (source) => {
 var READ_VALUES = new Set(["d", "i", "n", "N", "p", "t", "u"]);
 var NAME = /^[A-Za-z_]\w*$/;
 var SUBSCRIPTED = /^([A-Za-z_]\w*)(?:\[[^\]]*\]\+?|\+)=/;
-var WHOLE_RUN = /^"?\$\{([A-Za-z_]\w*)\[@\]\}"?$/;
+var WHOLE_RUN = /^(?:"\$\{([A-Za-z_]\w*)\[@\]\}"|\$\{([A-Za-z_]\w*)\[[@*]\]\})$/;
 function binds({ words }) {
   let at = 0;
   while (at < words.length && (!words[at].quoted && RESERVED.has(words[at].value) || ASSIGN.test(words[at].value)))
@@ -7536,12 +7590,13 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
   return verdict;
 }
+var evalText = (args) => (args[0]?.value === "--" ? args.slice(1) : args).map((a) => a.value).join(" ");
 function again(lexed, cmd, parsed) {
   if (!manyTimes(cmd, parsed))
     return lexed;
