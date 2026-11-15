@@ -164,10 +164,11 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "for c in echo; do $c pkill -f watcher; done",
     'echo "$X" pkill',
     'kill "$PID"',
-    // #2244's controls: a glob used only as an argument, a program word with no glob, and a glob that matches no file, which keeps its typed word
+    // #2244's controls: a glob used only as an argument, a program word with no glob, a glob that matches no file, which keeps its typed word, and a glob in a quoted expansion, which the shell does not match
     "ls /usr/bin/pk?ll",
     "/usr/bin/pgrep -f watcher",
     "/no/such/folder/pk?ll -f watcher",
+    'X=/usr/bin; "$X/pk?ll" -f watcher',
     // a bare * names no program, so a case arm the reader takes for a program word passes
     'cd x && for f in *.ts; do case "$f" in *" a "*) ;; esac; done',
   ])("%s", async (command) => {

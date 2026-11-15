@@ -28,6 +28,18 @@ export const groups: Group[] = [
         "a kill by name in a loop variable read after a loop over a list it cannot read",
         "c=echo; for c in $(cat list); do :; done; $c -f watcher # pkill",
       ],
+      [
+        "a kill by name in a loop variable set before a one-word literal loop, read after it",
+        "c=pkill; for c in echo; do :; done; $c -f watcher",
+      ],
+      ["a kill by name at a path of bracket globs alone", "/usr/bin/[p][k][i][l][l] -f watcher"],
+      ["a kill by name at a path of bracket and ? globs alone", "/usr/bin/[p]?[i]?[l] -f watcher"],
+      [
+        "a kill by name at a path a POSIX class glob matches",
+        "/usr/bin/pk[[:alpha:]]ll -f watcher",
+      ],
+      ["a kill by name at a held folder and a glob", "X=/usr/bin; $X/pk?ll -f watcher"],
+      ["a kill by name at a held glob", "X=/usr/bin/pk?ll; $X -f watcher"],
     ],
   },
   {
@@ -53,6 +65,35 @@ export const groups: Group[] = [
         "a stash pop in an array of a spaced element a shell's -c sets and runs unquoted",
         `bash -c 'A=("git stash" pop); \${A[@]}'`,
       ],
+      [
+        "a stash pop in a loop variable its body set, read after the loop",
+        "c=echo; for c in x; do c='git stash'; done; $c pop",
+      ],
+      [
+        "a stash pop in an unset loop variable its body set, read after the loop",
+        "for c in x; do c='git stash'; done; $c pop",
+      ],
+      [
+        "a stash pop in a loop variable read after a one-word literal loop",
+        "c=echo; for c in 'git stash'; do :; done; $c pop",
+      ],
+      [
+        "a stash pop in an unset loop variable read after a one-word literal loop",
+        "for c in 'git stash'; do :; done; $c pop",
+      ],
+      [
+        "a stash pop in a loop variable set before a one-word literal loop, read after it",
+        "c='git stash'; for c in echo; do :; done; $c pop",
+      ],
+      ["a stash pop by a git path a POSIX class glob matches", "/usr/bin/g[[:alpha:]]t stash pop"],
+      [
+        "a stash pop in an array an append changed, git in an ANSI-C string",
+        `A=($'\\x67it' stash); A+=(pop); "\${A[@]}"`,
+      ],
+      [
+        "a stash pop in an array an append changed, stash in an ANSI-C string",
+        `A=(git $'st\\x61sh'); A+=(pop); "\${A[@]}"`,
+      ],
     ],
   },
   {
@@ -71,6 +112,41 @@ export const groups: Group[] = [
       [
         "a recursive delete in an array a shell's -c sets and runs",
         `bash -c 'A=(${DELETE}); "\${A[@]}"'`,
+      ],
+      [
+        "a plain rm in a loop variable its body set, read after the loop",
+        `c=echo; for c in x; do c=rm; done; $c ${NEVER_MADE}`,
+      ],
+      [
+        "a plain rm in an unset loop variable its body set, read after the loop",
+        `for c in x; do c=rm; done; $c ${NEVER_MADE}`,
+      ],
+      [
+        "a plain rm and its path in a loop variable its body set, read after the loop",
+        `for c in x; do c='rm ${NEVER_MADE}'; done; $c`,
+      ],
+      [
+        "a recursive delete in a loop variable its body set, read after the loop",
+        `c=echo; for c in x; do c='${DELETE}'; done; $c`,
+      ],
+      [
+        "a plain rm in a loop variable read after a one-word literal loop",
+        `c=echo; for c in rm; do :; done; $c ${NEVER_MADE}`,
+      ],
+      [
+        "a plain rm in an unset loop variable read after a one-word literal loop",
+        `for c in rm; do :; done; $c ${NEVER_MADE}`,
+      ],
+      [
+        "a plain rm in a loop variable set before a one-word literal loop, read after it",
+        `c=rm; for c in echo; do :; done; $c ${NEVER_MADE}`,
+      ],
+      ["a plain rm by a path a POSIX class glob matches", `/bin/r[[:alpha:]] ${NEVER_MADE}`],
+      ["a plain rm at a held folder and a glob", `X=/bin; $X/r? ${NEVER_MADE}`],
+      ["a plain rm at a held glob", `X=/bin/r?; $X ${NEVER_MADE}`],
+      [
+        "a plain rm in an array an element's assignment set from an ANSI-C string",
+        `A=(echo ${NEVER_MADE}); A[0]=$'\\x72m'; "\${A[@]}"`,
       ],
     ],
   },

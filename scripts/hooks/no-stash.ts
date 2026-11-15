@@ -5,6 +5,7 @@ import { fromFactory } from "./role"
 import {
   type Env,
   GIT_TAKES,
+  decodedText,
   globSpells,
   knownVariables,
   lex,
@@ -201,10 +202,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
-  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any stash, in a call that names stash and git, written out or as a glob that may match it
-  const named =
-    /\bstash\b/.test(BARE(command)) &&
-    (/\bgit\b/i.test(BARE(command)) || globSpells(BARE(command), ["git"]))
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any stash, in a call that names stash and git, written out, in an ANSI-C string or as a glob that may match it
+  const text = BARE(decodedText(command))
+  const named = /\bstash\b/.test(text) && (/\bgit\b/i.test(text) || globSpells(text, ["git"]))
   return run(lex(command, env.known), env, (cmd, parsed, at) =>
     named && unreadRun(parsed) ? Promise.resolve(UNREAD) : visit(cmd, parsed, at),
   )

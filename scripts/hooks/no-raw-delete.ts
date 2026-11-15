@@ -9,6 +9,7 @@ import {
   type Command,
   type Env,
   examine,
+  decodedText,
   globSpells,
   known,
   knownVariables,
@@ -255,8 +256,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   if (typeof command !== "string" || !CANDIDATE.test(bare(command))) return
   const directory = typeof cwd === "string" ? cwd : undefined
   const roots = rootsOf(directory, session)
-  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one or holds a glob that may match a delete program
-  const named = DELETES.test(bare(command)) || globSpells(bare(command), SPELLED)
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any delete, in a call that reads as one, in its text or an ANSI-C string, or holds a glob that may match a delete program
+  const text = bare(decodedText(command))
+  const named = DELETES.test(text) || globSpells(text, SPELLED)
   const env: Env = {
     cwd: directory,
     files: new Map(),
