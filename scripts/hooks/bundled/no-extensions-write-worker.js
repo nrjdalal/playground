@@ -10759,7 +10759,11 @@ function braceWords(word) {
   return done;
 }
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
-var sedText = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
+var coded = (digits, base, escape) => {
+  const point = Number.parseInt(digits, base);
+  return point <= 1114111 ? String.fromCodePoint(point) : escape;
+};
+var sedText = (text) => text.replace(/\\(?:x([\da-fA-F]{1,2})|o([0-7]{1,3})|d(\d{1,3})|(.))|&/gs, (m, hex, octal, decimal, c) => hex ? coded(hex, 16, m) : octal ? coded(octal, 8, m) : decimal ? coded(decimal, 10, m) : m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
 function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
   const writes = [];
@@ -10771,6 +10775,8 @@ function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
       return [read(script)];
     if (item[1])
       writes.push(read(item[1].slice(0, -1)));
+    if (item[2])
+      writes.push(read(item[2]));
   }
   return writes;
 }
@@ -10862,12 +10868,12 @@ var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
 var PERL_RE = `/${PERL_BODY}`;
 var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
 var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
-var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
+var PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*))?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
 var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`;
-var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
+var PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
 var PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y");
-var perlText = (text) => text.replace(/\\(.)|\$[1-9&]/gs, (m, c) => c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
+var perlText = (text) => text.replace(/\\(?:x\{([\da-fA-F]+)\}|x([\da-fA-F]{1,2})|N\{U\+([\da-fA-F]+)\}|o\{([0-7]+)\}|(0[0-7]{0,2})|(.))|\$[1-9&]/gs, (m, braced, hex, named, octal, zero, c) => braced || hex || named ? coded(braced || hex || named, 16, m) : octal || zero ? coded(octal || zero, 8, m) : c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
 ` : c === "t" ? "\t" : c);
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
 function perlReadScripts({ args, local }, env) {
@@ -10897,12 +10903,12 @@ function perlReadScripts({ args, local }, env) {
 var perlReads = (parsed, env) => !!perlReadScripts(parsed, env);
 function escapedWrites(parsed, env) {
   const tool = program(parsed.name);
-  const unescaped = () => parsed.args.map((word) => word.value.replaceAll("\\/", "/"));
+  const unescaped = (read) => parsed.args.map((word) => read(word.value));
   if (SEDS.has(tool))
-    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped();
+    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped(sedText);
   if (tool !== "perl")
     return [];
-  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped();
+  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped(perlText);
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -10964,6 +10970,29 @@ function xargsGrep(cmd, parsed, env) {
   const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/;
   return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && (xargs.replace === undefined || !first.value.includes(xargs.replace)) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value)) && !/^--process-slot-var(?:=|$)/.test(value)) && reads(parsed, env);
 }
+var STDOUT = new Set(["", "1", "&"]);
+async function printed(cmd, env) {
+  const parsed = parse3(cmd);
+  if (PRINTERS.has(parsed.name)) {
+    const out = await outputOf(cmd, env);
+    return out.unknown ? [] : [out.value];
+  }
+  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name;
+  return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
+}
+var hookFolders = new Map;
+function hookFolder(dir) {
+  if (!hookFolders.has(dir)) {
+    const read = existsSync4(dir) ? Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
+      stderr: "ignore",
+      stdout: "pipe"
+    }) : undefined;
+    const out = read?.exitCode === 0 ? read.stdout.toString().trim() : "";
+    hookFolders.set(dir, out ? real(resolve5(dir, out)) : undefined);
+  }
+  return hookFolders.get(dir);
+}
+var hookFile = (path) => !!path && (/(?:^|\/)\.git\/hooks\//.test(path) || hookFolder(dirname4(path)) === real(dirname4(path)));
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
   const { args, first } = parsed;
@@ -11395,6 +11424,24 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
+    const hookWrites = [
+      [
+        cmd.redirects.flatMap((r) => r.target && writer(r) && STDOUT.has(r.fd) ? [r.target] : []),
+        cmd
+      ],
+      [program(name) === "tee" ? args.filter((word) => !/^-./.test(word.value)) : [], cmd.stdin]
+    ];
+    for (const [targets, source] of hookWrites) {
+      if (targets.length === 0 || !source)
+        continue;
+      for (const text of await printed(source, env))
+        for (const here of places(env)) {
+          const named = scriptNames(text, here);
+          const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
+          if (hook)
+            return refuse(`${shown(hook)}, a hook file, written with a script that names ${named}`);
+        }
+    }
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
