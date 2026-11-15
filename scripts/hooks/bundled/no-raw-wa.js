@@ -2013,9 +2013,10 @@ function stdinScript({ args, name }) {
 async function argFile({ chdir, file, moved }, cmd, env) {
   if (file.procs)
     return held2(await outputs(file.procs, env));
-  const relative = !isAbsolute3(file.value);
-  const cwd = moved ? undefined : chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
-  return held2(await readPath(file, relative && (moved || chdir) ? { ...env, cwd } : env));
+  if (moved)
+    return unknown(`${file.value}, which a privilege wrapper before xargs may read from another folder or root`);
+  const cwd = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
+  return held2(await readPath(file, chdir && !isAbsolute3(file.value) ? { ...env, cwd } : env));
 }
 var itemsOf = (fed, split) => {
   if (fed.unknown || split === undefined)

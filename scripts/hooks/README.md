@@ -13,7 +13,7 @@ xargs' replace-string options (`-I`, `-i`, `-J`, `--replace`) are read only amon
 A word in xargs' program position (its program, or a wrapper's name after it) that holds the replace string runs whatever stdin fills in there, so every hook judges the command again with that word filled (`xargsFilled` in `scripts/hooks/shell.ts`).
 It fills in stdin's text as a whole, line by line and item by item (for `-n`), split at blanks, or reads the word as unread when stdin is text it cannot read or makes more texts than `READINGS`.
 GNU's input options name more input (`xargsOption`): `-a` or `--arg-file` reads a file in place of stdin, a process substitution's output or a regular file within `MAX_BYTES`, and `-d` or `--delimiter` (one character or a backslash escape) and `-0` or `--null` split the input at their delimiter.
-A relative `-a` file is read from the folder an `env -C` before xargs names, and as unread after `sudo`, `doas` or `pkexec`, which may move the folder.
+A relative `-a` file is read from the folder an `env -C` before xargs names, and any `-a` file as unread after `sudo`, `doas` or `pkexec`, which may move the folder or the root.
 xargsOption reads these and the replace-string options in a cluster of flags too (`-0I`, `-rJ`), and each long one by any prefix GNU takes (`--delim=,`, `--repl=%`).
 The fill adds each such file's texts and each delimiter's items beside stdin's, each input and split under its own `READINGS` cap, and reads the word as unread for a file it cannot read or a delimiter escape it cannot decode.
 A text holding a quote or a backslash is filled with them stripped, as xargs strips them, and read as one unread word too.

@@ -1461,7 +1461,7 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
       delimiters?: (string | undefined)[]
@@ -1564,7 +1564,7 @@ function xargsOption(
 // Each word env -S splits out of its string, to the typed word in cmd.words that string came from, so xargsFilled fills the typed word; keyed on parse's own words alone, so no call's state is kept
 const splitFrom = new WeakMap<Word, Word>()
 
-// `moved`: a privilege wrapper came before, which may run the rest in another folder (sudo -D or -i, pkexec without --keep-cwd)
+// `moved`: a privilege wrapper came before, which may run the rest in another folder or root (sudo -D, -i or -R, pkexec without --keep-cwd)
 type State = { chdir?: Word; local: Map<string, Text>; moved?: boolean; rest: Word[]; xargs: Xargs }
 // env's folder word, which a second -C leaves unread, since one env moves by each in turn and another by the last alone
 const chdirOf = (state: State, word: Word | undefined): Word | undefined =>
@@ -2106,16 +2106,19 @@ function stdinScript({ args, name }: Parsed): boolean {
   return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
-// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and from no folder after a privilege wrapper, which may move it
+// The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
 async function argFile(
   { chdir, file, moved }: NonNullable<NonNullable<Xargs>["files"]>[number],
   cmd: Command,
   env: Env,
 ): Promise<Text> {
   if (file.procs) return held(await outputs(file.procs, env))
-  const relative = !isAbsolute(file.value)
-  const cwd = moved ? undefined : chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
-  return held(await readPath(file, relative && (moved || chdir) ? { ...env, cwd } : env))
+  if (moved)
+    return unknown(
+      `${file.value}, which a privilege wrapper before xargs may read from another folder or root`,
+    )
+  const cwd = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
+  return held(await readPath(file, chdir && !isAbsolute(file.value) ? { ...env, cwd } : env))
 }
 
 // The texts xargs may fill in from one input: by default (`split` null) the whole, each line and each blank-separated item (-n), and under a -d or -0 delimiter the whole and each item it splits off; undefined when the reader cannot read the input or decode the delimiter
