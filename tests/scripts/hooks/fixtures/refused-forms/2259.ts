@@ -69,6 +69,23 @@ export const groups: Group[] = [
         "cd /usr/bin && ./pk(i|x)ll -f watcher",
       ],
       ["a kill by name at a path a brace sequence spells", "/usr/bin/pk{i..i}ll -f watcher"],
+      // round 1: a quoted paren is a plain character, so a glob beside one stays a glob, and a quoted paren inside a group or its qualifiers is text
+      [
+        "a kill by name at a relative glob beside a quoted paren, after a cd into a folder it cannot read",
+        `cd "$Q" && ./pk?ll'(' -f watcher`,
+      ],
+      [
+        "a kill by name at a relative glob behind a quoted paren, after a cd into a folder it cannot read",
+        `cd "$Q" && '('pk?ll -f watcher`,
+      ],
+      [
+        "a kill by name at a path a zsh alternation holding a quoted paren matches",
+        `/usr/bin/p(kill|x')') -f watcher`,
+      ],
+      [
+        "a kill by name at a path a glob matches, with glob qualifiers holding a quoted paren",
+        `/usr/bin/pk?ll(e:'(true)':) -f watcher`,
+      ],
     ],
   },
   {
@@ -81,6 +98,14 @@ export const groups: Group[] = [
         "/usr/bin/g(i|x)t(x) stash pop",
       ],
       ["a stash pop by a git path a brace list spells", "/usr/bin/g{i,x}t stash pop"],
+      [
+        "a stash pop by a relative git glob beside a quoted paren, after a cd into a folder it cannot read",
+        `cd "$Q" && ./g?t'(' stash pop`,
+      ],
+      [
+        "a stash pop by a git path a zsh alternation holding a quoted paren matches",
+        `/usr/bin/g(it|x')') stash pop`,
+      ],
     ],
   },
   {

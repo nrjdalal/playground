@@ -7960,14 +7960,14 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  const grouped = (first.source ?? "").includes("(");
-  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(pattern) : null;
-  const patterns = grouped ? groupWords(qualifiers ? pattern.slice(0, qualifiers.index) : pattern) : [pattern];
-  if (patterns === undefined)
-    return;
+  const seen = (first.source ?? "").replace(QUOTED, (part) => "\uE005".repeat(part.length));
+  const grouped = seen.includes("(");
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null;
+  const groups = grouped ? groupWords(qualifiers ? pattern.slice(0, pattern.length - qualifiers[0].length) : pattern) : [pattern];
+  const patterns = groups ?? [pattern];
   if (patterns === null || qualifiers?.[1].includes("N"))
     return null;
-  if (!grouped && !GLOB_PATTERN.test(pattern))
+  if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern))
     return;
   const [only, ...more] = patterns;
   const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
@@ -8033,22 +8033,23 @@ function globMatches(pattern, env) {
   return found;
 }
 function groupWords(pattern) {
-  const open = pattern.indexOf("(");
+  const seen = pattern.replace(QUOTED, (part) => "\uE005".repeat(part.length));
+  const open = seen.indexOf("(");
   if (open < 0)
-    return pattern.includes(")") ? undefined : [pattern.replace(/["']/g, "")];
+    return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)];
   const cuts = [open];
   let close = -1;
-  for (let k = open, depth = 0;k < pattern.length && close < 0; k++) {
-    if (pattern[k] === "(")
+  for (let k = open, depth = 0;k < seen.length && close < 0; k++) {
+    if (seen[k] === "(")
       depth++;
-    else if (pattern[k] === "|" && depth === 1)
+    else if (seen[k] === "|" && depth === 1)
       cuts.push(k);
-    else if (pattern[k] === ")" && --depth === 0)
+    else if (seen[k] === ")" && --depth === 0)
       close = k;
   }
   if (close < 0 || pattern.slice(open, close).includes("/"))
     return;
-  if (/[#^~]/.test(pattern.slice(open, close)))
+  if (/[#^~]/.test(seen.slice(open, close)))
     return null;
   const out = [];
   for (const [n, from] of cuts.entries()) {
@@ -8059,6 +8060,7 @@ function groupWords(pattern) {
   }
   return out;
 }
+var unquote = (part) => part.startsWith("\\") ? part.slice(1) : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined);
 function braceRun(cmd, first) {
   if (first?.unknown !== BRACE)
     return;

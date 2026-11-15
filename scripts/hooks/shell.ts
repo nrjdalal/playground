@@ -2003,7 +2003,7 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
-// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) or a typed zsh group (`/usr/bin/pk(i|x)ll`, groupWords) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a group groupWords cannot read, zsh's glob qualifiers on a pattern that matches a file or that may vanish, a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, for a pattern that matches no file, which runs as typed, and for one zsh refuses as bad, which runs nothing
+// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) or a typed zsh group (`/usr/bin/pk(i|x)ll`, groupWords) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a group groupWords cannot read, zsh's glob qualifiers on a pattern that matches a file or that may vanish, a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed; a pattern zsh refuses as bad keeps the glob reading alone
 function globRun(
   cmd: Command,
   first: Word | undefined,
@@ -2012,15 +2012,18 @@ function globRun(
 ): Command[] | null | undefined {
   const pattern = first?.value ?? ""
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
-  const grouped = (first.source ?? "").includes("(")
+  // a paren the shell sees, its quoted parts masked at their length, since zsh reads a quoted paren as a plain character
+  const seen = (first.source ?? "").replace(QUOTED, (part) => "\uE005".repeat(part.length))
+  const grouped = seen.includes("(")
   // zsh reads a closing group with no | or ( in it as glob qualifiers, which pick among the files the rest matches and may run code there, and whose N lets a pattern that matches nothing vanish
-  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(pattern) : null
-  const patterns = grouped
-    ? groupWords(qualifiers ? pattern.slice(0, qualifiers.index) : pattern)
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(seen) : null
+  const groups = grouped
+    ? groupWords(qualifiers ? pattern.slice(0, pattern.length - qualifiers[0].length) : pattern)
     : [pattern]
-  if (patterns === undefined) return
+  // a pattern groupWords reads as bad keeps canary's glob reading, so the group reading only adds refusals
+  const patterns = groups ?? [pattern]
   if (patterns === null || qualifiers?.[1].includes("N")) return null
-  if (!grouped && !GLOB_PATTERN.test(pattern)) return
+  if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern)) return
   const [only, ...more] = patterns
   // a group with no | and no glob character names one path (`docs(PG-1):`, a commit scope a guard reads as a line), so under a folder the reader cannot read it keeps its typed word
   const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere
@@ -2080,19 +2083,21 @@ function globMatches(pattern: string, env: Env): string[] | null {
   return found
 }
 
-// The patterns a zsh group makes of a pattern word, each alternative of `(a|b)` in its place, nested groups expanded and its quotes dropped, as zsh's glob matches it against files; undefined for a pattern zsh refuses as bad, which runs nothing (an unclosed group, a / inside one); null for one the reader cannot read: an extended glob character (#, ^, ~) inside a group, or more patterns than READINGS
+// The patterns a zsh group makes of a pattern word, each alternative of `(a|b)` in its place, nested groups expanded, a quoted part's parens and bars kept as text and its quotes dropped, as zsh's glob matches it against files; undefined for a pattern zsh refuses as bad (an unclosed group, a / inside one), which globRun reads as canary did; null for one the reader cannot read: an extended glob character (#, ^, ~) inside a group, or more patterns than READINGS
 function groupWords(pattern: string): string[] | null | undefined {
-  const open = pattern.indexOf("(")
-  if (open < 0) return pattern.includes(")") ? undefined : [pattern.replace(/["']/g, "")]
+  // a quoted part, masked at its length, keeps its parens, bars and glob characters as text
+  const seen = pattern.replace(QUOTED, (part) => "\uE005".repeat(part.length))
+  const open = seen.indexOf("(")
+  if (open < 0) return seen.includes(")") ? undefined : [pattern.replace(QUOTED, unquote)]
   const cuts = [open]
   let close = -1
-  for (let k = open, depth = 0; k < pattern.length && close < 0; k++) {
-    if (pattern[k] === "(") depth++
-    else if (pattern[k] === "|" && depth === 1) cuts.push(k)
-    else if (pattern[k] === ")" && --depth === 0) close = k
+  for (let k = open, depth = 0; k < seen.length && close < 0; k++) {
+    if (seen[k] === "(") depth++
+    else if (seen[k] === "|" && depth === 1) cuts.push(k)
+    else if (seen[k] === ")" && --depth === 0) close = k
   }
   if (close < 0 || pattern.slice(open, close).includes("/")) return undefined
-  if (/[#^~]/.test(pattern.slice(open, close))) return null
+  if (/[#^~]/.test(seen.slice(open, close))) return null
   const out: string[] = []
   for (const [n, from] of cuts.entries()) {
     const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close)
@@ -2101,6 +2106,12 @@ function groupWords(pattern: string): string[] | null | undefined {
   }
   return out
 }
+
+// A quoted part's text, its quotes and a backslash's escape dropped
+const unquote = (part: string): string =>
+  part.startsWith("\\")
+    ? part.slice(1)
+    : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
 // A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees, which bash refuses and a guard meets as code it reads as a line (`f({a, b})`), and for any other program word
 function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
@@ -2181,11 +2192,11 @@ export function globSpells(text: string, names: string[]): boolean {
   return false
 }
 
-// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined and its quotes and backslashes dropped (braceWords, groupWords, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell
+// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell
 export function spelledText(text: string): string {
   const spelled = text
     .replace(/\\\n/g, "")
-    .replace(/["'\\]/g, "")
+    .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
     .filter((token) => /[{(]/.test(token))
     .flatMap((token) =>
@@ -2193,6 +2204,7 @@ export function spelledText(text: string): string {
         (word) => groupWords(word.replace(/\([^()|]*\)$/, "")) ?? [word],
       ),
     )
+    .map((word) => word.replace(/["']/g, ""))
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text
 }
 
