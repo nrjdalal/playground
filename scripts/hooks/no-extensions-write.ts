@@ -32,6 +32,7 @@ import {
 } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
+  BRACE,
   braceWords,
   codeFed,
   type Command,
@@ -275,7 +276,7 @@ const hookRemoverWord = (word: string) => {
   const lower = word.toLowerCase()
   return HOOK_REMOVERS.has(GNU_NAMED.exec(lower)?.[1] ?? lower)
 }
-// What of a text makes it one a hook file may not hold, `hook` asked whether the file is one only once the text holds such a thing: a remover word anywhere in it, its quotes and backslashes dropped, else, in a text holding an expansion or an eval, a command of it whose program the shell reads as a remover, an eval, or a program built from a variable or a substitution, which may be any remover; text the hook cannot read (undefined) counts for a file `hook` is sure of
+// What of a text makes it one a hook file may not hold, `hook` asked whether the file is one only once the text holds such a thing: a remover word anywhere in it, its quotes and backslashes dropped, else, in a text holding an expansion, a glob, a brace, a paren or an eval, a command of it whose program the shell reads as a remover, an eval, a program built from a variable or a substitution, or one named by a glob, a zsh group or a brace list, which may be any remover; text the hook cannot read (undefined) counts for a file `hook` is sure of
 function hookRemover(
   text: string | undefined,
   hook: (sure: boolean) => boolean,
@@ -286,12 +287,13 @@ function hookRemover(
     .flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/))
     .find(hookRemoverWord)
   if (word) return hook(false) ? word : undefined
-  if (!/[$`?*]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false)) return
+  if (!/[$`?*{(]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false)) return
   for (const cmd of lex(text).commands) {
     const { first, name } = parse(cmd)
     if (marked(name)) return "a program built from a variable or a substitution"
-    // a glob the shell sees in the program word (`/bin/r?`) picks the program at run time; test's own `[` and `[[` hold no pattern
-    if (first?.glob && /[?*]|\[[^\]]*\]/.test(name)) return "a program named by a glob"
+    // a glob the shell sees in the program word (`/bin/r?`) or a zsh group (`/bin/r(m|x)`) picks the program at run time, and a brace list (`/bin/r{m,}`) spells it; test's own `[` and `[[` hold no pattern
+    if (first?.unknown === BRACE) return "a program named by a brace list"
+    if (first?.glob && /[?*(]|\[[^\]]*\]/.test(name)) return "a program named by a glob"
     if (name === "eval" || hookRemoverWord(program(name))) return program(name)
   }
 }

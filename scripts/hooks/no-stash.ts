@@ -13,6 +13,7 @@ import {
   PRINTERS,
   program,
   run,
+  spelledText,
   unreadRun,
   visible,
   type Visit,
@@ -202,8 +203,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
-  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any stash, in a call that names stash and git, written out, in an ANSI-C string or as a glob that may match it
-  const text = BARE(decodedText(command))
+  // an array run whole or a glob program word the reader cannot read (unreadRun) may be any stash, in a call that names stash and git, written out, in an ANSI-C string, by a brace list or zsh group spelled out (spelledText) or as a glob that may match it
+  const text = BARE(spelledText(decodedText(command)))
   const named = /\bstash\b/.test(text) && (/\bgit\b/i.test(text) || globSpells(text, ["git"]))
   return run(lex(command, env.known), env, (cmd, parsed, at) =>
     named && unreadRun(parsed) ? Promise.resolve(UNREAD) : visit(cmd, parsed, at),

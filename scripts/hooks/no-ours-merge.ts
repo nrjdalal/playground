@@ -4,6 +4,7 @@ import { input } from "./input"
 import { gitCommand } from "./no-stash"
 import { fromFactory } from "./role"
 import {
+  BRACE,
   braceWords,
   type Env,
   GIT_TAKES,
@@ -27,8 +28,6 @@ const SHORT_TAKES = new Set(["F", "X", "m", "o", "s"])
 const ATTACHED = new Set(["S", "j", "u"])
 // How deep the hook follows an alias whose text names another alias; a deeper chain is refused
 const ALIAS_DEPTH = 8
-// The reader's mark on a word holding a brace list, which expanded() clears on each word braceWords makes
-const BRACE = "a brace expansion"
 // A brace sequence ({x..y}), which braceWords leaves as written
 const SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/
 const INSTEAD =
