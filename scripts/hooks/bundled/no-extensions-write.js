@@ -10003,7 +10003,10 @@ var ROUTE = `${WHY_ROOT} A guard's list or setting changes only by the owner typ
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var HOOK_TEXT = "which a hook file may not hold";
+var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution and no eval, or tell your lead what it needs to remove.";
+var hookRemoval = (file, what) => `${file} written with ${what}, ${HOOK_TEXT}`;
+var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE}`;
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
@@ -10095,6 +10098,43 @@ var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(chmod|cp|dd|find|install|ln|mkdir|mktemp|mv|rm|rmdir|sed|shred|sort|tar|tee|touch|truncate|unlink|xargs)$/;
+var HOOK_REMOVERS = new Set([
+  ...REMOVERS,
+  "-delete",
+  "rimraf",
+  "rm_f",
+  "rm_r",
+  "rm_rf",
+  "rmdirsync",
+  "rmsync",
+  "rmtree",
+  "shred",
+  "srm",
+  "trash",
+  "trash-put",
+  "unlinksync",
+  "wipe"
+]);
+var hookRemoverWord = (word) => {
+  const lower = word.toLowerCase();
+  return HOOK_REMOVERS.has(GNU_NAMED.exec(lower)?.[1] ?? lower);
+};
+function hookRemover(text, hook) {
+  if (text === undefined)
+    return hook(true) ? "text it cannot read" : undefined;
+  const word = text.replace(/[\\'"]/g, "").split(/[^\w-]+/).find(hookRemoverWord);
+  if (word)
+    return hook(false) ? word : undefined;
+  if (!/[$`]|\beval\b/.test(text) || !hook(false))
+    return;
+  for (const cmd of lex(text).commands) {
+    const { name } = parse3(cmd);
+    if (marked(name))
+      return "a program built from a variable or a substitution";
+    if (name === "eval" || hookRemoverWord(program(name)))
+      return program(name);
+  }
+}
 var WRITER_TAKES = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
@@ -11223,6 +11263,7 @@ function compoundBodies(commands, bodies = new WeakMap) {
   });
   return bodies;
 }
+var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 async function printed(cmd, env, kids) {
   const held = kids(cmd);
   if (held) {
@@ -11230,11 +11271,17 @@ async function printed(cmd, env, kids) {
     return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat();
   }
   const parsed = parse3(cmd);
-  if (PRINTERS.has(parsed.name)) {
+  const { args, name } = parsed;
+  if (SILENT.has(name))
+    return [];
+  const files = name === "cat" && args.some((a) => a.value !== "-" && !a.value.startsWith("-"));
+  if (!files && (name === "" || PRINTERS.has(name) || name === "cat" || name === "tee")) {
     const out = await outputOf(cmd, env);
-    return out.unknown ? [] : [out.value];
+    return [out.unknown ? undefined : out.value];
   }
-  const tool = GNU_NAMED.exec(parsed.name)?.[1] ?? parsed.name;
+  const tool = GNU_NAMED.exec(name)?.[1] ?? name;
+  if (files || !SEDS.has(program(name)) && tool !== "perl")
+    return [undefined];
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
 }
 function readHookFolder(dir) {
@@ -11257,8 +11304,8 @@ function readHookFolder(dir) {
   }
 }
 var hookFolders = new Map;
-function hookFile(path) {
-  if (!path)
+function hookFile(path, sure = false) {
+  if (!path || path.startsWith("/dev/"))
     return false;
   if (/(?:^|\/)\.git\/hooks\//.test(path))
     return true;
@@ -11266,7 +11313,7 @@ function hookFile(path) {
   if (!hookFolders.has(dir))
     hookFolders.set(dir, readHookFolder(dir));
   const folder = hookFolders.get(dir);
-  return folder === true || folder === real(dir);
+  return !sure && folder === true || folder === real(dir);
 }
 function narrow(cmd, env) {
   const parsed = parse3(cmd);
@@ -11508,7 +11555,21 @@ async function inspect(raw, environment, unknown = false) {
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
-    return inRoot(resolve5(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
+    const path = resolve5(directory ?? "", expanded);
+    if (inRoot(path))
+      return refuse(`a write to ${file}`);
+    const edits = Array.isArray(input.edits) ? input.edits : [];
+    const patch = typeof input.content === "string" && input.content.includes("*** Begin Patch");
+    const removes = [
+      input.content,
+      patch ? String(input.content).split(`
+`).filter((line) => line.startsWith("+")).map((line) => line.slice(1)).join(`
+`) : undefined,
+      input.new_string,
+      input.new_source,
+      ...edits.map((e) => e?.new_string)
+    ].filter((text) => typeof text === "string").map((text) => hookRemover(text, () => hookFile(path))).find(Boolean);
+    return removes ? refuse(hookRemoval(file, removes)) : undefined;
   }
   if (tool !== "Bash")
     return;
@@ -11707,6 +11768,12 @@ async function inspect(raw, environment, unknown = false) {
         return;
       for (const text of await printed(source, env, kids))
         for (const here of places(env)) {
+          let into;
+          const removes = hookRemover(text, (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))));
+          if (removes && into)
+            return hookRemoval(shown(into), removes);
+          if (text === undefined)
+            continue;
           const named = scriptNames(text, here);
           const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
           if (hook)
@@ -11729,7 +11796,7 @@ async function inspect(raw, environment, unknown = false) {
     if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
       execFds = fdFiles(cmd.redirects, execFds);
     const teeTool = program(name);
-    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin) : undefined);
+    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined);
     if (hookWrite)
       return refuse(hookWrite);
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
@@ -11820,6 +11887,7 @@ async function inspect(raw, environment, unknown = false) {
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
       ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
     ];
+    const unreadScript = edited.size > 0 && (args.some((word) => !edited.has(word) && marked(word.value)) || (tool === "sed" ? args.some((word) => /^-[^-i]*f|^--file(?:=|$)/.test(word.value)) : tool === "perl" && !args.some((word) => /^-[^-]*[eE]/.test(word.value))));
     const escaped = [...sedEdit, ...perlEdit].length > 0 ? [] : escapedWrites(parsed, env);
     const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"));
     const readings = gnuReadings(posix);
@@ -11858,6 +11926,11 @@ async function inspect(raw, environment, unknown = false) {
         if (named)
           return refuse(`${verb} with a variable on ${named}`);
       }
+      let hook;
+      const isHook = () => !!(hook = [...edited].find((file) => hookFile(pathOf(file, here))));
+      const hookText = edited.size === 0 ? undefined : unreadScript ? isHook() && "a script it cannot read" : written.map((text) => hookRemover(text, isHook)).find(Boolean);
+      if (hookText && hook)
+        return refuse(hookRemoval(shown(hook), hookText));
       for (const text of written) {
         const named = scriptNames(text, here);
         if (named)
