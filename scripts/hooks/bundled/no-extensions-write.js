@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
+import { existsSync as existsSync4, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
 import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
@@ -11990,6 +11990,7 @@ async function inspect(raw, environment, unknown = false) {
       ...hookEdits
     ];
     const sources = copies || copier === "sed" || copier === "perl" ? args.flatMap((word) => copier === "dd" ? word.value.startsWith("if=") ? [after(word, 3)] : [] : !word.value.startsWith("-") && !into.includes(word) && !hookEdits.includes(word) ? [word] : []) : [];
+    const linked = copier === "ln" && args.some((word) => /^-[^-]*s/.test(word.value) || word.value === "--symbolic") && !args.some((word) => /^-[^-]*r/.test(word.value) || word.value === "--relative");
     const readsStdin = copier === "dd" ? sources.length === 0 || sources.some((word) => STDIN_PATH.test(word.value)) : copies && sources.some((word) => STDIN_PATH.test(word.value));
     const ownText = cmd.words.map((word) => word.value).join(" ");
     const ownTexts = [
@@ -12001,11 +12002,30 @@ async function inspect(raw, environment, unknown = false) {
         const path = pathOf(word, here);
         return hookFile(path, true) || copies && !!path && hookFile(join7(path, "x"), true);
       });
+      const linkFolder = () => {
+        const target = into.length === 1 ? pathOf(into[0], here) : undefined;
+        if (!target)
+          return;
+        return into[0].value.endsWith("/") || existsSync4(target) && statSync3(target).isDirectory() ? target : dirname4(target);
+      };
       const copied = [];
       let unread = false;
-      for (const word of sources) {
-        if (STDIN_PATH.test(word.value))
+      for (const typed of sources) {
+        if (STDIN_PATH.test(typed.value))
           continue;
+        if (typed.glob) {
+          unread = true;
+          continue;
+        }
+        let word = typed;
+        if (linked && !/^[/~]/.test(typed.value)) {
+          const folder = linkFolder();
+          if (!folder || typed.unknown) {
+            unread = true;
+            continue;
+          }
+          word = { ...typed, value: resolve5(folder, typed.value) };
+        }
         const path = pathOf(word, here);
         const written = !!path && lineWritten.some((each) => pathOf(each, here) === path);
         if (written && !here.files.has(path)) {

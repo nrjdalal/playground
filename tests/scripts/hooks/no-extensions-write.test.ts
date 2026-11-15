@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 
 import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
@@ -3769,6 +3769,8 @@ describe("hook text that reaches a hook by another path", () => {
   writeFileSync(join(FILES, "names.sh"), "#!/bin/sh\ntouch ~/.playground/extensions/x\n")
   writeFileSync(join(FILES, "removes.sh"), "#!/bin/sh\nrm old.log\n")
   writeFileSync(join(FILES, "plain.sh"), "#!/bin/sh\nbun test\n")
+  mkdirSync(join(HOME, "scripts", "hooks"), { recursive: true })
+  writeFileSync(join(HOME, "scripts", "hooks", "pre-commit"), "#!/bin/sh\nbun test\n")
   // each held text and its near twins as a file's text: as written, in a comment, after a header line, and joined across a backslash-newline
   const TWINS = (text: string, joined: string) => [text, `# ${text}`, `#!/bin/sh\n${text}`, joined]
   const HELD = [
@@ -3784,7 +3786,7 @@ describe("hook text that reaches a hook by another path", () => {
   })
   const COPIED = join(HOME, "copied-on-the-line")
   // a copy into a hook whose source the hook reads by another way than an operand: stdin from a file, a piped reader, a file the line wrote first, a variable, a folder
-  const SHAPES: [string, (file: string, folder: string) => string][] = [
+  const SHAPES: [string, (file: string, folder: string, cwd: string) => string][] = [
     ["dd's stdin from a file", (file) => `dd of=.git/hooks/pre-commit < ${file}`],
     ["a copy of /dev/stdin from a file", (file) => `cp /dev/stdin .git/hooks/pre-commit < ${file}`],
     ["a reader piped into dd", (file) => `cat ${file} | dd of=.git/hooks/pre-commit`],
@@ -3794,11 +3796,41 @@ describe("hook text that reaches a hook by another path", () => {
     ],
     ["a source in a variable", (file) => `F=${file}; cp "$F" .git/hooks/pre-commit`],
     ["a folder copied into the hook folder", (_, folder) => `cp -R ${folder}/ .git/hooks/`],
+    ["a glob copied into the hook folder", (_, folder) => `cp ${folder}/* .git/hooks/`],
+    [
+      "a glob of a name's start copied into the hook folder",
+      (_, folder) => `cp ${folder}/pre* .git/hooks/`,
+    ],
+    ["a glob copied into the hook folder by -t", (_, folder) => `cp -t .git/hooks ${folder}/*`],
+    ["a glob moved into the hook folder", (_, folder) => `mv ${folder}/* .git/hooks/`],
+    ["a glob installed into the hook folder", (_, folder) => `install ${folder}/* .git/hooks/`],
+    [
+      "a one-character glob copied into a hook",
+      (_, folder) => `cp ${folder}/pre-commi? .git/hooks/pre-commit`,
+    ],
+    [
+      "a brace list copied into the hook folder",
+      (_, folder) => `cp ${folder}/{pre-commit,x} .git/hooks/`,
+    ],
+    [
+      "a relative symbolic link into a hook",
+      (file, _, cwd) => `ln -s ${relative(join(cwd, ".git", "hooks"), file)} .git/hooks/pre-commit`,
+    ],
+    [
+      "a relative symbolic link forced into a hook",
+      (file, _, cwd) =>
+        `ln -sf ${relative(join(cwd, ".git", "hooks"), file)} .git/hooks/pre-commit`,
+    ],
+    [
+      "a relative symbolic link made in the hook folder",
+      (_, folder, cwd) =>
+        `ln -s ${relative(join(cwd, ".git", "hooks"), join(folder, "pre-commit"))} .git/hooks/`,
+    ],
   ]
   test.each(
     SHAPES.flatMap(([shape, form]) =>
       HELD.flatMap(({ file, folder, k }) =>
-        [HOME, DATA, WORK].map((cwd) => [shape, k, cwd, form(file, folder)] as const),
+        [HOME, DATA, WORK].map((cwd) => [shape, k, cwd, form(file, folder, cwd)] as const),
       ),
     ),
   )(
@@ -3851,6 +3883,10 @@ describe("hook text that reaches a hook by another path", () => {
     [
       "a plain file fed to dd into a git hook",
       "dd of=.git/hooks/pre-commit < hook-sources/plain.sh",
+    ],
+    [
+      "a relative symbolic link to the repo's plain hook script",
+      "ln -s ../../scripts/hooks/pre-commit .git/hooks/pre-commit",
     ],
     [
       "an echo of a home folder in upper case into a git hook",

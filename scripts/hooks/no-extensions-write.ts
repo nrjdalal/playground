@@ -2450,6 +2450,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
                 : [],
           )
         : []
+    // a symbolic link's relative source names a file from the link's own folder, unless -r reads it from the shell's folder
+    const linked =
+      copier === "ln" &&
+      args.some((word) => /^-[^-]*s/.test(word.value) || word.value === "--symbolic") &&
+      !args.some((word) => /^-[^-]*r/.test(word.value) || word.value === "--relative")
     // a copy that reads its stdin: dd with no if=, or a copy of /dev/stdin
     const readsStdin =
       copier === "dd"
@@ -2468,11 +2473,32 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           const path = pathOf(word, here)
           return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
         })
-      // what a copy reads: each source file's text and its stdin's, and whether one of them is text the hook cannot read (a folder, a value it cannot hold, a piped program's output, a file the line writes before the copy reads it), while a source no file is at and the line writes none of names nothing a copy can take
+      // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
+      const linkFolder = () => {
+        const target = into.length === 1 ? pathOf(into[0], here) : undefined
+        if (!target) return undefined
+        return into[0].value.endsWith("/") || (existsSync(target) && statSync(target).isDirectory())
+          ? target
+          : dirname(target)
+      }
+      // what a copy reads: each source resolved to one file, whose text is read, and its stdin; any other source reads as text the hook cannot read (a glob, a folder, a value it cannot hold, a piped program's output, a file the line writes before the copy reads it), while a source no file is at and the line writes none of names nothing a copy can take
       const copied: string[] = []
       let unread = false
-      for (const word of sources) {
-        if (STDIN_PATH.test(word.value)) continue
+      for (const typed of sources) {
+        if (STDIN_PATH.test(typed.value)) continue
+        if (typed.glob) {
+          unread = true
+          continue
+        }
+        let word = typed
+        if (linked && !/^[/~]/.test(typed.value)) {
+          const folder = linkFolder()
+          if (!folder || typed.unknown) {
+            unread = true
+            continue
+          }
+          word = { ...typed, value: resolve(folder, typed.value) }
+        }
         const path = pathOf(word, here)
         const written = !!path && lineWritten.some((each) => pathOf(each, here) === path)
         // a file the line writes holds, when the copy reads it, the text the line gave it (here.files), else text the hook cannot see yet
