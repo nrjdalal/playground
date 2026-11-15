@@ -181,6 +181,22 @@ describe("isProtected", () => {
       expect(isProtected(path, roots, opts.session)).toBeString()
   })
 
+  // #2247's review: a scratch/ that is a symlink would carry the own loose file's exemption into the link's target, so it holds only while scratch/ is a real folder reached through no link from HOME.
+  test.each([".ssh", ".playground/elsewhere"])(
+    "refuses the caller's own loose file name through a scratch/ linked into %s, by either path",
+    (target) => {
+      const roots = machine()
+      const into = join(roots.home, target)
+      const kept = file(join(into, `${opts.session}-key`), "secret")
+      symlinkSync(into, join(roots.home, ".playground", "scratch"))
+      const linked = join(roots.home, ".playground", "scratch", `${opts.session}-key`)
+      expect(isProtected(linked, roots, opts.session)).toBeString()
+      expect(isProtected(kept, roots, opts.session)).toBeString()
+      expect(quarantine(linked, opts, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+      expect(readFileSync(kept, "utf8")).toBe("secret")
+    },
+  )
+
   test("moves the caller's own loose scratch file to the trash, and restore puts it back", () => {
     const roots = machine()
     const path = file(
