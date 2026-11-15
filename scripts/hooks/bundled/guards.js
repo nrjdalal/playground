@@ -16415,8 +16415,69 @@ if (false) {}
 
 // scripts/hooks/no-ours-merge.ts
 var SUBS = new Set(["merge", "pull"]);
+var VERIFIED = new Set(["commit", "merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "j", "m", "o", "s"]);
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
+var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
+var TAKES3 = {
+  commit: new Set([
+    "--author",
+    "--cleanup",
+    "--date",
+    "--file",
+    "--fixup",
+    "--message",
+    "--pathspec-from-file",
+    "--reedit-message",
+    "--reuse-message",
+    "--squash",
+    "--template",
+    "--trailer"
+  ]),
+  merge: new Set([
+    "--cleanup",
+    "--file",
+    "--into-name",
+    "--message",
+    "--strategy",
+    "--strategy-option"
+  ]),
+  pull: new Set(["--cleanup", "--file", "--strategy", "--strategy-option", "--upload-pack"])
+};
+var COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"]);
+function hooksOff(sub, args) {
+  let off;
+  const commit = sub === "commit";
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--")
+      break;
+    if (v.startsWith("--")) {
+      if (v === "--verify")
+        off = undefined;
+      else if (v === "--no-verify" || commit && v.length > 8 && "--no-verify".startsWith(v))
+        off = v;
+      else if (TAKES3[sub]?.has(v))
+        k++;
+      continue;
+    }
+    if (!v.startsWith("-") || v === "-")
+      continue;
+    for (let c = 1;c < v.length; c++) {
+      const letter = v[c];
+      if (commit && letter === "n")
+        off = "-n";
+      else if (letter === "S" || letter === "u")
+        break;
+      else if ((commit ? COMMIT_SHORT : SHORT_TAKES).has(letter)) {
+        if (c === v.length - 1)
+          k++;
+        break;
+      }
+    }
+  }
+  return off;
+}
 var strategyLong = (name) => name === "strategy" || name.length > "strategy".length && "strategy-option".startsWith(name);
 function strategies(args) {
   const found = [];
@@ -16462,9 +16523,16 @@ function judgeGit2(args) {
   const alias = aliases.find((a) => a.startsWith(`alias.${sub.value}=`));
   if (alias && /\b(?:merge|pull)\b/.test(alias) && /\bours\b/.test(alias))
     return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a merge with ours. ${INSTEAD3}`;
-  if (!SUBS.has(sub.value))
+  if (alias && /\b(?:commit|merge|pull)\b/.test(alias) && /--no-verify\b/.test(alias))
+    return `no-ours-merge hook refuses git ${sub.value}: it is an alias for a git call with --no-verify, which turns its hooks off. ${AGAIN}`;
+  if (!VERIFIED.has(sub.value))
     return;
   if (rest.some((a) => a.value === "-h" || a.value === "--help"))
+    return;
+  const off = hooksOff(sub.value, rest);
+  if (off)
+    return `no-ours-merge hook refuses git ${sub.value} ${off}, which turns its hooks off. ${AGAIN}`;
+  if (!SUBS.has(sub.value))
     return;
   for (const { flag, value } of strategies(rest)) {
     if (value && marked(value.value))
@@ -16473,7 +16541,7 @@ function judgeGit2(args) {
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
   }
 }
-var merges = (args) => SUBS.has(gitCommand(args).sub?.value ?? "");
+var merges = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
 var visit6 = async (_cmd, { args, first, name }) => {
   if (name === "git")
     return judgeGit2(args);
@@ -16486,8 +16554,17 @@ var visit6 = async (_cmd, { args, first, name }) => {
     return judgeGit2(args.slice(nested + 1));
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours/.test(BARE4(command));
-var mergeCall = (command) => /\bgit\b/i.test(BARE4(command)) && /\b(?:merge|pull)\b/.test(BARE4(command)) && /ours/.test(BARE4(command));
+var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|\s)-[^\s-]*n/.test(BARE4(command));
+var mergeCall = (command) => {
+  const bare = BARE4(command);
+  if (!/\bgit\b/i.test(bare))
+    return false;
+  if (/\b(?:merge|pull)\b/.test(bare) && /ours/.test(bare))
+    return true;
+  if (/\b(?:commit|merge|pull)\b/.test(bare) && /--no-verify\b/.test(bare))
+    return true;
+  return /\bcommit\b/.test(bare) && /(?:^|\s)-n\b/.test(bare);
+};
 async function inspect12(raw, environment) {
   let payload;
   try {
@@ -16496,7 +16573,7 @@ async function inspect12(raw, environment) {
     payload = undefined;
   }
   if (typeof payload !== "object" || payload === null)
-    return mergeCall(raw) ? "no-ours-merge hook could not parse its input, which reads as a merge with ours, so it refuses the call." : undefined;
+    return mergeCall(raw) ? "no-ours-merge hook could not parse its input, which reads as a merge with ours or a git call with its hooks off, so it refuses the call." : undefined;
   const { cwd, tool_input: toolInput, tool_name: tool } = payload;
   if (tool !== "Bash")
     return;
@@ -16525,7 +16602,7 @@ async function check17(raw, environment = process.env) {
     } catch {}
     if (!mergeCall(command))
       return;
-    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours, so it refuses it. Split it into plain commands and run them again.`;
+    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours or a git call with its hooks off, so it refuses it. Split it into plain commands and run them again.`;
   }
 }
 if (false) {}
