@@ -13879,7 +13879,7 @@ var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
 var HOOK_TEXT = "which a hook file may not hold";
-var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution and no eval, or tell your lead what it needs to remove.";
+var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove.";
 var refuse7 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE2}`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS2 = new Set([

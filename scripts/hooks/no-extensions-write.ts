@@ -105,7 +105,7 @@ const PRIVACY_ROUTE =
 // A hook file written with a remover or text the hook cannot read (hookRemover), which names its own route
 const HOOK_TEXT = "which a hook file may not hold"
 const HOOK_ROUTE =
-  "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution and no eval, or tell your lead what it needs to remove."
+  "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove."
 const hookRemoval = (file: string, what: string) => `${file} written with ${what}, ${HOOK_TEXT}`
 
 const refuse = (what: string) =>
@@ -281,15 +281,19 @@ function hookRemover(
   hook: (sure: boolean) => boolean,
 ): string | undefined {
   if (text === undefined) return hook(true) ? "text it cannot read" : undefined
+  // a backslash-newline goes first, since the shell joins a word across it
   const word = text
+    .replace(/\\\n/g, "")
     .replace(/[\\'"]/g, "")
     .split(/[^\w-]+/)
     .find(hookRemoverWord)
   if (word) return hook(false) ? word : undefined
-  if (!/[$`]|\beval\b/.test(text) || !hook(false)) return
+  if (!/[$`?*]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false)) return
   for (const cmd of lex(text).commands) {
-    const { name } = parse(cmd)
+    const { first, name } = parse(cmd)
     if (marked(name)) return "a program built from a variable or a substitution"
+    // a glob the shell sees in the program word (`/bin/r?`) picks the program at run time; test's own `[` and `[[` hold no pattern
+    if (first?.glob && /[?*]|\[[^\]]*\]/.test(name)) return "a program named by a glob"
     if (name === "eval" || hookRemoverWord(program(name))) return program(name)
   }
 }
@@ -1995,18 +1999,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
     const path = resolve(directory ?? "", expanded)
     if (inRoot(path)) return refuse(`a write to ${file}`)
-    // the text a file tool writes is judged as a shell's text written into a hook file is, and a Codex patch's (codex.ts) as written and as the lines it adds, read apart from the shell command an apply_patch heredoc stands in
+    // the text a file tool writes is judged as a shell's text written into a hook file is, and a Codex patch's (codex.ts) by the lines it adds in any of its files, read apart from its headers and the shell command an apply_patch heredoc stands in
     const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
     const patch = typeof input.content === "string" && input.content.includes("*** Begin Patch")
     const removes = [
-      input.content,
       patch
         ? String(input.content)
             .split("\n")
             .filter((line) => line.startsWith("+"))
             .map((line) => line.slice(1))
             .join("\n")
-        : undefined,
+        : input.content,
       input.new_string,
       input.new_source,
       ...edits.map((e) => e?.new_string),
