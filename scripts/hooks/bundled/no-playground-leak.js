@@ -7948,7 +7948,11 @@ function arrayRun(cmd, first, env) {
   const asWritten = (w) => !unreadWord({ ...w, source: w.source?.replace(/^~(?=\/|$)/, "") });
   if (elements.length === 0 || commands[0].redirects.length > 0 || !elements.every(asWritten))
     return null;
-  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? elements : [w]) };
+  const seps = ifsSplit(env);
+  const words = run?.[2] ? elements.flatMap((w) => splitValue(w.value, seps)) : elements;
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
 }
 function repass(commands, envs) {
   for (const cmd of commands) {
@@ -8090,7 +8094,7 @@ function heldScripts(cmd, parsed, env) {
 }
 function scriptWords({ args, name }) {
   if (name === "eval")
-    return args;
+    return args[0]?.value === "--" ? args.slice(1) : args;
   if (!SHELLS.has(name))
     return [];
   const { inline, operand } = shellOperand(args, name);
@@ -8397,12 +8401,13 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run2(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
   return verdict;
 }
+var evalText = (args) => (args[0]?.value === "--" ? args.slice(1) : args).map((a) => a.value).join(" ");
 function again(lexed, cmd, parsed) {
   if (!manyTimes(cmd, parsed))
     return lexed;

@@ -1970,7 +1970,7 @@ function namings(commands: Command[]): Map<string, number> {
   return counts
 }
 
-// An array the line holds, run whole as the program word (`"${A[@]}"`, or unquoted `${A[@]}` and `${A[*]}`), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not, when something may have changed the array, or when the line names it beside its one whole assignment and its runs (`namings`), so the program may be any; undefined for any other program word, or a name the line never set to an array
+// An array the line holds, run whole as the program word (`"${A[@]}"`, or unquoted `${A[@]}` and `${A[*]}`, whose elements split again at the line's IFS), runs its elements as the command's first words: the command with them in its place when each is a word the reader reads as written, null when one is not, when something may have changed the array, or when the line names it beside its one whole assignment and its runs (`namings`), so the program may be any; undefined for any other program word, or a name the line never set to an array
 function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | null | undefined {
   const run = (first?.raw ?? first?.source)?.match(WHOLE_RUN)
   const key = run?.[1] ?? run?.[2]
@@ -1989,7 +1989,11 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
     !unreadWord({ ...w, source: w.source?.replace(/^~(?=\/|$)/, "") })
   if (elements.length === 0 || commands[0].redirects.length > 0 || !elements.every(asWritten))
     return null
-  return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? elements : [w])) }
+  // an unquoted run splits each element at the line's IFS, dropping an empty one, as splitHeld splits a held value (`A=('git push' x); ${A[@]}`)
+  const seps = ifsSplit(env)
+  const words = run?.[2] ? elements.flatMap((w) => splitValue(w.value, seps)) : elements
+  if (words.length === 0) return null
+  return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
@@ -2137,9 +2141,9 @@ function heldScripts(cmd: Command, parsed: Parsed, env: Env): Command[] {
   return resolved ? [{ ...cmd, words }] : []
 }
 
-// The words that are a command's script: an eval's arguments, or a shell's -c operand
+// The words that are a command's script: an eval's arguments past a leading `--`, or a shell's -c operand
 function scriptWords({ args, name }: Parsed): Word[] {
-  if (name === "eval") return args
+  if (name === "eval") return args[0]?.value === "--" ? args.slice(1) : args
   if (!SHELLS.has(name)) return []
   const { inline, operand } = shellOperand(args, name)
   return inline && operand ? [operand] : []
@@ -2530,17 +2534,16 @@ async function examineReading(
     verdict =
       (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ??
       (await nested(cmd, env, () =>
-        run(
-          again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
-          here,
-          visit,
-          builtins,
-        ),
+        run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins),
       ))
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
 }
+
+// The script an eval runs: its words joined by spaces, past a leading `--`, which bash's and zsh's eval take as the end of its options
+const evalText = (args: Word[]): string =>
+  (args[0]?.value === "--" ? args.slice(1) : args).map((a) => a.value).join(" ")
 
 // A script an eval or a source reads in the line's own shell runs again each time a count or a loop runs that command, so each of its commands is marked repeated, as the line's own would be
 function again(lexed: Lexed, cmd: Command, parsed: Parsed): Lexed {
