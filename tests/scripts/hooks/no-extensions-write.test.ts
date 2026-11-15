@@ -3681,3 +3681,79 @@ describe("an xargs input option beside a typed program keeps the call's verdict"
     )
   })
 })
+
+// #2248: a printer's text written into a file of the folder core.hooksPath names is judged as text written into .git/hooks is, while the same text into another file of that repo keeps canary's verdict; git answers with every GIT_ variable dropped, and a folder git cannot answer for reads as a hook folder
+describe("an echo into the folder core.hooksPath names is judged as one into a git hook (PG-2248)", () => {
+  const repo = (name: string, hooks: string) => {
+    const dir = join(HOME, name)
+    mkdirSync(join(dir, hooks), { recursive: true })
+    mkdirSync(join(dir, "notes"), { recursive: true })
+    const git = (...args: string[]) =>
+      Bun.spawnSync(["git", "-C", dir, ...args], { stderr: "ignore", stdout: "ignore" })
+    git("init", "-q")
+    git("config", "core.hooksPath", hooks)
+    return dir
+  }
+  const REPO = repo("hooked", "githooks")
+  const OTHER = repo("hooked-other", "h2")
+  const BROKEN = repo("hooked-broken", "githooks")
+  writeFileSync(join(BROKEN, ".git", "config"), "[core\n")
+  // a repo whose core.hooksPath names a folder not made yet
+  const LATER = join(HOME, "hooked-later")
+  mkdirSync(LATER)
+  Bun.spawnSync(["git", "-C", LATER, "init", "-q"])
+  Bun.spawnSync(["git", "-C", LATER, "config", "core.hooksPath", "newhooks"])
+
+  test.each([
+    ["by its path", `echo 'touch ~/.playground/extensions/x' > ${REPO}/githooks/pre-commit`, HOME],
+    ["from the repo", "echo 'touch ~/.play*/extensions/x' > githooks/pre-commit", REPO],
+  ])("an echo of the data folder into it %s is refused", async (_, command, cwd) => {
+    expect(await bash(command, cwd)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("an echo of the data folder into another file of the repo runs", async () => {
+    expect(
+      await bash("echo 'touch ~/.playground/extensions/x' > notes/run.sh", REPO),
+    ).toBeUndefined()
+  })
+
+  test("a GIT_DIR in the hook's environment leaves the repo's own hook folder read", async () => {
+    const before = process.env.GIT_DIR
+    process.env.GIT_DIR = join(REPO, ".git")
+    try {
+      expect(
+        await bash(`echo 'touch ~/.playground/extensions/x' > ${OTHER}/h2/pre-commit`),
+      ).toContain("no-extensions-write hook refuses")
+    } finally {
+      if (before === undefined) delete process.env.GIT_DIR
+      else process.env.GIT_DIR = before
+    }
+  })
+
+  test.each([
+    [
+      "made by a mkdir before it",
+      "mkdir hooked-later/newhooks && echo 'touch ~/.playground/extensions/x' > hooked-later/newhooks/pre-commit",
+    ],
+    [
+      "made after a cd into the repo",
+      "cd hooked-later && mkdir -p newhooks && echo 'touch ~/.playground/extensions/x' > newhooks/pre-commit",
+    ],
+  ])("an echo of the data folder into the hook folder %s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
+  })
+
+  test("an echo of the data folder into another folder the same line makes runs", async () => {
+    expect(
+      await bash(
+        "mkdir hooked-later/other && echo 'touch ~/.playground/extensions/x' > hooked-later/other/x.sh",
+      ),
+    ).toBeUndefined()
+  })
+
+  test("an echo of the data folder into a repo whose config git cannot read is refused", async () => {
+    expect(
+      await bash(`echo 'touch ~/.playground/extensions/x' > ${BROKEN}/notes/run.sh`),
+    ).toContain("no-extensions-write hook refuses")
+  })
+})
