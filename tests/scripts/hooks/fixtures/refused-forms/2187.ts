@@ -91,6 +91,7 @@ const rows = ({ HOME }: Paths): Row[] => [
   [
     "an in-place sed whose s/// writes a ** glob of the home in a brace list",
     String.raw`sed -i '' 's/a/ls ~\/{**,x}/' .git/hooks/pre-commit`,
+    "home",
   ],
   [
     "an in-place sed whose c\\ text writes a glob of the root",
