@@ -401,6 +401,10 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["git diff in its scratchpad's repo", `git -C ${PAD}/repo diff HEAD^ HEAD -- a.ts`],
     ["cp into its scratchpad", `mkdir -p ${PAD}/repo && cp -R ${HOME}/x/scripts ${PAD}/repo/`],
     ["cp into its scratch folder", `cp ${PAD}/a.ts ${SCRATCH}/b.ts`],
+    [
+      "the two revisions compared with no repository and no diff program",
+      `git diff --no-index --no-ext-diff --no-textconv ${PAD}/base ${PAD}/proposed`,
+    ],
   ])("%s passes", async (_, command) => {
     expect(await item(command)).toBeUndefined()
   })
@@ -422,6 +426,17 @@ describe("no-outside-pr-code lets an item reviewer finish its review by reading"
     ["cp with a target directory option", `cp -t ${HOME}/.playground/ops ${PAD}/a.ts`],
     ["find that deletes", `find ${PAD} -name x -delete`],
     ["find that runs a program", `find ${PAD} -exec sh {} ;`],
+    ["git init of a scratch repo", `git -C ${PAD}/repo init -q`],
+    ["git commit in a scratch repo", `git -C ${PAD}/repo commit -qm base`],
+    ["git add in a scratch repo", `git -C ${PAD}/repo add -A`],
+    [
+      "a --no-index diff that leaves a diff program on",
+      `git diff --no-index ${PAD}/base ${PAD}/proposed`,
+    ],
+    [
+      "a --no-index diff that leaves textconv on",
+      `git diff --no-index --no-ext-diff ${PAD}/base ${PAD}/proposed`,
+    ],
   ])("%s is refused", async (_, command) => {
     expect(await item(command)).toContain("no-outside-pr-code")
   })
