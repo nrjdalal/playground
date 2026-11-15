@@ -224,6 +224,14 @@ const controls = (): Row[] => [
     "an in-place GNU sed that follows links, on a git hook",
     "gsed -i --follow-symlinks 's/pre-commit/pre-push/' .git/hooks/pre-commit",
   ],
+  [
+    "a read-only sed whose script file is attached to its -f, on a git hook",
+    "sed -f/tmp/fix.sed .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place sed whose attached -e script holds an f, on a git hook",
+    "sed -i -es/pre-commit/pre-fetch/ .git/hooks/pre-commit",
+  ],
   ["a test run's output redirected into a log", "bun test > out.log 2>&1"],
   ["an echo of a variable redirected into a note", `echo "$X" > notes.txt`],
   ["an in-place sed whose script is a file, on a note", "sed -i '' -f s.sed notes.txt"],
