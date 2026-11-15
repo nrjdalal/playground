@@ -1,6 +1,6 @@
 import type { Group, Row } from "./_shared"
 
-// #2236: an in-place sed's or perl's replacement that writes into a hook a remover of the home or of a folder that holds the root, the data folder by its bare name, or a brace list whose alternative spells the root after a prefix, each judged the same from every working folder; rows are data, as refused-forms.ts says.
+// #2236: an in-place sed's or perl's replacement that writes into a hook a remover of the home or of a folder that holds the root (a remover after a glued pipe or as a brace-list command, the home by an expansion, a substitution or a variable included), the data folder by its bare name, or a brace list whose alternative spells the root after a prefix, each judged the same from every working folder; rows are data, as refused-forms.ts says.
 const WHOLE = ", on a line read whole"
 const rows = (): Row[] => [
   [
@@ -50,6 +50,82 @@ const rows = (): Row[] => [
   [
     "an in-place sed whose s/// writes a brace list of more words than the hook reads",
     String.raw`sed -i '' 's/a/ls ~\/{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home after a pipe with no space",
+    String.raw`sed -i '' 's/a/true|rm ~/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home after an or-list with no space",
+    String.raw`sed -i '' 's/a/true||rm ~/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home as a brace-list command",
+    String.raw`sed -i '' 's/a/{rm,~}/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the data folder's bare name after a pipe with no space",
+    String.raw`sed -i '' 's/a/true|rm .playground/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the filesystem's root after a pipe with no space",
+    String.raw`sed -i '' 's/a/true|rm \//' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place perl whose s/// writes a remover of the home after a pipe with no space",
+    String.raw`perl -pi -e 's/a/true|rm ~/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by ${HOME:?}",
+    "sed -i '' 's/a/rm ${HOME:?}/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by ${HOME:-x}",
+    "sed -i '' 's/a/rm ${HOME:-x}/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by a substitution that prints it",
+    String.raw`sed -i '' 's/a/rm $(echo ~)/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by a backtick substitution that prints it",
+    "sed -i '' 's/a/rm `echo ~`/' .git/hooks/pre-commit",
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the home by a variable the text sets to it",
+    String.raw`sed -i '' 's/a/X=~; rm $X/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a code comment naming find",
+    String.raw`sed -i '' 's/old/\/\/ find the first match/' src/a.ts`,
+  ],
+  [
+    "an in-place sed whose s/// writes a code comment naming mv and rm",
+    String.raw`sed -i '' 's/x/\/\/ mv the file, then rm the copy/' src/a.ts`,
+  ],
+  [
+    "an in-place perl whose s/// writes a block comment naming find",
+    String.raw`perl -pi -e 's/foo/\/* find the user *\/ foo/' src/a.ts`,
+  ],
+  [
+    "an in-place sed whose s/// writes a block comment naming rm",
+    String.raw`sed -i '' 's/x/\/* rm *\//' src/a.ts`,
+  ],
+  [
+    "an in-place sed whose s/// writes a change into the home after a remover's own command",
+    String.raw`sed -i '' 's/X/rm -f build.log; cd ~/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes an echo of $HOME after a find's own command",
+    String.raw`sed -i '' 's/X/find . -name x; echo $HOME/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of a path under a variable",
+    String.raw`sed -i '' 's/a/rm -rf $TMPDIR\/x/' .git/hooks/pre-commit`,
+  ],
+  [
+    "an in-place sed whose s/// writes a remover of the files a substitution lists",
+    String.raw`sed -i '' 's/a/rm -f $(git ls-files -d)/' .git/hooks/pre-commit`,
   ],
   [
     "an in-place sed whose s/// writes a change into the home into a git hook",
@@ -118,6 +194,14 @@ const allowedCalls = [
   "an in-place sed whose s/// writes a remover of node_modules",
   "an in-place sed whose s/// writes a find that deletes logs below the folder it runs in",
   "an in-place sed whose s/// writes a remover of the folder it runs in",
+  "an in-place sed whose s/// writes a code comment naming find",
+  "an in-place sed whose s/// writes a code comment naming mv and rm",
+  "an in-place perl whose s/// writes a block comment naming find",
+  "an in-place sed whose s/// writes a block comment naming rm",
+  "an in-place sed whose s/// writes a change into the home after a remover's own command",
+  "an in-place sed whose s/// writes an echo of $HOME after a find's own command",
+  "an in-place sed whose s/// writes a remover of a path under a variable",
+  "an in-place sed whose s/// writes a remover of the files a substitution lists",
   "an in-place sed whose s/// writes a remover of a repo's own extensions folder",
   "an in-place sed whose s/// writes a remover of a build folder in a repo's own extensions folder",
 ]
