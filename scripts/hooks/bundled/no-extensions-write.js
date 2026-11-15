@@ -10836,7 +10836,10 @@ function braceWords(word) {
 }
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
 var coded = (digits, base, escape) => {
-  const point = Number.parseInt(digits, base);
+  const clean = digits.replace(/[\s_]/g, "");
+  if (!(base === 16 ? /^[\da-f]+$/i : base === 8 ? /^[0-7]+$/ : /^\d+$/).test(clean))
+    return "*";
+  const point = Number.parseInt(clean, base);
   return point <= 1114111 ? String.fromCodePoint(point) : escape;
 };
 var sedText = (text) => text.replace(/\\(?:x([\da-fA-F]{1,2})|o([0-7]{1,3})|d(\d{1,3})|(.))|&/gs, (m, hex, octal, decimal, c) => hex ? coded(hex, 16, m) : octal ? coded(octal, 8, m) : decimal ? coded(decimal, 10, m) : m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
@@ -10852,7 +10855,7 @@ function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
     if (item[1])
       writes.push(read(item[1].slice(0, -1)));
     if (item[2])
-      writes.push(read(item[2]));
+      writes.push(read(printText(item[2])));
   }
   return writes;
 }
@@ -10948,9 +10951,41 @@ var PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_V
 var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`;
 var PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
+var PRINT_VALUE = new RegExp(PERL_VALUE, "g");
+var printText = (values) => [...values.matchAll(PRINT_VALUE)].map(([v]) => v.startsWith('"') ? v.slice(1, -1) : "$1").join("");
 var PERL_STEP = new RegExp(String.raw`${PERL_ITEM}(?:;[ \t]*|$)`, "y");
-var perlText = (text) => text.replace(/\\(?:x\{([\da-fA-F]+)\}|x([\da-fA-F]{1,2})|N\{U\+([\da-fA-F]+)\}|o\{([0-7]+)\}|(0[0-7]{0,2})|(.))|\$[1-9&]/gs, (m, braced, hex, named, octal, zero, c) => braced || hex || named ? coded(braced || hex || named, 16, m) : octal || zero ? coded(octal || zero, 8, m) : c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
-` : c === "t" ? "\t" : c);
+function charName(name) {
+  const spelled = name.trim().toUpperCase().replace(/\s+/g, " ");
+  const fixed = {
+    "FULL STOP": ".",
+    "HYPHEN-MINUS": "-",
+    "LOW LINE": "_",
+    SOLIDUS: "/"
+  };
+  const digits = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"];
+  const letter = /^LATIN (SMALL|CAPITAL) LETTER ([A-Z])$/.exec(spelled);
+  const digit = /^DIGIT ([A-Z]+)$/.exec(spelled);
+  if (letter)
+    return letter[1] === "SMALL" ? letter[2].toLowerCase() : letter[2];
+  if (digit && digits.includes(digit[1]))
+    return String(digits.indexOf(digit[1]));
+  return fixed[spelled] ?? "*";
+}
+var PERL_ESCAPE = /\\(?:x\{(?<hexBraced>[^}]*)\}|x(?<hex>[\da-fA-F]{1,2})|N\{\s*U\+(?<point>[^}]*)\}|N\{(?<name>[^}]*)\}|o\{(?<octalBraced>[^}]*)\}|(?<octal>0[0-7]{0,2}|[1-7][0-7]{1,2})|(?<char>.))|\$[1-9&]/gs;
+var perlText = (text) => text.replace(PERL_ESCAPE, (m, ...rest) => {
+  const g = rest.at(-1);
+  const hex = g.hexBraced ?? g.hex ?? g.point;
+  const octal = g.octalBraced ?? g.octal;
+  if (hex !== undefined)
+    return coded(hex, 16, m);
+  if (octal !== undefined)
+    return coded(octal, 8, m);
+  if (g.name !== undefined)
+    return charName(g.name);
+  const c = g.char;
+  return c === undefined || /[1-9]/.test(c) ? "*" : c === "n" ? `
+` : c === "t" ? "\t" : c;
+});
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
 function perlReadScripts({ args, local }, env) {
   if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
@@ -11046,8 +11081,44 @@ function xargsGrep(cmd, parsed, env) {
   const system = /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/;
   return !!xargs && !!first && name === "grep" && also.length === 0 && !chdir && local.size === 0 && ownFirst(cmd, lead) && system.test(lead.value) && system.test(first.value) && (xargs.replace === undefined || !first.value.includes(xargs.replace)) && xargsOptions(cmd, first).every((value) => !marked(value) && !WRAPPERS.has(program(value)) && !/^--process-slot-var(?:=|$)/.test(value)) && reads(parsed, env);
 }
-var STDOUT = new Set(["", "1", "&"]);
-async function printed(cmd, env) {
+function fdFiles(redirects, inherited) {
+  const fds = new Map(inherited);
+  const opened = (fd) => redirects.flatMap((r) => r.target && writer(r) && r.fd === fd ? [r.target] : []);
+  for (const r of redirects) {
+    if (!r.target || !(r.op.startsWith(">") || r.op === "<>"))
+      continue;
+    const fd = r.fd === "" || r.fd === "&" ? "1" : r.fd;
+    const n = r.target.value;
+    const dup = r.op === ">&" && /^\d+$/.test(n);
+    const files = dup ? [...fds.get(n) ?? [], ...opened(n)] : writer(r) ? [r.target] : [];
+    fds.set(fd, files);
+    if (r.fd === "&" || r.op === ">&" && r.fd === "" && !dup)
+      fds.set("2", files);
+  }
+  return fds;
+}
+var LEADS2 = new Set(["!", "(", "do", "elif", "else", "then", "{"]);
+var OPENERS = new Set(["case", "for", "if", "select", "until", "while"]);
+var CLOSERS = new Set(["done", "esac", "fi"]);
+function compoundBodies(commands, bodies = new WeakMap) {
+  const open = [];
+  commands.forEach((cmd, k) => {
+    const lead = cmd.words.find((w) => w.quoted || !LEADS2.has(w.value));
+    if (lead && !lead.quoted && OPENERS.has(lead.value))
+      open.push(k);
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
+      bodies.set(cmd, commands.slice(open.pop(), k));
+    if (cmd.inner)
+      compoundBodies(cmd.inner(), bodies);
+  });
+  return bodies;
+}
+async function printed(cmd, env, kids) {
+  const held = kids(cmd);
+  if (held) {
+    const own = held.filter((c) => !fdFiles(c.redirects, new Map).has("1"));
+    return (await Promise.all(own.map((c) => printed(c, env, kids)))).flat();
+  }
   const parsed = parse3(cmd);
   if (PRINTERS.has(parsed.name)) {
     const out = await outputOf(cmd, env);
@@ -11057,18 +11128,19 @@ async function printed(cmd, env) {
   return inPlace(tool, parsed.args).length > 0 ? [] : escapedWrites(parsed, env);
 }
 function readHookFolder(dir) {
-  if (!existsSync4(dir))
-    return false;
+  let at = dir;
+  while (!existsSync4(at) && dirname4(at) !== at)
+    at = dirname4(at);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_") && key !== "LC_ALL"));
   try {
-    const read = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--git-path", "hooks"], {
+    const read = Bun.spawnSync(["git", "-C", at, "rev-parse", "--git-path", "hooks"], {
       env: { ...env, LC_ALL: "C" },
       stderr: "pipe",
       stdout: "pipe",
       timeout: 2000
     });
     if (read.exitCode === 0)
-      return real(resolve5(dir, read.stdout.toString().trim()));
+      return real(resolve5(at, read.stdout.toString().trim()));
     return read.exitCode !== 128 || !read.stderr.toString().includes("not a git repository");
   } catch {
     return true;
@@ -11439,6 +11511,8 @@ async function inspect(raw, environment, unknown = false) {
   let whole = false;
   let rootLine = false;
   let patterns = new Set;
+  let bodies = new WeakMap;
+  let execFds = new Map;
   let lineWrites = false;
   let nearEval;
   let textDepth = 0;
@@ -11517,24 +11591,37 @@ async function inspect(raw, environment, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
-    const hookWrites = [
-      [
-        cmd.redirects.flatMap((r) => r.target && writer(r) && STDOUT.has(r.fd) ? [r.target] : []),
-        cmd
-      ],
-      [program(name) === "tee" ? args.filter((word) => !/^-./.test(word.value)) : [], cmd.stdin]
-    ];
-    for (const [targets, source] of hookWrites) {
-      if (targets.length === 0 || !source)
-        continue;
-      for (const text of await printed(source, env))
+    const kids = (c) => c.inner?.() ?? bodies.get(c);
+    const intoHook = async (targets, source) => {
+      if (targets.length === 0)
+        return;
+      for (const text of await printed(source, env, kids))
         for (const here of places(env)) {
           const named = scriptNames(text, here);
           const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
           if (hook)
-            return refuse(`${shown(hook)}, a hook file, written with a script that names ${named}`);
+            return `${shown(hook)}, a hook file, written with a script that names ${named}`;
         }
-    }
+    };
+    const outOf = async (c, inherited) => {
+      const fds = fdFiles(c.redirects, inherited);
+      if (fds.size === 0)
+        return;
+      const held = kids(c);
+      if (!held)
+        return intoHook(fds.get("1") ?? [], c);
+      for (const each of held) {
+        const named = await outOf(each, fds);
+        if (named)
+          return named;
+      }
+    };
+    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+      execFds = fdFiles(cmd.redirects, execFds);
+    const teeTool = program(name);
+    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" && cmd.stdin ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin) : undefined);
+    if (hookWrite)
+      return refuse(hookWrite);
     const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
@@ -11765,6 +11852,8 @@ async function inspect(raw, environment, unknown = false) {
     return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
+  bodies = compoundBodies(lexed.commands);
+  execFds = new Map;
   lineWrites = redirectsWrite(lexed.commands);
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
