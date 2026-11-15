@@ -1,9 +1,10 @@
-// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names and every file it writes lands in the session's own folders, since running the PR's tests, scripts or installs runs its author's code on this machine.
+// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names and every file it writes lands in the session's own folders outside any git folder, and refuses a file tool's write into a git folder, since a git folder's config and hooks name programs a git read runs and running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
+import { patchPaths } from "./codex"
 import { input } from "./input"
 import { mainCheckout } from "./no-main-checkout"
 import { readsWords } from "./read-only"
@@ -48,6 +49,13 @@ export type Lookup = {
 
 const CHECKERS = new Set(["reviewer", "tester"])
 const TOOLS = new Set(["Bash", "Monitor"])
+// The file tools, each by the input key that names the file it writes, A to Z
+const FILE_TOOLS = new Map([
+  ["Edit", "file_path"],
+  ["MultiEdit", "file_path"],
+  ["NotebookEdit", "notebook_path"],
+  ["Write", "file_path"],
+])
 const PULL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/
 // Programs and shell words that run no file they are given, by bare name, A to Z.
 const UTILITIES = new Set([
@@ -214,6 +222,17 @@ function placed(written: string | undefined): string | undefined {
   }
 }
 
+// Whether a path lands in a git folder, a `.git` part or a folder holding HEAD, objects and refs at or above it, whose config and hooks name programs a later git read runs; a path the hook cannot place counts as one.
+function gitFolder(path: string | undefined, lookup: Lookup): boolean {
+  if (path === undefined || path.split("/").some((part) => part.toLowerCase() === ".git"))
+    return true
+  for (let at = path; ; at = dirname(at)) {
+    if (lookup.holds(at, "HEAD") && lookup.holds(at, "objects") && lookup.holds(at, "refs"))
+      return true
+    if (dirname(at) === at) return false
+  }
+}
+
 // git's reads, and the literal forms that fetch or place a PR's code without running a file it holds: a fetch, a fresh clone of a GitHub repo, a worktree add or list, and a detached checkout or switch in a folder with no node_modules for a git hook's lefthook to load.
 function gitAllows(
   words: string[],
@@ -307,6 +326,7 @@ export async function inspect(
     const path = text && !(text as Word).glob ? pathOf(text, here) : undefined
     if (path === undefined || !existsSync(dirname(resolve(path))) || !ownPath(text, here))
       return false
+    if (gitFolder(placed(path), lookup)) return false
     // a link as the last part, dangling or not, carries the write where it points, and a file with a second link changes a file elsewhere too
     try {
       const stat = lstatSync(path)
@@ -462,13 +482,42 @@ export async function check(
     return
   }
   const { cwd, session_id: sessionId, tool_input: toolInput, tool_name: tool } = input
-  if (typeof tool !== "string" || !TOOLS.has(tool)) return
+  if (typeof tool !== "string") return
+  const key = FILE_TOOLS.get(tool)
+  // a Codex session's edit, whose command is the patch (codex.ts)
+  const patch = tool === "apply_patch"
+  if (!TOOLS.has(tool) && key === undefined && !patch) return
   const command = (toolInput as { command?: unknown } | undefined)?.command
-  if (typeof command !== "string") return
+  if (key === undefined && !patch && typeof command !== "string") return
   if (!CHECKERS.has(await sessionRole(environment, sessionId))) return
   const why = await readMode(sessionId, lookup)
   if (!why) return
   const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : undefined
+  // a file tool writes anywhere it wrote before, but into a git folder, and a path it cannot place counts as one
+  if (key !== undefined || patch) {
+    const named = patch
+      ? typeof command === "string"
+        ? patchPaths(command)
+        : []
+      : [(toolInput as Record<string, unknown> | undefined)?.[key!]]
+    let git = named.length === 0
+    try {
+      git ||= named.some((path) => {
+        if (typeof path !== "string") return true
+        const at = isAbsolute(path)
+          ? path
+          : patch && directory
+            ? resolve(directory, path)
+            : undefined
+        return gitFolder(at === undefined ? undefined : placed(at), lookup)
+      })
+    } catch {
+      git = true
+    }
+    if (!git) return
+    return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which writes no file into a git folder (a .git part, or a folder holding HEAD, objects and refs), since its config and hooks name programs a later git read runs: ${why}`
+  }
+  if (typeof command !== "string") return
   let allowed = false
   try {
     const name = await lookup.name(sessionId)
@@ -477,7 +526,7 @@ export async function check(
     allowed = await inspect(command, directory, environment, lookup, own)
   } catch {}
   if (allowed) return
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`
 }
 
 async function output(argv: string[]): Promise<string | undefined> {

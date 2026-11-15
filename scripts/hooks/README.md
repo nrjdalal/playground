@@ -1092,6 +1092,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `uniq`'s output operand lands there too, and so does `gh run download`'s `-D` folder, else the one it runs in, which one artifact fills.
   The folder must exist before the line runs and the target holds no glob, since a write makes no folder and one the line makes first, or a glob, can be a link that carries the write out; a line that writes there and also runs a move that can put a link there first (git's `clone`, `checkout`, `switch` or `worktree`, `gh repo clone` or `fork`, `playground rm`) is refused.
   The target's last part is no symlink, a dangling one included, and a file there has one hard link only (a folder, as gh run download's, always has more), since a write follows either out of the session's folders.
+  The target lands in no git folder: no part of its path, its links resolved, is `.git` (case ignored), and no folder at or above it holds `HEAD`, `objects` and `refs` (`gitFolder`), since a git folder's config and hooks name programs a later git read runs (`diff.external`, `core.fsmonitor`, a textconv driver).
+  The file tools (Edit, MultiEdit, NotebookEdit and Write, and a Codex session's `apply_patch`, each file its patch names placed from the folder it runs in) write where they wrote before, but into a git folder anywhere, and a path that is no absolute string, or a patch that names no file, counts as one; outside read mode the hook returns before it reads the path.
   `gh` passes with no `--`, since gh's clone hands git every option after it, and never as a checkout: `gh pr checkout` or `gh pr co` wherever the verb sits among gh's flags, and `gh issue develop`.
   git passes only where it would find a repository with a work tree: the first folder up from where it runs, its symlinks followed as git follows them, that holds `.git`, or `HEAD`, `objects` and `refs`, decides, since a PR can ship the second as plain files whose config names programs a read runs (`diff.external`).
   git takes one `-C` and no other option before its subcommand (`-c`, `--git-dir`, `--work-tree`), and no `GIT_DIR` or `GIT_WORK_TREE`, set on the call or exported, so the folder the hook walks is the one git uses.
@@ -1118,8 +1120,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
   Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and where read mode writes (a folder made in one call, written in the next), and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
   A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
-  [guards](#guards) runs it on Bash, and both settings files register its own bundle on Monitor, which guards does not hear.
-  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts tests/scripts/hooks/guards.test.ts tests/scripts/factory-settings.test.ts`, the last two holding it to guards' entry and the Monitor one.
+  [guards](#guards) runs it on Bash, and both settings files register its own bundle on Monitor and on the file tools, which guards does not hear; its wrapper refuses the call on a crash, as every PreToolUse wrapper does ([Registered in both settings files](#registered-in-both-settings-files)).
+  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts tests/scripts/hooks/guards.test.ts tests/scripts/factory-settings.test.ts`, the last two holding it to guards' entry and its Monitor and file-tool ones.
 
 ## no-prepare-write
 
