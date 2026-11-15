@@ -15,7 +15,7 @@ Any other argument is refused with the usage line, exit 1, and runs no pass.
 Healthy means the job's heartbeat (ops/<name>.json) is fresh (within three cycles), its pid is alive, its last result
 is not an exit. An unhealthy job's old herdr pane, which ops opened, is closed first (ops-dashboard then waits until its
 recorded process groups are gone, stopping them through procs.sh);
-nothing is ever selected by name or pattern. A launchd job is only reported, once after DOWN_PASSES unhealthy passes in a row: launchd keeps it alive. A job whose holder runs an
+nothing is ever selected by name or pattern. A launchd job is only reported, once after DOWN_PASSES unhealthy passes in a row: launchd, or on Linux its systemd user unit, keeps it alive. A job whose holder runs an
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
@@ -300,13 +300,20 @@ def start(job):
 JOBS_RENDER = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "scripts", "src", "playground", "jobs.ts")
 
 
+def kept_by(job):
+    """What keeps a launchd job alive, as a report names it: launchd's label on macOS, and on Linux the systemd user unit of the same name."""
+    if sys.platform.startswith("linux"):
+        return f"systemd unit {job.get('launchd')}.service"
+    return f"launchd job {job.get('launchd')}"
+
+
 def render_jobs():
-    """jobs.json from the store's job settings and each org's own job rows, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, a turned-off job's plist going to the trash; a launchd job of Playground's own turned on and not loaded is installed in ~/Library/LaunchAgents when its plist is missing there and bootstrapped, and one turned off has its plist there trashed and is booted out while loaded (exit 1 logs the one the trash kept, each refused bootstrap or bootout and each org job row refused); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
+    """jobs.json from the store's job settings and each org's own job rows, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, a turned-off job's plist going to the trash; a launchd job of Playground's own turned on and not loaded is installed in ~/Library/LaunchAgents when its plist is missing there and bootstrapped, and one turned off has its plist there trashed and is booted out while loaded, or on Linux the same as a systemd user unit in ~/.config/systemd/user, enabled, or disabled, trashed and stopped (exit 1 logs the one the trash kept, each refused bootstrap, bootout, enable, disable or stop and each org job row refused); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     if not (os.path.exists(bun) and os.path.exists(JOBS_RENDER)):
         return
     try:
-        r = subprocess.run([bun, "--no-env-file", JOBS_RENDER, "render", "--data", os.path.dirname(OPS), "--jobs", os.path.join(OPS, "jobs.json"), "--launch-agents", os.path.join(OPS, "launch-agents"), "--install", os.path.expanduser("~/Library/LaunchAgents")],
+        r = subprocess.run([bun, "--no-env-file", JOBS_RENDER, "render", "--data", os.path.dirname(OPS), "--jobs", os.path.join(OPS, "jobs.json"), "--launch-agents", os.path.join(OPS, "launch-agents"), "--install", os.path.expanduser("~/.config/systemd/user" if sys.platform.startswith("linux") else "~/Library/LaunchAgents")],
                            capture_output=True, text=True, timeout=60)
     except Exception as e:
         log(f"jobs.json kept: {e}")
@@ -383,18 +390,18 @@ def up(quiet):
             continue
         if not is_herdr(job):
             if stale:
-                # launchd keeps it alive and ops-up never started it, so it is reported, never signalled
+                # launchd (systemd on Linux) keeps it alive and ops-up never started it, so it is reported, never signalled
                 key = f"{job['name']}:{beats.get(job['name'])}:deleted"
                 if key not in starts.get("_reported", []):
                     starts.setdefault("_reported", []).append(key)
-                    run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} pid {beats.get(job['name'])} runs a deleted executable ({gone[beats.get(job['name'])]}); launchd job {job.get('launchd')} keeps it alive, so restart it there"], 60)
-            log(f"{job['name']} unhealthy ({why}); launchd job {job.get('launchd')} keeps it alive")
+                    run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} pid {beats.get(job['name'])} runs a deleted executable ({gone[beats.get(job['name'])]}); {kept_by(job)} keeps it alive, so restart it there"], 60)
+            log(f"{job['name']} unhealthy ({why}); {kept_by(job)} keeps it alive")
             # told once at DOWN_PASSES in a row; a healthy pass drops the count, so a later outage is told again
             down = starts.setdefault("_down", {})
             down[job["name"]] = down.get(job["name"], 0) + 1
             if down[job["name"]] == DOWN_PASSES:
                 told = re.sub(r"\d+m old", "stale", why)
-                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} has been unhealthy ({told}) for {DOWN_PASSES} passes in a row; launchd job {job.get('launchd')} is not bringing it back, so check it is installed and loaded (playground doctor)"], 60)
+                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} has been unhealthy ({told}) for {DOWN_PASSES} passes in a row; {kept_by(job)} is not bringing it back, so check it is installed and loaded (playground doctor)"], 60)
             continue
         log(f"{job['name']} unhealthy ({why}); starting")
         # the printed line is told to ops once until it changes, so a heartbeat's age stays out of it

@@ -97,6 +97,9 @@ export type CarveOut = { bytes: number; files: number; folder: string; home?: tr
 // The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
 export const PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/
 
+// The file name of a systemd user unit that is Playground's own, the same job's on Linux, which the jobs render installs and removes, and no other.
+export const PLAYGROUND_UNIT = /^com\.playground\.[\w.-]+\.service$/
+
 // Each script's carve-outs by the script's name, one entry per folder it removes from, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
 export const CARVE_OUTS: Record<string, CarveOut> = {
   // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
@@ -114,6 +117,14 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     folder: "Library/LaunchAgents",
     home: true,
     name: PLAYGROUND_AGENT,
+  },
+  // the same render's installed units on Linux, for a job now turned off: Playground's own units alone, never another user unit
+  "jobs-units": {
+    bytes: 64 * 1024,
+    files: 1,
+    folder: ".config/systemd/user",
+    home: true,
+    name: PLAYGROUND_UNIT,
   },
 }
 

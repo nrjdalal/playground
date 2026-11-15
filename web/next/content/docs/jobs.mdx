@@ -73,6 +73,28 @@ Only Playground's own labels (`com.playground.*`) are installed or removed, so n
 A launchd job you turn off has its plist in `~/Library/LaunchAgents` moved to the trash under the `jobs-installed` carve-out, beside the `jobs` one above, and is unloaded with `launchctl bootout` while launchd still holds it, tried again on the next pass when launchd refuses.
 A launchd job still down after 3 passes in a row is told to Ops once, and again only after it has run healthy in between.
 
+### On Linux
+
+Linux has no launchd, so on Linux the same pass runs each launchd job as a systemd user unit of the same name, `<label>.service`:
+
+| Job                  | launchd label                       | systemd user unit                           |
+| -------------------- | ----------------------------------- | ------------------------------------------- |
+| `ops-flow`           | `com.playground.ops-flow`           | `com.playground.ops-flow.service`           |
+| `ops-herdr`          | `com.playground.ops-herdr`          | `com.playground.ops-herdr.service`          |
+| `ops-restore`        | `com.playground.ops-restore`        | `com.playground.ops-restore.service`        |
+| `ops-session-resume` | `com.playground.ops-session-resume` | `com.playground.ops-session-resume.service` |
+| `ops-tick`           | `com.playground.ops-tick`           | `com.playground.ops-tick.service`           |
+| `ops-zai-usage`      | `com.playground.ops-zai-usage`      | `com.playground.ops-zai-usage.service`      |
+
+A unit runs its plist's program from the same folder and logs to the same `launchd.log`, with `~/.bun/bin` first on its `PATH`, and systemd restarts it always, 10 seconds apart, as launchd keeps a job alive.
+A stop ends the job's own process alone (`KillMode=process`), so the herdr servers ops-herdr starts outlive it, as they outlive its launchd job.
+While systemd does not run it, its unit is written into `~/.config/systemd/user` when none is there, its log's folder is made, and it is started with `systemctl --user enable --now`, tried again on the next pass when systemd refuses, and a unit already there stays as it is.
+A job you turn off is disabled with `systemctl --user disable`, its unit moved to the trash under the `jobs-units` carve-out ([CLI](/docs/cli)) and systemd reloaded so it forgets the unit, and then stopped while it runs, the unit going first since ops-tick's own pass runs the render.
+Only Playground's own units (`com.playground.*.service`) are installed or removed, so no other user unit is touched.
+`playground doctor` checks each one with `systemctl --user is-active`, and `playground uninstall` disables and removes it.
+
+A user's units stop when that user logs out unless lingering is on, so the machine's bootstrap turns it on once, with sudo: `sudo loginctl enable-linger <user>`.
+
 ## Bring an existing jobs.json in
 
 A machine that ran its jobs from a hand-kept `jobs.json` brings them into settings once, at the switch:

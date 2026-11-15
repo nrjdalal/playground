@@ -654,22 +654,29 @@ describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
   test("lets its own entry through and refuses its parent, a sibling and an entry over its cap", () => {
     const roots = machine()
     const folder = join(roots.home, carve.home ? "" : ".playground", carve.folder)
-    const own = file(join(folder, carve.name ? "com.playground.own.plist" : "own"))
+    // a named carve-out's own entry is the Playground file its pattern takes: a plist or a unit
+    const named = (stem: string) =>
+      [".plist", ".service"]
+        .map((end) => `com.playground.${stem}${end}`)
+        .find((n) => carve.name!.test(n))!
+    const own = file(join(folder, carve.name ? named("own") : "own"))
     const sibling = file(join(folder, "..", "sibling-of-carve-out", "own"))
-    const over = join(folder, carve.name ? "com.playground.over.plist" : "over")
+    const over = join(folder, carve.name ? named("over") : "over")
     if (carve.name) file(over, "x".repeat(carve.bytes + 1))
     else file(join(over, "big"), "x".repeat(Math.min(carve.bytes + 1, 4096)))
     if (!carve.name && carve.bytes >= 4096)
       for (let i = 0; i <= carve.files; i++) file(join(over, `f${i}`))
-    const named = { ...opts, carveOut: name }
-    expect(quarantine(own, named, roots, { now: NOW })).toMatchObject({ files: 1 })
-    expect(quarantine(join(folder, ".."), named, roots, { now: NOW })).toMatchObject({
+    const carved = { ...opts, carveOut: name }
+    expect(quarantine(own, carved, roots, { now: NOW })).toMatchObject({ files: 1 })
+    expect(quarantine(join(folder, ".."), carved, roots, { now: NOW })).toMatchObject({
       kind: "protected",
     })
-    expect(quarantine(sibling, named, roots, { now: NOW })).toMatchObject({ kind: "protected" })
-    expect(quarantine(over, { ...named, session: "over-cap" }, roots, { now: NOW })).toMatchObject({
-      kind: "tripwire",
-    })
+    expect(quarantine(sibling, carved, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+    expect(quarantine(over, { ...carved, session: "over-cap" }, roots, { now: NOW })).toMatchObject(
+      {
+        kind: "tripwire",
+      },
+    )
   })
 })
 
@@ -691,6 +698,35 @@ test("the jobs-installed carve-out moves only a plain com.playground plist, and 
     })
   expect(readFileSync(theirs, "utf8")).toBe("theirs")
   expect(existsSync(join(folder, "a"))).toBe(true)
+  expect(quarantine(ours, named, roots, { now: NOW })).toMatchObject({ files: 1 })
+  expect(existsSync(ours)).toBe(false)
+  const [entry] = listTrash(roots.trash)
+  expect(restore(entry!.id, roots)).toEqual({ path: ours })
+  expect(readFileSync(ours, "utf8")).toBe("ours")
+})
+
+// #2203: on Linux jobs.ts disables a turned-off job and moves its unit from ~/.config/systemd/user, which holds every other user unit too.
+test("the jobs-units carve-out moves only a plain com.playground unit, and restore puts it back", () => {
+  const roots = machine()
+  const units = join(roots.home, ".config", "systemd", "user")
+  const named = { ...opts, carveOut: "jobs-units" }
+  const ours = file(join(units, "com.playground.ops-x.service"), "ours")
+  const theirs = file(join(units, "syncthing.service"), "theirs")
+  const plist = file(join(units, "com.playground.ops-x.plist"), "plist")
+  const folder = join(units, "com.playground.ops-dir.service")
+  file(join(folder, "a"))
+  const link = join(units, "com.playground.ops-link.service")
+  symlinkSync(theirs, link)
+  const deeper = file(join(units, "default.target.wants", "com.playground.ops-x.service"))
+  for (const path of [theirs, plist, folder, link])
+    expect(quarantine(path, named, roots, { now: NOW })).toMatchObject({
+      kind: "protected",
+      refused: expect.stringContaining("not a file the jobs-units carve-out names"),
+    })
+  expect(quarantine(deeper, named, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+  expect(readFileSync(theirs, "utf8")).toBe("theirs")
+  expect(existsSync(join(folder, "a"))).toBe(true)
+  expect(existsSync(deeper)).toBe(true)
   expect(quarantine(ours, named, roots, { now: NOW })).toMatchObject({ files: 1 })
   expect(existsSync(ours)).toBe(false)
   const [entry] = listTrash(roots.trash)
