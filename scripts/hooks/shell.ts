@@ -2124,9 +2124,7 @@ function braceRun(cmd: Command, first: Word | undefined): Command | null | undef
   if (!expanded || expanded.some((w) => BRACE_LIST.test(w))) return null
   const words: Word[] = []
   for (const each of expanded) {
-    const { commands } = lex(
-      each.replace(/[\uE000-\uE004]/g, (c) => HIDDEN[c.charCodeAt(0) - 0xe000]),
-    )
+    const { commands } = lex(unhide(each))
     if (commands.length > 1 || commands[0]?.redirects.length) return null
     words.push(...(commands[0]?.words ?? []))
   }
@@ -2140,6 +2138,8 @@ const QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g
 // A brace, comma or paren as a private character braceWords passes over, put back once the words are made
 const HIDDEN = "{,}()"
 const hide = (c: string) => String.fromCharCode(0xe000 + HIDDEN.indexOf(c))
+const HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide).join("")}]`, "g")
+const unhide = (text: string) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 0xe000])
 
 // A program word that joins a read the split reading leaves whole (a quoted `"$X"`) to a typed glob part (`"$X"/pk?ll`), its read resolved with the held variables and then globbed; a glob character inside the held value is matched too, which errs toward a match
 function heldGlob(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {

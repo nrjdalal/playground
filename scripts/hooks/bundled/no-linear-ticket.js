@@ -2020,7 +2020,7 @@ function braceRun(cmd, first) {
     return null;
   const words = [];
   for (const each of expanded) {
-    const { commands } = lex(each.replace(/[\uE000-\uE004]/g, (c) => HIDDEN[c.charCodeAt(0) - 57344]));
+    const { commands } = lex(unhide(each));
     if (commands.length > 1 || commands[0]?.redirects.length)
       return null;
     words.push(...commands[0]?.words ?? []);
@@ -2032,6 +2032,8 @@ function braceRun(cmd, first) {
 var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
 var HIDDEN = "{,}()";
 var hide = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
+var HIDDEN_CHARS = new RegExp(`[${[...HIDDEN].map(hide).join("")}]`, "g");
+var unhide = (text) => text.replace(HIDDEN_CHARS, (c) => HIDDEN[c.charCodeAt(0) - 57344]);
 function heldGlob(cmd, first, env) {
   if (!first?.glob || !first.raw || !marked(first.value))
     return;
