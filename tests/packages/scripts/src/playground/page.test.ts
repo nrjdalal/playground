@@ -287,3 +287,39 @@ test("playground page --remove refuses a previews folder that is a symlink, leav
     expect(listTrash(roots.trash)).toEqual([])
   }
 })
+
+// #2237's review: --remove reads pages.jsonl as the Previews app's readPages does, so a page the Pages tab never lists is never removed.
+test("playground page --remove counts a page as listed only by a record the Pages tab reads, and drops one only by a tombstone of that exact shape", () => {
+  const { data, previews, roots } = fakeMachine()
+  for (const name of ["odd.html", "gone.html", "kept.html"])
+    writeFileSync(join(previews, name), "<p>x</p>")
+  const record = (file: string) => ({
+    at: "2026-11-15T09:00:00.000Z",
+    by: "planner",
+    file,
+    for: null,
+    title: file,
+  })
+  const lines = [
+    { file: "odd.html", title: "" },
+    { file: "odd.html", title: "t" },
+    { ...record("odd.html"), at: "yesterday" },
+    record("gone.html"),
+    { at: "2026-11-15T09:30:00.000Z", deleted: true, file: "gone.html" },
+    record("kept.html"),
+    { at: "2026-11-15T09:30:00.000Z", by: "planner", deleted: true, file: "kept.html" },
+  ]
+  writeFileSync(
+    join(previews, "pages.jsonl"),
+    lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
+  )
+  const before = snapshot(previews)
+  for (const name of ["odd.html", "gone.html"]) {
+    const refused = removePage(name, data, { now: NOW, roots, session: "tester" })
+    expect("error" in refused ? refused.error : "moved").toContain("pages.jsonl lists no page")
+  }
+  expect(snapshot(previews)).toEqual(before)
+  expect("moved" in removePage("kept.html", data, { now: NOW, roots, session: "tester" })).toBe(
+    true,
+  )
+})
