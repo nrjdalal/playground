@@ -13,7 +13,7 @@ import { type Docker, ensureDatabase } from "./database"
 import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
-import { keepPage, pageArgs } from "./page"
+import { keepPage, pageArgs, removePage } from "./page"
 import {
   addCommand,
   extraWordRefusal,
@@ -367,10 +367,22 @@ const add = async (args: string[]): Promise<number> => {
   return 0
 }
 
-// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), and never opened: it reaches the owner as an Inbox card's html attachment.
-const page = (args: string[]): number => {
+// playground page: the page kept in the data folder the dashboard reads (PLAYGROUND_DATA_DIR's when set, so a test stack's fixture folder can be named), and never opened: it reaches the owner as an Inbox card's html attachment. With --remove, one kept page leaves the Pages tab and its files go to the trash, each by the id it prints.
+const page = async (args: string[]): Promise<number> => {
   const parsed = pageArgs(args)
   if ("error" in parsed) return fail(parsed.error)
+  if ("remove" in parsed) {
+    const { machineRoots, sessionName } = await import("../trash")
+    const removed = removePage(parsed.remove, dataDir(), {
+      roots: machineRoots(),
+      session: await sessionName(),
+    })
+    if ("error" in removed) return fail(removed.error)
+    console.log(`Removed ${removed.moved[0]!.file} from the Pages tab; its files are in the trash:`)
+    for (const { file, id } of removed.moved) console.log(`  ${id}  ${file}`)
+    console.log("playground rm --restore <id> brings one back")
+    return 0
+  }
   const kept = keepPage(parsed, dataDir())
   if ("error" in kept) return fail(kept.error)
   console.log(`Kept ${kept.path}`)
@@ -475,7 +487,7 @@ const code =
             : MANAGERS.includes(command as ManagerVerb)
               ? await managerAlone(command as ManagerVerb, rest)
               : command === "page"
-                ? page(rest)
+                ? await page(rest)
                 : command === "view"
                   ? await view()
                   : command === "picker"
