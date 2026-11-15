@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a git merge or git pull with the ours strategy or the ours strategy option, since the PR's squash onto canary then deletes whatever canary added that the merge ignored, while canary reads as merged in and every gate stays green; and a git merge, pull or commit with its hooks off (--no-verify, a commit's -n), since its commit then skips commit-msg and a commit's pre-commit.
+// PreToolUse hook: refuses a git merge or git pull with the ours strategy or the ours strategy option, since the PR's squash onto canary then deletes whatever canary added that the merge ignored, while canary reads as merged in and every gate stays green; a git merge, pull or commit with its hooks off (--no-verify, a commit's -n), since its commit then skips commit-msg and a commit's pre-commit; and a git call that defines an alias on its own line, which can carry either.
 
 import { input } from "./input"
 import { gitCommand } from "./no-stash"
@@ -6,6 +6,7 @@ import { fromFactory } from "./role"
 import {
   braceWords,
   type Env,
+  GIT_TAKES,
   knownVariables,
   lex,
   marked,
@@ -156,7 +157,39 @@ function aliasWords(text: string): string[] | undefined {
   return words
 }
 
-async function judgeGit(args: Word[], env: Env, depth: number): Promise<string | undefined> {
+// The word on git's own line, before its subcommand, that defines an alias: a -c or --config-env value whose key is alias.<name> in any case, or, when the program is surely git, a -c value the hook cannot read
+function aliasDefined(args: Word[], git = true): Word | undefined {
+  for (let k = 0; k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value
+    if (v.startsWith("--config-env=")) {
+      if (/^--config-env=alias\./i.test(v) || (git && marked(v))) return args[k]
+    } else if (GIT_TAKES.has(v)) {
+      const value = args[++k]
+      if (!value || (v !== "-c" && v !== "--config-env")) continue
+      if (
+        /^alias\./i.test(value.value) ||
+        (git && (marked(value.value) || value.unknown === BRACE))
+      )
+        return value
+    }
+  }
+}
+
+// A factory session's git call that defines an alias on its own line is refused, whatever it runs, once the reading below finds nothing more precise
+async function judgeGit(
+  args: Word[],
+  env: Env,
+  depth: number,
+  git = true,
+): Promise<string | undefined> {
+  const found = await readGit(args, env, depth)
+  if (found) return found
+  const alias = aliasDefined(args, git)
+  if (alias)
+    return `no-ours-merge hook refuses this git call: it defines a git alias on its own line (${visible(alias.source ?? alias.value)}), which can run a merge, pull or commit with its hooks off or with ours under a name the hook may not read. Run the git command directly, its words written out in place of the alias.`
+}
+
+async function readGit(args: Word[], env: Env, depth: number): Promise<string | undefined> {
   const { aliases, rest, sub } = gitCommand(args)
   if (!sub) return
   if (marked(sub.value)) {
@@ -167,7 +200,7 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`
     return
   }
-  // git runs an alias only for a name that is no git command of its own, the last -c for it winning, its key read in any case
+  // git runs an alias for any name but its own commands, which the hook applies to the three it judges, commit, merge and pull; the last -c for a name wins, its key read in any case
   const key = `alias.${sub.value.toLowerCase()}`
   const found = aliases.findLast(
     (a) => a.includes("=") && a.slice(0, a.indexOf("=")).toLowerCase() === key,
@@ -193,7 +226,7 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
     return judgeGit([...args.slice(0, args.indexOf(sub)), ...own, ...rest], env, depth + 1)
   }
   if (!VERIFIED.has(sub.value)) return
-  // a -h or --help lets no call through, since the walk may read a word as help that git takes as an option's value
+  // a -h or --help lets no refused call through, since the walk may read a word as help that git takes as an option's value
   const { off, unread } = walk(sub.value, rest)
   if (unread)
     return `no-ours-merge hook refuses git ${sub.value} with a brace list it cannot expand (${visible(unread.source ?? unread.value)}), which may spell --no-verify${SUBS.has(sub.value) ? " or ours" : ""}: write the words out. ${SUBS.has(sub.value) ? `${INSTEAD} ` : ""}${AGAIN}`
@@ -225,25 +258,35 @@ const visitor =
   async (_cmd, { args: typed, first, name }, env) => {
     const args = expanded(typed)
     if (name === "git") return judgeGit(args, env, depth)
-    if (first && (first.unknown || marked(first.value)) && verified(args))
-      return judgeGit(args, env, depth)
+    if (
+      first &&
+      (first.unknown || marked(first.value)) &&
+      (verified(args) || aliasDefined(args, false))
+    )
+      return judgeGit(args, env, depth, false)
     if (PRINTERS.has(name)) return
     const nested = args.findIndex(
-      (a, j) => program(a.value) === "git" && verified(args.slice(j + 1)),
+      (a, j) =>
+        program(a.value) === "git" &&
+        (verified(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))),
     )
     if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth)
   }
 
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 
-// The cheap first look: ours, veri (--no-verify and its abbreviations), a short option holding n or a brace list or sequence named anywhere, quotes gone so o'u'rs still counts; $'...' can spell any word, so it always counts.
+// The cheap first look: ours, veri (--no-verify and its abbreviations), a short option holding n, a brace list or sequence, alias, a -c or --config-env named anywhere, quotes gone so o'u'rs still counts; $'...' can spell any word, so it always counts.
 const candidate = (command: string): boolean =>
-  command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/.test(BARE(command))
+  command.includes("$'") ||
+  /ours|veri|alias|config-env|(?:^|\s)-c\s|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/i.test(
+    BARE(command),
+  )
 
-// A call that reads as a merge or pull with ours, or a merge, pull or commit with its hooks off, which the hook refuses when it cannot read it
+// A call that reads as a merge or pull with ours, a merge, pull or commit with its hooks off, or a git call that defines an alias, which the hook refuses when it cannot read it
 const mergeCall = (command: string): boolean => {
   const bare = BARE(command)
   if (!/\bgit\b/i.test(bare)) return false
+  if (/alias\./i.test(bare)) return true
   if (/\b(?:merge|pull)\b/.test(bare) && /ours/.test(bare)) return true
   if (/\b(?:commit|merge|pull)\b/.test(bare) && /--no-veri/.test(bare)) return true
   return /\bcommit\b/.test(bare) && /(?:^|[\s{,])-[^\s-]*n/.test(bare)
@@ -258,7 +301,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   }
   if (typeof payload !== "object" || payload === null)
     return mergeCall(raw)
-      ? "no-ours-merge hook could not parse its input, which reads as a merge with ours or a git call with its hooks off, so it refuses the call."
+      ? "no-ours-merge hook could not parse its input, which reads as a merge with ours, a git call with its hooks off or one that defines an alias, so it refuses the call."
       : undefined
   const { cwd, tool_input: toolInput, tool_name: tool } = payload as Record<string, unknown>
   if (tool !== "Bash") return
@@ -275,7 +318,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   return run(lex(command, env.known), env, visitor(0))
 }
 
-// Fails closed only on a call that reads as a merge with ours or a git call with its hooks off: an error on any other call lets it run, so a parser bug cannot block every Bash command.
+// Fails closed only on a call that reads as a merge with ours, a git call with its hooks off or one that defines an alias: an error on any other call lets it run, so a parser bug cannot block every Bash command.
 export async function check(
   raw: string,
   environment: Record<string, string | undefined> = process.env,
@@ -289,7 +332,7 @@ export async function check(
       if (typeof parsed.tool_input?.command === "string") command = parsed.tool_input.command
     } catch {}
     if (!mergeCall(command)) return
-    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours or a git call with its hooks off, so it refuses it. Split it into plain commands and run them again.`
+    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours, a git call with its hooks off or one that defines an alias, so it refuses it. Split it into plain commands and run them again.`
   }
 }
 

@@ -16640,7 +16640,30 @@ function aliasWords(text) {
     words.push(word);
   return words;
 }
-async function judgeGit2(args, env, depth) {
+function aliasDefined(args, git = true) {
+  for (let k = 0;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v.startsWith("--config-env=")) {
+      if (/^--config-env=alias\./i.test(v) || git && marked(v))
+        return args[k];
+    } else if (GIT_TAKES.has(v)) {
+      const value = args[++k];
+      if (!value || v !== "-c" && v !== "--config-env")
+        continue;
+      if (/^alias\./i.test(value.value) || git && (marked(value.value) || value.unknown === BRACE))
+        return value;
+    }
+  }
+}
+async function judgeGit2(args, env, depth, git = true) {
+  const found = await readGit(args, env, depth);
+  if (found)
+    return found;
+  const alias = aliasDefined(args, git);
+  if (alias)
+    return `no-ours-merge hook refuses this git call: it defines a git alias on its own line (${visible(alias.source ?? alias.value)}), which can run a merge, pull or commit with its hooks off or with ours under a name the hook may not read. Run the git command directly, its words written out in place of the alias.`;
+}
+async function readGit(args, env, depth) {
   const { aliases, rest, sub } = gitCommand(args);
   if (!sub)
     return;
@@ -16703,20 +16726,22 @@ var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
   const args = expanded(typed);
   if (name === "git")
     return judgeGit2(args, env, depth);
-  if (first && (first.unknown || marked(first.value)) && verified(args))
-    return judgeGit2(args, env, depth);
+  if (first && (first.unknown || marked(first.value)) && (verified(args) || aliasDefined(args, false)))
+    return judgeGit2(args, env, depth, false);
   if (PRINTERS.has(name))
     return;
-  const nested = args.findIndex((a, j) => program(a.value) === "git" && verified(args.slice(j + 1)));
+  const nested = args.findIndex((a, j) => program(a.value) === "git" && (verified(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))));
   if (nested !== -1)
     return judgeGit2(args.slice(nested + 1), env, depth);
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/.test(BARE4(command));
+var candidate5 = (command) => command.includes("$'") || /ours|veri|alias|config-env|(?:^|\s)-c\s|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/i.test(BARE4(command));
 var mergeCall = (command) => {
   const bare = BARE4(command);
   if (!/\bgit\b/i.test(bare))
     return false;
+  if (/alias\./i.test(bare))
+    return true;
   if (/\b(?:merge|pull)\b/.test(bare) && /ours/.test(bare))
     return true;
   if (/\b(?:commit|merge|pull)\b/.test(bare) && /--no-veri/.test(bare))
@@ -16731,7 +16756,7 @@ async function inspect12(raw, environment) {
     payload = undefined;
   }
   if (typeof payload !== "object" || payload === null)
-    return mergeCall(raw) ? "no-ours-merge hook could not parse its input, which reads as a merge with ours or a git call with its hooks off, so it refuses the call." : undefined;
+    return mergeCall(raw) ? "no-ours-merge hook could not parse its input, which reads as a merge with ours, a git call with its hooks off or one that defines an alias, so it refuses the call." : undefined;
   const { cwd, tool_input: toolInput, tool_name: tool } = payload;
   if (tool !== "Bash")
     return;
@@ -16760,7 +16785,7 @@ async function check17(raw, environment = process.env) {
     } catch {}
     if (!mergeCall(command))
       return;
-    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours or a git call with its hooks off, so it refuses it. Split it into plain commands and run them again.`;
+    return `no-ours-merge hook could not read this call (${error}), which reads as a merge with ours, a git call with its hooks off or one that defines an alias, so it refuses it. Split it into plain commands and run them again.`;
   }
 }
 if (false) {}

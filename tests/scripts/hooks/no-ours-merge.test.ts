@@ -231,6 +231,7 @@ describe("every other call runs", () => {
     ],
     ["a --config-env of another key", "git --config-env=user.name=NAME commit -m y"],
     ["an alias set in a config file", "git config alias.st status"],
+    ["a program the hook cannot read with a -c it cannot read", '$S -c "$F"'],
     ["echo of a call that defines an alias", "echo git -c alias.c=commit c -m x"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
