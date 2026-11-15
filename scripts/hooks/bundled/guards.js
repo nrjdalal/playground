@@ -1293,8 +1293,8 @@ function word(lx) {
       lx.i++;
     }
   }
-  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
-    out.unknown ??= "a brace expansion";
+  if (BRACE_LIST.test(bare))
+    out.unknown ??= BRACE;
   if (GLOB_CHARS.test(bare))
     out.glob = true;
   out.source = src.slice(start, lx.i);
@@ -1305,6 +1305,8 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
+var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
 var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
@@ -1908,8 +1910,36 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  if (!GLOB_PATTERN.test(pattern))
+  const grouped = (first.source ?? "").includes("(");
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(pattern) : null;
+  const patterns = grouped ? groupWords(qualifiers ? pattern.slice(0, qualifiers.index) : pattern) : [pattern];
+  if (patterns === undefined)
     return;
+  if (patterns === null || qualifiers?.[1].includes("N"))
+    return null;
+  if (!grouped && !GLOB_PATTERN.test(pattern))
+    return;
+  const [only, ...more] = patterns;
+  const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute2(only) && unsure)
+    return;
+  const found = [];
+  for (const each of patterns) {
+    const matched = globMatches(each, env);
+    if (matched === null)
+      return null;
+    found.push(...matched);
+  }
+  if (found.length > READINGS || qualifiers && found.length > 0)
+    return null;
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function globMatches(pattern, env) {
   const absolute = isAbsolute2(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -1950,13 +1980,61 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
         return null;
     }
   }
-  if (found.length === 0)
-    return;
-  return found.map((value) => ({
-    ...cmd,
-    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
-  }));
+  return found;
 }
+function groupWords(pattern) {
+  const open = pattern.indexOf("(");
+  if (open < 0)
+    return pattern.includes(")") ? undefined : [pattern.replace(/["']/g, "")];
+  const cuts = [open];
+  let close = -1;
+  for (let k = open, depth = 0;k < pattern.length && close < 0; k++) {
+    if (pattern[k] === "(")
+      depth++;
+    else if (pattern[k] === "|" && depth === 1)
+      cuts.push(k);
+    else if (pattern[k] === ")" && --depth === 0)
+      close = k;
+  }
+  if (close < 0 || pattern.slice(open, close).includes("/"))
+    return;
+  if (/[#^~]/.test(pattern.slice(open, close)))
+    return null;
+  const out = [];
+  for (const [n, from] of cuts.entries()) {
+    const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close);
+    const words = groupWords(pattern.slice(0, open) + alternative + pattern.slice(close + 1));
+    if (!words || out.push(...words) > READINGS)
+      return words === undefined ? undefined : null;
+  }
+  return out;
+}
+function braceRun(cmd, first) {
+  if (first?.unknown !== BRACE)
+    return;
+  const source = (first.source ?? "").replace(/\\\n/g, "");
+  if (/[$`]/.test(source))
+    return null;
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide));
+  if (masked.includes("("))
+    return;
+  const expanded = braceWords(masked);
+  if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
+    return null;
+  const words = [];
+  for (const each of expanded) {
+    const { commands } = lex(each.replace(/[\uE000-\uE004]/g, (c) => HIDDEN[c.charCodeAt(0) - 57344]));
+    if (commands.length > 1 || commands[0]?.redirects.length)
+      return null;
+    words.push(...commands[0]?.words ?? []);
+  }
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
+}
+var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
+var HIDDEN = "{,}()";
+var hide = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
 function heldGlob(cmd, first, env) {
   if (!first?.glob || !first.raw || !marked(first.value))
     return;
@@ -1990,6 +2068,10 @@ function globSpells(text, names) {
       return true;
   }
   return false;
+}
+function spelledText(text) {
+  const spelled = text.replace(/\\\n/g, "").replace(/["'\\]/g, "").split(/[\s;&<>`]+/).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? []).flatMap((word) => groupWords(word.replace(/\([^()|]*\)$/, "")) ?? [word]));
+  return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
 function repass(commands, envs) {
   for (const cmd of commands) {
@@ -2090,14 +2172,18 @@ async function examine(cmd, env, visit, builtins) {
   const array = arrayRun(cmd, primary.first, env);
   const prior = splitHeld(cmd, primary.name, env, true);
   const split = splitHeld(cmd, primary.name, env);
+  const brace = braceRun(cmd, primary.first);
   const globs = [
+    brace === null ? null : undefined,
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
-    ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true))
+    ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
+    ...brace ? [globRun(brace, parse(brace).first, env)] : []
   ];
   const resolving = [
     ...split,
     ...array ? [array] : [],
+    ...brace ? [brace] : [],
     ...heldScripts(cmd, primary, env),
     ...globs.flatMap((globbed) => globbed ?? [])
   ];
@@ -4208,7 +4294,7 @@ function own(inst, key, value, enumerable = true) {
   Object.defineProperty(inst, key, { configurable: true, writable: true, enumerable, value });
   return value;
 }
-function hide(inst, key, value) {
+function hide2(inst, key, value) {
   return own(inst, key, value, false);
 }
 function derived(computes, table) {
@@ -5214,7 +5300,7 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
   }
 }, {
   get "~standard"() {
-    return hide(this, "~standard", standardProps(this));
+    return hide2(this, "~standard", standardProps(this));
   },
   set "~standard"(value) {
     own(this, "~standard", value);
@@ -8768,7 +8854,7 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
     return args.length === 0 ? fn(this) : fn(this, ...args);
   },
   get "~standard"() {
-    return hide(this, "~standard", {
+    return hide2(this, "~standard", {
       ...standardProps(this),
       jsonSchema: {
         input: createStandardJSONSchemaMethod(this, "input"),
@@ -9798,7 +9884,7 @@ async function inspect2(raw, environment) {
     process: environment,
     vars: new Map
   };
-  const text = BARE(decodedText(command));
+  const text = BARE(spelledText(decodedText(command)));
   const named = /\bstash\b/.test(text) && (/\bgit\b/i.test(text) || globSpells(text, ["git"]));
   return run2(lex(command, env.known), env, (cmd, parsed, at) => named && unreadRun(parsed) ? Promise.resolve(UNREAD) : visit2(cmd, parsed, at));
 }
@@ -15806,8 +15892,8 @@ async function inspect8(raw) {
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
-  const bare = `${toolInput.command} ${decoded}`.replace(/["'\\]/g, "");
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare) && !globSpells(bare, KILLS))
+  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "");
+  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare) && !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) && !globSpells(bare, KILLS))
     return;
   const lexed = lex(toolInput.command);
   const fresh = () => ({ files: new Map, known: {}, process: {}, vars: new Map });
@@ -16659,7 +16745,7 @@ var VERIFIED = new Set(["commit", "merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "m", "o", "s"]);
 var ATTACHED = new Set(["S", "j", "u"]);
 var ALIAS_DEPTH = 8;
-var BRACE = "a brace expansion";
+var BRACE2 = "a brace expansion";
 var SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/;
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
@@ -16694,7 +16780,7 @@ function walk2(sub, args) {
   let unread;
   const commit = sub === "commit";
   const value = (k) => {
-    if (args[k]?.unknown === BRACE)
+    if (args[k]?.unknown === BRACE2)
       unread ??= args[k];
     return k;
   };
@@ -16702,7 +16788,7 @@ function walk2(sub, args) {
     const v = args[k].value;
     if (v === "--")
       break;
-    if (args[k].unknown === BRACE)
+    if (args[k].unknown === BRACE2)
       unread ??= args[k];
     else if (v.startsWith("--")) {
       if (v === "--verify")
@@ -16866,7 +16952,7 @@ async function readGit(args, env, depth, cluster) {
   if (!SUBS.has(sub.value))
     return;
   for (const { flag, value } of strategies(rest)) {
-    if (value && (marked(value.value) || value.unknown === BRACE))
+    if (value && (marked(value.value) || value.unknown === BRACE2))
       return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.source ?? value.value)}). ${INSTEAD3}`;
     if (value?.value === "ours")
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
@@ -16878,7 +16964,7 @@ var judged = (args) => {
   return sub !== undefined && (VERIFIED.has(sub) || marked(sub));
 };
 var expanded = (args) => args.flatMap((w) => {
-  if (w.unknown !== BRACE)
+  if (w.unknown !== BRACE2)
     return [w];
   const words = braceWords(w.value);
   if (!words || words.some((v) => SEQUENCE.test(v)))
@@ -17551,7 +17637,7 @@ async function check19(raw) {
 if (false) {}
 
 // packages/scripts/src/release-notes/notes.ts
-var HIDDEN = new Set(["ci"]);
+var HIDDEN2 = new Set(["ci"]);
 var ARTICLES = new Set(["a", "an", "the"]);
 var COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"]);
 var CONTRIBUTORS_HEADING = "### \u2764\uFE0F Contributors";
@@ -17857,11 +17943,11 @@ async function inspect15(raw, environment) {
   if (tool !== "Bash")
     return;
   const command = input?.command;
-  if (typeof command !== "string" || !CANDIDATE.test(bare(command)))
+  if (typeof command !== "string" || !CANDIDATE.test(bare(spelledText(command))))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const roots = rootsOf(directory, session);
-  const text = bare(decodedText(command));
+  const text = bare(spelledText(decodedText(command)));
   const named = DELETES.test(text) || globSpells(text, SPELLED);
   const env = {
     cwd: directory,

@@ -1248,8 +1248,7 @@ function word(lx: Lexer): Word {
       lx.i++
     }
   }
-  // the lookahead finds the close once, so a { with no } costs its length rather than its square
-  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
+  if (BRACE_LIST.test(bare)) out.unknown ??= BRACE
   if (GLOB_CHARS.test(bare)) out.glob = true
   out.source = src.slice(start, lx.i)
   if (marked(out.value)) out.raw = out.source
@@ -1259,6 +1258,12 @@ function word(lx: Lexer): Word {
 }
 
 const GLOB_CHARS = /[*?[{(]/
+
+// A brace list or sequence the shell expands, its close found by a lookahead once, so a { with no } costs its length rather than its square
+const BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/
+
+// The mark a word holding a brace list or sequence the shell sees carries
+export const BRACE = "a brace expansion"
 
 // A word's value that opens with ~- or ~+ as zsh expands it: followed by its end, a slash, or a part the shell fills in at run time
 const TILDE = /^~[-+](?=\/|$|\u0000)/
@@ -1998,7 +2003,7 @@ function arrayRun(cmd: Command, first: Word | undefined, env: Env): Command | nu
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
-// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, and for a pattern that matches no file, which runs as typed
+// A program word holding a glob the shell sees (`/usr/bin/pk?ll`, `pk*ll`, `/bin/r[m]`) or a typed zsh group (`/usr/bin/pk(i|x)ll`, groupWords) runs the file it matches: the command with each match in its place, read from the disk segment by segment from the line's folder; null when the reader cannot tell what it matches (a group groupWords cannot read, zsh's glob qualifiers on a pattern that matches a file or that may vanish, a relative pattern under a folder it cannot read, a folder it cannot list, more matches than READINGS), so the command reads as unread; undefined for any other program word, for a pattern that matches no file, which runs as typed, and for one zsh refuses as bad, which runs nothing
 function globRun(
   cmd: Command,
   first: Word | undefined,
@@ -2007,7 +2012,35 @@ function globRun(
 ): Command[] | null | undefined {
   const pattern = first?.value ?? ""
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? "")) return
-  if (!GLOB_PATTERN.test(pattern)) return
+  const grouped = (first.source ?? "").includes("(")
+  // zsh reads a closing group with no | or ( in it as glob qualifiers, which pick among the files the rest matches and may run code there, and whose N lets a pattern that matches nothing vanish
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(pattern) : null
+  const patterns = grouped
+    ? groupWords(qualifiers ? pattern.slice(0, qualifiers.index) : pattern)
+    : [pattern]
+  if (patterns === undefined) return
+  if (patterns === null || qualifiers?.[1].includes("N")) return null
+  if (!grouped && !GLOB_PATTERN.test(pattern)) return
+  const [only, ...more] = patterns
+  // a group with no | and no glob character names one path (`docs(PG-1):`, a commit scope a guard reads as a line), so under a folder the reader cannot read it keeps its typed word
+  const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute(only) && unsure) return
+  const found: string[] = []
+  for (const each of patterns) {
+    const matched = globMatches(each, env)
+    if (matched === null) return null
+    found.push(...matched)
+  }
+  if (found.length > READINGS || (qualifiers && found.length > 0)) return null
+  if (found.length === 0) return
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => (w === first ? { quoted: true, value } : w)),
+  }))
+}
+
+// The paths a pattern matches, read from the disk segment by segment from the line's folder, a pattern with no glob character matching its own path when it exists; null when the reader cannot tell (globRun)
+function globMatches(pattern: string, env: Env): string[] | null {
   const absolute = isAbsolute(pattern)
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere)) return null
   const base = absolute ? "/" : (env.cwd as string)
@@ -2044,12 +2077,58 @@ function globRun(
       if (!/^(?:ENOENT|ENOTDIR)$/.test((error as { code?: string }).code ?? "")) return null
     }
   }
-  if (found.length === 0) return
-  return found.map((value) => ({
-    ...cmd,
-    words: cmd.words.map((w) => (w === first ? { quoted: true, value } : w)),
-  }))
+  return found
 }
+
+// The patterns a zsh group makes of a pattern word, each alternative of `(a|b)` in its place, nested groups expanded and its quotes dropped, as zsh's glob matches it against files; undefined for a pattern zsh refuses as bad, which runs nothing (an unclosed group, a / inside one); null for one the reader cannot read: an extended glob character (#, ^, ~) inside a group, or more patterns than READINGS
+function groupWords(pattern: string): string[] | null | undefined {
+  const open = pattern.indexOf("(")
+  if (open < 0) return pattern.includes(")") ? undefined : [pattern.replace(/["']/g, "")]
+  const cuts = [open]
+  let close = -1
+  for (let k = open, depth = 0; k < pattern.length && close < 0; k++) {
+    if (pattern[k] === "(") depth++
+    else if (pattern[k] === "|" && depth === 1) cuts.push(k)
+    else if (pattern[k] === ")" && --depth === 0) close = k
+  }
+  if (close < 0 || pattern.slice(open, close).includes("/")) return undefined
+  if (/[#^~]/.test(pattern.slice(open, close))) return null
+  const out: string[] = []
+  for (const [n, from] of cuts.entries()) {
+    const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close)
+    const words = groupWords(pattern.slice(0, open) + alternative + pattern.slice(close + 1))
+    if (!words || out.push(...words) > READINGS) return words === undefined ? undefined : null
+  }
+  return out
+}
+
+// A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees, which bash refuses and a guard meets as code it reads as a line (`f({a, b})`), and for any other program word
+function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
+  if (first?.unknown !== BRACE) return
+  const source = (first.source ?? "").replace(/\\\n/g, "")
+  if (/[$`]/.test(source)) return null
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide))
+  if (masked.includes("(")) return
+  const expanded = braceWords(masked)
+  if (!expanded || expanded.some((w) => BRACE_LIST.test(w))) return null
+  const words: Word[] = []
+  for (const each of expanded) {
+    const { commands } = lex(
+      each.replace(/[\uE000-\uE004]/g, (c) => HIDDEN[c.charCodeAt(0) - 0xe000]),
+    )
+    if (commands.length > 1 || commands[0]?.redirects.length) return null
+    words.push(...(commands[0]?.words ?? []))
+  }
+  if (words.length === 0) return null
+  return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
+}
+
+// A quoted part of a word, or a character after a backslash, whose braces and commas the shell's brace expansion leaves as text
+const QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g
+
+// A brace, comma or paren as a private character braceWords passes over, put back once the words are made
+const HIDDEN = "{,}()"
+const hide = (c: string) => String.fromCharCode(0xe000 + HIDDEN.indexOf(c))
 
 // A program word that joins a read the split reading leaves whole (a quoted `"$X"`) to a typed glob part (`"$X"/pk?ll`), its read resolved with the held variables and then globbed; a glob character inside the held value is matched too, which errs toward a match
 function heldGlob(cmd: Command, first: Word | undefined, env: Env): Command[] | null | undefined {
@@ -2100,6 +2179,21 @@ export function globSpells(text: string, names: string[]): boolean {
     if (names.some((name) => glob.match(name))) return true
   }
   return false
+}
+
+// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined and its quotes and backslashes dropped (braceWords, groupWords, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell
+export function spelledText(text: string): string {
+  const spelled = text
+    .replace(/\\\n/g, "")
+    .replace(/["'\\]/g, "")
+    .split(/[\s;&<>`]+/)
+    .filter((token) => /[{(]/.test(token))
+    .flatMap((token) =>
+      (braceWords(token) ?? []).flatMap(
+        (word) => groupWords(word.replace(/\([^()|]*\)$/, "")) ?? [word],
+      ),
+    )
+  return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text
 }
 
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
@@ -2206,14 +2300,18 @@ export async function examine(
   const prior = splitHeld(cmd, primary.name, env, true)
   const split = splitHeld(cmd, primary.name, env)
   // a held value split into the program word is globbed as the shell globs an unquoted expansion (`X=/usr/bin; $X/pk?ll`)
+  const brace = braceRun(cmd, primary.first)
   const globs = [
+    brace === null ? null : undefined,
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
+    ...(brace ? [globRun(brace, parse(brace).first, env)] : []),
   ]
   const resolving = [
     ...split,
     ...(array ? [array] : []),
+    ...(brace ? [brace] : []),
     ...heldScripts(cmd, primary, env),
     ...globs.flatMap((globbed) => globbed ?? []),
   ]

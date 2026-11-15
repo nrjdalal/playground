@@ -12,6 +12,7 @@ import {
   shellSlot,
   SHELLS,
   slotWords,
+  spelledText,
   UNKNOWN,
   type Command,
   type Visit,
@@ -54,16 +55,17 @@ async function inspect(raw: string) {
     tool_name?: unknown
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
-  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill, and an ANSI-C string's words are read as the lexer decodes them, since `$'pkill\x20-f'` holds pkill behind an escape; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows, and so does a glob that may match a kill program (`/usr/bin/pk?ll`), which the reader matches on the disk
+  // quotes and backslashes go first, since the shell reads p"k"ill and \pkill as pkill, and an ANSI-C string's words are read as the lexer decodes them, since `$'pkill\x20-f'` holds pkill behind an escape; a word of 2 or more back-to-back variable reads (`$P$Q`) passes too, since the reader joins the program name they hold where no literal kill token shows, and so does a glob that may match a kill program (`/usr/bin/pk?ll`), which the reader matches on the disk, a brace list or zsh group spelled out (spelledText), as `/usr/bin/pk{i,x}ll` and `/usr/bin/pk(i|x)ll` name pkill, and a brace sequence joined to a name (`pk{i..i}ll`), which the reader reads as unread
   const decoded = toolInput.command.includes("$'")
     ? lex(toolInput.command)
         .commands.flatMap((c) => c.words.map((w) => w.value))
         .join(" ")
     : ""
-  const bare = `${toolInput.command} ${decoded}`.replace(/["'\\]/g, "")
+  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
   if (
     !/\b(?:fuser|kill|killall|pkill)\b/.test(bare) &&
     !/(?:\$\{?\w+\}?){2,}/.test(bare) &&
+    !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) &&
     !globSpells(bare, KILLS)
   )
     return

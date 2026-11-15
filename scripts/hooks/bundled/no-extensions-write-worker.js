@@ -7410,8 +7410,8 @@ function word(lx) {
       lx.i++;
     }
   }
-  if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare))
-    out.unknown ??= "a brace expansion";
+  if (BRACE_LIST.test(bare))
+    out.unknown ??= BRACE;
   if (GLOB_CHARS.test(bare))
     out.glob = true;
   out.source = src.slice(start, lx.i);
@@ -7422,6 +7422,8 @@ function word(lx) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
+var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
 var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
@@ -8025,8 +8027,36 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const pattern = first?.value ?? "";
   if (!first || !glob || marked(pattern) || SUBSCRIPTED.test(first.source ?? ""))
     return;
-  if (!GLOB_PATTERN.test(pattern))
+  const grouped = (first.source ?? "").includes("(");
+  const qualifiers = grouped ? /\(([^()|]*)\)$/.exec(pattern) : null;
+  const patterns = grouped ? groupWords(qualifiers ? pattern.slice(0, qualifiers.index) : pattern) : [pattern];
+  if (patterns === undefined)
     return;
+  if (patterns === null || qualifiers?.[1].includes("N"))
+    return null;
+  if (!grouped && !GLOB_PATTERN.test(pattern))
+    return;
+  const [only, ...more] = patterns;
+  const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute3(only) && unsure)
+    return;
+  const found = [];
+  for (const each of patterns) {
+    const matched = globMatches(each, env);
+    if (matched === null)
+      return null;
+    found.push(...matched);
+  }
+  if (found.length > READINGS || qualifiers && found.length > 0)
+    return null;
+  if (found.length === 0)
+    return;
+  return found.map((value) => ({
+    ...cmd,
+    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
+  }));
+}
+function globMatches(pattern, env) {
   const absolute = isAbsolute3(pattern);
   if (!absolute && (!env.cwd || env.cwdUnread || env.cwdAnywhere))
     return null;
@@ -8067,13 +8097,61 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
         return null;
     }
   }
-  if (found.length === 0)
-    return;
-  return found.map((value) => ({
-    ...cmd,
-    words: cmd.words.map((w) => w === first ? { quoted: true, value } : w)
-  }));
+  return found;
 }
+function groupWords(pattern) {
+  const open = pattern.indexOf("(");
+  if (open < 0)
+    return pattern.includes(")") ? undefined : [pattern.replace(/["']/g, "")];
+  const cuts = [open];
+  let close = -1;
+  for (let k = open, depth = 0;k < pattern.length && close < 0; k++) {
+    if (pattern[k] === "(")
+      depth++;
+    else if (pattern[k] === "|" && depth === 1)
+      cuts.push(k);
+    else if (pattern[k] === ")" && --depth === 0)
+      close = k;
+  }
+  if (close < 0 || pattern.slice(open, close).includes("/"))
+    return;
+  if (/[#^~]/.test(pattern.slice(open, close)))
+    return null;
+  const out = [];
+  for (const [n, from] of cuts.entries()) {
+    const alternative = pattern.slice(from + 1, cuts[n + 1] ?? close);
+    const words = groupWords(pattern.slice(0, open) + alternative + pattern.slice(close + 1));
+    if (!words || out.push(...words) > READINGS)
+      return words === undefined ? undefined : null;
+  }
+  return out;
+}
+function braceRun(cmd, first) {
+  if (first?.unknown !== BRACE)
+    return;
+  const source = (first.source ?? "").replace(/\\\n/g, "");
+  if (/[$`]/.test(source))
+    return null;
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide2));
+  if (masked.includes("("))
+    return;
+  const expanded = braceWords(masked);
+  if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
+    return null;
+  const words = [];
+  for (const each of expanded) {
+    const { commands } = lex(each.replace(/[\uE000-\uE004]/g, (c) => HIDDEN[c.charCodeAt(0) - 57344]));
+    if (commands.length > 1 || commands[0]?.redirects.length)
+      return null;
+    words.push(...commands[0]?.words ?? []);
+  }
+  if (words.length === 0)
+    return null;
+  return { ...cmd, words: cmd.words.flatMap((w) => w === first ? words : [w]) };
+}
+var QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g;
+var HIDDEN = "{,}()";
+var hide2 = (c) => String.fromCharCode(57344 + HIDDEN.indexOf(c));
 function heldGlob(cmd, first, env) {
   if (!first?.glob || !first.raw || !marked(first.value))
     return;
@@ -8196,14 +8274,18 @@ async function examine(cmd, env, visit, builtins) {
   const array = arrayRun(cmd, primary.first, env);
   const prior = splitHeld(cmd, primary.name, env, true);
   const split = splitHeld(cmd, primary.name, env);
+  const brace = braceRun(cmd, primary.first);
   const globs = [
+    brace === null ? null : undefined,
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
-    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true))
+    ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true)),
+    ...brace ? [globRun(brace, parse3(brace).first, env)] : []
   ];
   const resolving = [
     ...split,
     ...array ? [array] : [],
+    ...brace ? [brace] : [],
     ...heldScripts(cmd, primary, env),
     ...globs.flatMap((globbed) => globbed ?? [])
   ];
@@ -10138,13 +10220,15 @@ function hookRemover(text, hook) {
   const word = [text.replace(/\\\n/g, ""), text].flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/)).find(hookRemoverWord);
   if (word)
     return hook(false) ? word : undefined;
-  if (!/[$`?*]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false))
+  if (!/[$`?*{(]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false))
     return;
   for (const cmd of lex(text).commands) {
     const { first, name } = parse3(cmd);
     if (marked(name))
       return "a program built from a variable or a substitution";
-    if (first?.glob && /[?*]|\[[^\]]*\]/.test(name))
+    if (first?.unknown === BRACE)
+      return "a program named by a brace list";
+    if (first?.glob && /[?*(]|\[[^\]]*\]/.test(name))
       return "a program named by a glob";
     if (name === "eval" || hookRemoverWord(program(name)))
       return program(name);
