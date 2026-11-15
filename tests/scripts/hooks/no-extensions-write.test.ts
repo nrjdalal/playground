@@ -3757,3 +3757,63 @@ describe("an echo into the folder core.hooksPath names is judged as one into a g
     ).toContain("no-extensions-write hook refuses")
   })
 })
+
+// #2258: a command that writes, moves or copies into a hook file takes every text on its line as the hook's text, and a copy's source file the hook can read on disk as well
+describe("hook text that reaches a hook by another path", () => {
+  const FILES = join(HOME, "hook-sources")
+  mkdirSync(FILES, { recursive: true })
+  writeFileSync(join(FILES, "names.sh"), "#!/bin/sh\ntouch ~/.playground/extensions/x\n")
+  writeFileSync(join(FILES, "removes.sh"), "#!/bin/sh\nrm old.log\n")
+  writeFileSync(join(FILES, "plain.sh"), "#!/bin/sh\nbun test\n")
+
+  test.each([
+    ["cp", "cp hook-sources/names.sh .git/hooks/pre-commit"],
+    ["mv", "mv hook-sources/names.sh .git/hooks/pre-commit"],
+    ["install", "install -m 755 hook-sources/names.sh .git/hooks/pre-commit"],
+    ["ln -s", `ln -s ${FILES}/names.sh .git/hooks/pre-commit`],
+    ["cp -t", "cp -t .git/hooks hook-sources/names.sh"],
+    ["dd if=", "dd if=hook-sources/names.sh of=.git/hooks/pre-commit"],
+    ["a read-only sed", "sed 's/a/b/' hook-sources/names.sh > .git/hooks/pre-commit"],
+    ["a read-only perl", "perl -pe 's/a/b/' hook-sources/names.sh > .git/hooks/pre-commit"],
+  ])(
+    "a file whose text names the data folder, copied into a git hook by %s, is refused",
+    async (_, command) => {
+      expect(await bash(command)).toContain("copied from a file whose text names")
+    },
+  )
+
+  test("a file whose text holds a remover, copied into a git hook, is refused", async () => {
+    expect(await bash("cp hook-sources/removes.sh .git/hooks/pre-commit")).toContain(
+      "written with rm, which a hook file may not hold",
+    )
+  })
+
+  test.each([
+    ["a plain file copied into a git hook", "cp hook-sources/plain.sh .git/hooks/pre-commit"],
+    ["a plain file moved into a git hook", "mv hook-sources/plain.sh .git/hooks/pre-commit"],
+    [
+      "a read-only sed of a plain file into a git hook",
+      "sed 's/a/b/' hook-sources/plain.sh > .git/hooks/pre-commit",
+    ],
+    ["a file that names the data folder copied into a note", "cp hook-sources/names.sh notes.sh"],
+    ["a source the hook cannot find copied into a git hook", "cp no-such.sh .git/hooks/pre-commit"],
+    [
+      "an echo of a home folder in upper case into a git hook",
+      "echo 'touch ~/NOTES/x' > .git/hooks/pre-commit",
+    ],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test("a line that names the data folder in one command and writes a hook in another is refused, a known limit", async () => {
+    expect(
+      await bash("ls ~/.playground/extensions; echo 'bun test' > .git/hooks/pre-commit"),
+    ).toContain("on a line whose text names")
+  })
+
+  test("a line that runs a remover in one command and writes a hook in another is refused, a known limit", async () => {
+    expect(await bash("rm -f old.log; echo 'bun test' > .git/hooks/pre-commit")).toContain(
+      "written with rm, which a hook file may not hold",
+    )
+  })
+})
