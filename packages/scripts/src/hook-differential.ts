@@ -399,6 +399,65 @@ export function canaryTree({
   return dir
 }
 
+// The error a module throws as a fresh bun process imports it, else undefined: a hook's Worker resolves its packages again at each call, so a package the tree lost after the run loaded it fails there and the hook's onerror allows the call; a process of its own, since Bun keeps a failed resolution for every later Worker in the same process, and it exits once the import ends, since a Worker module's onmessage keeps a process open
+const loadError = async (file: string) => {
+  const run = Bun.spawn(
+    ["bun", "--no-env-file", "-e", `await import(${JSON.stringify(file)}); process.exit()`],
+    {
+      stderr: "pipe",
+      stdout: "ignore",
+    },
+  )
+  const [code, stderr] = await Promise.all([run.exited, new Response(run.stderr).text()])
+  return code === 0
+    ? undefined
+    : (stderr.split("\n").find((line) => line.startsWith("error:")) ?? stderr.trim())
+}
+
+// The first of canary's measured hooks and its hooks' Worker modules (scripts/hooks/*-worker.ts) that fails to load, with its error, else undefined
+export async function unloaded(tree: string, hooks: string[]): Promise<string | undefined> {
+  const dir = join(tree, "scripts/hooks")
+  const files = [
+    ...hooks.map((hook) => join(dir, `${hook}.ts`)).filter((file) => existsSync(file)),
+    ...[...new Bun.Glob("*-worker.ts").scanSync(dir)].map((file) => join(dir, file)),
+  ]
+  for (const file of files) {
+    const error = await loadError(file)
+    if (error !== undefined) return `${file}: ${error}`
+  }
+}
+
+// canary's tree once every module unloaded() checks loads there: macOS's daily temp cleaner empties an installed package by its files' age, leaving canaryTree's .installed, so such a tree is moved aside for the cleaner and built again, and one that still fails throws
+export async function loadedTree(build: () => string, hooks: string[]): Promise<string> {
+  const tree = build()
+  if ((await unloaded(tree, hooks)) === undefined) return tree
+  try {
+    renameSync(tree, `${tree}.pruned-${Date.now()}`)
+  } catch {
+    // another run against the sha moved it first
+  }
+  const again = build()
+  const error = await unloaded(again, hooks)
+  if (error !== undefined) throw new Error(`canary's tree cannot load ${error}`)
+  return again
+}
+
+type Guard = { name: string; run: (raw: string, env: Env) => Promise<string | undefined> }
+
+// A hook's check(), but guards' runs each TAKES_MAIN guard with the head's main checkout, since guards gives them none and each would read its own tree as main, canary's unpacked one on canary's side; a guards with no GUARDS export keeps its own
+export async function checkOf(file: string, hook: string, main: string): Promise<Check> {
+  const own = await import(file)
+  if (hook !== "guards" || !Array.isArray(own.GUARDS)) return own.check
+  const guards = await Promise.all(
+    (own.GUARDS as Guard[]).map(async (guard) => {
+      if (!TAKES_MAIN.includes(guard.name)) return guard
+      const { check } = await import(join(dirname(file), `${guard.name}.ts`))
+      return { ...guard, run: (raw: string, env: Env) => check(raw, env, main) }
+    }),
+  )
+  return (raw, env) => own.check(raw, env, guards)
+}
+
 const option = (args: string[], name: string) => {
   const at = args.indexOf(name)
   return at === -1 ? undefined : args[at + 1]
@@ -598,13 +657,17 @@ async function main(args: string[]): Promise<number> {
     console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
     return 2
   }
-  const before = canaryTree({
-    base: join(tmpdir(), "hook-differential"),
-    root,
-    run: (argv, cwd, stdin) =>
-      Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
-    sha,
-  })
+  const before = await loadedTree(
+    () =>
+      canaryTree({
+        base: join(tmpdir(), "hook-differential"),
+        root,
+        run: (argv, cwd, stdin) =>
+          Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
+        sha,
+      }),
+    hooks,
+  )
   const list =
     mode === "replay"
       ? await calls(projects, Date.now() - hours * 3600 * 1000, role === "session", glm)
@@ -632,8 +695,8 @@ async function main(args: string[]): Promise<number> {
     const own = join(before, "scripts/hooks", `${hook}.ts`)
     const absent = !existsSync(own)
     // A hook canary lacks is measured against a baseline that allows every call, so each refusal it makes counts as newly refused
-    const canary: Check = absent ? () => undefined : (await import(own)).check
-    const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
+    const canary: Check = absent ? () => undefined : await checkOf(own, hook, headMain)
+    const head: Check = await checkOf(join(root, "scripts/hooks", `${hook}.ts`), hook, headMain)
     const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     // a scratch data folder per hook, so the marks one hook's replay writes never reach the next's
     const env = envOf({ ...session, data: scratchData(real), glm, home, role })
@@ -657,6 +720,14 @@ async function main(args: string[]): Promise<number> {
       result.changed.push(line)
       console.error(line)
     }
+  }
+  // a tree the temp cleaner emptied mid-run let canary's Worker allow each later call, so the run fails and stores nothing
+  const lost = await unloaded(before, hooks)
+  if (lost !== undefined) {
+    console.error(
+      `hook-differential: canary's tree lost a package during the run, so run it again: ${lost}`,
+    )
+    return 1
   }
   if (found && unmoved(root, found, options))
     await store(dataDirOf(process.env, home), found, result)
