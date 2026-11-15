@@ -13878,7 +13878,9 @@ var ROUTE2 = `${WHY_ROOT} A guard's list or setting changes only by the owner ty
 var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
 var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
 var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse7 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE2}`;
+var HOOK_TEXT = "which a hook file may not hold";
+var HOOK_ROUTE = "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove.";
+var refuse7 = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE2}`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS2 = new Set([
   "[",
@@ -13913,6 +13915,23 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
 var RSYNC_FLAGS = new Set(["backup", "partial"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
+var HOOK_REMOVERS = new Set([
+  ...REMOVERS,
+  "-delete",
+  "rimraf",
+  "rm_f",
+  "rm_r",
+  "rm_rf",
+  "rmdirsync",
+  "rmsync",
+  "rmtree",
+  "shred",
+  "srm",
+  "trash",
+  "trash-put",
+  "unlinksync",
+  "wipe"
+]);
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
 var CLI = join12("packages", "scripts", "src", "playground", "cli.ts");
@@ -14018,6 +14037,7 @@ var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", 
 var LEADS2 = new Set(["!", "(", "do", "elif", "else", "then", "{"]);
 var OPENERS = new Set(["case", "for", "if", "select", "until", "while"]);
 var CLOSERS = new Set(["done", "esac", "fi"]);
+var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 async function guarded(raw, environment = process.env, wait = 12000, url = new URL(`./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`, import.meta.url).href) {
