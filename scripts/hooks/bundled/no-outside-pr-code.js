@@ -59,6 +59,15 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
   return resolve(named);
 };
 
+// scripts/hooks/codex.ts
+var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var patchPaths = (text) => text.split(`
+`).flatMap((line) => {
+  const trimmed = line.trim();
+  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
+});
+
 // scripts/hooks/input.ts
 var DEADLINE = 13000;
 async function input(name, kind, deadline = DEADLINE) {
@@ -7879,6 +7888,12 @@ function readsWords(words) {
 // scripts/hooks/no-outside-pr-code.ts
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
+var FILE_TOOLS = new Map([
+  ["Edit", "file_path"],
+  ["MultiEdit", "file_path"],
+  ["NotebookEdit", "notebook_path"],
+  ["Write", "file_path"]
+]);
 var PULL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 var UTILITIES = new Set([
   "[",
@@ -8023,6 +8038,16 @@ function placed(written) {
       return path;
   }
 }
+function gitFolder(path, lookup) {
+  if (path === undefined || path.split("/").some((part) => part.toLowerCase() === ".git"))
+    return true;
+  for (let at = path;; at = dirname3(at)) {
+    if (lookup.holds(at, "HEAD") && lookup.holds(at, "objects") && lookup.holds(at, "refs"))
+      return true;
+    if (dirname3(at) === at)
+      return false;
+  }
+}
 function gitAllows(words, folder, lookup, environment) {
   if ("GIT_DIR" in environment || "GIT_WORK_TREE" in environment)
     return false;
@@ -8093,6 +8118,8 @@ async function inspect(command, directory, environment, lookup, own = []) {
   const ownTarget = (text, here) => {
     const path = text && !text.glob ? pathOf(text, here) : undefined;
     if (path === undefined || !existsSync2(dirname3(resolve4(path))) || !ownPath(text, here))
+      return false;
+    if (gitFolder(placed(path), lookup))
       return false;
     try {
       const stat = lstatSync2(path);
@@ -8236,10 +8263,14 @@ async function check(raw, environment = process.env, lookup = live(environment))
     return;
   }
   const { cwd, session_id: sessionId, tool_input: toolInput, tool_name: tool } = input;
-  if (typeof tool !== "string" || !TOOLS2.has(tool))
+  if (typeof tool !== "string")
+    return;
+  const key = FILE_TOOLS.get(tool);
+  const patch = tool === "apply_patch";
+  if (!TOOLS2.has(tool) && key === undefined && !patch)
     return;
   const command = toolInput?.command;
-  if (typeof command !== "string")
+  if (key === undefined && !patch && typeof command !== "string")
     return;
   if (!CHECKERS.has(await sessionRole(environment, sessionId)))
     return;
@@ -8247,6 +8278,25 @@ async function check(raw, environment = process.env, lookup = live(environment))
   if (!why)
     return;
   const directory = typeof cwd === "string" && isAbsolute4(cwd) ? cwd : undefined;
+  if (key !== undefined || patch) {
+    const named = patch ? typeof command === "string" ? patchPaths(command) : [] : [toolInput?.[key]];
+    let git = named.length === 0;
+    try {
+      git ||= named.some((path) => {
+        if (typeof path !== "string")
+          return true;
+        const at = isAbsolute4(path) ? path : patch && directory ? resolve4(directory, path) : undefined;
+        return gitFolder(at === undefined ? undefined : placed(at), lookup);
+      });
+    } catch {
+      git = true;
+    }
+    if (!git)
+      return;
+    return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which writes no file into a git folder (a .git part, or a folder holding HEAD, objects and refs), since its config and hooks name programs a later git read runs: ${why}`;
+  }
+  if (typeof command !== "string")
+    return;
   let allowed = false;
   try {
     const name = await lookup.name(sessionId);
@@ -8256,7 +8306,7 @@ async function check(raw, environment = process.env, lookup = live(environment))
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });

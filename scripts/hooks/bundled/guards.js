@@ -16938,6 +16938,12 @@ import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdir
 import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
+var FILE_TOOLS4 = new Map([
+  ["Edit", "file_path"],
+  ["MultiEdit", "file_path"],
+  ["NotebookEdit", "notebook_path"],
+  ["Write", "file_path"]
+]);
 var PULL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/;
 var UTILITIES = new Set([
   "[",
@@ -17082,6 +17088,16 @@ function placed(written) {
       return path;
   }
 }
+function gitFolder(path, lookup) {
+  if (path === undefined || path.split("/").some((part) => part.toLowerCase() === ".git"))
+    return true;
+  for (let at = path;; at = dirname9(at)) {
+    if (lookup.holds(at, "HEAD") && lookup.holds(at, "objects") && lookup.holds(at, "refs"))
+      return true;
+    if (dirname9(at) === at)
+      return false;
+  }
+}
 function gitAllows(words, folder, lookup, environment) {
   if ("GIT_DIR" in environment || "GIT_WORK_TREE" in environment)
     return false;
@@ -17152,6 +17168,8 @@ async function inspect13(command, directory, environment, lookup, own = []) {
   const ownTarget = (text, here) => {
     const path = text && !text.glob ? pathOf(text, here) : undefined;
     if (path === undefined || !existsSync10(dirname9(resolve10(path))) || !ownPath(text, here))
+      return false;
+    if (gitFolder(placed(path), lookup))
       return false;
     try {
       const stat = lstatSync2(path);
@@ -17295,10 +17313,14 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
     return;
   }
   const { cwd, session_id: sessionId, tool_input: toolInput, tool_name: tool } = input;
-  if (typeof tool !== "string" || !TOOLS2.has(tool))
+  if (typeof tool !== "string")
+    return;
+  const key = FILE_TOOLS4.get(tool);
+  const patch = tool === "apply_patch";
+  if (!TOOLS2.has(tool) && key === undefined && !patch)
     return;
   const command = toolInput?.command;
-  if (typeof command !== "string")
+  if (key === undefined && !patch && typeof command !== "string")
     return;
   if (!CHECKERS.has(await sessionRole(environment, sessionId)))
     return;
@@ -17306,6 +17328,25 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
   if (!why)
     return;
   const directory = typeof cwd === "string" && isAbsolute7(cwd) ? cwd : undefined;
+  if (key !== undefined || patch) {
+    const named = patch ? typeof command === "string" ? patchPaths(command) : [] : [toolInput?.[key]];
+    let git = named.length === 0;
+    try {
+      git ||= named.some((path) => {
+        if (typeof path !== "string")
+          return true;
+        const at = isAbsolute7(path) ? path : patch && directory ? resolve10(directory, path) : undefined;
+        return gitFolder(at === undefined ? undefined : placed(at), lookup);
+      });
+    } catch {
+      git = true;
+    }
+    if (!git)
+      return;
+    return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which writes no file into a git folder (a .git part, or a folder holding HEAD, objects and refs), since its config and hooks name programs a later git read runs: ${why}`;
+  }
+  if (typeof command !== "string")
+    return;
   let allowed = false;
   try {
     const name = await lookup.name(sessionId);
@@ -17315,7 +17356,7 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
   } catch {}
   if (allowed)
     return;
-  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next): ${why}`;
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
@@ -18763,7 +18804,7 @@ async function judgeBash(command, cwd, environment) {
   };
   return run2(lex(command, env.known), env, visit, true);
 }
-var FILE_TOOLS4 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
+var FILE_TOOLS5 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
 async function inspect17(raw, environment) {
   const {
     cwd,
@@ -18774,7 +18815,7 @@ async function inspect17(raw, environment) {
   const targets = targetsOf(environment);
   if (tool === "Bash" && typeof input?.command === "string")
     return judgeBash(input.command, folder, environment);
-  if (typeof tool === "string" && FILE_TOOLS4.has(tool)) {
+  if (typeof tool === "string" && FILE_TOOLS5.has(tool)) {
     const path = input?.file_path ?? input?.notebook_path;
     if (typeof path === "string" && worst(path, targets) === "inside")
       return refuse15(`a ${tool} of ${path}`);

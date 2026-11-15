@@ -727,6 +727,164 @@ describe("no-outside-pr-code's read mode writes only into its own folders", () =
   })
 })
 
+// #2261: a git folder's config and hooks name programs a later git read runs, so read mode writes none, by any tool
+describe("no-outside-pr-code's read mode writes nothing into a git folder", () => {
+  const data = realpathSync(mkdtempSync(join(tmpdir(), "outside-pr-gitdir-")))
+  const environment = {
+    HOME,
+    PATH: "/usr/bin:/bin",
+    PLAYGROUND_DATA_DIR: data,
+    PLAYGROUND_ROLE: "reviewer",
+  }
+  const EVIL = `${OUTSIDE}/evil.sh`
+  const sessions = [
+    ["an outside PR's reviewer", "s-out-named", OUT_REVIEWER],
+    ["an item reviewer", "s-item", ITEM_REVIEWER],
+  ] as const
+  // each session's clone with its git folder, a link in its own folder to that git folder, and a folder shaped as a bare repository
+  for (const [, , name] of sessions) {
+    const own = join(data, "scratch", name)
+    mkdirSync(join(own, "c", ".git", "hooks"), { recursive: true })
+    mkdirSync(join(own, "c", "l"), { recursive: true })
+    mkdirSync(join(own, "bare", "hooks"), { recursive: true })
+    symlinkSync(join(own, "c", ".git"), join(own, "gl"))
+    HELD[join(own, "c")] = [".git"]
+    HELD[join(own, "bare")] = ["HEAD", "objects", "refs"]
+  }
+  const judgeIn = (command: string, session: string, cwd = MAIN) =>
+    check(call(command, cwd, session), environment, lookup)
+  const fileCall = (tool: string, input: Record<string, unknown>, session: string) =>
+    JSON.stringify({ cwd: MAIN, session_id: session, tool_input: input, tool_name: tool })
+  const edits = (path: string) =>
+    [
+      ["Write", { content: "x", file_path: path }],
+      ["Edit", { file_path: path, new_string: "y", old_string: "x" }],
+      ["MultiEdit", { edits: [{ new_string: "y", old_string: "x" }], file_path: path }],
+      ["NotebookEdit", { new_source: "x", notebook_path: path }],
+      // a Codex session's edit, whose command is the patch
+      ["apply_patch", { command: `*** Begin Patch\n*** Add File: ${path}\n+x\n*** End Patch` }],
+    ] as const
+
+  describe.each(sessions)("%s", (_, session, name) => {
+    const own = join(data, "scratch", name)
+
+    test.each([
+      ["a redirect over its clone's git config", `cat ${EVIL} > ${own}/c/.git/config`],
+      ["a redirect into its clone's git hooks", `cat ${EVIL} > ${own}/c/.git/hooks/post-checkout`],
+      ["an append to its clone's git config", `cat ${EVIL} >> ${own}/c/.git/config`],
+      [
+        "a relative redirect after a cd into the git folder",
+        `cd ${own}/c/.git && cat ${EVIL} > config`,
+      ],
+      ["a redirect through a link to the git folder", `cat ${EVIL} > ${own}/gl/config`],
+      ["a redirect into a folder shaped as a bare repository", `cat ${EVIL} > ${own}/bare/config`],
+      [
+        "a redirect into a bare repository's hooks",
+        `cat ${EVIL} > ${own}/bare/hooks/post-checkout`,
+      ],
+      ["uniq's output into the git folder", `uniq ${EVIL} ${own}/c/.git/config`],
+      ["gh run download into the git folder", `gh run download 9 -D ${own}/c/.git/hooks`],
+    ])("%s is refused", async (_, command) => {
+      expect(await judgeIn(command, session)).toContain("no-outside-pr-code")
+    })
+
+    test.each([
+      ["a redirect into its clone's work tree", `cat ${OUTSIDE}/a.ts > ${own}/c/l/a.ts`],
+      [
+        "a redirect to a .gitignore in the work tree",
+        `cat ${OUTSIDE}/a.ts > ${own}/c/l/.gitignore`,
+      ],
+      ["a git diff in a clone whose git folder was never written", `git -C ${own}/c diff HEAD~1`],
+      ["a git log -p there", `git -C ${own}/c log -p`],
+      ["a git show there", `git -C ${own}/c show HEAD`],
+    ])("%s passes", async (_, command) => {
+      expect(await judgeIn(command, session)).toBeUndefined()
+    })
+
+    test.each([
+      ...edits(`${own}/c/.git/config`),
+      ...edits(`${own}/c/.git/hooks/post-checkout`),
+      ...edits(`${own}/gl/config`),
+      ...edits(`${own}/bare/config`),
+      ...edits(`${OUTSIDE}/.git/config`),
+    ])("%s into a git folder is refused", async (tool, input) => {
+      expect(await check(fileCall(tool, input, session), environment, lookup)).toContain(
+        "no-outside-pr-code",
+      )
+    })
+
+    test.each([...edits(`${own}/c/l/a.ts`), ...edits(`${own}/c/l/.gitignore`)])(
+      "%s outside any git folder passes",
+      async (tool, input) => {
+        expect(await check(fileCall(tool, input, session), environment, lookup)).toBeUndefined()
+      },
+    )
+
+    test.each([
+      ["no path", { content: "x" }],
+      ["a relative path", { content: "x", file_path: "c/.git/config" }],
+      ["a path that is no string", { content: "x", file_path: 7 }],
+    ])("a Write with %s is refused", async (_, input) => {
+      expect(await check(fileCall("Write", input, session), environment, lookup)).toContain(
+        "no-outside-pr-code",
+      )
+    })
+
+    test.each([
+      ["no file", { command: "*** Begin Patch\n*** End Patch" }],
+      ["no patch", {}],
+    ])("an apply_patch with %s is refused", async (_, input) => {
+      expect(await check(fileCall("apply_patch", input, session), environment, lookup)).toContain(
+        "no-outside-pr-code",
+      )
+    })
+
+    test("an apply_patch's relative file is placed from the folder it runs in", async () => {
+      const input = { command: "*** Begin Patch\n*** Add File: .git/config\n+x\n*** End Patch" }
+      const raw = JSON.stringify({
+        cwd: `${own}/c`,
+        session_id: session,
+        tool_input: input,
+        tool_name: "apply_patch",
+      })
+      expect(await check(raw, environment, lookup)).toContain("no-outside-pr-code")
+    })
+  })
+
+  // the rule is read mode's alone, so a factory PR's checker and every other session write a git folder as before
+  const factory = join(data, "scratch", OUT_REVIEWER)
+  test.each([
+    ["a factory PR's checker", "s-own", "reviewer"],
+    ["a worker", "s-out", "worker"],
+  ])("%s writes a git folder as before", async (_, session, role) => {
+    const env = { ...environment, PLAYGROUND_ROLE: role }
+    expect(
+      await check(call(`cat ${EVIL} > ${factory}/c/.git/config`, MAIN, session), env, lookup),
+    ).toBeUndefined()
+    for (const [tool, input] of edits(`${factory}/c/.git/config`))
+      expect(await check(fileCall(tool, input, session), env, lookup)).toBeUndefined()
+  })
+
+  test.each([
+    ["a factory PR's checker", "s-own", "reviewer"],
+    ["a worker", "s-out", "worker"],
+  ])(
+    "a Write with no path from %s passes, since only read mode refuses it",
+    async (_, session, role) => {
+      const env = { ...environment, PLAYGROUND_ROLE: role }
+      expect(await check(fileCall("Write", { content: "x" }, session), env, lookup)).toBeUndefined()
+      expect(await check(fileCall("apply_patch", {}, session), env, lookup)).toBeUndefined()
+    },
+  )
+
+  test("the reason says read mode writes no git folder", async () => {
+    const input = { content: "x", file_path: `${factory}/c/.git/config` }
+    expect(await check(fileCall("Write", input, "s-out-named"), environment, lookup)).toContain(
+      "writes no file into a git folder",
+    )
+  })
+})
+
 describe("no-outside-pr-code reads the session's PRs to choose read mode", () => {
   test.each([
     ["a checker of the owner's own PR", "s-own"],
