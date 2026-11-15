@@ -128,7 +128,7 @@ It refuses a file that is not an HTML page, and a `--by` or `--for` that names n
 
 `playground page --remove <file.html>` takes one kept page off the Pages tab, named by its file name or by the path `playground page` printed.
 It adds a line to `pages.jsonl` that drops the page's record, the same line the Pages tab's delete writes, and moves the page's HTML, its caption and the PDF beside it to the trash, printing each one's id for `playground rm --restore <id>`.
-It refuses before it moves anything: a page `pages.jsonl` does not list, a path outside the previews folder or with a `..` step, a previews folder that is a symlink, a symlink or a hard link, a file over 20 MB, and a page whose files would take more of the trash's three moves a minute than your session has left.
+It refuses before it moves anything: a page `pages.jsonl` does not list, a path outside the previews folder or with a `..` step, a previews folder that is a symlink, a page file or `pages.jsonl` that is a symlink or a hard link, a file over 20 MB, and a page whose files would take more of the trash's three moves a minute than your session has left.
 The HTML moves first and the record drops second, so a refused move leaves the page listed; when `pages.jsonl` cannot take the line, the HTML comes back from the trash and the page stays.
 
 ## Wait on CI: `playground ci-wait`

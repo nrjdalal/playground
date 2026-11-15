@@ -203,9 +203,14 @@ export const removePage = (
     }
   if (target !== name && realOrSelf(dirname(resolve(target))) !== realOrSelf(folder))
     return { error: `${target} is not in the previews folder ${folder}` }
+  const page = CARVE_OUTS.page!
+  const index = lstatSync(join(folder, PAGES_FILE), { throwIfNoEntry: false })
+  if (index && (!index.isFile() || index.nlink !== 1 || index.size > page.bytes))
+    return {
+      error: `${PAGES_FILE} is not a regular file with one link of at most ${page.bytes / 1024 ** 2} MB (a symlink or a hard link), so nothing is removed`,
+    }
   if (!listedPages(folder).has(name))
     return { error: `pages.jsonl lists no page ${name}, so nothing is removed` }
-  const page = CARVE_OUTS.page!
   const stem = name.slice(0, -".html".length)
   const files = [name, `${stem}.txt`, `${stem}.pdf`].filter(
     (file, i) => i === 0 || lstatSync(join(folder, file), { throwIfNoEntry: false }),
