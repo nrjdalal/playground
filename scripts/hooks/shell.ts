@@ -3146,7 +3146,7 @@ async function existing(path: string, env: Env): Promise<Text> {
   return env.files.get(path) ?? (await readFile(path)) ?? { value: "" }
 }
 
-async function outputOf(cmd: Command, env: Env): Promise<Text> {
+export async function outputOf(cmd: Command, env: Env): Promise<Text> {
   tick()
   const { args, name, xargs } = parse(cmd)
   // xargs hands the program words from its stdin, which the hook does not split as xargs does
