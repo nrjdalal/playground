@@ -39,6 +39,11 @@ describe("a merge or pull with ours is refused", () => {
     ["through env", "env GIT_EDITOR=true git merge -s ours origin/canary"],
     ["a value set before it", "S=ours; git merge -s $S origin/canary"],
     ["an alias for an ours merge", "git -c 'alias.m=merge -s ours' m origin/canary"],
+    ["--help as a message", "git merge -s ours -m --help origin/canary"],
+    ["after pull's bare -j", "git pull -j -s ours origin canary"],
+    ["an alias for a plain merge with ours after it", "git -c alias.m=merge m -s ours x"],
+    ["a shell alias for an ours merge", "git -c 'alias.m=!git merge -s ours' m origin/canary"],
+    ["in a brace list", "git merge {-s,ours,origin/canary}"],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-ours-merge hook refuses")
@@ -70,6 +75,26 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
     ["an abbreviated commit --no-verify", "git commit --no-veri -m 'fix: x'"],
     ["commit -n after --verify", "git commit --verify -n -m 'fix: x'"],
     ["an alias for a commit", "git -c 'alias.c=commit --no-verify' c -m 'fix: x'"],
+    ["--help as a commit's message", "git commit -n -m 'fix: x' -m --help"],
+    ["--help as a merge's message", "git merge --no-verify -m --help origin/canary"],
+    ["--help as --into-name's value", "git merge --no-verify --into-name --help origin/canary"],
+    ["--help after --", "git commit -n -- --help"],
+    ["after pull's bare -j", "git pull -j --no-verify origin canary"],
+    ["after pull's -j in a cluster", "git pull -qj --no-verify origin canary"],
+    ["an unread subcommand", "git $(echo commit) --no-verify -m x"],
+    ["an unread variable subcommand", "git $X --no-verify"],
+    ["an alias holding -n", "git -c 'alias.ci=commit -n' ci -m x"],
+    ["an alias holding -n in a cluster", "git -c 'alias.ci=commit -nm' ci x"],
+    ["an alias holding an abbreviation", "git -c 'alias.ci=commit --no-veri' ci -m x"],
+    [
+      "an alias for a plain commit with the flag after it",
+      "git -c alias.c=commit c --no-verify -m x",
+    ],
+    ["a shell alias for a commit with -n", "git -c 'alias.c=!git commit -n' c -m x"],
+    ["an alias of an alias", "git -c alias.a=b -c 'alias.b=commit -n' a -m x"],
+    ["-n in a brace list", "git commit {-n,-mx}"],
+    ["--no-verify in a brace list", "git commit {--no-verify,-mx}"],
+    ["--no-verify in a merge's brace list", "git merge {--no-verify,origin/canary}"],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-ours-merge hook refuses")
@@ -104,6 +129,14 @@ describe("every other call runs", () => {
     ["commit --verify after -n", "git commit -n --verify -m 'fix: x'"],
     ["echo of a merge", "echo git merge --no-verify"],
     ["a push", "git push --no-verify origin HEAD:x"],
+    ["commit -n --help", "git commit -n --help"],
+    ["an alias for a plain commit", "git -c alias.c=commit c -m 'fix: x'"],
+    [
+      "an alias named for a git command, which git runs as the command",
+      "git -c 'alias.commit=commit -n' commit -m x",
+    ],
+    ["an alias for a plain merge", "git -c alias.m=merge m --no-ff origin/canary"],
+    ["a brace list of branches", "git merge {origin/canary,origin/main}"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -131,6 +164,13 @@ describe("the hook as Claude Code runs it", () => {
     const proc = runHook("git merge --no-edit --no-verify origin/canary", "worker")
     expect(proc.exitCode).toBe(2)
     expect(proc.stderr.toString()).toContain("without --no-verify")
+  })
+
+  test.each([
+    ["-n in a cluster", "git commit -nm x {"],
+    ["an abbreviation", "git commit --no-veri -m x {"],
+  ])("input it cannot parse that reads as a commit with %s is refused", async (_, raw) => {
+    expect(await check(raw, {})).toContain("could not parse")
   })
 
   test("input it cannot parse that reads as an ours merge is refused", async () => {
