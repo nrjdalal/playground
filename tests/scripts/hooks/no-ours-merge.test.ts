@@ -161,6 +161,8 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
 
 describe("a git call that defines an alias on its own line is refused", () => {
   test.each([
+    ["an alias whose text it cannot read", 'git -c "alias.x=$V" x'],
+    ["an alias whose name it cannot read", 'git -c "alias.$N=commit -n" ci'],
     [
       "an alias beside an unread option word behind run-slot",
       "~/.playground/ops/run-slot.sh w -- git $OPT 'alias.ci=commit -n' ci -m x",
@@ -236,6 +238,16 @@ describe("a git call that defines an alias on its own line is refused", () => {
 
 describe("every other call runs", () => {
   test.each([
+    [
+      "a -c header whose value it cannot read",
+      'git -c http.extraHeader="Authorization: $T" fetch origin',
+    ],
+    ["a -c email whose value it cannot read", 'git -c user.email="$EMAIL" commit -m x'],
+    ["a -c name whose value it cannot read", 'git -c user.name="$NAME" commit -m x'],
+    [
+      "a -c ssh command whose value it cannot read",
+      'git -c core.sshCommand="ssh -i $KEY" fetch origin',
+    ],
     ["a program the hook cannot read with -name", '$FIND "$d" -name x'],
     ["a program the hook cannot read with -n", '$HEAD "$f" -n 20'],
     ["a script run by a program the hook cannot read with -n", '$PY "$S" -n 3'],
