@@ -132,7 +132,7 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     home: true,
     name: PLAYGROUND_UNIT,
   },
-  // packages/scripts/src/playground/page.ts's --remove: one kept page's HTML, caption or PDF, each at most 20 MB, the most a file the Previews app lists holds (MAX_PREVIEW_BYTES), and never pages.jsonl beside them
+  // packages/scripts/src/playground/page.ts's --remove: one kept page's HTML, caption or PDF, each at most 20 MiB, the most a file the Previews app lists holds (MAX_PREVIEW_BYTES), and never pages.jsonl beside them
   page: {
     bytes: 20 * 1024 ** 2,
     files: 1,
