@@ -11979,15 +11979,17 @@ async function inspect(raw, environment, unknown = false) {
       args.map((word) => word.value).join(" "),
       ...cmd.redirects.flatMap((r) => r.body ? [r.body.value] : [])
     ];
-    for (const here of hookTargets.length > 0 ? places(env) : []) {
+    for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
       const hookAt = () => hookTargets.find((word) => {
         const path = pathOf(word, here);
-        return hookFile(path) || copies && !!path && hookFile(join7(path, "x"));
+        return hookFile(path, true) || copies && !!path && hookFile(join7(path, "x"), true);
       });
       const copied = [];
       for (const word of sources) {
-        const read = await readPath(word, here);
-        if (!read.unknown)
+        const read = await readPath(word, here).catch(() => {
+          return;
+        });
+        if (read && !read.unknown)
           copied.push(read.value);
       }
       const key = here.cwd ?? "";

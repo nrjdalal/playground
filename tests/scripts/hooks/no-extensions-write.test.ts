@@ -3756,6 +3756,10 @@ describe("an echo into the folder core.hooksPath names is judged as one into a g
       await bash(`echo 'touch ~/.playground/extensions/x' > ${BROKEN}/notes/run.sh`),
     ).toContain("no-extensions-write hook refuses")
   })
+
+  test("a copy into a repo whose config git cannot read, on a line whose other text holds a remover, runs", async () => {
+    expect(await bash(`rm -f old.log; cp notes.txt ${BROKEN}/notes/run.sh`)).toBeUndefined()
+  })
 })
 
 // #2258: a command that writes, moves or copies into a hook file takes every text on its line as the hook's text, and a copy's source file the hook can read on disk as well
@@ -3809,6 +3813,24 @@ describe("hook text that reaches a hook by another path", () => {
     expect(
       await bash("ls ~/.playground/extensions; echo 'bun test' > .git/hooks/pre-commit"),
     ).toContain("on a line whose text names")
+  })
+
+  test("a bash -c that pipes the data folder into a git hook by dd is refused", async () => {
+    expect(
+      await bash(`bash -c "echo 'touch ~/.playground/extensions/x' | dd of=.git/hooks/pre-commit"`),
+    ).toContain("no-extensions-write hook refuses")
+  })
+
+  test("an in-place sed whose replacement text holds a move into a git hook runs", async () => {
+    expect(
+      await bash(`sed -i '' '3s|.*|"mv a.sh .git/hooks/pre-commit"|' notes.ts`, WORK),
+    ).toBeUndefined()
+  })
+
+  test("an in-place perl whose script is longer than a file name can be keeps its refusal of a file in the root", async () => {
+    expect(
+      await bash(`perl -0pi -e 's/${"a".repeat(2000)}/b/' ${join(ROOT, "policy.json")}`),
+    ).toContain("no-extensions-write hook refuses")
   })
 
   test("a line that runs a remover in one command and writes a hook in another is refused, a known limit", async () => {

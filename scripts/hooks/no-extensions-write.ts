@@ -2426,23 +2426,24 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
                 : [],
           )
         : []
-    // the command's own texts are its words past its program, so mv's own name is no remover in the hook it moves a file into, and its heredoc's or here-string's body
+    // the command's own texts are its words past its program, so mv's own name is no remover in the hook it moves a file into, and its heredoc's or here-string's body; a command read out of a quoted text (textDepth), which no one typed, writes no hook
     const ownText = cmd.words.map((word) => word.value).join(" ")
     const ownTexts = [
       args.map((word) => word.value).join(" "),
       ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
     ]
-    for (const here of hookTargets.length > 0 ? places(env) : []) {
-      // a target that is a hook file, or a hook folder a copy writes its sources into
+    for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
+      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run
       const hookAt = () =>
         hookTargets.find((word) => {
           const path = pathOf(word, here)
-          return hookFile(path) || (copies && !!path && hookFile(join(path, "x")))
+          return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
         })
       const copied: string[] = []
+      // a word no file can be named by (a script read as a path past the name limit) is no file, so it adds no text
       for (const word of sources) {
-        const read = await readPath(word, here)
-        if (!read.unknown) copied.push(read.value)
+        const read = await readPath(word, here).catch(() => undefined)
+        if (read && !read.unknown) copied.push(read.value)
       }
       // the line's texts that would make a hook's text refused, judged once a folder the shell may be in, so a line of many writes reads each text once
       const key = here.cwd ?? ""
