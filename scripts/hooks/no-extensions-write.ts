@@ -1186,6 +1186,37 @@ function follows(have: string[], want: string[]): boolean {
   }
   return true
 }
+const BRACE_WORDS = 64
+// The words a shell's brace expansion makes of a word, each list's prefix and suffix kept and nested lists expanded, or undefined past BRACE_WORDS; a brace with no comma at its own depth stays text
+function braceWords(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS) return undefined
+    const next = todo.pop()!
+    let split: string[] | undefined
+    for (let open = next.indexOf("{"); open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open]
+      let depth = 0
+      for (let k = open; k < next.length; k++) {
+        if (next[k] === "{") depth++
+        else if (next[k] === "," && depth === 1) cuts.push(k)
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k]
+              .slice(1)
+              .map(
+                (end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1),
+              )
+          break
+        }
+      }
+    }
+    if (split) todo.push(...split)
+    else done.push(next)
+  }
+  return done
+}
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
 const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
 // a sed replacement as sed writes it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything
@@ -1802,33 +1833,44 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root, a path in it or a folder between the home and it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME or / that can name the root, a path in it or a folder between the home and it, or, when the text holds a remover (REMOVERS), the home or any other folder that holds the root (reaches), a relative one that can from the home when the text holds a remover, or holding a / or a glob from the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob, a brace list or an escaped slash spells the root no other way than its literal path, and a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
   const scriptNames = (text: string, env: Env): string | undefined => {
     const plain = text.replace(/['"]/g, "")
     if (holds(plain, env)) return `${root} in its text`
-    for (const token of plain.split(/[\s;&<>=]+/))
-      for (const word of [token, ...token.split(/[{},]/)]) {
+    const tokens = plain.split(/[\s;&<>=]+/)
+    const removes = tokens.some((token) => {
+      const name =
+        token
+          .replace(/^[$(`|]+/, "")
+          .split(sep)
+          .at(-1) ?? ""
+      return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name)
+    })
+    for (const token of tokens) {
+      const expanded = braceWords(token)
+      if (!expanded) return `${token}, a brace list of more words than the hook reads`
+      for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
         const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
         const value = tilde ? home + word.slice(tilde[0].length) : word
-        if (value.startsWith(sep) && reaches(value)) return value
+        if (value.startsWith(sep) && reaches(value, removes)) return value
         if (
-          env.cwd &&
           !value.startsWith(sep) &&
-          /[/*?[(]/.test(value) &&
-          reaches(resolve(env.cwd, value))
+          ((env.cwd && /[/*?[(]/.test(value) && reaches(resolve(env.cwd, value))) ||
+            (removes && reaches(resolve(home, value))))
         )
           return word
         const parts = word.split(sep)
         const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
         if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
       }
+    }
   }
   // the root's parts as a script may spell them: from the home when the root is under it, else from /
   const rootParts = needle.split(sep).filter(Boolean)
   // the home's part count (1 when the root is not under the home), which a folder holding the root must pass, so the home itself and every folder above it are no such folder
   const floor = needle === root ? 1 : real(home).split(sep).length
-  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
-  const reaches = (path: string) => {
+  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it, or for a remover any folder that holds it, the home and / included: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder that holds the root a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
+  const reaches = (path: string, remover = false) => {
     const parts = path.split(sep)
     const at = parts.findIndex((part) => GLOB.test(part))
     const want = root.split(sep)
@@ -1837,13 +1879,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
     // a folder below the floor that holds the root only adds a refusal, so canary's reading stands for every other path
     if (
-      spelled.length > floor &&
+      spelled.length > (remover ? 1 : floor) &&
       spelled.length < want.length &&
       spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
       follows(spelled, want.slice(0, spelled.length))
     )
       return true
-    return at < 0 ? inRoot(path) : follows(have, want)
+    return at < 0 ? inRoot(path) || (remover && above(path, true)) : follows(have, want)
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>

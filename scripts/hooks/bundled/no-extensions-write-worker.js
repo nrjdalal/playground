@@ -10712,6 +10712,37 @@ function follows(have, want) {
   }
   return true;
 }
+var BRACE_WORDS = 64;
+function braceWords(word) {
+  const done = [];
+  const todo = [word];
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS)
+      return;
+    const next = todo.pop();
+    let split;
+    for (let open = next.indexOf("{");open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open];
+      let depth = 0;
+      for (let k = open;k < next.length; k++) {
+        if (next[k] === "{")
+          depth++;
+        else if (next[k] === "," && depth === 1)
+          cuts.push(k);
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k].slice(1).map((end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1));
+          break;
+        }
+      }
+    }
+    if (split)
+      todo.push(...split);
+    else
+      done.push(next);
+  }
+  return done;
+}
 var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
 var sedText = (text) => text.replace(/\\(.)|&/gs, (m, c) => m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
@@ -11206,32 +11237,41 @@ async function inspect(raw, environment, unknown = false) {
     const plain = text.replace(/['"]/g, "");
     if (holds(plain, env))
       return `${root} in its text`;
-    for (const token of plain.split(/[\s;&<>=]+/))
-      for (const word of [token, ...token.split(/[{},]/)]) {
+    const tokens = plain.split(/[\s;&<>=]+/);
+    const removes = tokens.some((token) => {
+      const name = token.replace(/^[$(`|]+/, "").split(sep2).at(-1) ?? "";
+      return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
+    });
+    for (const token of tokens) {
+      const expanded = braceWords(token);
+      if (!expanded)
+        return `${token}, a brace list of more words than the hook reads`;
+      for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
         const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
         const value = tilde ? home + word.slice(tilde[0].length) : word;
-        if (value.startsWith(sep2) && reaches(value))
+        if (value.startsWith(sep2) && reaches(value, removes))
           return value;
-        if (env.cwd && !value.startsWith(sep2) && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)))
+        if (!value.startsWith(sep2) && (env.cwd && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)) || removes && reaches(resolve5(home, value))))
           return word;
         const parts = word.split(sep2);
         const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
         if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
           return word;
       }
+    }
   };
   const rootParts = needle.split(sep2).filter(Boolean);
   const floor = needle === root ? 1 : real(home).split(sep2).length;
-  const reaches = (path) => {
+  const reaches = (path, remover = false) => {
     const parts = path.split(sep2);
     const at = parts.findIndex((part) => GLOB.test(part));
     const want = root.split(sep2);
     const base = real(at < 0 ? path : parts.slice(0, at).join(sep2) || sep2);
     const have = [...base === sep2 ? [""] : base.split(sep2), ...at < 0 ? [] : parts.slice(at)];
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have;
-    if (spelled.length > floor && spelled.length < want.length && spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) && follows(spelled, want.slice(0, spelled.length)))
+    if (spelled.length > (remover ? 1 : floor) && spelled.length < want.length && spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) && follows(spelled, want.slice(0, spelled.length)))
       return true;
-    return at < 0 ? inRoot(path) : follows(have, want);
+    return at < 0 ? inRoot(path) || remover && above(path, true) : follows(have, want);
   };
   const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
