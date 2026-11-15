@@ -10740,6 +10740,14 @@ function follows(have, want) {
   }
   return true;
 }
+var SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g;
+var HOME_NAMED = /~|\$\{?HOME\b|\bcd\s*(?:$|[;&|)`])/;
+var HOME_WORD = /^(?:~|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})(?=[/*]|$)/;
+var LOGIN_HOME = /^~([A-Za-z_][\w.-]*)(?=[/*]|$)/;
+var removerWord = (word) => {
+  const name = word.split(sep2).at(-1) ?? "";
+  return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
+};
 var BRACE_WORDS = 64;
 function braceWords(word) {
   const done = [];
@@ -11265,26 +11273,44 @@ async function inspect(raw, environment, unknown = false) {
     const plain = text.replace(/['"]/g, "");
     if (holds(plain, env))
       return `${root} in its text`;
-    const tokens = plain.split(/[\s;&<>=]+/);
-    const removes = tokens.some((token) => {
-      const name = token.replace(/^[$(`|]+/, "").split(sep2).at(-1) ?? "";
-      return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
-    });
-    for (const token of tokens) {
-      const expanded = braceWords(token);
-      if (!expanded)
-        return `${token}, a brace list of more words than the hook reads`;
-      for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
-        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word);
-        const value = tilde ? home + word.slice(tilde[0].length) : word;
-        if (value.startsWith(sep2) && reaches(value, removes))
-          return value;
-        if (!value.startsWith(sep2) && (env.cwd && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)) || removes && reaches(resolve5(home, value))))
-          return word;
-        const parts = word.split(sep2);
-        const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
-        if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
-          return word;
+    const values = new Map;
+    for (const set of plain.matchAll(SETS_NAME)) {
+      const name = set[1] ?? set[3];
+      values.set(name, [
+        ...values.get(name) ?? [],
+        ...set[1] ? [set[2]] : set[4].split(/\s+/).filter(Boolean)
+      ]);
+    }
+    const filled = plain.replace(/\$\{([A-Za-z_]\w*)[^}]*\}|\$([A-Za-z_]\w*)/g, (spelled, braced, bare) => values.get(braced ?? bare ?? "")?.join(" ") ?? spelled);
+    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => HOME_NAMED.test(sub) ? "~" : sub);
+    const fed = homed.split(/(\|\||[;&\n])/).map((chunk) => /\|\s*\S*xargs\b/.test(chunk) && chunk.slice(chunk.search(/\S*xargs\b/)).split(/\s+/).some(removerWord) ? `rm ${chunk.replace(/\|/g, " ")}` : chunk).join("");
+    for (const source of new Set([plain, filled, homed, fed])) {
+      let removing = false;
+      for (const [token] of source.matchAll(/[^\s;&<>=]+|[\s;&<>=]+/g)) {
+        if (/^[\s;&<>=]/.test(token)) {
+          if (/[;&\n]/.test(token))
+            removing = false;
+          continue;
+        }
+        const expanded = braceWords(token);
+        if (!expanded)
+          return `${token}, a brace list of more words than the hook reads`;
+        const parts = token.split(/[|()`]/);
+        const removed = removing || parts.some(removerWord) || expanded.some((word) => removerWord(word));
+        removing = parts.length > 1 ? removerWord(parts.at(-1)) : removed;
+        for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
+          const tilde = HOME_WORD.exec(word);
+          const login = LOGIN_HOME.exec(word);
+          const value = tilde ? home + word.slice(tilde[0].length) : login ? join7(dirname4(home), login[1]) + word.slice(login[0].length) : word;
+          if (value.startsWith(sep2) && reaches(value, removed))
+            return value;
+          if (!value.startsWith(sep2) && (env.cwd && /[/*?[(]/.test(value) && reaches(resolve5(env.cwd, value)) || removed && reaches(resolve5(home, value))))
+            return word;
+          const parts = word.split(sep2);
+          const expands = (k) => parts.slice(0, k).some((part) => /[$~`]/.test(part));
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts)))
+            return word;
+        }
       }
     }
   };

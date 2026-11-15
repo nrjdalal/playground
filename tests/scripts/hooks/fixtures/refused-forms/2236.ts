@@ -136,14 +136,6 @@ const rows = (): Row[] => [
     String.raw`sed -i '' 's/x/\/\/ mv the file, then rm the copy/' src/a.ts`,
   ],
   [
-    "an in-place perl whose s/// writes a block comment naming find",
-    String.raw`perl -pi -e 's/foo/\/* find the user *\/ foo/' src/a.ts`,
-  ],
-  [
-    "an in-place sed whose s/// writes a block comment naming rm",
-    String.raw`sed -i '' 's/x/\/* rm *\//' src/a.ts`,
-  ],
-  [
     "an in-place sed whose s/// writes a change into the home after a remover's own command",
     String.raw`sed -i '' 's/X/rm -f build.log; cd ~/' .git/hooks/pre-commit`,
   ],
@@ -192,6 +184,17 @@ const rows = (): Row[] => [
     String.raw`sed -i '' 's/a/rm -rf ./' .git/hooks/pre-commit`,
   ],
 ]
+// a block comment's closing */, which from the data folder canary already reads as a glob of the root, so these rows run call by call from every other folder
+const comments = (): Row[] => [
+  [
+    "an in-place perl whose s/// writes a block comment naming find",
+    String.raw`perl -pi -e 's/foo/\/* find the user *\/ foo/' src/a.ts`,
+  ],
+  [
+    "an in-place sed whose s/// writes a block comment naming rm",
+    String.raw`sed -i '' 's/x/\/* rm *\//' src/a.ts`,
+  ],
+]
 // a repo's own extensions folder, which from the data folder itself is the root, so these rows run from every other folder
 const away = (): Row[] => [
   [
@@ -215,6 +218,7 @@ export const groups: Group[] = [
   },
   { folders: ["home", "process worktree"], guards: ["no-extensions-write"], rows: away },
   { folders: ["home", "process worktree"], guards: ["no-extensions-write"], rows: whole(away) },
+  { folders: ["home", "process worktree"], guards: ["no-extensions-write"], rows: comments },
 ]
 
 const allowedCalls = [
@@ -231,8 +235,6 @@ const allowedCalls = [
   "an in-place sed whose s/// writes a remover of a quoted variable",
   "an in-place sed whose s/// writes a code comment naming find",
   "an in-place sed whose s/// writes a code comment naming mv and rm",
-  "an in-place perl whose s/// writes a block comment naming find",
-  "an in-place sed whose s/// writes a block comment naming rm",
   "an in-place sed whose s/// writes a change into the home after a remover's own command",
   "an in-place sed whose s/// writes an echo of $HOME after a find's own command",
   "an in-place sed whose s/// writes a remover of a path under a variable",
@@ -240,4 +242,7 @@ const allowedCalls = [
   "an in-place sed whose s/// writes a remover of a repo's own extensions folder",
   "an in-place sed whose s/// writes a remover of a build folder in a repo's own extensions folder",
 ]
-export const allowed: string[] = allowedCalls.flatMap((what) => [what, `${what}${WHOLE}`])
+export const allowed: string[] = [
+  ...allowedCalls.flatMap((what) => [what, `${what}${WHOLE}`]),
+  ...comments().map(([what]) => what),
+]
