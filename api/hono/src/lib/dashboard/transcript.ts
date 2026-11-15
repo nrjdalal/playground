@@ -310,7 +310,7 @@ export const completeLines = (bytes: Uint8Array): { consumed: number; text: stri
   return { consumed, text: new TextDecoder().decode(bytes.subarray(0, consumed)) }
 }
 
-// The last `limit` entries, read from the file's end so a long session costs one bounded read: its last TAIL_BYTES, and when they hold no whole step (a last line longer than that, such as a screenshot's result, or bookkeeping lines alone) twice as far back each time, reading only the new bytes, until a step shows, the file starts or TAIL_CEILING is reached.
+// The last `limit` entries, read from the file's end so a long session costs a bounded read: its last TAIL_BYTES, and when they hold no whole step (a last line longer than that, such as a screenshot's result, or bookkeeping lines alone) twice as far back each time, reading only the new bytes, until a step shows, the file starts or TAIL_CEILING is reached.
 export async function readTail(
   path: string,
   limit: number,
