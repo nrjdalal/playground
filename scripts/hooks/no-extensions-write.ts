@@ -1186,6 +1186,51 @@ function follows(have: string[], want: string[]): boolean {
   }
   return true
 }
+// a variable a script's text sets, by an assignment or a for loop, its name and its value or list captured
+const SETS_NAME = /(?:^|[\s;&|(`])([A-Za-z_]\w*)=(\S*)|\bfor\s+([A-Za-z_]\w*)\s+in\s+([^;\n]*)/g
+// a substitution that prints the home itself: a ~, ~login, $HOME or ${HOME…} word with at most a / after it, or a bare cd (to the home) before a pwd
+const HOME_NAMED =
+  /(?:^|[\s(`])(~[\w.-]*|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})\/?(?=$|[\s;&|)`])|\bcd\s*(?:$|[;&|)`])/
+// a word the shell expands to the home: ~, $HOME, or ${HOME} with any operator (${HOME:?}, ${HOME:-x})
+const HOME_WORD = /^(?:~|\$HOME|\$\{HOME(?:[^}\w][^}]*)?\})(?=[/*]|$)/
+// ~ and a login name, the home of the login it names, which for the caller's own is its home
+const LOGIN_HOME = /^~([A-Za-z_][\w.-]*)(?=[/*]|$)/
+// whether a word names a remover (REMOVERS), by its path's last part, a GNU build's g name read as the tool it builds
+const removerWord = (word: string) => {
+  const name = word.split(sep).at(-1) ?? ""
+  return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name)
+}
+const BRACE_WORDS = 64
+// The words a shell's brace expansion makes of a word, each list's prefix and suffix kept and nested lists expanded, or undefined past BRACE_WORDS; a brace with no comma at its own depth stays text
+function braceWords(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    if (done.length + todo.length > BRACE_WORDS) return undefined
+    const next = todo.pop()!
+    let split: string[] | undefined
+    for (let open = next.indexOf("{"); open >= 0 && !split; open = next.indexOf("{", open + 1)) {
+      const cuts = [open]
+      let depth = 0
+      for (let k = open; k < next.length; k++) {
+        if (next[k] === "{") depth++
+        else if (next[k] === "," && depth === 1) cuts.push(k)
+        else if (next[k] === "}" && --depth === 0) {
+          if (cuts.length > 1)
+            split = [...cuts, k]
+              .slice(1)
+              .map(
+                (end, n) => next.slice(0, open) + next.slice(cuts[n] + 1, end) + next.slice(k + 1),
+              )
+          break
+        }
+      }
+    }
+    if (split) todo.push(...split)
+    else done.push(next)
+  }
+  return done
+}
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
 const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
 // a sed replacement as sed writes it: a backslash dropped (`\/` reads as /, `\n` as a line break) and the matched text (&, \1 to \9) read as a *, since it can be anything
@@ -1802,33 +1847,83 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped: the root in its text, else a word, or a part of a brace list, under ~, $HOME or / that can name the root, a path in it or a folder between the home and it (reaches), a relative one holding a / or a glob that can once resolved against the cwd, its .. collapsed, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a glob or an escaped slash spells the root no other way than its literal path
+  // What an in-place sed's or perl's script writes that a shell may run later (sedWrites), its quotes dropped, read as written, with each variable it sets filled in, with a substitution that names the home itself read as the home and with a pipeline into an xargs remover read as that remover's command: the root in its text, else a word, a part of a brace list or a word its brace lists expand to (braceWords), under ~, $HOME (any ${HOME…}), ~<login> or / that can name the root, a path in it or a folder between the home and it, or, for a word after a remover in its own command (REMOVERS), the home or any other folder that holds the root (reaches), a relative one holding a / or a glob that can from the cwd, its .. collapsed, or, after a remover, a relative one that names the root, a path in it or a folder between the home and it from the home, or one that holds the root's own parts after a / whose text before it the shell may expand to the home ($, ~ or a backtick in it, follows), so a remover a script runs later, from a folder the hook cannot know, is judged the same from every working folder
   const scriptNames = (text: string, env: Env): string | undefined => {
     const plain = text.replace(/['"]/g, "")
     if (holds(plain, env)) return `${root} in its text`
-    for (const token of plain.split(/[\s;&<>=]+/))
-      for (const word of [token, ...token.split(/[{},]/)]) {
-        const tilde = /^(?:~|\$HOME|\$\{HOME\})(?=[/*]|$)/.exec(word)
-        const value = tilde ? home + word.slice(tilde[0].length) : word
-        if (value.startsWith(sep) && reaches(value)) return value
-        if (
-          env.cwd &&
-          !value.startsWith(sep) &&
-          /[/*?[(]/.test(value) &&
-          reaches(resolve(env.cwd, value))
-        )
-          return word
-        const parts = word.split(sep)
-        const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
-        if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
+    // each variable the text sets, by an assignment or a for loop, read as the values it is set to, and then a substitution that names the home itself (HOME_NAMED) as the home word it prints
+    const values = new Map<string, string[]>()
+    for (const set of plain.matchAll(SETS_NAME)) {
+      const name = set[1] ?? set[3]
+      values.set(name, [
+        ...(values.get(name) ?? []),
+        ...(set[1] ? [set[2]] : set[4].split(/\s+/).filter(Boolean)),
+      ])
+    }
+    const filled = plain.replace(
+      /\$\{([A-Za-z_]\w*)[^}]*\}|\$([A-Za-z_]\w*)/g,
+      (spelled, braced?: string, bare?: string) =>
+        values.get(braced ?? bare ?? "")?.join(" ") ?? spelled,
+    )
+    const homed = filled.replace(/\$\([^()]*\)|`[^`]*`/g, (sub) => {
+      const named = HOME_NAMED.exec(sub)
+      return named ? (named[1] ?? "~") : sub
+    })
+    // a pipeline that feeds xargs running a remover reads as that remover's command, the words fed to it after it
+    const fed = homed
+      .split(/(\|\||[;&\n])/)
+      .map((chunk) =>
+        /\|\s*\S*xargs\b/.test(chunk) &&
+        chunk
+          .slice(chunk.search(/\S*xargs\b/))
+          .split(/\s+/)
+          .some(removerWord)
+          ? `rm ${chunk.replace(/\|/g, " ")}`
+          : chunk,
+      )
+      .join("")
+    for (const source of new Set([plain, filled, homed, fed])) {
+      // whether the words read now follow a remover word in their own command, which a ;, & or line break ends, and a |, ( or backtick inside a token ends where the shell starts another
+      let removing = false
+      for (const [token] of source.matchAll(/[^\s;&<>=]+|[\s;&<>=]+/g)) {
+        if (/^[\s;&<>=]/.test(token)) {
+          if (/[;&\n]/.test(token)) removing = false
+          continue
+        }
+        const expanded = braceWords(token)
+        if (!expanded) return `${token}, a brace list of more words than the hook reads`
+        const parts = token.split(/[|()`]/)
+        const removed: boolean =
+          removing || parts.some(removerWord) || expanded.some((word) => removerWord(word))
+        removing = parts.length > 1 ? removerWord(parts.at(-1)!) : removed
+        for (const word of new Set([token, ...token.split(/[{},]/), ...expanded])) {
+          const tilde = HOME_WORD.exec(word)
+          const login = LOGIN_HOME.exec(word)
+          const value = tilde
+            ? home + word.slice(tilde[0].length)
+            : login
+              ? join(dirname(home), login[1]) + word.slice(login[0].length)
+              : word
+          if (value.startsWith(sep) && reaches(value, removed)) return value
+          if (
+            !value.startsWith(sep) &&
+            ((env.cwd && /[/*?[(]/.test(value) && reaches(resolve(env.cwd, value))) ||
+              (removed && reaches(resolve(home, value))))
+          )
+            return word
+          const parts = word.split(sep)
+          const expands = (k: number) => parts.slice(0, k).some((part) => /[$~`]/.test(part))
+          if (parts.some((_, k) => expands(k) && follows(parts.slice(k), rootParts))) return word
+        }
       }
+    }
   }
   // the root's parts as a script may spell them: from the home when the root is under it, else from /
   const rootParts = needle.split(sep).filter(Boolean)
   // the home's part count (1 when the root is not under the home), which a folder holding the root must pass, so the home itself and every folder above it are no such folder
   const floor = needle === root ? 1 : real(home).split(sep).length
-  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder below the floor a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
-  const reaches = (path: string) => {
+  // Whether an absolute path or glob can name the root, a path in it or a folder below the floor that holds it, or for a remover any folder that holds it, the home and / included: its folder before the first glob part with links followed, then each later part matching the root's part at its place, a ** or a zsh (…) matching any; for a folder that holds the root a glob part matches a dot name only when it or one of its brace or zsh group alternatives starts with a dot, as the shell's globs do
+  const reaches = (path: string, remover = false) => {
     const parts = path.split(sep)
     const at = parts.findIndex((part) => GLOB.test(part))
     const want = root.split(sep)
@@ -1837,13 +1932,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const spelled = have.at(-1) === "" ? have.slice(0, -1) : have
     // a folder below the floor that holds the root only adds a refusal, so canary's reading stands for every other path
     if (
-      spelled.length > floor &&
+      spelled.length > (remover ? 1 : floor) &&
       spelled.length < want.length &&
       spelled.every((part, k) => !want[k].startsWith(".") || /(?:^|[{(|,])\./.test(part)) &&
       follows(spelled, want.slice(0, spelled.length))
     )
       return true
-    return at < 0 ? inRoot(path) : follows(have, want)
+    return at < 0 ? inRoot(path) || (remover && above(path, true)) : follows(have, want)
   }
   // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
