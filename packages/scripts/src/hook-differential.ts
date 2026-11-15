@@ -442,6 +442,9 @@ export async function loadedTree(build: () => string, hooks: string[]): Promise<
   return again
 }
 
+export const checkOf = async (file: string, _hook: string, _main: string): Promise<Check> =>
+  (await import(file)).check
+
 const option = (args: string[], name: string) => {
   const at = args.indexOf(name)
   return at === -1 ? undefined : args[at + 1]

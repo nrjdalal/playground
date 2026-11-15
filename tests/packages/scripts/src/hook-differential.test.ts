@@ -19,6 +19,7 @@ import { dirname, join, relative, resolve } from "node:path"
 import {
   calls,
   canaryTree,
+  checkOf,
   cwdsOf,
   envOf,
   GLM_BASE_URL,
@@ -782,6 +783,30 @@ describe("a hook that takes the main checkout", () => {
       "newly refused": 0,
       same: 1,
     })
+  })
+
+  test("guards gives its main-checkout guards the head's main checkout on both sides, so a form naming it reads the same", async () => {
+    // a side's guards runs its GUARDS, whose no-main-checkout reads its own tree as main unless given one, as the real hook's default does
+    const side = (name: string) => {
+      const hooks = join(DIR, "guards-main", name, "scripts", "hooks")
+      mkdirSync(hooks, { recursive: true })
+      writeFileSync(
+        join(hooks, "no-main-checkout.ts"),
+        'export const check = (raw: string, _env: unknown, main = import.meta.dir) => JSON.parse(raw).tool_input.command.includes(`${main}/`) ? "refused" : undefined\n',
+      )
+      writeFileSync(
+        join(hooks, "guards.ts"),
+        'import { check as mainCheckout } from "./no-main-checkout"\nexport const GUARDS = [{ factory: true, name: "no-main-checkout", run: (raw: string, env: unknown) => mainCheckout(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+      )
+      return join(hooks, "guards.ts")
+    }
+    const command = `echo x > ${join(DIR, "guards-main", "head", "scripts", "hooks")}/f`
+    const raw = JSON.stringify({ tool_input: { command } })
+    const main = join(DIR, "guards-main", "head", "scripts", "hooks")
+    const canary = await checkOf(side("canary"), "guards", main)
+    const head = await checkOf(side("head"), "guards", main)
+    expect(await head(raw, {})).toBe("refused")
+    expect(await canary(raw, {})).toBe("refused")
   })
 
   test("TAKES_MAIN names every hook whose check() takes the main checkout, and only those", async () => {
