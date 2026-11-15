@@ -44,6 +44,7 @@ describe("a merge or pull with ours is refused", () => {
     ["an alias for a plain merge with ours after it", "git -c alias.m=merge m -s ours x"],
     ["a shell alias for an ours merge", "git -c 'alias.m=!git merge -s ours' m origin/canary"],
     ["in a brace list", "git merge {-s,ours,origin/canary}"],
+    ["in a brace sequence", "git merge -s our{s..s} x"],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-ours-merge hook refuses")
@@ -95,6 +96,17 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
     ["-n in a brace list", "git commit {-n,-mx}"],
     ["--no-verify in a brace list", "git commit {--no-verify,-mx}"],
     ["--no-verify in a merge's brace list", "git merge {--no-verify,origin/canary}"],
+    ["an alias whose text holds a ;", "git -c 'alias.c=commit -m x; -n' c"],
+    ["an alias whose text holds a #", "git -c 'alias.c=commit -m x #' c -n"],
+    ["an alias whose text holds a &&", "git -c 'alias.c=commit -m x &&' c -n"],
+    ["an alias whose text holds a >", `git -c 'alias.c=commit -m "x" >' c -n`],
+    ["a brace sequence in an abbreviation", "git commit --no-ver{i..i} -m x"],
+    ["a brace sequence in a merge's --no-verify", "git merge --no-verif{y..y} origin/canary"],
+    ["a brace sequence after a message", "git commit -m x --no-verif{y..y}"],
+    [
+      "an alias chain past the depth the hook follows",
+      "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=a8 -c alias.a8=a9 -c alias.a9=commit a1 -n -m x",
+    ],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-ours-merge hook refuses")
@@ -137,6 +149,13 @@ describe("every other call runs", () => {
     ],
     ["an alias for a plain merge", "git -c alias.m=merge m --no-ff origin/canary"],
     ["a brace list of branches", "git merge {origin/canary,origin/main}"],
+    ["an alias with a quoted message", `git -c 'alias.c=commit -m "fix: x"' c`],
+    ["a brace in a commit message", "git commit -m 'fix: x {a..b} y'"],
+    ["a brace in a double-quoted commit message", `git commit -m "fix: x {a,b} y"`],
+    [
+      "an alias chain inside the depth the hook follows",
+      "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=commit a1 -m x",
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
