@@ -46,10 +46,10 @@ describe("brief-rush.md's merge and scratch lines run as written", () => {
     expect(text).toContain("run from your PR's own worktree")
   })
 
-  test("every log goes inside the session's own scratch folder", async () => {
+  test("every log goes inside the session's own scratch folder, and a loose file named after it is its own", async () => {
     const text = await read(join("scripts/briefs", "brief-rush.md"))
     const line = text.split("\n").find((l) => l.startsWith("Plan: ")) ?? ""
     expect(line).toContain("Write every log inside `scratch/<session name>/`")
-    expect(line).toContain("`scratch/<session>-x.log`")
+    expect(line).toContain("`<session name>-*` or `<session name>.*`")
   })
 })
