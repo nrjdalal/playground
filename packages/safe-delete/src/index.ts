@@ -91,8 +91,15 @@ export const PURGE = { days: 7, minFree: 50e9 }
 // The cap's window, which a burst's recent moves read and a told mark outlives by at most: past it no try can meet the key again, since the key is a stamp that never recurs.
 const CAP_WINDOW_MS = 60_000
 
-// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, and with name set only a plain file whose name it matches; the folder itself, its parent, a sibling and anything deeper stay protected.
-export type CarveOut = { bytes: number; files: number; folder: string; home?: true; name?: RegExp }
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), or in HOME with home set, each at most its files and bytes, with name set only a plain file whose name it matches, and with noLink set only while that folder is no symlink and sits behind none; the folder itself, its parent, a sibling and anything deeper stay protected.
+export type CarveOut = {
+  bytes: number
+  files: number
+  folder: string
+  home?: true
+  name?: RegExp
+  noLink?: true
+}
 
 // The file name of a LaunchAgent that is Playground's own, which the jobs render installs and removes, and no other.
 export const PLAYGROUND_AGENT = /^com\.playground\.[\w.-]+\.plist$/
@@ -125,6 +132,14 @@ export const CARVE_OUTS: Record<string, CarveOut> = {
     folder: ".config/systemd/user",
     home: true,
     name: PLAYGROUND_UNIT,
+  },
+  // packages/scripts/src/playground/page.ts's --remove: one kept page's HTML, caption or PDF, each at most 20 MB, the most a file the Previews app lists holds (MAX_PREVIEW_BYTES), and never pages.jsonl beside them
+  page: {
+    bytes: 20 * 1024 ** 2,
+    files: 1,
+    folder: "previews",
+    name: /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.(?:html|pdf|txt)$/,
+    noLink: true,
   },
 }
 
@@ -292,7 +307,10 @@ const carveOutAt = (
 ): CarveOut | string => {
   const carve = Object.hasOwn(table, name) ? table[name]! : undefined
   if (!carve) return `no carve-out is named ${name}`
-  const folder = real(join(carve.home ? roots.home : dirname(roots.trash), carve.folder))
+  const named = join(real(carve.home ? roots.home : dirname(roots.trash)), carve.folder)
+  const folder = real(named)
+  if (carve.noLink && folder !== named)
+    return `${named} is a symlink or sits behind one, which the ${name} carve-out does not follow`
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (dirname(own) !== folder || dirname(real(abs)) !== folder)
@@ -386,6 +404,10 @@ const recentMoves = (trash: string, session: string, now: Date): TrashEntry[] =>
     .flatMap((batch) => manifestOf(trash, batch))
     .filter((entry) => Date.parse(entry.at) > since)
 }
+
+// How many more moves a session may make before the per-minute cap refuses one, so a caller with several moves to make can refuse before its first; read-only.
+export const movesLeft = (trash: string, session: string, now = new Date()): number =>
+  Math.max(0, LIMITS.perMinute - recentMoves(trash, session, now).length)
 
 // Whether a cap refusal is its burst's first, so it alerts once: the told mark is a file named for the burst's key, made with wx, so of two tries at one instant the first alone creates it and alerts, and a later try inside the burst, whose key is already told, is a plain refusal. A mark of the old shape, a content file at the session's own path, is cleared at the session's first burst, the removal for that case alone, so a concurrent try's fresh folder stands; the design's history is in the PG-1733 commits.
 const firstOfBurst = (trash: string, session: string, recent: TrashEntry[]): boolean => {
