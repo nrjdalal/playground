@@ -24,8 +24,12 @@ const VERIFIED = new Set(["commit", "merge", "pull"])
 const SHORT_TAKES = new Set(["F", "X", "m", "o", "s"])
 // Short options whose value is only an attached one, so the next word is an option of its own: -S (merge, pull, commit), pull's -j, commit's -u
 const ATTACHED = new Set(["S", "j", "u"])
-// How deep the hook follows an alias whose text names another alias
+// How deep the hook follows an alias whose text names another alias; a deeper chain is refused
 const ALIAS_DEPTH = 8
+// The reader's mark on a word holding a brace list, which expanded() clears on each word braceWords makes
+const BRACE = "a brace expansion"
+// A brace sequence ({x..y}), which braceWords leaves as written
+const SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/
 const INSTEAD =
   "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green."
 
@@ -61,15 +65,17 @@ const TAKES: Record<string, Set<string>> = {
 // A commit's short options that take a value, attached or as the next word
 const COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"])
 
-// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: whether it asks for help (-h or --help read as an option), and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
-function walk(sub: string, args: Word[]): { help: boolean; off?: string } {
+// One walk of a merge's, pull's or commit's options as git reads them, past each option's value and up to --: the first word read there that holds a brace list braceWords cannot expand, whether it asks for help (-h or --help read as an option), and the option that turns the hooks off, as written, when it is the last word of --no-verify and --verify; a commit also takes -n, alone or in a cluster of short options, and an abbreviation of --no-verify longer than the ambiguous --no-ver; a merge's and a pull's -n is --no-stat.
+function walk(sub: string, args: Word[]): { help: boolean; off?: string; unread?: Word } {
   let off: string | undefined
   let help = false
+  let unread: Word | undefined
   const commit = sub === "commit"
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
     if (v === "--") break
-    if (v === "-h" || v === "--help") help = true
+    if (args[k].unknown === BRACE) unread ??= args[k]
+    else if (v === "-h" || v === "--help") help = true
     else if (v.startsWith("--")) {
       if (v === "--verify") off = undefined
       else if (v === "--no-verify" || (commit && v.length > 8 && "--no-verify".startsWith(v)))
@@ -88,7 +94,7 @@ function walk(sub: string, args: Word[]): { help: boolean; off?: string } {
       }
     }
   }
-  return { help, off }
+  return { help, off, unread }
 }
 
 // A long option git reads as --strategy or --strategy-option: either name whole, or an abbreviation of --strategy-option longer than --strategy (a shorter one is ambiguous, which git refuses).
@@ -126,11 +132,26 @@ function strategies(args: Word[]): { flag: string; value?: Word }[] {
 
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
-// An alias's call as a shell line: a ! alias's text with the typed words after it, as git runs it, else git with its own options, the alias's words and the typed words
-const aliasLine = (text: string, before: Word[], typed: Word[]) => {
-  const words = typed.map((w) => quote(w.value)).join(" ")
-  if (text.startsWith("!")) return `${text.slice(1)} ${words}`
-  return `git ${before.map((w) => quote(w.value)).join(" ")} ${text} ${words}`
+// A non-! alias's words as git's split_cmdline makes them: split at whitespace, single and double quotes grouping, a backslash outside single quotes taking the next character as written; undefined on an unclosed quote, which git refuses
+function aliasWords(text: string): string[] | undefined {
+  const words: string[] = []
+  let word: string | undefined
+  let quoted = ""
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k]
+    if (!quoted && /\s/.test(c)) {
+      if (word !== undefined) words.push(word)
+      word = undefined
+    } else if (!quoted && (c === "'" || c === '"')) {
+      quoted = c
+      word ??= ""
+    } else if (c === quoted) quoted = ""
+    else if (c === "\\" && quoted !== "'") word = (word ?? "") + (text[++k] ?? "")
+    else word = (word ?? "") + c
+  }
+  if (quoted) return
+  if (word !== undefined) words.push(word)
+  return words
 }
 
 async function judgeGit(args: Word[], env: Env, depth: number): Promise<string | undefined> {
@@ -146,19 +167,36 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
   // git runs an alias only for a name that is no git command of its own, the last -c for it winning
   const name = `alias.${sub.value}=`
   const text = aliases.findLast((a) => a.startsWith(name))?.slice(name.length)
-  if (text !== undefined && !VERIFIED.has(sub.value) && depth < ALIAS_DEPTH) {
-    const line = aliasLine(text, args.slice(0, args.indexOf(sub)), rest)
-    return run(lex(line, env.known), env, visitor(depth + 1))
+  if (text !== undefined && !VERIFIED.has(sub.value)) {
+    if (depth >= ALIAS_DEPTH)
+      return `no-ours-merge hook refuses git ${sub.value}: it is an alias chain deeper than the ${ALIAS_DEPTH} aliases the hook follows, so it cannot read what runs. Call the git command the chain ends in. ${AGAIN}`
+    // a ! alias is a shell line git runs with the typed words after it; any other is git with its own options, the alias's words and the typed words
+    if (text.startsWith("!")) {
+      const line = `${text.slice(1)} ${rest.map((w) => quote(w.value)).join(" ")}`
+      return run(lex(line, env.known), env, visitor(depth + 1))
+    }
+    const words = aliasWords(text)
+    if (!words) return
+    const own = words.map((value) => ({
+      ...sub,
+      raw: undefined,
+      source: value,
+      unknown: undefined,
+      value,
+    }))
+    return judgeGit([...args.slice(0, args.indexOf(sub)), ...own, ...rest], env, depth + 1)
   }
   if (!VERIFIED.has(sub.value)) return
-  const { help, off } = walk(sub.value, rest)
+  const { help, off, unread } = walk(sub.value, rest)
+  if (unread)
+    return `no-ours-merge hook refuses git ${sub.value} with a brace list it cannot expand (${visible(unread.source ?? unread.value)}), which may spell --no-verify${SUBS.has(sub.value) ? " or ours" : ""}: write the words out. ${SUBS.has(sub.value) ? `${INSTEAD} ` : ""}${AGAIN}`
   if (help) return
   if (off)
     return `no-ours-merge hook refuses git ${sub.value} ${off}, which turns its hooks off. ${AGAIN}`
   if (!SUBS.has(sub.value)) return
   for (const { flag, value } of strategies(rest)) {
-    if (value && marked(value.value))
-      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.value)}). ${INSTEAD}`
+    if (value && (marked(value.value) || value.unknown === BRACE))
+      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.source ?? value.value)}). ${INSTEAD}`
     if (value?.value === "ours")
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD}`
   }
@@ -166,13 +204,14 @@ async function judgeGit(args: Word[], env: Env, depth: number): Promise<string |
 
 const verified = (args: Word[]) => VERIFIED.has(gitCommand(args).sub?.value ?? "")
 
-// Each word as the shell's brace expansion makes it, a list past braceWords' cap kept as written
+// Each word as the shell's brace expansion makes it; a list past braceWords' cap or holding a sequence keeps its BRACE mark, as a word the hook cannot read
 const expanded = (args: Word[]): Word[] =>
-  args.flatMap((w) =>
-    w.unknown === "a brace expansion"
-      ? (braceWords(w.value)?.map((value) => ({ ...w, unknown: undefined, value })) ?? [w])
-      : [w],
-  )
+  args.flatMap((w) => {
+    if (w.unknown !== BRACE) return [w]
+    const words = braceWords(w.value)
+    if (!words || words.some((v) => SEQUENCE.test(v))) return [w]
+    return words.map((value) => ({ ...w, unknown: undefined, value }))
+  })
 
 // git itself, a name the hook cannot read with a merge, pull or commit after it, or git behind a wrapper the reader does not know (run-slot.sh <who> -- git merge ...); depth counts the aliases followed to reach it.
 const visitor =
@@ -191,9 +230,9 @@ const visitor =
 
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 
-// The cheap first look: ours, veri (--no-verify and its abbreviations), a short option holding n or a brace list named anywhere, quotes gone so o'u'rs still counts; $'...' can spell any word, so it always counts.
+// The cheap first look: ours, veri (--no-verify and its abbreviations), a short option holding n or a brace list or sequence named anywhere, quotes gone so o'u'rs still counts; $'...' can spell any word, so it always counts.
 const candidate = (command: string): boolean =>
-  command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*,/.test(BARE(command))
+  command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/.test(BARE(command))
 
 // A call that reads as a merge or pull with ours, or a merge, pull or commit with its hooks off, which the hook refuses when it cannot read it
 const mergeCall = (command: string): boolean => {

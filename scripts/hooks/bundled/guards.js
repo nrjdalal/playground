@@ -16508,6 +16508,8 @@ var VERIFIED = new Set(["commit", "merge", "pull"]);
 var SHORT_TAKES = new Set(["F", "X", "m", "o", "s"]);
 var ATTACHED = new Set(["S", "j", "u"]);
 var ALIAS_DEPTH = 8;
+var BRACE = "a brace expansion";
+var SEQUENCE = /\{[^{}]*\.\.[^{}]*\}/;
 var INSTEAD3 = "Merge canary in plainly instead: git merge origin/canary, and resolve each conflict keeping both sides' meaning. With ours, the PR's squash onto canary deletes whatever canary added that the merge ignored, while every gate still reads green.";
 var AGAIN = "Run it again without --no-verify (or a commit's -n), so git runs the hooks of the commit it makes. A reviewer's local merge of canary drops --no-verify too: git -C <clone> merge --no-edit origin/canary runs the clone's own hooks.";
 var TAKES3 = {
@@ -16539,12 +16541,15 @@ var COMMIT_SHORT = new Set(["C", "F", "c", "m", "t"]);
 function walk2(sub, args) {
   let off;
   let help = false;
+  let unread;
   const commit = sub === "commit";
   for (let k = 0;k < args.length; k++) {
     const v = args[k].value;
     if (v === "--")
       break;
-    if (v === "-h" || v === "--help")
+    if (args[k].unknown === BRACE)
+      unread ??= args[k];
+    else if (v === "-h" || v === "--help")
       help = true;
     else if (v.startsWith("--")) {
       if (v === "--verify")
@@ -16570,7 +16575,7 @@ function walk2(sub, args) {
       }
     }
   }
-  return { help, off };
+  return { help, off, unread };
 }
 var strategyLong = (name) => name === "strategy" || name.length > "strategy".length && "strategy-option".startsWith(name);
 function strategies(args) {
@@ -16608,12 +16613,32 @@ function strategies(args) {
   return found;
 }
 var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-var aliasLine = (text, before, typed) => {
-  const words = typed.map((w) => quote(w.value)).join(" ");
-  if (text.startsWith("!"))
-    return `${text.slice(1)} ${words}`;
-  return `git ${before.map((w) => quote(w.value)).join(" ")} ${text} ${words}`;
-};
+function aliasWords(text) {
+  const words = [];
+  let word;
+  let quoted = "";
+  for (let k = 0;k < text.length; k++) {
+    const c = text[k];
+    if (!quoted && /\s/.test(c)) {
+      if (word !== undefined)
+        words.push(word);
+      word = undefined;
+    } else if (!quoted && (c === "'" || c === '"')) {
+      quoted = c;
+      word ??= "";
+    } else if (c === quoted)
+      quoted = "";
+    else if (c === "\\" && quoted !== "'")
+      word = (word ?? "") + (text[++k] ?? "");
+    else
+      word = (word ?? "") + c;
+  }
+  if (quoted)
+    return;
+  if (word !== undefined)
+    words.push(word);
+  return words;
+}
 async function judgeGit2(args, env, depth) {
   const { aliases, rest, sub } = gitCommand(args);
   if (!sub)
@@ -16627,13 +16652,30 @@ async function judgeGit2(args, env, depth) {
   }
   const name = `alias.${sub.value}=`;
   const text = aliases.findLast((a) => a.startsWith(name))?.slice(name.length);
-  if (text !== undefined && !VERIFIED.has(sub.value) && depth < ALIAS_DEPTH) {
-    const line = aliasLine(text, args.slice(0, args.indexOf(sub)), rest);
-    return run2(lex(line, env.known), env, visitor2(depth + 1));
+  if (text !== undefined && !VERIFIED.has(sub.value)) {
+    if (depth >= ALIAS_DEPTH)
+      return `no-ours-merge hook refuses git ${sub.value}: it is an alias chain deeper than the ${ALIAS_DEPTH} aliases the hook follows, so it cannot read what runs. Call the git command the chain ends in. ${AGAIN}`;
+    if (text.startsWith("!")) {
+      const line = `${text.slice(1)} ${rest.map((w) => quote(w.value)).join(" ")}`;
+      return run2(lex(line, env.known), env, visitor2(depth + 1));
+    }
+    const words = aliasWords(text);
+    if (!words)
+      return;
+    const own = words.map((value) => ({
+      ...sub,
+      raw: undefined,
+      source: value,
+      unknown: undefined,
+      value
+    }));
+    return judgeGit2([...args.slice(0, args.indexOf(sub)), ...own, ...rest], env, depth + 1);
   }
   if (!VERIFIED.has(sub.value))
     return;
-  const { help, off } = walk2(sub.value, rest);
+  const { help, off, unread } = walk2(sub.value, rest);
+  if (unread)
+    return `no-ours-merge hook refuses git ${sub.value} with a brace list it cannot expand (${visible(unread.source ?? unread.value)}), which may spell --no-verify${SUBS.has(sub.value) ? " or ours" : ""}: write the words out. ${SUBS.has(sub.value) ? `${INSTEAD3} ` : ""}${AGAIN}`;
   if (help)
     return;
   if (off)
@@ -16641,14 +16683,21 @@ async function judgeGit2(args, env, depth) {
   if (!SUBS.has(sub.value))
     return;
   for (const { flag, value } of strategies(rest)) {
-    if (value && marked(value.value))
-      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.value)}). ${INSTEAD3}`;
+    if (value && (marked(value.value) || value.unknown === BRACE))
+      return `no-ours-merge hook refuses git ${sub.value} ${flag} with a value it cannot read (${visible(value.source ?? value.value)}). ${INSTEAD3}`;
     if (value?.value === "ours")
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
   }
 }
 var verified = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
-var expanded = (args) => args.flatMap((w) => w.unknown === "a brace expansion" ? braceWords(w.value)?.map((value) => ({ ...w, unknown: undefined, value })) ?? [w] : [w]);
+var expanded = (args) => args.flatMap((w) => {
+  if (w.unknown !== BRACE)
+    return [w];
+  const words = braceWords(w.value);
+  if (!words || words.some((v) => SEQUENCE.test(v)))
+    return [w];
+  return words.map((value) => ({ ...w, unknown: undefined, value }));
+});
 var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
   const args = expanded(typed);
   if (name === "git")
@@ -16662,7 +16711,7 @@ var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
     return judgeGit2(args.slice(nested + 1), env, depth);
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
-var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*,/.test(BARE4(command));
+var candidate5 = (command) => command.includes("$'") || /ours|veri|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/.test(BARE4(command));
 var mergeCall = (command) => {
   const bare = BARE4(command);
   if (!/\bgit\b/i.test(bare))
