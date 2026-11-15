@@ -16534,7 +16534,6 @@ var UTILITIES = new Set([
   "case",
   "cat",
   "cd",
-  "cmp",
   "comm",
   "continue",
   "cut",
