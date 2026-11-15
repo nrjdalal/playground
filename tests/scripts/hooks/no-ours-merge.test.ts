@@ -103,6 +103,9 @@ describe("a merge, pull or commit that skips its hooks is refused", () => {
     ["a brace sequence in an abbreviation", "git commit --no-ver{i..i} -m x"],
     ["a brace sequence in a merge's --no-verify", "git merge --no-verif{y..y} origin/canary"],
     ["a brace sequence after a message", "git commit -m x --no-verif{y..y}"],
+    ["a brace sequence as -m's value", "git commit -m -{m..n}"],
+    ["a brace sequence as --message's value", "git commit --message -{m..n}"],
+    ["a brace sequence as a merge's -m value", "git merge -m -{m..n} origin/canary"],
     [
       "an alias chain past the depth the hook follows",
       "git -c alias.a1=a2 -c alias.a2=a3 -c alias.a3=a4 -c alias.a4=a5 -c alias.a5=a6 -c alias.a6=a7 -c alias.a7=a8 -c alias.a8=a9 -c alias.a9=commit a1 -n -m x",
