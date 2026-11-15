@@ -19,11 +19,13 @@ import { dirname, join, relative, resolve } from "node:path"
 import {
   calls,
   canaryTree,
+  checkOf,
   cwdsOf,
   envOf,
   GLM_BASE_URL,
   keyOf,
   linesOf,
+  loadedTree,
   parse,
   replay,
   resultPath,
@@ -36,6 +38,7 @@ import {
   sweep,
   TAKES_MAIN,
   type Check,
+  unloaded,
 } from "../../../../packages/scripts/src/hook-differential"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/hook-differential.ts")
@@ -146,6 +149,63 @@ describe("canaryTree", () => {
     ).toThrow("could not install abc")
     canaryTree({ base, root: "/repo", run: recorder(steps), sha: "abc" })
     expect(steps).toHaveLength(6)
+  })
+})
+
+describe("a canary tree the temp cleaner emptied", () => {
+  // a tree as canaryTree leaves it: guards loads no-extensions-write, whose settings import zod, and the hook starts its worker module; emptied, zod keeps its folders and loses every file, as macOS's temp cleaner leaves an installed package by its age
+  const tree = (name: string, emptied: boolean) => {
+    const at = join(DIR, name)
+    const hooks = join(at, "scripts", "hooks")
+    const zod = join(at, "packages", "settings", "node_modules", "zod")
+    mkdirSync(hooks, { recursive: true })
+    mkdirSync(join(at, "packages", "settings", "src"), { recursive: true })
+    mkdirSync(join(zod, "v4"), { recursive: true })
+    writeFileSync(join(at, ".installed"), "")
+    writeFileSync(
+      join(at, "packages", "settings", "src", "settings.ts"),
+      'import { z } from "zod"\nexport const field = z.string()\n',
+    )
+    writeFileSync(
+      join(hooks, "no-extensions-write.ts"),
+      'import "../../packages/settings/src/settings"\nexport const check = () => undefined\n',
+    )
+    writeFileSync(
+      join(hooks, "no-extensions-write-worker.ts"),
+      'import "./no-extensions-write"\nself.onmessage = () => {}\n',
+    )
+    writeFileSync(
+      join(hooks, "guards.ts"),
+      'import "./no-extensions-write"\nexport const check = () => undefined\n',
+    )
+    if (!emptied) {
+      writeFileSync(join(zod, "package.json"), '{ "name": "zod", "main": "index.js" }')
+      writeFileSync(join(zod, "index.js"), "module.exports = { z: { string: () => ({}) } }\n")
+    }
+    return at
+  }
+
+  test("guards and its Worker module load in a whole tree, and an emptied one names the package they cannot find", async () => {
+    expect(await unloaded(tree("whole", false), ["guards"])).toBeUndefined()
+    expect(await unloaded(tree("emptied", true), ["guards"])).toContain("Cannot find package 'zod'")
+    expect(await unloaded(tree("emptied", true), [])).toContain("no-extensions-write-worker.ts")
+  })
+
+  test("an emptied tree is moved aside and built again, and one that stays emptied fails the run", async () => {
+    const emptied = tree("rebuilt", true)
+    const builds: string[] = []
+    const built = await loadedTree(() => {
+      builds.push(emptied)
+      if (builds.length === 2) tree("rebuilt", false)
+      return emptied
+    }, ["guards"])
+    expect(built).toBe(emptied)
+    expect(builds).toHaveLength(2)
+    expect(readdirSync(DIR).filter((n) => n.startsWith("rebuilt.pruned-"))).toHaveLength(1)
+    const stays = tree("stays", true)
+    await expect(
+      loadedTree(() => (existsSync(stays) ? stays : tree("stays", true)), ["guards"]),
+    ).rejects.toThrow("Cannot find package 'zod'")
   })
 })
 
@@ -723,6 +783,30 @@ describe("a hook that takes the main checkout", () => {
       "newly refused": 0,
       same: 1,
     })
+  })
+
+  test("guards gives its main-checkout guards the head's main checkout on both sides, so a form naming it reads the same", async () => {
+    // a side's guards runs its GUARDS, whose no-main-checkout reads its own tree as main unless given one, as the real hook's default does
+    const side = (name: string) => {
+      const hooks = join(DIR, "guards-main", name, "scripts", "hooks")
+      mkdirSync(hooks, { recursive: true })
+      writeFileSync(
+        join(hooks, "no-main-checkout.ts"),
+        'export const check = (raw: string, _env: unknown, main = import.meta.dir) => JSON.parse(raw).tool_input.command.includes(`${main}/`) ? "refused" : undefined\n',
+      )
+      writeFileSync(
+        join(hooks, "guards.ts"),
+        'import { check as mainCheckout } from "./no-main-checkout"\nexport const GUARDS = [{ factory: true, name: "no-main-checkout", run: (raw: string, env: unknown) => mainCheckout(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+      )
+      return join(hooks, "guards.ts")
+    }
+    const command = `echo x > ${join(DIR, "guards-main", "head", "scripts", "hooks")}/f`
+    const raw = JSON.stringify({ tool_input: { command } })
+    const main = join(DIR, "guards-main", "head", "scripts", "hooks")
+    const canary = await checkOf(side("canary"), "guards", main)
+    const head = await checkOf(side("head"), "guards", main)
+    expect(await head(raw, {})).toBe("refused")
+    expect(await canary(raw, {})).toBe("refused")
   })
 
   test("TAKES_MAIN names every hook whose check() takes the main checkout, and only those", async () => {
