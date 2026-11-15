@@ -234,6 +234,55 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     ])
   })
 
+  // PG-2228: the hint keeps the account the session runs on, read from its resume record before the close, since a resume rewrites it.
+  describe("an idle reviewer's resume hint names the account its resume record holds", () => {
+    const NAME = "m4tq7x-reviewer"
+    const target: Target = {
+      kind: "reviewer",
+      name: NAME,
+      pr: URL,
+      refs: [],
+      worker: "m4tq7x-worker",
+    }
+    const head = "#!/bin/bash\n# server: playground\n"
+    const exec = `exec /m/scripts/spawn.sh resume ${NAME} /wt 1111`
+    const hint = (account: string) =>
+      `Ended ${NAME}: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume ${NAME} <dir> --pr ${URL}${account}`
+    const end = async (record: string | null) => {
+      const resumeDir = realpathSync(mkdtempSync(join(tmpdir(), "auto-end-resume-")))
+      const path = join(resumeDir, `${NAME}.sh`)
+      if (record !== null) writeFileSync(path, record)
+      const { deps } = fakes({
+        close: async () => (writeFileSync(path, `${head}${exec}\n`), { ok: true, out: "" }),
+        resumeDir,
+      } as Partial<EndDeps>)
+      return (await endOne(target, "checker-nothing (head scored)", deps)).map((l) => l.text)
+    }
+
+    test("an account line, a gate's pick included, is read before the close rewrites the record", async () => {
+      const lines = await end(
+        `${head}# account: seat-b@example.test\n${exec} --model claude-opus-5-5\n`,
+      )
+      expect(lines).toEqual([
+        hint(" --account seat-b@example.test"),
+        hint(" --account seat-b@example.test"),
+      ])
+    })
+
+    test("with no account line, the exec line's --account, as an own login's record holds it", async () => {
+      const lines = await end(`${head}${exec} --account seat-c@example.test\n`)
+      expect(lines).toEqual([
+        hint(" --account seat-c@example.test"),
+        hint(" --account seat-c@example.test"),
+      ])
+    })
+
+    test("a record naming no account, or none at all, keeps today's hint", async () => {
+      expect(await end(`${head}${exec}\n`)).toEqual([hint(""), hint("")])
+      expect(await end(null)).toEqual([hint(""), hint("")])
+    })
+  })
+
   test("a line goes to the roster lead, its worker's, or ops for a ops checker; a roster-says flag ends nobody", async () => {
     const { closed, deps } = fakes()
     const lines = await sweep(
