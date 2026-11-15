@@ -68,9 +68,11 @@ describe("ui-verify's Cross-browser bullet reuses one decided copy per browser",
     expect(line).toContain("agent-browser's own Chrome for Testing")
   })
 
-  test("a pin bump is a new build that can ask once, so the session waits and tells its lead", async () => {
+  test("a pin bump or an agent-browser upgrade is a new build that can ask once, so the session waits and tells its lead", async () => {
     const line = await bullet("Cross-browser")
     expect(line).toContain("new build")
+    expect(line).toContain("Playwright pin bump")
+    expect(line).toContain("agent-browser upgrade")
     expect(line).toContain("tells its lead")
     expect(line).toContain("Inbox")
   })
