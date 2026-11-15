@@ -134,6 +134,13 @@ describe("a stash found by name or SHA, and every other call, runs", () => {
       "an array a shell's -c sets and runs, which names no stash",
       `bash -c 'A=(echo hi); "\${A[@]}"'`,
     ],
+    // #2259's controls
+    [
+      "a commit subject holding (…) beside a stash list",
+      "git commit -m 'fix(PG-1): a (b|c) subject' && git stash list",
+    ],
+    ["a brace list used only as an argument", "git stash list && echo {a,b}"],
+    ["a brace list in a path used only as an argument", "ls /usr/bin/g{i,x}t; git stash list"],
   ])("%s", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })

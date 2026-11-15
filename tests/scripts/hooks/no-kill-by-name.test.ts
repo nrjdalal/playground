@@ -169,6 +169,14 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "/usr/bin/pgrep -f watcher",
     "/no/such/folder/pk?ll -f watcher",
     'X=/usr/bin; "$X/pk?ll" -f watcher',
+    // #2259's controls: a brace list or zsh group used only as an argument, a commit subject holding (…), a quoted or escaped brace the shell does not expand, and a brace list in a comment
+    "ls /usr/bin/{pkill,ls}",
+    "echo {a,b} && ls",
+    "git commit -m 'fix(PG-1): pkill (a|b) watcher'",
+    'pk"{i,x}"ll -f watcher',
+    "/usr/bin/pk\\{i,x}ll -f watcher",
+    "echo hi # /usr/bin/pk{i,x}ll -f watcher",
+    "touch f{1..3}.txt",
     // a bare * names no program, so a case arm the reader takes for a program word passes
     'cd x && for f in *.ts; do case "$f" in *" a "*) ;; esac; done',
   ])("%s", async (command) => {

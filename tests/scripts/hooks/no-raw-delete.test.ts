@@ -67,6 +67,13 @@ describe("a delete the hook lets run", () => {
     "/no/such/folder/r? notes.txt",
     'A=(rm notes.txt); "${A[@]}"',
     'A=(echo hi); A+=(there); "${A[@]}"',
+    // #2259's controls: a commit subject holding (…), a brace list or a subshell used only as an argument or a group, code with braces and parens a spaced word holds, and a commit scope read as a line after a cd into a folder that is gone
+    "git commit -m 'fix(PG-1): rm (a|b) files'",
+    "mkdir -p /tmp/zz/{a,b}",
+    "(cd /tmp && ls)",
+    `agent-browser eval 'JSON.stringify({rm: f("(a: b)"), h: g()})'`,
+    `agent-browser eval "x.match(/rm[^a]{0,90}|y[^a]{0,60}/g)"`,
+    `cd /no/such/folder; ~/.playground/ops/run-slot.sh w -- git commit -m "docs(PG-1): rm help"`,
     `~/.playground/ops/run-slot.sh me -- git commit -m "fix(PG-1): playground rm moves a file" -m "a (b) c"`,
     'rmdir "${S:?}/${m:?}"',
     "mv web/next/.next .turbo /tmp/claude-501/p/s/scratchpad/cold-1/",
