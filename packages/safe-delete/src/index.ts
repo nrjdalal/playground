@@ -217,13 +217,15 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path); none for a name no session may hold.
+// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path), while scratch/ is a real folder reached through no symlink from the real HOME; none for a name no session may hold.
 const ownScratchOf = (home: string, session: string, path: string): string[] => {
   if (!SESSION.test(session)) return []
   const name = basename(path)
   const stat = lstat(path)
+  const scratch = join(home, ".playground", "scratch")
   const loose =
-    dirname(path) === real(join(home, ".playground", "scratch")) &&
+    real(scratch) === scratch &&
+    dirname(path) === scratch &&
     (name.startsWith(`${session}-`) || name.startsWith(`${session}.`)) &&
     (!stat || stat.isFile())
   return [
