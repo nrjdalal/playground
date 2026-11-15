@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -269,4 +270,20 @@ describe("playground page --remove (#2191)", () => {
     expect(readFileSync(join(previews, "lookup.html"), "utf8")).toBe("<p>lookup</p>")
     expect(readFileSync(join(previews, "lookup.txt"), "utf8")).toBe("Lookup\n")
   })
+})
+
+// #2237's review: a previews folder that is a symlink leads out of the data folder, so --remove refuses it, whatever the link points at.
+test("playground page --remove refuses a previews folder that is a symlink, leaving the index and the link's target as they were", () => {
+  for (const target of [".ssh", "Documents"]) {
+    const { data, previews, roots, root } = fakeMachine()
+    keep(data, root, "report.html")
+    const elsewhere = join(roots.home, target)
+    renameSync(previews, elsewhere)
+    symlinkSync(elsewhere, previews)
+    const before = snapshot(elsewhere)
+    const refused = removePage("report.html", data, { now: NOW, roots, session: "tester" })
+    expect("error" in refused ? refused.error : "moved").toContain("symlink")
+    expect(snapshot(elsewhere)).toEqual(before)
+    expect(listTrash(roots.trash)).toEqual([])
+  }
 })

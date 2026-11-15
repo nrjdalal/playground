@@ -1722,3 +1722,24 @@ test("movesLeft counts a session's own moves inside the minute and changes nothi
   )
   expect(readdirSync(roots.trash).sort()).toEqual(before)
 })
+
+// #2237's review: a previews folder that is a symlink would let the page carve-out move a file out of the link's target, so the carve-out takes previews only as a real folder of the data folder.
+test("the page carve-out refuses a previews folder that is a symlink into a protected folder, and the target keeps its file", () => {
+  for (const target of [".ssh", ".config"]) {
+    const roots = machine()
+    const folder = join(roots.home, target)
+    const kept = file(join(folder, "notes.txt"), "secret")
+    symlinkSync(folder, join(roots.home, ".playground", "previews"))
+    expect(
+      quarantine(
+        join(roots.home, ".playground", "previews", "notes.txt"),
+        { ...opts, carveOut: "page" },
+        roots,
+        {
+          now: NOW,
+        },
+      ),
+    ).toMatchObject({ kind: "protected", refused: expect.stringContaining("symlink") })
+    expect(readFileSync(kept, "utf8")).toBe("secret")
+  }
+})
