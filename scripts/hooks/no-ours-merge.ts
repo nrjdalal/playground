@@ -176,26 +176,35 @@ function aliasDefined(args: Word[], git = true): Word | undefined {
 }
 
 // A factory session's git call that defines an alias on its own line is refused, whatever it runs, once the reading below finds nothing more precise
+// git: the program is surely git, so an unread -c value counts; cluster: a short option holding n beside an unread subcommand counts, which a git nested in another program's words (grep git "$f" -n) leaves out
 async function judgeGit(
   args: Word[],
   env: Env,
   depth: number,
   git = true,
+  cluster = true,
 ): Promise<string | undefined> {
-  const found = await readGit(args, env, depth)
+  const found = await readGit(args, env, depth, cluster)
   if (found) return found
   const alias = aliasDefined(args, git)
   if (alias)
     return `no-ours-merge hook refuses this git call: it defines a git alias on its own line (${visible(alias.source ?? alias.value)}), which can run a merge, pull or commit with its hooks off or with ours under a name the hook may not read. Run the git command directly, its words written out in place of the alias.`
 }
 
-async function readGit(args: Word[], env: Env, depth: number): Promise<string | undefined> {
+async function readGit(
+  args: Word[],
+  env: Env,
+  depth: number,
+  cluster: boolean,
+): Promise<string | undefined> {
   const { aliases, rest, sub } = gitCommand(args)
   if (!sub) return
   if (marked(sub.value)) {
     if (rest.some((a) => a.value === "ours"))
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD}`
-    const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value))
+    const off = rest.find(
+      (a) => a.value.startsWith("--no-veri") || (cluster && /^-[^-]*n/.test(a.value)),
+    )
     if (off)
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`
     const alias = rest.find((a) => /^(?:--config-env=)?alias\./i.test(a.value))
@@ -244,7 +253,9 @@ async function readGit(args: Word[], env: Env, depth: number): Promise<string | 
   }
 }
 
-// A subcommand the hook judges: commit, merge, pull, or one it cannot read, as a plain git call has it judged
+const verified = (args: Word[]) => VERIFIED.has(gitCommand(args).sub?.value ?? "")
+
+// A nested git's subcommand the hook judges: commit, merge, pull, or one it cannot read
 const judged = (args: Word[]) => {
   const sub = gitCommand(args).sub?.value
   return sub !== undefined && (VERIFIED.has(sub) || marked(sub))
@@ -268,7 +279,7 @@ const visitor =
     if (
       first &&
       (first.unknown || marked(first.value)) &&
-      (judged(args) || aliasDefined(args, false))
+      (verified(args) || aliasDefined(args, false))
     )
       return judgeGit(args, env, depth, false)
     if (PRINTERS.has(name)) return
@@ -277,7 +288,7 @@ const visitor =
         program(a.value) === "git" &&
         (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))),
     )
-    if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth)
+    if (nested !== -1) return judgeGit(args.slice(nested + 1), env, depth, true, false)
   }
 
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")

@@ -16655,22 +16655,22 @@ function aliasDefined(args, git = true) {
     }
   }
 }
-async function judgeGit2(args, env, depth, git = true) {
-  const found = await readGit(args, env, depth);
+async function judgeGit2(args, env, depth, git = true, cluster = true) {
+  const found = await readGit(args, env, depth, cluster);
   if (found)
     return found;
   const alias = aliasDefined(args, git);
   if (alias)
     return `no-ours-merge hook refuses this git call: it defines a git alias on its own line (${visible(alias.source ?? alias.value)}), which can run a merge, pull or commit with its hooks off or with ours under a name the hook may not read. Run the git command directly, its words written out in place of the alias.`;
 }
-async function readGit(args, env, depth) {
+async function readGit(args, env, depth, cluster) {
   const { aliases, rest, sub } = gitCommand(args);
   if (!sub)
     return;
   if (marked(sub.value)) {
     if (rest.some((a) => a.value === "ours"))
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ours. ${INSTEAD3}`;
-    const off = rest.find((a) => a.value.startsWith("--no-veri") || /^-[^-]*n/.test(a.value));
+    const off = rest.find((a) => a.value.startsWith("--no-veri") || cluster && /^-[^-]*n/.test(a.value));
     if (off)
       return `no-ours-merge hook refuses this git call: it cannot read which git command runs (${visible(sub.value)}) beside ${visible(off.value)}, which may turn a commit's hooks off. ${AGAIN}`;
     const alias = rest.find((a) => /^(?:--config-env=)?alias\./i.test(a.value));
@@ -16716,6 +16716,7 @@ async function readGit(args, env, depth) {
       return `no-ours-merge hook refuses git ${sub.value} ${flag} ours. ${INSTEAD3}`;
   }
 }
+var verified = (args) => VERIFIED.has(gitCommand(args).sub?.value ?? "");
 var judged = (args) => {
   const sub = gitCommand(args).sub?.value;
   return sub !== undefined && (VERIFIED.has(sub) || marked(sub));
@@ -16732,13 +16733,13 @@ var visitor2 = (depth) => async (_cmd, { args: typed, first, name }, env) => {
   const args = expanded(typed);
   if (name === "git")
     return judgeGit2(args, env, depth);
-  if (first && (first.unknown || marked(first.value)) && (judged(args) || aliasDefined(args, false)))
+  if (first && (first.unknown || marked(first.value)) && (verified(args) || aliasDefined(args, false)))
     return judgeGit2(args, env, depth, false);
   if (PRINTERS.has(name))
     return;
   const nested = args.findIndex((a, j) => program(a.value) === "git" && (judged(args.slice(j + 1)) || aliasDefined(args.slice(j + 1))));
   if (nested !== -1)
-    return judgeGit2(args.slice(nested + 1), env, depth);
+    return judgeGit2(args.slice(nested + 1), env, depth, true, false);
 };
 var BARE4 = (command) => command.replace(/[\\'"]/g, "");
 var candidate5 = (command) => command.includes("$'") || /ours|veri|alias|config-env|(?:^|\s)-c\s|(?:^|[\s{,])-[^\s-]*n|\{[^}]*(?:,|\.\.)/i.test(BARE4(command));
