@@ -10156,7 +10156,7 @@ var hookRemoverWord = (word) => {
 function hookRemover(text, hook) {
   if (text === undefined)
     return hook(true) ? "text it cannot read" : undefined;
-  const word = text.replace(/\\\n/g, "").replace(/[\\'"]/g, "").split(/[^\w-]+/).find(hookRemoverWord);
+  const word = [text.replace(/\\\n/g, ""), text].flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/)).find(hookRemoverWord);
   if (word)
     return hook(false) ? word : undefined;
   if (!/[$`?*]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false))
@@ -11572,7 +11572,12 @@ var texts = (word) => {
   return out;
 };
 async function inspect(raw, environment, unknown = false) {
-  const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool,
+    turn_id: turn
+  } = JSON.parse(raw);
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const root = real(extensionsDir(dataDir(environment)));
@@ -11597,7 +11602,7 @@ async function inspect(raw, environment, unknown = false) {
     if (inRoot(path))
       return refuse(`a write to ${file}`);
     const edits = Array.isArray(input.edits) ? input.edits : [];
-    const patch = typeof input.content === "string" && input.content.includes("*** Begin Patch");
+    const patch = typeof turn === "string" && typeof input.content === "string" && input.content.includes("*** Begin Patch");
     const removes = [
       patch ? String(input.content).split(`
 `).filter((line) => line.startsWith("+")).map((line) => line.slice(1)).join(`

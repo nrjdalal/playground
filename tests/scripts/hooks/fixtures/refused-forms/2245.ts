@@ -172,6 +172,24 @@ const held = (): Row[] => [
     "cat > .git/hooks/pre-commit <<'EOF'\nr\\\nm old.log\nEOF",
   ],
   [
+    "a Write of a remover after a comment that holds a patch header into a git hook",
+    {
+      input: { content: "# *** Begin Patch\nrm old.log\n", file_path: ".git/hooks/pre-commit" },
+      tool: "Write",
+    },
+  ],
+  [
+    "a Write of a remover after a comment that ends at a backslash into a git hook",
+    {
+      input: { content: "# note\\\nrm old.log\n", file_path: ".git/hooks/pre-commit" },
+      tool: "Write",
+    },
+  ],
+  [
+    "a heredoc of a remover after a comment that ends at a backslash fed to cat into a git hook",
+    "cat > .git/hooks/pre-commit <<'EOF'\n# note\\\nrm old.log\nEOF",
+  ],
+  [
     "a Write of a program named by a glob of its path into a git hook",
     {
       input: { content: "/bin/r? old.log\n", file_path: ".git/hooks/pre-commit" },

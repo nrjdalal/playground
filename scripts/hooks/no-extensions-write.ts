@@ -281,11 +281,9 @@ function hookRemover(
   hook: (sure: boolean) => boolean,
 ): string | undefined {
   if (text === undefined) return hook(true) ? "text it cannot read" : undefined
-  // a backslash-newline goes first, since the shell joins a word across it
-  const word = text
-    .replace(/\\\n/g, "")
-    .replace(/[\\'"]/g, "")
-    .split(/[^\w-]+/)
+  // read with each backslash-newline joined, since the shell joins a word across one, and as typed, since a comment ends at its newline even after a backslash
+  const word = [text.replace(/\\\n/g, ""), text]
+    .flatMap((each) => each.replace(/[\\'"]/g, "").split(/[^\w-]+/))
     .find(hookRemoverWord)
   if (word) return hook(false) ? word : undefined
   if (!/[$`?*]|\[[^\]]*\]|\beval\b/.test(text) || !hook(false)) return
@@ -1977,7 +1975,12 @@ const texts = (word: Word): Word[] => {
 
 // unknown: the line names HOME, TMPDIR or PWD other than by expanding them, so it is read a second time with those unknown, since the shell's value may not be the environment's
 async function inspect(raw: string, environment: Environment, unknown = false) {
-  const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
+  const {
+    cwd,
+    tool_input: toolInput,
+    tool_name: tool,
+    turn_id: turn,
+  } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
   const root = real(extensionsDir(dataDir(environment)))
@@ -1999,9 +2002,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
     const path = resolve(directory ?? "", expanded)
     if (inRoot(path)) return refuse(`a write to ${file}`)
-    // the text a file tool writes is judged as a shell's text written into a hook file is, and a Codex patch's (codex.ts) by the lines it adds in any of its files, read apart from its headers and the shell command an apply_patch heredoc stands in
+    // the text a file tool writes is judged as a shell's text written into a hook file is, and a Codex patch's (codex.ts) (a Write with codex.ts's turn_id) by the lines it adds in any of its files, read apart from its headers and the shell command an apply_patch heredoc stands in
     const edits = Array.isArray(input.edits) ? (input.edits as Record<string, unknown>[]) : []
-    const patch = typeof input.content === "string" && input.content.includes("*** Begin Patch")
+    const patch =
+      typeof turn === "string" &&
+      typeof input.content === "string" &&
+      input.content.includes("*** Begin Patch")
     const removes = [
       patch
         ? String(input.content)
