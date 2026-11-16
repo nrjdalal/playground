@@ -278,7 +278,6 @@ const install = async (box: string, home: string, path: string): Promise<string>
   return `${out}\n${err}\ninstall.sh exit ${code}`
 }
 
-// Adds a Claude account through the Dashboard's own Add, on the stand-ins: setup-token is the repo's made-up one and the Keychain a file in the box; null once the file holds the token, else why not. A commit with no PLAYGROUND_PROFILE_URL would send the made-up token to Claude's profile read, so the gate adds none there.
 // The made-up account the gate adds through the Dashboard's Add a Claude account.
 const GATE_ACCOUNT = "gate@example.com"
 
@@ -294,6 +293,7 @@ export const accountKept = (box: string, home: string, account: string): boolean
   )
 }
 
+// Adds a Claude account through the Dashboard's own Add, on the stand-ins: setup-token is the repo's made-up one; null once this host's security keeps the token (accountKept), else why not. A commit with no PLAYGROUND_PROFILE_URL would send the made-up token to Claude's profile read, so the gate adds none there.
 const addAccount = (browser: Browser, box: string, home: string): string | null => {
   const setup = join(home, "playground", "api", "hono", "src", "lib", "accounts", "claude-setup.ts")
   if (!existsSync(setup) || !readFileSync(setup, "utf8").includes("PLAYGROUND_PROFILE_URL"))

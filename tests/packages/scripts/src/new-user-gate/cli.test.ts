@@ -296,7 +296,7 @@ describe("the gate's Add account on Linux (#2391)", () => {
     const saved = Bun.spawnSync([process.execPath, "--no-env-file", shim, "-i"], {
       env: { HOME: home, PATH: process.env.PATH ?? "" },
       stdin: new TextEncoder().encode(
-        'add-generic-password -U -s "playground-claude" -a "gate@example.com" -w "made-up"\n',
+        'add-generic-password -U -s "playground-claude-oauth" -a "gate@example.com" -w "made-up"\n',
       ),
     })
     expect(saved.exitCode).toBe(0)
