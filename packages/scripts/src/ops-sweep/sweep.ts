@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 import { verdictOf } from "@packages/config/verdicts"
-import { accountKey, accountSettings, accountsOf, readPolicy } from "@packages/settings"
+import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
@@ -249,7 +249,7 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
-// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh.
+// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's; a RETIRED job's heartbeat file, which outlives it, goes unread.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
   let disabled = new Set<string>()
@@ -261,7 +261,7 @@ export async function opsDown(ctx: Context): Promise<string[]> {
     .filter(([job, mark]) => !cmds.includes(mark) && !disabled.has(`ops-${job}`))
     .map(([job]) => `ops-down:${job}`)
   const files = (await readdir(ctx.ops).catch(() => [])).filter(
-    (f) => f.startsWith("ops-") && f.endsWith(".json"),
+    (f) => f.startsWith("ops-") && f.endsWith(".json") && !RETIRED.includes(f.slice(0, -5)),
   )
   for (const file of files) {
     try {

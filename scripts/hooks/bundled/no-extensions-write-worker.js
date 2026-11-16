@@ -6216,10 +6216,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
+var RETIRED_KEYS = new Set(RETIRED.map(jobKey));
 var REGISTRY_KEYS = new Set([
   ...Object.keys(JOBS).map(jobKey),
   ...Object.values(OLD_KEYS).flat(),
-  ...RETIRED.map(jobKey)
+  ...RETIRED_KEYS
 ]);
 
 // scripts/hooks/codex.ts

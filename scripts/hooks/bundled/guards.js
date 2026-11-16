@@ -10384,10 +10384,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
+var RETIRED_KEYS = new Set(RETIRED.map(jobKey));
 var REGISTRY_KEYS = new Set([
   ...Object.keys(JOBS).map(jobKey),
   ...Object.values(OLD_KEYS).flat(),
-  ...RETIRED.map(jobKey)
+  ...RETIRED_KEYS
 ]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
