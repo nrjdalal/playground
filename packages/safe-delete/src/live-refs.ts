@@ -1,4 +1,4 @@
-// The live read of a remote's branches that unpushed (index.ts) and the push scans share: commit-trailer's pre-push step and the push-scan guards, which import this file by its relative source path, since index.ts reads @packages/config's built kinds and a guard reads no dist (scripts/hooks/role.ts).
+// The live read of a remote's branches that unpushed (index.ts) and the push scans share: commit-trailer's pre-push step and the push-scan guards, which import this file by its relative source path, since index.ts imports @packages/config by its package name and a guard imports no workspace package (scripts/hooks/role.ts).
 import { AsyncLocalStorage } from "node:async_hooks"
 
 export type Tip = { ref: string; sha: string }
