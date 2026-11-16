@@ -345,6 +345,47 @@ describe("a head with no finished GitGuardian check", () => {
   })
 })
 
+// a web/next PR merged on ready while its tester's drive was still open, with no TesterBot line at its head (PG-2485).
+describe("the tester gate holds a web/next diff for its tester's PASS at the head", () => {
+  const tester = (word: "FAIL" | "PASS", sha = HEAD, author = "acme") =>
+    said(`## TesterBot · ${word} at ${sha.slice(0, 7)} · both shots attached`, author)
+  const ui = ["web/next/src/components/dashboard/row.tsx", "AGENTS.md"]
+  const gate = (patch: Partial<PrFacts>) => gatesOf(facts(patch)).find((g) => g.name === "tester")
+
+  test("a PASS at the head passes, naming the line", () => {
+    expect(gate({ comments: [review(), tester("PASS")], files: ui })).toEqual({
+      detail: "## TesterBot · PASS at 69a6a4c · both shots attached",
+      name: "tester",
+      ok: true,
+    })
+  })
+
+  test.each([
+    ["no verdict", [review()]],
+    ["a FAIL at the head", [review(), tester("FAIL")]],
+    ["a PASS at an older head", [review(), tester("PASS", OLD)]],
+    ["a PASS by anyone else", [review(), tester("PASS", HEAD, "someone-else")]],
+    ["a PASS then a FAIL at the head", [review(), tester("PASS"), tester("FAIL")]],
+  ])("%s refuses", (_, comments) => {
+    expect(failing({ comments, files: ui })).toEqual(["tester"])
+  })
+
+  test("its refusal names the line it waits for and the head", () => {
+    expect(gate({ files: ui })?.detail).toBe(
+      "a web/next diff waits for its tester's drive: missing ## TesterBot · PASS at 69a6a4c from acme; spawn or resume the PR's tester, which posts ## TesterBot · PASS at 69a6a4c",
+    )
+    expect(gate({ comments: [review(), tester("FAIL")], files: ui })?.detail).toBe(
+      "newest tester verdict is not a pass: ## TesterBot · FAIL at 69a6a4c · both shots attached",
+    )
+  })
+
+  test("a diff with no web/next file meets no tester gate", () => {
+    expect(gate({ files: ["packages/scripts/src/pr-merge/gates.ts", "web/nextish.md"] })).toBe(
+      undefined,
+    )
+  })
+})
+
 describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-1274)", () => {
   const stacked = (line: string) => `${SKILL_BODY}\n- ${line}`
   const parent = (patch: Partial<PrFacts>) =>

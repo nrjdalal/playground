@@ -1,6 +1,6 @@
 # pr:merge and pr:train
 
-A Playground PR reaches `canary` only through `bun run pr:merge <n>`, or merge-on-ready (`bun run pr:train ready`), which runs pr:merge on the first gated PR in queue order, once it is ready at 5/5 with GitHub's checks green at its head.
+A Playground PR reaches `canary` only through `bun run pr:merge <n>`, or merge-on-ready (`bun run pr:train ready`), which runs pr:merge on the first gated PR in queue order, once it is ready at 5/5 with GitHub's checks green at its head, and for a diff under `web/next/` its tester's PASS there.
 This file holds the gates, the merge lock and the merge queue's readers.
 
 ## Gates
@@ -22,6 +22,8 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
   The grep leaves out the gate's own folders (`GATE_OWN`), whose code, docs and tests name sample tokens that would else read as found, and a template the head cannot show, or one holding no placeholder, stops the run with why, so the check fails closed.
   The changed paths are the PR's files from the one paginated `pulls/<n>/files` read `factsOf` makes, a renamed file by both its paths, so Checks, `pr:merge`, merge-on-ready and the train judge the same list.
 - `review`: the newest `## ReviewBot · round <n>: <s>/5 at <sha7>` on the head reads 5/5.
+- `tester`: on a diff with a file under `web/next/`, the newest `## TesterBot · <PASS|FAIL> at <sha7>` on the head reads PASS, since a UI change lands only once its tester has driven it (`testerGate` in `gates.ts`; a UI PR once merged on ready while its tester's drive was still open).
+  No verdict at the head refuses, naming the line it waits for and the next move, spawn or resume the PR's tester; a FAIL, or a PASS at an older head, refuses too, and a diff with no `web/next/` file meets no `tester` gate.
 - `types`: last, inside the merge lock once every other gate passes, the tree the squash makes type-checks (`types.ts`), since a head's own checks typed it alone and a clean textual merge can still call an API `canary` changed.
   It skips when the head already holds `canary`'s tip (`git merge-base --is-ancestor`), whose own checks typed that very tree.
   Else it checks the `git merge-tree --write-tree` tree out detached in `.claude/worktrees/merge-types`, the one worktree every merge reuses and keeps however it ends, since cloning and removing a whole `node_modules` (about 114k files) on each merge drove the load to 93 on 2 Nov.
@@ -34,7 +36,7 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
   A type error refuses with the first errors and the fix (merge `canary` in, fix it, and the new head needs its checks and a 5/5), and a stale bundle with the files `--check` names and its fix (merge `canary` in plainly, run `bun run hooks:bundle` and commit the rebuild on its own, then checks and a 5/5); either is kept beside the lock (`merge-types/<head>-<canary>`), so merge-on-ready's next cycle refuses the same pair at once; a run it cannot finish in 600s (`TYPES_BUDGET_MS`, which every gate in one `pr:train ready` call shares, so the call ends inside the merge train's 900s), counting each step's wait for a CPU slot as well as its run, or a step that fails another way refuses, naming it, and runs again on the next try.
   `--explain` names whether it would run or skip, and why, and runs no type check.
 
-Every verdict is read from the comments of the account that owns `factory.repo` alone (`packages/config/src/verdicts.ts` parses them): the reviewer's `## ReviewBot` line, which the `review` gate reads, and the tester's `## TesterBot · <PASS|FAIL> at <sha7>` line, which the Dashboard shows and no gate reads.
+Every verdict is read from the comments of the account that owns `factory.repo` alone (`packages/config/src/verdicts.ts` parses them): the reviewer's `## ReviewBot` line, which the `review` gate reads, and the tester's `## TesterBot · <PASS|FAIL> at <sha7>` line, which the `tester` gate reads on a `web/next/` diff and the Dashboard shows.
 `--explain` prints each gate and what it found.
 suite.sh's `audit` fails only on an advisory the head adds over its merge base with `canary`.
 It also refuses a head holding a merge of `canary` that dropped a line its `canary` side added, in a file git merges without a conflict, which git's own merge of its two parents (`git merge-tree --write-tree`) keeps, `canary` still holds and the squash onto `canary` lacks (`keeps canary`, `lost.ts`), naming each file and merge:

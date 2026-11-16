@@ -114,7 +114,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 - A fix push that changes a figure, row count or table the body's Evidence measured refreshes the body in the same update, its Evidence naming the new head, so every round opens on a body that describes the head it scores.
 - When a scope ruling drops or changes an item, change the PR's title in the same update as its body (`gh pr edit <n> --title <title> --body-file <file>`), since the merge commit and the Changelog take the title: one PR merged under a title naming an item its ruling had dropped.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
-- A head at 5/5 with green checks merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
+- A head at 5/5 with green checks, and its tester's PASS on a `web/next/` diff, merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
 - Apply a patch copied from a GitHub comment with `git apply --recount <file>`, since a comment's patch often carries stale hunk counts.
 - A lead hands a reviewer's patch on by the reviewer's own path, its verdict comment or the file it saved, never as a copy the lead writes out again, since a rewritten copy lost the leading space of its blank context lines and failed `git apply --check`.
