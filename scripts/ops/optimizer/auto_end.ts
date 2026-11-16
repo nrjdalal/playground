@@ -467,15 +467,17 @@ export const cleanupHeld = async (
   rm: RmDeps,
 ): Promise<string | null> => {
   const { worktreeRefusal } = await import("../../../packages/safe-delete/src/index")
+  const own = await rm.prState(path, pr)
   return worktreeRefusal(
     path,
     { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
     {
       clones: rm.clones,
       discard: true,
-      freed: freedOf(await rm.prState(path, pr)),
+      freed: freedOf(own),
       live: STATUSES.live,
       merged: () => null,
+      ...(own && own !== "none" ? { ownPr: own.number } : {}),
       places: rm.places,
       ...(pr ? { pr } : {}),
       procs: [],
