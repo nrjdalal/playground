@@ -82,10 +82,10 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("step 8 names the one waiter on the head's checks, which a re-run at the same head ends, and how to name another repo's gate checks (#1410, #2058)", async () => {
     const step8 = (await skill()).split("8. **Report and wait.**")[1]?.split("\n")[0] ?? ""
     expect(step8).toContain(
-      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head> [<check>...]`",
+      "`cd <main> && ${CLAUDE_SKILL_DIR}/scripts/state.ts checks <repo> <n> <head> [<check>...]`",
     )
     expect(step8).toContain(
-      "`cd /private/tmp && ${CLAUDE_SKILL_DIR}/scripts/state.ts wait <repo> <n> <head>`",
+      "`cd <main> && ${CLAUDE_SKILL_DIR}/scripts/state.ts wait <repo> <n> <head>`",
     )
     expect(step8).toContain(
       "start `checks` again at once, which waits past a red that concluded before it started",
@@ -104,6 +104,16 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain(
       "`state.ts checks` on a head whose gate checks are not all green",
     )
+  })
+
+  test("every waiter starts from the main checkout, which every platform has, never a macOS-only folder (#2359)", async () => {
+    const text = await skill()
+    expect(text).not.toContain("/private/tmp")
+    expect(text).toContain("`<main>` the main checkout, the absolute path")
+    expect(text.split("1. **Recover.**")[1]?.split("\n")[0] ?? "").toContain(
+      "step 8's waiter alone starts from `<main>`",
+    )
+    expect(await page()).toContain("A waiter starts from the main checkout")
   })
 
   test("green CI at the head stands in for check-types, but not for a file packages/scripts imports from outside it (#166)", async () => {

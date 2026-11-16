@@ -9,6 +9,7 @@ import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages
 
 import { livePair } from "../../../../api/hono/src/lib/dev/live-dashboard"
 import { accountsIo, runAccounts } from "./accounts"
+import { refreshBriefs, type Send } from "./brief-refresh"
 import { type Docker, ensureDatabase } from "./database"
 import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
@@ -16,6 +17,7 @@ import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
 import {
   addCommand,
+  aliasFailure,
   extraWordRefusal,
   HELP,
   leftLines,
@@ -33,7 +35,7 @@ import {
   wantsHelp,
 } from "./plan"
 import {
-  apiUp,
+  apiRead,
   dashboardBeat,
   cutDashboardCheckout,
   dashboardCheckout,
@@ -69,18 +71,23 @@ const briefExists = (brief: string): boolean => existsSync(join(HOME_DATA, brief
 
 // The managers a playground verb starts: the named kinds, and the optimizer, whose name is its kind.
 type ManagerVerb = NamedKind | "optimizer"
+const nameOf = (kind: ManagerVerb) => (kind === "optimizer" ? kind : getSessionNames().names[kind])
+// A held brief diff reaches its manager through the ops outbox's relay, since a script cannot SendMessage (ADR 0010); job.ts loads only when a diff is held, as its imports reach the ops jobs' whole tree.
+const sendBrief: Send = async (to, text) =>
+  (await import("../ops-job/job")).sendAs("brief")(to, text)
 
 // playground dispatcher, planner, builder, ops or optimizer, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
 const manager = async (
   kind: ManagerVerb,
   options: { brief?: string; harness?: "codex" } = {},
 ): Promise<{ code: number; message: string }> => {
-  const name = kind === "optimizer" ? kind : getSessionNames().names[kind]
+  const name = nameOf(kind)
   const result = await startDispatcher({
     ...options,
     data: HOME_DATA,
     live: liveSessions((live) => live === name).map((d) => d.name),
     name,
+    send: sendBrief,
     spawn: SPAWN,
     template: join(REPO, "scripts", "briefs", `${kind}.md`),
   })
@@ -237,17 +244,25 @@ const dashboard = async (): Promise<number> => {
       const started = await manager("dispatcher")
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
-      const ready = urls ?? dashboardUrls(checkout)
       const started = Date.now()
       const state = { shownAt: started, startedAt: started }
       for (;;) {
-        const api = await apiUp(ready)
+        // read afresh each poll, as the supervisor's wait_dashboard does: the stack's API may start portless's 1355 proxy, with its own scheme, after the first read
+        const health = await apiRead(dashboardUrls(checkout))
         const now = Date.now()
-        const failure = startFailure(
-          await linesSince(logs.results, from.results),
-          await linesSince(logs.log, from.log),
+        const results = await linesSince(logs.results, from.results)
+        const failure = startFailure(results, await linesSince(logs.log, from.log))
+        const outcome = waitOutcome(
+          {
+            alias: aliasFailure(results),
+            api: health.up,
+            beat: dashboardBeat(now),
+            failure,
+            now,
+            redirect: health.redirect,
+          },
+          state,
         )
-        const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
             failed.push(`The Dashboard didn't come up: ${outcome.done}`)
@@ -263,7 +278,8 @@ const dashboard = async (): Promise<number> => {
         await pause(2000)
       }
     } else {
-      const ready = urls ?? dashboardUrls(checkout)
+      // read again for the same reason as the wait's polls: the URLs read at the run's start can name an idle ~/.portless's
+      const ready = dashboardUrls(checkout)
       if (!ready) {
         failed.push("The Dashboard didn't open: portless gives no URL for it")
         return close()
@@ -324,7 +340,17 @@ const roll = async (): Promise<number> => {
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
 const update = (to?: string): Promise<number> =>
-  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"))
+  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"), (old) =>
+    refreshBriefs({
+      data: HOME_DATA,
+      live: (name) => liveSessions((live) => live === name).length > 0,
+      log: console.log,
+      managers: MANAGERS.map((kind) => ({ kind, name: nameOf(kind) })),
+      old,
+      repo: REPO,
+      send: sendBrief,
+    }),
+  )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
 const uninstallAll = async (purge: boolean): Promise<number> => {

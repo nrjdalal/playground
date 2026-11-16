@@ -56,7 +56,7 @@ describe("bare dispatcher", () => {
     const repo = join(root, "repo")
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
-    for (const file of ["portless-ca.ts", "swap-bundles.ts"])
+    for (const file of ["portless-ca.ts", "swap-bundles.ts", "write-atomic.ts"])
       cpSync(join(dirname(CLI), "..", file), join(src, file))
     for (const file of ["live-dashboard.ts", "proxy.ts"])
       cpSync(
@@ -163,6 +163,29 @@ describe("bare dispatcher", () => {
     expect(err).toContain(`playground: ${refusal}\n`)
     expect(err).not.toContain("Traceback")
     expect(out).toEndWith(`Left for you:\n  - The dispatcher didn't start: ${refusal}\n`)
+  }, 15_000)
+
+  // On a first start the run's first read names an idle ~/.portless's URL, and the stack's API starts the proxy that serves later, so the open step reads the URLs again after the wait (#2299)
+  test("opens the Dashboard at the URL portless names after the wait, not the one it named at the run's start", async () => {
+    const server = Bun.serve({ fetch: () => new Response("ok"), hostname: "127.0.0.1", port: 0 })
+    const { port } = server
+    const count = join(mkdtempSync(join(realpathSync(dir), "gets-")), "count")
+    const { child } = await dispatcher(
+      "exit 0",
+      {
+        bunx: `n=$(($(cat '${count}' 2>/dev/null || echo 0) + 1)); echo $n > '${count}'; [ $n -le 2 ] && echo http://127.0.0.1:1 || echo http://127.0.0.1:${port}`,
+        docker: "exit 1",
+        open: "exit 0",
+      },
+      { "scripts/briefs/dispatcher.md": "brief\n", "scripts/spawn.sh": "exit 1\n" },
+    )
+    const deadline = setTimeout(() => child.kill(), 10_000)
+    await child.exited
+    clearTimeout(deadline)
+    server.stop(true)
+    const out = await new Response(child.stdout).text()
+    expect(out).toContain("The Dashboard answered after")
+    expect(out).toContain(`Dashboard: http://127.0.0.1:${port}/dashboard\n`)
   }, 15_000)
 
   // The servers Playground started had no stop of the user's own, so a pair that restored another herdr setup's layout stayed up

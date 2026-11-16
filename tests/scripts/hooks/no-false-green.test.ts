@@ -114,6 +114,11 @@ describe("a test run piped with no pipefail is refused, naming the fix", () => {
       $label: "a test run held in a variable set by declare, piped (PG-2127)",
       command: `declare C="bun run test"; $C | tail`,
     },
+    { $label: "in a paren after a wrapper (PG-2292)", command: "nice (bun test x | tail)" },
+    {
+      $label: "in a paren after a wrapper, its output joined (PG-2292)",
+      command: "command (bun test x 2>&1 | tail -5)",
+    },
   ])("$label", async ({ command }) => {
     const reason = await bash(command)
     expect(reason).toContain("no-false-green hook refuses a test run piped into")

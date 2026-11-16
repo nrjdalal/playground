@@ -596,7 +596,7 @@ describe("the slot-stuck alert", () => {
     expect(alert.line).not.toContain("held by")
   })
 
-  // issue 1842: under the battery's or focus's hold can-take reads closed, so the alert names the hold the queue waits on, not a stall, and sends nothing
+  // issue 1842: under focus's hold can-take reads closed, so the alert names the hold the queue waits on, not a stall, and sends nothing
   const HOLD = `
 import importlib.util, json, os, sys
 spec = importlib.util.spec_from_file_location("run", sys.argv[1])
@@ -681,20 +681,6 @@ print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "s
     expect(alerts[0].name).toBe("worker-m")
     expect(sent).toHaveLength(1)
     expect(sent[0][1]).toContain("could take it and takes nothing")
-  })
-
-  test("names the battery's hold and sends no stall line", async () => {
-    const { alerts, sent } = await held(
-      "run-slot.battery",
-      "ops 2026-11-11T12:00:00Z 2099-01-01T00:00:00Z held for the row\n",
-    )
-    expect(sent).toEqual([])
-    expect(alerts).toHaveLength(1)
-    expect(alerts[0].case).toBe("hold")
-    expect(alerts[0].name).toBe("worker-m")
-    expect(alerts[0].line).toContain("held by the battery's red mark (run-slot.battery)")
-    expect(alerts[0].line).not.toContain("fit no open slot")
-    expect(alerts[0].line).not.toContain("could take")
   })
 
   test("names the focus hold with its holder and sends no stall line", async () => {

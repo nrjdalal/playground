@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
+and the standing rules (ask, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -132,7 +132,7 @@ A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
-What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
+What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as a failed ship.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
@@ -202,6 +202,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
+  A probe alone can start with Remote Control on (`--remote-control <name>`), or run on another machine over ssh (`--ssh <user@host> --key <file>`) from its pane here; the restore below leaves such a probe down.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
   the first dispatcher first and past the busy-machine check, then the other managers, which pass that check as `SPAWN.md`'s load gate says, then the rest,
   on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.

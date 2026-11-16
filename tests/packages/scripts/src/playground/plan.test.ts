@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   addCommand,
+  aliasFailure,
   extraWordRefusal,
   HELP,
   planStart,
@@ -714,6 +715,48 @@ describe("waitOutcome", () => {
     expect(read([stale, `${T} DOWN dev: x`, stale])).toMatchObject({ ok: false })
     expect(read([stale, `${T} DOWN dev: x`, `${T} RESTART abc1234 PASS v`], true)).toMatchObject({
       ok: true,
+    })
+  })
+
+  // the supervisor's ALIAS FAIL from a first start's first minute once cost the full 15 minutes with no reason given (#2301)
+  test("ends at the next poll past the grace on an ALIAS FAIL no PASS has followed, naming the missing route", () => {
+    const T = "2026-11-16T06:42:16Z"
+    const fail = `${T} ALIAS FAIL no route for dashboard.playground.localhost in /home/me/.portless/fallback/routes.json`
+    const read = (results: string[], now = 62_000) =>
+      waitOutcome(
+        { alias: aliasFailure(results), api: false, beat: RUNNING, failure: null, now },
+        { shownAt: now, startedAt: 0 },
+      )
+    expect(read([fail])).toEqual({
+      done: "portless does not route the Dashboard's addresses to its stack: no route for dashboard.playground.localhost in /home/me/.portless/fallback/routes.json (waited 1m 2s); see ops/dashboard/supervisor.log, then run playground again",
+      ok: false,
+    })
+    expect(read([fail], 29_000)).not.toHaveProperty("done")
+    expect(
+      read([
+        fail,
+        `${T} ALIAS PASS playground.localhost and api.playground.localhost hold the live stack's ports 1 and 2`,
+      ]),
+    ).toEqual({ progress: null })
+    expect(read([`${T} START abc1234 PASS version=1`])).toEqual({ progress: null })
+  })
+
+  // on the 1355 proxy with TLS an http address answers 302 to https, which read as down for 15 minutes (#2301)
+  test("ends past the grace on a health read that answers a redirect, naming the URL asked and where it was sent", () => {
+    const redirect = {
+      from: "http://dashboard.api.playground.localhost:1355/api/health",
+      status: 302,
+      to: "https://dashboard.api.playground.localhost:1355/api/health",
+    }
+    const read = (now: number) =>
+      waitOutcome(
+        { api: false, beat: RUNNING, failure: null, now, redirect },
+        { shownAt: now, startedAt: 0 },
+      )
+    expect(read(29_000)).not.toHaveProperty("done")
+    expect(read(30_000)).toEqual({
+      done: "the Dashboard's API answered 302 at http://dashboard.api.playground.localhost:1355/api/health, a redirect to https://dashboard.api.playground.localhost:1355/api/health, so playground asks it at an address portless does not serve (waited 30s); see ops/dashboard/supervisor.log, then run playground again",
+      ok: false,
     })
   })
 

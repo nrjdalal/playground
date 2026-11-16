@@ -1,6 +1,6 @@
 # health-beat
 
-`bun run health-beat` prints the owner's health beat as text: a header at the time in `clock.ownerZone`, then one line each for the main checkout, the Dashboard, the Mac's load and CPU idle share, its memory, the sessions of the last 2 hours by state, the ops jobs by heartbeat, and the battery.
+`bun run health-beat` prints the owner's health beat as text: a header at the time in `clock.ownerZone`, then one line each for the main checkout, the Dashboard, the Mac's load and CPU idle share, its memory, the sessions of the last 2 hours by state, and the ops jobs by heartbeat.
 It posts nothing: the session that runs the beat posts the text, and keeps its channel and token outside the repo.
 
 The two lines under the header say what this install runs, each naming the place it describes and the version it carries, as `running.ts` reads it:
