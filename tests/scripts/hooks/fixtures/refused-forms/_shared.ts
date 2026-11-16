@@ -9,6 +9,7 @@ export type Guard =
   | "no-extensions-write"
   | "no-glm-heavy-path"
   | "no-headless-login"
+  | "no-hidden-program"
   | "no-kill-by-name"
   | "no-linear-ticket"
   | "no-main-checkout"

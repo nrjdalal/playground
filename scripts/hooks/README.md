@@ -52,12 +52,10 @@ The reader lexes the commands inside a process substitution (`procSub`), `<(…)
 and `<(…)` or `=(…)` as a redirect's file, so every hook judges them as it judges any other command.
 A paren where a wrapper's program word goes, past any word that may expand to no word, also reads as a zsh glob word, as zsh reads one after a program word, so a group-spelled program (`command (r|x)m`, `nice $E (r|x)m`, `command (r|x y)m`) is globbed in the shell's folder like any program word (`globOpens`), its group's span skipping a quoted or escaped paren as zsh's does (`nice (p|")")kill`).
 The lexer keeps the subshell reading in the command list exactly as before and hangs the glob reading's command on the wrapper's own (`globTwin`, `Command.glob`), which `run()` judges through `examine` at the wrapper's turn, so the glob reading only adds refusals and a hook that reads the command list itself reads the line as before.
-The paren reads as a subshell alone after a command made only of unquoted `time`, `nocorrect` and `repeat` leads, each `repeat` with its count (`time (…)`, `time repeat 1 (…)`), as zsh runs one there.
+The paren reads as a subshell alone after a command made only of unquoted `time`, `nocorrect` and `repeat` leads, each `repeat` with its count (`time (…)`, `time repeat 1 (…)`), as zsh runs one there; a `time` right after a `time` is the external program, which globs the paren (`time time (r|x)m`).
 It reads as a subshell alone in a `case`, `for`, `foreach`, `function` or `select` header, around a literal `/`, which zsh refuses as a bad pattern, around a group whose every alternative holds an unquoted blank or command separator, or is empty with no text glued after the group, which names no program (`nice (ls -la)`, `nice (pkill;x)`, `nice (a || b)`), and in any other argument;
 an empty `()` defines a function.
-Four group spellings stay as known limits, tracked as follow-up issues: a `/` inside an expansion in the group, which zsh drops with the expansion and still globs;
-a group holding a blank nested in or next to another group, which `blankGroups` does not spell; a group after `time time`, which zsh globs, its second `time` the external program, while the reader keeps a subshell and misses the spelled program;
-and a group alternative holding a backslash-escaped character (`(r|\))m`, `(r|\()m`, `(r|"\"")m`), which the first look (`spelledText`, below) reads with its backslash dropped, so a guard whose first look finds no name there passes over it.
+A group spelling the reader misses, a `/` inside an expansion in the group, a group holding a blank nested in or next to another group, or a group alternative holding a backslash-escaped character (`(r|\))m`), is a program word that is not one plain name, which [no-hidden-program](#no-hidden-program) refuses whatever another guard reads of it.
 A command whose program word is written as an expansion no split or array reading resolves, or whose `eval` or `-c` script keeps a part no reading builds, is marked `unread` on its parsed readings (`unreadCommand` in `scripts/hooks/shell.ts`), so each guard applies its own rule for a command it cannot read:
 [no-kill-by-name](#no-kill-by-name) refuses one, and [no-stash](#no-stash) and [no-raw-delete](#no-raw-delete) refuse one whose program word is an array run whole or a glob (`unreadRun`), such as an array an append changed (`A=(git stash); A+=(pop); "${A[@]}"`) or one a shell's `-c` script sets and runs, in a call that names their program.
 A guard counts a call as naming a program when its text holds the name, in an ANSI-C string too (`decodedText`: `$'\x67it'`), with its brace lists and zsh groups spelled out as the words they make (`spelledText`: `pk{i,x}ll`, `pk(i|x)ll`, up to `braceWords`' cap, an alternative holding `#`, `^` or `~` spelled as itself and as any text, `pk?(i|^x)l` as `pk?*l`,
@@ -329,7 +327,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs the first two on the GitHub tools.
+  no-hidden-program, no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -894,6 +892,23 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Its reason gives the shape, with the account read from the session's resume record (`~/.playground/resume/<name>.sh`, its `# account:` line, else its `--account`), and the Keychain service from the `usage.keychainService` setting, `playground-claude-oauth` while the policy sets none.
   A command that only names `claude -p` (in `echo`, `grep` or a heredoc's body) runs, and so do `claude` without `-p`, `--resume` and `--version`.
   It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too.
+
+## no-hidden-program
+
+- A factory session's command runs only when each program word in it is one plain name, so every guard that reads a program by its name reads the name that runs: `scripts/hooks/no-hidden-program.ts`, run on Bash by [guards](#guards) and acting for a factory session alone, refuses any other, by `plainProgram` in `scripts/hooks/shell.ts`.
+  Seven guard pull requests in a row each taught the shared reader one more spelling of a program name (a brace list, a zsh group, a brace sequence, a name glued to a paren, a process substitution, a group after a wrapper), and each review found the next one, so the rule fails closed on the name itself.
+- It reads the program word of each command the shell runs, past wrappers, reserved words and `VAR=x` assignments: the line's own, and each script the shared walk follows (a shell's `-c`, `eval`, `source`, a script fed to a shell, the glob reading of a wrapper's group).
+  It never reads an argument, nor the text another guard reads out of one as a possible line (a commit message, `agent-browser eval`'s JavaScript).
+  It judges the reading that runs alone, so a wrapper option's value (`nice -n $N ls`, `sudo -u $U ls`) passes, while `command -v`'s operand is read as a program word like any other, a plain name passing.
+- A plain name is one name once its quotes and backslashes are removed: no unquoted `*`, `?`, closed `[…]`, paren group, brace list or sequence, or extendedglob operator (`#`, `^`, a `~` past the start), no leading `=` (zsh's path lookup, `=rm`), no ANSI-C escape (`$'\x67it'`),
+  and no expansion but `$HOME` or `$PLAYGROUND_REPO` before a slash (`$NAME`, `${NAME}`, `${NAME:?…}`, or `${NAME:-…}` with a default holding no `$` or backquote).
+  A call whose text holds a numeric range (`py<-> a`, `2<1-5>`), which zsh globs into a word with no option set, is refused whole, quoted or not, since the shared reader keeps reading its `<` as a redirect, as every other hook does.
+  Those two are read from the session's starting env, so one the same line sets or changes is refused (`HOME=/tmp/x; $HOME/bin/rm`, `HOME+=/x`, `${HOME:=/tmp/x}`).
+  `[`, `[[` and a case statement's patterns (`casePatterns`) pass.
+- A program held in a variable the line sets is refused too, and the refusal names the literal to write in its place (`H=~/x; $H list`: write `~/x` in place of `$H`).
+  A `command -v $t` refusal names `type $t` as the way out, and a numeric-range refusal names passing the text in a file (`git commit -F <file>`), each measured as passing.
+  A call it cannot parse is refused.
+  Its rows are `tests/scripts/hooks/fixtures/refused-forms/2375.ts`, and its tests are `bun run test:file tests/scripts/hooks/no-hidden-program.test.ts tests/scripts/hooks/refused-forms.test.ts`.
 
 ## no-kill-by-name
 

@@ -6512,6 +6512,30 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(all, scoped = false) {
+  const out = new Set;
+  for (let k = 0;k < all.length; k++) {
+    if (!caseOpener(all[k]) && all[k].follows !== ";;")
+      continue;
+    const commands = scoped ? all.slice(k).filter((c) => c.scope === all[k].scope) : all.slice(k);
+    let end = 0;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(0, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 function optionValue(word, { flags, values }) {
   if (word.startsWith("--")) {
     const eq = word.indexOf("=");
@@ -7047,6 +7071,8 @@ function lex(src, known = {}) {
     for (const c of lx.commands)
       c.cdRedefined = true;
   braced(lx.commands);
+  for (const c of casePatterns(lx.commands, true))
+    c.casePattern = true;
   return { commands: lx.commands, scopes: lx.scopes };
 }
 var BRACED = new Set([
@@ -7431,7 +7457,9 @@ function plainAlternative(group, glued) {
 function subshellPrefix(lead) {
   let at = 0;
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time")
+      break;
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect")
       at++;
     else if (lead[at].value === "repeat" && at + 1 < lead.length)
       at += 2;
@@ -8375,6 +8403,7 @@ function loopClose(commands, k) {
     }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
+var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
   tick();
   orElse(cmd, env);
@@ -10393,29 +10422,6 @@ function lineTextsOf(commands) {
     ...cmd.words.flatMap((word) => word.procs ? lineTextsOf(word.procs) : []),
     ...cmd.inner ? lineTextsOf(cmd.inner()) : []
   ]);
-}
-function caseOpener(cmd) {
-  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
-  const before = cmd.words.slice(0, Math.max(at, 0));
-  const word = cmd.words[at + 2];
-  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
-}
-function casePatterns(commands) {
-  const out = new Set;
-  for (let k = 0;k < commands.length; k++) {
-    if (!caseOpener(commands[k]) && commands[k].follows !== ";;")
-      continue;
-    let end = k;
-    while (commands[end + 1]?.follows === "|")
-      end++;
-    const body = commands[end + 1];
-    const run = commands.slice(k, end + 1);
-    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
-      continue;
-    for (const c of run)
-      out.add(c);
-  }
-  return out;
 }
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
