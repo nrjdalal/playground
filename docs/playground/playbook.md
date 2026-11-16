@@ -132,6 +132,7 @@ For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions a
 A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for it while a priority file stands, its roster row marked so it counts against no later start.
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
+While a window stands, run-slot's queue runs that session's heavy work first, after focus and a lead's hand-written pick.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as a failed ship.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
