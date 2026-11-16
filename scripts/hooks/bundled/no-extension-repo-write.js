@@ -7568,7 +7568,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -9609,11 +9609,6 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
-  "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
-    cwd: "{dashboard}",
-    description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
-    schedule: { always: true }
-  }),
   "ops-restore": {
     ...launchd("ops-restore", {
       description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
@@ -10248,6 +10243,449 @@ function readOnly(raw) {
     return false;
   }
 }
+
+// scripts/hooks/steady.ts
+var unquoted = (text) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "");
+var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
+var EVALUATES = [
+  /\(\([^)]*[A-Za-z_]/,
+  /\$\[[^\]]*[A-Za-z_]/,
+  /\[\[[\s\S]*\s-(?:eq|ge|gt|le|lt|ne)\s/,
+  /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
+  /@P\}/
+];
+var SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/;
+var INDIRECTS = /\$\{!(?!\}|[A-Za-z_]\w*(?:[*@]|\[[*@]\])\})/;
+var QUALIFIER = /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/;
+function singleQuotesOut(command) {
+  if (command.includes("$'"))
+    return command;
+  let out = "";
+  let double = false;
+  const docs = [];
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (c === "\\") {
+      out += command.slice(i, i + 2);
+      i++;
+    } else if (double) {
+      if (c === '"')
+        double = false;
+      out += c;
+    } else if (c === '"') {
+      double = true;
+      out += c;
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf(`
+`, i);
+      const stop = end === -1 ? command.length : end;
+      out += command.slice(i, stop);
+      i = stop - 1;
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1)
+        return command;
+      out += "x";
+      i = end;
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<";
+      i += 2;
+    } else if (command.startsWith("<<", i)) {
+      const doc = command.slice(i).match(/^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/);
+      if (!doc)
+        return command;
+      docs.push({ delim: doc[2] ?? doc[3] ?? doc[4], strip: doc[1] === "-" });
+      out += doc[0];
+      i += doc[0].length - 1;
+    } else if (c === `
+` && docs.length) {
+      out += c;
+      let at = i + 1;
+      for (const { delim, strip } of docs) {
+        for (;; ) {
+          if (at > command.length)
+            return command;
+          const end = command.indexOf(`
+`, at);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(at, stop);
+          out += command.slice(at, Math.min(stop + 1, command.length));
+          at = stop + 1;
+          if ((strip ? line.replace(/^\t+/, "") : line) === delim)
+            break;
+          if (end === -1)
+            return command;
+        }
+      }
+      docs.length = 0;
+      i = at - 1;
+    } else
+      out += c;
+  }
+  return double || docs.length ? command : out;
+}
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
+var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
+var KEEPS_PROGRAM = /^(?:-|builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/;
+var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
+function quotedBodiesOut(command) {
+  let out = "";
+  const docs = [];
+  let program = true;
+  let target = false;
+  let word = "";
+  const endWord = () => {
+    if (word && target)
+      target = false;
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word))
+      program = false;
+    word = "";
+  };
+  for (let i = 0;i < command.length; ) {
+    const rest = command.slice(i);
+    let token;
+    let doc = null;
+    if (rest[0] === `
+`) {
+      endWord();
+      out += `
+`;
+      i++;
+      for (const { delim, strip } of docs)
+        for (;; ) {
+          if (i >= command.length)
+            return command;
+          const end = command.indexOf(`
+`, i);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(i, stop);
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim;
+          out += (last ? line : "") + (end === -1 ? "" : `
+`);
+          i = stop + 1;
+          if (last)
+            break;
+        }
+      docs.length = 0;
+      program = true;
+      continue;
+    } else if (token = rest.match(/^[ \t]+/)?.[0])
+      endWord();
+    else if (token = rest.match(/^(?:&&|\|\||[;|])/)?.[0]) {
+      endWord();
+      program = true;
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC);
+      if (!doc)
+        return command;
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      token = doc[0];
+      docs.push({
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        strip: doc[1] === "-"
+      });
+    } else if (token = rest.match(REDIRECT2)?.[0]) {
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      target = !/&(?:\d+|-)$/.test(token);
+    } else if (token = rest.match(WORD)?.[0]) {
+      word += token;
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word))
+        return command;
+      if (PROMPT_PARAM.test(word))
+        return command;
+    }
+    if (!token || docs.length && token.includes(`
+`))
+      return command;
+    out += token;
+    i += token.length;
+  }
+  return docs.length ? command : out;
+}
+function namings2(command) {
+  const counts = new Map;
+  const plain = new Set;
+  const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  const text = quotedBodiesOut(command);
+  const singleQuotedOut = singleQuotesOut(text);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(singleQuotedOut) || SUBSCRIPT.test(unquoted(singleQuotedOut)) || QUALIFIER.test(singleQuotedOut) || INDIRECTS.test(text);
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
+    if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
+      blind = true;
+  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
+    const [whole, expanded, key] = m;
+    const next = command.slice(m.index + whole.length);
+    if (expanded && READS_ONLY.test(next))
+      continue;
+    const assigns = next[0] === "=" ? "=" : undefined;
+    const at = m.index + (expanded?.length ?? 0);
+    if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
+      for (let k = 0;k < key.length - 1; k++)
+        if (key[k] === "a" || key[k] === "v")
+          add(key.slice(k + 1));
+      continue;
+    }
+    add(key);
+    if (!expanded && assigns === "=" && (at === 0 || /[\s;&|(]/.test(command[at - 1])))
+      plain.add(key);
+  }
+  const from = [];
+  let joined = "";
+  for (let i = 0;i < command.length; i++)
+    if (!'\\\'"'.includes(command[i])) {
+      from.push(i);
+      joined += command[i];
+    }
+  for (const m of joined.matchAll(/(?<![\w$])[A-Za-z_]\w*/g)) {
+    const end = m.index + m[0].length - 1;
+    if (from[end] - from[m.index] !== end - m.index)
+      add(m[0]);
+  }
+  return { blind, counts, plain };
+}
+var SHELL_SETS = new Set([
+  "ARGC",
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "COLUMNS",
+  "COPROC",
+  "CPUTYPE",
+  "DIRSTACK",
+  "EGID",
+  "EPOCHREALTIME",
+  "EPOCHSECONDS",
+  "ERRNO",
+  "EUID",
+  "FUNCNAME",
+  "FUNCNEST",
+  "GID",
+  "GROUPS",
+  "HISTCMD",
+  "HOST",
+  "HOSTNAME",
+  "HOSTTYPE",
+  "LINENO",
+  "LINES",
+  "LOGNAME",
+  "MACHTYPE",
+  "MAPFILE",
+  "MATCH",
+  "MBEGIN",
+  "MEND",
+  "OLDPWD",
+  "OPTARG",
+  "OPTIND",
+  "OSTYPE",
+  "PIPESTATUS",
+  "PPID",
+  "PWD",
+  "RANDOM",
+  "REPLY",
+  "SECONDS",
+  "SHELLOPTS",
+  "SHLVL",
+  "SRANDOM",
+  "TRY_BLOCK_ERROR",
+  "TRY_BLOCK_INTERRUPT",
+  "TTY",
+  "TTYIDLE",
+  "UID",
+  "USERNAME",
+  "VENDOR",
+  "ZCURSES_COLORS",
+  "ZCURSES_COLOR_PAIRS",
+  "ZPCRE_OP",
+  "_",
+  "aliases",
+  "argv",
+  "builtins",
+  "commands",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
+  "mapfile",
+  "match",
+  "mbegin",
+  "mend",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "pipestatus",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "status",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "widgets",
+  "zcurses_attrs",
+  "zcurses_colors",
+  "zcurses_keycodes",
+  "zcurses_windows",
+  "zgdbm_tied"
+]);
+var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZFTP_|ZSH_|zsh_)/;
+var TIED = new Set([
+  "CDPATH",
+  "FIGNORE",
+  "FPATH",
+  "HISTCHARS",
+  "MAILPATH",
+  "MANPATH",
+  "MODULE_PATH",
+  "PATH",
+  "PROMPT",
+  "PROMPT2",
+  "PROMPT3",
+  "PROMPT4",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PSVAR",
+  "WATCH",
+  "cdpath",
+  "fignore",
+  "fpath",
+  "histchars",
+  "mailpath",
+  "manpath",
+  "module_path",
+  "path",
+  "prompt",
+  "psvar",
+  "watch"
+]);
+var NUMERIC = new Set(["float", "integer"]);
+var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
+var TESTS = new Set(["[", "[[", "test"]);
+var PLAIN_NAME = /^[A-Za-z_]\w*$/;
+var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
+var BINARY = new Set([
+  "!=",
+  "-a",
+  "-ef",
+  "-eq",
+  "-ge",
+  "-gt",
+  "-le",
+  "-lt",
+  "-ne",
+  "-nt",
+  "-o",
+  "-ot",
+  "<",
+  "=",
+  "==",
+  "=~",
+  ">"
+]);
+var testsAName = (args, expands) => args.some((w, k) => {
+  const next = args[k + 1];
+  if (w.value === "-v")
+    return next !== undefined && !PLAIN_NAME.test(next.source ?? "");
+  if (!expands)
+    return false;
+  if (EXPANDS.test(w.source ?? "$"))
+    return true;
+  if (!marked(w.value))
+    return false;
+  return !w.quoted || next !== undefined && next.value !== "]" && !BINARY.has(next.value);
+});
+var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
+var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
+var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
+function setterCounts(named, commands, parses) {
+  if (named.blind || named.counts.has("IFS"))
+    return;
+  const counts = new Map(named.counts);
+  for (const [at, cmd] of commands.entries()) {
+    const { name } = parses[at];
+    if (RUNS_TEXT.has(name) || marked(name))
+      return;
+    const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
+    if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
+      return;
+    if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
+      return;
+    if (name === "print" && flagged(/P/))
+      return;
+    if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
+      return;
+    const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
+    if (!NAME_SETTERS.has(name) && loop === -1)
+      continue;
+    if (bareExport(parses[at]))
+      continue;
+    const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
+    for (const word of names) {
+      if (!word)
+        continue;
+      if (marked(word.value.split("=")[0]))
+        return;
+      if (word.quoted && word.value.includes("["))
+        return;
+      for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+function startingVariables(command, environment, known) {
+  const commands = lex(command, known).commands;
+  const counts = setterCounts(namings2(command), commands, commands.map((cmd) => parse3(cmd)));
+  const starting = {};
+  if (!counts)
+    return starting;
+  for (const [key, value] of Object.entries(environment)) {
+    if (!value || key in known || !/^[A-Z_][A-Z0-9_]*$/.test(key) || counts.has(key))
+      continue;
+    if (SHELL_SETS.has(key) || SHELL_SETS_PREFIX.test(key) || TIED.has(key))
+      continue;
+    if (key === "IFS" || key === "ZDOTDIR" || key.startsWith("CLAUDE"))
+      continue;
+    starting[key] = value;
+  }
+  return starting;
+}
+var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
 
 // scripts/hooks/no-playground-leak.ts
 var withPlace = (text, name, fix) => ({
@@ -11477,10 +11915,11 @@ async function inspect(raw, environment) {
     if (typeof command !== "string" || !candidate(command))
       return;
     const directory = typeof cwd === "string" ? cwd : undefined;
+    const own = knownVariables(command, environment, directory);
     const env = {
       cwd: directory,
       files: new Map,
-      known: knownVariables(command, environment, directory),
+      known: { ...own, ...startingVariables(command, environment, own) },
       process: environment,
       vars: new Map
     };

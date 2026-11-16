@@ -83,6 +83,7 @@ import {
   quotedBodiesOut,
   singleQuotesOut,
   type Steady,
+  startingVariables,
   steadyNames,
   unquoted,
 } from "./steady"
@@ -2080,7 +2081,7 @@ const texts = (word: Word): Word[] => {
   return out
 }
 
-// unknown: the line names HOME, TMPDIR or PWD other than by expanding them, so it is read a second time with those unknown, since the shell's value may not be the environment's
+// unknown: the line names a variable it reads (HOME, TMPDIR, PWD or one from the starting environment) other than by expanding it, so it is read a second time with those unknown, since the shell's value may not be the environment's
 async function inspect(
   raw: string,
   environment: Environment,
@@ -3048,7 +3049,8 @@ async function inspect(
     )
   }
   const named = namings(command)
-  const known = knownVariables(command, environment, directory)
+  const own = knownVariables(command, environment, directory)
+  const known = { ...own, ...startingVariables(command, environment, own) }
   const steered = Object.keys(known).filter((key) => named.counts.has(key))
   if (unknown) for (const key of steered) delete known[key]
   const lexed = lex(command, known)

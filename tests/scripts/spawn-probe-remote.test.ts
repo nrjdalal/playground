@@ -2,9 +2,11 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { peerArgv } from "../../api/hono/src/lib/system/peer"
 import { OLD } from "../session-names"
 import {
   bin,
+  capacityLog,
   execLine,
   launchOf,
   lw,
@@ -20,7 +22,7 @@ import {
 // Every case runs spawn.sh, which starts fake processes and waits on them.
 setDefaultTimeout(40_000)
 
-// A fake ssh ahead of spawn-fake's bin: it runs spawn.sh's check of the other machine in bash with a scratch PATH of that machine's own (remote-bin) and logs it apart, failing it under FAKE_SSH_FAIL; it logs every other call's words, keeps the copy's tar stream, and runs the -tt call's remote command in bash, as the other machine's shell would.
+// A fake ssh ahead of spawn-fake's bin: it runs spawn.sh's check of the other machine in bash with a scratch PATH of that machine's own (remote-bin) and logs it apart, failing it under FAKE_SSH_FAIL; it answers the gate's peer read with FAKE_PEER_LOAD, FAKE_PEER_CORES and FAKE_PEER_AVAIL (kB of 100000), logging it apart and failing it under FAKE_PEER_FAIL; it logs every other call's words, keeps the copy's tar stream, and runs the -tt call's remote command in bash, as the other machine's shell would.
 const sshBin = join(scratch, "ssh-bin")
 mkdirSync(sshBin, { recursive: true })
 writeFileSync(
@@ -30,6 +32,13 @@ case " $* " in *hasCompletedOnboarding*)
   printf '%s\\037' "$@" >> "$HOME/ssh.checks"; echo >> "$HOME/ssh.checks"
   [ -z "$FAKE_SSH_FAIL" ] || { echo "ssh: connect to host spark-bravo port 22: Connection refused" >&2; exit 255; }
   exec env -i HOME="$HOME" PATH="$HOME/remote-bin" /bin/bash -c "\${!#}" ;;
+*" /proc/loadavg "*)
+  printf '%s\\037' "$@" >> "$HOME/ssh.peer"; echo >> "$HOME/ssh.peer"
+  [ -z "$FAKE_PEER_FAIL" ] || { echo "ssh: connect to host spark-bravo port 22: Connection timed out" >&2; exit 255; }
+  echo "\${FAKE_PEER_LOAD:-0.50 0.60} 0.70 1/100 1234"
+  printf 'MemTotal: 100000 kB\\nMemAvailable: %s kB\\n' "\${FAKE_PEER_AVAIL:-80000}"
+  for ((i = 0; i < \${FAKE_PEER_CORES:-20}; i++)); do echo "cpu$i 1 2 3 4"; done
+  exit 0 ;;
 esac
 printf '%s\\037' "$@" >> "$HOME/ssh.calls"; echo >> "$HOME/ssh.calls"
 case " $* " in *" -tt "*) exec bash -c "\${!#}" ;; *) cat > "$HOME/ssh.stdin" ;; esac
@@ -99,6 +108,44 @@ describe("--remote-control and --ssh are a probe's start alone", () => {
   })
 })
 
+describe("--remote-control warns where Remote Control forms no link, a start on a token", () => {
+  const warns = "--remote-control rc-a forms no Remote Control link, since"
+  test("an --account start", async () => {
+    const r = await spawn(
+      [...probe, "--remote-control", "rc-a", "--account", "spare@example.com"],
+      [],
+    )
+    expect(r.code).toBe(0)
+    expect(r.err).toContain(`${warns} --account spare@example.com starts it on a token`)
+  })
+
+  test("an --ssh start to a machine with no claude.ai sign-in, and none to one with it", async () => {
+    const rc = [...probe, ...ssh, "--remote-control", "rc-a"]
+    const bare = await spawn(rc, [], farPath, undefined, undefined, far())
+    expect(bare.code).toBe(0)
+    expect(bare.err).toContain(
+      `${warns} pride@spark-bravo holds no claude.ai sign-in (~/.claude/.credentials.json), so it runs on a token`,
+    )
+    const signed = await spawn(rc, [], farPath, undefined, undefined, (home) => {
+      far()(home)
+      mkdirSync(join(home, ".claude"), { recursive: true })
+      writeFileSync(join(home, ".claude", ".credentials.json"), "{}\n")
+    })
+    expect(signed.code).toBe(0)
+    expect(signed.err).not.toContain(warns)
+  })
+
+  test("a start on this machine's own login, and an --ssh start with no --remote-control, stay quiet", async () => {
+    const own = await spawn([...probe, "--remote-control", "rc-a"], [])
+    expect(own.code).toBe(0)
+    expect(launchOf(own)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN")
+    expect(own.err).not.toContain(warns)
+    const far_ = await spawn(probe.concat(ssh), [], farPath, undefined, undefined, far())
+    expect(far_.code).toBe(0)
+    expect(checks(far_.home)).not.toContain("credentials")
+  })
+})
+
 describe("--remote-control", () => {
   test("passes Claude Code's --remote-control <name> and keeps the probe's row", async () => {
     const r = await spawn([...probe, "--remote-control", "rc-a"], [])
@@ -153,18 +200,20 @@ describe("--ssh runs the probe's claude on another machine", () => {
       `tk="$(security find-generic-password -s playground-claude-oauth -a ${email} -w)"`,
     )
 
-    // The copy holds two names, each relative, so nothing lands outside the remote folder.
+    // The copy holds three names, each relative, so nothing lands outside the remote folder: the settings, the skills and the brief, which the prompt names there.
     const listed = Bun.spawnSync(["tar", "-tf", join(r.home, "ssh.stdin")]).stdout.toString()
     const entries = listed.split("\n").filter(Boolean)
     expect(entries.every((e) => !e.startsWith("/") && !e.split("/").includes(".."))).toBe(true)
     const tops = [...new Set(entries.map((e) => e.split("/")[0]))].sort()
-    expect(tops).toHaveLength(2)
+    expect(tops).toHaveLength(3)
     expect(tops.some((t) => /^factory-settings-sandbox-.*\.json$/.test(t ?? ""))).toBe(true)
+    expect(tops).toContain("b.md")
 
     // The remote shell ran claude with its settings and skills from that folder, the token in no word.
     const args = readFileSync(join(r.home, "claude.args"), "utf8")
     expect(args).toContain(`--settings ${remote}/factory-settings-sandbox-`)
     expect(args).toMatch(new RegExp(`--plugin-dir ${remote}/[0-9a-f]+ `))
+    expect(args).toContain(`Your brief is in ${remote}/b.md: read it in full`)
     expect(args).not.toContain(TOKEN)
     expect(readFileSync(join(r.home, "ssh.calls"), "utf8")).not.toContain(TOKEN)
     expect([r.out, r.err, ...(r.roster ?? [])].join("\n")).not.toContain(TOKEN)
@@ -236,6 +285,102 @@ describe("--ssh runs the probe's claude on another machine", () => {
     expect(r.err).toContain(says)
     expect(placing(r)).toEqual([])
     expect(existsSync(lw(r.home, "launch", "probe-far.sh"))).toBe(false)
+  })
+})
+
+describe("an --ssh probe's load and memory gates read its target, through the System view's peer read", () => {
+  const target = "pride@spark-bravo"
+  const peerCalls = (home: string) =>
+    readFileSync(join(home, "ssh.peer"), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.split("\x1f").slice(0, -1))
+  const recent = (n: number, readings: object) =>
+    Array.from({ length: n }, () =>
+      JSON.stringify({ at: new Date().toISOString(), readings, verdict: "pass" }),
+    ).join("\n") + "\n"
+
+  test("a free target passes while this machine is busy, its pass logged with the target's readings and host", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, FAKE_LOAD1: "40.00", FAKE_LOAD5: "40.00", CAPACITY_JSONL: recent(30, {}) },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(0)
+    expect(peerCalls(r.home)).toEqual([peerArgv(target, join(r.home, "key")).slice(1)])
+    const pass = capacityLog(r).at(-1)
+    expect(pass.verdict).toBe("pass")
+    expect(pass.readings).toMatchObject({
+      cores: 20,
+      free: 80,
+      host: target,
+      load5: 0.6,
+      starts: 0,
+    })
+  })
+
+  test("a busy target is refused while this machine is free, naming the target", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, FAKE_PEER_LOAD: "30.00 30.00" },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("the load gate holds it: max(load1, load5) is 30.00 and 0 started")
+    expect(r.err).toContain(`the 20 cores on ${target}`)
+    expect(placing(r)).toEqual([])
+  })
+
+  test("the starts logged for the target count against it, and this machine's own do not", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, CAPACITY_JSONL: recent(25, { host: target }) },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("max(load1, load5) is 0.60 and 25 started")
+    const here = await spawn(probe, [], { CAPACITY_JSONL: recent(25, { host: target }) })
+    expect(here.code).toBe(0)
+    expect(capacityLog(here).at(-1).readings).toMatchObject({ starts: 0 })
+    expect(capacityLog(here).at(-1).readings.host).toBeUndefined()
+  })
+
+  test("a target short of memory is refused by its free share", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, FAKE_PEER_AVAIL: "3000" },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(`the memory gate holds it: free is 3% (${target}'s /proc/meminfo)`)
+  })
+
+  test("a target whose read fails is refused with ssh's words", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, FAKE_PEER_FAIL: "1" },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      `the load gate holds it: it cannot read ${target}'s load and memory over ssh (ssh: connect to host spark-bravo port 22: Connection timed out)`,
+    )
+    expect(placing(r)).toEqual([])
   })
 })
 

@@ -25,6 +25,7 @@
   Healthy is `follower: running`, with `never read` and `with unread bytes` small and back at 0 once the sessions go quiet (a line still being written counts as unread until its newline lands).
   The log has one line a minute while it reads anything, and a `reads failed` line when any read failed.
   When status exits 1, or the unread counts keep climbing for a minute, stop the background task (a stop finishes the chunk in hand) and start it again: a restart reads only what changed while it was down.
+  With `POSTGRES_URL` empty, as in first run's setup, every form prints asks.md's no-database line and exits 1, and a restart waits until setup has made the database.
   The importer exits 1 by itself on any of these, its two lock checks running from the moment it takes the lock, through the backfill as well as the follow; start it again after fixing what the log names:
   - the connection holding its lock drops, no longer holds the lock, or leaves a check unanswered for 10s (`LOCK_CHECK_MS`, `LOCK_DEADLINE_MS` in `dashboard-ingest.ts`), since a connection dropped without a reset hangs rather than errs;
   - a write finds the lock gone, since every write transaction checks it last, so that write rolls back;
