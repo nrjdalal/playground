@@ -176,32 +176,29 @@ const PLANS: Record<
       : { argv: ["brew", "install", "node"], label: "Installing Node.js", ms: 20 * MINUTE },
   ],
   proxy: (_, __, ___, os) => [
-    os === "linux"
-      ? {
-          admin: true,
-          argv: ["node", PORTLESS_CLI, "service", "install"],
-          detached: true,
-          // pkexec's own codes: 126 when the owner closes its window, 127 when no window could ask
-          exits: {
-            126: "You closed the password window, so the web address is not set up. Click Set up the web address again and enter your password.",
-            127: "Your computer could not ask for your password, so the web address is not set up.",
-          },
-          failed:
-            "Your computer did not set up the web address. Click Set up the web address again, and enter your password in its window.",
-          label: "Setting up the web address",
-          ms: 5 * MINUTE,
-          note: "Your computer asks for your password in its own window",
-        }
-      : {
-          admin: true,
-          argv: ["node", PORTLESS_CLI, "service", "install"],
-          detached: true,
-          failed:
-            "Your Mac did not set up the web address. Click Set up the web address again, and enter your Mac's password in its window.",
-          label: "Setting up the web address",
-          ms: 5 * MINUTE,
-          note: "Your Mac asks for your password in its own window",
-        },
+    {
+      admin: true,
+      argv: ["node", PORTLESS_CLI, "service", "install"],
+      detached: true,
+      label: "Setting up the web address",
+      ms: 5 * MINUTE,
+      ...(os === "linux"
+        ? {
+            // pkexec's own codes: 126 when the owner closes its window, 127 when no window could ask
+            exits: {
+              126: "You closed the password window, so the web address is not set up. Click Set up the web address again and enter your password.",
+              127: "Your computer could not ask for your password, so the web address is not set up.",
+            },
+            failed:
+              "Your computer did not set up the web address. Click Set up the web address again, and enter your password in its window.",
+            note: "Your computer asks for your password in its own window",
+          }
+        : {
+            failed:
+              "Your Mac did not set up the web address. Click Set up the web address again, and enter your Mac's password in its window.",
+            note: "Your Mac asks for your password in its own window",
+          }),
+    },
   ],
   python: () => [
     { argv: ["brew", "install", "python"], label: "Installing Python", ms: 20 * MINUTE },
