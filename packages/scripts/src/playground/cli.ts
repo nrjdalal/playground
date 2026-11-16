@@ -8,7 +8,6 @@ import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { livePair } from "../../../../api/hono/src/lib/dev/live-dashboard"
-import { mainCheckout } from "../main-checkout"
 import { accountsIo, runAccounts } from "./accounts"
 import { refreshBriefs, type Send } from "./brief-refresh"
 import { type Docker, ensureDatabase } from "./database"
@@ -16,7 +15,6 @@ import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
-import { cloneOf, syncPeers } from "./peer-sync"
 import {
   addCommand,
   aliasFailure,
@@ -359,12 +357,18 @@ const update = (to?: string): Promise<number> =>
         repo: REPO,
         send: sendBrief,
       }),
-    (sha) =>
-      syncPeers(
+    // loaded only here, since the bare start and every other command need neither
+    async (sha) => {
+      const [{ cloneOf, syncPeers }, { mainCheckout }] = await Promise.all([
+        import("./peer-sync"),
+        import("../main-checkout"),
+      ])
+      await syncPeers(
         join(dashboardCheckout(REPO) ?? REPO, ".env"),
         sha,
         cloneOf(mainCheckout(REPO), homedir()),
-      ),
+      )
+    },
   )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
