@@ -342,6 +342,19 @@ export const groups: Group[] = [
         "a git hook's text running a variable's program in a paren after a wrapper",
         "echo 'nice ($R x)' > .git/hooks/pre-commit",
       ],
+      // a case's pattern run is read off the command list's order, which the glob reading leaves as it is
+      [
+        "a write into a git hook piped after a wrapper's group in a case's pattern place",
+        "case x in a) true ;; nice (b|c)d | tee .git/hooks/pre-commit) true ;; esac",
+      ],
+      [
+        "an append into a git hook piped after a wrapper's group in a case's pattern place",
+        "case x in a) true ;; command (b|c)d | tee -a .git/hooks/pre-commit) true ;; esac",
+      ],
+      [
+        "a copy into the extensions folder piped after a wrapper's group in a case's pattern place",
+        "case x in a) true ;; nice (b|c)d | cp f ~/.playground/extensions/x) true ;; esac",
+      ],
     ],
   },
 ]

@@ -445,18 +445,25 @@ describe("xargs fills its program from the input GNU's input options name", () =
   })
 })
 
-// #2292: a paren where a wrapper's program word goes reads as zsh's glob word beside its subshell reading, so every reader of the command list keeps the subshell's commands
-describe("a wrapper's group word keeps the subshell reading's commands beside it", () => {
-  const words = (line: string) => lex(line).commands.map((c) => c.words.map((w) => w.value))
+// #2292: a paren where a wrapper's program word goes keeps its subshell reading in the command list, and its opener carries zsh's glob reading beside it
+describe("a wrapper's group word keeps the command list and carries the glob reading on its opener", () => {
+  const read = (line: string) => {
+    const { commands } = lex(line)
+    return {
+      commands: commands.map((c) => c.words.map((w) => w.value)),
+      glob: commands.flatMap((c) => (c.glob ? [c.glob.words.map((w) => w.value)] : [])),
+    }
+  }
   test.each([
-    ["nice (r|x)m a", [["nice"], ["r"], ["x"], ["m", "a"], ["nice", "(r|x)m", "a"]]],
+    ["nice (r|x)m a", [["nice"], ["r"], ["x"], ["m", "a"]], [["nice", "(r|x)m", "a"]]],
     [
       "nice (r|x)(m|y) a",
-      [["nice"], ["r"], ["x"], [], ["m"], ["y"], ["a"], ["nice", "(r|x)(m|y)", "a"]],
+      [["nice"], ["r"], ["x"], [], ["m"], ["y"], ["a"]],
+      [["nice", "(r|x)(m|y)", "a"]],
     ],
-    ["nice (bun test | tail)", [["nice"], ["bun", "test"], ["tail"], []]],
-    ['nice (a|")") ; pkill x', [["nice"], ["a"], [")"], [], ["nice", '(a|")")'], ["pkill", "x"]]],
-  ])("%s", (line, expected) => {
-    expect(words(line)).toEqual(expected)
+    ["nice (bun test | tail)", [["nice"], ["bun", "test"], ["tail"], []], []],
+    ['nice (a|")") ; ls x', [["nice"], ["a"], [")"], [], ["ls", "x"]], [["nice", '(a|")")']]],
+  ])("%s", (line, commands, glob) => {
+    expect(read(line)).toEqual({ commands, glob })
   })
 })
