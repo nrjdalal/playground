@@ -26,9 +26,9 @@ import {
   withHerdrState,
 } from "@/lib/dashboard/herdr"
 import {
-  processStarts,
   readRegistry,
   registeredSessionsOf,
+  registeredStarts,
   type Registry,
   registryOf,
 } from "@/lib/dashboard/peers"
@@ -482,7 +482,7 @@ export const rosterFacts = (
   ),
 })
 
-// What proves a session record live (herdr's, as herdrRecords() shapes it), read once per refresh: Claude's registry, when each registered pid's process started (null when ps could not be run), and the transcripts folder of the Claude config that registry belongs to.
+// What proves a session record live (herdr's, as herdrRecords() shapes it), read once per refresh: Claude's registry, when each registered pid's process started in the form its file records it (registeredStarts in peers.ts; null when ps could not be run), and the transcripts folder of the Claude config that registry belongs to.
 export type LiveProof = { projects: string; registry: Registry; starts: Map<number, string> | null }
 
 // Pure: whether a session record is a Claude or Codex session running now. A record outlives its session's end at the pid it stored, which macOS hands to the next process that starts (a record whose session ended yesterday read live as another program's pid, a needsInput row with a red light). Claude writes a registry file at its pid while it runs, naming its session and when its process started; a clean exit removes the file, a crash leaves it. So the record is live only when the file at its pid names its session and that pid's process started when the file says, which a reused pid's never did. A file mid-rewrite, a registry or ps that cannot be read (proof null with neither), or a session under another Claude config, whose registry this one cannot see, leaves the record's word standing.
@@ -748,8 +748,10 @@ export async function listLive(): Promise<Live> {
     sessions: herdrRecords(servers, registry, new Date().toISOString(), codexLaunches()),
   }
   const workspaces = { workspaces: herdrWorkspaces(servers) }
-  const starts = await processStarts(
-    [...(registry ?? [])].flatMap(([pid, entry]) => (entry?.procStart ? [pid] : [])),
+  const starts = await registeredStarts(
+    [...(registry ?? [])].flatMap(([pid, entry]) =>
+      entry?.procStart ? [{ pid, procStart: entry.procStart }] : [],
+    ),
   )
   // Every read below sees live sessions alone, so an ended session's record never reaches a row, a light, a picker or a needs-you count.
   const proven = liveRecords(records, { projects: projectsDir(), registry, starts })

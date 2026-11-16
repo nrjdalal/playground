@@ -15,6 +15,7 @@ import {
   readPolicyOrDefaults,
 } from "@packages/settings"
 
+import { inRecordedForm } from "../../../../api/hono/src/lib/sessions/proc-start"
 import { portlessCa } from "../portless-ca"
 import {
   dashboardBeatOf,
@@ -112,7 +113,7 @@ export const apiUp = (urls: Urls | null): Promise<boolean> =>
 export const webUp = (urls: Urls | null): Promise<boolean> =>
   urls ? answers(urls.web, (status) => status < 400) : Promise.resolve(false)
 
-// The live sessions holding a dispatcher's name: a registry file whose pid runs with the start time the file records, as spawn.sh counts them.
+// The live sessions holding a dispatcher's name: a registry file whose pid runs with the start time the file records, in the form it records it (inRecordedForm), as spawn.sh counts them.
 export const liveDispatchers = (): Dispatcher[] => liveSessions((name) => slotOfName(name) !== null)
 
 // The live sessions whose name keep takes, counted as liveDispatchers counts them.
@@ -151,8 +152,9 @@ export const liveSessions = (keep: (name: string) => boolean): Dispatcher[] => {
     const match = line.trim().match(/^(\d+)\s+(.+)$/)
     if (match) starts.set(Number(match[1]), match[2]!.split(/\s+/).join(" "))
   }
+  const recorded = inRecordedForm(starts, entries)
   for (const entry of entries) {
-    const start = starts.get(entry.pid)
+    const start = recorded.get(entry.pid)
     if (start === undefined) continue
     if (typeof entry.procStart === "string" && entry.procStart.split(/\s+/).join(" ") !== start)
       continue
