@@ -490,6 +490,8 @@ case "$1 \${2:-}" in
     [ -z "$FAKE_HERDR_LIST_FAIL" ] || exit 1
     [ -z "$FAKE_HERDR_LIST_ENDS" ] || ends "$FAKE_HERDR_LIST_ENDS"
     cat "$HOME/herdr.panes" 2>/dev/null || echo '{"result":{"panes":[]}}' ;;
+  # pane process-info --pane <id>: the pane's foreground processes, from herdr.process/<id> when a case writes one
+  "pane process-info") cat "$HOME/herdr.process/$4" 2>/dev/null || { echo "error: pane $4 not found" >&2; exit 1; } ;;
   "pane rename")
     [ -z "$FAKE_HERDR_RENAME_EATS" ] || rm -f "$HOME"/.playground/launch/*.herdr
     [ -z "$FAKE_HERDR_RENAME_FAIL" ] || { echo "error: label taken" >&2; exit 1; } ;;

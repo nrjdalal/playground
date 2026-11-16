@@ -40,6 +40,7 @@ import {
   type Check,
   unloaded,
 } from "../../../../packages/scripts/src/hook-differential"
+import { scratchEnv } from "../../../scratch-env"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/hook-differential.ts")
 const SETTING = join(import.meta.dir, "../../../../packages/scripts/src/playground/setting.ts")
@@ -61,10 +62,9 @@ const home = (name: string) => {
 }
 
 const start = (at: string, env: Record<string, string> = {}) => {
-  const { RUN_SLOT_NICE: _, ...rest } = process.env
   return Bun.spawnSync(["bun", SCRIPT, "replay", "--canary", "HEAD", "--hook", "no-such-hook"], {
     cwd: join(import.meta.dir, "../../../.."),
-    env: { ...rest, HOME: at, ...env },
+    env: scratchEnv(at, env),
     stderr: "pipe",
     stdout: "pipe",
   })
@@ -966,15 +966,9 @@ describe("a stored result", () => {
   ]
 
   const run = (at: string, root: string, argv: string[], env: Record<string, string> = {}) => {
-    const {
-      CLAUDE_CONFIG_DIR: _c,
-      PLAYGROUND_DATA_DIR: _d,
-      RUN_SLOT_NICE: _r,
-      ...rest
-    } = process.env
     return Bun.spawnSync(["bun", SCRIPT, ...argv], {
       cwd: root,
-      env: { ...rest, HOME: at, TMPDIR: DIR, ...env },
+      env: scratchEnv(at, { TMPDIR: DIR, ...env }),
       stderr: "pipe",
       stdout: "pipe",
     })

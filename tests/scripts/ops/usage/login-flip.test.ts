@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { readSetting, setSetting } from "../../../../packages/settings/src/settings-folder"
 // Registers usage.accounts, which setSetting checks a write against.
 import "../../../../packages/settings/src/accounts"
-import { readSetting, setSetting } from "../../../../packages/settings/src/settings-folder"
 import { markOwn } from "../../../../web/next/src/lib/own-account"
+import { scratchEnv } from "../../../scratch-env"
 
 const script = join(
   import.meta.dir,
@@ -135,11 +136,7 @@ const flip = (
     tokens?: string[]
   } = {},
 ) => {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home ?? mkdtempSync(join(scratch, "home-")),
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home ?? mkdtempSync(join(scratch, "home-")))
   const spec = JSON.stringify({
     ...extra,
     accounts: extra.accounts ?? ACCOUNTS,
@@ -562,8 +559,7 @@ test.each([
   "probe() marks a full week limited until its weekReset whatever the status header says, and leaves a week under 100 alone: $name",
   ({ status, week, limited }) => {
     const home = mkdtempSync(join(scratch, "home-probe-"))
-    const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-    delete env.CLAUDE_CONFIG_DIR
+    const env = scratchEnv(home)
     const headers: Record<string, string> = {
       "anthropic-ratelimit-unified-5h-reset": String(FAR),
       "anthropic-ratelimit-unified-5h-utilization": "0.5",

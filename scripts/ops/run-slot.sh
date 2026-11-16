@@ -448,6 +448,13 @@ box_fits() {
   # RUN_SLOT_HERE=1, in run-slot's environment or as an env word of the command, keeps the run on this Mac (builder, 19 Oct: a Mac rerun of a red seen only on the box)
   [ -n "${RUN_SLOT_HERE:-}" ] && return 1
   for a in "$@"; do case "$a" in RUN_SLOT_HERE=?*) return 1 ;; esac; done
+  # the box gets no PLAYGROUND_REPO, so a run from the factory's main checkout stays here, where test:file's refusal of a relative path there reads it (PG-2368)
+  if [ -n "${PLAYGROUND_REPO:-}" ]; then
+    local repo dir
+    repo=$(cd "$PLAYGROUND_REPO" 2>/dev/null && pwd -P)
+    dir=$(cd "$(box_dir "$@")" 2>/dev/null && pwd -P)
+    [ -n "$repo" ] && [ "$dir" = "$repo" ] && return 1
+  fi
   for a in "$@"; do
     case "$a" in env|*=*) continue ;; esac
     first=$a

@@ -14,6 +14,7 @@ import {
   type EndDeps,
   endMerged,
   endOne,
+  reportArgv,
   finishedOf,
   sweep,
   type Target,
@@ -227,7 +228,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect(closed).toEqual(["k8wjf3-reviewer"])
     expect(cleaned).toEqual([])
     const text =
-      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir> --pr <PR url>"
+      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir> --force --pr <PR url>"
     expect(lines).toEqual([
       { text, to: "builder" },
       { text, to: "k8wjf3-worker" },
@@ -247,7 +248,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     const head = "#!/bin/bash\n# server: playground\n"
     const exec = `exec /m/scripts/spawn.sh resume ${NAME} /wt 1111`
     const hint = (account: string) =>
-      `Ended ${NAME}: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume ${NAME} <dir> --pr ${URL}${account}`
+      `Ended ${NAME}: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume ${NAME} <dir> --force --pr ${URL}${account}`
     const end = async (record: string | null) => {
       const resumeDir = realpathSync(mkdtempSync(join(tmpdir(), "auto-end-resume-")))
       const path = join(resumeDir, `${NAME}.sh`)
@@ -1451,5 +1452,21 @@ describe("endMerged: a closed session's worktrees are cleaned after its close, a
     const refused = fakes({ cleanup, close: async () => ({ ok: false, out: "no pane" }) })
     await endMerged(URL, "daaac8e0000", input({ roster, sessions }), refused.deps)
     expect(cleaned).toEqual([`m4tqzr-reviewer ${URL}`])
+  })
+})
+
+describe("reportArgv: the roster write that ends a row records why", () => {
+  test.each([
+    ["ended automatically: worker-prs-done", "worker-prs-done"],
+    ["ended automatically: checker-nothing (head scored), with no live session", "checker-nothing"],
+    ["ended automatically: #12 merged as daaac8e", "merged"],
+  ])("%s ends the row with endReason %s, so a resume needs --force", (text, reason) => {
+    expect(reportArgv("w1-worker", text).slice(2)).toEqual([
+      "report",
+      "w1-worker",
+      text,
+      `endReason=${reason}`,
+      "status=ended",
+    ])
   })
 })
