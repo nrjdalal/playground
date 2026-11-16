@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { GUARD_LISTS, loginPath } from "../../packages/settings/src/rendered"
 import { OLD_NAMES } from "../session-names"
@@ -33,6 +33,41 @@ const CHECKOUT_LISTS = Object.fromEntries(
 export const script = join(root, "scripts", "spawn.sh")
 export const scratch = mkdtempSync(join(tmpdir(), "spawn-sh-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+
+// A copy of spawn.sh's main checkout, found as spawn.sh finds its own: git's common folder's parent, else the folder above the script's, each link followed before its .. as `cd -P` does.
+const mainOf = (script: string): string => {
+  let repo: string
+  try {
+    repo = realpathSync.native(`${dirname(script)}/..`)
+  } catch {
+    return resolve(dirname(script), "..")
+  }
+  const common = Bun.spawnSync([
+    "git",
+    "-C",
+    repo,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ])
+  return common.exitCode === 0 ? dirname(common.stdout.toString().trim()) : repo
+}
+
+// This checkout's main checkout, which a case's own spawn.sh runs in.
+export const TRUSTED = [mainOf(join(root, "scripts", "spawn.sh"))]
+
+// Pure: a Claude Code config's text with the owner's yes to its folder trust question for each of dirs, as first run's Trust this folder records it; a config that does not read as an object stays as it is.
+export const trusting = (text: string | undefined, dirs: string[] = TRUSTED): string => {
+  let config: Record<string, unknown> = {}
+  try {
+    config = text === undefined ? {} : JSON.parse(text)
+  } catch {
+    return text!
+  }
+  if (!config || typeof config !== "object") return text!
+  const projects = Object.fromEntries(dirs.map((dir) => [dir, { hasTrustDialogAccepted: true }]))
+  return JSON.stringify({ ...config, projects: { ...projects, ...(config.projects as object) } })
+}
 
 export const LSTART = "Tue Oct 13 04:43:59 2026"
 
@@ -304,6 +339,9 @@ export async function spawn(
     writeFileSync(join(acme, name), raw ?? JSON.stringify(good))
   }
   file("usage.json", env.USAGE_JSON, usage())
+  // --account spare@example.com's own reading, which the ops tick's other-logins beat writes; unset leaves it off, as on a machine that has not read that login.
+  if (env.SPARE_USAGE_JSON !== undefined)
+    writeFileSync(join(acme, "usage-spare.json"), env.SPARE_USAGE_JSON)
   file("zai-usage.json", env.ZAI_USAGE_JSON, zai(1400, 7000))
   file(join("ops", "ops-zai-usage.json"), env.ZAI_HEARTBEAT_JSON, beat())
   if (env.CAPACITY_JSONL !== undefined)
@@ -311,10 +349,19 @@ export async function spawn(
   // The week-pace override the dispatcher writes; unset leaves the file off, as it is on most days.
   if (env.PACE_OFF_UNTIL !== undefined)
     writeFileSync(join(acme, "usage-pace-off-until"), env.PACE_OFF_UNTIL)
-  // Claude Code's own config, which names this machine's login: ~/.claude.json, or the config folder's with CONFIG_DIR_CLAUDE_JSON.
-  if (env.CLAUDE_JSON !== undefined) writeFileSync(join(home, ".claude.json"), env.CLAUDE_JSON)
-  if (env.CONFIG_DIR_CLAUDE_JSON !== undefined)
-    writeFileSync(join(home, ".claude", ".claude.json"), env.CONFIG_DIR_CLAUDE_JSON)
+  // Claude Code's own config, which names this machine's login: ~/.claude.json, or the config folder's with CONFIG_DIR_CLAUDE_JSON; each holds the yes to Claude Code's folder trust question for each checkout the case's spawn.sh checks, its own main checkout and PLAYGROUND_REPO, which NO_CLAUDE_TRUST leaves off, as on a fresh machine.
+  const checkouts = [
+    ...new Set([mainOf(path), env.PLAYGROUND_REPO ?? join(home, "code", "factory")]),
+  ]
+  const config = (text: string | undefined) =>
+    env.NO_CLAUDE_TRUST ? text : trusting(text, checkouts)
+  const own = config(env.CLAUDE_JSON)
+  if (own !== undefined) writeFileSync(join(home, ".claude.json"), own)
+  const folder = config(env.CONFIG_DIR_CLAUDE_JSON)
+  if (folder !== undefined) {
+    mkdirSync(join(home, ".claude"), { recursive: true })
+    writeFileSync(join(home, ".claude", ".claude.json"), folder)
+  }
   if (env.BRIEF_FILE) {
     const brief = join(home, ".playground", env.BRIEF_FILE)
     mkdirSync(dirname(brief), { recursive: true })

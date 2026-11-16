@@ -61,6 +61,11 @@ const HERDR_PIN = join(
   import.meta.dir,
   "../../../../../packages/scripts/src/playground/herdr-pin.ts",
 )
+// The script that records the owner's yes to Claude Code's folder trust question for this checkout's main checkout.
+const CLAUDE_TRUST = join(
+  import.meta.dir,
+  "../../../../../packages/scripts/src/playground/claude-trust.ts",
+)
 // portless's own CLI in this checkout, which the trust fix runs as the signed-in user and the proxy fix as root through macOS's administrator dialog, on Linux pkexec's: any password goes to the OS's own window.
 const PORTLESS_CLI = join(import.meta.dir, "../../../../../node_modules/portless/dist/cli.js")
 const FAKE = join(import.meta.dir, "../../fixtures/fix.ts")
@@ -128,6 +133,13 @@ const PLANS: Record<
       label: "Signing in to Claude Code",
       login: true,
       ms: 15 * MINUTE,
+    },
+  ],
+  "claude-trust": () => [
+    {
+      argv: ["bun", "--no-env-file", CLAUDE_TRUST],
+      label: `Trusting ${site.name}'s folder in Claude Code`,
+      ms: MINUTE,
     },
   ],
   codex: (has) => [

@@ -13,10 +13,12 @@ import { z } from "zod"
 import { apiReference, serveScalarBundle } from "@/lib/api-reference"
 import { baseApp } from "@/lib/base-app"
 import { keepSweeping } from "@/lib/dashboard/attachments"
+import { deliver } from "@/lib/dashboard/deliver"
 import { readsLive } from "@/lib/dashboard/fixture"
-import { getItem } from "@/lib/dashboard/inbox"
+import { endLostRoots, getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { seedFixtureThreadsAtStart } from "@/lib/dashboard/threads"
+import { DISPATCHER } from "@/lib/dashboard/workers"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
 import { startRelay } from "@/lib/relay/mac"
@@ -297,6 +299,19 @@ keepSweeping()
 
 // The session the dashboard hosts on the Agent SDK, when PLAYGROUND_SDK_PROBE_DIR names its folder.
 startSdkProbe()
+
+// A root step's run lives in the process that claimed its card, so each approved one with no result from before this start was lost: it reads failed and its poster is told, on a stack that reads this machine alone.
+if (readsLive()) {
+  endLostRoots(db, new Date(), {
+    actor: { label: "Dashboard" },
+    deliver,
+    dispatcher: DISPATCHER,
+  }).catch((error: unknown) =>
+    console.error(
+      `inbox: ending the root steps a restart cut off failed: ${error instanceof Error ? error.message : error}`,
+    ),
+  )
+}
 
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)

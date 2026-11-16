@@ -218,8 +218,11 @@ export const canDraft = (item: InboxItem): boolean =>
 const chosen = (item: InboxItem) =>
   item.kind !== "update" && item.answer && "choice" in item.answer ? item.answer : null
 
-// What the dashboard's own run on an accept's, a clone's, an apps change's, a grant's, an own card's or a guard setting's Approve gave, read off any answer, none for the rest.
-type Steps = Pick<InboxAnswer, "accepted" | "cloned" | "listed" | "opened" | "owned" | "set">
+// What the dashboard's own run on an accept's, a clone's, an apps change's, a grant's, an own card's, a root step's or a guard setting's Approve gave, read off any answer, none for the rest.
+type Steps = Pick<
+  InboxAnswer,
+  "accepted" | "cloned" | "listed" | "opened" | "owned" | "rooted" | "set"
+>
 const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
 
 // Pure: whether a card a reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
@@ -592,6 +595,7 @@ export function kindWord(item: InboxItem): string {
     guard: "Guard setting",
     own: "Own account",
     reveal: "Show a secret",
+    root: "Root step",
     schema: "Schema",
     secret: "Secret",
     ship: "Ship",
@@ -641,9 +645,9 @@ export function itemState(item: InboxItem): ItemState {
   }
   if (sendFailed(item)) return "failed"
   if (needsYou(item)) return "open"
-  // an accept, a clone, an apps change, an own flag or a guard setting the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
-  const { accepted, cloned, listed, opened, owned, set } = stepsOf(provided)
-  const ran = accepted ?? cloned ?? listed ?? owned ?? set
+  // an accept, a clone, an apps change, an own flag, a root step or a guard setting the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
+  const { accepted, cloned, listed, opened, owned, rooted, set } = stepsOf(provided)
+  const ran = accepted ?? cloned ?? listed ?? owned ?? rooted ?? set
   if (ran) return ran.exitCode === 0 ? "done" : "failed"
   if (opened && opened.exitCode !== 0) return "failed"
   // a reply is being carried out by its poster until it is closed, then done
@@ -761,9 +765,9 @@ export function outcomeLine(item: InboxItem): string | null {
   return item.answer.noLink ? `${done} · No link: ${item.answer.noLink}` : done
 }
 
-// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, a clone's, an apps change's, an own flag's, a guard setting's, or a grant that opened nothing; null for any other answer.
+// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, a clone's, an apps change's, an own flag's, a root step's, a guard setting's, or a grant that opened nothing; null for any other answer.
 const stepLine = (answer: Steps): string | null => {
-  const { accepted, cloned, listed, opened, owned, set } = answer
+  const { accepted, cloned, listed, opened, owned, rooted, set } = answer
   if (accepted)
     return accepted.exitCode === 0
       ? `Accepted: ${accepted.line}`
@@ -780,6 +784,10 @@ const stepLine = (answer: Steps): string | null => {
     return owned.exitCode === 0
       ? `Own account: ${owned.line}`
       : `Own account change failed (exit ${owned.exitCode}): ${owned.line}`
+  if (rooted)
+    return rooted.exitCode === 0
+      ? `Ran as root: ${rooted.line}`
+      : `Root step failed (exit ${rooted.exitCode}): ${rooted.line}`
   if (set)
     return set.exitCode === 0
       ? `Guard setting: ${set.line}`

@@ -21,7 +21,7 @@ export const ANSWER_VERBS = [
 // What a step the dashboard ran on Approve gave: its exit code and its first line.
 const ranSchema = z.strictObject({ exitCode: z.number().int(), line: z.string() })
 
-// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, a clone, an apps change, a grant's pane, an own flag, a guard setting) rides as accepted, cloned, listed, opened, owned or set, and a secret's results carry each sink's status, never its value.
+// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, a clone, an apps change, a grant's pane, an own flag, a root step, a guard setting) rides as accepted, cloned, listed, opened, owned, rooted or set, and a secret's results carry each sink's status, never its value.
 export const answerPayloadSchema = z.strictObject({
   accepted: ranSchema.optional(),
   at: z.iso.datetime(),
@@ -64,6 +64,7 @@ export const answerPayloadSchema = z.strictObject({
       }),
     )
     .optional(),
+  rooted: ranSchema.optional(),
   set: ranSchema.optional(),
   text: z.string().optional(),
   title: z.string(),
@@ -133,6 +134,7 @@ export type ChoicePreview =
   | { key: string; type: "guard"; value?: unknown }
   | { key: string; own: boolean; type: "own" }
   | { type: "reveal" }
+  | { step: string; type: "root" }
   | { type: "schema" }
   | { type: "secret" }
   | { sha: string; type: "ship" }
@@ -177,6 +179,10 @@ const defaultLabels = (
         : [`Unmark ${preview.key} as your own account`, "Keep it as it is"]
     case "reveal":
       return ["Done, I have it", "I do not need it"]
+    case "root":
+      return preview.step === "install"
+        ? ["Install the root steps", "Do not install them"]
+        : [`Run ${preview.step} as root`, "Do not run it"]
     case "schema":
       return ["Apply this schema", "Do not apply it"]
     case "ship":
@@ -265,3 +271,52 @@ export function picksOf(
 
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
+
+// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with what it does in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
+export const ROOT_STEPS = {
+  "bwrap-userns":
+    "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace",
+} as const
+
+export type RootStep = keyof typeof ROOT_STEPS
+
+export const ROOT_NAMES = Object.keys(ROOT_STEPS) as [RootStep, ...RootStep[]]
+
+export const ROOT_BASE = "/usr/local/lib/playground"
+export const ROOT_DIR = `${ROOT_BASE}/root`
+
+export const HEX64 = /^[0-9a-f]{64}$/
+
+const REFUSE_HASH = 'echo "refused: a hash is not 64 lowercase hex" >&2; exit 1'
+
+// The install, run by /bin/sh as root before any root-owned script exists, so the card shows this very text: it refuses any hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against the hash the approved card passed, and moves them into place, or refuses with nothing moved.
+export const INSTALL_TEXT = [
+  "set -eu",
+  "umask 022",
+  `base=${ROOT_BASE}`,
+  "src=$1",
+  "shift",
+  'case $src in /*) ;; *) echo "refused: the scripts folder is not an absolute path" >&2; exit 1 ;; esac',
+  `[ $# -eq ${ROOT_NAMES.length} ] || { echo "refused: ${ROOT_NAMES.length} hashes are needed, one for each script" >&2; exit 1; }`,
+  'for h in "$@"; do',
+  `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
+  "done",
+  'mkdir -p "$base/root"',
+  'chown root:root "$base" "$base/root"',
+  'chmod 0755 "$base" "$base/root"',
+  'stage=$(mktemp -d "$base/.stage.XXXXXX")',
+  `trap 'rm -f "$stage"/*; rmdir "$stage"' EXIT`,
+  `for name in ${ROOT_NAMES.join(" ")}; do`,
+  '  cp "$src/$name" "$stage/$name"',
+  '  sum=$(sha256sum "$stage/$name")',
+  '  [ "${sum%% *}" = "$1" ] || { echo "refused: $name changed since you approved it" >&2; exit 1; }',
+  "  shift",
+  "done",
+  `for name in ${ROOT_NAMES.join(" ")}; do`,
+  '  chown root:root "$stage/$name"',
+  '  chmod 0755 "$stage/$name"',
+  '  mv -f "$stage/$name" "$base/root/$name"',
+  "done",
+  `echo "installed ${ROOT_NAMES.join(", ")} in $base/root"`,
+].join("\n")

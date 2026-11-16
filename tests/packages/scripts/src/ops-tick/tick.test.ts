@@ -2272,3 +2272,71 @@ describe("the load where sysctl has no vm.loadavg", () => {
     ])
   })
 })
+
+describe("other-logins", () => {
+  // A data folder whose policy lists two Claude rows and a GLM row, and stored-login.json naming the first Claude row, in another letter case than its row.
+  const logins = (ops: string) => {
+    storeWith(
+      join(ops, ".."),
+      {},
+      {
+        "usage.accounts": [
+          { email: "stored@example.test" },
+          { email: "other@example.test", provider: "claude" },
+          { label: "zai", provider: "glm" },
+        ],
+      },
+    )
+    mkdirSync(join(ops, "usage"), { recursive: true })
+    writeFileSync(
+      join(ops, "usage", "stored-login.json"),
+      JSON.stringify({ account: "Stored@example.test" }),
+    )
+  }
+  const watched = (runs: string[][]) =>
+    runs
+      .filter((argv) => argv.some((a) => a.endsWith("usage/account-watch.py")))
+      .map((a) => a.at(-1))
+
+  test("runs account-watch.py for each Claude row but the stored login, at 21 and 51 past, and logs its line", async () => {
+    const ops = scratch()
+    logins(ops)
+    const { ctx, runs, sent } = fake(ops, at(13, 21), {
+      "account-watch.py": "other@example.test: week 12% five-hour 3%",
+    })
+    await beat("other-logins").run(ctx)
+    expect(watched(runs)).toEqual(["other@example.test"])
+    expect(beat("other-logins").cron).toBe("21,51 * * * *")
+    expect(await Bun.file(join(ops, "log", "account-watch.log")).text()).toContain(
+      "other@example.test: week 12% five-hour 3%",
+    )
+    expect(sent).toEqual([])
+  })
+
+  test("a failed read throws, and the second in a row tells ops once, until a read passes", async () => {
+    const ops = scratch()
+    logins(ops)
+    const failing = { "account-watch.py": { code: 1, out: "other@example.test: token unread" } }
+    const first = fake(ops, at(13, 21), failing)
+    await expect(beat("other-logins").run(first.ctx)).rejects.toThrow(
+      "other@example.test: token unread",
+    )
+    expect(first.sent).toEqual([])
+    const second = fake(ops, at(13, 51), failing)
+    await expect(beat("other-logins").run(second.ctx)).rejects.toThrow()
+    expect(second.sent).toEqual([
+      {
+        text: "other-logins: other@example.test's usage read failed 2 times in a row, so spawn.sh skips the usage check for --account other@example.test: other@example.test: token unread",
+        to: "ops",
+      },
+    ])
+    const third = fake(ops, at(14, 21), failing)
+    await expect(beat("other-logins").run(third.ctx)).rejects.toThrow()
+    expect(third.sent).toEqual([])
+    await beat("other-logins").run(fake(ops, at(14, 51), { "account-watch.py": "ok" }).ctx)
+    await expect(beat("other-logins").run(fake(ops, at(15, 21), failing).ctx)).rejects.toThrow()
+    const again = fake(ops, at(15, 51), failing)
+    await expect(beat("other-logins").run(again.ctx)).rejects.toThrow()
+    expect(again.sent.map((m) => m.to)).toEqual(["ops"])
+  })
+})

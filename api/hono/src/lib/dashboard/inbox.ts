@@ -9,8 +9,10 @@ import {
   answerPayloadSchema,
   choicesOf,
   CLOCKS_STOPPED_AT,
+  HEX64,
   MAX_OPTIONS,
   picksOf,
+  ROOT_NAMES,
   rowOfAnswer,
 } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
@@ -43,11 +45,18 @@ import { z } from "zod"
 
 import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
+import {
+  installArgv,
+  installedRefusal,
+  repoScripts,
+  ROOT_TIMEOUT_MS,
+  stepArgv,
+} from "../system/root"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -309,6 +318,24 @@ export const grantArgv = (preview: InboxGrant): string[] => [
   "/usr/bin/open",
   `x-apple.systempreferences:com.apple.preference.security?${GRANT_PANES[preview.permission]}`,
 ]
+
+// A step that needs root on this machine, which the owner approves from the Inbox in place of a terminal: `install` puts the listed scripts in place, their hashes frozen on the card as it is posted (rootScripts), and any other step is one listed script (system/root.ts's ROOT_STEPS), run through the desktop's password window with no argument.
+const rootSchema = z.strictObject({
+  scripts: z
+    .array(
+      z.strictObject({
+        name: z.enum(ROOT_NAMES),
+        sha256: z.string().regex(HEX64, "Must be a sha256 in 64 lowercase hex"),
+      }),
+    )
+    .max(ROOT_NAMES.length)
+    .optional(),
+  step: z.enum(["install", ...ROOT_NAMES]),
+  type: z.literal("root"),
+  why: words,
+})
+
+export type InboxRoot = z.infer<typeof rootSchema>
 
 // Runs an argv with no shell and returns its exit code and output; run-argv.ts holds the real one, and a test passes its own.
 export type ArgvRun = (argv: string[]) => Promise<{ code: number; err: string; out: string }>
@@ -583,7 +610,7 @@ const askQuestion = z
     path: ["recommended"],
   })
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an extensions clone, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in plain words (the plain-words skill), one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an extensions clone, an apps change, a grant's System Settings pane, a guard setting, an own account change or a root step, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in plain words (the plain-words skill), one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -656,6 +683,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   grantSchema,
   guardSchema,
   ownSchema,
+  rootSchema,
 ])
 
 const link = z
@@ -777,7 +805,7 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
 export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, cloned, listed, opened, owned and set: what the dashboard ran on an accept's, a clone's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, a draft's words going with them, so a retry shares none twice and its poster posts no words again.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, cloned, listed, opened, owned, rooted and set: what the dashboard ran on an accept's, a clone's, an apps change's, a grant's, an own card's, a root step's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, a draft's words going with them, so a retry shares none twice and its poster posts no words again.
 export type InboxAnswer = {
   accepted?: RunResult
   ackedAt?: string
@@ -796,6 +824,7 @@ export type InboxAnswer = {
   option?: number
   options?: number[]
   owned?: RunResult
+  rooted?: RunResult
   set?: RunResult
   uploaded?: number
   // where the owner answered when not on the card: whatsapp, his reply naming the card's id there (whatsapp-answer.ts)
@@ -1099,7 +1128,8 @@ function answerOf(
         item.preview.type === "grant" ||
         item.preview.type === "guard" ||
         item.preview.type === "own" ||
-        item.preview.type === "reveal") &&
+        item.preview.type === "reveal" ||
+        item.preview.type === "root") &&
       action === "edit"
     ) {
       return { message: "This decision is approved or denied as it reads" }
@@ -1218,6 +1248,7 @@ export function answerPayload(
         answer.listed ||
         answer.opened ||
         answer.owned ||
+        answer.rooted ||
         answer.set
       ) {
         const ran = answer.accepted
@@ -1228,9 +1259,11 @@ export function answerPayload(
               ? { listed: answer.listed }
               : answer.owned
                 ? { owned: answer.owned }
-                : answer.set
-                  ? { set: answer.set }
-                  : { opened: answer.opened! }
+                : answer.rooted
+                  ? { rooted: answer.rooted }
+                  : answer.set
+                    ? { set: answer.set }
+                    : { opened: answer.opened! }
         return {
           ...head,
           ...comment,
@@ -1560,6 +1593,8 @@ export async function postItem(
     cloneRefused(parsed.data, settingsData) ??
     voiceRefused(parsed.data, settingsData)
   if (refused) return refused
+  const data = await rootScripts(parsed.data)
+  if ("ok" in data) return data
   if (threadId !== undefined) {
     const [found] = await db.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId))
     if (!found) return { code: "NOT_FOUND", message: `no thread ${threadId}`, ok: false }
@@ -1567,14 +1602,29 @@ export async function postItem(
   const [row] = await db
     .insert(inboxItem)
     .values({
-      ...parsed.data,
+      ...data,
       createdAt: now,
-      status: parsed.data.kind === "update" ? "done" : "open",
+      status: data.kind === "update" ? "done" : "open",
       threadId,
       updatedAt: now,
     })
     .returning()
   return { item: toItem(row as Row), ok: true }
+}
+
+// An install card's scripts as this checkout holds them when it is posted or edited, so the card shows the very bytes its Approve installs: a poster's own list must match them, and a step card lists none.
+const rootScripts = async (
+  input: z.infer<typeof inboxInputSchema>,
+): Promise<z.infer<typeof inboxInputSchema> | Refused> => {
+  if (input.kind !== "decision" || input.preview.type !== "root") return input
+  const { preview } = input
+  const refuse = (message: string): Refused => ({ code: "VALIDATION_ERROR", message, ok: false })
+  if (preview.step !== "install")
+    return preview.scripts ? refuse("A root step's card lists no scripts") : input
+  const scripts = await repoScripts()
+  if (preview.scripts && !isDeepStrictEqual(preview.scripts, scripts))
+    return refuse("An install card's scripts are this checkout's; post it with none to fill them")
+  return { ...input, preview: { ...preview, scripts } }
 }
 
 // Pure: under owner.voice's singular, the refusal for a draft's or a slack decision's first we, us, our, ours or ourselves outside someone else's words; none under any other voice.
@@ -1682,6 +1732,8 @@ export async function editItem(
     cloneRefused(parsed.data, settingsData) ??
     voiceRefused(parsed.data, settingsData)
   if (refused) return refused
+  const data = await rootScripts(parsed.data)
+  if ("ok" in data) return data
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
   if (parsed.data.from !== item.from) {
@@ -1690,7 +1742,7 @@ export async function editItem(
   if (parsed.data.kind !== item.kind) {
     return { code: "VALIDATION_ERROR", message: `This item is a ${item.kind}`, ok: false }
   }
-  const reopens = ownerDone(item) && !isDeepStrictEqual(wordsOf(parsed.data), wordsOf(item))
+  const reopens = ownerDone(item) && !isDeepStrictEqual(wordsOf(data), wordsOf(item))
   if (closed(item) && !reopens) {
     return {
       code: "CONFLICT",
@@ -1707,8 +1759,8 @@ export async function editItem(
         answer: sql`nullif(${inboxItem.answer} - 'dismissedAt', '{}'::jsonb)`,
         readAt: null,
       }),
-      preview: parsed.data.preview,
-      title: parsed.data.title,
+      preview: data.preview,
+      title: data.title,
       // past the stamp he read, even inside its millisecond, so an answer whose seen names the old words is refused (answerItem)
       updatedAt: sql`greatest(${now.toISOString()}::timestamptz, ${inboxItem.updatedAt} + interval '1 millisecond')`,
       version: sql`${inboxItem.version} + 1`,
@@ -1882,6 +1934,7 @@ export async function answerItem(
     grant,
     now = new Date(),
     reveal,
+    root,
     settingsData,
     upload,
     via,
@@ -1896,6 +1949,7 @@ export async function answerItem(
     grant?: ArgvRun
     now?: Date
     reveal?: KeychainRead
+    root?: ArgvRun
     settingsData?: string
     via?: InboxAnswer["via"]
   } & Pick<Sending, "upload" | "wait">,
@@ -1909,16 +1963,19 @@ export async function answerItem(
       ok: false,
     }
   }
-  // a guard setting or an own flag is written as the card he read shows it, so its Approve names that reading
+  // a guard setting, an own flag or a root step runs as the card he read shows it, so its Approve names that reading
   if (
     input.action === "approve" &&
     input.seen === undefined &&
     current.kind === "decision" &&
-    (current.preview.type === "guard" || current.preview.type === "own")
+    (current.preview.type === "guard" ||
+      current.preview.type === "own" ||
+      current.preview.type === "root")
   ) {
     return {
       code: "VALIDATION_ERROR",
-      message: "A guard setting or an own card is approved from the card that shows it, with seen",
+      message:
+        "A guard setting, an own card or a root step is approved from the card that shows it, with seen",
       ok: false,
     }
   }
@@ -1940,7 +1997,7 @@ export async function answerItem(
     input.action === "dismiss"
       ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
       : { ...checked.answer, at, ...(via && { via }) }
-  // an accept's, a clone's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  // an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"
       ? stepOf(current.preview, current.ref, {
@@ -1949,6 +2006,7 @@ export async function answerItem(
           apps,
           clone,
           grant,
+          root,
           settingsData,
         })
       : undefined
@@ -1973,42 +2031,50 @@ export async function answerItem(
     )
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
-  let answered = toItem(row)
-  let given: Omit<InboxAnswer, "at"> = checked.answer
-  // run once, after the claim above, so a double click or a second tab runs it once
-  if (step) {
-    const result = await step.run().catch((error: unknown) => ({
-      exitCode: 1,
-      line: runResult({
-        code: 1,
-        err: error instanceof Error ? error.message : String(error),
-        out: "",
-      }).line,
-    }))
-    given = { ...given, [step.key]: result }
-    // merged key by key, so a poster's read that landed while it ran keeps its close
-    const [recorded] = await db
-      .update(inboxItem)
-      .set({
-        answer: sql`${inboxItem.answer} || (${JSON.stringify({ [step.key]: result })}::text)::jsonb`,
-        version: sql`${inboxItem.version} + 1`,
-      })
-      .where(eq(inboxItem.id, id))
-      .returning()
-    if (recorded) answered = toItem(recorded)
+  const carryOut = async (): Promise<{ item: InboxItem; ok: true }> => {
+    let answered = toItem(row)
+    let given: Omit<InboxAnswer, "at"> = checked.answer
+    // run once, after the claim above, so a double click or a second tab runs it once
+    if (step) {
+      const result = await step.run().catch((error: unknown) => ({
+        exitCode: 1,
+        line: runResult({
+          code: 1,
+          err: error instanceof Error ? error.message : String(error),
+          out: "",
+        }).line,
+      }))
+      given = { ...given, [step.key]: result }
+      // merged key by key, so a poster's read that landed while it ran keeps its close
+      const [recorded] = await db
+        .update(inboxItem)
+        .set({
+          answer: sql`${inboxItem.answer} || (${JSON.stringify({ [step.key]: result })}::text)::jsonb`,
+          version: sql`${inboxItem.version} + 1`,
+        })
+        .where(eq(inboxItem.id, id))
+        .returning()
+      if (recorded) answered = toItem(recorded)
+    }
+    if (!deliver) return { item: answered, ok: true }
+    return {
+      item: await send(db, answered, textsOf(answered, { ...given, at: answer.at }), {
+        actor,
+        deliver,
+        dispatcher,
+        now,
+        upload,
+        wait,
+      }),
+      ok: true,
+    }
   }
-  if (!deliver) return { item: answered, ok: true }
-  return {
-    item: await send(db, answered, textsOf(answered, { ...given, at: answer.at }), {
-      actor,
-      deliver,
-      dispatcher,
-      now,
-      upload,
-      wait,
-    }),
-    ok: true,
+  // a root step waits on the password window, longer than a request stays open (Bun.serve's idleTimeout), so it runs after the answer returns, the card In progress until its result lands and its poster is told
+  if (step && "background" in step) {
+    void carryOut().catch((error: unknown) => console.error("root step:", error))
+    return { item: toItem(row), ok: true }
   }
+  return carryOut()
 }
 
 // Pure: whether an item still waits on his answer: an open decision or draft he has not replied to, archived or put off included.
@@ -2021,9 +2087,9 @@ const carrying = (item: InboxItem): boolean => {
   if (item.kind === "update" || !answer || !("choice" in answer)) return false
   if (answer.choice === "provided") return !("results" in answer && answer.results)
   if (!isGo(answer.choice)) return false
-  const { accepted, ackedAt, cloned, link, listed, noLink, opened, owned, set } =
+  const { accepted, ackedAt, cloned, link, listed, noLink, opened, owned, rooted, set } =
     answer as InboxAnswer
-  if (accepted ?? cloned ?? listed ?? owned ?? set) return false
+  if (accepted ?? cloned ?? listed ?? owned ?? rooted ?? set) return false
   if (opened && opened.exitCode !== 0) return false
   const unstamped =
     item.delivery?.status === "delivered" && Date.parse(answer.at) < ACKS_STAMPED_FROM.getTime()
@@ -2079,7 +2145,7 @@ async function archive(
   return row ? { item: toItem(row), ok: true } : CHANGED
 }
 
-// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, a clone's `ext init` and `ext add`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, a clone's `ext init` and `ext add`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts, a root step's pkexec, run in the background; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
 function stepOf(
   preview: InboxPreview,
   ref: number,
@@ -2089,6 +2155,7 @@ function stepOf(
     apps,
     clone,
     grant,
+    root,
     settingsData,
   }: {
     accept?: ExtRun
@@ -2096,11 +2163,13 @@ function stepOf(
     apps?: OwnerApps
     clone?: CloneRun
     grant?: ArgvRun
+    root?: ArgvRun
     settingsData?: string
   },
 ):
   | {
-      key: "accepted" | "cloned" | "listed" | "opened" | "owned" | "set"
+      background?: true
+      key: "accepted" | "cloned" | "listed" | "opened" | "owned" | "rooted" | "set"
       run: () => Promise<RunResult>
     }
   | { refusal: string }
@@ -2180,7 +2249,91 @@ function stepOf(
     if (!settingsData) return { refusal: "This dashboard cannot write usage.accounts" }
     return { key: "owned", run: async () => ownWrite(settingsData, preview, ref, actor) }
   }
+  if (preview.type === "root") {
+    if (!root)
+      return {
+        refusal: "This dashboard runs nothing as root: it shows test data, or runs off Linux",
+      }
+    return { background: true, key: "rooted", run: () => rootRun(root, preview) }
+  }
   return undefined
+}
+
+// pkexec's own codes, 126 when the owner closes its window and 127 when no window could ask (onboard/fix.ts's proxy step), and 143, runArgv's kill at ROOT_TIMEOUT_MS
+const ROOT_EXITS: Record<number, string> = {
+  126: "you closed the password window, so nothing ran as root",
+  127: "your computer could not ask for your password, so nothing ran as root",
+  143: `the password window got no answer in ${ROOT_TIMEOUT_MS / 60_000} minutes, so nothing ran as root`,
+}
+
+export const ROOT_LOST_LINE =
+  "the Dashboard restarted while it ran, so its result is unknown: check it before you approve it again"
+
+// Run once at API start: ends each approved root card with no result answered before this process started, as a failed rooted that says so, then tells its poster as its own run would have; only the process that claimed a card runs it, so a restart lost each one.
+export async function endLostRoots(
+  db: Database,
+  now: Date,
+  telling?: Omit<Sending, "now">,
+): Promise<InboxItem[]> {
+  const cutoff = now.toISOString()
+  const rooted: RunResult = { exitCode: 1, line: ROOT_LOST_LINE }
+  const rows = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`${inboxItem.answer} || (${JSON.stringify({ rooted })}::text)::jsonb`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(
+      and(
+        eq(inboxItem.kind, "decision"),
+        sql`${inboxItem.preview} ->> 'type' = 'root'`,
+        sql`${inboxItem.answer} ->> 'choice' = 'approve'`,
+        sql`${inboxItem.answer} -> 'rooted' is null`,
+        sql`(${inboxItem.answer} ->> 'at')::timestamptz < ${cutoff}::timestamptz`,
+      ),
+    )
+    .returning()
+  const ended = rows.map(toItem)
+  if (!telling) return ended
+  const told: InboxItem[] = []
+  // each card on its own, so a send that throws (a database write) leaves the other posters told
+  for (const item of ended) {
+    try {
+      told.push(
+        await send(db, item, textsOf(item, item.answer as InboxAnswer), { ...telling, now }),
+      )
+    } catch (error) {
+      console.error(
+        `inbox: telling #i${item.ref}'s poster its root step was cut off failed:`,
+        error,
+      )
+      told.push(item)
+    }
+  }
+  return told
+}
+
+// A root card's run: the install's fixed text with the card's frozen hashes, or a listed step's installed script once its install is root's own and current; a guard that refuses runs nothing.
+export async function rootRun(
+  run: ArgvRun,
+  preview: InboxRoot,
+  installed: typeof installedRefusal = installedRefusal,
+): Promise<RunResult> {
+  let argv: string[]
+  try {
+    if (preview.step === "install") argv = installArgv(preview.scripts ?? [])
+    else {
+      const refused = await installed(preview.step)
+      if (refused) return { exitCode: 1, line: refused }
+      argv = stepArgv(preview.step)
+    }
+  } catch (error) {
+    return { exitCode: 1, line: error instanceof Error ? error.message : String(error) }
+  }
+  const ran = await run(argv)
+  const exit = ROOT_EXITS[ran.code]
+  return exit ? { exitCode: ran.code, line: exit } : runResult(ran)
 }
 
 // Writes an own card's flag on its one row of usage.accounts at its scope as the owner's act, the list read whole and every other row put back as it was; a value that is not a list, or a row gone since the post, writes nothing.
