@@ -29,6 +29,17 @@ describe("on Linux the lanes read /proc", () => {
     expect(look({ idle: 39 }).slots).toBe("1\n")
   })
 
+  // issue 2405: one reading under the bar after one over it leaves them open, as on macOS
+  test.each([
+    [80, 4],
+    [39, 1],
+  ])("/proc/stat's 39%% idle after a reading of %d%% leaves %d slots open", (before, slots) => {
+    const m = machine({ load1: 2, load5: 2, proc: procDir({ idle: 39 }, [], [["stat"]]) })
+    writeFileSync(join(m.ops, "run-slot.gauges"), `0 ${before} 0 120 3.50 0 -\n`)
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    expect(run.stdout.toString()).toBe(`${slots}\n`)
+  })
+
   test("load1 comes from /proc/loadavg, and at 45 it shuts them", () => {
     expect(look({ idle: 80, load1: 45, load5: 2 }).slots).toBe("1\n")
   })
@@ -58,6 +69,34 @@ describe("on Linux the lanes read /proc", () => {
     expect(await Bun.file(join(m.ops, "run-slot.runs.log")).text()).toMatch(
       / lanes worker-x \d+ shut why=mem idle=\d+(\.\d+)?% load1=1\.25 free=64% pressure=2 swapins=\d+/,
     )
+  })
+})
+
+// The lanes line's disk0 on Linux: the first whole disk in /proc/diskstats by /sys/class/block (no partition file, not under devices/virtual), its reads and writes over the swap-ins' one-second wait, so the fixture moves diskstats in with vmstat; it lists loop0 and nvme0n1p1 ahead of nvme0n1, each busier, so taking either logs other figures.
+describe("on Linux the lanes line logs the first whole disk's rate from /proc/diskstats", () => {
+  const lanes = async (omit: string[] = []) => {
+    const m = machine({
+      load1: 2,
+      load5: 2,
+      proc: procDir({ diskIos: 240, diskMB: 7, free: 80, idle: 80 }, omit, [
+        ["stat"],
+        ["vmstat", "diskstats"],
+      ]),
+    })
+    expect(await m.runs("worker-x")).toBe(true)
+    return Bun.file(join(m.ops, "run-slot.runs.log")).text()
+  }
+
+  test("nvme0n1's transfers and MB a second", async () => {
+    expect(await lanes()).toMatch(/ lanes worker-x \d+ .* disk0_tps=240 disk0_mbs=7\.00$/m)
+  })
+
+  test.each([
+    ["/proc/diskstats", "diskstats"],
+    ["/sys/class/block", "sys"],
+    ["/proc/vmstat, whose one-second wait is the disk's window", "vmstat"],
+  ])("with no %s it logs -", async (_, omit) => {
+    expect(await lanes([omit])).toMatch(/ lanes worker-x \d+ .* disk0_tps=- disk0_mbs=-$/m)
   })
 })
 

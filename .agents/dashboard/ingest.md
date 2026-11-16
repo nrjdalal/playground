@@ -29,4 +29,4 @@
   - the connection holding its lock drops, no longer holds the lock, or leaves a check unanswered for 10s (`LOCK_CHECK_MS`, `LOCK_DEADLINE_MS` in `dashboard-ingest.ts`), since a connection dropped without a reset hangs rather than errs;
   - a write finds the lock gone, since every write transaction checks it last, so that write rolls back;
   - every read fails for three rescans in a row.
-  After a pull, or the live dashboard's roll onto a new canary head, restart it as well, since a running follower keeps the code it started with: when that changes `packages/*`, restart `bun run dev` first (its build of `packages/*` is what the follower imports) and run `bun run db:migrate` when a migration landed, then the follower.
+  After a pull, or the live dashboard's roll onto a new head, restart it as well, since a running follower keeps the code it started with: when that changes `packages/*`, restart `bun run dev` first (its build of `packages/*` is what the follower imports) and run `bun run db:migrate` when a migration landed, then the follower.

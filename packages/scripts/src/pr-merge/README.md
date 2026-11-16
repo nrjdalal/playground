@@ -5,6 +5,8 @@ This file holds the gates, the merge lock and the merge queue's readers.
 
 ## Gates
 
+Every gate judges the PR's head as GitHub names it (`headRefOid`), which pr:merge and the train's forecast fetch from its pull ref, `refs/pull/<n>/head`, else, while GitHub has not made that ref yet, from its branch (`headRefName`), refusing a branch whose tip is another commit (`fetchHead` in `merge.ts`).
+
 A draft left green reaches `canary` too: when the owner's draft passes every gate but ready, pr:merge marks it ready (`gh pr ready`) just before its squash, merge-on-ready takes it, `--explain` names it, and an outside author's draft is never touched (`marksReady` in `gates.ts`).
 pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a `"*"` line until it lapses (Holds and rulings), or a file that does not read, holds every PR), and refuses unless:
 
@@ -85,6 +87,7 @@ a merge that cannot reach Redis keeps to the folder alone and so is refused by a
 `bun run lock take|renew|free` gives a shell script the same Redis lock (exit 3: no Redis, keep the script's own lock file).
 It squash-merges with `--match-head-commit <head>` and `--body` set to the PR body less every line opening `Co-authored-by:`, in any case, since AGENTS.md's Commits rule keeps that trailer out of `canary` and GitHub's own squash body copies it from the PR's commits, tries once more on a GitHub 5xx, checks the PR reads `MERGED`, prints the merge SHA and, after letting the lock go, leaves its merge comment.
 Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_end.ts`, the factory's SESSIONS.md End) and cleans each worktree an ended one used, each line to its lead; a failure there is printed and never undoes the merge.
+A PR labelled `ship-now` (the factory's **release** rule) also queues Ops one line through `scripts/ops/notify.sh` as `ops-ship`, the line `shipNowLine` builds, which reaches Ops tagged `[ops-ship]`; the label rides the PR view the gates already read, and a failed send is printed and never undoes the merge.
 `--explain` takes no lock.
 Like `bun run verify`, pr:merge and pr:train first build the workspace packages they import when a `dist` is missing, is older than a file under its package's `src` while no stack runs in this worktree, or lacks a name their sources import from it, those reached through a relative import outside their folder included (`packages/scripts/src/verify/prebuild.ts pr-merge`), so either runs from a fresh worktree;
 in the factory's main checkout (`$PLAYGROUND_REPO`), which builds only `packages/*` after a pull, the prebuild stops instead, verify's, `bun run dev`'s, `bun run ask`'s, `bun run thread`'s, `test:file`'s and `check-types:tests`' too, and says to run from your own worktree.

@@ -349,7 +349,7 @@ owner_idle() {
   a=$(( $(date +%s) - ${newest:-0} ))
   [ "$a" -lt "$q" ] && echo "$a" || echo "$q"
 }
-# a roll is due once ROLL_GAP has passed ($1 seconds since the last) and the owner has been idle OWNER_IDLE ($2), or the owner's idle cannot be read while the dashboard's Postgres runs ($3 is up), so a canary move never waits on a reading; with the container down a roll would fail its database proof, so it holds
+# a roll is due once ROLL_GAP has passed ($1 seconds since the last) and the owner has been idle OWNER_IDLE ($2), or the owner's idle cannot be read while the dashboard's Postgres runs ($3 is up), so an upstream move never waits on a reading; with the container down a roll would fail its database proof, so it holds
 roll_due() { [ "$1" -ge $ROLL_GAP ] && { [ -n "$2" ] && [ "$2" -ge $OWNER_IDLE ] || { [ -z "$2" ] && [ "$3" = up ]; }; }; }
 dashboard_db() { dashboard_container > /dev/null && echo up || echo down; }
 # When the running code (from head $1, or a copy outside this checkout) differs from the checkout's scripts/ops/dashboard/, write the roll to $S/reload (the head, tag $2, then $3-$5 for finish_roll) and exit 75 with the API and the follower down (a swapped web keeps serving), so run.sh execs the checkout's own copy

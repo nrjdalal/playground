@@ -7,6 +7,7 @@ import {
   procUsedBytes,
   readIdle,
   readSysctl,
+  readUpSince,
   type SysctlName,
   sysctlOf,
 } from "../../../../../packages/scripts/src/ops-machine/readings"
@@ -109,6 +110,27 @@ describe("a reading that cannot be taken is unread, never 0", () => {
   test("the memory in use with no /proc/meminfo", () => {
     onLinux(procDir({}, ["meminfo"]))
     expect(procUsedBytes()).toBeNull()
+  })
+})
+
+describe("the machine's latest boot or wake", () => {
+  // sysctl's line for a kern time, as measured on macOS: `{ sec = <s>, usec = <us> } <date>`, sec 0 for a wake the machine has not had.
+  const kern = (sec: number) => `{ sec = ${sec}, usec = 147343 } Sat Nov 14 05:25:54 2026\n`
+
+  test("is /proc/stat's btime where sysctl has no kern.boottime, since Linux keeps no wake time", async () => {
+    onLinux(procDir({ boot: 1_763_000_000 }))
+    expect(await readUpSince(LINUX_SYSCTL)).toBe(1_763_000_000_000)
+  })
+
+  test("is 0 with no sysctl answer and no /proc/stat", async () => {
+    onLinux(procDir({}, ["stat"]))
+    expect(await readUpSince(LINUX_SYSCTL)).toBe(0)
+  })
+
+  test("is the later of macOS's boot and wake, and /proc is never read", async () => {
+    onLinux(procDir({ boot: 1_799_999_999 }))
+    const mac = async () => ({ code: 0, out: kern(1_763_000_000) + kern(1_763_050_000) })
+    expect(await readUpSince(mac)).toBe(1_763_050_000_000)
   })
 })
 

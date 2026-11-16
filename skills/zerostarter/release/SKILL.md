@@ -10,6 +10,7 @@ A ship promotes `canary` to `main` by hand: one PR `canary -> main`, merged with
 `auto-canary-into-main.yml` runs on each push to `canary`, and by hand (`workflow_dispatch`), and only opens the draft ship PR when none is open, moving no version; it opens the PR with `GITHUB_TOKEN`, so it needs the repository's "Allow GitHub Actions to create and approve pull requests" setting on.
 No workflow tags a ship or writes a changelog, so every step below is yours.
 `main` deploys to production, so ship only on the user's go-ahead (playbook's **release** rule gives it to Ops).
+An `[ops-ship]` line reading `#<n> carries ship-now and merged at <sha>: ship canary now by the release skill, ...` starts a ship at step 1 outside the usual beat, the **release** rule's `ship-now`; when a ship you are already running pinned a `CANARY` that holds it (`git merge-base --is-ancestor <sha> "$CANARY"` exits 0), that ship carries it, and every step's gate below holds for it as for any ship.
 
 Run every command from a cwd inside the Playground checkout, so `gh` reads the right repository.
 
@@ -166,7 +167,7 @@ A reset or merge of the main checkout made outside `playground update`, with no 
 3. Install when the merge changed `bun.lock` or a `package.json`, with `--ignore-scripts`, since the postinstall's `deps-manager.ts` can rewrite a `package.json` there (v0.0.141's pull left a newly added `nanoid` uninstalled, so `bun run name` failed).
 4. Build `packages/*` when the merge changed a package with a `dist` (`packages/scripts` runs from source, so a change there alone builds nothing), since the `playground` command imports their `dist`, with env validation off, since the main checkout has no `.env`.
 5. Restart each ops job whose source the merge changed ([ops-restart](../../../scripts/ops/README.md#when-a-job-restarts-onto-new-code)).
-6. Roll the Dashboard, which answers `Already up to date` when `canary` has not moved.
+6. Roll the Dashboard, which answers `Already up to date` when the branch it follows has not moved.
 
 A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `playground update` again, which builds again, since a run that stopped short records nothing.
 A job that a `left alone` or an `on, but not running` line names and that is not running three of its cycles after the update (its heartbeat's `cycleSeconds`, the staleness `up.py` reads a job down by) is a failed step, whatever the line's `up.py exited 0` says, since `up.py` exits 0 on every pass: send its `up.log` lines (`ops/` in the data folder) up the chain.

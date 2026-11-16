@@ -321,7 +321,7 @@ const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
 const GIT_FIX = `it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made by absolute path under the main checkout's .claude/worktrees/, so it nests in no other worktree, by git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary.`
 
 const LIVE_FIX =
-  "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each canary head, and a change it needs goes through a PR into canary."
+  "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each head of the branch the main checkout sits on, and a change it needs goes through a PR into canary."
 
 // A git call that writes the live Dashboard's checkout: a commit, or any move gitMoves reads, every merge and reset included, since step 5 and the keep reset are the main checkout's own.
 function liveWrite(

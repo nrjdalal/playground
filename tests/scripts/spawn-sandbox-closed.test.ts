@@ -472,6 +472,45 @@ describe("the closed sandbox lets a session work in its own worktree", () => {
     expect(existsSync(treeOf(main, "review-9"))).toBe(false)
   })
 
+  // GitHub makes a PR's pull ref a little after the PR opens (#2389): origin holds the PR's branch alone, at the head the mirror's PR commit is
+  const branchOnly = () => {
+    const made = checkout()
+    const mirror = join(made.main, "..", `${made.main.split("/").pop()}-origin.git`)
+    Bun.spawnSync(["git", "-C", mirror, "update-ref", "refs/heads/pg-11-x", made.at.pr])
+    return made
+  }
+  const reviewEleven = [
+    "column",
+    "reviewer",
+    "reviewer-x",
+    "worker-x",
+    "w1:p2",
+    "r.md",
+    "--pr",
+    "11",
+    "--sandbox",
+  ]
+
+  test("a reviewer of a PR whose pull ref origin lacks yet starts at its branch, at the head GitHub names (#2389)", async () => {
+    const { at, env, main, spawnSh } = branchOnly()
+    const r = await spawn(reviewEleven, [], { ...env, FAKE_GH_PR: `pg-11-x ${at.pr}` }, spawnSh)
+    expect(r.code, r.err).toBe(0)
+    const head = Bun.spawnSync(["git", "-C", treeOf(main, "review-11"), "rev-parse", "HEAD"])
+      .stdout.toString()
+      .trim()
+    expect(head).toBe(at.pr)
+  })
+
+  test("a reviewer of a PR whose branch is not at the head GitHub names is refused, with no worktree made (#2389)", async () => {
+    const { at, env, main, spawnSh } = branchOnly()
+    const r = await spawn(reviewEleven, [], { ...env, FAKE_GH_PR: `pg-11-x ${at.canary}` }, spawnSh)
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      `refs/pull/11/head is missing, and its branch pg-11-x is at ${at.pr.slice(0, 7)}, not the head ${at.canary.slice(0, 7)}, so reviewer-x has no commit to start its worktree at`,
+    )
+    expect(existsSync(treeOf(main, "review-11"))).toBe(false)
+  })
+
   test("a worker whose --in names a worktree starts there, with no worktree made, and writes it and its git entry", async () => {
     const { env, main, spawnSh } = checkout()
     const tree = treeOf(main, "pg-9-x")
