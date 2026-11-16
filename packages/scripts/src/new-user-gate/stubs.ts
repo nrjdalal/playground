@@ -1,4 +1,4 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, curl is real with each URL logged, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
 
 import { join } from "node:path"
 
@@ -12,8 +12,14 @@ const logged = (box: string, name: string) =>
   `#!/bin/bash\necho "${name} $*" >> "${box}/calls.log"\n`
 
 // Pure: each stand-in's file name and script for a box at box, with bunx execing realBunx for anything but pglaunch.
-export const stubs = (box: string, realBunx: string): Record<string, string> => ({
+export const stubs = (box: string, realBunx: string, realCurl = ""): Record<string, string> => ({
   brew: `${logged(box, "brew")}exit 1\n`,
+  // the real curl, with each URL it fetches logged and no other argument, since a header can carry a token
+  curl: `#!/bin/bash
+u=; for a in "$@"; do case "$a" in http://* | https://*) u="$u $a" ;; esac; done
+echo "curl$u" >> "${box}/calls.log"
+exec "${realCurl}" "$@"
+`,
   bunx: `${logged(box, "bunx")}pg=; name=; prev=
 for a in "$@"; do case "$a" in pglaunch@*) pg=1 ;; esac; [ "$prev" = -n ] && name=$a; prev=$a; done
 [ -n "$pg" ] || exec "${realBunx}" "$@"

@@ -115,8 +115,9 @@ A test of a slow route runs past 12s on a real `Bun.serve`, since Bun.serve's de
 
 No end-to-end suite exists: `bun run test:e2e` matches no file.
 
-The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box, with stand-ins for claude, gh, brew, security and sudo (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
-The install runs on this host's OS, since `installEnv` sets no `INSTALL_OS` and install.sh reads `uname -s`, so on Linux uv comes from its own installer.
+The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box, with stand-ins for claude, gh, brew, security and sudo, and a logging curl (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
+The install runs on this host's OS, since `installEnv` sets no `INSTALL_OS` and install.sh reads `uname -s`.
+The box's PATH (`boxPath`) carries this host's uv, linked alone into the box's `tools` folder, so install.sh's uv step downloads nothing on Linux, as `/opt/homebrew/bin` gives it on a Mac; a `curl` stand-in logs each URL to calls.log, so a download shows there.
 The box is `makeBox`'s scratch folder `/tmp/pg-gate-<sha7>-<random>`, made in another parent folder with `--box <parent dir>`.
 Before the install it checks that the box's zsh, plain and login, finds every stand-in in the box's stubs folder, and stops with exit 2 naming each one it finds elsewhere, so no job the box starts reaches a real binary.
 Its claude runs a scripted session (`claude.ts`) for each launch spawn.sh makes: the dispatcher hands the typed task to the builder, the builder to a worker, and the worker runs `gh pr create`, calling no model.

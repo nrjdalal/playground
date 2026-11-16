@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
 // Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
@@ -137,6 +137,35 @@ const realBin = (name: string) => {
   return found
 }
 
+// The box's tools folder on its PATH: this host's uv linked alone, as a Mac's /opt/homebrew/bin gives it, so install.sh's uv step finds it and downloads nothing; its own folder (~/.local/bin on Linux) can hold other real programs.
+export const hostTools = (box: string, uv: string | null): string => {
+  const tools = join(box, "tools")
+  mkdirSync(tools, { recursive: true })
+  if (uv) symlinkSync(uv, join(tools, "uv"))
+  return tools
+}
+
+// The box's PATH: the stand-ins first, then the host's uv, bun, node and docker, and the system's folders.
+export const boxPath = (box: string, uv = Bun.which("uv")): string => {
+  const node = dirname(
+    Bun.spawnSync(["realpath", realBin("node")])
+      .stdout.toString()
+      .trim(),
+  )
+  return [
+    join(box, "stubs"),
+    hostTools(box, uv),
+    join(homedir(), ".bun", "bin"),
+    node,
+    dirname(realBin("docker")),
+    "/opt/homebrew/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ].join(":")
+}
+
 // A box for sha: a scratch folder in parent named pg-gate-<sha7>-<random>, which dropBox alone removes.
 export const makeBox = (sha: string, parent = "/tmp") =>
   makeScratch(`pg-gate-${sha.slice(0, 7)}-`, parent)
@@ -160,29 +189,14 @@ const prep = (box: string, sha: string) => {
   mkdirSync(join(box, "stubs"), { recursive: true })
   mkdirSync(join(box, "shots"), { recursive: true })
   mkdirSync(home, { recursive: true })
-  for (const [name, text] of Object.entries(stubs(box, realBin("bunx")))) {
+  for (const [name, text] of Object.entries(stubs(box, realBin("bunx"), realBin("curl")))) {
     writeFileSync(join(box, "stubs", name), text)
     chmodSync(join(box, "stubs", name), 0o755)
   }
   writeFileSync(join(box, "tty"), "y\n")
   for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
-  const node = dirname(
-    Bun.spawnSync(["realpath", realBin("node")])
-      .stdout.toString()
-      .trim(),
-  )
-  const path = [
-    join(box, "stubs"),
-    join(homedir(), ".bun", "bin"),
-    node,
-    dirname(realBin("docker")),
-    "/opt/homebrew/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-  ]
+  const path = boxPath(box)
   run(["git", "fetch", "-q", "origin"], { cwd: REPO })
   run(["git", "init", "-q", "--bare", join(box, "source.git")])
   const pushed = run(
@@ -215,10 +229,10 @@ const prep = (box: string, sha: string) => {
   })
   if (proxy.code !== 0)
     throw new Error(`the box's portless proxy did not start: ${proxy.err.trim()}`)
-  return { home, path: path.join(":") }
+  return { home, path }
 }
 
-// install.sh's whole env in the box: the box's HOME and the test sandbox's stand-ins for the terminal, Homebrew and portless's service, with no INSTALL_OS, so install.sh takes this host's from uname as a new user's run does (on Linux, uv from its own installer).
+// install.sh's whole env in the box: the box's HOME and the test sandbox's stand-ins for the terminal, Homebrew and portless's service, with no INSTALL_OS, so install.sh takes this host's from uname as a new user's run does.
 export const installEnv = (box: string, home: string, path: string): Record<string, string> => ({
   BUN_INSTALL_CACHE_DIR: join(homedir(), ".bun", "install", "cache"),
   GIT_CONFIG_NOSYSTEM: "1",

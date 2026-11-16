@@ -15,6 +15,7 @@ import { basename, join } from "node:path"
 import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   BOX_LOAD_MULT,
+  boxPath,
   Browser,
   capacityRefusals,
   clean,
@@ -284,7 +285,7 @@ describe("the box on this host's OS (#2374)", () => {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-host-")))
   afterAll(() => rmSync(parent, { force: true, recursive: true }))
 
-  test("install.sh reads the host's OS from uname, so on Linux its uv step takes uv's own installer, not brew", () => {
+  test("install.sh reads the host's OS from uname, so on Linux it takes its Linux branch, not brew", () => {
     expect(
       installEnv(join(parent, "box"), join(parent, "box", "h"), "/usr/bin"),
     ).not.toHaveProperty("INSTALL_OS")
@@ -313,6 +314,29 @@ describe("the box on this host's OS (#2374)", () => {
     )
     expect(read.exitCode).toBe(0)
     expect(JSON.parse(read.stdout.toString()).claudeAiOauth.accessToken).toBe("made-up")
+  })
+
+  test("install.sh's own uv step on Linux finds this host's uv on the box's PATH, so calls.log holds no curl", () => {
+    const box = join(parent, "uv")
+    mkdirSync(join(box, "stubs"), { recursive: true })
+    for (const [name, text] of Object.entries(stubs(box, "", "/bin/false"))) {
+      writeFileSync(join(box, "stubs", name), text)
+      chmodSync(join(box, "stubs", name), 0o755)
+    }
+    const uv = join(parent, "host-uv")
+    writeFileSync(uv, "#!/bin/sh\necho uv 0.0.0\n")
+    chmodSync(uv, 0o755)
+    const install = readFileSync(join(import.meta.dir, "../../../../../install.sh"), "utf8")
+    const has = install.match(/^has\(\) \{.*\}$/m)?.[0]
+    const step = install.match(/^install_tool\(\) \{\n[\s\S]*?\n\}$/m)?.[0]
+    const ran = Bun.spawnSync(["bash", "-c", `${has}\n${step}\nOS=Linux\ninstall_tool uv`], {
+      env: { HOME: join(box, "h"), PATH: boxPath(box, uv) },
+    })
+    const calls = existsSync(join(box, "calls.log"))
+      ? readFileSync(join(box, "calls.log"), "utf8")
+      : ""
+    expect({ calls, code: ran.exitCode }).toEqual({ calls: "", code: 0 })
+    expect(realpathSync(join(box, "tools", "uv"))).toBe(uv)
   })
 })
 
