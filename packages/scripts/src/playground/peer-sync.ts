@@ -31,10 +31,11 @@ export const cloneOf = (repo: string, home: string): string | null => {
     : null
 }
 
-// ssh's argv to one peer as the System panel's peer read builds it (api/hono/src/lib/system/probe.ts): no prompt, a short connect, and remote words fixed here but the clone's path and the sha, each checked before it gets here
+// ssh's argv to one peer as the System panel's peer read builds it (peerArgv, api/hono/src/lib/system/peer.ts): no prompt, a short connect, and remote words fixed here but the clone's path and the sha, each checked before it gets here
 const ssh = (key: string | undefined, target: string, words: string[]) => [
   "ssh",
-  ...(key ? ["-i", key] : []),
+  // a key is the only identity tried, as peerArgv tries it, so an agent holding many keys never spends the server's MaxAuthTries
+  ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
   "-o",
   "BatchMode=yes",
   "-o",
@@ -93,13 +94,19 @@ const syncPeer = async (
   sha: string,
 ): Promise<string> => {
   const state = await run(ssh(key, target, read(clone)), READ_MS)
-  if (state.code !== 0) return `not reached: ${firstLine(state.out, state.code)}`
+  // ssh exits 255 for its own failures; any other code is git's on the peer, which ssh reached
+  if (state.code !== 0)
+    return `${state.code === 255 ? "not reached" : "read failed"}: ${firstLine(state.out, state.code)}`
   const { branch, changed } = cloneState(state.out)
   if (changed) return "local changes, left as it is"
   if (branch !== null && branch !== "main") return `on ${branch}, not main, left as it is`
   const listed = await run(ssh(key, target, worktrees(clone)), READ_MS)
   if (listed.code !== 0) return `worktree list failed: ${firstLine(listed.out, listed.code)}`
-  const others = listed.out.split("\n").filter((line) => line.startsWith("worktree ")).length - 1
+  // a worktree whose folder is gone reads prunable until git worktree prune, and uses nothing
+  const others =
+    listed.out
+      .split("\n\n")
+      .filter((block) => /^worktree /m.test(block) && !/^prunable/m.test(block)).length - 1
   if (others > 0)
     return `${others} ${others === 1 ? "worktree uses" : "worktrees use"} the clone, left as it is`
   for (const [name, words] of steps(clone, sha)) {

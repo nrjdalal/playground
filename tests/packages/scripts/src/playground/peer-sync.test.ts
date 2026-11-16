@@ -25,7 +25,17 @@ const envFile = (text: string) => {
 const ONE = envFile(
   "PLAYGROUND_PEERS=spark-b=you@10.0.0.2\nPLAYGROUND_PEER_KEY=/home/you/.ssh/cluster\n",
 )
-const SSH = ["ssh", "-i", "/home/you/.ssh/cluster", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+const SSH = [
+  "ssh",
+  "-i",
+  "/home/you/.ssh/cluster",
+  "-o",
+  "IdentitiesOnly=yes",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ConnectTimeout=5",
+]
 
 // A stub ssh: answers each call by the first of its remote words the script names, and records every argv.
 const stubSsh = (answers: Record<string, { code?: number; out?: string }> = {}) => {
@@ -188,6 +198,44 @@ describe("syncPeers", () => {
       "peer spark-b: worktree list failed: error: unknown option",
     ])
     expect(failed.calls).toHaveLength(2)
+  })
+
+  test("with no key, ssh takes its own default identity: no -i and no IdentitiesOnly", async () => {
+    const { calls, run } = stubSsh()
+    const env = envFile("PLAYGROUND_PEERS=spark-b=you@10.0.0.2\n")
+    expect(await sync(env, run)).toEqual(["peer spark-b: at 0123456"])
+    expect(calls[0]?.slice(0, 7)).toEqual([
+      "ssh",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=5",
+      "you@10.0.0.2",
+      "git",
+    ])
+  })
+
+  test("a read git fails on the peer, such as a missing clone, says read failed, since ssh reached it", async () => {
+    const { calls, run } = stubSsh({
+      status: {
+        code: 128,
+        out: "fatal: cannot change to '/home/you/code/playground': No such file or directory\n",
+      },
+    })
+    expect(await sync(ONE, run)).toEqual([
+      "peer spark-b: read failed: fatal: cannot change to '/home/you/code/playground': No such file or directory",
+    ])
+    expect(calls).toHaveLength(1)
+  })
+
+  test("a worktree whose folder is gone, marked prunable, does not hold the clone", async () => {
+    const { calls, run } = stubSsh({
+      worktree: {
+        out: "worktree /home/you/code/playground\nHEAD 0123\nbranch refs/heads/main\n\nworktree /home/you/replay/r1\nHEAD 0123\ndetached\nprunable gitdir file points to non-existent location\n\n",
+      },
+    })
+    expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
+    expect(calls).toHaveLength(5)
   })
 
   test("a peer ssh cannot reach prints why, and the next peer still moves", async () => {
