@@ -376,6 +376,31 @@ describe("the tripwire", () => {
     expect(existsSync(big)).toBe(true)
   })
 
+  // #2407: an end moves the session's own temp folder, which hook test data fills past 5,000 files, whole under the 2 GB cap alone, and a refusal past the cap pages no one
+  test("the session's own temp folder moves whole past 5,000 files, a plain refusal past 2 GB; another's and a longer name's keep the alert", () => {
+    const roots = machine()
+    const tmp = join(roots.root, "tmp")
+    const big = (name: string) => {
+      mkdirSync(join(tmp, name, "deep"), { recursive: true })
+      for (let i = 0; i <= 5000; i++) writeFileSync(join(tmp, name, "deep", String(i)), "")
+      return join(tmp, name)
+    }
+    const own = big(`playground-${opts.session}.AbC123`)
+    expect(quarantine(own, opts, roots, { now: NOW, tmp })).toMatchObject({ files: 5001 })
+    expect(existsSync(own)).toBe(false)
+    for (const name of ["playground-a4b5c6-worker.Q1", `playground-${opts.session}2.Q2`])
+      expect(quarantine(big(name), opts, roots, { now: NOW, tmp })).toMatchObject({
+        kind: "tripwire",
+      })
+    const huge = join(tmp, `playground-${opts.session}.H1`)
+    mkdirSync(huge)
+    truncateSync(file(join(huge, "data.bin"), ""), 2 * 1024 ** 3 + 1)
+    expect(quarantine(huge, opts, roots, { now: NOW, tmp })).toEqual({
+      kind: "refused",
+      refused: `${huge} holds over 2 GB, past the tripwire: it stays in place`,
+    })
+  })
+
   // #2088: the nightly clean's gone option moves an entry directly in scratch/ whole, a loose file included, under the 2 GB cap alone; without it a session's own scratch folder keeps the file count
   test("a gone session's entry directly in scratch/ moves whole past 5,000 files and comes back; without gone it is refused, and gone reaches nothing else", () => {
     const roots = machine()

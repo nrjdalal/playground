@@ -542,16 +542,22 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       await mkdir(dirname(CARRIED), { recursive: true })
       await appendFile(CARRIED, `${JSON.stringify(item)}\n`)
     },
-    leftovers: (name) => leftoversOf(name, rm.data, readdirSync("/tmp")).filter(existsSync),
+    leftovers: (name) =>
+      leftoversOf(name, rm.data, readdirSync("/tmp"), process.platform).filter(existsSync),
   }
 }
 
 // Pure: the folders and files an ended session leaves, named for it: its scratch and scratchpad folders, the memory trial's settings file spawn.sh wrote for it, and on Linux each temp folder spawn.sh made it (/tmp/playground-<name>.XXXXXX, one per start), of tmp's entries; the caller keeps the ones that exist.
-export const leftoversOf = (name: string, data: string, tmp: string[]): string[] => [
+export const leftoversOf = (
+  name: string,
+  data: string,
+  tmp: string[],
+  platform: string,
+): string[] => [
   join(data, "scratch", name),
   join(data, "scratchpad", name),
   join(data, `factory-settings-400k-memory-${name}.json`),
-  ...(process.platform === "linux"
+  ...(platform === "linux"
     ? tmp
         .filter((entry) => entry.startsWith(`playground-${name}.`))
         .map((entry) => join("/tmp", entry))
@@ -647,7 +653,6 @@ export const liveDeps = (projectsDir: string): EndDeps => ({
       return []
     }
     const text = await Bun.file(taking).text()
-    await Bun.file(taking).delete()
     const items = text.split("\n").flatMap((line) => {
       try {
         return line ? [JSON.parse(line) as Carried] : []
@@ -658,12 +663,12 @@ export const liveDeps = (projectsDir: string): EndDeps => ({
     const deps = await cleanupDeps()
     if (!deps) {
       await appendFile(CARRIED, text)
+      await Bun.file(taking).delete()
       return []
     }
-    return (await drainCarried(items, deps)).map((line) => ({
-      text: `Cleanup an earlier end carried: ${line}`,
-      to: "ops",
-    }))
+    const lines = await drainCarried(items, deps)
+    await Bun.file(taking).delete()
+    return lines.map((line) => ({ text: `Cleanup an earlier end carried: ${line}`, to: "ops" }))
   },
   cleanup: cleanupLive(projectsDir),
   close: async (name) => {

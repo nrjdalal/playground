@@ -1597,7 +1597,7 @@ describe("reportArgv: the roster write that ends a row records why", () => {
 })
 
 describe("an ended session's leftovers and the moves its end carried (#2407)", () => {
-  test("leftoversOf names its scratch and scratchpad folders, its memory settings file and, on Linux, each temp folder spawn.sh made it, never a longer name's", () => {
+  test("leftoversOf names its scratch and scratchpad folders, its memory settings file and, on Linux alone, each temp folder spawn.sh made it, never a longer name's", () => {
     const tmp = [
       "playground-k3m9px-worker.AbC123",
       "playground-k3m9px-worker.Zz9",
@@ -1605,13 +1605,17 @@ describe("an ended session's leftovers and the moves its end carried (#2407)", (
       "playground-k3m9px-worker2.Q2",
       "playground-builder.Z2",
     ]
-    expect(leftoversOf("k3m9px-worker", "/d", tmp)).toEqual([
+    expect(leftoversOf("k3m9px-worker", "/d", tmp, "darwin")).toEqual([
       "/d/scratch/k3m9px-worker",
       "/d/scratchpad/k3m9px-worker",
       "/d/factory-settings-400k-memory-k3m9px-worker.json",
-      ...(process.platform === "linux"
-        ? ["/tmp/playground-k3m9px-worker.AbC123", "/tmp/playground-k3m9px-worker.Zz9"]
-        : []),
+    ])
+    expect(leftoversOf("k3m9px-worker", "/d", tmp, "linux")).toEqual([
+      "/d/scratch/k3m9px-worker",
+      "/d/scratchpad/k3m9px-worker",
+      "/d/factory-settings-400k-memory-k3m9px-worker.json",
+      "/tmp/playground-k3m9px-worker.AbC123",
+      "/tmp/playground-k3m9px-worker.Zz9",
     ])
   })
 

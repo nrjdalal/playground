@@ -477,6 +477,12 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
   refused: text,
 })
 
+// The session's own temp folder spawn.sh made it on Linux, tmp/playground-<session>.<suffix>, a real folder directly in tmp, which its end moves whole under the byte cap alone, since a session's hook test data fills it past the file count.
+const ownTempOf = (own: string, session: string, tmp: string): boolean =>
+  dirname(own) === real(tmp) &&
+  basename(own).startsWith(`playground-${session}.`) &&
+  !!lstat(own)?.isDirectory()
+
 // Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it; a worktree --discard lets go has its commits no remote holds bundled beside it in that batch first (bundleUnpushed).
 export function quarantine(
   path: string,
@@ -490,7 +496,12 @@ export function quarantine(
     worktree?: Holders
   },
   roots: Roots,
-  io: { carveOuts?: Record<string, CarveOut>; dev?: (path: string) => number; now?: Date } = {},
+  io: {
+    carveOuts?: Record<string, CarveOut>
+    dev?: (path: string) => number
+    now?: Date
+    tmp?: string
+  } = {},
 ): Quarantined | Refusal {
   const abs = resolve(path)
   if (!SESSION.test(opts.session))
@@ -525,9 +536,10 @@ export function quarantine(
       `refused a ${recent.length + 1}th removal: ${opts.session} moved ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, the session's own temp folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
   const own = join(real(dirname(abs)), basename(abs))
-  const whole = ended && own === ended
+  const temp = ownTempOf(own, opts.session, io.tmp ?? "/tmp")
+  const whole = (ended && own === ended) || temp
   const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
@@ -535,18 +547,22 @@ export function quarantine(
   })
   // A session's own folder over the tripwire is a plain no, matched at its own place and never at a symlink's target, so every other path keeps the alert.
   if (!opts.worktree && (files > cap.files || size > cap.bytes))
-    return ["scratch", "scratchpad"].some(
-      (dir) => own === join(real(join(roots.home, ".playground", dir)), opts.session),
-    )
+    return temp
       ? refused(
-          `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/) once you end`,
+          `${abs} holds over ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: it stays in place`,
         )
-      : refused(
-          carve
-            ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
-            : `${abs} holds over ${whole ? "" : `${LIMITS.files} files or `}${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
-          "tripwire",
-        )
+      : ["scratch", "scratchpad"].some(
+            (dir) => own === join(real(join(roots.home, ".playground", dir)), opts.session),
+          )
+        ? refused(
+            `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/) once you end`,
+          )
+        : refused(
+            carve
+              ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
+              : `${abs} holds over ${whole ? "" : `${LIMITS.files} files or `}${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+            "tripwire",
+          )
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
