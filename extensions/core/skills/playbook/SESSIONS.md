@@ -150,6 +150,7 @@ A sweep reads each agent's state from four places:
 - `ListAgents`: its row says whether the session is busy, idle or waiting, and its absence means the session is down.
 - `herdr pane list`, run in a pane on the session's server: the pane whose `label` is the session's name has `agent_status`, which reads `blocked` while the session waits on a person, `working` while it runs, and `idle` or `done` while it waits.
 - `herdr pane read <pane id> --source visible --lines 40` (raise `--lines` for more): what it waits on, a picker or a permission prompt; `visible` reads the screen as it shows now, where `recent` would scroll the session.
+  A session on another server, such as a probe on `playground-probes`, reads through `spawn.sh read <name> [session-id]`, since `no-raw-spawn` refuses a herdr call carrying `HERDR_SOCKET_PATH`: it prints the last 200 lines of the pane spawn.sh opened under that name, found as `spawn.sh close` finds it, and writes nothing.
 - the session-state record at `session-state/<session id>.json` in the data folder: its `state` reads `working`, `idle`, `stuck`, `failed` or `usage-limit`.
   The way from a session's name to its id: the `~/.claude/sessions/<pid>.json` file that names the session holds its `sessionId`.
   A `stuck` or `usage-limit` record goes stale once the transcript holds a newer turn (`stateNow()` in `packages/config/src/session-state.ts` reads it as over), so the positive check is the record reading `working` with `at` after the send.
