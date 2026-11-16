@@ -1239,7 +1239,7 @@ describe("clusterOf", () => {
       value: "3.5 on 40 cores",
     })
     expect(cluster.memory).toEqual({
-      detail: "94% free · pressure Normal here",
+      detail: "94% free · pressure Normal on machine-a",
       hover: "machine-a 12.0 GB of 128.0 GB + machine-b 4.0 GB of 128.0 GB",
       marker: null,
       value: "16.0 GB of 256.0 GB",
@@ -1328,7 +1328,7 @@ describe("systemReadings over a cluster", () => {
       "disk 7T green",
     ])
     expect(pick(report, "cpu").title).toBe(
-      "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores",
+      "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores, 5 min.",
     )
     expect(pick(report, "memory").title).toBe(
       "Memory 38% used\nspark-a566 50% + spark-9dfb 25% used",
@@ -1374,7 +1374,15 @@ describe("systemReadings over a cluster", () => {
     expect(pick(pressed, "memory")).toMatchObject({
       level: "amber",
       reasons: ["Memory pressure warn on spark-a566"],
+      state: "Memory pressure warn on spark-a566",
     })
+    const unread = spark("spark-9dfb", 10, 32, 0)
+    unread.reading!.memory.usedBytes = null
+    const halfRead = both(spark("spark-a566", 10, 64, 2), unread)
+    halfRead.memory.pressure = "warn"
+    expect(pick(halfRead, "memory").title).toBe(
+      "Memory; Memory pressure warn on spark-a566\nspark-a566 50% + spark-9dfb - used",
+    )
   })
 
   test("a peer that did not read is named with its reason and since when, beside 1 of 2 machines, and the sums keep the machine that read", () => {
@@ -1386,13 +1394,13 @@ describe("systemReadings over a cluster", () => {
     })
     const missing = `1 of 2 machines\nspark-9dfb unreachable since ${messageTime(since, new Date(NOW))}: ssh you@10.0.0.2 ran past 3s`
     expect(pick(report, "cpu")).toMatchObject({
-      title: `Load 10 on 20 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 cores\n${missing}`,
+      title: `Load 10 on 20 cores, 5 min., below the 0.8 a core warning level on each machine that read\nspark-a566 10 on 20 cores, 5 min.\n${missing}`,
       value: "10",
     })
     expect(pick(report, "memory").title).toEndWith(missing)
     expect(pick(report, "swap").title).toEndWith(missing)
     expect(pick(report, "disk")).toMatchObject({
-      title: `Disk 3470 GB free, above the 50 GB warning level on each machine\nspark-a566 3470 GB free\n${missing}`,
+      title: `Disk 3470 GB free, above the 50 GB warning level on each machine that read\nspark-a566 3470 GB free\n${missing}`,
       value: "3T",
     })
   })

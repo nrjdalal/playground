@@ -18,6 +18,7 @@ import {
   cleanupDeps,
   cleanWorktree,
 } from "../../../../scripts/ops/optimizer/auto_end"
+import { reapersOf } from "../orphan-reapers"
 import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
@@ -443,24 +444,36 @@ export const nightlyClean =
       }
       return out.length ? out.join("; ") : "none stale"
     })
-    // After the worktrees step, so a script left running in a worktree it trashed is read the same night, and with each parent-pid-1 process's working folder, so a test's child left under a removed sandbox is read too: TERM, then KILL past the grace, each by its own pid (the signal rule's orphan case).
+    // After the worktrees step, so a script left running in a worktree it trashed is read the same night, and with the working folder of each process a reaper adopted (pid 1, or the user's systemd --user above this one), so a test's child left under a removed sandbox is read too, ended only once the roster reads its session ended: TERM, then KILL past the grace, each by its own pid (the signal rule's orphan case).
     await step("orphans", async () => {
       const listed = await ctx.run(PS)
       if (listed.code !== 0) return "ps unreadable, none read"
       const procs = procsOf(listed.out)
+      const reapers = reapersOf(procs, process.pid)
       // lsof names the rest of the pids when one has exited since ps, so its output is read whatever its exit
-      const lone = procs.filter((p) => p.ppid === 1).map((p) => p.pid)
+      const lone = procs.filter((p) => reapers.has(p.ppid)).map((p) => p.pid)
       const cwds = lone.length ? cwdsOf((await ctx.run([...CWDS, lone.join(",")])).out) : new Map()
+      // an unreadable roster reads no session ended, so every sandbox orphan that names one is kept
+      const ended = await Bun.file(join(data, "roster.json"))
+        .json()
+        .then(
+          (r: { agents?: { name?: unknown; status?: unknown }[] }) =>
+            new Set((r.agents ?? []).filter((a) => a.status === "ended").map((a) => a.name)),
+          () => new Set<unknown>(),
+        )
       const found = orphansOf(
         procs.map((p) => ({ ...p, cwd: cwds.get(p.pid) })),
         join(main, ".claude", "worktrees"),
         existsSync,
+        reapers,
+        (name) => ended.has(name),
       )
       const said = await endOrphans(found, ctx.run, deps.sleep)
       removed.push(...said.ended)
       kept.push(...said.kept)
       const all = [...said.ended, ...said.kept]
-      return all.length ? all.join("; ") : "none"
+      // the reapers it read by, so a run started outside the user manager, which reads pid 1 alone, shows in the report
+      return `${all.length ? all.join("; ") : "none"} (reapers: ${[...reapers].join(",")})`
     })
     // Every other repo the factory works in: a worktree goes by git worktree remove, with no force flag, so git refuses a dirty tree, only when its PR merged or closed (or it has none, and every commit is on a branch a remote holds now, which unpushed reads live, or, with each remote read, archiveUnlanded has archived each one no remote holds under the data folder's scratchpad/archive), it holds no work but build output, and no live process or roster row has it; each kept one is named with why, and its branch stays, so git worktree add <path> <branch> brings it back.
     await step("other repos", async () => {
