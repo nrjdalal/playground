@@ -1249,11 +1249,10 @@ def slot_stuck(state, now_t):
     if now_t - sf["since"] < 120:
         return None
     can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, text=True, timeout=30)
-    # issue 1842: a standing battery or focus hold closes can-take on purpose, so the line names that hold, not a stall
-    hold = re.search(r"^run-slot\.sh: held by run-slot\.(battery|focus for (\S+))$", can.stderr, re.M)
+    # issue 1842: a standing focus hold closes can-take on purpose, so the line names that hold, not a stall
+    hold = re.search(r"^run-slot\.sh: held by run-slot\.focus for (\S+)$", can.stderr, re.M)
     if can.returncode != 0 and hold:
-        why = "the battery's red mark (run-slot.battery)" if hold.group(2) is None else f"{hold.group(2)}'s focus (run-slot.focus)"
-        line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, held by {why}, a hold, not a stall"
+        line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, held by {hold.group(1)}'s focus (run-slot.focus), a hold, not a stall"
         return {"at": now(), "kind": "slot-stuck", "case": "hold", "line": line, "name": first[2], "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sf["since"]))}
     if can.returncode != 0:
         # issue 1416: the units rule beside a free slot is as designed, so the alert only names it: the slot, the head's units, each holder's

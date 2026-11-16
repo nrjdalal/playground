@@ -6115,10 +6115,6 @@ var launchd = (name, job) => ({
 });
 var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
 var JOBS = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true }
-  }),
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
     cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
@@ -6207,6 +6203,7 @@ var JOBS = {
     schedule: { every: 300 }
   })
 };
+var RETIRED = ["ops-awake"];
 var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
 var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
   jobKey(name),
@@ -6219,7 +6216,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
-var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+var REGISTRY_KEYS = new Set([
+  ...Object.keys(JOBS).map(jobKey),
+  ...Object.values(OLD_KEYS).flat(),
+  ...RETIRED.map(jobKey)
+]);
 
 // scripts/hooks/codex.ts
 import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";

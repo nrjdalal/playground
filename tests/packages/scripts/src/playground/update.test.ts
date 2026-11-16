@@ -104,6 +104,34 @@ describe("runUpdate", () => {
     ])
   })
 
+  test("the brief refresh runs after link-skills with the commit the update started from, and its failure is logged while the update goes on (#2317)", async () => {
+    const { calls, run } = fakeRun({ "rev-parse": { out: "old\n" } })
+    const seen: { calls: number; old: string }[] = []
+    const briefs = async (old: string) => {
+      seen.push({ calls: calls.length, old })
+    }
+    expect(await runUpdate(repo, run, async () => 0, quiet, undefined, undefined, briefs)).toBe(0)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.old).toBe("old")
+    expect(calls[seen[0]!.calls - 1]).toEqual(["bash", `${repo}/scripts/link-skills.sh`])
+    const said: string[] = []
+    const failing = async () => {
+      throw new Error("a made-up git failure")
+    }
+    expect(
+      await runUpdate(
+        repo,
+        fakeRun().run,
+        async () => 0,
+        (l) => said.push(l),
+        undefined,
+        undefined,
+        failing,
+      ),
+    ).toBe(0)
+    expect(said).toContain("playground update: brief refresh failed: a made-up git failure")
+  })
+
   test("a merge that changed a skill names it and the folder in the checkout a live session reads it from; one that changed none says nothing of skills", async () => {
     const said: string[] = []
     const { run } = fakeRun({

@@ -9425,10 +9425,6 @@ var launchd = (name, job) => ({
 });
 var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
 var JOBS = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true }
-  }),
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
     cwd: "{dashboard}",
     description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
@@ -9517,6 +9513,7 @@ var JOBS = {
     schedule: { every: 300 }
   })
 };
+var RETIRED = ["ops-awake"];
 var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
 var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
   jobKey(name),
@@ -9529,7 +9526,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
-var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+var REGISTRY_KEYS = new Set([
+  ...Object.keys(JOBS).map(jobKey),
+  ...Object.values(OLD_KEYS).flat(),
+  ...RETIRED.map(jobKey)
+]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
 var factorySettings = defineSettings({
@@ -9669,16 +9670,6 @@ var pathsSettings = defineSettings({
 // packages/settings/src/rules.ts
 var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
-  "battery.alert": {
-    default: 5,
-    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
-    schema: percent
-  },
-  "battery.ask": {
-    default: 10,
-    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
-    schema: percent
-  },
   "clock.ownerZone": {
     default: "UTC",
     description: "The time zone, by its IANA name, a time shown to the owner reads in.",

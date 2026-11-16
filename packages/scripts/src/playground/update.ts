@@ -46,6 +46,7 @@ export const runUpdate = async (
   log: (line: string) => void = console.log,
   to?: string,
   done?: string,
+  briefs?: (old: string) => Promise<void>,
 ): Promise<number> => {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
   // a step whose output the terminal shows, named before it runs and again when it fails
@@ -204,6 +205,10 @@ export const runUpdate = async (
     ["bash", join(repo, "scripts", "link-skills.sh")],
   ]
   if (!(await shown(linkSkills))) return 1
+  // each manager's brief copy follows its template while unedited (brief-refresh.ts); a failure there is logged, never a reason to stop the update
+  await briefs?.(old).catch((error: Error) =>
+    log(`playground update: brief refresh failed: ${error.message}`),
+  )
   const changed = (await git("diff", "--name-only", old, "HEAD")).out.split("\n").filter(Boolean)
   const { build, install, skills } = updateSteps(changed)
   if (skills.length)
