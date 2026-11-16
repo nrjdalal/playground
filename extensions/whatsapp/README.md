@@ -17,7 +17,7 @@ A saved number shows by its last 4 digits alone, and an empty field keeps it; th
 ## Photos and voice notes
 
 A photo or voice note you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with the photo's caption or the note's words; it stays out of the attachments folder.
-Voice notes are read as text on this Mac by whisper.cpp: `brew install whisper-cpp ffmpeg`, then put a ggml model at `<data>/wa/whisper-model.bin` (`playground doctor` lists `whisper-cli` as optional).
+Voice notes are read as text on this machine by whisper.cpp: `brew install whisper-cpp ffmpeg` (on Linux, build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and install your distro's `ffmpeg`), then put a ggml model at `<data>/wa/whisper-model.bin` (`playground doctor` lists `whisper-cli` as optional).
 Without them a voice note reaches the dispatcher as not transcribed, with its path.
 
 ## Inbox cards on WhatsApp
