@@ -67,7 +67,6 @@ const iconTints = (html: string) =>
   iconTags(html).map((tag) =>
     [...classesOf(tag)].find((t) => /^text-(success|caution|destructive|inactive)$/.test(t)),
   )
-const itemTag = (html: string) => /<li [^>]*>/.exec(html)?.[0] ?? ""
 const srText = (html: string) =>
   [...html.matchAll(/<span class="sr-only">(.*?)<\/span>/g)].map(([, text]) => text).join(" ")
 const readingTints = (html: string) =>
@@ -663,16 +662,28 @@ describe("Playground's row", () => {
 
 // The header's readings sum the cluster as the System table does, so the owner's two 20-core machines read on 40 cores (#2425).
 describe("headerIcons over a cluster", () => {
-  const spark = (name: string) => ({
+  const spark = (name: string, diskFree = 30) => ({
     down: null,
     name,
     reading: {
       cores: 20,
+      disk: { freeBytes: diskFree * 1024 ** 3, totalBytes: 3755 * 1024 ** 3 },
       load: [10, 10, 10] as [number, number, number],
       memory: { totalBytes: 128 * 1024 ** 3, usedBytes: 64 * 1024 ** 3 },
       swap: { totalBytes: 16 * 1024 ** 3, usedBytes: 0 },
     },
   })
+  test("the disk icon shows the cluster's free space, orange on its fullest machine, which its hover names beside each machine's part", () => {
+    const read = fresh((r) => {
+      r.machines = [spark("spark-a566", 3470), spark("spark-9dfb", 30)]
+    })
+    const disk = icons(read).icons.find((i) => i.key === "disk")!
+    expect(disk.value).toBe("3T")
+    expect(disk.hover).toBe(
+      "Disk 3500 GB free; spark-9dfb disk 30 GB free, under the 50 GB warning level\nspark-a566 3470 + spark-9dfb 30 GB free",
+    )
+  })
+
   test("the load icon's number and hover are both machines', each named", () => {
     const read = fresh((r) => {
       r.machines = [spark("spark-a566"), spark("spark-9dfb")]

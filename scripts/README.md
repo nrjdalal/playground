@@ -66,7 +66,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--model <id>` picks the Claude model for a start or a resume, one of the `models.claude` setting, else `models.default` (the docs list each key and its default).
   It is refused for any other id, an empty or missing value, on GLM, which maps every model itself, and for a reviewer or tester (a column of either, or a resume of a `reviewer-` or `tester-` session) on anything but `models.checker`, which a checker runs on with no `--model`,
   since its verdict gates a merge; nothing records it, so a resume takes it afresh and one with no `--model` runs on `models.default`.
-  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore or close.
+  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore, close or read.
   The resume record keeps an effort other than high on its exec line, so a restore runs at the same effort, and a resume with no `--effort` runs at high.
   `--title "<title>"` gives a start the plain title the sidebar reads it by, up to 40 characters: a `worker` is refused without one, and a reviewer's or tester's column with none takes `Review: ` or `Test: ` before its worker's roster title, keeps the title its row already holds, or is refused.
   A probe keeps its words-only default and a new runner takes its name, and every other mode refuses it, a resume, a close and a restore included.
@@ -76,7 +76,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--memory <dir>` turns Claude Code's auto-memory on for that one start or resume, writing to `<dir>`, whatever the session's role.
   Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>` (beside the Agent and Workflow deny, for a dispatcher or a lead), so the shared file every other launch reads stays as it is.
   `--memory off` keeps it off for that one start or resume, on the shared settings file, whatever arm the role or the row would take.
-  It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore or close.
+  It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore, close or read.
   Without either, each start takes the auto-memory trial's arm by its role ([ADR 0022](../.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)): on for the dispatcher and the builder, ops and planner leads in the data folder's `memory/<kind>/`, on for every second fresh worker start in `memory/worker-b/`, and off for every other session.
   A resume keeps its roster row's `memory=on` or `memory=off`, which every start records.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
@@ -87,6 +87,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `spawn.sh probe` (in herdr alone) opens a probe in a herdr workspace of its own, for a server with no pane to split beside, and a herdr refusal quotes herdr's own error.
   A probe alone takes `--remote-control <name>`, which passes Claude Code's own flag, and `--ssh <user@host> --key <file>`, which runs its claude on that machine under `ssh -tt` from its pane here, its settings and skills copied first into one new remote folder;
   every other mode refuses both, naming the flag and the mode, and `spawn.sh restore` leaves such a probe down (playbook's SPAWN.md, --remote-control and --ssh).
+  Before its pane opens, a sandboxed start (a probe, `--sandbox`, or a resume of a row recording it) reads its machine, an `--ssh` probe's over one more `ssh` under the launch's PATH and any other's here, and refuses, installing nothing, when Linux's sandbox lacks `bwrap` or `socat` or its `bwrap --ro-bind / / --unshare-net true` fails (Ubuntu 24.04's AppArmor),
+  or when the `--ssh` machine's `~/.claude.json` lacks `"hasCompletedOnboarding": true`.
   `--runtime herdr` opens the session in herdr: on the playground server under `~/.playground/herdr`, by the binary its `pin.json` names, refused when that file's sha256 or `--version` differs or the server is not running; a workspace labelled with the name, or for a column a split right of the herdr pane it names (its spawner's own is `$HERDR_PANE_ID`);
   the pane labelled with the name, since herdr clears an agent's name after every turn while a label survives a restart (measured);
   Claude's folder trust and MCP picker answered (the picker by enabling its servers, when `~/.mcp.json` alone defines them) only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; names of at most 32 characters.
@@ -110,6 +112,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   a session whose start stopped before its runtime pin closes too while its record stands and one pane carries the label, its pin written as herdr first, and its refusals for a missing record, no pane or two panes name the missing pin;
   it ends the session's roster row just before the pane closes, so a restore whose resume finds the session gone reads ended and skips it, and puts the old status back when herdr refuses the close, a parked row with its hold; a resume or a new start of that name sets the row back to starting.
   Once the pane closes it keeps the time and the row's status in the data folder's `closes/<name>`, for a just-closed resume's pass (playbook's SPAWN.md, Capacity gate).
+  `spawn.sh read <name> [session id]` prints the last 200 lines of that same pane, found and refused as close finds it, on its server's own socket, and writes nothing, so a session reads a probe on `playground-probes`, which `no-raw-spawn` keeps a plain herdr read off.
   `scripts/hooks/no-raw-spawn.ts`, run on Bash by [guards](hooks/README.md#guards), refuses every cmux call but `cmux --help`, `-h`, `--version` or `version` alone, cmux by its name in any case (macOS's filesystem ignores case, so `CMUX` runs it), by any path or behind `env`, since every session runs in herdr and no factory session calls cmux;
   a program it cannot read followed by one of cmux's session commands (`agent`, `fork`, `new-split`, `restore`, `surface` and the rest of `HEADS`) is refused as cmux, and so is a call it cannot parse that names cmux beside `claude`, `fork`, `restore` or another session word;
   and a `claude --resume`, `-r`, `--continue` or `-c` before any `--`, claude named in any case, naming the script.

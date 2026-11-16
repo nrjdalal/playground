@@ -268,7 +268,7 @@ var isRecord = (value) => typeof value === "object" && value !== null && !Array.
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "async_hooks";
-import { lstatSync, readdirSync, readFileSync as readFileSync2, realpathSync, statSync } from "fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "fs";
 import { homedir as homedir2 } from "os";
 import { basename, dirname as dirname2, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
@@ -362,32 +362,21 @@ var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
   busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
-  chrt: [
-    "-a -b -d -e -f -i -m -o -p -R -r -v --all-tasks --batch --deadline --ext --fifo --idle --max --other --pid --reset-on-fork --rr --verbose",
-    "-D -P -T --sched-deadline --sched-period --sched-runtime"
-  ],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
   env: ["-0 -i -v --debug --ignore-environment --null", "-P -S -u --unset"],
   exec: ["-c -l", "-a"],
-  flock: [
-    "-F -n -o -s -u -x --close --exclusive --fcntl --nb --no-fork --nonblocking --shared --unlock --verbose",
-    "-E -w --conflict-exit-code --length --start --timeout --wait"
-  ],
-  ionice: ["-t --ignore", "-c -n -P -p -u --class --classdata --pgid --pid --uid"],
   nice: ["", "-n --adjustment"],
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
   pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
-  setsid: ["-c -f -w --ctty --fork --wait", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
     "-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version",
     "-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user"
   ],
-  taskset: ["-a -c -p --all-tasks --cpu-list --pid", ""],
   time: [
     "-a -h -l -p -q -V -v --append --portability --quiet --verbose",
     "-f -o --format --output"
@@ -401,66 +390,6 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
-var runner = (flags, values, more = {}) => ({
-  flags: new Set(flags.split(" ")),
-  joined: more.always ?? new Set(more.joined?.split(" ")),
-  script: new Set(more.script?.split(" ")),
-  spec: !!more.spec,
-  tools: !!more.tools,
-  values: new Set(values.split(" "))
-});
-var NPM = runner("-y --dangerously-allow-all-scripts --include-workspace-root --no --strict-allow-scripts --workspaces --yes", "-c -w --allow-scripts --call --package --workspace", { script: "-c --call", spec: true });
-var BUNX = runner("--bun --ignore-scripts --no-install --silent --trust --verbose", "-p --ca --cafile --cwd --env-file --minimum-release-age --package --registry", { spec: true });
-var PNPM_FLAGS = "-c -r -w -y --aggregate-output --color --fail-if-no-match --ignore-workspace --include-workspace-root --no-fail-if-no-match --no-include-workspace-root --no-progress --no-sort --parallel --recursive --reverse --shell-mode --sort --stream --use-stderr --workspace-root --yes";
-var PNPM_VALUES = "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages";
-var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { joined: "-c --shell-mode", spec: true });
-var MISE = runner("--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all", "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets", { script: "-c --command", tools: true });
-var BUN_FLAGS = "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces";
-var BUN_VALUES = "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell";
-var DENO = runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true });
-var RUNNERS = new Map([
-  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true })],
-  ["bun run", runner(BUN_FLAGS, BUN_VALUES)],
-  ["bun x", BUNX],
-  ["bunx", BUNX],
-  ["corepack", runner("", "", { spec: true })],
-  ["deno run", DENO],
-  ["deno x", DENO],
-  ["mise exec", MISE],
-  ["mise x", MISE],
-  ["npm exec", NPM],
-  ["npm x", NPM],
-  ["npx", NPM],
-  ["pnpm dlx", PNPM_DLX],
-  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { joined: "-c --shell-mode" })],
-  ["pnpx", PNPM_DLX],
-  ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
-  ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
-  ["yarn exec", runner("", "", { always: true })]
-]);
-var MANAGERS = new Map([
-  ["bun", "bun run"],
-  ["deno", "deno run"],
-  ["mise", "mise exec"],
-  ["npm", "npm exec"],
-  ["pnpm", "pnpm exec"],
-  ["volta", "volta run"],
-  ["yarn", "yarn dlx"]
-]);
-var SCOPES = new Map([
-  ["yarn workspace", { names: 1, options: { flags: new Set, values: new Set } }],
-  [
-    "yarn workspaces foreach",
-    {
-      names: 0,
-      options: {
-        flags: new Set("-A -i -n -p -R -t -v -W --all --dry-run --interlaced --no-private --parallel --recursive --topological --topological-dev --verbose --worktree".split(" ")),
-        values: new Set("-j --exclude --from --include --jobs".split(" "))
-      }
-    }
-  ]
-]);
-var PNPM_COMMANDS = new Set("access add adduser approve approve-builds audit bin bugs c cache cat-file cat-index change ci clean clean-install completion config create dedupe deploy deprecate dislink dist-tag dist-tags dlx docs doctor edit env exec fetch find find-hash fund get help home i ic ignored-builds import info init install install-clean install-test issues it la lane licences licenses link list ll ln login logout ls m multi outdated owner owners pack pack-app patch patch-commit patch-remove peers permissions ping pipeline pkg prefix profile prune publish purge rb rebuild recursive remove repo restart rm root rt run run-script runtime s sbom se search self-update set set-script setup shim show ss stage star stars start stop store t tasks team test token tst un undeprecate uni uninstall unlink unpublish unstar up update upgrade v version view whoami why with xmas".split(" "));
 function caseOpener(cmd) {
   const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
   const before = cmd.words.slice(0, Math.max(at, 0));
@@ -595,7 +524,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -613,6 +542,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -784,8 +715,7 @@ function bodyOf(commands, k) {
   }
   return [];
 }
-var COUNTED = new Set(["flock", "repeat", "taskset", "timeout"]);
-var REPEATS = new Set(["repeat", "timeout"]);
+var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
@@ -840,6 +770,7 @@ var CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -1797,7 +1728,6 @@ function unwrap(state, inside, budget) {
       xargs: state.xargs && { ...state.xargs }
     }, wrapper, budget));
   };
-  let spec = false;
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       const word = peek();
@@ -1821,17 +1751,11 @@ function unwrap(state, inside, budget) {
         state.xargs ??= {};
       take();
     }
-    const runs = RUNNERS.get(wrapper);
-    const options = WRAPPERS.get(wrapper) ?? runs;
-    spec = !!runs?.spec;
-    let joined = runs?.joined === true;
+    const options = WRAPPERS.get(wrapper);
     for (let w = peek();w; w = peek()) {
       const v = w.value;
-      const script = runs && namedOption(v, runs, runs.script);
       if (wrapper === "xargs")
         xargsOption(state.xargs ??= {}, w, next(), state);
-      if (runs && runs.joined !== true && joinsWords(v, runs.joined))
-        joined = true;
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1858,12 +1782,6 @@ function unwrap(state, inside, budget) {
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
-      } else if (script !== undefined) {
-        take();
-        const text = script === -1 ? take() : slice(w, script);
-        if (text)
-          rest.push(text, ...SH_C);
-        break;
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -1878,32 +1796,16 @@ function unwrap(state, inside, budget) {
           fork(wrapper, 3);
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1));
-      } else if (runs?.tools && rest.some((r) => !r.quoted && r.value === "--"))
-        take();
-      else
+      } else
         break;
-    }
-    if (joined && rest.length > 0) {
-      const text = rest.toReversed().map((r) => r.value).join(" ");
-      rest.length = 0;
-      rest.push({ quoted: true, value: text }, ...SH_C);
     }
     if (COUNTED.has(wrapper))
       take();
-    if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? ""))
-      take();
-    if (wrapper === "flock" && !peek()?.quoted && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
-      take();
-      const text = take();
-      if (text)
-        rest.push(text, ...SH_C);
-    }
     if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted)
       take();
   }
-  const typed = take();
-  const first = spec && typed ? packageName(typed) : typed;
-  const parsed = {
+  const first = take();
+  return {
     also,
     args: rest.reverse(),
     chdir: state.chdir,
@@ -1912,140 +1814,6 @@ function unwrap(state, inside, budget) {
     name: first ? program(first.value) : "",
     xargs: state.xargs
   };
-  const via = viaRunner(parsed, state, budget);
-  if (via)
-    also.push(via);
-  return parsed;
-}
-var SH_C = [
-  { quoted: false, value: "-c" },
-  { quoted: false, value: "sh" }
-];
-var FLOCK_SCRIPT = new Set(["-c", "--command"]);
-function namedOption(v, { values }, names) {
-  if (!v.startsWith("-") || v === "-" || v === "--")
-    return;
-  if (v.startsWith("--")) {
-    const eq = v.indexOf("=");
-    if (!names.has(eq === -1 ? v : v.slice(0, eq)))
-      return;
-    return eq === -1 ? -1 : eq + 1;
-  }
-  for (let k = 1;k < v.length; k++) {
-    const option = `-${v[k]}`;
-    if (values.has(option))
-      return names.has(option) ? k === v.length - 1 ? -1 : k + 1 : undefined;
-  }
-}
-function joinsWords(v, joined) {
-  if (v.startsWith("--"))
-    return joined.has(v.split("=")[0]);
-  return v.startsWith("-") && [...v.slice(1)].some((letter) => joined.has(`-${letter}`));
-}
-function packageName(word) {
-  const from = word.value.startsWith("npm:") ? 4 : 0;
-  const name = word.value.slice(from).replace(/(?<=.)@[^@/]*$/, "");
-  if (from === 0 && name === word.value)
-    return word;
-  const cut = slice(word, from);
-  return { ...cut, source: word.source === word.value ? name : word.source, value: name };
-}
-function subcommandAt(manager, args, options) {
-  for (let k = 0;k < args.length; k++) {
-    const v = args[k].value;
-    if (!v.startsWith("-") || v === "-" || v === "--")
-      return k;
-    const end = optionValue(v, options);
-    if (end === "next")
-      k++;
-    else if (end === undefined && !RUNNERS.has(`${manager} ${args[k + 1]?.value}`) && RUNNERS.has(`${manager} ${args[k + 2]?.value}`))
-      k++;
-  }
-  return args.length;
-}
-function viaRunner(parsed, state, budget) {
-  const { args, name } = parsed;
-  let key = RUNNERS.has(name) ? name : undefined;
-  let words = args;
-  let implicit = false;
-  const manager = MANAGERS.get(name);
-  if (!key && manager) {
-    let at = subcommandAt(name, args, RUNNERS.get(manager));
-    const from = at;
-    for (let scope = scopeAt(name, args, at);scope; scope = scopeAt(name, args, at)) {
-      const after = at + scope.words + scope.names;
-      at = after + subcommandAt(name, args.slice(after), scope.options);
-    }
-    const sub = args[at]?.value;
-    if (sub === undefined)
-      return;
-    if (RUNNERS.has(`${name} ${sub}`)) {
-      key = `${name} ${sub}`;
-      words = args.toSpliced(from, at + 1 - from);
-    } else if (name === "pnpm" && !PNPM_COMMANDS.has(sub) || name === "deno" && sub.startsWith("npm:")) {
-      key = manager;
-      implicit = true;
-    }
-  }
-  if (!key)
-    return;
-  tick();
-  if (budget.left-- <= 0) {
-    budget.capped = true;
-    return;
-  }
-  const reading = unwrap({
-    chdir: parsed.chdir,
-    local: new Map(parsed.local),
-    moved: state.moved,
-    rest: words.toReversed(),
-    xargs: parsed.xargs && { ...parsed.xargs }
-  }, key, budget);
-  if (!reading.first)
-    return;
-  const file = reading.first.value;
-  if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file)))
-    return;
-  if (key === "deno run" && words.includes(reading.first))
-    return;
-  return { ...reading, via: implicit ? name : key };
-}
-var SCRIPT_FILE = /\.[cm]?[jt]sx?$/;
-function scopeAt(name, args, at) {
-  const two = `${name} ${args[at]?.value} ${args[at + 1]?.value}`;
-  const one = `${name} ${args[at]?.value}`;
-  const scope = SCOPES.get(two) ?? SCOPES.get(one);
-  return scope && { ...scope, words: SCOPES.has(two) ? 2 : 1 };
-}
-function runsScript({ first, via }, env) {
-  if (via !== "bun run" && via !== "pnpm")
-    return false;
-  const name = first?.value;
-  const unsure = env.cwdUnread || env.cwdAnywhere || (env.cwdMaybe?.length ?? 0) > 0;
-  const start = env.cwdSure ?? (unsure ? undefined : env.cwd);
-  if (!name || marked(name) || !start)
-    return false;
-  for (let dir = start;; dir = dirname2(dir)) {
-    const scripts = packageScripts(`${dir}/package.json`);
-    if (scripts)
-      return Object.hasOwn(scripts, name);
-    if (dirname2(dir) === dir)
-      return false;
-  }
-}
-function packageScripts(path) {
-  let text;
-  try {
-    text = readFileSync2(path, "utf8");
-  } catch {
-    return;
-  }
-  try {
-    const scripts = JSON.parse(text).scripts;
-    return scripts && typeof scripts === "object" ? scripts : {};
-  } catch {
-    return {};
-  }
 }
 function slotWords({ args, name }) {
   if (name !== "run-slot.sh")
@@ -2652,8 +2420,6 @@ async function examine(cmd, env, visit, builtins) {
   if (verdict)
     return verdict;
   for (const parsed of others) {
-    if (runsScript(parsed, before))
-      continue;
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins);
     if (verdict)
       return verdict;
@@ -3056,7 +2822,7 @@ var throughBuiltin = (cmd, { first }) => {
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
   return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
-var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && REPEATS.has(program(w.value)));
+var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
   ...env.cwdSure === undefined ? [] : [env.cwdSure],
   ...env.cwdMaybe ?? []
@@ -3280,6 +3046,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -3298,6 +3077,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;
@@ -3853,7 +3634,7 @@ function quotedParts(code) {
   }
   return { outside, strings };
 }
-var RUNNERS2 = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xargs"]);
+var RUNNERS = new Set([...LAUNCHERS, ...SHELLS, "command", "exec", "time", "xargs"]);
 async function runsTool(line) {
   try {
     const env = { cwd: undefined, files: new Map, known: {}, process: {}, vars: new Map };
@@ -3872,7 +3653,7 @@ async function prose(text) {
     if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-"))
       return false;
     const last = word.replace(/[,:.]+$/, "").split(/[^\w.-]/).pop() ?? "";
-    if (RUNNERS2.has(last.toLowerCase()))
+    if (RUNNERS.has(last.toLowerCase()))
       return false;
   }
   return !await runsTool(text);
@@ -4201,7 +3982,7 @@ import {
   existsSync as existsSync4,
   mkdirSync,
   readdirSync as readdirSync2,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync2,
   renameSync,
   rmdirSync,
   rmSync,
@@ -4288,7 +4069,7 @@ function remotes(cwd) {
 
 // scripts/hooks/no-playground-leak.ts
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "async_hooks";
-import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
+import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync3, statSync as statSync3 } from "fs";
 import { basename as basename3, join as join9 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -10843,7 +10624,6 @@ var pathsSettings = defineSettings({
   }
 });
 // packages/settings/src/rules.ts
-var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
   "clock.ownerZone": {
     default: "UTC",
@@ -11761,7 +11541,7 @@ function rosterNames(environment) {
   try {
     if (statSync3(path).size > MAX_ROSTER_BYTES)
       return [];
-    const agents = JSON.parse(readFileSync4(path, "utf8"))?.agents;
+    const agents = JSON.parse(readFileSync3(path, "utf8"))?.agents;
     if (!Array.isArray(agents))
       return [];
     return agents.flatMap((a) => {
@@ -13140,7 +12920,7 @@ async function eachInput(raw, guard, judge) {
 }
 
 // scripts/hooks/no-main-checkout.ts
-import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync5, realpathSync as realpathSync3 } from "fs";
+import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync4, realpathSync as realpathSync3 } from "fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute4, join as join11, normalize, resolve as resolve6, sep } from "path";
 
 // scripts/hooks/steady.ts
@@ -13708,7 +13488,7 @@ function heldVars(env, steady, raw) {
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout2(dir) {
   try {
-    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync5(join11(dir, ".git"), "utf8"))?.[1];
+    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync4(join11(dir, ".git"), "utf8"))?.[1];
     const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve6(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
@@ -13730,9 +13510,9 @@ function liveCheckout(main, environment) {
   }
   for (const name of names) {
     try {
-      if (readFileSync5(join11(worktrees, name, "HEAD"), "utf8").trim() !== head)
+      if (readFileSync4(join11(worktrees, name, "HEAD"), "utf8").trim() !== head)
         continue;
-      return dirname4(resolve6(join11(worktrees, name), readFileSync5(join11(worktrees, name, "gitdir"), "utf8").trim()));
+      return dirname4(resolve6(join11(worktrees, name), readFileSync4(join11(worktrees, name, "gitdir"), "utf8").trim()));
     } catch {}
   }
 }
@@ -13788,7 +13568,7 @@ var UNKNOWN_FIX = "the hook cannot tell which folder it runs in, since a cd befo
 var ANYWHERE_FIX = "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path.";
 var fixFor2 = (sure, own = INSTEAD2) => sure ? own : UNKNOWN_FIX;
 var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
-var RUNNERS3 = new Set(["npx"]);
+var RUNNERS2 = new Set(["npx"]);
 var X = { quoted: false, value: "x" };
 var TOOLS = new Set(["lefthook", "turbo"]);
 var DUPLICATE = /^(?:\d+|-)$/;
@@ -13978,7 +13758,7 @@ function toolWords(tools, name, args, env) {
   const named = (word) => tools.includes(toolName(word));
   if (tools.includes(name))
     return args;
-  if (RUNNERS3.has(name) || name === "bunx")
+  if (RUNNERS2.has(name) || name === "bunx")
     return runnerTool(named, args);
   if (name !== "bun")
     return;
@@ -14105,7 +13885,7 @@ function runs(name, args, local, env) {
   }
   if (TOOLS.has(name))
     return { cwd: cwdFlag(args, env), what: name };
-  if (RUNNERS3.has(name)) {
+  if (RUNNERS2.has(name)) {
     const tool = [toolName(args[runnerTarget(args)]?.value), ...packagedTools(args)].find((t) => TOOLS.has(t));
     if (tool)
       return { cwd: cwdFlag(args, env), what: `${name} ${tool}` };
@@ -14418,6 +14198,7 @@ var READERS2 = new Set([
   "[",
   "cat",
   "cmp",
+  "df",
   "diff",
   "grep",
   "head",
@@ -14608,7 +14389,7 @@ var TAKES2 = new Set([
   "-w",
   "--workspace"
 ]);
-var RUNNERS4 = new Set(["bun", "npm", "pnpm", "yarn"]);
+var RUNNERS3 = new Set(["bun", "npm", "pnpm", "yarn"]);
 var EXECS = new Set(["bunx", "npx", "pnpx"]);
 var TEST_BINS = new Set(["jest", "vitest"]);
 var PY_TOOLS = new Set(["pytest", "ruff", "ty"]);
@@ -14665,7 +14446,7 @@ function runsTests(cmd) {
   const [sub = "", next = ""] = positionals(args);
   if (EXECS.has(name))
     return TEST_BINS.has(program(sub));
-  if (!RUNNERS4.has(name))
+  if (!RUNNERS3.has(name))
     return false;
   if (sub === "run" || sub === "run-script")
     return TEST_SCRIPT.test(next);
@@ -14765,7 +14546,7 @@ if (false) {}
 import {
   existsSync as existsSync8,
   readdirSync as readdirSync5,
-  readFileSync as readFileSync6,
+  readFileSync as readFileSync5,
   readlinkSync,
   realpathSync as realpathSync4,
   statSync as statSync4
@@ -15229,7 +15010,7 @@ var ORG_SCRIPT_DIRS = [
     "the DM sender, which posts to the owner's chat"
   ]
 ];
-var RUNNERS5 = new Set([
+var RUNNERS4 = new Set([
   "bash",
   "bun",
   "bunx",
@@ -15245,11 +15026,11 @@ var RUNNERS5 = new Set([
 ]);
 var RUNNER_DIR = /^(?:--cwd|--dir|--prefix|-C)(?:=|$)/;
 var scriptDir = (path) => path === undefined ? undefined : ORG_SCRIPT_DIRS.find(([at]) => at.test(path))?.[1];
-function packageScripts2(dir) {
+function packageScripts(dir) {
   const found = new Map;
   for (let at = dir;; at = dirname6(at)) {
     try {
-      const { scripts } = JSON.parse(readFileSync6(join14(at, "package.json"), "utf8"));
+      const { scripts } = JSON.parse(readFileSync5(join14(at, "package.json"), "utf8"));
       for (const [name, command] of Object.entries(scripts ?? {}))
         if (!found.has(name) && typeof command === "string")
           found.set(name, { at, command });
@@ -15275,7 +15056,7 @@ function orgScript(parsed, env) {
   }
   if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
     return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` };
-  if (!RUNNERS5.has(name))
+  if (!RUNNERS4.has(name))
     return;
   let at = env.cwd;
   for (let i = 0;i < args.length; i++) {
@@ -15291,7 +15072,7 @@ function orgScript(parsed, env) {
       why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names"
     };
   at = realOf2(at);
-  const scripts = packageScripts2(at);
+  const scripts = packageScripts(at);
   for (const a of args) {
     if (a.value.startsWith("-") || unreadValue(a))
       continue;
@@ -16325,12 +16106,10 @@ if (false) {}
 // scripts/hooks/no-hidden-program.ts
 var changedIn = (command) => new Set([...PLAIN_PREFIXES].filter((name) => new RegExp(`(?:^|[\\s;&|(){}])${name}\\+=|\\$\\{${name}:{0,2}=`).test(command)));
 var NUMERIC_RANGE = /<\d*-\d*>/;
-var visitOf = (changed) => async (cmd, { first, via }, at) => {
+var visitOf = (changed) => async (cmd, { first }, at) => {
   const typed = first?.source ?? first?.value;
   const primary = parse(cmd).first;
-  if (!first || cmd.casePattern)
-    return;
-  if (!via && typed !== (primary?.source ?? primary?.value))
+  if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value))
     return;
   if (plainProgram(first, at, changed))
     return;
@@ -16758,12 +16537,12 @@ if (false) {}
 import { join as join17 } from "path";
 
 // api/hono/src/lib/dev/proxy.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync7, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
+import { existsSync as existsSync9, mkdirSync as mkdirSync3, readFileSync as readFileSync6, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "fs";
 import { homedir as homedir4 } from "os";
 import { basename as basename7, dirname as dirname8, join as join16 } from "path";
 var serving = (dir) => {
   try {
-    const pid = Number(readFileSync7(join16(dir, "proxy.pid"), "utf8").trim());
+    const pid = Number(readFileSync6(join16(dir, "proxy.pid"), "utf8").trim());
     if (!(pid > 0))
       return false;
     process.kill(pid, 0);
@@ -17559,7 +17338,7 @@ async function check18(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
+import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync7, realpathSync as realpathSync5 } from "fs";
 import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
@@ -17984,11 +17763,14 @@ async function check19(raw, environment = process.env, lookup = live2(environmen
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
-  const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
+  const child = Bun.spawn(argv, { stderr: "pipe", stdout: "pipe" });
   const timer = setTimeout(() => child.kill(), 5000);
   try {
-    const text = await new Response(child.stdout).text();
-    return await child.exited === 0 ? text.trim() : undefined;
+    const [text, error] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ]);
+    return await child.exited === 0 ? { error, text: text.trim() } : { error };
   } finally {
     clearTimeout(timer);
   }
@@ -17996,7 +17778,7 @@ async function output(argv) {
 var isPr = (read) => typeof read === "object" && read !== null && ["author", "owner", "ownerType"].every((key) => typeof read[key] === "string");
 var firstLine = (script) => {
   try {
-    return readFileSync8(script, "utf8").split(`
+    return readFileSync7(script, "utf8").split(`
 `, 1)[0];
   } catch {
     return;
@@ -18059,7 +17841,9 @@ function live2(environment) {
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";
-      const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq]);
+      const argv = ["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq];
+      const once = await output(argv);
+      const text = once.text ?? (/HTTP 4\d\d/.test(once.error) ? undefined : (await Bun.sleep(1000).then(() => output(argv))).text);
       let read;
       try {
         read = text ? JSON.parse(text) : undefined;
@@ -18347,15 +18131,25 @@ var DATA = new Set([
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
 var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && browserEval(args);
+var BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"]);
+var BROWSER_VALUES = new Set(["--args", "--session"]);
 var browserEval = (args) => {
-  const at = args[0]?.value === "--session" ? 2 : args[0]?.value.startsWith("--session=") ? 1 : 0;
-  return args[at]?.value === "eval";
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "eval")
+      return true;
+    const [name, attached] = value.split(/=(.*)/s);
+    const own = BROWSER_VALUES.has(name) ? attached ?? args[++k]?.value : undefined;
+    if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own)))
+      return false;
+  }
+  return false;
 };
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
 var DELETER_PROGRAMS = new Set([...DEL, "rimraf"]);
-var RUNNERS6 = new Map([
+var RUNNERS5 = new Map([
   ["bun", ["x"]],
   ["bunx", []],
   ["npm", ["exec", "x"]],
@@ -18380,7 +18174,7 @@ var JUDGED = new Set([
   "rsync"
 ]);
 function packageOf(name, args) {
-  const subs = RUNNERS6.get(name);
+  const subs = RUNNERS5.get(name);
   if (!subs)
     return;
   const words = args.filter((a) => !a.value.startsWith("-"));
@@ -18398,7 +18192,7 @@ var RUNS2 = {
 var QUEUES = new Set(["at", "batch"]);
 var unversioned = (name) => name.replace(/(?<=.)@[^@/]*$/, "");
 var ATTACHED2 = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
-var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
+var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[dfiIPRrvWx]*[rR][dfiIPRrvWx]*$/.test(v);
 var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive3(part));
 var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test(word.value);
 var prefixOf = (v, option, shortest) => v.length >= shortest && option.startsWith(v);
@@ -18487,6 +18281,8 @@ async function inspect16(raw, environment) {
   const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const line = (text, at) => run2(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
+    if (cmd.casePattern)
+      return;
     const { args, name } = parsed;
     const verdict = await judge(cmd, parsed, at, reach);
     if (verdict)
@@ -19140,9 +18936,9 @@ function judgeApi2(rest, flags, built) {
 }
 var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
 var STEP_HELP = new Set(["--help", "-h"]);
-var RUNNERS7 = new Set(["npm", "pnpm", "yarn"]);
+var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
 function yardStep(name, args, shell) {
-  if (RUNNERS7.has(name))
+  if (RUNNERS6.has(name))
     return args.some((a) => a.value === "ship:yard");
   if (name !== "bun")
     return false;
@@ -19862,7 +19658,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS8 = new Set(["bunx", "npx"]);
+var RUNNERS7 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -19956,7 +19752,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS8.has(name)) {
+  if (RUNNERS7.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;

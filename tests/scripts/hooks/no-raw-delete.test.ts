@@ -207,6 +207,9 @@ describe("agent-browser eval's script is JavaScript, never a shell command line 
     "agent-browser --session=t eval 'a?.b ?? 1'",
     "agent-browser --session t open http://x.localhost && agent-browser --session t eval 'a?.b ?? 1'",
     "agent-browser --session t eval 'document.title'",
+    // #2320: --args' launch flags holding no blank, --ignore-https-errors and --json before eval too
+    `agent-browser --args "--no-sandbox,--mute-audio" --session t --ignore-https-errors eval 'a?.b ?? 1'`,
+    "agent-browser --args=--no-sandbox --json eval 'a?.b ?? 1'",
   ])("%s runs", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
@@ -217,8 +220,9 @@ describe("agent-browser eval's script is JavaScript, never a shell command line 
     "agent-browser eval 'a?.b ?? 1' && r? -rf x",
     `agent-browser eval "$(rm -rf ${NEVER_MADE})"`,
     `agent-browser rm -rf ${NEVER_MADE}`,
-    // #1887: another option before eval, a session name and no eval, and a substitution in the session's script
-    "agent-browser --json eval 'a?.b ?? 1'",
+    // #1887: another option before eval, a session name and no eval, and a substitution in the session's script; #2320: --args' launch flags holding a blank
+    "agent-browser --profile p eval 'a?.b ?? 1'",
+    `agent-browser --args "--renderer-cmd-prefix=r? -rf x" eval 'a?.b ?? 1'`,
     `agent-browser --session t rm -rf ${NEVER_MADE}`,
     `agent-browser --session t eval "$(rm -rf ${NEVER_MADE})"`,
   ])("%s is still refused", async (command) => {

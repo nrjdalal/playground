@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
@@ -136,6 +136,7 @@ const READERS = new Set([
   "[",
   "cat",
   "cmp",
+  "df",
   "diff",
   "grep",
   "head",
@@ -367,6 +368,35 @@ function lineTextsOf(commands: Command[]): string[] {
 }
 
 const GLOB = /[*?[{(]/
+// Whether a glob's path segment may match a name, read wider than any shell reads it: a backslash's next character as itself, a bracket expression as any one character, and from a group, brace or numeric range (or a ksh operator before a group) on, any text; a segment holding a zsh negation, exclusion or repeat (`^`, `~`, `#`), or a bracket expression holding a bracket (`[[:alpha:]]`), may match any name
+function mayMatch(segment: string, name: string): boolean {
+  let source = ""
+  for (let k = 0; k < segment.length; k++) {
+    const c = segment[k]
+    if (c === "\\") source += (segment[++k] ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    else if ("#^~".includes(c)) return true
+    else if ("({<".includes(c) || ("*?+@!".includes(c) && segment[k + 1] === "(")) {
+      source += ".*"
+      break
+    } else if (c === "*") source += ".*"
+    else if (c === "?") source += "."
+    else if (c === "[") {
+      // its close: a ] right after the opening [, or after its ! or ^, is a member, and so is an escaped one
+      let close = k + ("!^".includes(segment[k + 1]) ? 2 : 1)
+      if (segment[close] === "[") return true
+      for (close++; close < segment.length && segment[close] !== "]"; close++) {
+        if (segment[close] === "[") return true
+        if (segment[close] === "\\") close++
+      }
+      if (close >= segment.length) source += "\\["
+      else {
+        source += "."
+        k = close
+      }
+    } else source += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  }
+  return new RegExp(`^${source}$`, "is").test(name)
+}
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
 // the variables that make a program run another, gh's (GH_EDITOR, GH_PAGER) and agent-browser's own among them, so a line setting one keeps a jq filter's and an eval script's canary reading
@@ -1072,13 +1102,63 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at))
 }
 
+// ssh's flags and its options that take a value (OpenSSH's getopt string), and the words after its host, which it joins with blanks into the command line the remote shell runs; undefined for no command, or an option off these lists, so canary's reading holds
+const SSH_FLAGS = "46AaCfGgKkMNnqsTtVvXxYy"
+const SSH_VALUES = "BbcDEeFIiJLlmOoPpQRSWw"
+function sshRemote({ args, first }: Parsed): { host: Word; line: string } | undefined {
+  if (program(first?.value ?? "") !== "ssh") return
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--" || !value.startsWith("-") || value === "-") {
+      const at = value === "--" ? k + 1 : k
+      const rest = args.slice(at + 1)
+      return args[at] && rest.length > 0
+        ? { host: args[at], line: rest.map((w) => w.value).join(" ") }
+        : undefined
+    }
+    for (let c = 1; c < value.length; c++) {
+      if (SSH_VALUES.includes(value[c])) {
+        if (c === value.length - 1) k++
+        break
+      }
+      if (!SSH_FLAGS.includes(value[c])) return
+    }
+  }
+}
+
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
-// what lets an awk program run a command or write a file: system(), a > redirect or an @ directive, and a | pipe outside the literals awkPipe allows, the one way a getline runs a command (`"cmd" | getline`), since a plain getline or one from a file only reads
-const AWK_RUNS = /system|[>@]/
+// what lets an awk program run a command or write a file: system(), an @ directive, a > redirect (awkRedirects), and a | pipe outside the literals awkPipe allows, the one way a getline runs a command (`"cmd" | getline`), since a plain getline or one from a file only reads
+const AWK_RUNS = /system|@/
 // a regex literal where awk reads only a pattern: at the program's start or after {, }, ;, !, (, ,, ~, &&, || or a newline, holding no quote, no [ and no newline, so a > in it (`/^>>>>>>> /`) is a character it matches, never a redirect
 const AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g
+// AWK_PATTERN's regex, a bracket expression in it read whole (`/^[a-z/]+:/`), for awkRedirects alone, which needs no / left
+const AWK_BRACKETED =
+  /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.|\[\^?\]?(?:[^\]\\\n]|\\.)*\])*\//g
 const awkRuns = (program: string) =>
-  AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program)
+  AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) ||
+  awkRedirects(program.replace(AWK_BRACKETED, "$1$2RE")) ||
+  awkPipe(program)
+
+// Whether an awk program may redirect with >: awk reads one only in a print or printf statement outside parentheses, so a > in a pattern, a condition or a parenthesized expression compares; its strings are masked first, a statement's continued lines joined, and a program still holding a / (a division, or a regex the pattern mask left) counts every > as canary did
+function awkRedirects(program: string): boolean {
+  // a backslash-newline, or a newline after a comma, && or ||, continues the statement, as awk reads it
+  const text = program.replace(/"(?:[^"\\\n]|\\.)*"/g, "S").replace(/\\\n|(,|&&|\|\|)\s*\n/g, "$1 ")
+  if (!text.includes(">")) return false
+  if (/["/]/.test(text)) return true
+  let depth = 0
+  let printing = false
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k]
+    if (c === "(") depth++
+    else if (c === ")") depth = Math.max(0, depth - 1)
+    else if (/[;{}\n]/.test(c)) {
+      depth = 0
+      printing = false
+    } else if (c === ">" && printing && depth === 0) return true
+    else if (/^printf?\b/.test(text.slice(k)) && !/[\w$]/.test(text[k - 1] ?? "")) printing = true
+  }
+  return false
+}
 
 // The literals a | may sit in without piping: a regex that is the program's whole leading pattern (`/a|b/`, `/a|b/ {…}`), and a regex or a string right after ~ (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, no [ and no newline
 const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
@@ -2001,7 +2081,12 @@ const texts = (word: Word): Word[] => {
 }
 
 // unknown: the line names HOME, TMPDIR or PWD other than by expanding them, so it is read a second time with those unknown, since the shell's value may not be the environment's
-async function inspect(raw: string, environment: Environment, unknown = false) {
+async function inspect(
+  raw: string,
+  environment: Environment,
+  rootNames: () => string[],
+  unknown = false,
+) {
   const {
     cwd,
     tool_input: toolInput,
@@ -2099,7 +2184,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
-        if (folder && (inRoot(folder) || above(folder, true)))
+        // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none
+        const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0]
+        const reaches =
+          !folder ||
+          resolve(folder) !== sep ||
+          rootNames().some((entry) => mayMatch(segment, entry))
+        if (folder && (inRoot(folder) || above(folder, true)) && reaches)
           return `${text.value}, a glob in ${folder}`
       }
     }
@@ -2254,6 +2345,15 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
+    // ssh runs the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed here, and ssh itself by its own words up to the host, a local redirect included
+    const remote = sshRemote(parsed)
+    if (remote && cmd.words.includes(remote.host)) {
+      const own = { ...cmd, words: cmd.words.slice(0, cmd.words.indexOf(remote.host) + 1) }
+      return (
+        (await visit(own, parse(own), env)) ??
+        run(lex(remote.line, env.known), { ...env, vars: new Map() }, visit, true)
+      )
+    }
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name)
@@ -2986,18 +3086,20 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     return refuse(SCORE_AS_OTHER)
   const verdict = await run(lexed, env, visit, true)
   if (verdict || unknown || steered.length === 0) return verdict
-  return inspect(raw, environment, true)
+  return inspect(raw, environment, rootNames, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write; a RangeError, a stack overflow or the walk past its time, refuses.
+// rootNames lists the filesystem's root, which a test fixes so a verdict never depends on what a machine's / holds
 export async function check(
   raw: string,
   environment: Environment = process.env,
   budget = 10_000,
+  rootNames: () => string[] = () => readdirSync(sep),
 ): Promise<string | undefined> {
   try {
     return await withDeadline(budget, async () =>
-      eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)),
+      eachInput(raw, "no-extensions-write", (one) => inspect(one, environment, rootNames)),
     )
   } catch (error) {
     if (error instanceof RangeError) return refuse(TOO_LONG)
