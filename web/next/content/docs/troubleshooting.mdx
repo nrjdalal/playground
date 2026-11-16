@@ -42,6 +42,10 @@ Your sessions run in herdr, which `playground` starts, and `playground view` ope
 - **`MISSING herdr`** in `playground doctor`, or **`herdr at <path> cannot be read`** in the log: Playground's own herdr is missing or changed (a `herdr update` changes it). Run `playground herdr pin`, which puts the pinned version back.
 - **`herdr-pin: <asset> <version> has sha256 <got>, not the pinned <want>; nothing was installed`**: the download is not the release Playground pins, so nothing was installed. Run `playground herdr pin` again; when it repeats, the release changed upstream and the pin needs a PR.
 
+## The test browser on Linux
+
+- **`MISSING test browser`** in `playground doctor` on Linux arm64: the browser that agents check pages in is not set up. Chrome for Testing has no build for this machine, so it runs Playwright's Chromium, named in agent-browser's own settings file, `~/.agent-browser/config.json`, without the sandbox Linux blocks. Run the steps the line names, in order, once for the whole machine.
+
 ## A port is in use
 
 - **`Port <number> is already in use`** in the log: another program holds the port every local Playground address goes through.
