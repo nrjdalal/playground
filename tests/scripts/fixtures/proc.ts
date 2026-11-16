@@ -1,11 +1,17 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 // /proc's text in the Linux kernel's own formats (Documentation/filesystems/proc.rst and accounting/psi.rst), for the machine readings' Linux branch on a Mac: a test writes it with procDir, points PLAYGROUND_PROC at the folder under the test sandbox (TEST_SANDBOX_HOME), and leaves the macOS command each reading takes first unread.
 export type Proc = {
+  // /proc/stat's btime, the boot in seconds since the epoch
+  boot?: number
   // the cpu<n> lines in /proc/stat
   cores?: number
+  // the first whole disk's MB (of 1,048,576 bytes) read and written between the two /proc/diskstats reads
+  diskMB?: number
+  // the first whole disk's reads and writes completed between the two /proc/diskstats reads
+  diskIos?: number
   // MemAvailable's share of MemTotal, in percent
   free?: number
   // PSI's full avg10 for memory, in percent
@@ -29,7 +35,32 @@ const PSWPIN = 4_049_933
 const cpus = (cores: number) =>
   Array.from({ length: cores }, (_, n) => `cpu${n} 5000 10 2500 42500 50 0 15 0 0 0\n`).join("")
 
+const BOOT = 1_763_100_000
+
+// /proc/diskstats with a loop device and a partition ahead of the whole disk, each busy, so a reader that takes either first reads the wrong figures; the disk's reads (field 4), sectors read (6), writes (8) and sectors written (10) grow by ios and MB, half each way.
+const diskstats = (ios: number, mb: number) => {
+  const reads = 88_987 + Math.floor(ios / 2)
+  const writes = 3_584_993 + Math.ceil(ios / 2)
+  const sectorsRead = 6_078_266 + mb * 1024
+  const sectorsWritten = 306_940_476 + mb * 1024
+  return [
+    `   7       0 loop0 ${14 + 2 * ios} 0 ${34 + mb * 4096} 0 0 0 0 0 0 0 0 0 0 0 0 0 0`,
+    ` 259       1 nvme0n1p1 ${341 + 3 * ios} 473 ${14360 + mb * 6144} 46 2 0 2 0 0 9 46 0 0 0 0 0 0`,
+    ` 259       0 nvme0n1 ${reads} 11889 ${sectorsRead} 24070 ${writes} 14033180 ${sectorsWritten} 15388858 0 1049043 15601998 0 0 0 0 297432 189069`,
+    "",
+  ].join("\n")
+}
+
+// /sys/class/block's links for diskstats' three devices, as the kernel makes them: loop0 under devices/virtual, nvme0n1 a PCI device, nvme0n1p1 inside it with a partition file.
+const NVME = "devices/pci0004:00/0004:00:00.0/0004:01:00.0/nvme/nvme0/nvme0n1"
+const SYS_BLOCK: Record<string, string> = {
+  loop0: "devices/virtual/block/loop0",
+  nvme0n1: NVME,
+  nvme0n1p1: `${NVME}/nvme0n1p1`,
+}
+
 export const procText = ({
+  boot = BOOT,
   cores = 20,
   free = 50,
   full = 0,
@@ -38,6 +69,7 @@ export const procText = ({
   some = 0,
   swapUsedMB = 0,
 }: Proc = {}): Record<string, string> => ({
+  diskstats: diskstats(0, 0),
   loadavg: `${load1.toFixed(2)} ${load5.toFixed(2)} 3.00 2/1834 99120\n`,
   meminfo: [
     `MemTotal:       ${TOTAL_KB} kB`,
@@ -51,20 +83,21 @@ export const procText = ({
     "",
   ].join("\n"),
   "pressure/memory": `some avg10=${some.toFixed(2)} avg60=0.00 avg300=0.00 total=1200\nfull avg10=${full.toFixed(2)} avg60=0.00 avg300=0.00 total=300\n`,
-  stat: `cpu  100000 200 50000 850000 1000 0 300 0 0 0\n${cpus(cores)}intr 123456\nctxt 7890123\nbtime 1763100000\nprocesses 99120\n`,
+  stat: `cpu  100000 200 50000 850000 1000 0 300 0 0 0\n${cpus(cores)}intr 123456\nctxt 7890123\nbtime ${boot}\nprocesses 99120\n`,
   vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN}\npswpout 116968\n`,
 })
 
-// The text the `step`th move of a file brings in: 1000 more jiffies of CPU at `idle`, and `swapins` more pages swapped in, each step on from the last.
+// The text the `step`th move of a file brings in: 1000 more jiffies of CPU at `idle`, `swapins` more pages swapped in, and `diskIos` more transfers of `diskMB` more MB, each step on from the last.
 export const laterText = (
-  { cores = 20, idle = 60, swapins = 0 }: Proc = {},
+  { boot = BOOT, cores = 20, diskIos = 0, diskMB = 0, idle = 60, swapins = 0 }: Proc = {},
   step = 1,
 ): Record<string, string> => ({
-  stat: `cpu  ${100000 + step * (1000 - Math.round(idle * 10))} 200 50000 ${850000 + step * Math.round(idle * 10)} 1000 0 300 0 0 0\n${cpus(cores)}btime 1763100000\n`,
+  diskstats: diskstats(step * diskIos, step * diskMB),
+  stat: `cpu  ${100000 + step * (1000 - Math.round(idle * 10))} 200 50000 ${850000 + step * Math.round(idle * 10)} 1000 0 300 0 0 0\n${cpus(cores)}btime ${boot}\n`,
   vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + step * swapins}\npswpout 116968\n`,
 })
 
-// A folder of /proc text for `proc`, with each name in `omit` left out. `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
+// A folder of /proc text for `proc`, with each name in `omit` left out, and its sys folder standing for /sys's block links (omit "sys" to leave it out). `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat, then diskstats) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
 export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] = []): string => {
   const dir = mkdtempSync(join(tmpdir(), "proc-"))
   const write = (path: string, text: string) => {
@@ -73,6 +106,14 @@ export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] 
   }
   for (const [name, text] of Object.entries(procText(proc)))
     if (!omit.includes(name)) write(join(dir, name), text)
+  if (!omit.includes("sys")) {
+    mkdirSync(join(dir, "sys", "class", "block"), { recursive: true })
+    for (const [name, device] of Object.entries(SYS_BLOCK)) {
+      mkdirSync(join(dir, "sys", device), { recursive: true })
+      symlinkSync(join("..", "..", device), join(dir, "sys", "class", "block", name))
+    }
+    write(join(dir, "sys", SYS_BLOCK.nvme0n1p1!, "partition"), "1\n")
+  }
   const steps: Record<string, number> = {}
   later.forEach((names, i) => {
     for (const name of names) {

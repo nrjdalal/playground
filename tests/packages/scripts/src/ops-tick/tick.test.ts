@@ -32,7 +32,7 @@ import {
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { NO_CHECKOUT } from "../../../../../packages/scripts/src/playground/probe"
-import { procDir } from "../../../../scripts/fixtures/proc"
+import { procDir, withProc } from "../../../../scripts/fixtures/proc"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 import { watchTorn } from "../torn-reads"
@@ -1588,13 +1588,21 @@ describe("relay watch", () => {
   const kern = (date?: Date) =>
     `{ sec = ${date ? Math.floor(date.getTime() / 1000) : 0}, usec = ${date ? 147343 : 0} } Sat Nov 14 05:25:54 2026\n`
 
-  // A context whose runs answer bun run ask and sysctl's boot and wake times, recording each ask call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
+  // procps's sysctl on Linux, which has no kern.boottime: it says so and exits 255.
+  const LINUX_BOOT = {
+    "kern.boottime": {
+      code: 255,
+      err: "sysctl: cannot stat /proc/sys/kern/boottime: No such file or directory\n",
+    },
+  }
+
+  // A context whose runs answer bun run ask and sysctl's boot and wake times (procps's refusal with linux), recording each ask call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
   const watch = (
     ops: string,
     now: Date,
     peek: string,
     code = 0,
-    up: { boot?: Date; wake?: Date } = {},
+    up: { boot?: Date; linux?: boolean; wake?: Date } = {},
   ) => {
     const queue = join(ops, "outbox", "ops-unstick.jsonl")
     if (peek.startsWith("pending")) writeFileSync(queue, `${JSON.stringify({ text: "x" })}\n`)
@@ -1604,6 +1612,7 @@ describe("relay watch", () => {
     const { run } = fakeRun({
       ask: { code, out: `${ID}\n#i601\n` },
       ...(up.boot ? { "kern.boottime": kern(up.boot) + kern(up.wake) } : {}),
+      ...(up.linux ? LINUX_BOOT : {}),
     })
     ctx.run = async (argv, timeoutMs, stdin) => {
       if (argv.includes("ask")) asks.push({ argv, stdin })
@@ -1724,6 +1733,28 @@ describe("relay watch", () => {
     expect(waiterLines(ops).map(({ at: queued, to }) => ({ at: queued, to }))).toEqual([
       { at: iso(at(14, 10)), to: OLD.dispatcher },
     ])
+  })
+
+  test("on Linux the boot comes from /proc/stat's btime, so a restart there times the wait from the boot too", async () => {
+    const ops = scratch()
+    outbox(ops, at(7, 0), false)
+    const boot = at(13, 35)
+    await withProc(procDir({ boot: Math.floor(boot.getTime() / 1000) }), async () => {
+      const linux = { linux: true }
+      await beat("relay-watch").run(
+        watch(ops, at(7, 5), "pending: ops-unstick.jsonl", 0, linux).ctx,
+      )
+      const held: unknown[] = []
+      for (const minute of [40, 45, 50, 55, 60, 65]) {
+        const tick = watch(ops, at(13, minute), "pending: ops-unstick.jsonl", 0, linux)
+        await beat("relay-watch").run(tick.ctx)
+        held.push(...tick.asks, ...waiterLines(ops))
+      }
+      expect(held).toEqual([])
+      const due = watch(ops, at(14, 10), "pending: ops-unstick.jsonl", 0, linux)
+      await beat("relay-watch").run(due.ctx)
+      expect(waiterLines(ops).map((l) => l.to)).toEqual([OLD.dispatcher])
+    })
   })
 
   test("a wake from sleep after the boot times the wait from the wake", async () => {

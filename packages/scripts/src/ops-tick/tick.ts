@@ -18,7 +18,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
-import { procSource, readSysctl } from "../ops-machine/readings"
+import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
@@ -901,11 +901,8 @@ export const escalateMs = async (data: string): Promise<number> => {
   return ruleSettings.get(settings, "unstick.escalateMinutes") * 60_000
 }
 
-// The machine's latest boot or wake from sleep, read from sysctl's `{ sec = <s>, usec = <us> } <date>` lines, 0 when unread: no beat runs while the machine is off or asleep, so a wait from before it is not the relay's or the sweep's.
-const upSince = async (ctx: Context): Promise<number> => {
-  const { out } = await ctx.run(["sysctl", "-n", "kern.boottime", "kern.waketime"])
-  return Math.max(0, ...[...out.matchAll(/\bsec = (\d+)/g)].map((m) => Number(m[1]) * 1000))
-}
+// The machine's latest boot or wake from sleep (readUpSince: macOS's sysctl, else Linux's /proc/stat btime), 0 when unread: no beat runs while the machine is off or asleep, so a wait from before it is not the relay's or the sweep's.
+const upSince = (ctx: Context): Promise<number> => readUpSince(ctx.run)
 
 // The hold Ops sets when it slows or pauses its sweep on purpose, a usage squeeze or maintenance: ops/sweep-hold-until holds a future ISO time with its zone, and while one stands the watch keeps quiet and clears its state, so it judges unheld time only and a lift never alerts for the held window; a missing, empty, past or unreadable time leaves the watch on.
 const sweepHold = async (ctx: Context): Promise<boolean> => {

@@ -61,6 +61,34 @@ describe("on Linux the lanes read /proc", () => {
   })
 })
 
+// The lanes line's disk0 on Linux: the first whole disk in /proc/diskstats by /sys/class/block (no partition file, not under devices/virtual), its reads and writes over the gauges' third one-second wait; the fixture lists loop0 and nvme0n1p1 ahead of nvme0n1, each busier, so taking either logs other figures.
+describe("on Linux the lanes line logs the first whole disk's rate from /proc/diskstats", () => {
+  const lanes = async (omit: string[] = []) => {
+    const m = machine({
+      load1: 2,
+      load5: 2,
+      proc: procDir({ diskIos: 240, diskMB: 7, free: 80, idle: 80 }, omit, [
+        ["stat"],
+        ["vmstat"],
+        ["diskstats"],
+      ]),
+    })
+    expect(await m.runs("worker-x")).toBe(true)
+    return Bun.file(join(m.ops, "run-slot.runs.log")).text()
+  }
+
+  test("nvme0n1's transfers and MB a second", async () => {
+    expect(await lanes()).toMatch(/ lanes worker-x \d+ .* disk0_tps=240 disk0_mbs=7\.00$/m)
+  })
+
+  test.each([
+    ["/proc/diskstats", "diskstats"],
+    ["/sys/class/block", "sys"],
+  ])("with no %s it logs -", async (_, omit) => {
+    expect(await lanes([omit])).toMatch(/ lanes worker-x \d+ .* disk0_tps=- disk0_mbs=-$/m)
+  })
+})
+
 describe("on Linux a reading /proc does not give shuts slots 2 to 4, never reading as 0", () => {
   test.each(["meminfo", "pressure/memory", "vmstat"])("with no /proc/%s", (file) => {
     expect(look({ idle: 80 }, [file]).slots).toBe("1\n")
