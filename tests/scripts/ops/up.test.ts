@@ -818,6 +818,46 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
   )
 })
 
+// spawn.sh resume refuses a done row without --force, so up.py prints no line that the resume would refuse, as it prints none for an ended or a paused row.
+test("a done, ended or paused row prints no resume line", () => {
+  const config = join(scratch, "config-down")
+  const data = join(scratch, "data-down")
+  mkdirSync(data, { recursive: true })
+  const rows = {
+    "d1-worker": "done",
+    "d2-worker": "ended",
+    "d3-worker": "paused",
+    "d4-worker": "working",
+  }
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({ agents: Object.entries(rows).map(([name, status]) => ({ name, status })) }),
+  )
+  for (const name of Object.keys(rows)) {
+    mkdirSync(join(config, "projects", name), { recursive: true })
+    writeFileSync(
+      join(config, "projects", name, `s-${name}.jsonl`),
+      `${JSON.stringify({ agentName: name, cwd: "/nowhere", model: "claude-opus-5-5" })}\n`,
+    )
+  }
+  const child = Bun.spawnSync(["python3", "-I", "-c", RESUMES, upPy], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      HOME: scratch,
+      PATH: "/usr/bin:/bin",
+      PLAYGROUND_DATA_DIR: data,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const resumed = child.stdout
+    .toString()
+    .split("\n")
+    .flatMap((line) => / resume (\S+) /.exec(line)?.[1] ?? [])
+  expect(resumed).toEqual(["d4-worker"])
+})
+
 // #1296: up.py read a relative value against its own folder, as every Python reader of PLAYGROUND_DATA_DIR did
 test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute one names one folder", () => {
   const at = mkdtempSync(join(scratch, "relative-"))
