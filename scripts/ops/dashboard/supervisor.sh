@@ -202,8 +202,8 @@ stop_all() {
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
   [ "${1:-}" = keep-web ] || stop_web
 }
-# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (from 1355 to 443)
-dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
+# the dashboard's URLs as portless names them for this checkout, from the state folder portlessDir() picks (the 1355 proxy's while only it serves, so its https is named), read at every check, since portless's proxy can move (from 1355 to 443)
+dashboard_urls() { local dir; dir=$(bun --no-env-file -e "console.log((await import('$D/../../../api/hono/src/lib/dev/proxy.ts')).portlessDir())") && WEB=$(PORTLESS_STATE_DIR=$dir bunx portless get playground) && API=$(PORTLESS_STATE_DIR=$dir bunx portless get api.playground); }
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
 # The branch the dashboard rolls to, read once at start, and its head on origin, read each time
 UPSTREAM=$("$D/upstream.sh")
@@ -220,7 +220,8 @@ follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /
 # The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, in the folder portlessDir() names, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
 read_aliases() { bun --no-env-file "$D/alias.ts" "$WEB" "$API" 2>&1; }
 # A mismatch is read again after ALIAS_CONFIRM seconds (6), past the launcher's 2 s alias sync, which an alias waits on after a restart (live.md); one that holds, a missing file or a missing route is one ALIAS FAIL result (run.sh's notify_new alerts it), written again only when it changes, and ALIAS PASS once it is right, so the heartbeat reads ok again
-check_aliases() { local out rc=0; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
+# A missing route for the web's own name, as when web_route wrote it before the stack's API started portless's proxy in its fallback folder, is written again by web_route into the folder that serves now and read again after ALIAS_CONFIRM, once the launcher's sync has given it its bare alias
+check_aliases() { local out rc=0 host; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; host=${WEB#*://}; host=${host%%[:/]*}; if [ $rc -eq 2 ] && [[ $out == "no route for $host in "* ]] && alive dashboard-web && web_route "$(cat "$S/dashboard-web.port")"; then say "the web's route was missing ($out), so web_route wrote it again"; rc=1; fi; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
 # Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
 # every verify check but pages, one call each (verify takes one check per call): the pages check opens /dashboard/apps/changelog,
 # which marks the changelog read for LocalAgent, the owner's account, so each roll cleared the owner's +1 (fixed since, 7 Oct)
@@ -309,7 +310,7 @@ quiet_for() { local c; c=$(dashboard_container) || return 0; docker exec "$c" ps
 owner_idle() {
   local q a newest
   q=$(quiet_for); [ -n "$q" ] || return 0
-  newest=$(stat -f %m "$ASKS"/*.json 2>/dev/null | sort -n | tail -1)
+  newest=$({ stat -c %Y "$ASKS"/*.json 2>/dev/null || stat -f %m "$ASKS"/*.json 2>/dev/null; } | sort -n | tail -1)
   a=$(( $(date +%s) - ${newest:-0} ))
   [ "$a" -lt "$q" ] && echo "$a" || echo "$q"
 }

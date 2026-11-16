@@ -1,12 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  apiRead,
   apiUp,
   cutDashboardCheckout,
   dashboardCheckout,
+  dashboardUrls,
   homeDataDir,
   liveBranch,
   linesSince,
@@ -56,6 +58,25 @@ describe("apiUp and webUp", () => {
     const server = serve(307)
     const url = `http://127.0.0.1:${server.port}`
     expect(await webUp({ api: url, web: url })).toBe(true)
+    server.stop(true)
+  })
+
+  // the 1355 proxy with TLS answers an http address with a 302 to https (#2301)
+  test("a health read that answers a redirect is down, and names the URL asked and where it was sent", async () => {
+    const server = Bun.serve({
+      fetch: () => Response.redirect("https://api.example.localhost:1355/api/health", 302),
+      hostname: "127.0.0.1",
+      port: 0,
+    })
+    const url = `http://127.0.0.1:${server.port}`
+    expect(await apiRead({ api: url, web: url })).toEqual({
+      redirect: {
+        from: `${url}/api/health`,
+        status: 302,
+        to: "https://api.example.localhost:1355/api/health",
+      },
+      up: false,
+    })
     server.stop(true)
   })
 
@@ -123,6 +144,43 @@ describe("apiUp over https", () => {
 
   test("reads as down with no CA in portless's state folder", async () => {
     expect(await upUnder(join(dir, "missing"))).toBe(false)
+  })
+})
+
+// On Linux no portless service runs on 443, so the stack's API starts the 1355 proxy in ~/.portless/fallback with TLS on, and ~/.portless stays idle (#2299).
+describe("dashboardUrls", () => {
+  test("names the 1355 fallback proxy's https URLs while only it serves, not an idle ~/.portless's", () => {
+    const home = mkdtempSync(join(tmpdir(), "probe-urls-home-"))
+    const dashboard = mkdtempSync(join(tmpdir(), "probe-urls-desk-"))
+    symlinkSync(
+      join(import.meta.dir, "../../../../../node_modules"),
+      join(dashboard, "node_modules"),
+    )
+    mkdirSync(join(home, ".portless", "fallback"), { recursive: true })
+    writeFileSync(join(home, ".portless", "routes.json"), "[]")
+    // a stand-in for the fallback proxy: a port of the test's own, under the test's own pid
+    const proxy = Bun.serve({ fetch: () => new Response(""), hostname: "127.0.0.1", port: 0 })
+    const fallback = join(home, ".portless", "fallback")
+    writeFileSync(join(fallback, "proxy.pid"), String(process.pid))
+    writeFileSync(join(fallback, "proxy.port"), String(proxy.port))
+    writeFileSync(join(fallback, "proxy.tls"), "1")
+    // every PORTLESS* key is set aside, as install.test.ts's gitEnv drops them, so portless reads only the folders this test made
+    const saved = Object.entries(process.env).filter(([key]) => key.startsWith("PORTLESS"))
+    const savedHome = process.env.HOME
+    process.env.HOME = home
+    for (const [key] of saved) delete process.env[key]
+    try {
+      expect(dashboardUrls(dashboard)).toEqual({
+        api: `https://api.playground.localhost:${proxy.port}`,
+        web: `https://playground.localhost:${proxy.port}`,
+      })
+    } finally {
+      process.env.HOME = savedHome
+      for (const [key, value] of saved) process.env[key] = value
+      proxy.stop(true)
+      rmSync(home, { force: true, recursive: true })
+      rmSync(dashboard, { force: true, recursive: true })
+    }
   })
 })
 
