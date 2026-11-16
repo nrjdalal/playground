@@ -2169,6 +2169,19 @@ test("12n merge: a test file a red run's report leaves out, as bun leaves out on
   ])
 })
 
+test("12p merge's test run stays on this machine, where its junit report is written, since run-slot sends test:file to the runner box by default (#2468)", () => {
+  const argv = state.testsArgv("probe-worker", "/s/review-501", ["tests/a.test.ts"], "/t/r.xml")
+  expect(argv.slice(1, 6)).toEqual(["probe-worker", "--", "env", "RUN_SLOT_HERE=1", "bun"])
+  expect(argv.slice(6)).toEqual([
+    "--cwd=/s/review-501",
+    "run",
+    "test:file",
+    "--reporter=junit",
+    "--reporter-outfile=/t/r.xml",
+    "tests/a.test.ts",
+  ])
+})
+
 test("12o redIn reads bun's own junit report: a failed testcase's file and a test file left out are red, a green file and a non-test file are not (#2468)", () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites name="bun test" tests="3" assertions="3" failures="1" skipped="0" time="0.01">
