@@ -1690,6 +1690,90 @@ test("a pre-push job checks the bundles of the head merged with origin/canary, o
   expect(push).not.toHaveProperty("skip")
 })
 
+// CI's test check runs test:skills, which went red on 16 Nov after a branch changed the sandbox its steps run in while no local run caught it; checked on lefthook itself with the run swapped for an echo, over every file a step names, read from test-skills.ts, so a new step's file fails here until the glob holds it
+test("pre-push runs test:skills through the commit slot when the branch changed a file its steps read since origin/canary, and skips it otherwise", async () => {
+  const { steps } = await import("../packages/scripts/src/test-skills")
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-push": { commands: Record<string, Record<string, unknown>> }
+  }
+  const job = config["pre-push"].commands["test-skills"]
+  expect(job).toMatchObject({
+    files: "git diff --name-only origin/canary...HEAD",
+    run: "bun --no-env-file packages/scripts/src/commit-slot.ts bun run test:skills # {files}",
+  })
+  const named = steps.flatMap(([, argv]) =>
+    argv.filter((arg) => /^(extensions|packages|scripts|tests)\/.+\.(py|sh|ts)$/.test(arg)),
+  )
+  expect(named).toContain("tests/test_ops_jobs.py")
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-test-skills-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
+  // commit one file on the branch, run the hook, then put the branch back at canary
+  const ran = async (file: string) => {
+    await Bun.write(join(dir, file), "changed\n")
+    expect(git("add", file)).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-m", file)).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-push"])
+    expect(git("reset", "-q", "--hard", "origin/canary")).toMatchObject({ code: 0 })
+    expect(git("clean", "-q", "-fd")).toMatchObject({ code: 0 })
+    expect(hook.code).toBe(0)
+    return hook.out.includes("skills-ran")
+  }
+  try {
+    expect(git("init", "-q", "-b", "work")).toMatchObject({ code: 0 })
+    // JSON is YAML, so the job goes in as lefthook read it
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-push": { commands: { "test-skills": { ...job, run: "echo skills-ran # {files}" } } },
+      }),
+    )
+    expect(git("add", ".")).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-m", "base")).toMatchObject({ code: 0 })
+    expect(git("update-ref", "refs/remotes/origin/canary", "HEAD")).toMatchObject({ code: 0 })
+
+    for (const file of [
+      ...named,
+      "extensions/core/skills/playbook/SKILL.md",
+      // what a step's entry file loads first: the sandbox's scratch folders, test-sandbox's helpers, state.test.ts's gates and the ops jobs test's renderers
+      "packages/config/src/kinds.ts",
+      "packages/safe-delete/src/index.ts",
+      "packages/scripts/src/clock-exempt.ts",
+      "packages/scripts/src/pr-merge/gates.ts",
+      "packages/scripts/src/sandbox.ts",
+      "packages/scripts/src/test-sandbox.ts",
+      "packages/scripts/src/test-skills.ts",
+      "packages/scripts/src/verify/prebuild.ts",
+      "packages/settings/src/folder.ts",
+      "packages/settings/src/rendered.ts",
+      "tests/scripts/hooks/render-set.ts",
+      "tests/session-names.ts",
+      "scripts/factory-settings.json",
+      "scripts/hooks/bundled/guards.js",
+      "scripts/hooks/no-raw-delete.ts",
+      "scripts/ops/run-slot.sh",
+      "scripts/spawn.sh",
+      "skills/zerostarter/dev/SKILL.md",
+    ])
+      expect({ file, ran: await ran(file) }).toEqual({ file, ran: true })
+    for (const file of [
+      "api/hono/src/index.ts",
+      "docs/playground/playbook.md",
+      "extensions/core/skills/playbook/SESSIONS.md",
+      "packages/scripts/src/pr-merge/held.ts",
+      "scripts/README.md",
+      "scripts/briefs/brief-rush.md",
+    ])
+      expect({ file, ran: await ran(file) }).toEqual({ file, ran: false })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 120_000)
+
 // Each committed bundle names every module it holds in a `// <path>` comment, so the folders the job must watch are read from the bundles themselves: a guard that starts importing another folder fails here until the glob holds it.
 test("the hooks-bundle job's glob holds every folder a committed bundle imports", async () => {
   const glob = ((await hooksBundleJob())?.glob ?? []) as string[]
