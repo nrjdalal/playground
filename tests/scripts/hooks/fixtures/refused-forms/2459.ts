@@ -57,6 +57,20 @@ const extensionsControls = ({ DATA, HOME }: Paths): Row[] => [
     "ssh spark-9dfb bash -s <<'EOF'\nif [ -r /etc/os-release ]; then . /etc/os-release && echo \"${PRETTY_NAME:-unknown}\"; fi\nEOF",
   ],
   ["a source of os-release by . from the home", ". /etc/os-release && echo ok", "home"],
+  [
+    "a source of os-release by source in a heredoc fed to a remote bash",
+    "ssh spark-9dfb bash -s <<'EOF'\nsource /etc/os-release && echo ok\nEOF",
+  ],
+  ["a source of os-release by source from the home", "source /etc/os-release && echo ok", "home"],
+  ["a source of os-release by . in a remote line", "ssh box '. /etc/os-release && echo ok'"],
+  [
+    "a source of os-release by source in a remote line",
+    "ssh box 'source /etc/os-release && echo ok'",
+  ],
+  [
+    "Ops' peer-folder check fed from a file, its output piped to head",
+    `ssh spark-9dfb bash -s < ${HOME}/peer-check.sh | head -80`,
+  ],
   ["a RemoteCommand that writes nothing", "ssh -o RemoteCommand=uptime box"],
   ["a remote uptime after a port option past the host", "ssh box -p 22 uptime"],
 ]
@@ -75,6 +89,24 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
     "ssh spark-9dfb bash -s <<'EOF'\n. .playground/extensions/x\nEOF",
   ],
   ["a source by . of a file in the root from the home", ". .playground/extensions/x", "home"],
+  [
+    "a source by source of a file in the root in a heredoc fed to a remote bash",
+    "ssh spark-9dfb bash -s <<'EOF'\nsource .playground/extensions/x\nEOF",
+  ],
+  [
+    "a source by source of a file in the root from the home",
+    "source .playground/extensions/x",
+    "home",
+  ],
+  ["a source by . of a file in the root in a remote line", "ssh box '. .playground/extensions/x'"],
+  [
+    "a source by source of a file in the root in a remote line",
+    "ssh box 'source .playground/extensions/x'",
+  ],
+  [
+    "a write under the root fed to a remote bash from a file, its output piped to head",
+    `ssh spark-9dfb bash -s < ${HOME}/peer-write.sh | head -80`,
+  ],
   [
     "a reader piped to a remote bash inside a here-string, which roots the line",
     "ssh spark-9dfb bash -s <<< 'cat .playground/extensions/x | bash'",
@@ -195,6 +227,34 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
     "a touch through a ? glob in zsh -4 from the home",
     "zsh -4 -c 'touch ?playground/extensions/y'",
     "home",
+  ],
+  [
+    "a remote touch through a ? glob after exporting a name the hook cannot read",
+    "ssh box 'export GLOB$(echo IGNORE)=x; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a shopt of a substitution",
+    "ssh box 'shopt -s $(echo dot)glob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a setopt of a substitution",
+    "ssh box 'setopt $(echo glob)dots; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after declaring a name built from a variable",
+    "ssh box 'o=GLOBIGN; declare ${o}ORE=x; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a zsh options key built from a variable",
+    "ssh box 'options[glob${x}dots]=on; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a shopt of a positional parameter",
+    "ssh box 'shopt -s $1; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a shopt of every positional parameter",
+    `ssh box 'shopt -s "$@"; touch ?playground/extensions/y'`,
   ],
   [
     "a fed file the line rewrites from the root before ssh reads it",

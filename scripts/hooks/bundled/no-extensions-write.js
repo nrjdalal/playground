@@ -10385,6 +10385,7 @@ var READERS = new Set([
   "test",
   "wc"
 ]);
+var PIPE_READERS = new Set([...READERS, "cut", "tr"]);
 var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
 var XARGS_ARG_FILE = /^-[0oprtx]*a|^--a(?:r(?:g(?:-(?:f(?:i(?:le?)?)?)?)?)?)?(?:=|$)/;
 var XARGS_NUL = /^-[0oprtx]*0|^--nu(?:ll?)?$/;
@@ -12082,7 +12083,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     return names;
   };
   const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : "";
-  const dotsOn = /dotglob|globdots|globignore/i.test(bare) || /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare);
+  const dotsOn = /dotglob|globdots|globignore/i.test(bare) || /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare) || bare.split(/[;&|\n]/).some((part) => /\b(?:declare|emulate|eval|export|local|readonly|set|setopt|shopt|typeset|unsetopt)\b[^$`]*[$`]/.test(part) || /(?:^|\s)[^\s=]*[$`][^\s=]*=/.test(part));
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
@@ -12700,7 +12701,14 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     visitShells: true
   };
   const [only, ...rest] = lexed.commands;
-  const alone = !!only && rest.length === 0 && !only.inner && ![...only.words, ...only.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => word.procs);
+  const plain = (cmd) => !cmd.inner && ![...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => word.procs);
+  const fedBy = (cmd) => {
+    for (let at = cmd.stdin;at; at = at.stdin)
+      if (at === only)
+        return true;
+    return false;
+  };
+  const alone = !!only && plain(only) && rest.every((cmd) => plain(cmd) && fedBy(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")));
   rootLine = rooted(lexed.commands, alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
   sshFed = new Set([...codeFed(lexed.commands)].filter(([, { consumer }]) => !!sshCall(parse3(consumer))).map(([producer]) => producer));
   if (evaluatedParts(command).some((part) => touches(part, env)))

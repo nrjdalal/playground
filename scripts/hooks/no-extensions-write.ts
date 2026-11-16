@@ -153,6 +153,8 @@ const READERS = new Set([
   "test",
   "wc",
 ])
+// the programs a pipe from a fed ssh may run into with its file still read (sshText): readers, and the filters that write no file
+const PIPE_READERS = new Set([...READERS, "cut", "tr"])
 // find's actions that write, remove or run
 const FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/
 // xargs' -a (GNU's --arg-file), -0 (--null) and -d (--delimiter), after any of its flags in one cluster or by any prefix of the long name
@@ -2150,11 +2152,19 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) on the line lets a glob match a name led by a dot
+  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) on the line lets a glob match a name led by a dot, and so may a switch or an assignment whose name the hook cannot read: a shell option command, or a name assigned, exported or declared, holding a `$` or a backquote
   const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : ""
   const dotsOn =
     /dotglob|globdots|globignore/i.test(bare) ||
-    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
+    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare) ||
+    bare
+      .split(/[;&|\n]/)
+      .some(
+        (part) =>
+          /\b(?:declare|emulate|eval|export|local|readonly|set|setopt|shopt|typeset|unsetopt)\b[^$`]*[$`]/.test(
+            part,
+          ) || /(?:^|\s)[^\s=]*[$`][^\s=]*=/.test(part),
+      )
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2232,7 +2242,7 @@ async function inspect(
         const folder = dir && dirname(dir)
         // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none; any other folder above the root fails closed on a glob, since code text (`node -e '…'`, an awk program) reads as one there
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0]
-        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in the home reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it
+        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in a folder above the root reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it
         const climbs = text.value.slice(glob.index).split("/").includes("..")
         const reaches = (folder: string) =>
           inRoot(folder) ||
@@ -3147,14 +3157,26 @@ async function inspect(
     visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
-  // a file fed to ssh is read only when the ssh is the line's one command, since another could write the file before ssh reads it
+  // a file fed to ssh is read only when the line's first command is the ssh and every other is a reader its pipe feeds with no redirect but a descriptor's copy (`| head -80`), since any other could write the file before ssh reads it
   const [only, ...rest] = lexed.commands
+  const plain = (cmd: Command) =>
+    !cmd.inner &&
+    ![...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
+      (word) => word.procs,
+    )
+  const fedBy = (cmd: Command) => {
+    for (let at = cmd.stdin; at; at = at.stdin) if (at === only) return true
+    return false
+  }
   const alone =
     !!only &&
-    rest.length === 0 &&
-    !only.inner &&
-    ![...only.words, ...only.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
-      (word) => word.procs,
+    plain(only) &&
+    rest.every(
+      (cmd) =>
+        plain(cmd) &&
+        fedBy(cmd) &&
+        PIPE_READERS.has(program(parse(cmd).name)) &&
+        cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")),
     )
   rootLine = rooted(
     lexed.commands,

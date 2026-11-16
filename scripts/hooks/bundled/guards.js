@@ -14320,6 +14320,7 @@ var READERS2 = new Set([
   "test",
   "wc"
 ]);
+var PIPE_READERS = new Set([...READERS2, "cut", "tr"]);
 var GIT_READS = new Set([
   "blame",
   "cat-file",
