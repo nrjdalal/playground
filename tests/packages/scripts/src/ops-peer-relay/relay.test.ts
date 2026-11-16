@@ -242,8 +242,7 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     appendFileSync(queueOf(here), "{not a line\n")
     const good = line("good")
     write(there, good)
-    await until(() => rows(here).length === 1)
-    await Bun.sleep(200)
+    await until(() => rows(here).length === 1 && held.told.length === 2)
     held.stop()
     await held.done
     expect(rows(here).map((r) => r.text)).toEqual(["good"])
@@ -280,6 +279,12 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     const { here } = machines("silent")
     const held = hold(here, shFar("sleep 5"), 300)
     expect(await held.done).toBe("me@spark-b said no hello within 0.3s")
+  })
+
+  test("a far end that ends with no output reads as its exit code, not as a missing agent.ts", async () => {
+    const { here } = machines("ended")
+    const held = hold(here, shFar("exit 3"))
+    expect(await held.done).toBe("me@spark-b ended with code 3 before its hello")
   })
 
   // The far end reads the line and drops it unwritten, so it never acks: the local cursor stays before the line, and the next link sends it again.
@@ -335,7 +340,7 @@ describe("the relay job's loop (PG-2444)", () => {
       signal: stop.signal,
       wait: (ms) => Bun.sleep(ms),
     })
-    await until(() => fars.length === 1)
+    await until(() => existsSync(join(here, "ops", "peer-relay", `${PEER.name}.json`)))
     write(here, line("first"))
     await until(() => rows(there).length === 1)
     fars[0]!.kill()
