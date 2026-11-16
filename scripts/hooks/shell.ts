@@ -443,7 +443,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
     if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
     // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
     if (name === "su") return suCommand(args) ? undefined : "root"
-    if (!SHELLS.has(name)) return undefined
+    if (!SHELLS.has(name) || noExec(args, name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
     return inline || (operand && !STDIN_PATHS.has(operand.value)) ? undefined : "shell"
@@ -456,6 +456,14 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   }
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
+  // `command -v` or `-V` looks up the names after it and runs none of them, so no shell starts
+  if (
+    before.some(
+      (w, k) =>
+        !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? ""),
+    )
+  )
+    return undefined
   // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
   const wrappers: string[] = []
@@ -693,6 +701,7 @@ export const CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -3456,6 +3465,18 @@ export function isFolder(path: string): boolean {
 const SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"])
 const BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"])
 
+// Whether a shell's options before its first operand leave -n (noexec) set, the last -n or +n winning, so it reads its script and runs none of it; a cluster holding o or O (-o, +xo, -eO) or a long option (zsh's --no-noexec), each of which can set an option by name, keeps it unset.
+export function noExec(args: Word[], shell: string): boolean {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
+  let set = false
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || (value.startsWith("--") && value !== "--")) return false
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value)) break
+    if (value.includes("n")) set = value.startsWith("-")
+  }
+  return set
+}
+
 // A shell's first operand, and whether -c makes it the script's text rather than a script file's name; no operand means the shell reads its script from stdin.
 export function shellOperand(args: Word[], shell: string): { inline: boolean; operand?: Word } {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
@@ -3480,6 +3501,7 @@ async function shell(
 ): Promise<string | undefined> {
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
+  if (noExec(args, name)) return
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
     let script = operand.value
