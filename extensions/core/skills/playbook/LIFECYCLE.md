@@ -65,14 +65,14 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   That machine serves under this Mac's own portless CA, which its setup copies there, so the owner trusts no new CA.
   A session asks for the host and then the switch as two Inbox guard decisions, `{"config": {"host": ...}}` then `{"enabled": true}`, so the owner only clicks Approve; a session that cannot post them reports up its chain and sets nothing itself.
   It starts ssh again after a drop, 2 s on and doubling to 60 s, from 2 s again once a link held 60 s.
+  A port another program already answers on starts no ssh.
+  It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
+  It posts the link once as an Inbox update whose title opens it, and `playground doctor`'s `tunnel` line reads its beat.
   ops-peer-relay (`packages/scripts/src/ops-peer-relay/`, off by default) runs on one machine of a pair, from the Dashboard's checkout, whose `.env` names the other machines in `PLAYGROUND_PEERS` and the key in `PLAYGROUND_PEER_KEY` (`~/.ssh/playground_spark` when unset), the cluster the System page reads.
   It holds one ssh to each peer, running `agent.ts` from that machine's own checkout at this one's path, and copies each new `ops-peer.jsonl` line both ways, `playground send`'s queue ([SESSIONS.md](SESSIONS.md#message-a-session)), each line once by its `id`, the copy stamped `relayedAt` and its `at` kept.
   A byte cursor per side, `ops/peer-relay/<peer>.json`, moves only once the far side has written the line, so a line written during a drop arrives once after it.
   The agent says hello with its protocol version first, and a far checkout without it reads `down: peer checkout lacks agent.ts v1`, which Ops answers by moving that clone to the shipped tag; nothing else runs or installs on the far machine.
   It tells Ops one line per down spell and one when it is up again, starts ssh again on ops-tunnel's waits, and tells Ops each line it passes over, one that is not a peer line or is over 16 KB.
-  A port another program already answers on starts no ssh.
-  It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
-  It posts the link once as an Inbox update whose title opens it, and `playground doctor`'s `tunnel` line reads its beat.
   ops-session-resume is `bun run ops:session-resume` in a checkout of `canary`: every 60 seconds it reads the state each session's hooks write (`session-state/<session id>.json` in the data folder),
   and to each live factory session (never a probe, nor one of the owner's own) at its usage limit whose reset passed a minute ago, unless Claude Code announced it carries on by itself (the **unstick** rule),
   it queues one resume line in the ops outbox, which the relay sends with `SendMessage` (**voice**), and one carry-on line to each such session whose turn a restart lost (its newest state `working`, written before its process started, 2 minutes on, with no Escape after it in the transcript),

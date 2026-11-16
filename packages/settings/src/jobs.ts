@@ -127,7 +127,6 @@ export const JOBS: Record<string, Job> = {
       schedule: { every: 60 },
     },
   ),
-  // launchd holds it and it runs from the Dashboard's checkout, so a main checkout wiped with its herdr config and scripts still has its restore.
   // It runs from the Dashboard's checkout, whose .env names the peers (PLAYGROUND_PEERS) the System page reads.
   "ops-peer-relay": terminal(
     "ops-peer-relay",
@@ -139,6 +138,7 @@ export const JOBS: Record<string, Job> = {
       schedule: { always: true },
     },
   ),
+  // launchd holds it and it runs from the Dashboard's checkout, so a main checkout wiped with its herdr config and scripts still has its restore.
   "ops-restore": {
     ...launchd("ops-restore", {
       description:

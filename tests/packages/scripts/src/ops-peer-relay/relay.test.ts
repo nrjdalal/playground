@@ -95,7 +95,7 @@ const cursorOf = (data: string) =>
   JSON.parse(readFileSync(join(data, "ops", "peer-relay", `${PEER.name}.json`), "utf8"))
 
 // One link between the two folders, held until stop is called; told holds what it told Ops.
-const hold = (here: string, far: Far) => {
+const hold = (here: string, far: Far, replyMs = 5_000) => {
   const told: string[] = []
   const stop = new AbortController()
   let up = false
@@ -105,7 +105,7 @@ const hold = (here: string, far: Far) => {
     notify: async (text) => told.push(text),
     peer: PEER,
     pollMs: 20,
-    replyMs: 5_000,
+    replyMs,
     signal: stop.signal,
     up: () => (up = true),
   })
@@ -274,6 +274,37 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     )
     expect(await held.done).toContain("refused the key")
   })
+
+  test("a far end that says nothing reads as its silence, not as a missing agent.ts", async () => {
+    const { here } = machines("silent")
+    const held = hold(here, shFar("sleep 5"), 300)
+    expect(await held.done).toBe("me@spark-b said no hello within 0.3s")
+  })
+
+  // The far end reads the line and drops it unwritten, so it never acks: the local cursor stays before the line, and the next link sends it again.
+  const HI = `echo '{"hello":"ops-peer-relay","version":1}'; echo '{"end":0}'`
+  test.each([
+    ["never answers", `${HI}; read line; sleep 5`, "wrote no answer for a line within 0.3s"],
+    ["ends before it answers", `${HI}; read line; exit 0`, "ssh to me@spark-b ended with code 0"],
+  ])(
+    "a far end that %s keeps the local cursor before the line, and the next link sends it",
+    async (_, script, why) => {
+      const { here, there } = machines(`unacked-${_.replaceAll(" ", "-")}`)
+      writeFileSync(queueOf(here), "")
+      const first = hold(here, shFar(script), 300)
+      await until(first.isUp)
+      const kept = line("not yet written there")
+      write(here, kept)
+      expect(await first.done).toContain(why)
+      expect(cursorOf(here).local).toBe(0)
+      const second = hold(here, agentFar(there))
+      await until(() => rows(there).length === 1)
+      second.stop()
+      await second.done
+      expect(rows(there)).toEqual([{ ...kept, relayedAt: expect.any(String) }])
+      expect(cursorOf(here).local).toBe(Buffer.byteLength(`${JSON.stringify(kept)}\n`))
+    },
+  )
 })
 
 describe("the relay job's loop (PG-2444)", () => {

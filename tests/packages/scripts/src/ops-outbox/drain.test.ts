@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { drain, localNames, pending } from "../../../../../packages/scripts/src/ops-outbox/drain"
 
@@ -152,13 +152,31 @@ describe("drain's ops-peer lines (PG-2444)", () => {
     expect([...(await localNames(config))]).toEqual(["probe-b"])
   })
 
-  test("only returns lines for Ops' sweep to send: it reaches no pane and types into none", () => {
-    const source = readFileSync(
-      join(import.meta.dir, "../../../../../packages/scripts/src/ops-outbox/drain.ts"),
-      "utf8",
+  test("only returns lines for Ops' sweep to send: it reaches no pane and types into none, through any file it imports", () => {
+    const drainPath = join(
+      import.meta.dir,
+      "../../../../../packages/scripts/src/ops-outbox/drain.ts",
     )
-    const imports = [...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1])
-    expect(imports.filter((path) => /deliver|herdr|pane|sdk/.test(path!))).toEqual([])
+    const transpiler = new Bun.Transpiler({ loader: "ts" })
+    const seen = new Set<string>()
+    const queue = [drainPath]
+    while (queue.length) {
+      const file = queue.pop()!
+      if (seen.has(file)) continue
+      seen.add(file)
+      const text = readFileSync(file, "utf8").replace(/^#!.*\n/, "")
+      for (const { path } of transpiler.scanImports(text)) {
+        if (!path.startsWith(".")) continue
+        const base = join(dirname(file), path)
+        const found = [base, `${base}.ts`, join(base, "index.ts")].find(
+          (p) => p.endsWith(".ts") && existsSync(p),
+        )
+        if (found) queue.push(found)
+      }
+    }
+    expect(seen.size).toBeGreaterThan(1)
+    expect([...seen].filter((file) => /deliver|herdr|pane|sdk/.test(file))).toEqual([])
+    expect(readFileSync(drainPath, "utf8")).not.toMatch(/herdr|Bun\.spawn|deliver\(/)
   })
 })
 

@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { orgOf, type Peer } from "@packages/config/org"
 
 import { beat } from "../ops-tick/tick"
-import { whyOf } from "../ops-tunnel/tunnel"
+import { KEY, whyOf } from "../ops-tunnel/tunnel"
 import { PEER_QUEUE, type PeerLine } from "../playground/send"
 import { writeAtomic } from "../write-atomic"
 import { linesOf } from "./agent"
@@ -13,8 +13,6 @@ import { HELLO, appendOnce, isPeerLine, linesFrom, parsed } from "./queue"
 
 // ops-peer-relay: copies the outbox's ops-peer.jsonl between this machine and each peer PLAYGROUND_PEERS names, both ways, over one ssh each on the factory's key, so a session on one machine reads a `playground send` from the other in its alerts-wait. The far end is agent.ts, run from the far machine's own checkout; no job runs there.
 export const JOB = "ops-peer-relay"
-
-const KEY = join(".ssh", "playground_spark")
 
 // Pure: PLAYGROUND_PEERS and PLAYGROUND_PEER_KEY from a .env's text, the two keys alone, so the job reads the peers the System page reads with no other value of that file in its env.
 export const envKeysOf = (text: string): Record<string, string> => {
@@ -35,7 +33,7 @@ export const clusterOf = (
 ): { key: string; peers: Peer[] } | { why: string } => {
   try {
     const { cluster } = orgOf(keys)
-    return { key: cluster.key ?? join(home, KEY), peers: cluster.peers }
+    return { key: cluster.key ?? join(home, KEY.slice(2)), peers: cluster.peers }
   } catch (error) {
     return {
       why: `PLAYGROUND_PEERS or PLAYGROUND_PEER_KEY does not read: ${(error as Error).message.slice(0, 200)}`,
@@ -147,15 +145,18 @@ export async function link({
         ).catch(console.error)
       : undefined
   let acked: ((id: unknown) => void) | undefined
-  let hello: (ok: boolean) => void = () => {}
-  const greeted = new Promise<boolean>((done) => (hello = done))
+  // the far end's first word: its hello, another line, its end, or silence past replyMs
+  let hello: (said: "hello" | "other" | "ended" | "silent") => void = () => {}
+  const greeted = new Promise<"hello" | "other" | "ended" | "silent">((done) => (hello = done))
   const reading = (async () => {
     let first = true
     for await (const text of linesOf(far.stdout)) {
       const message = parsed(text) as Record<string, unknown> | undefined
       if (first) {
         first = false
-        hello(message?.hello === HELLO.hello && message?.version === HELLO.version)
+        hello(
+          message?.hello === HELLO.hello && message?.version === HELLO.version ? "hello" : "other",
+        )
         continue
       }
       if (!message) continue
@@ -171,20 +172,24 @@ export async function link({
         await save()
       }
     }
-    hello(false)
+    hello("ended")
   })().catch((error) => stop(`the far end's stream failed: ${(error as Error).message}`))
-  void far.exited.then(() => hello(false))
-  const timer = setTimeout(() => hello(false), replyMs)
-  const ok = await greeted
+  void far.exited.then(() => hello("ended"))
+  const timer = setTimeout(() => hello("silent"), replyMs)
+  const said = await greeted
   clearTimeout(timer)
-  if (!ok && !ended) {
+  if (said !== "hello" && !ended) {
     far.kill()
     const code = await far.exited
-    const stderr = await far.stderr
+    const stderr = (await far.stderr).trim()
     stop(
-      stderr && !lacking(stderr)
-        ? whyOf(stderr, { host: peer.target, key, port: 0, user: "" }, code)
-        : LACKS,
+      said === "other" || lacking(stderr)
+        ? LACKS
+        : stderr
+          ? whyOf(stderr, { host: peer.target, key, port: 0, user: "" }, code)
+          : said === "silent"
+            ? `${peer.target} said no hello within ${replyMs / 1000}s`
+            : `${peer.target} ended with code ${code} before its hello`,
     )
   }
   if (!ended) up?.()
@@ -313,11 +318,9 @@ export async function keep({
     let down = false
     while (!signal.aborted) {
       const cluster = clusterOf(envKeysOf(await envText()), home)
-      const peer = "why" in cluster ? undefined : cluster.peers.find((p) => p.name === name)
-      if (!peer || "why" in cluster) {
-        states.delete(name)
-        return
-      }
+      if ("why" in cluster) return void states.delete(name)
+      const peer = cluster.peers.find((p) => p.name === name)
+      if (!peer) return void states.delete(name)
       const missing = !existsSync(cluster.key)
         ? `the key ${cluster.key} is missing`
         : !far
