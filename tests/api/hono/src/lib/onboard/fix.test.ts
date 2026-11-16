@@ -175,6 +175,26 @@ describe("each fix runs its fixed argv", () => {
     ])
   })
 
+  test("ca-trust runs this checkout's own ca-trust script, with nothing from the request", async () => {
+    const m = machine()
+    m.stub(
+      "bun",
+      'echo "Restart Firefox if it is open, since a running browser keeps its old store."',
+    )
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/ca-trust?profile=/etc`)).status).toBe(202)
+    const done = await settled(app, `${FIX}/ca-trust`)
+    expect(done.state).toBe("ok")
+    expect(done.lines).toContain(
+      "Restart Firefox if it is open, since a running browser keeps its old store.",
+    )
+    expect(m.calls()).toEqual([
+      expect.stringMatching(
+        /^bun --no-env-file \/\S+\/packages\/scripts\/src\/playground\/ca-trust\.ts$/,
+      ),
+    ])
+  })
+
   test("trust runs this checkout's own portless trust under node, with nothing from the request", async () => {
     const m = machine()
     m.stub("node", 'echo "Local CA added to system trust store."')

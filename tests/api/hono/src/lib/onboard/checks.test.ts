@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+
+import { CA as CA_PEM } from "../dev/fixtures/ca"
 
 const { COMMANDS, firstRunChecks, onboardChecks } =
   await import("../../../../../../api/hono/src/lib/onboard/checks")
@@ -66,7 +68,7 @@ const everything = () => machine(TOOLS, ANSWERS, [CA])
 
 const live = { kind: "live", rule: "own" } as const
 const env = { HOME }
-const signedUp = { env, login: () => true, source: live }
+const signedUp = { env, login: () => true, platform: "darwin" as const, source: live }
 const byName = <T extends { name: string }>(checks: T[]): Record<string, T> =>
   Object.fromEntries(checks.map((c) => [c.name, c]))
 
@@ -358,10 +360,102 @@ describe("the rows the app cannot fix itself", () => {
   test("Settings is ok once a login is named, else optional with Settings' step as its action", async () => {
     const { reader } = everything()
     const rows = byName(
-      await onboardChecks({ database: "ok", env, login: () => false, reader, source: live }),
+      await onboardChecks({
+        database: "ok",
+        env,
+        login: () => false,
+        platform: "darwin",
+        reader,
+        source: live,
+      }),
     )
     expect(rows.Settings).toMatchObject({ action: { id: "settings" }, status: "optional" })
     expect(rows.Settings!.note).toBeTruthy()
+  })
+})
+
+describe("the Certificate row on Linux", () => {
+  const STATE = mkdtempSync(join(tmpdir(), "checks-ca-state-"))
+  const LINUX_CA = join(STATE, "ca.pem")
+  writeFileSync(LINUX_CA, CA_PEM)
+  const PROFILE = "snap/firefox/common/.mozilla/firefox/abc.default"
+  const homes: string[] = []
+  afterEach(() => {
+    for (const dir of homes.splice(0)) rmSync(dir, { force: true, recursive: true })
+  })
+  afterAll(() => rmSync(STATE, { force: true, recursive: true }))
+  // A scratch HOME with one snap Firefox profile, and certutil's listing of it reading the CA as trusted or not.
+  const linux = async (tools: string[], trusted: boolean, { profile = true } = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), "checks-ca-"))
+    homes.push(dir)
+    const db = `sql:${join(dir, PROFILE)}`
+    if (profile) {
+      mkdirSync(join(dir, PROFILE), { recursive: true })
+      writeFileSync(join(dir, PROFILE, "cert9.db"), "")
+    }
+    const answers = trusted
+      ? {
+          [`certutil -L -d ${db}`]: { stdout: "portless Local CA      C,,\n" },
+          [`certutil -L -d ${db} -n portless Local CA -a`]: {
+            stdout: CA_PEM,
+          },
+        }
+      : {}
+    const { reader } = machine([...TOOLS, ...tools], { ...ANSWERS, ...answers }, [LINUX_CA])
+    const rows = byName(
+      await onboardChecks({
+        ...signedUp,
+        database: "ok",
+        env: { HOME: dir, PORTLESS_STATE_DIR: STATE },
+        platform: "linux",
+        reader,
+      }),
+    )
+    return rows.Certificate
+  }
+
+  test("a Firefox profile that does not trust the CA is MISSING, with the ca-trust fix", async () => {
+    expect(await linux(["certutil"], false)).toMatchObject({
+      action: { id: "ca-trust", label: "Trust it in Firefox" },
+      detail: "not trusted in 1 Firefox profile",
+      status: "MISSING",
+    })
+  })
+
+  test("with no certutil it is MISSING with the NSS tools named and no fix, since the app installs nothing", async () => {
+    const row = await linux([], false)
+    expect(row).toMatchObject({ action: null, detail: "certutil not found", status: "MISSING" })
+    expect(row!.note).toContain("libnss3-tools")
+  })
+
+  test("a Chromium-family browser on PATH makes it optional, naming its own import, once Firefox trusts the CA", async () => {
+    const row = await linux(["certutil", "helium"], true)
+    expect(row).toMatchObject({ action: null, detail: "check your browser", status: "optional" })
+    expect(row!.note).toContain("chrome://certificate-manager")
+    expect(row!.note).toContain("Turn on warnings")
+    expect((await linux(["certutil", "helium"], false))!.note).toContain("In helium")
+  })
+
+  test("ok once every Firefox profile trusts the CA, or with no browser to set up", async () => {
+    expect(await linux(["certutil"], true)).toMatchObject({
+      detail: "trusted in Firefox",
+      status: "ok",
+    })
+    expect(await linux([], false, { profile: false })).toMatchObject({
+      detail: "no browser found",
+      status: "ok",
+    })
+  })
+
+  test("no row on a Mac, with PORTLESS=0, or before the proxy has made its CA", async () => {
+    const { reader } = machine([...TOOLS, "certutil"], ANSWERS, [LINUX_CA])
+    const read = (env: Record<string, string>, platform: NodeJS.Platform, on = reader) =>
+      onboardChecks({ ...signedUp, database: "ok", env, platform, reader: on })
+    const state = { HOME, PORTLESS_STATE_DIR: STATE }
+    expect(byName(await read(state, "darwin")).Certificate).toBeUndefined()
+    expect(byName(await read({ ...state, PORTLESS: "0" }, "linux")).Certificate).toBeUndefined()
+    const none = machine([...TOOLS, "certutil"], ANSWERS, []).reader
+    expect(byName(await read(state, "linux", none)).Certificate).toBeUndefined()
   })
 })
 

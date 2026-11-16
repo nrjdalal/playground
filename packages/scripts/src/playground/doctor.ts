@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { type CaTrust, chromiumSteps, readCaTrust } from "../../../../api/hono/src/lib/dev/ca-trust"
 import {
   FALLBACK_PORT,
   portlessDir,
@@ -11,6 +12,7 @@ import {
 } from "../../../../api/hono/src/lib/dev/proxy"
 import { readPolicyFile } from "../../../settings/src/rendered"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "../ops-herdr/pin"
+import { probe } from "./ca-trust"
 import { checkHerdr } from "./herdr-pin"
 import { type Link, linksInto } from "./links"
 
@@ -221,6 +223,34 @@ export const browserCheck = (
   )
 }
 
+// On Linux, the browsers' trust of portless's CA, as first run's Certificate row reads it (ca-trust.ts): MISSING with its steps while a Firefox profile does not trust it, and optional naming a Chromium-family browser's own import, which no file shows.
+export const certificateCheck = (read: CaTrust, ca: string, repo: string): Check => {
+  const name = "browser certificate"
+  const chromium = read.chromium.length > 0 ? chromiumSteps(read.chromium, ca) : ""
+  if (read.untrusted.length > 0)
+    return check(
+      name,
+      true,
+      false,
+      `${read.certutil ? "" : "install your distro's NSS tools (libnss3-tools on Debian and Ubuntu, nss-tools on Fedora), then "}run bun ${repo}/packages/scripts/src/playground/ca-trust.ts or click Trust it in Firefox in Settings' Things to fix, then restart Firefox${chromium ? `. ${chromium}` : ""}`,
+      `Firefox profiles that do not trust ${ca}: ${read.untrusted.join(", ")}`,
+    )
+  if (chromium) return { detail: `check by hand: ${chromium}`, name, status: "optional" }
+  return check(
+    name,
+    true,
+    true,
+    "",
+    read.firefox.length > 0 ? `Firefox trusts ${ca}` : "no browser found",
+  )
+}
+
+// The certificate line while portless's proxy has made its CA, none before.
+const certificateOf = async (home: string, repo: string): Promise<Check[]> => {
+  const ca = join(portlessDir(), "ca.pem")
+  return existsSync(ca) ? [certificateCheck(await readCaTrust(ca, home, probe), ca, repo)] : []
+}
+
 // portless's proxy, which serves the Dashboard's https://playground.localhost: ok by the stack's own rule, proxyDown, and optional while it is down, since `bun run dev` then starts it on FALLBACK_PORT with no password; Settings' Things to fix or install.sh sets it up with the Mac's password.
 export const proxyCheck = (repo: string, down: number | null): Check =>
   check(
@@ -365,7 +395,7 @@ export const launchdChecks = async (
   return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded, platform)
 }
 
-// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, on Linux arm64 the test browser, the jobs launchd, or on Linux systemd, should hold, and the tunnel's state while its job is on.
+// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, on Linux arm64 the test browser, on Linux the browsers' trust of portless's CA, the jobs launchd, or on Linux systemd, should hold, and the tunnel's state while its job is on.
 export const doctor = async (repo: string, home: string, data: string): Promise<Check[]> => [
   ...tools(),
   dataCheck(data, existsSync),
@@ -382,6 +412,7 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
   ...(process.platform === "linux" && process.arch === "arm64"
     ? [browserCheck(home, (cmd) => Bun.which(cmd) !== null, exitsZero)]
     : []),
+  ...(process.platform === "linux" ? await certificateOf(home, repo) : []),
   ...(process.platform === "darwin" || process.platform === "linux"
     ? await launchdChecks(data, jobLoaded(process.platform))
     : []),

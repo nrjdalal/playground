@@ -15,6 +15,7 @@ import { proxyDown } from "../../../../../api/hono/src/lib/dev/proxy"
 import {
   agentBrowserConfig,
   browserCheck,
+  certificateCheck,
   dataCheck,
   herdrCheck,
   jobChecks,
@@ -478,6 +479,51 @@ describe("browserCheck", () => {
       name: "test browser",
       status: "ok",
     })
+  })
+})
+
+describe("certificateCheck", () => {
+  const CA = "/home/x/.portless/fallback/ca.pem"
+  const PROFILE = "/home/x/snap/firefox/common/.mozilla/firefox/abc.default"
+  const read = (over: Partial<Parameters<typeof certificateCheck>[0]>) => ({
+    certutil: true,
+    chromium: [],
+    firefox: [PROFILE],
+    untrusted: [],
+    ...over,
+  })
+
+  test("a Firefox profile that does not trust the CA is MISSING, naming the script, the button and the restart", () => {
+    const check = certificateCheck(read({ untrusted: [PROFILE] }), CA, "/repo")
+    expect(check.status).toBe("MISSING")
+    expect(check.detail).toContain("run bun /repo/packages/scripts/src/playground/ca-trust.ts")
+    expect(check.detail).toContain("Trust it in Firefox")
+    expect(check.detail).toContain("restart Firefox")
+    expect(check.detail).toContain(PROFILE)
+    expect(check.detail).not.toContain("libnss3-tools")
+  })
+
+  test("with no certutil the step installs the distro's NSS tools first, and a Chromium browser's import follows", () => {
+    const check = certificateCheck(
+      read({ certutil: false, chromium: ["helium"], untrusted: [PROFILE] }),
+      CA,
+      "/repo",
+    )
+    expect(check.status).toBe("MISSING")
+    expect(check.detail).toContain("libnss3-tools")
+    expect(check.detail).toContain("In helium, open chrome://certificate-manager")
+  })
+
+  test("optional with a Chromium-family browser's own import once Firefox trusts it, else ok", () => {
+    const chromium = certificateCheck(read({ chromium: ["google-chrome"] }), CA, "/repo")
+    expect(chromium.status).toBe("optional")
+    expect(chromium.detail).toContain(`Import ${CA}`)
+    expect(certificateCheck(read({}), CA, "/repo")).toEqual({
+      detail: `Firefox trusts ${CA}`,
+      name: "browser certificate",
+      status: "ok",
+    })
+    expect(certificateCheck(read({ firefox: [] }), CA, "/repo").detail).toBe("no browser found")
   })
 })
 

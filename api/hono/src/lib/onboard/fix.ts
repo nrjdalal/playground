@@ -52,6 +52,8 @@ const KEEP = 40
 const NO_BROWSER = "/usr/bin/true"
 const GITHUB_DEVICE = "https://github.com/login/device"
 const CLAUDE_INSTALLER = "https://claude.ai/install.sh"
+// The script that imports portless's CA into each Firefox profile that does not trust it yet, as the signed-in user.
+const CA_TRUST = join(import.meta.dir, "../../../../../packages/scripts/src/playground/ca-trust.ts")
 const HERDR_PIN = join(
   import.meta.dir,
   "../../../../../packages/scripts/src/playground/herdr-pin.ts",
@@ -91,6 +93,14 @@ const PLANS: Record<
   FixId,
   ((has: (tool: string) => boolean, dir: string, from: Env) => Step[]) | null
 > = {
+  "ca-trust": () => [
+    {
+      argv: ["bun", "--no-env-file", CA_TRUST],
+      failed: "Firefox was not set to trust the certificate. Click Trust it in Firefox again.",
+      label: "Trusting the local web proxy's certificate in Firefox",
+      ms: MINUTE,
+    },
+  ],
   claude: (_, dir) => [
     {
       argv: [
