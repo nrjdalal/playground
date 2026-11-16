@@ -653,6 +653,12 @@ describe("verify's browser", () => {
     expect(first.slice(0, 3)).toEqual(later.slice(0, 3))
     expect(later[1]).toBe("--args")
     expect(later[3]!.startsWith("--")).toBe(true)
+    // a later call that relaunched on the config's --no-sandbox alone dropped the mute, so each call's one value keeps both
+    expect(later[2]!.split(",")).toEqual(
+      expect.arrayContaining(
+        process.platform === "linux" ? ["--no-sandbox", "--mute-audio"] : ["--mute-audio"],
+      ),
+    )
   })
 
   // #2385: verify's own --args replaced agent-browser's config, so on Linux Chromium lost --no-sandbox and died, and it refused portless's https stack as ERR_CERT_AUTHORITY_INVALID.
