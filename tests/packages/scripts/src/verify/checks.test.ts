@@ -31,6 +31,7 @@ import {
 } from "../../../../../packages/scripts/src/verify/checks"
 import { DASHBOARD_MAP } from "../../../../../packages/scripts/src/verify/map"
 import { VERIFY_VISIT } from "../../../../../web/next/src/lib/verify-visit"
+import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
 
 const SHA = "8064f3d1c2b0a9e8f7d6c5b4a3928170e6d5c4b3"
 
@@ -686,6 +687,22 @@ describe("verify's browser", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
+  })
+
+  const open = `import { Browser } from ${JSON.stringify(join(import.meta.dir, "../../../../../packages/scripts/src/verify/checks.ts"))}; await new Browser().run("open", "http://dashboard/")`
+
+  test("tries an open again after a network change, through networkChangedWait", () => {
+    const run = withFakeAgentBrowser(1, "net::ERR_NETWORK_CHANGED at http://dashboard/", open)
+    expect(run.err).toContain("net::ERR_NETWORK_CHANGED, retry 1 of 2")
+    expect(run.code).toBe(0)
+    expect(run.calls).toHaveLength(2)
+  })
+
+  test("fails an open on any other net error at once", () => {
+    const run = withFakeAgentBrowser(1, "net::ERR_CONNECTION_REFUSED at http://dashboard/", open)
+    expect(run.err).toContain("ERR_CONNECTION_REFUSED")
+    expect(run.code).not.toBe(0)
+    expect(run.calls).toHaveLength(1)
   })
 })
 
