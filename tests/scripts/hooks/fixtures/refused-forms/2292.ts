@@ -121,6 +121,11 @@ export const groups: Group[] = [
       ["a condition's subshell running a plain rm", `if (/bin/rm ${NEVER_MADE}); then :; fi`],
       ["a wrapper before a paren holding a blank and a plain rm", `nice (/bin/rm ${NEVER_MADE})`],
       [
+        "a wrapper before a paren holding a slash and a plain rm, from a worktree",
+        `nice (/bin/rm ${NEVER_MADE})`,
+        "process worktree",
+      ],
+      [
         "command running a plain rm by a path a zsh group matches",
         `command /bin/(r|x)m ${NEVER_MADE}`,
       ],
