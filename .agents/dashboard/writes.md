@@ -35,7 +35,7 @@
   Close the probe the moment its test is done.
 - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own: a worker before it opens or updates a PR, the reviewer before it scores one, a runner after it restarts a stack.
   With no check it runs `all`.
-  With no URLs it checks this worktree's stack; for the live dashboard, read-only, run it from the dashboard's checkout (on branch `live.branch`, so portless names its stack `dashboard.playground` and `dashboard.api.playground`) with no URLs and `--expect <live.branch>` (its checkout runs `origin/canary`'s latest head, `.agents/dashboard/live.md`).
+  With no URLs it checks this worktree's stack; for the live dashboard, read-only, run it from the dashboard's checkout (on branch `live.branch`, so portless names its stack `dashboard.playground` and `dashboard.api.playground`) with no URLs and `--expect <live.branch>` (its checkout runs the latest head of the branch the main checkout sits on, `.agents/dashboard/live.md`).
   A check it lacks goes into `packages/scripts/src/verify/`, so the next agent has it too.
   It builds the workspace packages it imports when their `dist` is missing (a fresh worktree) or lacks a name its sources import, and in the factory's main checkout (`$PLAYGROUND_REPO`) it stops instead and says to run from your own worktree.
   It also builds one whose `src` holds a file newer than its `dist`, but only while no stack runs in this worktree, since a rebuild under a running stack hangs it.
