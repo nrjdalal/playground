@@ -43,6 +43,12 @@ What the factory fetches from outside the lockfile runs at one known version, an
 - **Cost:** about 101 KB gzip with its own Shiki highlighter (measured on 1.6.2 with `bun build --minify`, React external), loaded through `next/dynamic` only when a patch opens, so no other page carries it; `tests/web/next/src/components/dashboard/viewer/patch-view.test.ts` fails when any other file imports it.
 - **Watch:** a fast-moving 1.x (17 publishes in the 90 days to 2 Nov 2026) under a caret range; a minor that changes `FileDiff`'s options or `parsePatchFiles` shows in that test and in the viewer's own fallback to text, which takes any render the package throws on.
 
+### `next`: its agent upgrade stop is off (web)
+
+- **What:** `web/next/next.config.ts` sets `experimental.agentUpgrade: false`. Left at its default, `'security'`, `next build` in an agent session stops with `SecurityFatalError` whenever npm's advisory feed lists the installed Next. It skips the stop with no agent and no TTY, so CI stays green while every session's pre-commit build stops, as it did on 16 Nov 2026 for about 90 minutes at 16.4.3 ([GHSA-mfr8-8qww-v76h](https://github.com/advisories/GHSA-mfr8-8qww-v76h)).
+- **Trade:** a new Next advisory no longer fails `next build`. The audit gates catch it instead, at moderate or worse: a PR's Audit step when the PR adds it (`audit.ts --new-over`), `audit-canary.yml`'s run and its `canary audit` issue at `canary`'s next push when it lands on a Next that `canary` already holds (a PR only prints that one as a notice), and the pre-push `audit` on a direct push to `canary`. Each must keep failing on a moderate-or-worse Next advisory, and none ignores one.
+- **Watch:** `tests/web/next/next.config.test.ts` fails when a ZeroStarter sync or a Next upgrade drops the key, and when an env schema or `turbo.json` passes `__NEXT_AGENT_UPGRADE`, which Next reads ahead of the config, to a build.
+
 ## Active overrides
 
 ### `seroval` → `^1.6.8`
