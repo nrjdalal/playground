@@ -20,6 +20,7 @@ set -euo pipefail
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
 #   spawn.sh close     <name> [session-id]              closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; a session whose start stopped before its runtime pin closes too while its record stands and one pane carries its label, the pin written first; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close; with a session id, it closes the one labelled pane whose claude runs that session, so one of two panes under the name closes, the row and its close time left to the other while it stands
+#   spawn.sh read      <name> [session-id]              prints the last 200 lines of the herdr pane spawn.sh opened for <name>, found as close finds it, on the server its resume record names, playground-probes included, and writes nothing
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
@@ -1107,6 +1108,34 @@ PY
     refuse "the herdr server $HERDR_SESSION_NAME is not running at $HERDR_DIR/$HERDR_SESSION_NAME.sock; playground, or bun run ops:herdr start, brings it up"
 }
 
+# What claude's sandbox needs on Linux, read in a POSIX shell: bwrap and socat on PATH, and a bwrap that opens the sandbox's network namespace, which Ubuntu 24.04's AppArmor refuses with no profile for it; one line a missing piece, then ok.
+SANDBOX_NEEDS='if [ "$(uname -s)" = Linux ]; then
+  for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 || echo "missing $t"; done
+  if command -v bwrap >/dev/null 2>&1 && ! e=$(bwrap --ro-bind / / --unshare-net true 2>&1 >/dev/null); then echo "apparmor $(printf "%s\n" "$e" | head -n 1)"; fi
+fi
+echo ok'
+# A sandboxed start's claude exits in its pane, naming nothing here, when its machine lacks what the sandbox needs (failIfUnavailable), so that machine is read before the pane opens: an --ssh probe's over ssh, under the launch's PATH and with its first run finished there too, else this one; it installs nothing.
+sandbox_ready() {
+  local where said line why=
+  if [ -n "$SSH_HOST" ]; then
+    where=$SSH_HOST
+    said=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes "$SSH_HOST" "PATH=\"\$HOME/.bun/bin:\$PATH\"; grep -Eq '\"hasCompletedOnboarding\"[[:space:]]*:[[:space:]]*true' \"\$HOME/.claude.json\" 2>/dev/null || echo onboarding; $SANDBOX_NEEDS" </dev/null 2>&1) ||
+      refuse "it cannot read $SSH_HOST over ssh ($(tail -n 1 <<<"$said"))"
+  else
+    where="this machine"
+    said=$(bash -c "$SANDBOX_NEEDS" 2>&1) || refuse "it cannot read what this machine holds for claude's sandbox ($(tail -n 1 <<<"$said"))"
+  fi
+  [ "$(tail -n 1 <<<"$said")" = ok ] || refuse "it cannot read what $where holds for claude's sandbox ($(tail -n 1 <<<"$said"))"
+  while IFS= read -r line; do
+    case $line in
+      onboarding) why+="; ~/.claude.json there lacks \"hasCompletedOnboarding\": true, so claude would wait on its first-run screens: start claude there once by hand" ;;
+      "missing "*) why+="; ${line#missing } is not on PATH, and claude's sandbox needs it" ;;
+      "apparmor "*) why+="; bwrap cannot open the sandbox's network namespace (${line#apparmor }): Ubuntu 24.04's kernel.apparmor_restrict_unprivileged_userns=1 refuses it unless an AppArmor profile lets bwrap use user namespaces" ;;
+    esac
+  done <<<"$said"
+  [ -z "$why" ] || refuse "on $where ${why#; }, so its claude would exit in its pane (failIfUnavailable); spawn.sh installs nothing"
+}
+
 MODE=${1:-}
 [ $# -gt 0 ] && shift
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
@@ -1259,19 +1288,8 @@ PY
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it; a pin a stopped start left unwritten, it writes before the close.
-if [ "$MODE" = close ]; then
-  NAME=${1:-close} WANT_SID=${2:-}
-  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name, and its session id to pick one of two panes under the name"
-  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
-  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
-  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
-  unpinned=
-  if [ ! -e "$DATA/runtimes/$NAME" ]; then
-    unpinned=", and it has no runtime pin ($SHOWN/runtimes/$NAME)"
-  elif [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" != herdr ]; then
-    refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
-  fi
+# The pane spawn.sh opened for $NAME, by the label it set, on the server its resume record names, into $server and $panes: with WANT_SID the labelled pane whose claude runs that session, $stays counting the labelled panes it leaves, else the one labelled pane; each refusal ends on $unpinned and names $MODE.
+labelled_pane() {
   [ -f "$RESUME_DIR/$NAME.sh" ] || refuse "it has no resume record ($RESUME_DIR/$NAME.sh), which spawn.sh writes when herdr runs a session it opened$unpinned"
   # A record with no server line is playground's, as restore reads it.
   server=$(sed -n 's/^# server: //p' "$RESUME_DIR/$NAME.sh" | head -1)
@@ -1286,7 +1304,7 @@ try:
 except (ValueError, KeyError, TypeError):
     sys.exit(1)' "$NAME") || refuse "it cannot read the panes of the herdr server $server"
   count=$(grep -c . <<<"$panes" || true)
-  [ "$count" -gt 0 ] || refuse "no pane on the herdr server $server carries the label $NAME, so spawn.sh opened none it can close$unpinned"
+  [ "$count" -gt 0 ] || refuse "no pane on the herdr server $server carries the label $NAME, so spawn.sh opened none it can $MODE$unpinned"
   # With a session id, the labelled pane whose claude runs it: herdr's process-info names the claude's pid, and Claude Code's registry file for that pid names the session it runs, a resumed one's included.
   stays=0
   if [ -n "$WANT_SID" ]; then
@@ -1308,8 +1326,33 @@ except (OSError, ValueError, KeyError, TypeError, AttributeError):
     panes=${picked%$'\n'}
     stays=$((count - 1))
   else
-    [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned; name the session id of the one to close"
+    [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned; name the session id of the one to $MODE"
   fi
+}
+# A factory session reads a pane on a herdr server other than the default only here, since no-raw-spawn refuses a herdr call carrying HERDR_SOCKET_PATH: it finds the pane as close does and runs herdr's read alone there, on that server's own socket, writing nothing.
+if [ "$MODE" = read ]; then
+  NAME=${1:-read} WANT_SID=${2:-} unpinned=
+  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "read takes a session's name, and its session id to pick one of two panes under the name"
+  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
+  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
+  labelled_pane
+  hr pane read "$panes" --source recent-unwrapped --lines 200 || refuse "herdr could not read pane $panes on $server"
+  exit 0
+fi
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it; a pin a stopped start left unwritten, it writes before the close.
+if [ "$MODE" = close ]; then
+  NAME=${1:-close} WANT_SID=${2:-}
+  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name, and its session id to pick one of two panes under the name"
+  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
+  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
+  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
+  unpinned=
+  if [ ! -e "$DATA/runtimes/$NAME" ]; then
+    unpinned=", and it has no runtime pin ($SHOWN/runtimes/$NAME)"
+  elif [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" != herdr ]; then
+    refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
+  fi
+  labelled_pane
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
@@ -1761,6 +1804,10 @@ if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
   herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}"
+fi
+# A probe always takes the sandbox's settings, and --sandbox or a resumed row recording it the closed sandbox's (SANDBOX, below).
+if [ "$ROLE" = probe ] || [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; then
+  sandbox_ready
 fi
 if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"

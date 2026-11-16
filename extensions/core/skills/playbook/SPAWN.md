@@ -224,6 +224,8 @@ A session gets exactly one `--settings`, since Claude Code keeps only the last o
 Every launch merges its compact window (**context**): spawn.sh rebuilds that file on each launch into `factory-settings-400k.json` for a worker, a runner or a checker, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
 A dispatcher or a lead takes `factory-settings-manager-400k.json` (`factory-settings-glm-manager-400k.json` on GLM), the same file plus a deny of the Agent and Workflow tools, which its memory-trial file carries too (**workers**, scripts/README.md).
 A probe takes `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), the same file plus Claude Code's sandbox around its shell commands (scripts/README.md, spawn.sh); an `--ssh` probe's is one of its own ([--remote-control and --ssh](#--remote-control-and---ssh)).
+On Linux that sandbox needs `bwrap` and `socat` on PATH and a `bwrap` that opens a network namespace, which Ubuntu 24.04's `kernel.apparmor_restrict_unprivileged_userns=1` refuses without an AppArmor profile for `bwrap`, and its settings' `failIfUnavailable` exits claude in its pane without them,
+so before the pane opens, a probe's or a `--sandbox` start (a resume of a row recording it too, and `--check`) runs `bwrap --ro-bind / / --unshare-net true` and refuses, naming each missing piece and quoting bwrap's first error line, and installs nothing.
 herdr's own resume is off (`resume_agents_on_restore = false` in ops-herdr's `config.toml`), since it would bring a session back without `--settings` or the role, as a bare `claude --resume` by hand does.
 A session resumed that way gets its hooks from its folder alone: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
 so a factory session resumed without its settings where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as resumed.
@@ -247,6 +249,7 @@ In it a worker makes its branch with `git fetch origin canary`, then `git switch
 It writes that worktree, its `.git/worktrees` entry, and the main checkout's `.git/FETCH_HEAD`, `objects`, `refs` and `logs`; every other session's worktree, the `canary`, `main` and `live.branch` (the live dashboard's, `live/dashboard` by default) refs and their logs, `packed-refs`, `config`, `hooks`, `HEAD`, `index` and the rest of the checkout stay shut.
 It pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git/config`.
 It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses it for every other role and mode.
+On Linux it needs what a probe's sandbox needs, `bwrap`, `socat` and the AppArmor profile for `bwrap`, which spawn.sh checks before the pane opens ([Role and settings](#role-and-settings)).
 Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep, and a start without the flag under the same name clears.
 A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
 
@@ -265,6 +268,8 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
 - The probe keeps a probe's roster row, kind `probe`, written here.
   The capacity gate reads this machine alone, since the pane and its ssh run here.
+  Before the pane opens, one more `ssh` with the same options reads that machine under the launch's PATH, its `~/.bun/bin` first:
+  it refuses when `~/.claude.json` there lacks `"hasCompletedOnboarding": true`, since claude would wait on its first-run screens, and on what that machine's sandbox lacks, as a probe's own check here reads it ([Role and settings](#role-and-settings)), or with ssh's own words when the call fails.
   `spawn.sh close <name>` closes the pane, and the hangup ends the remote claude.
   Its resume record carries the flags, so `spawn.sh restore` leaves it down, naming why, and `spawn.sh resume` refuses it while that record stands, since a resume would run it here without them; start it again instead.
   The live-name check reads this machine's sessions alone, so it misses a name live on the other one.
