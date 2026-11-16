@@ -29,6 +29,17 @@ describe("on Linux the lanes read /proc", () => {
     expect(look({ idle: 39 }).slots).toBe("1\n")
   })
 
+  // issue 2405: one reading under the bar after one over it leaves them open, as on macOS
+  test.each([
+    [80, 4],
+    [39, 1],
+  ])("/proc/stat's 39%% idle after a reading of %d%% leaves %d slots open", (before, slots) => {
+    const m = machine({ load1: 2, load5: 2, proc: procDir({ idle: 39 }, [], [["stat"]]) })
+    writeFileSync(join(m.ops, "run-slot.gauges"), `0 ${before} 0 120 3.50 0 -\n`)
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() })
+    expect(run.stdout.toString()).toBe(`${slots}\n`)
+  })
+
   test("load1 comes from /proc/loadavg, and at 45 it shuts them", () => {
     expect(look({ idle: 80, load1: 45, load5: 2 }).slots).toBe("1\n")
   })
