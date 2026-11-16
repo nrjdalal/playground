@@ -16,8 +16,11 @@ import {
   type Repos,
   UNSET_REPOS,
 } from "./kinds"
+import { macOnlyAt, macOnlyLines } from "./mac-only"
 
-export type Counts = Partial<Record<Kind, number>>
+// Each kind the ratchet holds: the private traces kinds.ts patterns, and the Mac-only calls mac-only.ts counts, which no guard refuses.
+export type Counted = Kind | "macOnly"
+export type Counts = Partial<Record<Counted, number>>
 export type File = { path: string; text: string }
 
 export const COUNTS = join(import.meta.dir, "counts.json")
@@ -112,7 +115,7 @@ const keptMiss = (
   if (held < entry.hits) return `its line holds ${held} ${entry.kind}, not ${entry.hits}`
 }
 
-// Every kind with a pattern gets a count, 0 included, so a kind a run could not measure (an empty list) is absent rather than read as gone; each kept entry that still stands takes its hits off.
+// Every kind with a pattern gets a count, 0 included, and macOnly always, so a kind a run could not measure (an empty list) is absent rather than read as gone; each kept entry that still stands takes its hits off.
 export function count(
   files: File[],
   list: PublicList = EMPTY_LIST,
@@ -122,10 +125,12 @@ export function count(
   const kinds = patterns(list, repos)
   const counts: Counts = Object.fromEntries(kinds.map(([kind]) => [kind, 0]))
   const byPath = new Map(files.map((file) => [file.path, file]))
-  for (const { path, text } of files) {
-    if ([...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))) continue
-    for (const [kind, n] of Object.entries(hitsIn(path, text, kinds, repos)))
+  counts.macOnly = 0
+  for (const file of files) {
+    if ([...LEFT_OUT, ...LOCKFILES].some((re) => re.test(file.path))) continue
+    for (const [kind, n] of Object.entries(hitsIn(file.path, file.text, kinds, repos)))
       counts[kind as Kind]! += n!
+    counts.macOnly += macOnlyLines(file).length
   }
   for (const entry of kept)
     if (counts[entry.kind] !== undefined && !keptMiss(entry, byPath.get(entry.path), kinds, repos))
@@ -152,7 +157,7 @@ export function stale(
 // Each measured kind whose count is over its baseline, or has none yet.
 export const risen = (now: Counts, baseline: Counts): string[] =>
   Object.entries(now).flatMap(([kind, n]) => {
-    const was = baseline[kind as Kind]
+    const was = baseline[kind as Counted]
     if (was !== undefined && n <= was) return []
     return [
       `${kind}: ${n} in the tree, counts.json allows ${was ?? "none, since it has no count yet"}`,
@@ -161,24 +166,30 @@ export const risen = (now: Counts, baseline: Counts): string[] =>
 
 // The refusal for the risen lines, naming the fix where a kind has one, then each file and line located found.
 export const refusal = (over: string[], at: string[] = []): string =>
-  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}:\n${[...over, ...at].join("\n")}`
+  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}${over.some((line) => line.startsWith("macOnly:")) ? "; put a Linux branch in front of a Mac-only call (a uname or process.platform check that takes Linux another way)" : ""}:\n${[...over, ...at].join("\n")}`
 
 // Each line holding a hit of one of the kinds, as path:line: kind, past the paths never counted and the lines kept.json keeps while they hold no more than its hits; for each kind, the changed files' alone when they hold one, since a kind's floor can hold many older hits.
 export function located(
   files: File[],
-  wanted: Kind[],
+  wanted: Counted[],
   list: PublicList = EMPTY_LIST,
   repos: Repos = UNSET_REPOS,
   kept: Kept[] = [],
   changed: string[] = [],
 ): string[] {
   const near = files.filter((file) => changed.includes(file.path))
-  return patterns(list, repos)
-    .filter(([kind]) => wanted.includes(kind))
-    .flatMap((kind) => {
-      const own = locatedIn(near, [kind], repos, kept)
-      return own.length > 0 ? own : locatedIn(files, [kind], repos, kept)
-    })
+  const counted = files.filter(
+    ({ path }) => ![...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path)),
+  )
+  return [
+    ...patterns(list, repos)
+      .filter(([kind]) => wanted.includes(kind))
+      .flatMap((kind) => {
+        const own = locatedIn(near, [kind], repos, kept)
+        return own.length > 0 ? own : locatedIn(files, [kind], repos, kept)
+      }),
+    ...(wanted.includes("macOnly") ? macOnlyAt(counted, changed) : []),
+  ]
 }
 
 const locatedIn = (from: File[], kinds: [Kind, RegExp][], repos: Repos, kept: Kept[]) =>
@@ -212,8 +223,8 @@ export const changedFiles = (root: string): string[] => {
 }
 
 // The kinds the risen lines name.
-export const risenKinds = (over: string[]): Kind[] =>
-  over.map((line) => line.slice(0, line.indexOf(":")) as Kind)
+export const risenKinds = (over: string[]): Counted[] =>
+  over.map((line) => line.slice(0, line.indexOf(":")) as Counted)
 
 // The baseline with each measured kind lowered to its count; a kind this run did not measure keeps its count.
 export const lowered = (now: Counts, baseline: Counts): Counts =>
@@ -222,7 +233,7 @@ export const lowered = (now: Counts, baseline: Counts): Counts =>
       .sort()
       .map((kind) => [
         kind,
-        Math.min(baseline[kind as Kind] ?? Infinity, now[kind as Kind] ?? Infinity),
+        Math.min(baseline[kind as Counted] ?? Infinity, now[kind as Counted] ?? Infinity),
       ]),
   )
 
