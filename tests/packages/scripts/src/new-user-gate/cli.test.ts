@@ -15,7 +15,9 @@ import { basename, join } from "node:path"
 import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   BOX_LOAD_MULT,
+  Browser,
   capacityRefusals,
+  clean,
   databaseCheck,
   dropBox,
   installCheck,
@@ -296,6 +298,46 @@ describe("the box", () => {
     } finally {
       said.mockRestore()
     }
+  })
+
+  test("with agent-browser missing, the browser's close throws nothing and clean still removes the box, stopping only the box's proxy with none of the machine's live state", () => {
+    const box = makeBox("abcdef1234567890", parent)
+    const bin = join(parent, "bin")
+    const calls = join(parent, "portless-calls")
+    mkdirSync(bin, { recursive: true })
+    writeFileSync(join(bin, "docker"), "#!/bin/sh\nexit 0\n")
+    writeFileSync(join(bin, "portless"), `#!/bin/sh\n{ echo "argv $*"; env; } >> '${calls}'\n`)
+    chmodSync(join(bin, "docker"), 0o755)
+    chmodSync(join(bin, "portless"), 0o755)
+    const live = {
+      HERDR_SOCKET_PATH: "/run/user/1000/herdr.sock",
+      PATH: `${bin}:/usr/bin:/bin`,
+      PLAYGROUND_DATA_DIR: "/home/owner/.playground",
+      PORTLESS_STATE_DIR: "/home/owner/.portless/fallback",
+    }
+    const saved = Object.fromEntries(Object.keys(live).map((key) => [key, process.env[key]]))
+    Object.assign(process.env, live)
+    try {
+      expect(() => new Browser(join(box, "shots")).close()).not.toThrow()
+      clean(box, join(box, "h"), join(bin, "portless"))
+    } finally {
+      for (const [key, value] of Object.entries(saved))
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+    }
+    expect(existsSync(box)).toBe(false)
+    const said = readFileSync(calls, "utf8")
+    expect(said).toContain("argv proxy stop -p 14155")
+    expect(said).toContain(`HOME=${join(box, "h")}`)
+    for (const key of ["HERDR_SOCKET_PATH", "PLAYGROUND_DATA_DIR", "PORTLESS_STATE_DIR"])
+      expect(said).not.toContain(`${key}=`)
+  })
+
+  test("every child the gate starts takes its env from boxEnv's allowlist, never a spread of process.env", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../packages/scripts/src/new-user-gate/cli.ts"),
+    ).text()
+    expect(source).not.toContain("...process.env")
   })
 })
 
