@@ -1,4 +1,4 @@
-// The trace ratchet: counts each kind of private trace (kinds.ts) over the tree, past every live name the switch's migration moves (LIVE_NAMES, its allowlist, piece 21's reason) and past the paths the seed leaves out, so a check fails when any count rises above counts.json and each trace-out lowers it.
+// The trace ratchet: counts each kind of private trace (kinds.ts), and each Mac-only call with no Linux branch in front of it (mac-only.ts), over the tree, past every live name the switch's migration moves (LIVE_NAMES, its allowlist, piece 21's reason) and past the paths the seed leaves out, so a check fails when any count rises above counts.json and each trace-out lowers it.
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 
