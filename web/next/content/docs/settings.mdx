@@ -39,12 +39,13 @@ Accounts are kept in your settings (`usage.accounts`), so a machine needs a GitH
 
 Add as many Claude and GLM accounts as you like.
 On this page, **Add account** takes the provider.
-A Claude account takes its email (and an optional label), then three steps: open sign-in, which opens in a new window on a fresh profile of Chrome, Brave, Edge or Firefox (the button names the browser), deleted when the sign-in ends, so the sign-in uses the new account, not the one already signed in; sign in there with the account you are adding and approve access; then paste the code the page shows.
+A Claude account takes its email (and an optional label), then three steps: open sign-in, which opens in a new window on a fresh profile of Chrome, Brave, Edge or Firefox on a Mac, or of Helium, Chrome, Chromium or Firefox on Linux (the button names the browser), deleted when the sign-in ends, so the sign-in uses the new account, not the one already signed in; sign in there with the account you are adding and approve access; then paste the code the page shows.
 While Claude checks the code the dialog reads **Checking the code with Claude…**, for up to about 70 seconds; a code Claude refuses, no answer in that time, a sign-in that ended (most likely because Playground restarted) and a lost connection each say what happened over **Start again**, which opens a new sign-in.
-When this Mac has none of those (Safari alone takes no fresh profile), the dialog shows the link with **Copy link**: open it in a private or guest window yourself.
+When the computer has none of those (Safari alone takes no fresh profile), or a Linux desktop's display cannot be found, the dialog shows the link with **Copy link**: open it in a private or guest window yourself.
+An account already on the list whose token this computer does not hold, such as one carried over from another computer, can be added again the same way: it keeps its row and gains the token, while one whose token is here is refused as already listed.
 The account is listed once the sign-in names the email you gave; a sign-in for another account is refused and its token dropped, and one whose account cannot be read back is listed with **account not confirmed**.
 A GLM key takes its label and your Z.ai API key.
-The token goes to this Mac's Keychain (on Linux, a file only you can read in Playground's data folder) and is never shown again, and **Remove**, the bin on each row, takes the account off the list and its token out of the Keychain.
+The token goes to this computer's secret store, the Keychain on a Mac and on Linux a file only you can read in Playground's data folder, and is never shown again, and **Remove**, the bin on each row, takes the account off the list and its token out of the store.
 
 From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the Keychain, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
 `playground accounts list` shows each with its usage and `playground accounts remove <email|label>` takes one off; no token or key is ever shown ([The playground command](/docs/cli#accounts-playground-accounts)).

@@ -208,7 +208,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - Each item is a file `secrets/keychain/<service>/<account>` in the data folder (`dataDir()`, so `PLAYGROUND_DATA_DIR` moves it), each name percent-encoded with its dots, in folders at mode 700; a write makes a mode-600 file beside the item and renames it into place.
 - The item `Claude Code-credentials` is Claude Code's own login, which it keeps on Linux in `~/.claude/.credentials.json` at mode 600, so that item reads and writes that file.
 - Its output names no value but a `-w` read's; the closed sandbox denies the folder and the login file (spawn.sh above).
-  Tests: `bun run test:file tests/packages/scripts/src/security/cli.test.ts`.
+  Tests: `bun run test:file tests/packages/scripts/src/security/cli.test.ts tests/packages/settings/src/keychain.test.ts`, the second running the one writer of an account's token through it.
 
 ## A worktree's node_modules
 

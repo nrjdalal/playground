@@ -32,7 +32,7 @@ const ICONS = { claude: PROVIDER_ICONS.anthropic, glm: PROVIDER_ICONS.zai }
 
 const KEY = "usage.accounts"
 
-// Settings > Accounts: every Claude and GLM account the factory spends, each with whether its token is kept, Add account and Remove, and on a Claude row an Own account switch, whose account the login flip spends at a fifth unless it resets within a day; the token is pasted once and goes to the Keychain, never back to the page. While the first read is pending it holds its space empty, never a placeholder box.
+// Settings > Accounts: every Claude and GLM account the factory spends, each with whether its token is kept, Add account and Remove, and on a Claude row an Own account switch, whose account the login flip spends at a fifth unless it resets within a day; the token is pasted once and goes to this computer's secret store, never back to the page. While the first read is pending it holds its space empty, never a placeholder box.
 export function Accounts() {
   const { data, error, isPending } = useQuery({
     queryKey: ACCOUNTS_QUERY_KEY,
@@ -184,7 +184,7 @@ export function Accounts() {
           if (!open) setRemoving(null)
         }}
         title={`Remove ${title}?`}
-        description="It leaves the accounts your sessions spend, and its token leaves this Mac's Keychain."
+        description="It leaves the accounts your sessions spend, and its token leaves this computer's secret store."
         action="Remove"
         variant="destructive"
         pending={remove.isPending}
