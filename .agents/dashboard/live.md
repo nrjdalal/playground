@@ -18,7 +18,7 @@
   It resets `live.branch` to its head (`redeploy-pull.sh`), installs, builds `packages/*` or migrates as the move needs, restarts each ops job whose source the move changed (`scripts/ops/README.md`), finds the head's build kept (`build_head`, which builds it now only when no build was kept), serves that build and starts the follower, and runs `bun run verify`.
   A roll that reloads the supervisor (below) finishes on the same kept build.
   An open tab reloads onto the new head's build once its API names the new version, and holds its reload while words would be lost (`messages.md`, the outbox across a restart).
-  The stack is a production build, never `next dev`: `bun run build`, run with `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_API_URL` set to the URLs `portless get` names, since next bakes them into its client (and `HONO_APP_URL` and `HONO_TRUSTED_ORIGINS`, whose hosts auth bakes in),
+  The stack is a production build, never `next dev`: `bun run build`, run with `NEXT_PUBLIC_APP_URL` and `NEXT_PUBLIC_API_URL` set to the URLs `portless get` names in the folder `portlessDir()` picks (stack.md), since next bakes them into its client (and `HONO_APP_URL` and `HONO_TRUSTED_ORIGINS`, whose hosts auth bakes in),
   and with `NODE_ENV=production` and `SKIP_ENV_VALIDATION_SERVER=true`, so a first run builds before its `.env` holds a secret,
   copies next's standalone server with its static files to `ops/dashboard/builds/<sha>`.
   The supervisor runs that build's web on its own (`web_up`, the job `dashboard-web`, with the env the head's `packages/scripts/src/portless.ts` gives the serve task), and `bun run serve --filter=@api/hono` serves the API alone, the launcher's same checks run first.
@@ -47,5 +47,6 @@
   Each tick it reads portless's route file (`alias.ts`, read only) for whether each bare alias, `playground.localhost` and `api.playground.localhost`, holds the port of the live stack's own route, reading a mismatch again after `ALIAS_CONFIRM` seconds (6), past the launcher's 2 s alias sync.
   The wait covers each alias the launcher's 2 s sync moves: `api.playground.localhost` after the API restarts, and `playground.localhost` when the web's route is gone before `web_route` runs, since `moveRoute` moves an alias in the same call only while it follows the route's old port.
   Portless drops a route whose owner has exited, so on v0.0.18's roll the old launcher's web route went with its stop, and `playground.localhost` sat on the old web's port for about 3 s.
+  A missing route for the web's own name is written again first, by `web_route` into the folder `portlessDir()` names now, and read again after `ALIAS_CONFIRM`, since on a first start `web_route` runs before the stack's API starts portless's 1355 proxy in its fallback folder, and the proxy would never learn the web's names.
   A mismatch that holds, a missing route or a missing file writes one `ALIAS FAIL` result, which `run.sh` alerts as it does every FAIL line, again only when it changes, and `ALIAS PASS` once it is right, so the heartbeat reads ok again.
   Writes stay on: it is the owner's own dashboard.
