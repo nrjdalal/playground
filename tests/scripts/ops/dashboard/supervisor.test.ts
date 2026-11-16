@@ -1831,6 +1831,54 @@ describe("the supervisor's alias check", () => {
     expect(results[0]).toContain(`ALIAS FAIL no route file at ${routesFile}`)
   })
 
+  // on a first start web_route wrote the web's route into an idle ~/.portless 2 s before the stack's API started the 1355 proxy in ~/.portless/fallback, so the proxy never learned the web's names (#2300)
+  test("writes a web route that landed before the proxy started into the folder the proxy serves, and passes once the launcher's sync gives it its alias", async () => {
+    const home = join(scratch, "first-start-home")
+    const own = join(home, ".portless")
+    const fallback = join(own, "fallback")
+    const live = join(scratch, "first-start-state")
+    rmSync(home, { force: true, recursive: true })
+    rmSync(live, { force: true, recursive: true })
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(live, { recursive: true })
+    const route = (hostname: string, port: number, pid = process.pid) => ({ hostname, pid, port })
+    await Bun.write(
+      join(own, "routes.json"),
+      JSON.stringify([route("desk.playground.localhost", 4842)]),
+    )
+    // a stand-in for the 1355 proxy's state: the test's own pid, and the API's route and alias its launcher wrote
+    await Bun.write(join(fallback, "proxy.pid"), String(process.pid))
+    await Bun.write(
+      join(fallback, "routes.json"),
+      JSON.stringify([
+        route("desk.api.playground.localhost", 4843),
+        route("api.playground.localhost", 4843, 0),
+      ]),
+    )
+    await Bun.write(join(live, "dashboard-web.port"), "4842\n")
+    await Bun.write(join(live, "results.log"), "")
+    await Bun.write(answer, "https://desk.NAME.localhost\n")
+    // the API launcher's 2 s alias sync, run every 300 ms on the fallback folder until the check ends
+    const sync = `bun -e "const l = await import('${join(root, "api", "hono", "src", "lib", "dev", "launch.ts")}'); setInterval(() => l.syncAliases(l.dashboardAliasPairs('desk'), '${fallback}'), 300)" & SYNC=$!`
+    const { PORTLESS_STATE_DIR: _, ...env } = process.env
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${join(root, "scripts", "ops", "dashboard")} WT=${root} S=${live} RESULTS=${join(live, "results.log")} LOG=${join(live, "supervisor.log")} ALIAS_CONFIRM=3\n${fn("say")}\n${fn("result")}\n${fn("web_route")}\nalive() { [ "$1" = dashboard-web ]; }\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${sync}\ncheck_aliases; kill $SYNC; read_aliases`,
+      ],
+      { env: { ...env, HOME: home, PATH: `${scratch}:${process.env.PATH}` }, stdout: "pipe" },
+    )
+    expect(await proc.exited).toBe(0)
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      "playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    )
+    expect(await Bun.file(join(live, "results.log")).text()).toBe("")
+    expect(await Bun.file(join(live, "supervisor.log")).text()).toContain(
+      `the web's route was missing (no route for desk.playground.localhost in ${join(fallback, "routes.json")}), so web_route wrote it again`,
+    )
+  }, 20_000)
+
   test("runs on every tick of the loop, and only reads the route file", async () => {
     const loop = script.slice(script.indexOf("while true; do"))
     expect(loop).toContain("check_aliases")
