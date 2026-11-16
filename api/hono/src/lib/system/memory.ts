@@ -3,7 +3,7 @@ import {
   procSource,
   procUsedBytes,
   type SysctlName,
-} from "@packages/scripts/src/ops-machine/readings"
+} from "@packages/scripts/ops-machine/readings"
 
 import { parseSysctl, parseVmStat, type Sysctl } from "@/lib/system/parse"
 import { probe } from "@/lib/system/probe"

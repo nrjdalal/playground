@@ -6,6 +6,9 @@
     "playground": "./src/playground/cli.ts"
   },
   "type": "module",
+  "exports": {
+    "./ops-machine/readings": "./src/ops-machine/readings.ts"
+  },
   "scripts": {
     "check-types": "tsc --noEmit"
   },
