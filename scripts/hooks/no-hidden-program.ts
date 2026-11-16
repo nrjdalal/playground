@@ -36,7 +36,13 @@ const visitOf =
       value && !value.unknown && !marked(value.value) && value.value.trim()
         ? ` Here, write \`${value.value}\` in place of \`${typed}\`.`
         : ""
-    return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`
+    const before = cmd.words.slice(0, cmd.words.indexOf(first))
+    const lookup =
+      before.some((w) => !w.quoted && w.value === "command") &&
+      before.some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value))
+        ? " To look a program up, name it literally, or test with `type`."
+        : ""
+    return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}${lookup}`
   }
 
 async function inspect(raw: string, environment: Record<string, string | undefined>) {
@@ -53,7 +59,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     vars: new Map(),
   }
   if (NUMERIC_RANGE.test(command))
-    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and write a literal `<…-…>` some other way."
+    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and put text holding a literal `<…-…>` in a file and pass the file (`git commit -F <file>`)."
   return run(lex(command, env.known), env, visitOf(changedIn(command)))
 }
 

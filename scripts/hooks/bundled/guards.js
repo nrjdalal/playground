@@ -16098,7 +16098,9 @@ var visitOf = (changed) => async (cmd, { first }, at) => {
   const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1];
   const value = held === undefined ? undefined : at.vars.get(held);
   const rewrite = value && !value.unknown && !marked(value.value) && value.value.trim() ? ` Here, write \`${value.value}\` in place of \`${typed}\`.` : "";
-  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`;
+  const before = cmd.words.slice(0, cmd.words.indexOf(first));
+  const lookup = before.some((w) => !w.quoted && w.value === "command") && before.some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value)) ? " To look a program up, name it literally, or test with `type`." : "";
+  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}${lookup}`;
 };
 async function inspect8(raw, environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -16116,7 +16118,7 @@ async function inspect8(raw, environment) {
     vars: new Map
   };
   if (NUMERIC_RANGE.test(command))
-    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and write a literal `<\u2026-\u2026>` some other way.";
+    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and put text holding a literal `<\u2026-\u2026>` in a file and pass the file (`git commit -F <file>`).";
   return run2(lex(command, env.known), env, visitOf(changedIn(command)));
 }
 async function check12(raw, environment = process.env) {

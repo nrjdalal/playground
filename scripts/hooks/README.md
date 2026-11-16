@@ -906,6 +906,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Those two are read from the session's starting env, so one the same line sets or changes is refused (`HOME=/tmp/x; $HOME/bin/rm`, `HOME+=/x`, `${HOME:=/tmp/x}`).
   `[`, `[[` and a case statement's patterns (`casePatterns`) pass.
 - A program held in a variable the line sets is refused too, and the refusal names the literal to write in its place (`H=~/x; $H list`: write `~/x` in place of `$H`).
+  A `command -v $t` refusal names `type $t` as the way out, and a numeric-range refusal names passing the text in a file (`git commit -F <file>`), each measured as passing.
   A call it cannot parse is refused.
   Its rows are `tests/scripts/hooks/fixtures/refused-forms/2375.ts`, and its tests are `bun run test:file tests/scripts/hooks/no-hidden-program.test.ts tests/scripts/hooks/refused-forms.test.ts`.
 
