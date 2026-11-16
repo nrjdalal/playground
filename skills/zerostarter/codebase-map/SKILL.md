@@ -20,7 +20,7 @@ packages/safe-delete/ # playground rm's trash: quarantine, restore, the trash pu
 packages/settings/    # Playground's typed settings, the factory's items store and its jobs, read by the hooks and ops scripts
 packages/env/         # type-safe env, one validated entry per consumer
 packages/config/      # TS base, tsdown factory, and site.ts (brand identity)
-packages/scripts/     # build-only bun tooling (auth-schema, data-table-metrics, generate-env, lock, pr-merge, verify); every new script lands here, never bundled
+packages/scripts/     # build-only bun tooling (auth-schema, data-table-metrics, generate-env, lock, pr-merge, verify); every new script lands here, never bundled but for `ops-machine/readings`, which the API's bundle inlines
 packages/cli/         # the zerostarter scaffolding CLI (canonical repo only; init strips it)
 tests/                # the whole suite, mirroring each subject's path; *.e2e.test.ts drive a running stack (canonical repo only; forks take no tests)
 ```
