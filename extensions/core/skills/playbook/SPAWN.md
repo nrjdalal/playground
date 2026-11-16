@@ -185,7 +185,7 @@ The 98% switch to GLM is retired by his decision on Inbox #i827: the account rot
 
 ## --runtime herdr and restore
 
-`--runtime herdr`, with any mode but restore or close and anywhere among its words, opens the session in herdr, as every start does without it, on the playground server `bun run ops:herdr start` (or `dispatcher`) keeps up, by the binary its pin names; spawn.sh never starts or stops a server, and refuses while it is down.
+`--runtime herdr`, with any mode but restore, close or read and anywhere among its words, opens the session in herdr, as every start does without it, on the playground server `bun run ops:herdr start` (or `dispatcher`) keeps up, by the binary its pin names; spawn.sh never starts or stops a server, and refuses while it is down.
 A column's anchor is then a herdr pane id (`w1:p2`, or lettered as `wN:p1A`; your own is `$HERDR_PANE_ID`), and a name holds at most 32 characters.
 A probe on a server with no pane to split beside opens in a workspace of its own, in this checkout: `spawn.sh probe <name> <reports-to> <brief>`, with no `--runtime` or with `--runtime herdr`.
 It opens on the playground server; `PLAYGROUND_HERDR_SESSION=playground-probes` before the command puts it on the probes server.
@@ -212,7 +212,7 @@ Done when each line reads `restored`, `waiting`, `skipped <name>: live` or a ros
 
 ## --check
 
-`--check`, with any mode but restore or close, runs every gate but the live-name one and starts or closes nothing.
+`--check`, with any mode but restore, close or read, runs every gate but the live-name one and starts or closes nothing.
 
 ## Role and settings
 

@@ -66,7 +66,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--model <id>` picks the Claude model for a start or a resume, one of the `models.claude` setting, else `models.default` (the docs list each key and its default).
   It is refused for any other id, an empty or missing value, on GLM, which maps every model itself, and for a reviewer or tester (a column of either, or a resume of a `reviewer-` or `tester-` session) on anything but `models.checker`, which a checker runs on with no `--model`,
   since its verdict gates a merge; nothing records it, so a resume takes it afresh and one with no `--model` runs on `models.default`.
-  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore or close.
+  `--effort <level>` sets a start's or a resume's effort, one of low, medium, high, xhigh or max, high with none; it is refused for any other value, an empty or missing value, given twice, and with restore, close or read.
   The resume record keeps an effort other than high on its exec line, so a restore runs at the same effort, and a resume with no `--effort` runs at high.
   `--title "<title>"` gives a start the plain title the sidebar reads it by, up to 40 characters: a `worker` is refused without one, and a reviewer's or tester's column with none takes `Review: ` or `Test: ` before its worker's roster title, keeps the title its row already holds, or is refused.
   A probe keeps its words-only default and a new runner takes its name, and every other mode refuses it, a resume, a close and a restore included.
@@ -76,7 +76,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--memory <dir>` turns Claude Code's auto-memory on for that one start or resume, writing to `<dir>`, whatever the session's role.
   Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>` (beside the Agent and Workflow deny, for a dispatcher or a lead), so the shared file every other launch reads stays as it is.
   `--memory off` keeps it off for that one start or resume, on the shared settings file, whatever arm the role or the row would take.
-  It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore or close.
+  It is refused for a value that is neither an absolute folder nor `off`, given twice, and with restore, close or read.
   Without either, each start takes the auto-memory trial's arm by its role ([ADR 0022](../.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)): on for the dispatcher and the builder, ops and planner leads in the data folder's `memory/<kind>/`, on for every second fresh worker start in `memory/worker-b/`, and off for every other session.
   A resume keeps its roster row's `memory=on` or `memory=off`, which every start records.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
