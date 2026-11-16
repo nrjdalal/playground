@@ -33,7 +33,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It counts no live row's hold on a worktree sitting clean, detached, at a commit its base holds (`origin/canary`, or another repo's default branch), while a clone, link or process inside it still holds it.
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
-  Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
+  Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead, and each end moves the session's worktrees and leftovers to the trash.
   A worker leaves its checkers to auto-end's beat and does not close them itself: a checker idle under 10 minutes after its worker ends stays open, and the first beat past 10 closes it.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.

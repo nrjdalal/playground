@@ -1602,6 +1602,7 @@ describe("an ended session's leftovers and the moves its end carried (#2407)", (
       "playground-k3m9px-worker.AbC123",
       "playground-k3m9px-worker.Zz9",
       "playground-k3m9px-worker-x.Q1",
+      "playground-k3m9px-worker2.Q2",
       "playground-builder.Z2",
     ]
     expect(leftoversOf("k3m9px-worker", "/d", tmp)).toEqual([
