@@ -4,12 +4,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  cloneOf,
   cloneState,
   type PeerRun,
   syncPeers,
 } from "../../../../../packages/scripts/src/playground/peer-sync"
 
 const SHA = "0123456789abcdef0123456789abcdef01234567"
+const CLONE = "~/code/playground"
 const dir = mkdtempSync(join(tmpdir(), "peer-sync-"))
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
@@ -30,7 +32,7 @@ const stubSsh = (answers: Record<string, { code?: number; out?: string }> = {}) 
   const script: typeof answers = {
     status: { out: "## main...origin/main\n" },
     worktree: {
-      out: "worktree /home/you/Desktop/playground\nHEAD 0123\nbranch refs/heads/main\n\n",
+      out: "worktree /home/you/code/playground\nHEAD 0123\nbranch refs/heads/main\n\n",
     },
     ...answers,
   }
@@ -42,11 +44,22 @@ const stubSsh = (answers: Record<string, { code?: number; out?: string }> = {}) 
   return { calls, run }
 }
 
-const sync = async (env: string, run: PeerRun, sha = SHA) => {
+const sync = async (env: string, run: PeerRun, sha = SHA, clone: string | null = CLONE) => {
   const lines: string[] = []
-  await syncPeers(env, sha, run, (line) => lines.push(line))
+  await syncPeers(env, sha, clone, run, (line) => lines.push(line))
   return lines
 }
+
+describe("cloneOf", () => {
+  test("a peer's clone sits where this checkout sits under its home, as a ~ path; a checkout outside home or with a character a remote shell reads has none", () => {
+    expect(cloneOf("/home/you/code/playground", "/home/you")).toBe("~/code/playground")
+    expect(cloneOf("/home/you/playground", "/home/you")).toBe("~/playground")
+    expect(cloneOf("/srv/playground", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you/my code/playground", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you/code/$(x)", "/home/you")).toBeNull()
+  })
+})
 
 describe("cloneState", () => {
   test("reads the branch, a detached HEAD as null, and any line after the branch line as a change", () => {
@@ -73,48 +86,10 @@ describe("syncPeers", () => {
     const { calls, run } = stubSsh()
     expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
     expect(calls).toEqual([
-      [
-        ...SSH,
-        "you@10.0.0.2",
-        "git",
-        "-C",
-        "~/Desktop/playground",
-        "status",
-        "--porcelain",
-        "--branch",
-      ],
-      [
-        ...SSH,
-        "you@10.0.0.2",
-        "git",
-        "-C",
-        "~/Desktop/playground",
-        "worktree",
-        "list",
-        "--porcelain",
-      ],
-      [
-        ...SSH,
-        "you@10.0.0.2",
-        "git",
-        "-C",
-        "~/Desktop/playground",
-        "fetch",
-        "-q",
-        "origin",
-        "--tags",
-      ],
-      [
-        ...SSH,
-        "you@10.0.0.2",
-        "git",
-        "-C",
-        "~/Desktop/playground",
-        "checkout",
-        "-q",
-        "--detach",
-        SHA,
-      ],
+      [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "status", "--porcelain", "--branch"],
+      [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "worktree", "list", "--porcelain"],
+      [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "fetch", "-q", "origin", "--tags"],
+      [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "checkout", "-q", "--detach", SHA],
       [
         ...SSH,
         "you@10.0.0.2",
@@ -126,7 +101,7 @@ describe("syncPeers", () => {
         "--frozen-lockfile",
         "--ignore-scripts",
         "--cwd",
-        "~/Desktop/playground",
+        CLONE,
       ],
     ])
   })
@@ -155,7 +130,7 @@ describe("syncPeers", () => {
   test("a clone other worktrees are cut from is left as it is, since their hooks read through its git dir; a list that fails moves nothing", async () => {
     const two = stubSsh({
       worktree: {
-        out: "worktree /home/you/Desktop/playground\nHEAD 0123\nbranch refs/heads/main\n\nworktree /home/you/replay/r1\nHEAD 0123\ndetached\n\nworktree /home/you/replay/r2\nHEAD 0123\ndetached\n\n",
+        out: "worktree /home/you/code/playground\nHEAD 0123\nbranch refs/heads/main\n\nworktree /home/you/replay/r1\nHEAD 0123\ndetached\n\nworktree /home/you/replay/r2\nHEAD 0123\ndetached\n\n",
       },
     })
     expect(await sync(ONE, two.run)).toEqual([
@@ -164,7 +139,7 @@ describe("syncPeers", () => {
     expect(two.calls).toHaveLength(2)
     const one = stubSsh({
       worktree: {
-        out: "worktree /home/you/Desktop/playground\n\nworktree /home/you/replay/r1\n\n",
+        out: "worktree /home/you/code/playground\n\nworktree /home/you/replay/r1\n\n",
       },
     })
     expect(await sync(ONE, one.run)).toEqual([
@@ -218,6 +193,14 @@ describe("syncPeers", () => {
     const { calls, run } = stubSsh()
     expect(await sync(ONE, run, "HEAD; rm -rf ~")).toEqual([
       "peer sync: HEAD; rm -rf ~ is not a commit sha, so no peer moved",
+    ])
+    expect(calls).toEqual([])
+  })
+
+  test("a checkout with no plain path under home moves no peer and runs nothing", async () => {
+    const { calls, run } = stubSsh()
+    expect(await sync(ONE, run, SHA, null)).toEqual([
+      "peer sync: this checkout's path is not a plain path under the home folder, so no peer moved",
     ])
     expect(calls).toEqual([])
   })

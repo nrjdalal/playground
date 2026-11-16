@@ -15,7 +15,7 @@ import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
-import { syncPeers } from "./peer-sync"
+import { cloneOf, syncPeers } from "./peer-sync"
 import {
   addCommand,
   aliasFailure,
@@ -358,7 +358,8 @@ const update = (to?: string): Promise<number> =>
         repo: REPO,
         send: sendBrief,
       }),
-    (sha) => syncPeers(join(dashboardCheckout(REPO) ?? REPO, ".env"), sha),
+    (sha) =>
+      syncPeers(join(dashboardCheckout(REPO) ?? REPO, ".env"), sha, cloneOf(REPO, homedir())),
   )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
