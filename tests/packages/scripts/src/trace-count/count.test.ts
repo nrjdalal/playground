@@ -66,6 +66,7 @@ describe("the trace count", () => {
       issueRefs: 1,
       lightWords: 0,
       linearKeys: 1,
+      macOnly: 0,
       names: 1,
       oldNames: 2,
       oldSkillNames: 2,

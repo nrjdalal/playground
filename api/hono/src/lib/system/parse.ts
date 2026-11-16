@@ -186,3 +186,36 @@ export function parseContainerStats(out: string): Map<string, number> {
   }
   return usage
 }
+
+// One machine's size and load, the figures the System panel sums across machines; usedBytes is null when this machine's memory read failed.
+export type MachineReading = {
+  cores: number
+  load: [number, number, number]
+  memory: { totalBytes: number; usedBytes: number | null }
+  swap: { totalBytes: number; usedBytes: number } | null
+}
+
+// A peer's `cat /proc/loadavg /proc/meminfo /proc/stat`: loadavg's first line, MemTotal less MemAvailable as free counts it, SwapTotal less SwapFree, and one cpuN line per core; null when the load, the memory or the cores do not read, so a peer is never summed as zeros.
+export function parsePeer(out: string): MachineReading | null {
+  const kb = (key: string): number | null => {
+    const m = new RegExp(`^${key}:\\s+(\\d+) kB`, "m").exec(out)
+    return m ? Number(m[1]) * 1024 : null
+  }
+  const load = (out.trimStart().split("\n")[0] ?? "").trim().split(/\s+/).slice(0, 3).map(Number)
+  const cores = out.match(/^cpu\d+ /gm)?.length ?? 0
+  const total = kb("MemTotal")
+  const available = kb("MemAvailable")
+  const swapTotal = kb("SwapTotal")
+  const swapFree = kb("SwapFree")
+  if (load.length !== 3 || !load.every(Number.isFinite) || cores === 0) return null
+  if (total === null || available === null) return null
+  return {
+    cores,
+    load: load as [number, number, number],
+    memory: { totalBytes: total, usedBytes: Math.max(0, total - available) },
+    swap:
+      swapTotal === null || swapFree === null
+        ? null
+        : { totalBytes: swapTotal, usedBytes: Math.max(0, swapTotal - swapFree) },
+  }
+}
