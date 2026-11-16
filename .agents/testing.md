@@ -4,6 +4,8 @@
 
 A bare `bun test` from the repo root stops at `tests/require-sandbox.ts`, which `bunfig.toml` preloads, since only `test-sandbox.ts` gives a test a scratch home in place of the real one; bun reads `bunfig.toml` from the folder it runs in, so a run from a subfolder goes unguarded.
 That sandbox (`packages/scripts/src/sandbox.ts`) also sets `TZ=UTC`, so a test's children read one zone on the Mac and the runner box; a test of code that reads local time gives its child its own `TZ`.
+It takes the caller's env through `SANDBOX_KEYS` alone (`boxEnv`, `packages/scripts/src/box-env.ts`), since a variable naming live state by an absolute path (`PORTLESS_STATE_DIR` once let a scratch-HOME child stop the live proxy) survives a new HOME.
+A test that gives its own child a scratch HOME builds that env with `scratchEnv` (`tests/scratch-env.ts`), which keeps the sandbox's variables; `tests/scratch-home-env.test.ts` fails on a spread of `process.env`, a rest or a filtered copy of it included, beside a HOME of its own.
 It sets `PLAYGROUND_PROC` to a missing folder, so a machine reading a test leaves to Linux's `/proc` (`packages/scripts/src/ops-machine/readings.ts`, spawn.sh's and run-slot.sh's gates) reads nothing on GitHub's Linux runner rather than its real load;
 a test of a Linux reading points it at recorded text from `tests/scripts/fixtures/proc.ts`, and a child whose env it builds whole passes `TEST_SANDBOX_HOME` with it, since the readings take `PLAYGROUND_PROC` under that marker alone.
 It sets `TMPDIR` to the scratch folder's short `t` folder too, so every `mkdtemp(tmpdir())` folder a test or its child makes goes with the scratch when the run ends, rather than staying in the caller's temp folder (24,008 such entries once, issue 1306).
