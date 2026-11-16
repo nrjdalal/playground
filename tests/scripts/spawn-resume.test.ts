@@ -865,13 +865,16 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
 
   test.each([
     ["no name", ["close"]],
-    ["another word", ["close", "worker-x", "worker-y"]],
+    [
+      "a word past the session id",
+      ["close", "worker-x", "a1b2c3d4-0000-4000-8000-0000000000a1", "worker-y"],
+    ],
     ["an option", ["close", "worker-x", "--runtime", "herdr"]],
     ["a size", ["close", "worker-x", "--size", "small"]],
-  ])("it takes a session's name alone, so %s is usage", async (_, args) => {
+  ])("it takes a session's name and its session id alone, so %s is usage", async (_, args) => {
     const r = await spawn(args, [], {}, undefined, undefined, opened())
     expect(r.code).toBe(2)
-    expect(r.err).toContain("close takes a session's name alone")
+    expect(r.err).toContain("close takes a session's name, and its session id to pick one")
     expect(r.err).toContain("--runtime herdr    with any mode but restore or close,")
     expect(closes(r)).toEqual([])
     expect(r.roster).toBeUndefined()

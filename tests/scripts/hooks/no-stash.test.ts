@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-stash"
+import { scratchEnv } from "../../scratch-env"
 import { overBaseline, stepsOf } from "./pace"
 
 // The worktree path every refusal gives: absolute, beside the main checkout's .git, so none nests in another worktree (AGENTS.md's Workflow rule).
@@ -276,14 +277,12 @@ describe("the factory settings run it through guards", () => {
   const hook = async (home: string, command: string, repo: string, role = "worker") => {
     const proc = Bun.spawn(["bash", "-c", (await entry()).hooks[0].command], {
       cwd: tmpdir(),
-      env: {
-        ...process.env,
+      env: scratchEnv(home, {
         CLAUDE_PROJECT_DIR: home,
         GIT_CEILING_DIRECTORIES: tmpdir(),
-        HOME: home,
         PLAYGROUND_REPO: repo,
         PLAYGROUND_ROLE: role,
-      },
+      }),
       stderr: "pipe",
       stdin: new Blob([JSON.stringify({ tool_input: { command }, tool_name: "Bash" })]),
       stdout: "pipe",

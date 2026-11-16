@@ -1012,6 +1012,11 @@ function walk(lx, scope, nested, inherit) {
   const pending = [];
   const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
   let cmd = fresh();
+  const twins = new Map;
+  const past = (from) => {
+    const twin = twins.get(cmd);
+    return twin && from >= twin.from ? twin : undefined;
+  };
   const opens = [];
   let depth = 0;
   let loops = 0;
@@ -1021,6 +1026,7 @@ function walk(lx, scope, nested, inherit) {
   const heads = [];
   const end = (op) => {
     const done = cmd;
+    const twin = twins.get(done);
     const pipe = op === "|" || op === "|&";
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
@@ -1100,8 +1106,14 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
       }
       lx.commands.push(done);
+      if (twin && lx.i >= twin.from) {
+        const { of, redirects, words } = twin;
+        of.glob = { detached: of.detached || done.detached, redirects, words };
+      }
     }
     cmd = fresh();
+    if (twin && lx.i < twin.from)
+      twins.set(cmd, twin);
     cmd.follows = op;
     if (pipe) {
       cmd.stdin = done;
@@ -1132,6 +1144,7 @@ function walk(lx, scope, nested, inherit) {
       if (nested)
         return;
     } else if (c === "(") {
+      const twin = globOpens(cmd, src, lx.i) ? globTwin(lx, cmd) : undefined;
       lx.i++;
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined;
       end(";");
@@ -1141,9 +1154,14 @@ function walk(lx, scope, nested, inherit) {
       cmd.group = true;
       const members = topLevel(lx.commands.slice(from), scope);
       cmd.inner = () => members;
+      if (twin)
+        twins.set(cmd, twin);
     } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
+      const from = lx.i;
       cmd.words.push(procSub(lx));
+      past(from)?.words.push(cmd.words[cmd.words.length - 1]);
     } else if (redirect) {
+      const from = lx.i;
       lx.i += redirect[0].length;
       while (src[lx.i] === " " || src[lx.i] === "\t")
         lx.i++;
@@ -1162,6 +1180,7 @@ function walk(lx, scope, nested, inherit) {
         entry.body = { ...target, value: `${target.value}
 ` };
       cmd.redirects.push(entry);
+      past(from)?.redirects.push(entry);
     } else if (c === ";" || c === "&" || c === "|") {
       const two = src.slice(lx.i, lx.i + 2);
       const op = ["&&", ";;", "|&", "||"].includes(two) ? two : c;
@@ -1172,6 +1191,8 @@ function walk(lx, scope, nested, inherit) {
       cmd.words.push(word(lx));
       if (lx.i === from)
         lx.i++;
+      else
+        past(from)?.words.push(cmd.words[cmd.words.length - 1]);
     }
   }
   heredocs(lx, pending, nested);
@@ -1239,12 +1260,85 @@ function expandHeredoc(body) {
   const value = joined.replace(/\\([\\$`])/g, "$1");
   return /\$[\w{(@*#?!$-]|`/.test(joined.replace(/\\[\\$`]/g, "")) ? { unknown: "an expansion in an unquoted heredoc", value } : { value };
 }
-function word(lx) {
+function globOpens(cmd, src, at) {
+  const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value));
+  if (program < 0)
+    return false;
+  const lead = cmd.words.slice(program);
+  const next = { quoted: false, value: "(" };
+  let words = [...cmd.words, next];
+  let { first } = parse({ ...cmd, words });
+  while (first && first !== next && words.includes(first) && maySkip(first)) {
+    const dropped = first;
+    words = words.filter((w) => w !== dropped);
+    ({ first } = parse({ ...cmd, words }));
+  }
+  const close = balanced(src, at, "(", ")", false, true);
+  const group = src.slice(at, close);
+  return first === next && src[at + 1] !== ")" && !group.includes("/") && plainAlternative(group, close < src.length && !/[\s;&|<>)]/.test(src[close])) && !subshellPrefix(lead) && !HEADERS.has(cmd.words[0]?.value ?? "");
+}
+function plainAlternative(group, glued) {
+  let depth = 0;
+  let plain = true;
+  let empty = true;
+  for (let i = 1;i < group.length - 1; i++) {
+    const c = group[i];
+    if (c === "|" && depth === 0) {
+      if (plain && (glued || !empty))
+        return true;
+      plain = true;
+      empty = true;
+      continue;
+    }
+    empty = false;
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      const end = group.indexOf("'", i + 1);
+      i = end === -1 ? group.length : end;
+    } else if (c === '"') {
+      i++;
+      while (i < group.length && group[i] !== '"')
+        i += group[i] === "\\" ? 2 : 1;
+    } else if (c === "(")
+      depth++;
+    else if (c === ")")
+      depth--;
+    else if (/[\s;&]/.test(c))
+      plain = false;
+  }
+  return plain && (glued || !empty);
+}
+function subshellPrefix(lead) {
+  let at = 0;
+  while (at < lead.length && !lead[at].quoted)
+    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+      at++;
+    else if (lead[at].value === "repeat" && at + 1 < lead.length)
+      at += 2;
+    else
+      break;
+  return at > 0 && at === lead.length;
+}
+var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
+var HEADERS = new Set(["case", "for", "foreach", "function", "select"]);
+function globTwin(lx, of) {
+  const copy = { ...lx, commands: [], scopes: [...lx.scopes] };
+  const glob = word(copy, true);
+  const program = of.words.findIndex((w) => w.quoted || !MARKERS.has(w.value));
+  return {
+    from: copy.i,
+    of,
+    redirects: [...of.redirects],
+    words: [...of.words.slice(program), glob]
+  };
+}
+function word(lx, opening = false) {
   const { src } = lx;
   const start = lx.i;
   const out = { quoted: false, value: "" };
   let bare = "";
-  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")")) {
+  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")")) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
@@ -1254,7 +1348,7 @@ function word(lx) {
       lx.i--;
       merge(out, procSub(lx));
     } else if (c === "(") {
-      const end = balanced(src, lx.i, "(", ")");
+      const end = balanced(src, lx.i, "(", ")", false, opening);
       out.value += src.slice(lx.i, end);
       bare += src.slice(lx.i, end);
       inner(lx, src.slice(lx.i + 1, end - 1));
@@ -1407,7 +1501,7 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close, plain = false) {
+function balanced(src, from, open, close, plain = false, doubles = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
@@ -1417,6 +1511,10 @@ function balanced(src, from, open, close, plain = false) {
     else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
+    } else if (c === '"' && doubles) {
+      i++;
+      while (i < src.length && src[i] !== '"')
+        i += src[i] === "\\" ? 2 : 1;
     } else if (c === open)
       depth++;
     else if (c === close && --depth === 0)
@@ -1731,7 +1829,7 @@ async function runAll(lexed, env, visit, builtins) {
     const at = envOf(cmd.scope);
     if (cmd.repeated && !lexed.commands[k - 1]?.repeated)
       repass(lexed.commands.slice(k), envs);
-    const verdict = await examine(cmd, at, visit, builtins);
+    const verdict = await examine(cmd, at, visit, builtins) ?? (cmd.glob && await examine({ ...cmd, ...cmd.glob, glob: undefined }, at, visit, builtins));
     if (verdict)
       return verdict;
     unbind.get(cmd)?.();
@@ -2085,7 +2183,8 @@ function globSpells(text, names) {
   return false;
 }
 function spelledText(text) {
-  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).flatMap((token) => {
+  const plain = text.replace(/\\\n/g, "").replace(/\\/g, "");
+  const spelled = [...plain.split(/[\s;&<>`]+/), ...blankGroups(plain)].flatMap((token) => {
     const parts = token.split(/(?=[$=]\()|\|+(?=\()/).map((part) => part.replace(/^(?:[$=]?\(|['"])+/, ""));
     return [token, ...parts.filter((part) => part !== token)];
   }).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
@@ -2097,6 +2196,20 @@ function spelledText(text) {
   })).map((word) => word.replace(/["']/g, "")).flatMap((word) => /^[*?]+$/.test(word.slice(word.lastIndexOf("/") + 1)) ? [word, ANY_NAME] : [word]);
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
+function blankGroups(text) {
+  const out = [];
+  for (const { 0: group, index } of text.matchAll(/\([^()\s]*\s[^()]*\)/g)) {
+    let from = index;
+    while (from > 0 && !BETWEEN.test(text[from - 1]))
+      from--;
+    let to = index + group.length;
+    while (to < text.length && !BETWEEN.test(text[to]))
+      to++;
+    out.push(text.slice(from, to));
+  }
+  return out;
+}
+var BETWEEN = /[\s;&<>`]/;
 var SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g;
 var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : /^-?\d+$/.test(from) && /^-?\d+$/.test(to) ? "[0-9-]*" : "*";
 function anyText(word, part) {
@@ -2209,7 +2322,8 @@ async function examine(cmd, env, visit, builtins) {
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
-    ...brace ? [globRun(brace, parse(brace).first, env)] : []
+    ...brace ? [globRun(brace, parse(brace).first, env)] : [],
+    ...vanished.map((v) => globRun(v, parse(v).first, env))
   ];
   const resolving = [
     ...split,
@@ -2500,10 +2614,10 @@ function binds({ words }) {
   }
   return names.filter((w) => NAME.test(w));
 }
-var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+var mayVanish = (w, env) => maySkip(w) && [...(w.source ?? "").matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
   return !set || !!set.vanishes || !set.unknown && /^[ \t\n]*$/.test(set.value);
-}));
+});
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))
     return [];
@@ -12671,12 +12785,12 @@ import { dirname as dirname5, join as join12, resolve as resolve7, sep as sep2 }
 
 // scripts/hooks/codex.ts
 import { isAbsolute as isAbsolute3, resolve as resolve5 } from "path";
-var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var HEADERS2 = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
 var SHELL_PATCH = /(?:^|[\n;&|(`]|\$\()\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*\/)?(?:apply_patch|applypatch)(?=$|[\s;&|)<>'"`])/;
 var patchPaths = (text) => text.split(`
 `).flatMap((line) => {
   const trimmed = line.trim();
-  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  const header = HEADERS2.find((h) => trimmed.startsWith(h));
   return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
 });
 var writeOf2 = (input, path, patch) => {
@@ -14105,6 +14219,7 @@ var GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "github.pollMinutes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
@@ -17176,7 +17291,7 @@ var DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"]);
 var UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"]);
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? "");
 var GITHUB_URL2 = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
-var unread3 = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`;
+var unread3 = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again on the first call once the github rule's poll interval (github.pollMinutes, 5 minutes by default) has passed since the failed read.`;
 var REASONS = {
   none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>. An extension item's reviewer has no PR and stays in read mode: read each revision with playground ext show <scope> <kind> <key> --rev <sha> piped into jq (.content.files, .content.body), and say in the verdict that the item was read, not run.",
   outside: "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move a clone with no node_modules (a fresh one, never an installed one, whose git hooks would run) with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run."
@@ -17546,7 +17661,13 @@ function trackedIn(main, script) {
 function live2(environment) {
   const data = dataDirOf(environment);
   const cache = join19(data, "hook-outside-pr");
-  const HOUR = 3600 * 1000;
+  const pollMs = async () => {
+    const read = await readPolicy(data).catch(() => {
+      return;
+    });
+    const settings = read?.settings ?? { schemaVersion: 1, values: {} };
+    return ruleSettings.get(settings, "github.pollMinutes") * 60000;
+  };
   return {
     author: async (repo, pr) => {
       const file = join19(cache, `${repo.replace("/", "__")}__${pr}.json`);
@@ -17554,7 +17675,7 @@ function live2(environment) {
         const kept = await Bun.file(file).json();
         if (isPr(kept))
           return kept;
-        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < HOUR)
+        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < await pollMs())
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";

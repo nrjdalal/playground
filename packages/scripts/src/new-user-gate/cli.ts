@@ -1,19 +1,21 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
 // Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
+const PORTLESS = join(REPO, "node_modules", ".bin", "portless")
 const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
@@ -114,15 +116,54 @@ export const strayStandIns = (box: string, home: string, names: string[]): strin
 export const scriptsGroup = (text: string): boolean =>
   text.split("\n").some((line) => /^Scripts(\s*\d+)?$/.test(line.trim()))
 
-const run = (argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
-  const out = Bun.spawnSync(argv, { cwd: opts.cwd, env: opts.env, stderr: "pipe", stdout: "pipe" })
-  return { code: out.exitCode, err: out.stderr.toString(), out: out.stdout.toString() }
+// A program missing from PATH reads as exit 127 with its error, never a throw, so a finally's later steps (the box's clean) still run.
+export const run = (argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}) => {
+  try {
+    const out = Bun.spawnSync(argv, {
+      cwd: opts.cwd,
+      env: opts.env,
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    return { code: out.exitCode, err: out.stderr.toString(), out: out.stdout.toString() }
+  } catch (error) {
+    return { code: 127, err: error instanceof Error ? error.message : String(error), out: "" }
+  }
 }
 
 const realBin = (name: string) => {
   const found = Bun.which(name)
   if (!found) throw new Error(`${name} is not on PATH`)
   return found
+}
+
+// The box's tools folder on its PATH: this host's uv linked alone, as a Mac's /opt/homebrew/bin gives it, so install.sh's uv step finds it and downloads nothing; its own folder (~/.local/bin on Linux) can hold other real programs.
+export const hostTools = (box: string, uv: string | null): string => {
+  const tools = join(box, "tools")
+  mkdirSync(tools, { recursive: true })
+  if (uv) symlinkSync(uv, join(tools, "uv"))
+  return tools
+}
+
+// The box's PATH: the stand-ins first, then tools (hostTools' folder), the host's bun, node and docker, and the system's folders.
+export const boxPath = (box: string, tools: string): string => {
+  const node = dirname(
+    Bun.spawnSync(["realpath", realBin("node")])
+      .stdout.toString()
+      .trim(),
+  )
+  return [
+    join(box, "stubs"),
+    tools,
+    join(homedir(), ".bun", "bin"),
+    node,
+    dirname(realBin("docker")),
+    "/opt/homebrew/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ].join(":")
 }
 
 // A box for sha: a scratch folder in parent named pg-gate-<sha7>-<random>, which dropBox alone removes.
@@ -135,35 +176,27 @@ export const dropBox = (box: string) => {
   if (refused) console.error(`gate: ${refused}`)
 }
 
+// The made-up stored login where the box's security reads it: the stand-in's Keychain file on a Mac, and on Linux, where install links Playground's own security first on PATH, Claude's ~/.claude/.credentials.json (packages/scripts/src/security/cli.ts).
+export const plantLogin = (box: string, home: string, reading: ReturnType<typeof usageReading>) => {
+  writeFileSync(join(box, "keychain"), reading.keychain)
+  mkdirSync(join(home, ".claude"), { recursive: true })
+  writeFileSync(join(home, ".claude", ".credentials.json"), reading.credentials, { mode: 0o600 })
+}
+
 // A box at sha: the HOME, the stand-ins first on PATH, a bare source.git holding sha as pinned and as main, as a ship leaves it, beside origin's canary (HEAD main, as GitHub's), its clone at HOME/playground where install.sh finds it, and the box's own portless proxy on a high port with no TLS, so the box's stack never routes through this Mac's proxy.
 const prep = (box: string, sha: string) => {
   const home = join(box, "h")
   mkdirSync(join(box, "stubs"), { recursive: true })
   mkdirSync(join(box, "shots"), { recursive: true })
   mkdirSync(home, { recursive: true })
-  for (const [name, text] of Object.entries(stubs(box, realBin("bunx")))) {
+  for (const [name, text] of Object.entries(stubs(box, realBin("bunx"), realBin("curl")))) {
     writeFileSync(join(box, "stubs", name), text)
     chmodSync(join(box, "stubs", name), 0o755)
   }
   writeFileSync(join(box, "tty"), "y\n")
   for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
-  const node = dirname(
-    Bun.spawnSync(["realpath", realBin("node")])
-      .stdout.toString()
-      .trim(),
-  )
-  const path = [
-    join(box, "stubs"),
-    join(homedir(), ".bun", "bin"),
-    node,
-    dirname(realBin("docker")),
-    "/opt/homebrew/bin",
-    "/usr/bin",
-    "/bin",
-    "/usr/sbin",
-    "/sbin",
-  ]
+  const path = boxPath(box, hostTools(box, Bun.which("uv")))
   run(["git", "fetch", "-q", "origin"], { cwd: REPO })
   run(["git", "init", "-q", "--bare", join(box, "source.git")])
   const pushed = run(
@@ -186,52 +219,44 @@ const prep = (box: string, sha: string) => {
   const usageJob = join(home, "playground", "scripts", "ops", "usage", "run.py")
   if (existsSync(usageJob) && readFileSync(usageJob, "utf8").includes("PLAYGROUND_USAGE_API")) {
     const reading = usageReading(process.env.USER ?? "", Date.now())
-    writeFileSync(join(box, "keychain"), reading.keychain)
+    plantLogin(box, home, reading)
     mkdirSync(join(box, "usage-api"))
     writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
     writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
   }
-  const proxy = run(
-    [
-      join(REPO, "node_modules", ".bin", "portless"),
-      "proxy",
-      "start",
-      "-p",
-      PROXY_PORT,
-      "--no-tls",
-    ],
-    {
-      env: { ...process.env, HOME: home, PORTLESS_SYNC_HOSTS: "0" },
-    },
-  )
+  const proxy = run([PORTLESS, "proxy", "start", "-p", PROXY_PORT, "--no-tls"], {
+    env: boxEnv(home, { PORTLESS_SYNC_HOSTS: "0" }),
+  })
   if (proxy.code !== 0)
     throw new Error(`the box's portless proxy did not start: ${proxy.err.trim()}`)
-  return { home, path: path.join(":") }
+  return { home, path }
 }
 
-// install.sh piped to bash as `curl | bash` runs it, in the box's HOME with a clean environment and the test sandbox's stand-ins for the terminal, the OS, Homebrew and portless's service.
+// install.sh's whole env in the box: the box's HOME and the test sandbox's stand-ins for the terminal, Homebrew and portless's service, with no INSTALL_OS, so install.sh takes this host's from uname as a new user's run does.
+export const installEnv = (box: string, home: string, path: string): Record<string, string> => ({
+  BUN_INSTALL_CACHE_DIR: join(homedir(), ".bun", "install", "cache"),
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0",
+  HOME: home,
+  INSTALL_BREW_PREFIXES: "",
+  INSTALL_PORTLESS_PLIST: join(box, "plist"),
+  INSTALL_PROXY_UP: join(box, "proxy-up"),
+  INSTALL_TTY: join(box, "tty"),
+  LOGNAME: process.env.USER ?? "",
+  PATH: path,
+  PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
+  PORTLESS_SYNC_HOSTS: "0",
+  SHELL: "/bin/zsh",
+  TERM: "dumb",
+  TEST_SANDBOX_HOME: home,
+  USER: process.env.USER ?? "",
+})
+
+// install.sh piped to bash as `curl | bash` runs it, with installEnv's clean environment.
 const install = async (box: string, home: string, path: string): Promise<string> => {
   const child = Bun.spawn(["timeout", String(INSTALL_LIMIT_S), "bash"], {
     cwd: home,
-    env: {
-      BUN_INSTALL_CACHE_DIR: join(homedir(), ".bun", "install", "cache"),
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_TERMINAL_PROMPT: "0",
-      HOME: home,
-      INSTALL_BREW_PREFIXES: "",
-      INSTALL_OS: "Darwin",
-      INSTALL_PORTLESS_PLIST: join(box, "plist"),
-      INSTALL_PROXY_UP: join(box, "proxy-up"),
-      INSTALL_TTY: join(box, "tty"),
-      LOGNAME: process.env.USER ?? "",
-      PATH: path,
-      PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
-      PORTLESS_SYNC_HOSTS: "0",
-      SHELL: "/bin/zsh",
-      TERM: "dumb",
-      TEST_SANDBOX_HOME: home,
-      USER: process.env.USER ?? "",
-    },
+    env: installEnv(box, home, path),
     stderr: "pipe",
     stdin: Bun.file(join(home, "playground", "install.sh")),
     stdout: "pipe",
@@ -333,7 +358,7 @@ export const databaseCheck = async (
 }
 
 // One agent-browser session for the run, its screenshots in the box.
-class Browser {
+export class Browser {
   readonly session = `pg-gate-${process.pid}`
   constructor(readonly shots: string) {}
   // One command, tried again up to twice when the daemon took it but sent no reply (os error 35 while the browser starts).
@@ -449,9 +474,9 @@ const waitForRoom = async () => {
   )
 }
 
-// Stops what the box started, each by its own handle: herdr's servers (whose panes run the ops jobs) through ops-herdr's own stop, the supervisor by the pid its job wrote, the dashboard's stack by the process groups procs.sh recorded, the box's proxy through portless, and the gate's containers by the names its label lists.
-const clean = (box: string, home: string) => {
-  const env = { ...process.env, HOME: home }
+// Stops what the box started, each by its own handle: herdr's servers (whose panes run the ops jobs) through ops-herdr's own stop, the supervisor by the pid its job wrote, the dashboard's stack by the process groups procs.sh recorded, the box's proxy through portless on its own port, since a bare stop probes 443, 80 and 1355 and stops the machine's proxy there, and the gate's containers by the names its label lists.
+export const clean = (box: string, home: string, portless = PORTLESS) => {
+  const env = boxEnv(home)
   const desk = join(home, "playground", ".claude", "worktrees", "desk")
   const checkout = existsSync(desk) ? desk : join(home, "playground")
   const herdrCli = join(checkout, "packages", "scripts", "src", "ops-herdr", "cli.ts")
@@ -466,9 +491,7 @@ const clean = (box: string, home: string) => {
   const procs = join(checkout, "scripts", "ops", "dashboard", "procs.sh")
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
-  run([join(REPO, "node_modules", ".bin", "portless"), "proxy", "stop"], {
-    env: { ...process.env, HOME: home },
-  })
+  run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
   const names = run([
     "docker",
     "ps",

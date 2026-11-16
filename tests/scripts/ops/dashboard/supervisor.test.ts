@@ -2,16 +2,19 @@ import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { scratchEnv } from "../../../scratch-env"
 import { SCRIPT as RUN_SLOT, machine as slotMachine } from "../run-slot-fake"
 
 const root = join(import.meta.dir, "..", "..", "..", "..")
@@ -19,17 +22,28 @@ const script = await Bun.file(join(root, "scripts", "ops", "dashboard", "supervi
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-urls-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// This process's env with no PORTLESS* key, as install.test.ts's gitEnv drops them, so a test's portless reads only the folders it made.
+const noPortless = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PORTLESS")))
+
 const fn = (name: string) => script.match(new RegExp(`^${name}\\(\\) \\{.*\\}$`, "m"))?.[0]
 
-// A stand-in for bunx that answers `portless get <name>` from a file, as portless 0.15 names a URL from whatever proxy runs when it is asked.
+// A stand-in for bunx that answers `portless get <name>` from a file, as portless 0.15 names a URL from whatever proxy runs when it is asked; STATE in the file reads as the PORTLESS_STATE_DIR it was asked under.
 const bunx = join(scratch, "bunx")
 const answer = join(scratch, "answer")
-await Bun.write(bunx, `#!/bin/sh\n[ "$1 $2" = "portless get" ] && sed "s/NAME/$3/" "${answer}"\n`)
+await Bun.write(
+  bunx,
+  `#!/bin/sh\n[ "$1 $2" = "portless get" ] && sed "s/NAME/$3/; s|STATE|$PORTLESS_STATE_DIR|" "${answer}"\n`,
+)
 chmodSync(bunx, 0o755)
 
-const run = (body: string) =>
+const run = (body: string, env: Record<string, string | undefined> = process.env) =>
   Bun.spawn(["bash", "-c", body], {
-    env: { ...process.env, PATH: `${scratch}:${process.env.PATH}` },
+    env: {
+      ...env,
+      D: join(root, "scripts", "ops", "dashboard"),
+      PATH: `${scratch}:${process.env.PATH}`,
+    },
     stdout: "pipe",
   })
 
@@ -163,6 +177,25 @@ describe("the supervisor's dashboard URLs", () => {
     )
   })
 
+  // on Linux no portless service runs on 443, so the stack's API starts the 1355 proxy in ~/.portless/fallback with TLS on, and an idle ~/.portless names http (#2299)
+  test("are read from the folder portlessDir() picks, the 1355 fallback proxy's while only it serves", async () => {
+    const home = join(scratch, "urls-home")
+    const fallback = join(home, ".portless", "fallback")
+    mkdirSync(fallback, { recursive: true })
+    await Bun.write(join(home, ".portless", "routes.json"), "[]")
+    await Bun.write(join(fallback, "proxy.pid"), String(process.pid))
+    await Bun.write(answer, "STATE NAME\n")
+    const env = noPortless()
+    const proc = run(`${fn("dashboard_urls")}\ndashboard_urls && echo "$WEB|$API"`, {
+      ...env,
+      HOME: home,
+    })
+    expect(await proc.exited).toBe(0)
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      `${fallback} playground|${fallback} api.playground`,
+    )
+  })
+
   test("are read again on every try while the dashboard comes up, so a proxy that starts with the stack is found", async () => {
     // portless's guess before its proxy runs: a port nothing answers on
     await Bun.write(answer, "http://127.0.0.1:1/NAME\n")
@@ -254,7 +287,7 @@ describe("the supervisor's follower check", () => {
     expect(script).toContain("gave no answer in ${HELD_WAIT:-20}s; not restarting it")
     expect(script).toContain('say "follower: another importer holds the lock')
     expect(script).toContain("  elif ! alive dashboard-ingest; then\n    held_said_f=")
-    expect(script).toContain("  else\n    held_said_f=\n  fi\n  check_aliases\ndone")
+    expect(script).toContain("  else\n    held_said_f=\n  fi\n")
   })
 })
 
@@ -1669,7 +1702,7 @@ describe("the follower before first run's setup (#31)", () => {
 say() { echo "say $*" >> ${calls}; }; result() { echo "result $*" >> ${calls}; }
 start_dev() { :; }; check_dev() { echo dev=up; }; stop_all() { :; }; dev_down() { :; }
 start_follower() { echo start_follower >> ${calls}; }; check_follower() { echo follower=running; }
-follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }; check_aliases() { :; }
+follower_held() { return 1; }; alive() { [ "$1" = dashboard-dev ] || [ "$1" = dashboard-web ]; }; build_head() { :; }; keep_builds() { :; }; check_aliases() { :; }; check_proxy() { :; }
 dashboard_urls() { :; }; ensure_web() { :; }
 ${fn("setup_pending") ?? ""}
 ${script.slice(script.indexOf("\nroll_up() {") + 1, script.indexOf("\n}\n", script.indexOf("\nroll_up() {")) + 2)}
@@ -1804,6 +1837,54 @@ describe("the supervisor's alias check", () => {
     expect(results[0]).toContain(`ALIAS FAIL no route file at ${routesFile}`)
   })
 
+  // on a first start web_route wrote the web's route into an idle ~/.portless 2 s before the stack's API started the 1355 proxy in ~/.portless/fallback, so the proxy never learned the web's names (#2300)
+  test("writes a web route that landed before the proxy started into the folder the proxy serves, and passes once the launcher's sync gives it its alias", async () => {
+    const home = join(scratch, "first-start-home")
+    const own = join(home, ".portless")
+    const fallback = join(own, "fallback")
+    const live = join(scratch, "first-start-state")
+    rmSync(home, { force: true, recursive: true })
+    rmSync(live, { force: true, recursive: true })
+    mkdirSync(fallback, { recursive: true })
+    mkdirSync(live, { recursive: true })
+    const route = (hostname: string, port: number, pid = process.pid) => ({ hostname, pid, port })
+    await Bun.write(
+      join(own, "routes.json"),
+      JSON.stringify([route("desk.playground.localhost", 4842)]),
+    )
+    // a stand-in for the 1355 proxy's state: the test's own pid, and the API's route and alias its launcher wrote
+    await Bun.write(join(fallback, "proxy.pid"), String(process.pid))
+    await Bun.write(
+      join(fallback, "routes.json"),
+      JSON.stringify([
+        route("desk.api.playground.localhost", 4843),
+        route("api.playground.localhost", 4843, 0),
+      ]),
+    )
+    await Bun.write(join(live, "dashboard-web.port"), "4842\n")
+    await Bun.write(join(live, "results.log"), "")
+    await Bun.write(answer, "https://desk.NAME.localhost\n")
+    // the API launcher's 2 s alias sync, run every 300 ms on the fallback folder until the check ends
+    const sync = `bun -e "const l = await import('${join(root, "api", "hono", "src", "lib", "dev", "launch.ts")}'); setInterval(() => l.syncAliases(l.dashboardAliasPairs('desk'), '${fallback}'), 300)" & SYNC=$!`
+    const env = noPortless()
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `D=${join(root, "scripts", "ops", "dashboard")} WT=${root} S=${live} RESULTS=${join(live, "results.log")} LOG=${join(live, "supervisor.log")} ALIAS_CONFIRM=3\n${fn("say")}\n${fn("result")}\n${fn("web_route")}\nalive() { [ "$1" = dashboard-web ]; }\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${sync}\ncheck_aliases; kill $SYNC; read_aliases`,
+      ],
+      { env: { ...env, HOME: home, PATH: `${scratch}:${process.env.PATH}` }, stdout: "pipe" },
+    )
+    expect(await proc.exited).toBe(0)
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      "playground.localhost and api.playground.localhost hold the live stack's ports 4842 and 4843",
+    )
+    expect(await Bun.file(join(live, "results.log")).text()).toBe("")
+    expect(await Bun.file(join(live, "supervisor.log")).text()).toContain(
+      `the web's route was missing (no route for desk.playground.localhost in ${join(fallback, "routes.json")}), so web_route wrote it again`,
+    )
+  }, 20_000)
+
   test("runs on every tick of the loop, and only reads the route file", async () => {
     const loop = script.slice(script.indexOf("while true; do"))
     expect(loop).toContain("check_aliases")
@@ -1824,7 +1905,7 @@ describe("trash_build", () => {
         `D=${join(root, "scripts", "ops", "dashboard")} LOG=${state}/supervisor.log\n${fn("say")}\n${fn("trash_build")}\ntrash_build "${path}" "a test"`,
       ],
       {
-        env: { ...process.env, HOME: home, PLAYGROUND_DATA_DIR: join(home, ".playground") },
+        env: scratchEnv(home, { PLAYGROUND_DATA_DIR: join(home, ".playground") }),
         stderr: "pipe",
         stdout: "pipe",
       },
@@ -1856,4 +1937,151 @@ describe("trash_build", () => {
       await Bun.file(join(home, ".playground", "ops", "outbox", "ops-safe-delete.jsonl")).text(),
     ).toContain(`dashboard-supervisor: ${staging} is not directly in ${join(state, "builds")}`)
   }, 30_000)
+})
+
+describe("the supervisor's owner idle", () => {
+  test("reads an Inbox answer's mtime in GNU stat's form or BSD's, so a fresh answer counts on Linux too", async () => {
+    const asks = join(scratch, "asks")
+    mkdirSync(asks, { recursive: true })
+    const owner = script.match(/^owner_idle\(\) \{\n[\s\S]*?\n\}$/m)?.[0]
+    expect(owner).toBeDefined()
+    const proc = Bun.spawn(
+      ["bash", "-c", `quiet_for() { echo 999999; }\n${owner}\ntouch "$ASKS/a.json"\nowner_idle`],
+      { env: { ...process.env, ASKS: asks }, stdout: "pipe" },
+    )
+    const idle = (await new Response(proc.stdout).text()).trim()
+    expect(idle).toMatch(/^\d+$/)
+    expect(Number(idle)).toBeLessThan(60)
+  })
+})
+
+// check_proxy as the loop runs it, each call a tick: the owner's address is up or down by the file `up`, and a stand-in portless in WT's node_modules records each start and, while `comes-back` exists, brings the address back; results and dispatcher alerts land in `calls`
+describe("the supervisor's proxy check (#2380)", () => {
+  const proxy = join(scratch, "proxy")
+  const proxyWt = join(proxy, "wt")
+  const fallback = join(proxy, ".portless", "fallback")
+  const own = join(proxy, ".portless")
+  const up = join(proxy, "up")
+  const comesBack = join(proxy, "comes-back")
+  const proxyCalls = join(proxy, "calls")
+  mkdirSync(join(proxyWt, "node_modules", ".bin"), { recursive: true })
+  mkdirSync(fallback, { recursive: true })
+  const portless = join(proxyWt, "node_modules", ".bin", "portless")
+  writeFileSync(
+    portless,
+    `#!/bin/sh\necho "start $* in $PORTLESS_STATE_DIR" >> ${proxyCalls}\n[ -e ${comesBack} ] && echo up > ${up}\nprintf '\\033[31mport 1355 is taken\\033[0m\\n'\n`,
+    { mode: 0o755 },
+  )
+
+  const ticks = async (dir: string, body: string) => {
+    rmSync(proxyCalls, { force: true })
+    const proc = Bun.spawn(
+      [
+        "bash",
+        "-c",
+        `S=${proxy} WT=${proxyWt} PROXY_EVERY=0 PROXY_WAIT=1
+result() { echo "result $*" >> ${proxyCalls}; }; tell_dispatcher() { echo "tell $1" >> ${proxyCalls}; }
+owner_url() { PDIR=$([ "$(cat ${up})" = up ] && echo ${dir} || echo ${own}); OWNER=https://playground.localhost:1355; }
+answers() { [ "$(cat ${up})" = up ]; }
+${block("check_proxy")}
+${body}`,
+      ],
+      { stdout: "pipe" },
+    )
+    await proc.exited
+    return (
+      await Bun.file(proxyCalls)
+        .text()
+        .catch(() => "")
+    )
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+  }
+  const down =
+    "DOWN proxy: https://playground.localhost:1355 answered nothing at 2 checks 0 s apart"
+
+  test("starts the fallback proxy once on its address's port after two misses, and tells the dispatcher once", async () => {
+    await Bun.write(comesBack, "")
+    const calls = await ticks(
+      fallback,
+      `echo up > ${up}; check_proxy; echo down > ${up}; check_proxy; check_proxy; check_proxy; check_proxy`,
+    )
+    expect(calls).toEqual([
+      `result ${down}`,
+      `tell ${down}; starting it again on 1355`,
+      `start proxy start -p 1355 --skip-trust in ${fallback}`,
+      "result RESTART proxy PASS on 1355: https://playground.localhost:1355 answers",
+    ])
+  })
+
+  test("tells the dispatcher a second time when the start fails, then nothing more until the address answers", async () => {
+    rmSync(comesBack, { force: true })
+    const calls = await ticks(
+      fallback,
+      `echo up > ${up}; check_proxy; echo down > ${up}; for i in 1 2 3 4 5 6; do check_proxy; done; echo up > ${up}; check_proxy; check_proxy`,
+    )
+    expect(calls).toEqual([
+      `result ${down}`,
+      `tell ${down}; starting it again on 1355`,
+      `start proxy start -p 1355 --skip-trust in ${fallback}`,
+      "result RESTART proxy FAIL on 1355: port 1355 is taken",
+      "tell The Dashboard's proxy did not come back on 1355: port 1355 is taken (ops/dashboard/proxy-start.log)",
+      "result UP proxy PASS https://playground.localhost:1355 answers again",
+    ])
+  })
+
+  test("leaves a service's proxy to the owner: it alerts once and starts nothing", async () => {
+    await Bun.write(comesBack, "")
+    const calls = await ticks(
+      own,
+      `echo up > ${up}; check_proxy; echo down > ${up}; check_proxy; check_proxy; check_proxy`,
+    )
+    expect(calls).toEqual([
+      `result ${down}`,
+      `tell ${down}; not restarting it, since a service owns the proxy in ${own}`,
+    ])
+  })
+
+  test("starts nothing when the supervisor never saw the address answer, since nothing names its port", async () => {
+    await Bun.write(comesBack, "")
+    const calls = await ticks(fallback, `echo down > ${up}; check_proxy; check_proxy; check_proxy`)
+    const unseen = "DOWN proxy: the Dashboard address answered nothing at 2 checks 0 s apart"
+    expect(calls).toEqual([
+      `result ${unseen}`,
+      `tell ${unseen}; not restarting it, since this supervisor never saw it answer and nothing names its port`,
+    ])
+  })
+
+  test("holds the aliases while the proxy misses, and checks no more often than PROXY_EVERY", async () => {
+    expect(script).toContain("  check_proxy && check_aliases\ndone")
+    const calls = await ticks(
+      fallback,
+      `echo up > ${up}; PROXY_EVERY=60; check_proxy; echo down > ${up}; check_proxy && echo not-due >> ${proxyCalls}; PROXY_EVERY=0; check_proxy || echo missed >> ${proxyCalls}; PROXY_EVERY=60; check_proxy || echo held >> ${proxyCalls}`,
+    )
+    expect(calls).toEqual(["not-due", "missed", "held"])
+  })
+
+  test("counts any HTTP answer, a 502 included, as the proxy up, and a refused connection as a miss", async () => {
+    const server = Bun.serve({
+      fetch: () => new Response("bad gateway", { status: 502 }),
+      hostname: "127.0.0.1",
+      port: 0,
+    })
+    try {
+      const proc = Bun.spawn(
+        [
+          "bash",
+          "-c",
+          `${fn("answers")}\nanswers http://127.0.0.1:${server.port}/ ${proxy}; echo "a=$?"; answers http://127.0.0.1:1/ ${proxy}; echo "b=$?"`,
+        ],
+        { stdout: "pipe" },
+      )
+      const out = (await new Response(proc.stdout).text()).trim().split("\n")
+      expect(out[0]).toBe("a=0")
+      expect(out[1]).not.toBe("b=0")
+    } finally {
+      server.stop(true)
+    }
+  })
 })

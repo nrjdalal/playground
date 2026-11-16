@@ -11,6 +11,8 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { scratchEnv } from "../../../scratch-env"
+
 const script = join(import.meta.dir, "..", "..", "..", "..", "scripts", "ops", "usage", "run.py")
 const repo = join(import.meta.dir, "..", "..", "..", "..")
 const beat = join(repo, "scripts", "ops", "beat.py")
@@ -48,8 +50,7 @@ const runRaw = (name: string, flip: object) => {
   const folder = join(home, ".playground", "ops", "usage")
   mkdirSync(folder, { recursive: true })
   writeFileSync(join(folder, "login-flip.json"), JSON.stringify(flip))
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(["python3", "-I", "-c", harness, script, beat], { env })
   expect(child.stderr.toString()).toBe("")
   return child.stdout.toString().trim().split("\n")
@@ -151,12 +152,7 @@ print(json.dumps(ns["stored_login"]()))
 `
   const home = join(scratch, "api-home")
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
-    PLAYGROUND_USAGE_API: `file://${api}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home, { PLAYGROUND_USAGE_API: `file://${api}` })
   const child = Bun.spawnSync(["python3", "-I", "-c", read, script, beat], { env })
   expect(child.stderr.toString()).toBe("")
   expect(JSON.parse(child.stdout.toString())).toMatchObject({
@@ -225,13 +221,10 @@ const cycle = async (
     `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
     { mode: 0o755 },
   )
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
+  const env = scratchEnv(home, {
     PATH: `${stubs}:${process.env.PATH}`,
     PLAYGROUND_PROBE_URL: opts.probeUrl ?? "http://127.0.0.1:9/v1/messages",
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  })
   const child = Bun.spawn(["python3", "-I", script], { env, stderr: "pipe" })
   await child.exited
   expect(await new Response(child.stderr).text()).toBe("")
@@ -333,8 +326,7 @@ data = {"account": "login@example.org", "rate_limits": {"seven_day": {"used_perc
         "accounts": {"login@example.org": {"week": 50}, "spare@example.org": {"week": 97.5}, "other@example.org": {"week": 99}}}
 print(json.dumps([a["line"] for a in ns["week_alerts"](data, ["login@example.org", "spare@example.org"])]))
 `
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(["python3", "-I", "-c", read, script, beat], { env })
   expect(child.stderr.toString()).toBe("")
   expect(JSON.parse(child.stdout.toString())).toEqual([
@@ -358,8 +350,7 @@ data = {"account": "login@example.org", "rate_limits": {"seven_day": {"used_perc
         "accounts": {"spare@example.org": {"week": 97.5}}}
 print(json.dumps([f"{a['kind']} {a['name']}" for a in ns["week_alerts"](data, ["login@example.org", "spare@example.org"])]))
 `
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(["python3", "-I", "-c", read, script, beat], { env })
   expect(child.stderr.toString()).toBe("")
   expect(JSON.parse(child.stdout.toString())).toEqual([
@@ -426,8 +417,7 @@ test.each([
   writeFileSync(join(cache, "daily24_retail"), "7.25")
   const fake = join(home, "fake-cli.ts")
   writeFileSync(fake, `${body}\n`)
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(
     ["python3", "-I", "-c", costHarness, script, fake, String(timeout), beat],
     {
@@ -479,8 +469,7 @@ print(json.dumps(out))
 const fullWeek = (name: string, spec: Record<string, unknown>) => {
   const home = join(scratch, name)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(
     ["python3", "-I", "-c", fullWeekHarness, script, beat, JSON.stringify(spec)],
     { env },
@@ -625,8 +614,7 @@ print(json.dumps(ns["probe"](spec["email"])))
 test("run.py's probe marks a full week limited until its weekReset, with no status header in the answer (#1587)", () => {
   const home = join(scratch, "probe-limited")
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(
     [
       "python3",
@@ -672,8 +660,7 @@ print(json.dumps(ns["probed"]("full@example.org", s, {"account": "mine@example.o
 test("a frozen 5-hour figure past its reset counts as none in use, so no slow-spawns alert rides it (#1587)", () => {
   const home = join(scratch, "five-past-reset")
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(["python3", "-I", "-c", fiveHarness, script, beat], { env })
   expect(child.stderr.toString()).toBe("")
   expect(JSON.parse(child.stdout.toString()).rate_limits.five_hour).toEqual({
@@ -709,8 +696,7 @@ print(json.dumps(out))
 const runUnlisted = (name: string, spec: Record<string, unknown>) => {
   const home = join(scratch, name)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(
     ["python3", "-I", "-c", unlistedHarness, script, beat, JSON.stringify(spec)],
     { env },
@@ -777,8 +763,7 @@ print(json.dumps(out))
 const runPool = (name: string, spec: Record<string, unknown>) => {
   const home = join(scratch, name)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
-  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
-  delete env.CLAUDE_CONFIG_DIR
+  const env = scratchEnv(home)
   const child = Bun.spawnSync(
     ["python3", "-I", "-c", poolHarness, script, beat, JSON.stringify(spec)],
     {
