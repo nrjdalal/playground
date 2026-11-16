@@ -256,6 +256,7 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   The pane opens here, on this machine's herdr, and its launch runs two ssh calls, each `ssh -i <key> -o IdentitiesOnly=yes -o BatchMode=yes`, so a key that fails or an unknown host key stops it rather than prompting:
   the first pipes a tar of the launch's settings file and skill plugin into a new folder there, the probe's temp folder (on Linux this machine's own one's name, else a new name under `/tmp`), which `mkdir -m 700` refuses to reuse;
   the second, `ssh -tt`, runs the launch there, `--settings` and `--plugin-dir` pointing into that folder, in the same checkout path, so that machine holds the checkout, claude and the secret store at this one's paths.
+  The remote command also puts that machine's own `$HOME/.bun/bin` on PATH, expanded by its shell, since ssh hands a command the system PATH alone: bun and the secret store's link in `~/.bun/bin` are found there with no shell-file line.
   Its settings file is one of its own, `factory-settings-sandbox-400k-<name>.json` (`-closed-` with `--sandbox`), whose sandbox writes that folder, its TMPDIR there.
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
 - The probe keeps a probe's roster row, kind `probe`, written here.
