@@ -531,12 +531,16 @@ export async function check(
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`
 }
 
-async function output(argv: string[]): Promise<string | undefined> {
-  const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" })
+// A program's output when it exits 0, else its error text
+async function output(argv: string[]): Promise<{ error: string; text?: string }> {
+  const child = Bun.spawn(argv, { stderr: "pipe", stdout: "pipe" })
   const timer = setTimeout(() => child.kill(), 5000)
   try {
-    const text = await new Response(child.stdout).text()
-    return (await child.exited) === 0 ? text.trim() : undefined
+    const [text, error] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    return (await child.exited) === 0 ? { error, text: text.trim() } : { error }
   } finally {
     clearTimeout(timer)
   }
@@ -620,7 +624,14 @@ export function live(environment: Environment): Lookup {
       } catch {}
       const jq =
         "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}"
-      const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq])
+      const argv = ["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq]
+      const once = await output(argv)
+      // a failure GitHub did not answer with a 4xx (a network error, a 5xx) is read once more after a second, so one blip does not hold the session in read mode for a poll interval
+      const text =
+        once.text ??
+        (/HTTP 4\d\d/.test(once.error)
+          ? undefined
+          : (await Bun.sleep(1000).then(() => output(argv))).text)
       let read: unknown
       try {
         read = text ? JSON.parse(text) : undefined

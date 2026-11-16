@@ -44,6 +44,8 @@ SKIP = {
     "scripts/hooks/no-kill-by-name.ts",
     # vendored byte for byte from portless, so its own bare `portless proxy stop` stays as upstream wrote it
     "skills/zerostarter/portless/SKILL.md",
+    # its fed rows are portless calls written as text for its own rules, never run
+    "tests/live-tools-scan.test.ts",
     "tests/scripts/hooks/no-kill-by-name.test.ts",
 }
 # The refused-forms fixture's folder, one file a source, skipped whole.
