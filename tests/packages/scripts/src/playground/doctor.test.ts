@@ -90,6 +90,26 @@ describe("toolChecks", () => {
     expect(at("v24.21.0").status).toBe("ok")
   })
 
+  test("on Linux no fix names brew, and uv's names uv's own installer; a Mac's keep brew's", () => {
+    const fixes = (platform: NodeJS.Platform) =>
+      toolChecks(
+        () => false,
+        () => true,
+        () => null,
+        platform,
+      ).map((c) => `${c.name}: ${c.detail}`)
+    expect(fixes("linux").filter((fix) => /brew/.test(fix))).toEqual([])
+    expect(fixes("linux")).toContain(
+      "uv: missing; fix: curl -LsSf https://astral.sh/uv/install.sh | sh (the skills' tests)",
+    )
+    expect(fixes("linux").find((fix) => fix.startsWith("whisper-cli: "))).toContain("whisper.cpp")
+    expect(fixes("linux").find((fix) => fix.startsWith("node: "))).toContain("20.9 or newer")
+    expect(fixes("darwin")).toContain("uv: missing; fix: brew install uv (the skills' tests)")
+    expect(fixes("darwin").find((fix) => fix.startsWith("whisper-cli: "))).toContain(
+      "brew install whisper-cpp ffmpeg",
+    )
+  })
+
   test("with no gh the login is not asked", () => {
     let asked = false
     toolChecks(

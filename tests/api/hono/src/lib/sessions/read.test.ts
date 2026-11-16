@@ -25,6 +25,7 @@ import {
 import { testContainerName } from "../../../../../container"
 import { onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
+import { pidsDir, withProc } from "../../../../../scripts/fixtures/proc"
 
 // These drive the live paths against the test's own scratch files, every one of them stored as on a stack opted in to every session (own.ts).
 liveReads({ PLAYGROUND_ALL_SESSIONS: "true" })
@@ -826,6 +827,24 @@ describe("liveSessions", () => {
     } finally {
       rmSync(own, { force: true, recursive: true })
       rmSync(recycled, { force: true, recursive: true })
+    }
+  })
+
+  test("a Linux file, its procStart clock ticks since boot, is live while /proc gives its pid that start, and a recycled pid once it gives another", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sessions-registry-"))
+    try {
+      writeFileSync(
+        join(dir, `${process.pid}.json`),
+        JSON.stringify({ pid: process.pid, procStart: "1801742", sessionId: "linux" }),
+      )
+      const live = (ticks: string) =>
+        withProc(pidsDir({ [process.pid]: ticks }), async () => [
+          ...(await liveSessions(dir)).keys(),
+        ])
+      expect(await live("1801742")).toEqual(["linux"])
+      expect(await live("2900000")).toEqual([])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
     }
   })
 })

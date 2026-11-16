@@ -25,20 +25,72 @@ const nodeAtLeast = (version: string): boolean => {
   return major > NODE_MIN[0] || (major === NODE_MIN[0] && minor >= NODE_MIN[1])
 }
 
+// A tool's fix: one for every OS, or a Mac's and Linux's.
+type Fix = string | { darwin: string; linux: string }
+
 // What playground runs on: [command, required, fix, what for].
-const TOOLS: [string, boolean, string, string][] = [
+const TOOLS: [string, boolean, Fix, string][] = [
   ["bun", true, "curl -fsSL https://bun.sh/install | bash", "runs playground"],
   ["claude", true, "install Claude Code: https://claude.com/claude-code", "every session"],
-  ["docker", true, "install Docker Desktop", "the Dashboard's database"],
-  ["gh", true, "brew install gh", "clones, PRs and ext sync"],
-  ["git", true, "brew install git", "the checkout"],
-  ["node", true, `brew install node (${NODE_MIN.join(".")} or newer)`, "the Dashboard's next dev"],
-  ["python3", true, "brew install python", "the ops jobs"],
-  ["uv", false, "brew install uv", "the skills' tests"],
+  [
+    "docker",
+    true,
+    {
+      darwin: "install Docker Desktop",
+      linux: "install Docker Engine: https://docs.docker.com/engine/install/",
+    },
+    "the Dashboard's database",
+  ],
+  [
+    "gh",
+    true,
+    {
+      darwin: "brew install gh",
+      linux: "install gh: https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+    },
+    "clones, PRs and ext sync",
+  ],
+  [
+    "git",
+    true,
+    {
+      darwin: "brew install git",
+      linux: "your distro's git package, such as sudo apt install git",
+    },
+    "the checkout",
+  ],
+  [
+    "node",
+    true,
+    {
+      darwin: `brew install node (${NODE_MIN.join(".")} or newer)`,
+      linux: `install Node from https://nodejs.org/en/download (${NODE_MIN.join(".")} or newer)`,
+    },
+    "the Dashboard's next dev",
+  ],
+  [
+    "python3",
+    true,
+    {
+      darwin: "brew install python",
+      linux: "your distro's python3 package, such as sudo apt install python3",
+    },
+    "the ops jobs",
+  ],
+  [
+    "uv",
+    false,
+    { darwin: "brew install uv", linux: "curl -LsSf https://astral.sh/uv/install.sh | sh" },
+    "the skills' tests",
+  ],
   [
     "whisper-cli",
     false,
-    "brew install whisper-cpp ffmpeg, and a model at <data>/wa/whisper-model.bin",
+    {
+      darwin: "brew install whisper-cpp ffmpeg, and a model at <data>/wa/whisper-model.bin",
+      linux:
+        "build whisper.cpp from https://github.com/ggml-org/whisper.cpp, your distro's ffmpeg package, and a model at <data>/wa/whisper-model.bin",
+    },
     "WhatsApp voice notes as text",
   ],
 ]
@@ -54,10 +106,18 @@ export const toolChecks = (
   has: (cmd: string) => boolean,
   ghLogin: () => boolean,
   nodeVersion: () => string | null = () => null,
+  platform: NodeJS.Platform = process.platform,
 ): Check[] => {
   const checks = TOOLS.map(([cmd, required, fix, why]) => {
     const version = cmd === "node" && has(cmd) ? nodeVersion() : null
-    return check(cmd, required, has(cmd) && (version === null || nodeAtLeast(version)), fix, why)
+    const fixHere = typeof fix === "string" ? fix : platform === "linux" ? fix.linux : fix.darwin
+    return check(
+      cmd,
+      required,
+      has(cmd) && (version === null || nodeAtLeast(version)),
+      fixHere,
+      why,
+    )
   })
   if (has("gh"))
     checks.push(
@@ -245,6 +305,9 @@ const tools = (): Check[] =>
     () => exitsZero(["gh", "auth", "status", "--active", "-h", "github.com"]),
     () =>
       Bun.spawnSync(["node", "--version"], { stderr: "ignore" }).stdout.toString().trim() || null,
+    // install.sh's INSTALL_OS stand-in under the test sandbox, so its list names the fixes of the OS it was handed
+    ((process.env.TEST_SANDBOX_HOME && process.env.INSTALL_OS?.toLowerCase()) as NodeJS.Platform) ||
+      process.platform,
   )
 
 // The jobs launchd, or on Linux systemd, should hold, from the job registry on a machine whose extensions hold policy.json, else from jobs.json.
