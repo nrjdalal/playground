@@ -17,6 +17,8 @@ import {
 
 const by = (login: string, body: string) => ({ author: { login }, body })
 const NOW = new Date("2026-10-31T12:00:00Z")
+// GitHub's totalCount counts the whole timeline and ignores itemTypes, so a row that read it would show fp61
+const forcePushes = { filteredCount: 1, totalCount: 61 }
 
 const pr = (over: Partial<Pr> = {}): Pr => ({
   allCommits: { totalCount: 4 },
@@ -35,7 +37,7 @@ const pr = (over: Partial<Pr> = {}): Pr => ({
   mergedAt: "2026-10-31T11:30:00Z",
   number: 12,
   state: "MERGED",
-  timelineItems: { totalCount: 1 },
+  timelineItems: forcePushes,
   title: "fix(PG-12): a title",
   ...over,
 })
@@ -89,7 +91,7 @@ test("the search reads the factory's PRs updated since a time, and the query pag
     "firstCommit",
     "hasNextPage",
     "mergedAt",
-    "timelineItems",
+    "timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT], first: 1) { filteredCount }",
     "totalCount",
   ])
     expect(QUERY).toContain(field)
