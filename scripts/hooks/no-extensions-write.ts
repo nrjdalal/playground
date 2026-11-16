@@ -54,6 +54,7 @@ import {
   PRINTERS,
   program,
   READ,
+  readPath,
   run,
   SHELLS,
   shellOperand,
@@ -108,9 +109,13 @@ const HOOK_TEXT = "which a hook file may not hold"
 const HOOK_ROUTE =
   "a hook learns a remover's target only when it runs, so no reading of its text can rule out the guarded folder. Write the hook as text the hook can read, with no remover word (in a comment too), no program built from a variable or a substitution or named by a glob, and no eval, or tell your lead what it needs to remove."
 const hookRemoval = (file: string, what: string) => `${file} written with ${what}, ${HOOK_TEXT}`
+// A hook file written on a line whose other text holds a remover or names the root (PG-2258), which names its own route
+const LINE_TEXT = "which the hook reads as the hook's own text"
+const LINE_ROUTE =
+  "a line that writes a hook file has every text on it read as the hook's, since text can reach a hook by many paths. Run the hook's write as a call of its own, apart from the command that holds that text."
 
 const refuse = (what: string) =>
-  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : ROUTE}`
+  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : what.endsWith(HOOK_TEXT) ? HOOK_ROUTE : what.endsWith(LINE_TEXT) ? LINE_ROUTE : ROUTE}`
 
 // A refusal that likely names no write (`unwritten`), which the reader most often reaches by reading text as a path, so it routes to the lead as a likely false positive
 const refuseUnwritten = (what: string) =>
@@ -325,6 +330,39 @@ function redirectsWrite(commands: Command[]): boolean {
   return commands.some(
     (cmd) => cmd.redirects.some(writer) || (!!cmd.inner && redirectsWrite(cmd.inner())),
   )
+}
+
+// A path a copy reads its stdin through
+const STDIN_PATH = /^\/dev\/(?:stdin|fd\/0)$/
+
+// Every file a typed line writes: each writing redirect's target and each copy's (cp, dd, install, ln, mv), those of its groups, subshells and substitutions included, so a copy's source the line writes first reads as one the hook cannot see yet
+function writtenWords(commands: Command[]): Word[] {
+  return commands.flatMap((cmd) => {
+    const { args, name } = parse(cmd)
+    const tool = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
+    return [
+      ...cmd.redirects.flatMap((r) => (r.target && writer(r) ? [r.target] : [])),
+      ...(["cp", "dd", "install", "ln", "mv"].includes(tool)
+        ? writeTargets(tool, args, tool !== program(name) || onLinux())
+        : []),
+      ...cmd.words.flatMap((word) => (word.procs ? writtenWords(word.procs) : [])),
+      ...(cmd.inner ? writtenWords(cmd.inner()) : []),
+    ]
+  })
+}
+
+// Every text a typed line holds: each command's words as one text and each heredoc's or here-string's body, but a command's whose stdout its own redirect sends to a file, which reaches a hook only through that file (readPath) or as printed text, and those of each substitution, group, subshell and function body on it
+function lineTextsOf(commands: Command[]): string[] {
+  return commands.flatMap((cmd) => [
+    ...(fdFiles(cmd.redirects, new Map()).has("1")
+      ? []
+      : [
+          cmd.words.map((word) => word.value).join(" "),
+          ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
+        ]),
+    ...cmd.words.flatMap((word) => (word.procs ? lineTextsOf(word.procs) : [])),
+    ...(cmd.inner ? lineTextsOf(cmd.inner()) : []),
+  ])
 }
 
 // A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
@@ -1695,6 +1733,19 @@ function hookFile(path: string | undefined, sure = false): boolean {
   const folder = hookFolders.get(dir)
   return (!sure && folder === true) || folder === real(dir)
 }
+// Each spelling of a text that a hook may run: as typed, with its backslash-newlines joined as the shell joins a word across one, with its escapes read as a sed's or perl's replacement reads them (\U, \L, \E and their kin dropped, \n a newline, any other escaped character itself) and then joined, and each of those in lower case outside its variables, since macOS's filesystem reads a path in any case
+function hookSpellings(text: string): string[] {
+  const joined = text.replace(/\\\n/g, "")
+  const escaped = text
+    .replace(/\\[ELQUlu]/g, "")
+    .replace(/\\([\s\S])/g, (_, c: string) => (c === "n" ? "\n" : c))
+    .replace(/\\\n/g, "")
+  const lower = (each: string) =>
+    each.replace(/\$\{[^}]*\}|\$\w+|[^$]+|\$/g, (part) =>
+      part.startsWith("$") ? part : part.toLowerCase(),
+    )
+  return [...new Set([text, joined, escaped].flatMap((each) => [each, lower(each)]))]
+}
 
 // Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, date, echo, git, grep, head, lsof, perl, sed, sort, tail, uniq or wc, a bash -c of a script of such readers, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
@@ -2177,6 +2228,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
   const afterUnreadCd = (write: string) =>
     `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
+  // what in a text a hook file may not take, in any spelling a hook may run it (hookSpellings): a remover (hookRemover), else the root (scriptNames)
+  type HookFinding = { named?: string; removes?: string; text: string }
+  const hookFinding = (text: string, env: Env): HookFinding | undefined => {
+    for (const spelled of hookSpellings(text)) {
+      const removes = hookRemover(spelled, () => true)
+      if (removes) return { removes, text }
+      const named = scriptNames(spelled, env)
+      if (named) return { named, text }
+    }
+  }
+  // each line text's finding, by the folder it was judged from
+  let lineFindings = new Map<string, HookFinding[]>()
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
   // the typed command each run-slot.sh call's own words came from, so a cd or env -C among them holds the steady variables the line set before that call
@@ -2188,6 +2251,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   let bodies = new WeakMap<Command, Command[]>()
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
+  let lineTexts: string[] = []
+  let lineWritten: Word[] = []
   // the inline evaluator (bun or node) whose code the walk reads from a folder in or above the root, so a likely false positive in it names the form that runs
   let nearEval: string | undefined
   // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
@@ -2361,6 +2426,126 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           )
         : undefined)
     if (hookWrite) return refuse(hookWrite)
+    // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
+    const copier = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
+    const copies = ["cp", "dd", "install", "ln", "mv"].includes(copier)
+    const into = copies ? writeTargets(copier, args, copier !== program(name) || onLinux()) : []
+    const hookEdits = copier === "sed" || copier === "perl" ? inPlace(copier, args) : []
+    const hookTargets = [
+      ...(fdFiles(cmd.redirects, execFds).get("1") ?? []),
+      ...(copier === "tee" ? args.filter((word) => !/^-./.test(word.value)) : []),
+      ...into,
+      ...hookEdits,
+    ]
+    // the files a copy reads from: dd's if=, and every operand of cp, install, ln, mv, sed or perl but the files it writes, a sed's or perl's script read as a path that names no file
+    const sources =
+      copies || copier === "sed" || copier === "perl"
+        ? args.flatMap((word) =>
+            copier === "dd"
+              ? word.value.startsWith("if=")
+                ? [after(word, 3)]
+                : []
+              : !word.value.startsWith("-") && !into.includes(word) && !hookEdits.includes(word)
+                ? [word]
+                : [],
+          )
+        : []
+    // a symbolic link's relative source names a file from the link's own folder, unless -r reads it from the shell's folder
+    const linked =
+      copier === "ln" &&
+      args.some((word) => /^-[^-]*s/.test(word.value) || word.value === "--symbolic") &&
+      !args.some((word) => /^-[^-]*r/.test(word.value) || word.value === "--relative")
+    // a copy that reads its stdin: dd with no if=, or a copy of /dev/stdin
+    const readsStdin =
+      copier === "dd"
+        ? sources.length === 0 || sources.some((word) => STDIN_PATH.test(word.value))
+        : copies && sources.some((word) => STDIN_PATH.test(word.value))
+    // the command's own texts: its heredoc's or here-string's body, and its words past its program, so mv's own name is no remover, but a copy's, whose operands name files and whose text reaches the hook through them alone
+    const ownText = cmd.words.map((word) => word.value).join(" ")
+    const ownTexts = [
+      ...(copies ? [] : [args.map((word) => word.value).join(" ")]),
+      ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
+    ]
+    for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
+      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run
+      const hookAt = () =>
+        hookTargets.find((word) => {
+          const path = pathOf(word, here)
+          return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
+        })
+      // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
+      const linkFolder = () => {
+        const target = into.length === 1 ? pathOf(into[0], here) : undefined
+        if (!target) return undefined
+        return into[0].value.endsWith("/") || (existsSync(target) && statSync(target).isDirectory())
+          ? target
+          : dirname(target)
+      }
+      // what a copy reads: each source resolved to one file, whose text is read, and its stdin; any other source reads as text the hook cannot read (a glob, a folder, a value it cannot hold, a piped program's output, a file a redirect or an earlier copy on the line writes before the copy reads it), while a source no file is at and the line writes none of names nothing a copy can take
+      const copied: string[] = []
+      let unread = false
+      for (const typed of sources) {
+        if (STDIN_PATH.test(typed.value)) continue
+        if (typed.glob) {
+          unread = true
+          continue
+        }
+        let word = typed
+        if (linked && !/^[/~]/.test(typed.value)) {
+          const folder = linkFolder()
+          if (!folder || typed.unknown) {
+            unread = true
+            continue
+          }
+          word = { ...typed, value: resolve(folder, typed.value) }
+        }
+        const path = pathOf(word, here)
+        const written = !!path && lineWritten.some((each) => pathOf(each, here) === path)
+        // a file the line writes holds, when the copy reads it, the text the line gave it (here.files), else text the hook cannot see yet
+        if (written && !here.files.has(path)) {
+          if (copies) unread = true
+          continue
+        }
+        if (path && !written && !existsSync(path)) continue
+        // a word no file can be named by (a script read as a path past the name limit) is no file, so it adds no text
+        const read = await readPath(word, here).catch(() => undefined)
+        if (read && !read.unknown) copied.push(read.value)
+        else if (read && copies) unread = true
+      }
+      if (readsStdin && (cmd.stdin || cmd.redirects.some((r) => r.op.startsWith("<")))) {
+        const input = await stdinOf(cmd, here)
+        if (input.unknown) unread = true
+        else copied.push(input.value)
+      }
+      const unreadInto = unread && hookAt()
+      if (unreadInto) return refuse(hookRemoval(shown(unreadInto), "text it cannot read"))
+      // the line's texts that would make a hook's text refused, judged once a folder the shell may be in, so a line of many writes reads each text once
+      const key = here.cwd ?? ""
+      if (!lineFindings.has(key))
+        lineFindings.set(
+          key,
+          lineTexts.flatMap((text) => hookFinding(text, here) ?? []),
+        )
+      // a finding in another command's text on the line names the line as its source and routes to splitting the calls (LINE_TEXT), and one in the command's own text or a file it copies names the hook's text
+      for (const { named, removes } of (lineFindings.get(key) ?? []).filter(
+        (each) => each.text !== ownText,
+      )) {
+        const hook = hookAt()
+        if (hook)
+          return refuse(
+            `${shown(hook)}, a hook file, on a line whose other text ${removes ? `holds ${removes}` : `names ${named}`}, ${LINE_TEXT}`,
+          )
+      }
+      for (const [texts, how] of [
+        [ownTexts, "written with a text that"],
+        [copied, "copied from a file whose text"],
+      ] as const)
+        for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
+          const hook = hookAt()
+          if (hook && removes) return refuse(hookRemoval(shown(hook), removes))
+          if (hook) return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`)
+        }
+    }
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
     const reader =
       !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
@@ -2819,6 +3004,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   bodies = compoundBodies(lexed.commands)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
+  lineTexts = lineTextsOf(lexed.commands)
+  lineWritten = writtenWords(lexed.commands)
+  lineFindings = new Map()
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)

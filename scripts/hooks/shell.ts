@@ -2026,9 +2026,12 @@ function globRun(
   const patterns = groups ?? [pattern]
   if ((!grouped || !groups) && !GLOB_PATTERN.test(pattern)) return
   const [only, ...more] = patterns
-  // a group with no | and no glob character names one path (`docs(PG-1):`, a commit scope a guard reads as a line), so under a folder the reader cannot read it keeps its typed word
+  // a group with no | and no glob character names one path (`pk(i)ll`), so under a folder the reader cannot read it is read as that path, which zsh runs when the folder holds it
   const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere
-  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute(only) && unsure) return
+  if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute(only) && unsure)
+    return [
+      { ...cmd, words: cmd.words.map((w) => (w === first ? { quoted: true, value: only } : w)) },
+    ]
   const found: string[] = []
   for (const each of patterns) {
     const matched = globMatches(each, env)
@@ -2119,19 +2122,19 @@ const unquote = (part: string): string =>
     ? part.slice(1)
     : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
-// A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees, which bash refuses and a guard meets as code it reads as a line (`f({a, b})`), and for any other program word
+// A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text, and a zsh group in them globbed after (`/usr/bin/pk{(i|x),y}ll`), as zsh expands braces first; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees whose words do not lex as one command, code a guard reads as a line (`f({a, b})`), and for any other program word
 function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
   if (first?.unknown !== BRACE) return
   const source = (first.source ?? "").replace(/\\\n/g, "")
   if (/[$`]/.test(source)) return null
   const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide))
-  if (masked.includes("(")) return
+  const grouped = masked.includes("(")
   const expanded = braceWords(masked)
   if (!expanded || expanded.some((w) => BRACE_LIST.test(w))) return null
   const words: Word[] = []
   for (const each of expanded) {
     const { commands } = lex(unhide(each))
-    if (commands.length > 1 || commands[0]?.redirects.length) return null
+    if (commands.length > 1 || commands[0]?.redirects.length) return grouped ? undefined : null
     words.push(...(commands[0]?.words ?? []))
   }
   if (words.length === 0) return null
@@ -2200,21 +2203,55 @@ export function globSpells(text: string, names: string[]): boolean {
   return false
 }
 
-// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell
+// A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again cut before each `$(` and at a pipe before a paren, each part without a leading paren, `$(` or quote, beside its typed form
 export function spelledText(text: string): string {
   const spelled = text
     .replace(/\\\n/g, "")
     .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
+    .flatMap((token) => {
+      // a subshell's or a substitution's opening paren, a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
+      const parts = token
+        .split(/(?=\$\()|\|+(?=\()/)
+        .map((part) => part.replace(/^(?:\$?\(|['"])+/, ""))
+      return [token, ...parts.filter((part) => part !== token)]
+    })
     .filter((token) => /[{(]/.test(token))
     .flatMap((token) =>
-      (braceWords(token) ?? []).flatMap(
-        (word) => groupWords(word.replace(/\([^()|]*\)$/, ""), true) ?? [word],
-      ),
+      (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
+        const sequenced = word.replace(SEQUENCE, sequenceSpelling)
+        const unqualified = sequenced.replace(/\([^()|]*\)$/, "")
+        const words = groupWords(unqualified, true)
+        const out = words === null ? anyText(unqualified, /\([^()]*\)/g) : (words ?? [word])
+        return sequenced === word ? out : [word, ...out]
+      }),
     )
     .map((word) => word.replace(/["']/g, ""))
+    .flatMap((word) =>
+      /^[*?]+$/.test(word.slice(word.lastIndexOf("/") + 1)) ? [word, ANY_NAME] : [word],
+    )
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text
 }
+
+// A brace sequence (`{a..c}`, `{1..9..2}`), which braceWords leaves as written
+const SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g
+
+// A sequence of letters as the bracket of its range, any increment read as 1, one of numbers as text led by a digit or a minus, which no guarded program's name is, and any other as any text, since a bracket can read its ends as a negation or a close
+const sequenceSpelling = (_: string, from: string, to: string): string =>
+  /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to)
+    ? `[${from < to ? from : to}-${from < to ? to : from}]`
+    : /^-?\d+$/.test(from) && /^-?\d+$/.test(to)
+      ? "[0-9-]*"
+      : "*"
+
+// A word whose lists or groups make more words than the cap, each innermost one as any text until none is left, so a guard's first look reads it as a glob that may spell its program
+function anyText(word: string, part: RegExp): string[] {
+  const spelled = word.replace(part, "*")
+  return spelled === word ? [word] : anyText(spelled, part)
+}
+
+// A glob every program name matches that globSpells still reads, for a spelled word whose last path part keeps no literal character, which globSpells passes over as matching every name
+const ANY_NAME = "[!.]*"
 
 // A loop runs its body again after every change the pass before made, so a run of commands a loop or a count may repeat takes, before its first is read, each change its commands make and an unread value for each held variable it assigns, which a later pass reads (d-2047r); a scope the walk has not entered yet copies these from the one around it
 function repass(commands: Command[], envs: Map<number, Env>): void {

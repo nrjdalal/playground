@@ -8628,7 +8628,9 @@ function globRun(cmd, first, env, glob = !!first?.glob) {
   const [only, ...more] = patterns;
   const unsure = !env.cwd || env.cwdUnread || env.cwdAnywhere;
   if (more.length === 0 && !GLOB_PATTERN.test(only) && !isAbsolute2(only) && unsure)
-    return;
+    return [
+      { ...cmd, words: cmd.words.map((w) => w === first ? { quoted: true, value: only } : w) }
+    ];
   const found = [];
   for (const each of patterns) {
     const matched = globMatches(each, env);
@@ -8727,8 +8729,7 @@ function braceRun(cmd, first) {
   if (/[$`]/.test(source))
     return null;
   const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide2));
-  if (masked.includes("("))
-    return;
+  const grouped = masked.includes("(");
   const expanded = braceWords(masked);
   if (!expanded || expanded.some((w) => BRACE_LIST.test(w)))
     return null;
@@ -8736,7 +8737,7 @@ function braceRun(cmd, first) {
   for (const each of expanded) {
     const { commands } = lex(unhide(each));
     if (commands.length > 1 || commands[0]?.redirects.length)
-      return null;
+      return grouped ? undefined : null;
     words.push(...commands[0]?.words ?? []);
   }
   if (words.length === 0)
