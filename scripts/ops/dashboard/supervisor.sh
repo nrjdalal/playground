@@ -227,8 +227,7 @@ owner_url() { PDIR=$(bun --no-env-file -e "console.log((await import('$D/../../.
 # Whether address $1 gives any HTTP answer, under the CA in folder $2 as probe.ts trusts it: a 502 counts, since the proxy answers and the pid checks own the stack; refused, timed out or a failed handshake is a miss
 answers() { local ca=(); [ ! -f "$2/ca.pem" ] || ca=(--cacert "$2/ca.pem"); curl -s -o /dev/null --max-time 10 "${ca[@]}" "$1"; }
 # portless's proxy, read through the owner's address every PROXY_EVERY s (60): a stopped proxy leaves the web and the API alive, so the pid checks never see it (16 Nov, 09:23Z to 09:33Z).
-# Two misses in a row write one DOWN proxy result (run.sh tells ops) and tell the dispatcher once; a proxy the last answered check read in the fallback folder is started again there by portless's own start, on its address's port,
-# since its stop removed the proxy.port and proxy.pid that would name them; a service's proxy, or one this supervisor never saw answer, is left to the owner. A failed start tells the dispatcher again, and nothing more runs until the address answers.
+# Two misses in a row write one DOWN proxy result (run.sh tells ops) and tell the dispatcher once; a proxy the last answered check read in the fallback folder is started again there by portless's own start, on its address's port, since its stop removed the proxy.port and proxy.pid that would name them; a service's proxy, or one this supervisor never saw answer, is left to the owner. A failed start tells the dispatcher again, and nothing more runs until the address answers.
 check_proxy() {
   local now port hp i
   now=$(date +%s)

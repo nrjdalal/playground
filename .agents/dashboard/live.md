@@ -55,5 +55,5 @@
   A proxy the last answered check read in the fallback folder is then started again by portless's own start, `portless proxy start -p <port> --skip-trust` in that folder on the port its address named, since the stop removed the `proxy.port` and `proxy.pid` that would name them, so the routes it kept serve again.
   It reads `RESTART proxy PASS` once the address answers within `PROXY_WAIT` seconds (10), and `RESTART proxy FAIL <portless's last line>` otherwise, with the dispatcher told again and the start's output in `proxy-start.log` in the state folder.
   A proxy a service owns, or one this supervisor never saw answer, gets the alert alone, and after a failed start nothing more runs until the address answers again, which writes `UP proxy PASS`.
-  So a Dashboard whose address stops answering while its jobs run comes back by itself within about 2 minutes; the dispatcher's alert names the case it left for a person.
+  So a stopped 1355 proxy comes back by itself within about 2 minutes, while a hung one that still holds its port reads `RESTART proxy FAIL`; the dispatcher's alert names each case it left for a person.
   Writes stay on: it is the owner's own dashboard.
