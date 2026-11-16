@@ -1977,6 +1977,17 @@ test("12e merge: a test run that throws still leaves the clone at the head (#246
   expect(git(repo, "status", "--porcelain")).toBe("")
 })
 
+test("12g merge: a clone on a branch at the head goes back to that branch, not a detached head (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  git(repo, "checkout", "-q", "pr")
+  runMerge(repo, head)
+  expect(git(repo, "symbolic-ref", "--short", "HEAD")).toBe("pr")
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
 test("12f merge takes four arguments on its command line (#2468)", () => {
   const out = runCli(["merge", "/nowhere", "HEAD", "canary"])
   expect(out.code).toBe(1)

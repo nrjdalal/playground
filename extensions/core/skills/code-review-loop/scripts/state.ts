@@ -982,12 +982,23 @@ export const cmdMerge = (clone: string, head: string, base: string, session: str
       : files.length === 1
         ? files
         : files.filter((f) => !io.tests(session, clone, [f]))
+  let branch = ""
+  try {
+    branch = io.run("git", "-C", clone, "symbolic-ref", "-q", "--short", "HEAD").trim()
+  } catch (e) {
+    if (!(e instanceof Called)) throw e
+  }
+  // A clone on a branch at the head (a fixture-stack round's review-<n>) goes back to that branch.
+  const back =
+    branch && io.run("git", "-C", clone, "rev-parse", branch).trim() === headSha
+      ? [branch]
+      : ["--detach", headSha]
   let onMerge: string[]
   try {
     io.run("git", "-C", clone, "checkout", "-q", "--detach", merge)
     onMerge = red(tests)
   } finally {
-    io.run("git", "-C", clone, "checkout", "-q", "--detach", headSha)
+    io.run("git", "-C", clone, "checkout", "-q", ...back)
   }
   const atHeadTree = new Set(
     io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", headSha).split("\0"),
