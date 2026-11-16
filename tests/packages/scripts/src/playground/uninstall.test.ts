@@ -15,6 +15,7 @@ import { dirname, join } from "node:path"
 
 import { ourJobFiles, uninstall } from "../../../../../packages/scripts/src/playground/uninstall"
 import type { Run } from "../../../../../packages/scripts/src/playground/update"
+import { userSystemctl } from "../../../../../packages/scripts/src/user-systemctl"
 
 const scratch = mkdtempSync(join(tmpdir(), "playground-uninstall-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -206,9 +207,10 @@ describe("uninstall", () => {
     expect(
       await uninstall({ ...base, confirm: async () => true, platform: "linux", purge: false }),
     ).toBe(0)
-    expect(calls.filter((argv) => argv[0] === "systemctl")).toEqual([
-      ["systemctl", "--user", "disable", "--now", "com.playground.ops-tick.service"],
-      ["systemctl", "--user", "daemon-reload"],
+    // #2314: each call finds the user's bus from a pane with no XDG_RUNTIME_DIR, as userSystemctl builds it
+    expect(calls.filter((argv) => argv.includes("systemctl"))).toEqual([
+      userSystemctl(["disable", "--now", "com.playground.ops-tick.service"]),
+      userSystemctl(["daemon-reload"]),
     ])
     expect(existsSync(join(units, "com.playground.ops-tick.service"))).toBe(false)
     expect(existsSync(join(units, "syncthing.service"))).toBe(true)

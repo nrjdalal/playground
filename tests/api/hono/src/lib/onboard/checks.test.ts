@@ -326,6 +326,32 @@ describe("the rows the app cannot fix itself", () => {
     }
   })
 
+  // #2314: the password window is the OS's own, so the proxy row names the computer it runs on
+  test("the proxy fix's row says your Mac on macOS and your computer on Linux", async () => {
+    const root = mkdtempSync(join(tmpdir(), "portless-state-"))
+    const dir = join(root, "fallback")
+    mkdirSync(dir)
+    writeFileSync(join(dir, "proxy.port"), "1355\n")
+    try {
+      const note = async (platform: NodeJS.Platform) =>
+        byName(
+          await onboardChecks({
+            ...signedUp,
+            database: "ok",
+            env: { HOME, PORTLESS_STATE_DIR: dir },
+            platform,
+            reader: machine(TOOLS, ANSWERS, [], { ports: [1355] }).reader,
+          }),
+        ).portless!.note
+      expect(await note("darwin")).toContain("; your Mac asks for your password in its own window.")
+      expect(await note("linux")).toContain(
+        "; your computer asks for your password in its own window.",
+      )
+    } finally {
+      rmSync(root, { force: true, recursive: true })
+    }
+  })
+
   test("portless is not needed on a stack started with PORTLESS=0, whatever its proxy and CA", async () => {
     const { reader } = machine(TOOLS, ANSWERS, [], { ports: [] })
     const rows = byName(

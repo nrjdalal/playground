@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { restart } from "../../../../../packages/scripts/src/ops-restart/restart"
+import { userSystemctl } from "../../../../../packages/scripts/src/user-systemctl"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -152,7 +153,7 @@ const world = (changed: string[], live: Record<number, string> = {}, stubborn: n
         ? { code: 0, out: JSON.stringify({ ProgramArguments: plists[label] }) }
         : { code: 1, out: "" }
     }
-    if (argv[0] === "systemctl") {
+    if (argv.includes("systemctl")) {
       const label = Object.keys(plists).find((l) => argv.at(-1) === `${l}.service`)
       return label
         ? {
@@ -265,14 +266,9 @@ describe("restart", () => {
     await w.pass("linux")
     expect(w.kills()).toEqual(["kill -TERM 104"])
     expect(w.ups()).toEqual([])
-    expect(w.runs).toContainEqual([
-      "systemctl",
-      "--user",
-      "show",
-      "--property=ExecStart",
-      "--value",
-      "com.playground.ops-tick.service",
-    ])
+    expect(w.runs).toContainEqual(
+      userSystemctl(["show", "--property=ExecStart", "--value", "com.playground.ops-tick.service"]),
+    )
     expect(w.runs.some((argv) => argv[0] === "plutil")).toBe(false)
   })
 

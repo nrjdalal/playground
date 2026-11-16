@@ -1179,7 +1179,7 @@ def cycle(state):
 
 
 def dashboard_db():
-    """The live dashboard's /api/health `db` reading ("ok", "unreachable"), or None when it cannot be read: the checkout on live.branch, its API by portless as ops-dashboard's supervisor reads it."""
+    """The live dashboard's /api/health `db` reading ("ok", "unreachable"), or None when it cannot be read: the checkout on live.branch, its API by portless as ops-dashboard's supervisor reads it, in the folder portlessDir() names, whose CA curl trusts (on Linux the 1355 proxy's TLS marker and CA sit in ~/.portless/fallback)."""
     try:
         setting = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "packages", "scripts", "src", "playground", "setting.ts")
         live = subprocess.run(["bun", setting, "--text", "live.branch"], capture_output=True, text=True, timeout=30).stdout.strip()
@@ -1187,10 +1187,14 @@ def dashboard_db():
         dashboard = next((b.split("\n")[0].removeprefix("worktree ") for b in tree.split("\n\n") if live and f"branch refs/heads/{live}" in b.split("\n")), None)
         if not dashboard:
             return None
-        api = subprocess.run(["bunx", "portless", "get", "api.playground"], cwd=dashboard, capture_output=True, text=True, timeout=20).stdout.strip()
+        pdir = subprocess.run(["bun", "--no-env-file", "-e", "console.log((await import('./api/hono/src/lib/dev/proxy.ts')).portlessDir())"], cwd=dashboard, capture_output=True, text=True, timeout=20).stdout.strip()
+        env = {**os.environ, "PORTLESS_STATE_DIR": pdir} if pdir else None
+        api = subprocess.run(["bunx", "portless", "get", "api.playground"], cwd=dashboard, env=env, capture_output=True, text=True, timeout=20).stdout.strip()
         if not api.startswith("http"):
             return None
-        body = subprocess.run(["curl", "-s", "-m", "5", f"{api}/api/health"], capture_output=True, text=True, timeout=10).stdout
+        ca = os.path.join(pdir, "ca.pem") if pdir else ""
+        trust = ["--cacert", ca] if ca and os.path.isfile(ca) else []
+        body = subprocess.run(["curl", "-s", "-m", "5", *trust, f"{api}/api/health"], capture_output=True, text=True, timeout=10).stdout
         return json.loads(body)["data"]["db"]
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
         return None

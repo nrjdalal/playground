@@ -129,6 +129,7 @@ function stub({
   ready = ok(""),
   comments = PASSING,
   files = ["AGENTS.md", "packages/scripts/src/pr-merge/cli.ts"],
+  labels = [] as string[],
   merges = [ok("")],
   parents = {},
   stateAfter = ["MERGED"],
@@ -142,6 +143,7 @@ function stub({
   draft?: boolean
   ready?: RunResult
   files?: string[]
+  labels?: string[]
   merges?: RunResult[]
   parents?: Record<number, RunResult>
   stateAfter?: string[]
@@ -165,6 +167,7 @@ function stub({
           headRefName: "PG-112-x",
           headRefOid: HEAD,
           isDraft: draft,
+          labels: labels.map((name) => ({ name })),
           state: "OPEN",
           statusCheckRollup: checks,
         }),
@@ -278,6 +281,38 @@ describe("prMerge", () => {
       ...local(),
       ended: async () => {
         throw new Error("herdr is down")
+      },
+    })
+    expect(outcome).toMatchObject({ kind: "merged" })
+  })
+
+  // a fix for a bug live on the factory's own machine waited for the usual ship beat, so a ship-now label tells Ops to ship once it merges.
+  test("a ship-now PR's merge sends Ops one ship line; an unlabelled merge and a refusal send none", async () => {
+    const sent: string[] = []
+    const shipNow = async (line: string) => void sent.push(line)
+    const labelled = stub({ labels: ["bug", "ship-now"] })
+    expect(await prMerge(112, { repo: REPO }, labelled.run, { ...local(), shipNow })).toMatchObject(
+      { kind: "merged" },
+    )
+    expect(sent).toEqual([
+      "#112 carries ship-now and merged at abc1234def: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds abc1234def.",
+    ])
+    const plain = stub({ labels: ["bug"] })
+    expect(await prMerge(112, { repo: REPO }, plain.run, { ...local(), shipNow })).toMatchObject({
+      kind: "merged",
+    })
+    const refused = stub({ aheadBy: "1", labels: ["ship-now"] })
+    const refusal = await prMerge(112, { repo: REPO }, refused.run, {
+      ...local({ tree: null }),
+      shipNow,
+    })
+    expect(refusal.kind).toBe("refused")
+    expect(sent).toHaveLength(1)
+    const failing = stub({ labels: ["ship-now"] })
+    const outcome = await prMerge(112, { repo: REPO }, failing.run, {
+      ...local(),
+      shipNow: async () => {
+        throw new Error("notify.sh failed")
       },
     })
     expect(outcome).toMatchObject({ kind: "merged" })

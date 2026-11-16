@@ -393,6 +393,7 @@ const copyPrebuild = (dir: string): string => {
   cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
   mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
   symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
+  symlinkSync(join(ROOT, "packages/scripts"), join(dir, "node_modules/@packages/scripts"))
   return verify
 }
 

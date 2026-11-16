@@ -169,8 +169,12 @@ const homebrewCheck = (reader: Reader): Check => {
   }
 }
 
-// portless: its proxy runs by the dev launcher's own rule (proxyDown), on 443 or, while that is down, on 1355, which needs no password; the app sets up 443 (the proxy fix, which trusts the CA too) and trusts the CA (the trust fix) on the owner's click, any password going to macOS's own window, and reports a stopped proxy, which no running stack can show.
-const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
+// portless: its proxy runs by the dev launcher's own rule (proxyDown), on 443 or, while that is down, on 1355, which needs no password; the app sets up 443 (the proxy fix, which trusts the CA too) and trusts the CA (the trust fix) on the owner's click, any password going to the OS's own window, and reports a stopped proxy, which no running stack can show.
+const portlessCheck = async (
+  reader: Reader,
+  env: Env,
+  platform: NodeJS.Platform,
+): Promise<Check> => {
   const need = "the Dashboard's https address"
   const row = (detail: string, note: string, action: Action | null = null): Check => ({
     action,
@@ -192,7 +196,7 @@ const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
         )
       : row(
           "not on 443",
-          `The Dashboard's web address runs on port ${FALLBACK_PORT} for now. Set it up here, and it drops the port number; your Mac asks for your password in its own window.`,
+          `The Dashboard's web address runs on port ${FALLBACK_PORT} for now. Set it up here, and it drops the port number; ${platform === "linux" ? "your computer" : "your Mac"} asks for your password in its own window.`,
           { id: "proxy", label: "Set up the web address" },
         )
   const ca = join(dir, "ca.pem")
@@ -310,7 +314,7 @@ export async function onboardChecks({
           await Promise.all([
             ...TOOLS.map((tool) => toolCheck(tool, reader, env)),
             homebrewCheck(reader),
-            portlessCheck(reader, env),
+            portlessCheck(reader, env, platform),
             platform === "linux" ? certificateCheck(reader, env) : null,
             settingsCheck(login),
           ])

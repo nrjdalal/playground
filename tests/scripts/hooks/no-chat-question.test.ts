@@ -195,6 +195,15 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["tell us if", "Tell us if you want to look."],
     ["need to know if", "I need to know if you want to look."],
     ["say, words, then if", "Just say here if you want to see it."],
+    // a phrase put to him is an ask even when reported, so only one put to someone else passes (PG-2404)
+    ["a phrase reported as put to you", "I asked you to tell me if it breaks."],
+    ["a phrase reported as put to Quilla", "I asked Quilla to tell me if it breaks."],
+    ["a phrase reported as put to his handle", "I told @qmarsh to tell me if it breaks."],
+    [
+      "a reported phrase, then one of its own",
+      "I asked Ops to check; tell me if you want it sooner.",
+    ],
+    ["a question for a run on a machine", "Run the test on spark-9dfb?"],
   ])("%s", async (_name, last) => {
     expect(await stop(last)).toBe(REASON)
   })
@@ -381,8 +390,48 @@ describe("what passes", () => {
       "It is a quick screenshot job if you want to see it.",
     ],
     ["it yourself right after you can", "You can withdraw it yourself."],
+    // 16 Nov: a report of what he no longer has to do, and of what the session asked another (PG-2404)
+    [
+      "it yourself after without having to",
+      "After that, you hear about it without having to notice it yourself.",
+    ],
+    ["it yourself after without", "You hear about it without checking it yourself."],
+    [
+      "a phrase reported as put to an agent",
+      "I told the Builder and Ops, and asked Ops to tell me if anything else is missing.",
+    ],
   ])("not a request for his action: %s", async (_name, last) => {
     expect(await stop(last)).toBeUndefined()
+  })
+
+  // 16 Nov: a lead's reports naming a done item were refused, while its real question was not (PG-2404)
+  test.each([
+    [
+      "a done item, with what it asked Ops",
+      "- **One mix-up fixed:** the Builder thought Ops' test still waits on a token from you (#i7) and on setting up the second Spark. By my records both are already done: the setup at 07:45 UTC, and the token, which already works there, at 08:53 UTC. I told the Builder and Ops, and asked Ops to tell me if anything else is missing.",
+    ],
+    ["a done item, said done", "#i7 is done; nothing waits on you there."],
+    [
+      "a done item, with what he no longer has to do",
+      "All three parts of the outage fix (#i16) have merged.\n\n- **When it reaches you:** after that, an outage like this morning's lasts about a minute, and you hear about it without having to notice it yourself.",
+    ],
+    ["an open item, posted", "The local-model test decision is in your Inbox as #i23."],
+  ])("a lead's report naming an item passes: %s", async (_name, last) => {
+    expect(
+      await stop(last, {
+        role: "lead",
+        statuses: { "#i7": "done", "#i16": "done", "#i23": "open" },
+      }),
+    ).toBeUndefined()
+  })
+
+  test("a lead's real question in chat is still sent to the dispatcher (PG-2404)", async () => {
+    expect(
+      await stop(
+        "**Your decision: run the test on spark-9dfb?** It would install four things there, each with its undo.",
+        { role: "lead" },
+      ),
+    ).toBe(LEAD_REASON)
   })
 
   test("a line to the owner by name asks only for the names owner.names sets, so with none set it is an agent's", async () => {
