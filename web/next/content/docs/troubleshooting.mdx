@@ -56,6 +56,15 @@ Your sessions run in herdr, which `playground` starts, and `playground view` ope
 - **`a stack already runs in this checkout`** when you run `bun run dev` yourself: the Dashboard already runs from this folder.
   Use the one that runs, or stop it with `bun run dev:stop` first.
 
+## Alpha does not start
+
+- **`Claude Code would stop on its folder trust question in <folder>`** when Alpha or another session starts: Claude Code asks once whether you trust Playground's folder, and you have not said yes yet.
+  Click **Trust this folder** on Claude Code's card, in first run's Harness step or under Harness in Settings, then start it again.
+- **`it is parked until <time> (usage.accounts parkedUntil). usage.accounts also lists <accounts>`** when a session starts: the one Claude account signed in on this computer is parked, and the accounts named are not signed in here.
+  Sign one in with **Add account** in the Dashboard's Settings, then start it again.
+- **`there is no database yet: finish first-run setup on the Dashboard, then run this again`** from `playground ask` or `bun run thread`: first run has not made the Dashboard's database yet.
+  Finish the Database row on the Dashboard, then run the command again.
+
 ## A session paused on its usage limit
 
 A session that reached its account's usage limit shows **Paused · usage limit** with gray pause bars in the sidebar (see [Agents](/docs/agents#status-icons)).
