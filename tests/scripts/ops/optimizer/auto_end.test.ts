@@ -19,6 +19,7 @@ import {
   reportArgv,
   finishedOf,
   leftoversOf,
+  procHoldersOf,
   reasonOf,
   sweep,
   type Target,
@@ -1539,6 +1540,25 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(await drainCarried(carried, deps)).toEqual([])
   })
 
+  test("a leftover a live process holds is kept with its pid in the lead's line and never moved, while the rest go (#2407)", async () => {
+    const { main, projects, target } = cloned()
+    const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
+    const [held, free] = ["tmp-held", "tmp-free"].map((n) => join(main, "..", n)) as [
+      string,
+      string,
+    ]
+    const { deps } = fakes(main, [], undefined, {
+      heldBy: (path) => (path === held ? "held by pid 4242 (sleep), which still runs in it" : null),
+      leftovers: () => [held, free],
+    })
+    const { charged } = capped(deps)
+    expect(await cleanupLive(projects, async () => deps)(worker)).toEqual([
+      `kept ${held}: held by pid 4242 (sleep), which still runs in it`,
+      `removed ${free}`,
+    ])
+    expect(charged).toEqual([`k3m9px-worker ${free}`])
+  })
+
   test("a leftover safe-delete refuses, a temp folder past 2 GB, is kept with its refusal in the lead's line while the rest go (#2407)", async () => {
     const { main, projects, target } = cloned()
     const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
@@ -1624,4 +1644,33 @@ describe("an ended session's leftovers and the moves its end carried (#2407)", (
     const { deps } = fakes({ carried: async () => [line] })
     expect(await sweep(input(), deps)).toEqual([line])
   })
+})
+
+// #2407: a process still running in an ended session's leftover, an orphan that outlived it, keeps the leftover, named by its pid
+describe("a leftover a live process holds stays (#2407)", () => {
+  test.skipIf(process.platform !== "linux")(
+    "procHoldersOf names a child whose working folder is inside, and one holding a file there open, and nothing for a folder no process holds",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "held-")))
+      const [cwdHeld, fileHeld, free] = ["cwd", "file", "free"].map((n) => join(root, n)) as [
+        string,
+        string,
+        string,
+      ]
+      for (const dir of [cwdHeld, fileHeld, free]) mkdirSync(dir)
+      writeFileSync(join(fileHeld, "log"), "")
+      const sleeper = Bun.spawn(["sleep", "30"], { cwd: cwdHeld })
+      const tail = Bun.spawn(["tail", "-f", join(fileHeld, "log")], { cwd: root })
+      try {
+        await Bun.sleep(200)
+        expect(procHoldersOf(cwdHeld)).toContainEqual({ command: "sleep", pid: sleeper.pid })
+        expect(procHoldersOf(fileHeld)).toContainEqual({ command: "tail", pid: tail.pid })
+        expect(procHoldersOf(free)).toEqual([])
+        expect(procHoldersOf(join(root, "gone"))).toEqual([])
+      } finally {
+        sleeper.kill()
+        tail.kill()
+      }
+    },
+  )
 })

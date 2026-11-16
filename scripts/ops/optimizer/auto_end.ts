@@ -5,7 +5,14 @@
 // Then its leftovers go to the trash too: its scratch and scratchpad folders, its memory settings file and its temp folders. Every move is charged to the ended session under safe-delete's cap of 3 a minute, and a move past the cap is carried to the next auto-end beat.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
-import { existsSync, readdirSync, renameSync } from "node:fs"
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+} from "node:fs"
 import { appendFile, mkdir } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 
@@ -348,6 +355,7 @@ export type CleanupDeps = {
     discard?: boolean,
     who?: string,
   ) => Promise<{ ok: boolean; out: string }>
+  heldBy?: (path: string) => string | null
   rmOwn?: (path: string, reason: string, who: string) => Promise<{ ok: boolean; out: string }>
   room?: (who: string) => boolean
   carry?: (item: Carried) => Promise<void>
@@ -536,6 +544,17 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
         { discard: !!discard, path, ...(pr ? { pr } : {}), reason, worktree: true },
         who ?? (await rm.session()),
       ),
+    heldBy: (path) => {
+      const held =
+        process.platform === "linux"
+          ? procHoldersOf(path)
+          : (rm.procs() ?? [])
+              .filter((p) => p.cwd === path || p.cwd.startsWith(`${path}/`))
+              .map((p) => ({ command: basename(p.command.split(" ")[0] ?? ""), pid: p.pid }))
+      return held.length
+        ? `held by ${held.map((p) => `pid ${p.pid} (${p.command})`).join(", ")}, which still runs in it`
+        : null
+    },
     rmOwn: (path, reason, who) => moveOf({ discard: false, path, reason, worktree: false }, who),
     room: (who) => movesLeft(join(rm.data, "trash"), who) > 0,
     carry: async (item) => {
@@ -545,6 +564,41 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
     leftovers: (name) =>
       leftoversOf(name, rm.data, readdirSync("/tmp"), process.platform).filter(existsSync),
   }
+}
+
+// Each process but this one whose working folder or an open file sits in path, read from proc's pid folders (Linux's /proc), a pid whose links cannot be read counting as none; [] when path or proc cannot be read.
+export const procHoldersOf = (path: string, proc = "/proc"): { command: string; pid: number }[] => {
+  let root: string
+  let pids: string[]
+  try {
+    root = realpathSync(path)
+    pids = readdirSync(proc).filter((entry) => /^\d+$/.test(entry) && Number(entry) !== process.pid)
+  } catch {
+    return []
+  }
+  const inside = (link: string) => link === root || link.startsWith(`${root}/`)
+  const read = (at: string, fn: () => string[]) => {
+    try {
+      return fn()
+    } catch {
+      return [] as string[]
+    }
+  }
+  return pids.flatMap((pid) => {
+    const at = join(proc, pid)
+    const links = [
+      "cwd",
+      ...read(at, () => readdirSync(join(at, "fd")).map((fd) => join("fd", fd))),
+    ]
+    if (!links.some((link) => read(at, () => [readlinkSync(join(at, link))]).some(inside)))
+      return []
+    return [
+      {
+        command: read(at, () => [readFileSync(join(at, "comm"), "utf8").trim()])[0] ?? "",
+        pid: Number(pid),
+      },
+    ]
+  })
 }
 
 // Pure: the folders and files an ended session leaves, named for it: its scratch and scratchpad folders, the memory trial's settings file spawn.sh wrote for it, and on Linux each temp folder spawn.sh made it (/tmp/playground-<name>.XXXXXX, one per start), of tmp's entries; the caller keeps the ones that exist.
@@ -627,6 +681,8 @@ async function cleanLeftover(
   deps: CleanupDeps,
 ): Promise<string> {
   if (!deps.rmOwn) return `kept ${path}: nothing here moves it`
+  const held = deps.heldBy?.(path)
+  if (held) return `kept ${path}: ${held}`
   const item = { path, reason, who, worktree: false }
   if (!(await roomFor(item, deps))) return carriedLine(item)
   const moved = await deps.rmOwn(path, reason, who)
