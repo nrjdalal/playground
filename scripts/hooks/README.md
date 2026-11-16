@@ -327,7 +327,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-hidden-program, no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs the first two on the GitHub tools.
+  no-hidden-program, no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -897,8 +897,10 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   Seven guard pull requests in a row each taught the shared reader one more spelling of a program name (a brace list, a zsh group, a brace sequence, a name glued to a paren, a process substitution, a group after a wrapper), and each review found the next one, so the rule fails closed on the name itself.
 - It reads the program word of each command the shell runs, past wrappers, reserved words and `VAR=x` assignments: the line's own, and each script the shared walk follows (a shell's `-c`, `eval`, `source`, a script fed to a shell, the glob reading of a wrapper's group).
   It never reads an argument, nor the text another guard reads out of one as a possible line (a commit message, `agent-browser eval`'s JavaScript).
-- A plain name is one name once its quotes and backslashes are removed: no unquoted `*`, `?`, closed `[…]`, paren group, or brace list or sequence, no ANSI-C escape (`$'\x67it'`), and no expansion but `$HOME` or `$PLAYGROUND_REPO` before a slash (`$NAME`, `${NAME}`, `${NAME:?…}`, or `${NAME:-…}` with a default holding no expansion).
-  Those two are read from the session's starting env, so one an assignment on the same line sets is refused (`HOME=/tmp/x; $HOME/bin/rm`).
+  It judges the reading that runs alone, so a wrapper option's value (`nice -n $N ls`, `sudo -u $U ls`) and `command -v`'s or `-V`'s operand, which runs nothing, pass.
+- A plain name is one name once its quotes and backslashes are removed: no unquoted `*`, `?`, closed `[…]`, paren group, brace list or sequence, numeric range (`<->`, `<1-5>`, which zsh globs with no option set), or extendedglob operator (`#`, `^`, a `~` past the start), no leading `=` (zsh's path lookup, `=rm`), no ANSI-C escape (`$'\x67it'`),
+  and no expansion but `$HOME` or `$PLAYGROUND_REPO` before a slash (`$NAME`, `${NAME}`, `${NAME:?…}`, or `${NAME:-…}` with a default holding no `$` or backquote).
+  Those two are read from the session's starting env, so one the same line sets or changes is refused (`HOME=/tmp/x; $HOME/bin/rm`, `HOME+=/x`, `${HOME:=/tmp/x}`).
   `[`, `[[` and a case statement's patterns (`casePatterns`) pass.
 - A program held in a variable the line sets is refused too, and the refusal names the literal to write in its place (`H=~/x; $H list`: write `~/x` in place of `$H`).
   A call it cannot parse is refused.

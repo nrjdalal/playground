@@ -1,17 +1,48 @@
 // PreToolUse hook: refuses a command whose program name is not spelled plainly (a glob, a zsh group, a brace list, an ANSI-C escape, or an expansion but a HOME or PLAYGROUND_REPO folder), since each guard that reads a program by its name missed one new spelling of it after another; a plain name is one every guard reads.
-import { type Env, knownVariables, lex, marked, plainProgram, run, type Visit } from "./shell"
+import {
+  type Env,
+  knownVariables,
+  lex,
+  marked,
+  parse,
+  PLAIN_PREFIXES,
+  plainProgram,
+  run,
+  type Visit,
+  type Word,
+} from "./shell"
 
-const visit: Visit = async (cmd, { first }, at) => {
-  if (!first || cmd.casePattern || plainProgram(first, at)) return
-  const typed = first.source ?? first.value
-  const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed)?.[1]
-  const value = held === undefined ? undefined : at.vars.get(held)
-  const rewrite =
-    value && !value.unknown && !marked(value.value) && value.value.trim()
-      ? ` Here, write \`${value.value}\` in place of \`${typed}\`.`
-      : ""
-  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`
+// Whether a word before the program is command's -v or -V, which looks the program up and runs nothing
+const lookedUp = (words: Word[], first: Word): boolean => {
+  const before = words.slice(0, words.indexOf(first))
+  const at = before.findLastIndex((w) => !w.quoted && w.value === "command")
+  return at >= 0 && before.slice(at + 1).some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value))
 }
+
+// The prefix variables a line changes where the reader records no value: a `+=`, or a `${NAME=…}`, `${NAME:=…}` or `${NAME::=…}`
+const changedIn = (command: string): Set<string> =>
+  new Set(
+    [...PLAIN_PREFIXES].filter((name) =>
+      new RegExp(`(?:^|[\\s;&|(){}])${name}\\+=|\\$\\{${name}:{0,2}=`).test(command),
+    ),
+  )
+
+// Judges the reading that runs alone, the primary parse's program word, never another reading that takes an option's value as the program (`nice -n $N ls`)
+const visitOf =
+  (changed: ReadonlySet<string>): Visit =>
+  async (cmd, { first }, at) => {
+    const typed = first?.source ?? first?.value
+    const primary = parse(cmd).first
+    if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value)) return
+    if (lookedUp(cmd.words, first) || plainProgram(first, at, changed)) return
+    const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1]
+    const value = held === undefined ? undefined : at.vars.get(held)
+    const rewrite =
+      value && !value.unknown && !marked(value.value) && value.value.trim()
+        ? ` Here, write \`${value.value}\` in place of \`${typed}\`.`
+        : ""
+    return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`
+  }
 
 async function inspect(raw: string, environment: Record<string, string | undefined>) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
@@ -26,7 +57,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  return run(lex(command, env.known), env, visitOf(changedIn(command)))
 }
 
 // Fails closed: a call it cannot read is refused, since a program it cannot read is the case it is for.

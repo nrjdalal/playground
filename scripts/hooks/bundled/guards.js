@@ -1150,7 +1150,7 @@ function walk(lx, scope, nested, inherit) {
   while (lx.i < src.length) {
     tick();
     const c = src[lx.i];
-    const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8));
+    const redirect = NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)) ? null : REDIRECT.exec(src.slice(lx.i, lx.i + 8));
     if (c === " " || c === "\t")
       lx.i++;
     else if (c === "\\" && src[lx.i + 1] === `
@@ -1367,7 +1367,7 @@ function word(lx, opening = false) {
   const start = lx.i;
   const out = { quoted: false, value: "" };
   let bare = "";
-  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")")) {
+  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")" || NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)))) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
@@ -1376,6 +1376,12 @@ function word(lx, opening = false) {
       bare = bare.slice(0, -1);
       lx.i--;
       merge(out, procSub(lx));
+    } else if (c === "<") {
+      const range = NUMERIC_GLOB.exec(src.slice(lx.i, lx.i + 64))[0];
+      out.value += range;
+      bare += range;
+      out.glob = true;
+      lx.i += range.length;
     } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")", false, opening);
       out.value += src.slice(lx.i, end);
@@ -1433,6 +1439,7 @@ function word(lx, opening = false) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var NUMERIC_GLOB = /^\d*<\d*-\d*>/;
 var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
 var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
@@ -2331,7 +2338,7 @@ function loopClose(commands, k) {
     }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
-function plainProgram(first, env) {
+function plainProgram(first, env, changed = new Set) {
   const source = first.source ?? first.value;
   if (marked(first.value) && !/[$`]/.test(source))
     return false;
@@ -2358,15 +2365,18 @@ function plainProgram(first, env) {
     else if (c === "$") {
       const named = /^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[?-][^}$`]*)?\})/.exec(source.slice(i));
       const name = named?.[1] ?? named?.[2];
-      if (!named || !name || !PLAIN_PREFIXES.has(name) || env.vars.has(name))
+      if (!named || !name || !PLAIN_PREFIXES.has(name) || env.vars.has(name) || changed.has(name))
         return false;
       i += named[0].length - 1;
       if (!source.slice(i + 1).replace(/^"/, "").startsWith("/"))
         return false;
-    } else if (quote === "")
+    } else if (quote === "") {
+      if (c === "=" && i === 0 || c === "~" && i > 0)
+        return false;
       bare += c;
+    }
   }
-  return !/[*?(]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare);
+  return !/[*?(#^<]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare);
 }
 var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
@@ -16082,14 +16092,23 @@ async function refusal(raw, environment = process.env, load5 = currentLoad5()) {
 if (false) {}
 
 // scripts/hooks/no-hidden-program.ts
-var visit4 = async (cmd, { first }, at) => {
-  if (!first || cmd.casePattern || plainProgram(first, at))
+var lookedUp = (words, first) => {
+  const before = words.slice(0, words.indexOf(first));
+  const at = before.findLastIndex((w) => !w.quoted && w.value === "command");
+  return at >= 0 && before.slice(at + 1).some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value));
+};
+var changedIn = (command) => new Set([...PLAIN_PREFIXES].filter((name) => new RegExp(`(?:^|[\\s;&|(){}])${name}\\+=|\\$\\{${name}:{0,2}=`).test(command)));
+var visitOf = (changed) => async (cmd, { first }, at) => {
+  const typed = first?.source ?? first?.value;
+  const primary = parse(cmd).first;
+  if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value))
     return;
-  const typed = first.source ?? first.value;
-  const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed)?.[1];
+  if (lookedUp(cmd.words, first) || plainProgram(first, at, changed))
+    return;
+  const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1];
   const value = held === undefined ? undefined : at.vars.get(held);
   const rewrite = value && !value.unknown && !marked(value.value) && value.value.trim() ? ` Here, write \`${value.value}\` in place of \`${typed}\`.` : "";
-  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`;
+  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}`;
 };
 async function inspect8(raw, environment) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
@@ -16106,7 +16125,7 @@ async function inspect8(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit4);
+  return run2(lex(command, env.known), env, visitOf(changedIn(command)));
 }
 async function check12(raw, environment = process.env) {
   try {
@@ -16788,7 +16807,7 @@ async function dashboardRuns(what, environment) {
     return `no-mac-web-build hook refuses ${what}: the live dashboard's Postgres (${name}) runs in this Mac's Docker VM, and a web image build peaks past the VM's memory, so its out-of-memory killer takes the dashboard's database. ${await route()}`;
   return cannot(`docker inspect ${name} answered ${(err || out).trim().slice(0, 200) || `exit ${code}`}`);
 }
-var visit5 = async (_cmd, { args, first, name }, env) => {
+var visit4 = async (_cmd, { args, first, name }, env) => {
   const judge = async (words, compose) => {
     const what = webBuild(words, compose);
     return what ? dashboardRuns(what, env.process) : undefined;
@@ -16833,7 +16852,7 @@ async function inspect11(raw, environment) {
     process: environment,
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit5);
+  return run2(lex(command, env.known), env, visit4);
 }
 async function check16(raw, environment = process.env) {
   try {
@@ -16894,7 +16913,7 @@ function judge6(what, color, create) {
   if (!HEXES.has(color.value.replace(/^#/, "").toLowerCase()))
     return refuse11(what, `its color ${color.value} is not a Tailwind 500`);
 }
-var visit6 = async (cmd, { args, first, name }, env) => {
+var visit5 = async (cmd, { args, first, name }, env) => {
   if (name === "gh" || first?.unknown && ["api", "label"].includes(args[0]?.value ?? ""))
     return gh3(args, cmd, env);
   const nested = args.findIndex((a) => program(a.value) === "gh");
@@ -16969,7 +16988,7 @@ async function inspect12(raw) {
     process: process.env,
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit6);
+  return run2(lex(command, env.known), env, visit5);
 }
 async function check17(raw) {
   try {
@@ -17841,7 +17860,7 @@ var AT_ROOT_FIX = {
   rmdir: "Write and remove in $TMPDIR or the session's scratchpad, and run it again."
 };
 var refuseAtRoot = (name, path) => `no-prompt-stop hook refuses ${name} ${path}: Claude Code stops on a removal of a name directly in / and waits for a person, who is not there. ${AT_ROOT_FIX[name]}`;
-var visit7 = async (_cmd, { args, name }) => {
+var visit6 = async (_cmd, { args, name }) => {
   if (name !== "rm" && name !== "rmdir")
     return;
   const operands = args.filter((a) => !a.value.startsWith("-"));
@@ -17871,7 +17890,7 @@ async function inspect15(raw) {
     process: {},
     vars: new Map
   };
-  return run2(lex(command, env.known), env, visit7);
+  return run2(lex(command, env.known), env, visit6);
 }
 async function check20(raw) {
   try {
@@ -18538,7 +18557,7 @@ function judgeHerdr(args, local, env, program) {
     return refuseHerdr(`\`${verb}\` whose program is ${program.unknown ?? "a word it cannot read"}, which it cannot tell from herdr; type the program by its literal name, such as \`agent-browser\` or \`herdr\`, so the hook can read it`);
   return refuseHerdr(`a herdr ${verb}, which is not one of its reads`);
 }
-var visit8 = async (cmd, { args, first, local, name }, env) => {
+var visit7 = async (cmd, { args, first, local, name }, env) => {
   const texts = [...args, ...cmd.redirects.flatMap((r) => [r.target ?? [], r.body ?? []].flat())];
   const socket = (t) => {
     if (HERDR_SOCKET.test(t.value) || t.variable === "HERDR_SOCKET_PATH")
@@ -18615,7 +18634,7 @@ async function inspect17(raw, environment) {
     vars: new Map,
     visitShells: true
   };
-  return run2(lex(command, env.known), env, visit8, true);
+  return run2(lex(command, env.known), env, visit7, true);
 }
 async function check23(raw, environment = process.env) {
   try {

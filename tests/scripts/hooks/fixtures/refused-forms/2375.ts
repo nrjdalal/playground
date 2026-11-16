@@ -387,6 +387,21 @@ const controls = (): Row[] => [
     'case "$c" in *x*) ;; *) echo "$(date)";; esac',
   ],
   ["a glob in an argument", "ls *.ts"],
+  ["a numeric range in an argument", "cat <->"],
+  ["a group spelling in a comment", "# nice (r|\\))m /tmp/x"],
+  ["a group holding a literal slash, which zsh refuses as a bad pattern", "nice (r/x)m"],
+  ["a group in an argument", "echo (r|x)m"],
+  ["a group in a listing's argument", "ls (a|b)"],
+  ["a subshell after a repeat count and time", "repeat 1 time (ls)"],
+  ["a lookup of a program held in a variable", "X=git; command -v $X"],
+  ["a quoted lookup of a program held in a variable", 'X=git; command -V "$X"'],
+  ["a lookup of a loop variable", "for b in git bun; do command -v $b; done"],
+  ["a wrapper's option value held in a variable", "N=5; nice -n $N ls"],
+  ["exec's name held in a variable", 'X=foo; exec -a "$X" ls'],
+  ["sudo's user held in a variable", "U=me; sudo -u $U ls"],
+  ["a HOME the line reads before a program under it", "echo $HOME; $HOME/.bun/bin/bun --version"],
+  ["an input redirect", "cat < /tmp/x"],
+  ["an equals sign inside an argument", "git log --format=%H -1"],
 ]
 
 // The rewrites a refusal names: a program held in a variable the line sets, a HOME the line sets, and an expansion that defaults to a name
@@ -401,11 +416,56 @@ const held = (): Row[] => [
   ["a brace list in an eval's script", "eval 'p{k,x}ill -f watcher'"],
 ]
 
+// Each form with its twins: after a header line, and split by a backslash-newline before its last word
+const twins = (what: string, form: string): Row[] => [
+  [what, form],
+  [`${what}, after a header line`, `#!/bin/sh\n${form}`],
+  [`${what}, split by a backslash-newline`, form.replace(/ (?=\S+$)/, " \\\n")],
+]
+
+// The spellings zsh globs past the plain-name test before round 1: extendedglob's operators, a numeric range (on with no option, and never a redirect) and the equals path lookup
+const spelled = (): Row[] => [
+  ...twins("an rm extendedglob's # spells", `setopt extendedglob; /bin/rmm# -rf ${NEVER_MADE}`),
+  ...twins(
+    "a kill by name extendedglob's # spells",
+    "setopt extendedglob; /usr/bin/pkilll# -f watcher",
+  ),
+  ...twins("a stash pop extendedglob's # spells", "setopt extendedglob; /usr/bin/gitt# stash pop"),
+  ...twins(
+    "a kill by name extendedglob's ~ exclusion spells",
+    "setopt extendedglob; /usr/bin/pkill~x -f watcher",
+  ),
+  ...twins("a stash pop extendedglob's ^ spells", "setopt extendedglob; /usr/bin/^gi stash pop"),
+  ...twins("a program a numeric range spells", "py<-> a"),
+  ...twins("a program a numeric range spells after a wrapper", "nice py<-> a"),
+  ...twins("a program a numeric range inside a path spells", "/usr/bin/x<->m a"),
+  ...twins("a program a numeric range after digits spells", "2<-> a"),
+  ...twins("an rm the equals path lookup spells", `=rm -rf ${NEVER_MADE}`),
+  ...twins(
+    "a kill by name the equals path lookup spells after a wrapper",
+    "nice =pkill -f watcher",
+  ),
+  ["a program under a HOME the line appends to", "HOME+=/x; $HOME/bin/ls"],
+  ["a program under a HOME a := expansion sets", ": ${HOME::=/tmp/x}; $HOME/bin/ls"],
+  ["a program under a HOME a default expansion sets", ": ${HOME:=/tmp/x}; $HOME/bin/ls"],
+  ["a program under a HOME an unset default sets", ": ${HOME=/tmp/x}; $HOME/bin/ls"],
+  [
+    "spawn.sh under a Playground checkout the line appends to",
+    "PLAYGROUND_REPO+=/x; $PLAYGROUND_REPO/scripts/spawn.sh worker x",
+  ],
+]
+
 export const groups: Group[] = [
   {
     folders: ["checkout", "process home", "system bin"],
     guards: ["no-hidden-program"],
-    rows: (paths) => [...picked(paths), ...limits(), ...held(), ...controls()],
+    rows: (paths) => [
+      ...picked(paths),
+      ...limits().flatMap(([what, form]) => twins(what, form as string)),
+      ...held(),
+      ...spelled(),
+      ...controls(),
+    ],
   },
 ]
 
