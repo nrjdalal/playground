@@ -151,12 +151,12 @@ describe("each harness's card on a machine it reads (#1835)", () => {
     ).not.toContain("Trusted")
   })
 
-  test("a yes on a folder covers every folder under it, and only a yes counts", () => {
+  test("only a yes on the checkout itself counts, never one on a folder above it", () => {
     const yes = { projects: { [MAIN]: { hasTrustDialogAccepted: true } } }
     expect(trustsFolder(yes, MAIN)).toBe(true)
-    expect(trustsFolder(yes, `${MAIN}/.claude/worktrees/leads`)).toBe(true)
+    expect(trustsFolder(yes, `${MAIN}/`)).toBe(true)
     expect(trustsFolder({ projects: { "/code": { hasTrustDialogAccepted: true } } }, MAIN)).toBe(
-      true,
+      false,
     )
     expect(trustsFolder(yes, "/code/other")).toBe(false)
     expect(trustsFolder({ projects: { [MAIN]: { hasTrustDialogAccepted: false } } }, MAIN)).toBe(

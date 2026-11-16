@@ -1715,10 +1715,10 @@ restoring_row_down() {
   return 1
 }
 ! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
-# Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the folder and each folder above it, so the yes on the checkout's root covers every worktree in it.
+# Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the session's folder and each folder above it up to the checkout's root and no further (measured on 2.1.325), so the yes on the checkout's root covers every worktree in it and a yes on a folder above the checkout counts for nothing.
 # A Claude session in this checkout starts only once that yes is there, which first run's Trust this folder records; a folder outside it keeps herdr_answer's answer.
 claude_trusts() {
-  python3 -I - "$(own_config)" "$1" <<'PY'
+  python3 -I - "$(own_config)" "$1" "$2" <<'PY'
 import json, os, sys
 try:
     projects = json.load(open(sys.argv[1])).get("projects") or {}
@@ -1728,11 +1728,11 @@ yes = set()
 for path, project in projects.items():
     if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
         yes |= {os.path.abspath(path), os.path.realpath(path)}
-for d in {os.path.abspath(sys.argv[2]), os.path.realpath(sys.argv[2])}:
+for d, top in ((os.path.abspath(sys.argv[2]), os.path.abspath(sys.argv[3])), (os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[3]))):
     while True:
         if d in yes:
             sys.exit(0)
-        if os.path.dirname(d) == d:
+        if d == top or os.path.dirname(d) == d:
             break
         d = os.path.dirname(d)
 sys.exit(1)
@@ -1741,7 +1741,7 @@ PY
 if [ "$HARNESS" != codex ]; then
   for checkout in "$MAIN" "${PLAYGROUND_REPO:-$MAIN}"; do
     [[ ${DIR:-$REPO}/ == "$checkout"/* ]] || continue
-    claude_trusts "${DIR:-$REPO}" ||
+    claude_trusts "${DIR:-$REPO}" "$checkout" ||
       refuse "Claude Code would stop on its folder trust question in ${DIR:-$REPO}, since $(own_config) holds no yes for $checkout: click Trust this folder on Claude Code's card, in the Dashboard's first run or Settings' Harness section, then start it again"
     break
   done

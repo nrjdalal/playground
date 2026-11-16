@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { OLD } from "../session-names"
 import { placing, root, spawn, TRUSTED } from "./spawn-fake"
@@ -45,8 +45,12 @@ describe("a session in this checkout starts only once Claude Code trusts it (#23
     expect(r.code).toBe(0)
   })
 
-  test("a no, or a yes for another folder, is refused", async () => {
-    for (const config of [yes(TRUSTED[0]!, false), yes(join(TRUSTED[0]!, "elsewhere"))]) {
+  test("a no, a yes for another folder, or a yes on the folder above the checkout alone is refused", async () => {
+    for (const config of [
+      yes(TRUSTED[0]!, false),
+      yes(join(TRUSTED[0]!, "elsewhere")),
+      yes(dirname(TRUSTED[0]!)),
+    ]) {
       const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], {
         CLAUDE_JSON: config,
         NO_CLAUDE_TRUST: "1",

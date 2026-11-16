@@ -59,7 +59,6 @@ const SPECS: Record<HarnessId, { install: FixId; label: string; login: FixId; te
 export const codexHome = (env: Env): string => join(dataDirOf(env), "codex")
 
 export const HARNESS_COMMANDS = {
-  claudeStatus: () => ["claude", "auth", "status"],
   checkoutOf: (root: string) => [
     "git",
     "-C",
@@ -68,6 +67,7 @@ export const HARNESS_COMMANDS = {
     "--path-format=absolute",
     "--git-common-dir",
   ],
+  claudeStatus: () => ["claude", "auth", "status"],
   codexLogin: (home: string) => ["env", `CODEX_HOME=${home}`, "codex", "login", "status"],
   codexServer: (home: string) => ["env", `CODEX_HOME=${home}`, "codex", "app-server"],
   version: (tool: string) => [tool, "--version"],
@@ -207,18 +207,25 @@ const claudeSignedIn = async (
   return Boolean(config?.oauthAccount)
 }
 
-// Pure: whether Claude Code's config holds the owner's yes to its folder trust question for folder: projects[<path>].hasTrustDialogAccepted on the folder or a folder above it, as Claude Code reads it, so the yes on the checkout's root covers every worktree in it.
-export const trustsFolder = (config: Record<string, unknown> | null, folder: string): boolean => {
+// A path as given and as the disk resolves it, the two forms spawn.sh's claude_trusts compares.
+const forms = (path: string): string[] => {
+  const given = resolve(path)
+  try {
+    return [given, realpathSync(given)]
+  } catch {
+    return [given]
+  }
+}
+
+// Whether Claude Code's config holds the owner's yes to its folder trust question for the checkout itself: projects[<checkout>].hasTrustDialogAccepted, which covers every worktree in it, while a yes on a folder above the checkout counts for nothing, as Claude Code reads it and spawn.sh's claude_trusts checks.
+export const trustsFolder = (config: Record<string, unknown> | null, checkout: string): boolean => {
   const projects = (config?.projects ?? {}) as Record<string, { hasTrustDialogAccepted?: unknown }>
   const yes = new Set(
     Object.entries(projects)
       .filter(([, project]) => project?.hasTrustDialogAccepted === true)
-      .map(([path]) => resolve(path)),
+      .flatMap(([path]) => forms(path)),
   )
-  for (let dir = resolve(folder); ; dir = dirname(dir)) {
-    if (yes.has(dir)) return true
-    if (dirname(dir) === dir) return false
-  }
+  return forms(checkout).some((form) => yes.has(form))
 }
 
 // The main checkout of the API's own checkout, whose leads worktree the first dispatcher starts in: git's common folder's parent, or the checkout itself where git does not say.
