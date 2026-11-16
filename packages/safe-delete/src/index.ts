@@ -724,7 +724,7 @@ export const rowPullRequests = (row: { pr?: unknown; prs?: unknown }): string[] 
   ),
 ]
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or, for either, on a branch the remote itself holds now (remoteHolding), or, for another repo's worktree given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -835,7 +835,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   const base = baseOf()
   if (landed(git, holders, at, base)) return null
-  const holding = own ? null : remoteHolding(git, at)
+  const holding = remoteHolding(git, at)
   if (holding) {
     holders.note?.(
       `${at}'s commits are all on ${holding}, which the remote still holds, so no work is lost`,
@@ -850,9 +850,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     )
     return null
   }
-  const measured = own
-    ? "origin/canary (fetch origin canary if it merged since)"
-    : `${base ?? "its repo's default branch, which neither origin/HEAD nor gh names,"} or on any remote branch (fetch origin if it merged or was pushed since)`
+  const measured = `${base ?? "its repo's default branch, which neither origin/HEAD nor gh names,"} or on any remote branch (fetch origin if it merged or was pushed since)`
   return `${at}'s HEAD holds work not landed on ${measured}${archived ? `, and ${archived.refused}` : ""}: ${discard}`
 }
 

@@ -1111,7 +1111,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
 
   test("a clean worktree rm refuses for work not on canary goes through --discard once its PR merged or closed, and stays while it is open", async () => {
     const { main, wt } = machine()
-    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway`
+    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): playground rm --worktree ${wt} --discard removes it anyway`
     for (const finished of [false, true]) {
       const moved: string[] = []
       const { deps } = fakes(main, [], undefined, {

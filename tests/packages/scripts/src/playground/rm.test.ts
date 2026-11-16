@@ -1147,7 +1147,7 @@ test("--worktree refuses, with no PR and a commit no remote holds, a live sessio
   git(own, "add", ".")
   git(own, "commit", "-qm", "work")
   expect((await rmSaid(["--worktree", own], deps)).said[0]).toStartWith(
-    `playground: ${own}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): `,
+    `playground: ${own}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): `,
   )
   expect(existsSync(own)).toBe(true)
   expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
@@ -1295,26 +1295,100 @@ test.each([
   },
 )
 
-test("--worktree keeps origin/canary for this checkout's own worktree: one whose commit is on a remote branch, with an open PR, still refuses", async () => {
-  const { deps, main, root } = machine()
-  git(root, "init", "--bare", "-q", join(root, "remote.git"))
-  git(main, "init", "-q", "-b", "canary")
-  file(join(main, "README.md"))
-  git(main, "add", ".")
-  git(main, "commit", "-qm", "init")
-  git(main, "remote", "add", "origin", join(root, "remote.git"))
-  git(main, "push", "-q", "origin", "canary")
-  const own = join(main, ".claude", "worktrees", "pg-1")
-  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", own)
+// #2344: this checkout's own worktree, its commit pushed as PG-1-thing to a bare origin and not on canary, as a stood-down PR's tree sits
+const ownPushed = () => {
+  const m = machine()
+  git(m.root, "init", "--bare", "-q", join(m.root, "remote.git"))
+  git(m.main, "init", "-q", "-b", "canary")
+  file(join(m.main, "README.md"))
+  git(m.main, "add", ".")
+  git(m.main, "commit", "-qm", "init")
+  git(m.main, "remote", "add", "origin", join(m.root, "remote.git"))
+  git(m.main, "push", "-q", "origin", "canary")
+  const own = join(m.main, ".claude", "worktrees", "pg-1")
+  git(m.main, "worktree", "add", "-q", "-b", "PG-1-thing", own)
   file(join(own, "work.txt"))
   git(own, "add", ".")
   git(own, "commit", "-qm", "work")
   git(own, "push", "-q", "origin", "PG-1-thing")
-  const told = await rmTold(["--worktree", own], { ...deps, prState: openPr(own) })
-  expect(told.code).toBe(1)
-  expect(told.err[0]).toStartWith(
-    `playground: ${own}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): `,
+  const discard = `playground rm --worktree ${own} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
+  return { ...m, discard, own }
+}
+
+test.each([
+  ["an open PR", openPr],
+  ["no PR", () => readPrs([])],
+])(
+  "--worktree takes this checkout's own worktree whose commits are all on an origin branch other than canary, with %s, and names that branch",
+  async (_, pr) => {
+    const { deps, main, own } = ownPushed()
+    const told = await rmTold(["--worktree", own], { ...deps, prState: pr(own) })
+    expect({ ...told, out: notes(told.out) }).toEqual({
+      code: 0,
+      err: [],
+      out: [
+        `playground: ${own}'s commits are all on origin/PG-1-thing, which the remote still holds, so no work is lost`,
+      ],
+    })
+    expect(existsSync(own)).toBe(false)
+    expect(git(main, "worktree", "list", "--porcelain")).not.toContain(own)
+    expect(existsSync(join(deps.data, "scratchpad"))).toBe(false)
+  },
+)
+
+test.each([
+  [
+    "its branch deleted on origin since, its remote-tracking ref still here",
+    (root: string) =>
+      git(root, "--git-dir", join(root, "remote.git"), "update-ref", "-d", "refs/heads/PG-1-thing"),
+  ],
+  [
+    "a commit past the pushed branch",
+    (_root: string, own: string) => {
+      file(join(own, "more.txt"))
+      git(own, "add", ".")
+      git(own, "commit", "-qm", "more")
+    },
+  ],
+])(
+  "--worktree refuses this checkout's own worktree whose HEAD no origin branch holds: %s",
+  async (_, after) => {
+    const { deps, discard, own, root } = ownPushed()
+    after(root, own)
+    expect(git(own, "rev-parse", "--verify", "-q", "refs/remotes/origin/PG-1-thing")).not.toBe("")
+    expect(await rmTold(["--worktree", own], { ...deps, prState: openPr(own) })).toEqual({
+      code: 1,
+      err: [
+        `playground: ${own}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): ${discard}`,
+      ],
+      out: [],
+    })
+    expect(existsSync(own)).toBe(true)
+  },
+)
+
+test("--worktree still refuses this checkout's own worktree an origin branch holds while it has uncommitted work, or while a live roster row names its branch", async () => {
+  const { deps, discard, own } = ownPushed()
+  file(join(own, "wip.ts"))
+  expect(await rmTold(["--worktree", own], { ...deps, prState: openPr(own) })).toEqual({
+    code: 1,
+    err: [`playground: ${own} holds 1 uncommitted change (wip.ts): ${discard}`],
+    out: [],
+  })
+  git(own, "add", ".")
+  git(own, "commit", "-qm", "wip")
+  git(own, "push", "-q", "origin", "PG-1-thing")
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({
+      agents: [{ branch: "PG-1-thing", name: "abc123-worker", status: "working" }],
+    }),
   )
+  expect(await rmTold(["--worktree", own], { ...deps, prState: async () => null })).toEqual({
+    code: 1,
+    err: [`playground: ${own} is held by abc123-worker, which the roster lists as working`],
+    out: [],
+  })
   expect(existsSync(own)).toBe(true)
 })
 
