@@ -970,18 +970,27 @@ describe("opsDown", () => {
     ])
   })
 
-  test("reads no stale beat for a retired job, even with no jobs.json row for it (#2339)", async () => {
-    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
-    write(join(ops, "jobs.json"), { jobs: [] })
-    for (const job of RETIRED)
-      write(join(ops, `${job}.json`), {
-        cycleSeconds: 60,
-        job,
-        lastBeatAt: new Date(NOW - 9999 * 1000).toISOString(),
-        lastResult: "ok",
-      })
-    expect(await opsDown(ctx)).toEqual([])
-  })
+  test.each([
+    [
+      "stale",
+      (job: string) =>
+        JSON.stringify({
+          cycleSeconds: 60,
+          job,
+          lastBeatAt: new Date(NOW - 9999 * 1000).toISOString(),
+          lastResult: "ok",
+        }),
+    ],
+    ["torn", () => "{"],
+  ])(
+    "reads no %s beat file of a retired job, even with no jobs.json row for it (#2339)",
+    async (_, body) => {
+      const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+      write(join(ops, "jobs.json"), { jobs: [] })
+      for (const job of RETIRED) writeFileSync(join(ops, `${job}.json`), body(job))
+      expect(await opsDown(ctx)).toEqual([])
+    },
+  )
 })
 
 describe("forecast", () => {

@@ -249,19 +249,19 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
-// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's or a RETIRED one's, whose heartbeat file outlives it.
+// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's; a RETIRED job's heartbeat file, which outlives it, goes unread.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
-  const disabled = new Set<string>(RETIRED)
+  let disabled = new Set<string>()
   try {
     const jobs = JSON.parse(await Bun.file(join(ctx.ops, "jobs.json")).text()).jobs as Json[]
-    for (const job of jobs) if (job.disabled) disabled.add(String(job.name))
+    disabled = new Set(jobs.filter((j) => j.disabled).map((j) => String(j.name)))
   } catch {}
   const out = ([["dashboard", "dashboard/supervisor.sh"]] as const)
     .filter(([job, mark]) => !cmds.includes(mark) && !disabled.has(`ops-${job}`))
     .map(([job]) => `ops-down:${job}`)
   const files = (await readdir(ctx.ops).catch(() => [])).filter(
-    (f) => f.startsWith("ops-") && f.endsWith(".json"),
+    (f) => f.startsWith("ops-") && f.endsWith(".json") && !RETIRED.includes(f.slice(0, -5)),
   )
   for (const file of files) {
     try {
