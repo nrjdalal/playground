@@ -95,7 +95,9 @@ describe("a priority window's session", () => {
   })
 
   // round 1 of the review: a file whose braces were whole but whose middle broke held the pick, which off and the lapse cannot lift, since readWindow refuses it
-  test("nor a file with whole braces and a broken line, or a hand-written one with no by", async () => {
+  // round 2: a missing comma after by, or a trailing one after since, still named a pick, though JSON.parse refuses both
+  test("nor a file with whole braces and a broken line, a missing or trailing comma, or a hand-written one with no by", async () => {
+    const lines = (...l: string[]) => `${l.join("\n")}\n`
     expect(
       await order(
         (m) => {
@@ -103,16 +105,45 @@ describe("a priority window's session", () => {
           mkdirSync(data, { recursive: true })
           writeFileSync(
             join(data, "priority-worker-p.json"),
-            '{\n  "by": ,\n  "reason": "x",\n  "session": "worker-p",\n  "since": "2026-11-16T20:00:00.000Z"\n}\n',
+            lines(
+              "{",
+              '  "by": ,',
+              '  "reason": "x",',
+              '  "session": "worker-p",',
+              '  "since": "2026-11-16T20:00:00.000Z"',
+              "}",
+            ),
           )
           writeFileSync(
             join(data, "priority-worker-q.json"),
             `${JSON.stringify({ reason: "x", session: "worker-q", since: "2026-11-16T20:00:00.000Z" }, null, 2)}\n`,
           )
+          writeFileSync(
+            join(data, "priority-worker-r.json"),
+            lines(
+              "{",
+              '  "by": "dispatcher"',
+              '  "reason": "x",',
+              '  "session": "worker-r",',
+              '  "since": "2026-11-16T20:00:00.000Z"',
+              "}",
+            ),
+          )
+          writeFileSync(
+            join(data, "priority-worker-s.json"),
+            lines(
+              "{",
+              '  "by": "dispatcher",',
+              '  "reason": "x",',
+              '  "session": "worker-s",',
+              '  "since": "2026-11-16T20:00:00.000Z",',
+              "}",
+            ),
+          )
         },
-        ["worker-p", "worker-q"],
+        ["worker-p", "worker-q", "worker-r", "worker-s"],
       ),
-    ).toEqual(["worker-o", "worker-p", "worker-q"])
+    ).toEqual(["worker-o", "worker-p", "worker-q", "worker-r", "worker-s"])
   })
 
   // the shape on writes, a reason holding an escaped quote and a backslash, still names its session

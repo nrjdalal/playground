@@ -1690,22 +1690,26 @@ session_waiting() {
   done
   return 1
 }
-WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)",?$'
-# the session of the oldest window, by its since, whose session has a run waiting, read only from a file shaped as playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: its `{` and `}` lines, every other line one of by, reason, session and since with a string value, all four there, the session naming its file and not start
+WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)"(,?)$'
+# the session of the oldest window, by its since, whose session has a run waiting, read only from a file shaped as playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: `{` first and `}` last, every line between one of by, reason, session and since with a string value and a comma on each but the last, all four there, the session naming its file and not start
 window_holder() {
-  local f l s since by why open close bad best= bs=
+  local f l s since by why open close bad sep best= bs=
   for f in "$PDATA"/priority-*.json; do
     [ -f "$f" ] || continue
-    s= since= by= why= open= close= bad=
+    s= since= by= why= open= close= bad= sep=
     while IFS= read -r l || [ -n "$l" ]; do
-      case "$l" in
-        '{') open=1 ;;
-        '}') close=1 ;;
-        *)
-          [[ $l =~ $WIN_LINE ]] || { bad=1; break; }
-          case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
-          ;;
-      esac
+      [ -z "$close" ] || { bad=1; break; }
+      if [ -z "$open" ]; then
+        [ "$l" = '{' ] || { bad=1; break; }
+        open=1
+      elif [ "$l" = '}' ]; then
+        [ "$sep" = none ] || { bad=1; break; }
+        close=1
+      else
+        [[ $l =~ $WIN_LINE ]] && [ "$sep" != none ] || { bad=1; break; }
+        case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
+        [ -n "${BASH_REMATCH[4]}" ] && sep=, || sep=none
+      fi
     done 2>/dev/null < "$f"
     [ -z "$bad" ] && [ -n "$open" ] && [ -n "$close" ] && [ -n "$by" ] && [ -n "$why" ] && [[ $s =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [[ $since =~ ^[0-9][0-9TZ:.-]*$ ]] || continue
     [ "$s" != start ] && [ "${f##*/}" = "priority-$s.json" ] || continue
