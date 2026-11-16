@@ -2297,8 +2297,20 @@ export async function endLostRoots(
   const ended = rows.map(toItem)
   if (!telling) return ended
   const told: InboxItem[] = []
-  for (const item of ended)
-    told.push(await send(db, item, textsOf(item, item.answer as InboxAnswer), { ...telling, now }))
+  // each card on its own, so a send that throws (a database write) leaves the other posters told
+  for (const item of ended) {
+    try {
+      told.push(
+        await send(db, item, textsOf(item, item.answer as InboxAnswer), { ...telling, now }),
+      )
+    } catch (error) {
+      console.error(
+        `inbox: telling #i${item.ref}'s poster its root step was cut off failed:`,
+        error,
+      )
+      told.push(item)
+    }
+  }
   return told
 }
 
