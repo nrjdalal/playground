@@ -1198,7 +1198,7 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`, `nice $E (r|x)m`), as zsh reads one after a program word; a command of `time`, `nocorrect` and `repeat N` leads alone and a header's opener keep it a subshell, as does a group holding a `/`, which zsh refuses as a bad pattern, an empty `()` defines a function, and a paren in any other argument stays a subshell
+// Whether a paren opens a zsh glob word where a wrapper's program word goes (`command (r|x)m`), as zsh reads one after a program word; README's shared reader section lists where it stays a subshell
 function globOpens(cmd: Command, src: string, at: number): boolean {
   const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
   if (program < 0) return false
@@ -1220,7 +1220,7 @@ function globOpens(cmd: Command, src: string, at: number): boolean {
     !HEADERS.has(cmd.words[0]?.value ?? "")
   )
 }
-// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell: `time (…)`, `nocorrect (…)`, `repeat N (…)`, `time repeat 1 (…)`; `time time (…)` globs in zsh, its second time the external program, and keeps this subshell reading, which judges the commands inside
+// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`)
 function subshellPrefix(lead: Word[]): boolean {
   let at = 0
   while (at < lead.length && !lead[at].quoted)

@@ -31,7 +31,7 @@ const controls = (): Row[] => [
   ["a paren after two times, read as a subshell", "time time (echo sub)"],
 ]
 
-// zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; zsh globs the paren after `time time`, since the second time is the external program, and the subshell reading, which judges the commands inside, is the safe direction there
+// zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; after `time time` zsh globs the paren, its second time the external program, and the reader keeps a subshell, which judges these bodies' commands but misses a group-spelled program, a known limit
 const stacked = (body: string, what: string): Row[] => [
   [`a subshell after time and repeat running ${what}`, `time repeat 1 (${body})`],
   [`a subshell after repeat and time running ${what}`, `repeat 1 time (${body})`],
