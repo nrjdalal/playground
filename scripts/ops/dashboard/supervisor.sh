@@ -222,6 +222,41 @@ read_aliases() { bun --no-env-file "$D/alias.ts" "$WEB" "$API" 2>&1; }
 # A mismatch is read again after ALIAS_CONFIRM seconds (6), past the launcher's 2 s alias sync, which an alias waits on after a restart (live.md); one that holds, a missing file or a missing route is one ALIAS FAIL result (run.sh's notify_new alerts it), written again only when it changes, and ALIAS PASS once it is right, so the heartbeat reads ok again
 # A missing route for the web's own name, as when web_route wrote it before the stack's API started portless's proxy in its fallback folder, is written again by web_route into the folder that serves now and read again after ALIAS_CONFIRM, once the launcher's sync has given it its bare alias
 check_aliases() { local out rc=0 host; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; host=${WEB#*://}; host=${host%%[:/]*}; if [ $rc -eq 2 ] && [[ $out == "no route for $host in "* ]] && alive dashboard-web && web_route "$(cat "$S/dashboard-web.port")"; then say "the web's route was missing ($out), so web_route wrote it again"; rc=1; fi; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
+# The owner's address as probe.ts's dashboardUrls() reads it, the bare name in the folder portlessDir() picks (PDIR), which names the 1355 fallback only while its proxy.pid lives
+owner_url() { PDIR=$(bun --no-env-file -e "console.log((await import('$D/../../../api/hono/src/lib/dev/proxy.ts')).portlessDir())") && OWNER=$(PORTLESS_STATE_DIR=$PDIR bunx portless get playground --no-worktree); }
+# Whether address $1 gives any HTTP answer, under the CA in folder $2 as probe.ts trusts it: a 502 counts, since the proxy answers and the pid checks own the stack; refused, timed out or a failed handshake is a miss
+answers() { local ca=(); [ ! -f "$2/ca.pem" ] || ca=(--cacert "$2/ca.pem"); curl -s -o /dev/null --max-time 10 "${ca[@]}" "$1"; }
+# portless's proxy, read through the owner's address every PROXY_EVERY s (60): a stopped proxy leaves the web and the API alive, so the pid checks never see it (16 Nov, 09:23Z to 09:33Z).
+# Two misses in a row write one DOWN proxy result (run.sh tells ops) and tell the dispatcher once; a proxy the last answered check read in the fallback folder is started again there by portless's own start, on its address's port, since its stop removed the proxy.port and proxy.pid that would name them; a service's proxy, or one this supervisor never saw answer, is left to the owner. A failed start tells the dispatcher again, and nothing more runs until the address answers.
+check_proxy() {
+  local now port hp i
+  now=$(date +%s)
+  [ $((now - ${proxy_at:-0})) -ge "${PROXY_EVERY:-60}" ] || return $((${proxy_miss:-0} > 0))
+  proxy_at=$now
+  if owner_url && answers "$OWNER" "$PDIR"; then
+    [ "${proxy_miss:-0}" -lt 2 ] || result "UP proxy PASS $OWNER answers again"
+    proxy_miss=0 proxy_dir=$PDIR proxy_url=$OWNER
+    return 0
+  fi
+  proxy_miss=$((${proxy_miss:-0} + 1))
+  [ "$proxy_miss" -eq 2 ] || return 1
+  local down="DOWN proxy: ${proxy_url:-the Dashboard address} answered nothing at 2 checks ${PROXY_EVERY:-60} s apart"
+  result "$down"
+  if [ -z "${proxy_dir:-}" ]; then tell_dispatcher "$down; not restarting it, since this supervisor never saw it answer and nothing names its port"; return 1; fi
+  if [ "$(basename "$proxy_dir")" != fallback ]; then tell_dispatcher "$down; not restarting it, since a service owns the proxy in $proxy_dir"; return 1; fi
+  hp=${proxy_url#*://}; hp=${hp%%/*}
+  case $hp in *:*) port=${hp##*:} ;; *) [ "${proxy_url%%:*}" = http ] && port=80 || port=443 ;; esac
+  tell_dispatcher "$down; starting it again on $port"
+  PORTLESS_STATE_DIR=$proxy_dir "$WT/node_modules/.bin/portless" proxy start -p "$port" --skip-trust > "$S/proxy-start.log" 2>&1
+  for i in $(seq 1 "${PROXY_WAIT:-10}"); do
+    answers "$proxy_url" "$proxy_dir" && { result "RESTART proxy PASS on $port: $proxy_url answers"; proxy_miss=0; return 0; }
+    sleep 1
+  done
+  local why; why=$(sed $'s/\x1b\\[[0-9;]*m//g' "$S/proxy-start.log" | grep . | tail -1 | cut -c1-200)
+  result "RESTART proxy FAIL on $port: ${why:-portless printed nothing}"
+  tell_dispatcher "The Dashboard's proxy did not come back on $port: ${why:-portless printed nothing} (ops/dashboard/proxy-start.log)"
+  return 1
+}
 # Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
 # every verify check but pages, one call each (verify takes one check per call): the pages check opens /dashboard/apps/changelog,
 # which marks the changelog read for LocalAgent, the owner's account, so each roll cleared the owner's +1 (fixed since, 7 Oct)
@@ -472,5 +507,6 @@ while true; do
   else
     held_said_f=
   fi
-  check_aliases
+  # while the proxy misses, the aliases read the same outage, so they wait for it to answer
+  check_proxy && check_aliases
 done

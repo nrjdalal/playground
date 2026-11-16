@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -429,3 +429,58 @@ test.each([
   },
   20_000,
 )
+
+// a background task starts in the factory's main checkout, which follows main, so a relative path there names main's copy of the file, not the worker's branch
+describe("a relative path in the factory's main checkout", () => {
+  const main = join(DIR, "main-checkout")
+  const ran = join(DIR, "main-ran")
+  mkdirSync(join(main, "tests"), { recursive: true })
+  writeFileSync(
+    join(main, "tests", "here.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("here", () => writeFileSync(${JSON.stringify(ran)}, ""))\n`,
+  )
+  const runIn = async (repo: string, arg: string) => {
+    rmSync(ran, { force: true })
+    const run = Bun.spawn(["bun", SCRIPT, arg], {
+      cwd: main,
+      env: { ...process.env, PLAYGROUND_REPO: repo },
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    return { code, ran: existsSync(ran), stderr }
+  }
+
+  // a test file new on the branch is absent from the main checkout, so it gets the same --cwd form, not the missing-file one
+  test.each([
+    ["a file there", "tests/here.test.ts"],
+    ["a test file new on the branch, absent there", "tests/new-on-branch.test.ts"],
+  ])(
+    "refuses %s before any test runs, naming the path and the --cwd form",
+    async (_, arg) => {
+      const { code, ran, stderr } = await runIn(main, arg)
+      expect(code).toBe(1)
+      expect(ran).toBe(false)
+      expect(stderr).not.toContain("no test file")
+      expect(stderr).toContain(`bun run --cwd <your worktree> test:file ${arg}`)
+    },
+    20_000,
+  )
+
+  test.each([
+    ["an absolute path in the main checkout", "main", join(main, "tests", "here.test.ts")],
+    ["a relative path where PLAYGROUND_REPO names another checkout", "other", "tests/here.test.ts"],
+  ])(
+    "%s runs as before",
+    async (_, repo, arg) => {
+      const other = join(DIR, "other-checkout")
+      mkdirSync(other, { recursive: true })
+      const { code, ran, stderr } = await runIn(repo === "main" ? main : other, arg)
+      expect(code).toBe(0)
+      expect(ran).toBe(true)
+      expect(stderr).toContain("1 pass")
+    },
+    20_000,
+  )
+})
