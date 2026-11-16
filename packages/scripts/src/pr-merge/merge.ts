@@ -100,15 +100,35 @@ export async function readQueue(path: string): Promise<number[]> {
     .filter((n) => Number.isInteger(n) && n > 0)
 }
 
+// Fetches PR n's head into this checkout: its pull ref, else, while GitHub has not made that ref yet (one PR had only its merge ref 6 minutes after it opened), its head branch on origin, refused unless its tip is the head the gates judge, so a moved or same-named branch never stands in for it.
+export async function fetchHead(git: Run, n: number, head: string, branch: string): Promise<void> {
+  const pull = await git(["fetch", "--quiet", "origin", `refs/pull/${n}/head`])
+  if (pull.code === 0) return
+  if (!pull.stderr.includes("couldn't find remote ref"))
+    throw new Error(`git fetch exited ${pull.code}: ${pull.stderr.trim()}`)
+  const fetched = await git(["fetch", "--quiet", "origin", `refs/heads/${branch}`])
+  if (fetched.code !== 0)
+    throw new Error(
+      `refs/pull/${n}/head is missing, and git fetch of its branch ${branch} exited ${fetched.code}: ${fetched.stderr.trim()}`,
+    )
+  const tip = (await git(["rev-parse", "FETCH_HEAD"])).stdout.trim()
+  if (tip !== head)
+    throw new Error(
+      `refs/pull/${n}/head is missing, and its branch ${branch} is at ${tip.slice(0, 7) || "nothing"}, not the head ${head.slice(0, 7)}`,
+    )
+}
+
 // canary now, and the tree of the head merged with it: from this checkout's git, after fetching canary and the PR's head. A merge that conflicts has no tree (null), and names its files.
 async function mergeOf(
   git: Run,
   n: number,
   head: string,
+  branch: string,
 ): Promise<{ canary: string; conflicts: string[] | null; mergeTree: string | null }> {
-  const fetched = await git(["fetch", "--quiet", "origin", BASE, `refs/pull/${n}/head`])
+  const fetched = await git(["fetch", "--quiet", "origin", BASE])
   if (fetched.code !== 0)
     throw new Error(`git fetch exited ${fetched.code}: ${fetched.stderr.trim()}`)
+  await fetchHead(git, n, head, branch)
   const canary = await git(["rev-parse", `origin/${BASE}`])
   if (canary.code !== 0) throw new Error(`git rev-parse origin/${BASE} exited ${canary.code}`)
   const merged = parseMergeTree(
@@ -218,12 +238,13 @@ export async function factsOf(
       "-R",
       repo,
       "--json",
-      "author,baseRefName,body,headRefOid,isDraft,state,statusCheckRollup",
+      "author,baseRefName,body,headRefName,headRefOid,isDraft,state,statusCheckRollup",
     ]),
   ) as {
     author: { login: string } | null
     baseRefName: string
     body: string
+    headRefName: string
     headRefOid: string
     isDraft: boolean
     state: string
@@ -252,7 +273,7 @@ export async function factsOf(
       ]).catch((error: Error) => `unreadable: ${error.message}`),
     })),
   )
-  const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
+  const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid, view.headRefName)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
   const template = await git(["show", `${view.headRefOid}:${PR_TEMPLATE}`])
   const placeholders = template.code === 0 ? templatePlaceholders(template.stdout) : []

@@ -13,6 +13,7 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
+import { peerSchema } from "@packages/config/org"
 import { threadIdSchema } from "@packages/config/threads"
 import type { Roots } from "@packages/safe-delete"
 import { deriveRoot, HARNESS_IDS } from "@packages/settings"
@@ -277,10 +278,14 @@ export const fixtureSchema = z.object({
   system: z.object({
     cores: z.number().int().positive(),
     disk: z.object({ freeBytes: z.number(), totalBytes: z.number() }),
+    // The made-up machine's name beside its peers, `this machine` when unset.
+    hostname: z.string().optional(),
     load: z.tuple([z.number(), z.number(), z.number()]),
+    // The made-up cluster's other machines, as org.ts's cluster names them; each one's ssh read is its `peer <target>` probe, and one with no answer reads as down.
+    peers: z.array(peerSchema).optional(),
     // The made-up machine's operating system as Node names it, `darwin` when unset.
     platform: z.enum(["darwin", "linux"]).optional(),
-    // Each System panel probe's stdout, by its name in probe.ts's COMMANDS.
+    // Each System panel probe's stdout, by its name in probe.ts's COMMANDS (a peer's by `peer <target>`).
     probes: z.record(z.string(), z.string()),
     totalBytes: z.number(),
   }),

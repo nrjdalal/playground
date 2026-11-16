@@ -1878,6 +1878,18 @@ if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ 
   if [ ! -e "$TREE" ]; then
     # The worktree starts at the commit the session works from, its PR's head for a reviewer of this checkout's PR and origin's canary for any other, fetched here, so its first checkout changes no file: the sandbox shuts .claude/ and skills/zerostarter/, which .claude/skills links to, so a checkout that changes either fails inside it (SPAWN.md, --sandbox).
     at=$(git -C "$MAIN" ls-remote origin "$ref" 2>/dev/null) && at=${at%%[[:space:]]*} || at=
+    # GitHub makes a PR's pull ref a little after the PR opens, so while it has none the PR's branch stands in, taken only at the head GitHub names for the PR, as pr:merge's fetchHead does
+    if [ -z "$at" ] && [[ $ref == refs/pull/* ]] && [ -n "$origin" ]; then
+      pull_n=${ref#refs/pull/}
+      head_of=$(gh pr view "${pull_n%/head}" -R "$origin" --json headRefName,headRefOid --jq '.headRefName + " " + .headRefOid' 2>/dev/null) || head_of=
+      if [ -n "$head_of" ]; then
+        head_branch=${head_of% *} head_oid=${head_of##* }
+        head_tip=$(git -C "$MAIN" ls-remote origin "refs/heads/$head_branch" 2>/dev/null) && head_tip=${head_tip%%[[:space:]]*} || head_tip=
+        head_seen=${head_tip:0:7}
+        [ "$head_tip" = "$head_oid" ] || refuse "$ref is missing, and its branch $head_branch is at ${head_seen:-nothing}, not the head ${head_oid:0:7}, so $NAME has no commit to start its worktree at"
+        ref=refs/heads/$head_branch at=$head_tip
+      fi
+    fi
     [ -n "$at" ] || refuse "git ls-remote origin $ref read no commit, so $NAME has no commit to start its worktree at"
     git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || git -C "$MAIN" fetch -q --no-write-fetch-head origin "$ref" 2>/dev/null
     git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || refuse "git fetch origin $ref did not bring $at, so $NAME has no commit to start its worktree at"

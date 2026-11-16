@@ -14,6 +14,7 @@ import { basename, join } from "node:path"
 
 import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
+  accountKept,
   BOX_LOAD_MULT,
   boxPath,
   Browser,
@@ -40,6 +41,7 @@ import {
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { scratchEnv } from "../../../../scratch-env"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
 describe("the new-user gate's reads", () => {
@@ -279,6 +281,28 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     ).toBe(
       "PASS 1. curl | bash exits 0\nINCONCLUSIVE 2. Alpha routes: spawn.sh's capacity gate refused a start (load gate: …)\n1 of 2 passed, 1 inconclusive",
     )
+  })
+})
+
+describe("the gate's Add account on Linux (#2391)", () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-account-")))
+  afterAll(() => rmSync(parent, { force: true, recursive: true }))
+
+  test("an account saved through Linux's security, as storeSecret saves it, reads as kept", () => {
+    const box = join(parent, "box")
+    const home = join(box, "h")
+    mkdirSync(home, { recursive: true })
+    expect(accountKept(box, home, "gate@example.com")).toBe(false)
+    const shim = join(import.meta.dir, "../../../../../packages/scripts/src/security/cli.ts")
+    const saved = Bun.spawnSync([process.execPath, "--no-env-file", shim, "-i"], {
+      env: scratchEnv(home, { PLAYGROUND_DATA_DIR: undefined }),
+      stdin: new TextEncoder().encode(
+        'add-generic-password -U -s "playground-claude-oauth" -a "gate@example.com" -w "made-up"\n',
+      ),
+    })
+    expect(saved.exitCode).toBe(0)
+    expect(accountKept(box, home, "gate@example.com")).toBe(true)
+    expect(accountKept(box, home, "other@example.com")).toBe(false)
   })
 })
 

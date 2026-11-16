@@ -16019,11 +16019,35 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
+var LAUNCHERS2 = new Set(["bun", "bunx", "node", "npm", "npx", "pnpm", "pnpx", "yarn"]);
+var GLOBAL_FLAGS = new Set(["--cloudflare", "--funnel", "--lan", "--ngrok", "--tailscale"]);
+var GLOBAL_VALUED = new Set(["--ip", "--lan-ip-auto", "--script"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
 var refuse9 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
+};
+var isPortless = (word) => {
+  const name = word.replace(/(?<=.)@[^@/]*$/, "");
+  return program(name) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(name);
+};
+var portlessRuns = (name, args) => {
+  const values = args.map((a) => a.value);
+  if (isPortless(name))
+    return [values];
+  if (!LAUNCHERS2.has(name))
+    return [];
+  return values.flatMap((v, i) => isPortless(v) ? [values.slice(i + 1)] : []);
+};
+var probingStop = (words) => {
+  const args = words.filter((v, i) => !GLOBAL_FLAGS.has(v) && !GLOBAL_VALUED.has(v) && !GLOBAL_VALUED.has(words[i - 1] ?? ""));
+  if (args[0] === "clean")
+    return !args.slice(1).some((v) => v === "--help" || v === "-h");
+  if (args[0] !== "proxy" || args[1] !== "stop")
+    return false;
+  const flag = args.includes("--port") ? args.indexOf("--port") : args.indexOf("-p");
+  return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
 async function inspect8(raw) {
@@ -16032,7 +16056,8 @@ async function inspect8(raw) {
     return;
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "");
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare) && !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) && !globSpells(bare, KILLS))
+  const namesKill = /\b(?:fuser|kill|killall|pkill)\b/.test(bare) || /(?:\$\{?\w+\}?){2,}/.test(bare) || /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) || globSpells(bare, KILLS);
+  if (!namesKill && !/\bportless\b/.test(bare))
     return;
   const lexed = lex(toolInput.command);
   const fresh = () => ({ files: new Map, known: {}, process: {}, vars: new Map });
@@ -16054,8 +16079,10 @@ async function inspect8(raw) {
       return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
     }
     const { args, first, name, xargs } = parsed;
-    if (parsed.unread)
+    if (parsed.unread && namesKill)
       return refuse9("a command built from a value it cannot read, in a call that names a kill", " Write the program and its words out in the call.");
+    if (portlessRuns(name, args).some(probingStop))
+      return refuse9("a portless proxy stop with no port, or a portless clean", " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with portless proxy stop -p <its port>.");
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
