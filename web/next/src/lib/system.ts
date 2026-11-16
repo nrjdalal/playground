@@ -82,19 +82,29 @@ const sumOf = (parts: (number | null)[]): number | null =>
 const usedOf = (size: { totalBytes: number; usedBytes: number | null } | null): string =>
   size ? `${sizeLabel(size.usedBytes)} of ${sizeLabel(size.totalBytes)}` : "-"
 
-// Pure: the memory, CPU load and swap figures summed over every machine that read, each hover naming each machine's part (`machine-a 3.1 on 10 + machine-b 2.4 on 10 cores`); a machine that did not read is never a zero: its figures carry the marker `1 of 2 machines`, and the hover its reason and since when. Null with one machine, so a stack with no peers shows its own figures as before.
+// Pure: a cluster's machines that read, the marker `1 of 2 machines` while one did not (null while all read), and each that did not by name with since when and its reason, which clusterOf and clusterReadings both read.
+function machinesOf(machines: Machine[], now: Date) {
+  const up = machines.flatMap((m) => (m.reading ? [{ name: m.name, reading: m.reading }] : []))
+  const down = machines.flatMap((m) =>
+    m.down
+      ? [`${m.name} unreachable since ${messageTime(m.down.since, now)}: ${m.down.reason}`]
+      : [],
+  )
+  return {
+    down,
+    marker: down.length > 0 ? `${up.length} of ${machines.length} machines` : null,
+    up,
+  }
+}
+
+// Pure: the memory, CPU load, swap and disk free figures summed over every machine that read, each hover naming each machine's part (`machine-a 3.1 on 10 + machine-b 2.4 on 10 cores`); a machine that did not read is never a zero: its figures carry the marker `1 of 2 machines`, and the hover its reason and since when. Null with one machine, so a stack with no peers shows its own figures as before.
 export function clusterOf(
   machines: Machine[],
   pressure: Pressure | null,
   now: Date,
-): Record<"cpu" | "memory" | "swap", ClusterFigure> | null {
+): Record<"cpu" | "disk" | "memory" | "swap", ClusterFigure> | null {
   if (machines.length < 2) return null
-  const up = machines.flatMap((m) => (m.reading ? [{ name: m.name, reading: m.reading }] : []))
-  const down = machines.flatMap((m) => (m.down ? [{ name: m.name, ...m.down }] : []))
-  const marker = down.length > 0 ? `${up.length} of ${machines.length} machines` : null
-  const why = down.map(
-    (m) => `${m.name} unreachable since ${messageTime(m.since, now)}: ${m.reason}`,
-  )
+  const { down: why, marker, up } = machinesOf(machines, now)
   const figure = (
     value: string,
     split: (r: MachineReading) => string,
@@ -121,6 +131,14 @@ export function clusterOf(
           totalBytes: swaps.reduce((sum, s) => sum + s.totalBytes, 0),
           usedBytes: swaps.reduce((sum, s) => sum + s.usedBytes, 0),
         }
+  const disks = readings.flatMap((r) => (r.disk ? [r.disk] : []))
+  const disk =
+    disks.length === 0
+      ? null
+      : {
+          freeBytes: disks.reduce((sum, d) => sum + d.freeBytes, 0),
+          totalBytes: disks.reduce((sum, d) => sum + d.totalBytes, 0),
+        }
   const free =
     memory.usedBytes === null || memory.totalBytes === 0
       ? "Free share unknown"
@@ -132,11 +150,17 @@ export function clusterOf(
       " cores",
       `1, 5 and 15 min.: ${loads.join(" / ")}`,
     ),
+    disk: figure(
+      disk ? sizeLabel(disk.freeBytes) : "-",
+      (r) => (r.disk ? sizeLabel(r.disk.freeBytes) : "-"),
+      "",
+      disk ? `of ${sizeLabel(disk.totalBytes)}` : "Could not be read",
+    ),
     memory: figure(
       usedOf(memory),
       (r) => usedOf(r.memory),
       "",
-      `${free} · pressure ${pressure ? PRESSURE_LABELS[pressure] : "unknown"} here`,
+      `${free} · pressure ${pressure ? PRESSURE_LABELS[pressure] : "unknown"} on ${machines[0]!.name}`,
     ),
     swap: figure(usedOf(swap), (r) => usedOf(r.swap)),
   }
@@ -356,40 +380,175 @@ export function memoryLevel(
 export const diskValue = (gb: number): string =>
   gb < 999.5 ? String(Math.round(gb)) : `${Math.round(gb / 1024)}T`
 
-// Pure: every reading the System readings show, always, in its order (memory, CPU, swap, disk, the week, then the 5-hour window last), each judged by READING_LEVELS, memory by its pressure; a reading that could not be read is left out. The week is also orange over its pace, so the rule systemHealth kept before the table still counts. Values drop their unit and keep to three characters, so each takes a fixed slot in the stock sidebar; the hover says it in words.
+// Pure: every reading the System readings show, always, in its order (memory, CPU, swap, disk, the week, then the 5-hour window last), each judged by READING_LEVELS, memory by its pressure; a reading that could not be read is left out. The week is also orange over its pace, so the rule systemHealth kept before the table still counts. Values drop their unit and keep to three characters, so each takes a fixed slot in the stock sidebar; the hover says it in words. With peers (report.machines), memory, CPU, swap and disk are the cluster's sums as the table shows them (clusterReadings).
 export function systemReadings(report: SystemReport, now: number): Reading[] {
   const { cpu, disk, memory } = report
   const readings: Reading[] = []
-  const used = memory.usedBytes === null ? null : shareOf(memory.usedBytes, memory.totalBytes)
-  const judgedMemory = memoryLevel(memory.pressure, used)
-  if (used !== null || judgedMemory.hit) {
+  if (report.machines.length > 1) {
+    readings.push(...clusterReadings(report.machines, memory.pressure, new Date(now)))
+  } else {
+    const used = memory.usedBytes === null ? null : shareOf(memory.usedBytes, memory.totalBytes)
+    const judgedMemory = memoryLevel(memory.pressure, used)
+    if (used !== null || judgedMemory.hit) {
+      readings.push(
+        reading(
+          "memory",
+          used === null ? "-" : String(used),
+          judgedMemory,
+          used === null ? "Memory" : `Memory ${used}% used`,
+          [],
+          memory.pressure ? `pressure ${memory.pressure}` : "",
+        ),
+      )
+    }
+    const load = cpu.load[1]
+    const loadPhrase = `Load ${loadLabel(load)} on ${cpu.cores} cores, 5 min.`
     readings.push(
-      reading(
-        "memory",
-        used === null ? "-" : String(used),
-        judgedMemory,
-        used === null ? "Memory" : `Memory ${used}% used`,
-        [],
-        memory.pressure ? `pressure ${memory.pressure}` : "",
-      ),
+      reading("cpu", loadLabel(load), levelOf("cpu", load / cpu.cores, loadPhrase), loadPhrase),
     )
+    if (memory.swap) {
+      const swap = shareOf(memory.swap.usedBytes, memory.swap.totalBytes)
+      const swapPhrase = `Swap ${swap}% used`
+      readings.push(reading("swap", String(swap), levelOf("swap", swap, swapPhrase), swapPhrase))
+    }
   }
-  const load = cpu.load[1]
-  const loadPhrase = `Load ${loadLabel(load)} on ${cpu.cores} cores, 5 min.`
-  readings.push(
-    reading("cpu", loadLabel(load), levelOf("cpu", load / cpu.cores, loadPhrase), loadPhrase),
-  )
-  if (memory.swap) {
-    const swap = shareOf(memory.swap.usedBytes, memory.swap.totalBytes)
-    const swapPhrase = `Swap ${swap}% used`
-    readings.push(reading("swap", String(swap), levelOf("swap", swap, swapPhrase), swapPhrase))
-  }
-  if (disk) {
+  if (disk && report.machines.length <= 1) {
     const gb = Math.round(disk.freeBytes / GB)
     const diskPhrase = `Disk ${gb} GB free`
     readings.push(reading("disk", diskValue(gb), levelOf("disk", gb, diskPhrase), diskPhrase))
   }
   readings.push(...combinedUsage(report, now))
+  return readings
+}
+
+// Pure: memory, CPU, swap and disk free summed over every machine that read, as clusterOf sums them for the table: each value the cluster's, its level the worst machine's own with that machine named in its reason, its hover the split naming each machine, then each machine that did not read, by name, with its reason and since when. Memory pressure is this machine's alone (the first), so its reason names it.
+function clusterReadings(machines: Machine[], pressure: Pressure | null, now: Date): Reading[] {
+  const { down, marker, up } = machinesOf(machines, now)
+  const missing = marker ? [marker, ...down] : []
+  const each = marker ? " on each machine that read" : " on each machine"
+  const withSplit = (r: Reading, split: string): Reading => ({
+    ...r,
+    title: [r.title, split, ...missing].join("\n"),
+  })
+  const worst = (hits: (Hit | null)[]): Hit[] => {
+    const crossed = hits.filter((hit): hit is Hit => hit !== null)
+    return [
+      ...crossed.filter((h) => h.level === "red"),
+      ...crossed.filter((h) => h.level === "amber"),
+    ]
+  }
+  const readings: Reading[] = []
+
+  const totalBytes = up.reduce((sum, m) => sum + m.reading.memory.totalBytes, 0)
+  const usedBytes = sumOf(up.map((m) => m.reading.memory.usedBytes))
+  const used = usedBytes === null ? null : shareOf(usedBytes, totalBytes)
+  const here = machines[0]!.name
+  const pressureHit: Hit | null =
+    pressure === "critical" || pressure === "warn"
+      ? {
+          level: pressure === "critical" ? "red" : "amber",
+          reason: `Memory pressure ${pressure} on ${here}`,
+        }
+      : null
+  if (up.length > 0 && (used !== null || pressureHit)) {
+    const phrase = used === null ? "Memory" : `Memory ${used}% used`
+    readings.push(
+      withSplit(
+        reading(
+          "memory",
+          used === null ? "-" : String(used),
+          {
+            hit: null,
+            words: pressure === "normal" ? `${phrase}, pressure normal on ${here}` : phrase,
+          },
+          phrase,
+          pressureHit ? [pressureHit] : [],
+          pressure && !pressureHit ? `pressure ${pressure} on ${here}` : "",
+        ),
+        up
+          .map((m) => {
+            const own = m.reading.memory
+            return `${m.name} ${own.usedBytes === null ? "-" : `${shareOf(own.usedBytes, own.totalBytes)}%`}`
+          })
+          .join(" + ") + " used",
+      ),
+    )
+  }
+
+  if (up.length > 0) {
+    const load = up.reduce((sum, m) => sum + m.reading.load[1], 0)
+    const cores = up.reduce((sum, m) => sum + m.reading.cores, 0)
+    const phrase = `Load ${loadLabel(load)} on ${cores} cores, 5 min.`
+    const hits = worst(
+      up.map(
+        (m) =>
+          levelOf(
+            "cpu",
+            m.reading.load[1] / m.reading.cores,
+            `${m.name} load ${loadLabel(m.reading.load[1])} on ${m.reading.cores} cores`,
+          ).hit,
+      ),
+    )
+    const words = hits.length ? phrase : `${levelOf("cpu", load / cores, phrase).words}${each}`
+    readings.push(
+      withSplit(
+        reading("cpu", loadLabel(load), { hit: null, words }, phrase, hits),
+        up
+          .map((m) => `${m.name} ${loadLabel(m.reading.load[1])} on ${m.reading.cores}`)
+          .join(" + ") + " cores, 5 min.",
+      ),
+    )
+  }
+
+  const swapped = up.flatMap((m) =>
+    m.reading.swap ? [{ name: m.name, swap: m.reading.swap }] : [],
+  )
+  if (swapped.length > 0) {
+    const swap = shareOf(
+      swapped.reduce((sum, m) => sum + m.swap.usedBytes, 0),
+      swapped.reduce((sum, m) => sum + m.swap.totalBytes, 0),
+    )
+    const phrase = `Swap ${swap}% used`
+    const shares = swapped.map((m) => ({
+      name: m.name,
+      share: shareOf(m.swap.usedBytes, m.swap.totalBytes),
+    }))
+    const hits = worst(
+      shares.map((m) => levelOf("swap", m.share, `${m.name} swap ${m.share}% used`).hit),
+    )
+    const words = hits.length ? phrase : `${levelOf("swap", swap, phrase).words}${each}`
+    readings.push(
+      withSplit(
+        reading("swap", String(swap), { hit: null, words }, phrase, hits),
+        shares.map((m) => `${m.name} ${m.share}%`).join(" + ") + " used",
+      ),
+    )
+  }
+
+  const disked = up.flatMap((m) =>
+    m.reading.disk ? [{ gb: Math.round(m.reading.disk.freeBytes / GB), name: m.name }] : [],
+  )
+  if (disked.length > 0) {
+    const gb = disked.reduce((sum, m) => sum + m.gb, 0)
+    const phrase = `Disk ${gb} GB free`
+    const hits = worst(
+      disked.map((m) => levelOf("disk", m.gb, `${m.name} disk ${m.gb} GB free`).hit),
+    )
+    const words = hits.length
+      ? phrase
+      : `${levelOf("disk", gb, phrase).words}${disked.length === up.length ? each : ""}`
+    readings.push(
+      withSplit(
+        reading("disk", diskValue(gb), { hit: null, words }, phrase, hits),
+        up
+          .map((m) => {
+            const own = m.reading.disk
+            return `${m.name} ${own ? Math.round(own.freeBytes / GB) : "-"}`
+          })
+          .join(" + ") + " GB free",
+      ),
+    )
+  }
   return readings
 }
 

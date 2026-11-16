@@ -875,7 +875,7 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     const r = await spawn(args, [], {}, undefined, undefined, opened())
     expect(r.code).toBe(2)
     expect(r.err).toContain("close takes a session's name, and its session id to pick one")
-    expect(r.err).toContain("--runtime herdr    with any mode but restore or close,")
+    expect(r.err).toContain("--runtime herdr    with any mode but restore, close or read,")
     expect(closes(r)).toEqual([])
     expect(r.roster).toBeUndefined()
   })

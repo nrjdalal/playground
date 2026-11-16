@@ -109,6 +109,7 @@ The dispatcher, the Planner and the two leads never close, except to be started 
 In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
 A session ends when the one it reports to closes its pane, never the others.
 A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
+Each end also moves the session's own leftovers to the trash: its scratch and scratchpad folders, its memory settings file and its temp folders, so no session spends time cleaning up after itself.
 A worker whose last PR closed unmerged stays open too, and its lead gets a `Kept` line to reassign or end it.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
@@ -203,6 +204,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   A probe alone can start with Remote Control on (`--remote-control <name>`), or run on another machine over ssh (`--ssh <user@host> --key <file>`) from its pane here; the restore below leaves such a probe down.
+  Before its pane opens, a probe or a `--sandbox` start checks that its machine can run Claude Code's sandbox (on Linux `bwrap`, `socat`, and the AppArmor profile Ubuntu 24.04 needs for `bwrap`), and a probe on another machine also that Claude Code finished its first run there, and stops naming what is missing, installing nothing.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
   the first dispatcher first and past the busy-machine check, then the other managers, which pass that check as `SPAWN.md`'s load gate says, then the rest,
   on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.
@@ -210,6 +212,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
+  A session on another herdr server, such as a probe, is read through `spawn.sh read <name>`, which prints that pane's last 200 lines and changes nothing.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
   A lead picks any other session's model and effort by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
