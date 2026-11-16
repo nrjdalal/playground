@@ -171,7 +171,7 @@ function Checklist({ name }: { name: string }) {
       ),
       done: "Added.",
       title: "Claude account",
-      todo: `${name} runs on a Claude account, kept in this Mac's Keychain.`,
+      todo: `${name} runs on a Claude account, kept in this computer's secret store.`,
     },
     github: { done: "Signed in.", title: "GitHub" },
     harness: {

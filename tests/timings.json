@@ -608,7 +608,6 @@
     "tests/web/next/src/lib/threads.test.ts": 9,
     "tests/packages/scripts/src/health-beat/running.test.ts": 8,
     "tests/packages/scripts/src/linear-write/comment.test.ts": 8,
-    "tests/packages/scripts/src/pr-merge/config-dist.test.ts": 8,
     "tests/packages/scripts/src/pr-merge/gates.test.ts": 8,
     "tests/packages/scripts/src/verify/row-fit.test.ts": 8,
     "tests/scripts/briefs/slots.test.ts": 8,

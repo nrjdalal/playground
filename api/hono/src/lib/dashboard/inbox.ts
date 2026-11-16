@@ -186,7 +186,7 @@ const vercelSinkSchema = z.strictObject({
 const playgroundService = z.string().regex(PLAYGROUND_SERVICE, "Must be a playground- service")
 const keychainItemField = z.union([z.enum(KEYCHAIN_ITEM_NAMES), playgroundService])
 
-// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychainItemField allows.
+// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this computer's secret store items keychainItemField allows.
 export const secretSinkSchema = z.discriminatedUnion("type", [
   vercelSinkSchema,
   z.strictObject({ item: keychainItemField, type: z.literal("keychain") }),
