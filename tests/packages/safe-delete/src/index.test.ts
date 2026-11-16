@@ -377,7 +377,7 @@ describe("the tripwire", () => {
   })
 
   // #2407: an end moves the session's own temp folder, which hook test data fills past 5,000 files, whole under the 2 GB cap alone, and a refusal past the cap pages no one
-  test("the session's own temp folder moves whole past 5,000 files, a plain refusal past 2 GB; another's and a longer name's keep the alert", () => {
+  test("the session's own temp folder moves whole past 5,000 files, a plain refusal past 2 GB; another's and a longer name's keep the alert, and a link in its name moves alone", () => {
     const roots = machine()
     const tmp = join(roots.root, "tmp")
     const big = (name: string) => {
@@ -392,6 +392,11 @@ describe("the tripwire", () => {
       expect(quarantine(big(name), opts, roots, { now: NOW, tmp })).toMatchObject({
         kind: "tripwire",
       })
+    const target = big("elsewhere")
+    const link = join(tmp, `playground-${opts.session}.L1`)
+    symlinkSync(target, link)
+    expect(quarantine(link, opts, roots, { now: NOW, tmp })).toMatchObject({ files: 1 })
+    expect(readdirSync(join(target, "deep"))).toHaveLength(5001)
     const huge = join(tmp, `playground-${opts.session}.H1`)
     mkdirSync(huge)
     truncateSync(file(join(huge, "data.bin"), ""), 2 * 1024 ** 3 + 1)

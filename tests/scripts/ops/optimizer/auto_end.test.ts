@@ -1539,14 +1539,14 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(await drainCarried(carried, deps)).toEqual([])
   })
 
-  test("a leftover safe-delete refuses, one over the tripwire, is kept with its refusal while the rest go (#2407)", async () => {
+  test("a leftover safe-delete refuses, a temp folder past 2 GB, is kept with its refusal in the lead's line while the rest go (#2407)", async () => {
     const { main, projects, target } = cloned()
     const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
     const [big, small] = ["tmp-big", "tmp-small"].map((n) => join(main, "..", n)) as [
       string,
       string,
     ]
-    const refusal = `refused ${big}: it holds 5001 files, over the 5000-file tripwire`
+    const refusal = `${big} holds over 2 GB, past the tripwire: it stays in place`
     const { deps } = fakes(main, [], undefined, { leftovers: () => [big, small] })
     capped(deps)
     deps.rmOwn = async (path) =>
