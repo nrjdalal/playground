@@ -15,6 +15,7 @@ import {
   boxRoute,
   chaseStale,
   check,
+  CONFLICT_AFTER,
   type Context,
   forecast,
   IDLE_DB_AFTER,
@@ -567,6 +568,144 @@ describe("lateReviewers", () => {
     expect(told).toHaveLength(2)
     expect(told[1]!.argv[3]).toContain("PR #146 (bbbbb-worker)")
     expect(told[1]!.argv[3]).toContain("no live session for ghjkmn-reviewer")
+  })
+})
+
+describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
+  // PR 145 as GitHub's GraphQL answers it (#2443's shape: a rollup green from other apps, no GitHub Actions suite), its checks still pending so no late-reviewer line mixes in
+  const answer = (fields: Record<string, unknown> = {}, runs = 0) =>
+    JSON.stringify({
+      data: {
+        repository: {
+          p145: {
+            comments: { nodes: [] },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    checkSuites: { totalCount: runs },
+                    statusCheckRollup: { contexts: { nodes: [] }, state: "PENDING" },
+                  },
+                },
+              ],
+            },
+            headRefOid: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            isDraft: false,
+            mergeStateStatus: "DIRTY",
+            mergeable: "CONFLICTING",
+            state: "OPEN",
+            ...fields,
+          },
+        },
+      },
+    })
+  // one sweep's read at each of the given seconds after NOW, each answered by its own reply, with every queued line it told
+  const sweeps = async (replies: string[], step = 300) => {
+    const { ctx, sweep } = setup()
+    const told: Call[] = []
+    let at = 0
+    ctx.now = () => NOW + at * 1000
+    let reply = ""
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      {
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/145",
+        status: "working",
+      },
+    ]
+    roster(ctx, agents)
+    const counts: number[] = []
+    for (const [i, out] of replies.entries()) {
+      at = i * step
+      reply = out
+      await lateReviewers(ctx, agents, new Map())
+      counts.push(told.length)
+    }
+    return { counts, state: read(join(sweep, "conflict-told.json")), told }
+  }
+
+  test("a conflict with no run at the head tells the worker and its lead one sweep after it is first seen, once per head", async () => {
+    const { counts, told } = await sweeps([answer(), answer(), answer()])
+    expect(counts).toEqual([0, 2, 2])
+    expect(told.map((c) => c.env?.NOTIFY_TO)).toEqual(["abcdef-worker", "builder"])
+    expect(told[0]!.argv[2]).toBe("sweep")
+    expect(told[0]!.argv[3]).toBe(
+      "PR #145 (abcdef-worker): it conflicts with its base at head c0ff1c7, so GitHub runs no CI on it. Merge canary into it and push.",
+    )
+  })
+
+  test("#2443's shape, a rollup green from other apps with no Actions run, gets the conflict line and no late-reviewer line", async () => {
+    const green = answer({
+      commits: {
+        nodes: [
+          {
+            commit: {
+              checkSuites: { totalCount: 0 },
+              statusCheckRollup: {
+                contexts: { nodes: [{ completedAt: new Date(NOW - 60 * 60_000).toISOString() }] },
+                state: "SUCCESS",
+              },
+            },
+          },
+        ],
+      },
+    })
+    const { counts, told } = await sweeps([green, green])
+    expect(counts).toEqual([0, 2])
+    expect(told.every((c) => c.argv[3]!.includes("it conflicts with its base"))).toBe(true)
+  })
+
+  test("a new head that conflicts again starts its own clock and tells again", async () => {
+    const moved = answer({ headRefOid: "c0ff2c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })
+    const { counts, told } = await sweeps([answer(), answer(), moved, moved])
+    expect(counts).toEqual([0, 2, 2, 4])
+    expect(told[2]!.argv[3]).toContain("at head c0ff2c7")
+  })
+
+  test("a draft alerts too, since a draft gets CI; DIRTY alone or CONFLICTING alone is a conflict", async () => {
+    expect((await sweeps([answer({ isDraft: true }), answer({ isDraft: true })])).counts).toEqual([
+      0, 2,
+    ])
+    const dirty = answer({ mergeable: "UNKNOWN" })
+    expect((await sweeps([dirty, dirty])).counts).toEqual([0, 2])
+    const conflicting = answer({ mergeStateStatus: "UNKNOWN" })
+    expect((await sweeps([conflicting, conflicting])).counts).toEqual([0, 2])
+  })
+
+  test("stays quiet with a GitHub Actions run at the head, while GitHub works it out (UNKNOWN), and before CONFLICT_AFTER", async () => {
+    expect((await sweeps([answer({}, 1), answer({}, 1)])).told).toEqual([])
+    const unknown = answer({ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" })
+    const quiet = await sweeps([unknown, unknown])
+    expect(quiet.told).toEqual([])
+    expect(quiet.state).toEqual({})
+    expect((await sweeps([answer(), answer()], CONFLICT_AFTER - 1)).told).toEqual([])
+  })
+
+  test("an UNKNOWN read at the same head, as GitHub works it out again after the base moves, keeps the told mark and tells nothing", async () => {
+    const unknown = answer({ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" })
+    const { counts, state } = await sweeps([answer(), answer(), unknown, answer(), answer()])
+    expect(counts).toEqual([0, 2, 2, 2, 2])
+    expect(state["145"]).toMatchObject({
+      sha: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      told: true,
+    })
+    // an UNKNOWN read before the clock runs out neither tells nor restarts it
+    expect((await sweeps([answer(), unknown, answer()])).counts).toEqual([0, 0, 2])
+  })
+
+  test("keeps only PRs conflicting now, so a fixed conflict that comes back at the same head tells again", async () => {
+    const clean = answer({ mergeStateStatus: "CLEAN", mergeable: "MERGEABLE" })
+    const { counts, state } = await sweeps([answer(), answer(), clean, answer(), answer()])
+    expect(counts).toEqual([0, 2, 2, 2, 4])
+    expect(Object.keys(state)).toEqual(["145"])
+    const closed = await sweeps([answer(), answer({ state: "MERGED" })])
+    expect(closed.state).toEqual({})
   })
 })
 

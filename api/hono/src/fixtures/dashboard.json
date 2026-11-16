@@ -5570,6 +5570,31 @@
       "updatedAt": "2026-01-01T11:35:00.000Z",
       "url": "https://github.com/example/fixture/pull/102"
     },
+    "https://github.com/example/fixture/pull/106": {
+      "comments": {
+        "nodes": []
+      },
+      "commits": {
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
+      },
+      "headRefOid": "d106d106d106d106d106d106d106d106d106d106",
+      "isDraft": false,
+      "mergeStateStatus": "DIRTY",
+      "mergeable": "CONFLICTING",
+      "number": 106,
+      "state": "OPEN",
+      "title": "Title a thread from the chat's first ask",
+      "updatedAt": "2026-01-01T11:40:00.000Z",
+      "url": "https://github.com/example/fixture/pull/106"
+    },
     "https://github.com/example/fixture/pull/97": {
       "comments": {
         "nodes": []
