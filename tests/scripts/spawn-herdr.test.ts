@@ -21,7 +21,6 @@ import {
   launchOf,
   linuxTemp,
   lw,
-  opened,
   placing,
   resumeFile,
   root,

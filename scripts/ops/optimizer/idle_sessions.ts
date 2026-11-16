@@ -198,7 +198,7 @@ export function workerOf(name: string, linked?: string): string | undefined {
 
 // The pure core: no network, no filesystem, no signals. Every input is injected.
 export async function collect(input: CollectInput): Promise<Row[]> {
-  const { hours, linkedPrs, now, prState, projectsDir, roster, sessions, workerPrs } = input
+  const { hours, now, prState, projectsDir, roster, sessions } = input
   const rows: Row[] = []
   for (const name of Object.keys(sessions).sort()) {
     const d = sessions[name]
