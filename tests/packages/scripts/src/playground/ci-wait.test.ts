@@ -9,7 +9,10 @@ const NOW = Date.parse("2026-11-14T08:00:00Z")
 
 type Reply = { body?: unknown; headers?: Record<string, string>; path: string; status?: string }
 
-const pr = (sha: string): Reply => ({ body: { sha }, path: `repos/${REPO}/pulls/7` })
+const pr = (sha: string, mergeable: boolean | null = true, state = "open"): Reply => ({
+  body: { base: "canary", mergeable, sha, state },
+  path: `repos/${REPO}/pulls/7`,
+})
 const runs = (sha: string, ...checks: [string, string, string | null, number][]): Reply => ({
   body: checks.map(([name, status, conclusion, id]) => ({ conclusion, id, name, status })),
   path: `repos/${REPO}/commits/${sha}/check-runs?per_page=100`,
@@ -170,6 +173,47 @@ describe("playground ci-wait (PG-2113)", () => {
     ])
     expect(code).toBe(0)
     expect(sleeps).toEqual([65])
+  })
+
+  // PG-2486: GitHub starts no pull_request run on a PR that conflicts with its base, so a wait on its checks never ends
+  test("a PR that conflicts with its base exits 1 at once, naming the merge it needs, and reads no check", async () => {
+    const { code, lines, sleeps } = await wait([pr(A, false)])
+    expect(code).toBe(1)
+    expect(sleeps).toEqual([])
+    expect(lines).toContain("#7 conflicts with canary: no CI runs until canary is merged in")
+  })
+
+  // the fake gh refuses a path out of turn, so a check-runs read before mergeable turns true fails this test
+  test("a mergeable state GitHub has not yet worked out waits a poll and reads the PR again, reading checks only once it turns mergeable", async () => {
+    const { code, lines, sleeps } = await wait([
+      pr(A, null),
+      pr(A, true),
+      runs(A, [BUILD, "completed", "success", 3], ["test", "completed", "success", 4]),
+    ])
+    expect(code).toBe(0)
+    expect(sleeps).toEqual([POLL_SECONDS])
+    expect(lines.join("\n")).not.toContain("conflicts")
+  })
+
+  // a merged or closed PR, which REST reads as state closed, reads mergeable null for good, so a wait on it reads its checks as they stand rather than waiting without end
+  test("a merged or closed PR whose mergeable reads null reads its checks at once", async () => {
+    const { code, sleeps } = await wait([
+      pr(A, null, "closed"),
+      runs(A, [BUILD, "completed", "success", 3], ["test", "completed", "success", 4]),
+    ])
+    expect(code).toBe(0)
+    expect(sleeps).toEqual([])
+  })
+
+  test("a PR that turns conflicting while its checks run stops at the next poll", async () => {
+    const { code, lines, sleeps } = await wait([
+      pr(A, true),
+      runs(A, [BUILD, "in_progress", null, 3], ["test", "in_progress", null, 4]),
+      pr(A, false),
+    ])
+    expect(code).toBe(1)
+    expect(sleeps).toEqual([POLL_SECONDS])
+    expect(lines.at(-1)).toBe("#7 conflicts with canary: no CI runs until canary is merged in")
   })
 
   test("a PR number that is not a number, or a repo that is not owner/name, is a usage error", async () => {
