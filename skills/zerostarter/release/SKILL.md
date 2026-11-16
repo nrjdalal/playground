@@ -10,6 +10,7 @@ A ship promotes `canary` to `main` by hand: one PR `canary -> main`, merged with
 `auto-canary-into-main.yml` runs on each push to `canary`, and by hand (`workflow_dispatch`), and only opens the draft ship PR when none is open, moving no version; it opens the PR with `GITHUB_TOKEN`, so it needs the repository's "Allow GitHub Actions to create and approve pull requests" setting on.
 No workflow tags a ship or writes a changelog, so every step below is yours.
 `main` deploys to production, so ship only on the user's go-ahead (playbook's **release** rule gives it to Ops).
+An `[ops-ship]` line reading `#<n> carries ship-now and merged at <sha>: ship canary now by the release skill, ...` starts a ship at step 1 outside the usual beat, the **release** rule's `ship-now`; when a ship you are already running pinned a `CANARY` that holds it (`git merge-base --is-ancestor <sha> "$CANARY"` exits 0), that ship carries it, and every step's gate below holds for it as for any ship.
 
 Run every command from a cwd inside the Playground checkout, so `gh` reads the right repository.
 
