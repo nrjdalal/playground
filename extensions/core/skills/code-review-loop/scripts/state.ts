@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
-import { readFileSync, readdirSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readFileSync, readdirSync, rmSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
 export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`?([0-9a-f]{7,40})/i
@@ -37,6 +37,27 @@ export class Called extends Error {
 }
 
 // The seam the tests swap: run() is one gh or git call's stdout, sleep() waits, time() reads the clock in seconds.
+// io.tests's command: RUN_SLOT_HERE=1 keeps the run on this machine, since run-slot sends a test:file run to the runner box by default, whose junit report never comes back, so every red would read as NO-REPORT.
+export const testsArgv = (
+  session: string,
+  clone: string,
+  files: string[],
+  report: string,
+): string[] => [
+  join(homedir(), ".playground", "ops", "run-slot.sh"),
+  session,
+  "--",
+  "env",
+  "RUN_SLOT_HERE=1",
+  "bun",
+  `--cwd=${clone}`,
+  "run",
+  "test:file",
+  "--reporter=junit",
+  `--reporter-outfile=${report}`,
+  ...files,
+]
+
 export const io = {
   run: (...args: string[]): string => {
     const out = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" })
@@ -46,6 +67,12 @@ export const io = {
     return stdout
   },
   sleep: (s: number): Promise<void> => Bun.sleep(s * 1000),
+  // One run of test files in the clone through run-slot, green or not, its junit report written to <report>.
+  tests: (session: string, clone: string, files: string[], report: string): boolean =>
+    Bun.spawnSync(testsArgv(session, clone, files, report), {
+      stdout: "inherit",
+      stderr: "inherit",
+    }).exitCode === 0,
   time: (): number => Date.now() / 1000,
 }
 
@@ -848,7 +875,7 @@ const readBlobs = (
   return texts
 }
 
-export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
+export const touchedTests = (clone: string, base: string, head: string): string[] => {
   const changed = io
     .run("git", "-C", clone, "diff", "--name-only", "--no-renames", "-z", `${base}...${head}`)
     .split("\0")
@@ -921,7 +948,154 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
       ),
     ))
       if (WALKS_REPO.test(text)) listed.add(f)
-  for (const f of [...listed].sort()) console.log(f)
+  return [...listed].sort()
+}
+
+export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
+  for (const f of touchedTests(clone, base, head)) console.log(f)
+}
+
+const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
+
+// Pure: a red run's red files from its junit report: each file with a failed testcase, and each test file the report leaves out, since bun drops a file that throws as it loads (an import canary broke); a report that is missing names none.
+export const redIn = (xml: string | undefined, files: string[]): string[] => {
+  if (xml === undefined) return []
+  const listed = new Set(
+    [...xml.matchAll(/<test(?:suite|case)\b[^>]*\bfile="([^"]*)"/g)].map((m) => m[1]),
+  )
+  const failed = new Set(
+    [...xml.matchAll(/<testcase\b[^>]*\bfile="([^"]*)"[^>]*(?<!\/)>([\s\S]*?)<\/testcase>/g)]
+      .filter((m) => /<(failure|error)\b/.test(m[2]!))
+      .map((m) => m[1]),
+  )
+  return files.filter((f) => failed.has(f) || (/\.test\.tsx?$/.test(f) && !listed.has(f)))
+}
+
+// Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens. --conflict-only stops after merge-tree, running none of the PR's code, for an outside author's PR.
+export const cmdMerge = (...args: string[]): void => {
+  const conflictOnly = args.includes("--conflict-only")
+  const [clone = "", head = "", base = "", session = ""] = args.filter(
+    (a) => a !== "--conflict-only",
+  )
+  if (args.length !== 4) exitWith(USAGE)
+  const headSha = io.run("git", "-C", clone, "rev-parse", head).trim()
+  const baseSha = io.run("git", "-C", clone, "rev-parse", base).trim()
+  let tree: string
+  try {
+    tree = io.run(
+      "git",
+      "-C",
+      clone,
+      "merge-tree",
+      "--write-tree",
+      "--name-only",
+      "--no-messages",
+      headSha,
+      baseSha,
+    )
+  } catch (e) {
+    if (!(e instanceof Called) || !e.stdout.trim()) throw e
+    const files = e.stdout.trim().split("\n").slice(1)
+    console.log(`CONFLICT on ${baseSha.slice(0, 7)}: ${files.join(" ")}`)
+    process.exitCode = 1
+    return
+  }
+  if (conflictOnly) {
+    console.log(`CLEAN on ${baseSha.slice(0, 7)}: no conflict; --conflict-only ran no tests`)
+    return
+  }
+  const merge = io
+    .run(
+      "git",
+      "-C",
+      clone,
+      "commit-tree",
+      tree.trim(),
+      "-p",
+      headSha,
+      "-p",
+      baseSha,
+      "-m",
+      "merge check",
+    )
+    .trim()
+  const locks = io
+    .run("git", "-C", clone, "diff", "--name-only", headSha, merge)
+    .split("\n")
+    .filter((f) => LOCKS.test(f))
+  if (locks.length) {
+    console.log(`LOCK-CHANGED on ${baseSha.slice(0, 7)}: ${locks.join(" ")}; no tests ran`)
+    return
+  }
+  const tests = touchedTests(clone, baseSha, merge)
+  // A run's red files, read from its report; a red run whose report names none counts every file it ran as red, and says where.
+  const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
+  const unnamed: string[] = []
+  const red = (files: string[], where: string): string[] => {
+    if (!files.length) return []
+    rmSync(report, { force: true })
+    if (io.tests(session, clone, files, report)) return []
+    let xml: string | undefined
+    try {
+      xml = readFileSync(report, "utf8")
+    } catch {}
+    const named = redIn(xml, files)
+    if (named.length) return named
+    unnamed.push(where)
+    return files
+  }
+  const treeOf = (sha: string): Set<string> =>
+    new Set(io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", sha).split("\0"))
+  const at = (sha: string, files: string[], where: string): string[] => {
+    const tree = treeOf(sha)
+    const there = files.filter((f) => tree.has(f))
+    if (!there.length) return []
+    io.run("git", "-C", clone, "checkout", "-q", "--detach", sha)
+    return red(there, where)
+  }
+  let branch = ""
+  try {
+    branch = io.run("git", "-C", clone, "symbolic-ref", "-q", "--short", "HEAD").trim()
+  } catch (e) {
+    if (!(e instanceof Called)) throw e
+  }
+  // A clone on a branch at the head (a fixture-stack round's review-<n>) goes back to that branch.
+  const back =
+    branch && io.run("git", "-C", clone, "rev-parse", branch).trim() === headSha
+      ? [branch]
+      : ["--detach", headSha]
+  const c7 = baseSha.slice(0, 7)
+  // The merge's red files run once more on the merge (green there: red only beside the others, BATCH-RED), a run whose report named none running every touched test again; what stays red runs at the head (red there: the PR's own) and then at <base> (red there: canary's own), so CANARY-RED keeps only a red the merge alone makes.
+  let first: string[]
+  let onMerge: string[]
+  let atHead: string[]
+  let atBase: string[]
+  try {
+    first = at(merge, tests, `on the merge, so all ${tests.length} touched tests ran again`)
+    onMerge = red(first, "on the merge's second run")
+    atHead = at(headSha, onMerge, "at the head")
+    atBase = at(
+      baseSha,
+      onMerge.filter((f) => !atHead.includes(f)),
+      `at ${c7}`,
+    )
+  } finally {
+    rmSync(report, { force: true })
+    io.run("git", "-C", clone, "checkout", "-q", ...back)
+  }
+  const together = first.filter((f) => !onMerge.includes(f))
+  const canaryOnly = onMerge.filter((f) => !atHead.includes(f) && !atBase.includes(f))
+  if (canaryOnly.length) {
+    console.log(`CANARY-RED on ${c7}: ${canaryOnly.join(" ")}`)
+    process.exitCode = 1
+  } else if (!together.length) console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
+  if (together.length) console.log(`BATCH-RED on ${c7}: ${together.join(" ")}`)
+  if (atHead.length) console.log(`HEAD-RED: ${atHead.join(" ")}`)
+  if (atBase.length) console.log(`BASE-RED on ${c7}: ${atBase.join(" ")}`)
+  if (unnamed.length)
+    console.log(
+      `NO-REPORT on ${c7}: a red run's report named no red file ${unnamed.join("; ")}; each such run counts every file it ran as red`,
+    )
 }
 
 const splitResponse = (text: string): [Record<string, string>, string] => {
@@ -1035,6 +1209,7 @@ const COMMANDS: Record<
   checks: { argc: 3, more: true, run: cmdChecks },
   delta: { argc: 4, run: cmdDelta },
   fresh: { argc: 4, run: cmdFresh },
+  merge: { argc: 3, more: true, run: cmdMerge },
   pr: { argc: 2, run: cmdPr },
   scan: { argc: 1, run: cmdScan },
   "touched-tests": { argc: 3, run: cmdTouchedTests },
@@ -1049,6 +1224,8 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
+  state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
 A verdict is a comment by this gh account whose first line is

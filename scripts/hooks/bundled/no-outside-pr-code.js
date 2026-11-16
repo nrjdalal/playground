@@ -8680,6 +8680,7 @@ var FETCH_OPTIONS = new Set([
   "-t"
 ]);
 var QUIET = new Set(["-q", "--quiet"]);
+var STATE_READS = new Set(["checks", "delta", "fresh", "pr", "scan", "touched-tests", "wait"]);
 var SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 var SED_PRINT = new RegExp(`^${SED_ADDRESS}(?:,${SED_ADDRESS})?p$`);
 var SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/;
@@ -8800,6 +8801,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
     const path = real(written);
     return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/") && lookup.tracked(path);
   };
+  const runsPrTests = (script, rest) => script !== undefined && real(script).endsWith("/code-review-loop/scripts/state.ts") && !STATE_READS.has(rest[0] ?? "") && !(rest[0] === "merge" && rest.includes("--conflict-only"));
   const inMain = (folder) => {
     if (folder === undefined)
       return false;
@@ -8848,7 +8850,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length)
         return true;
-      if (!skillScript(program))
+      if (!skillScript(program) || runsPrTests(program, args.map((a) => a.value)))
         return false;
       const runner = lookup.runner(real(program));
       return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd);
@@ -8914,8 +8916,10 @@ async function inspect(command, directory, environment, lookup, own = []) {
       }
       return GH2.has(group) && !checkout && !words.includes("--");
     }
-    if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
-      return skillScript(pathOf(args[0], here));
+    if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-")) {
+      const script = pathOf(args[0], here);
+      return skillScript(script) && !runsPrTests(script, args.slice(1).map((a) => a.value));
+    }
     return false;
   };
   const visit = async (cmd, parsed, env) => {
