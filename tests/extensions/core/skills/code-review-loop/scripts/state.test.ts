@@ -1211,14 +1211,40 @@ test("10 touched-tests: the four rules on a scratch repository, printed one path
     ),
   ).toBe(true)
   expect([...new Set(listed)].sort()).toEqual(listed)
-  expect(listed.length).toBe(6)
+  expect(listed.length).toBe(7)
   expect(listed).not.toContain("tests/unrelated.test.ts")
-  expect(listed).not.toContain("tests/test_scan.py")
+  expect(listed).toContain("tests/test_scan.py")
   git(repo, "rm", "-q", "tests/changed.test.ts", "tests/web/next/src/lib/outbox.test.ts")
   git(repo, "commit", "-qm", "drop two tests")
   const after = touched(repo).listed
   expect(after.includes("tests/changed.test.ts")).toBe(false)
   expect(after.includes("tests/web/next/src/lib/outbox.test.ts")).toBe(false)
+})
+
+test("10 touched-tests: a Python test that walks the whole repo is listed whenever the diff adds text", () => {
+  const files = {
+    "docs/a.md": "x\n",
+    "logo.png": "\0x\n",
+    "tests/test_guard.py": 'files = subprocess.run(["git", "ls-files"]).stdout\n',
+    "tests/test_plain.py": "assert True\n",
+    "tests/test_walk.py": "for root, dirs, names in os.walk(ROOT):\n    pass\n",
+  }
+  const repo = scratch()
+  scratchRepo(repo, files)
+  writeFiles(repo, { "logo.png": "\0y\n" })
+  git(repo, "commit", "-qam", "an image alone")
+  const image = touched(repo)
+  expect(image.code, image.stderr).toBe(0)
+  expect(image.listed).toEqual([])
+  writeFiles(repo, { "docs/a.md": "y\n" })
+  git(repo, "commit", "-qam", "a line of text")
+  expect(touched(repo).listed).toEqual(["tests/test_guard.py", "tests/test_walk.py"])
+  // in a Python repo a walk is read by the folders it names, so only the git file list joins on any text
+  const py = scratch()
+  scratchRepo(py, { ...files, "pyproject.toml": "" })
+  writeFiles(py, { "docs/a.md": "y\n" })
+  git(py, "commit", "-qam", "a line of text")
+  expect(touched(py).listed).toEqual(["tests/test_guard.py"])
 })
 
 test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {

@@ -713,6 +713,10 @@ const stripValues = (text: string): string => {
 const GIT_GREP =
   /\bgit["'`]?(?:[\s,\[]+(?:["']?-[\w-]+["']?|\$?\{?[\w.$]+\}?|["'][^"'\n]*["'])){0,3}?[\s,\[]+["'`]?grep\b/
 const SCAN_PY = "rglob\\(|\\.glob\\(|os\\.walk|read_text\\("
+// A Python test that walks the whole repo, a guard reading every file's text, which names no changed path: one PR's touched tests ran green while CI went red on such a guard; in a Python repo SCAN_PY's path rule reads a walk, so only ls-files joins there
+const PY_TEST = /^tests\/(.+\/)?test_[^/]+\.py$/
+export const walksRepo = (text: string, python: boolean): boolean =>
+  (python ? /ls-files/ : /ls-files|os\.walk\(|rglob\(/).test(text)
 // Tests whose imported source scans the repo, so no grep of their own text finds them
 const SCANS_THROUGH_SOURCE = [
   "tests/packages/scripts/src/parity/record.test.ts",
@@ -904,7 +908,21 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
     if (changed.some((f) => TEMPLATE.test(f)))
       for (const f of grep(clone, head, "-E", [DIGEST_PIN])) picked.add(f)
   }
-  for (const f of [...picked].filter((f) => tests.has(f)).sort()) console.log(f)
+  const listed = new Set([...picked].filter((f) => tests.has(f)))
+  const addsText = io
+    .run("git", "-C", clone, "diff", "--numstat", "--no-renames", `${base}...${head}`)
+    .split("\n")
+    .some((line) => /^[1-9]/.test(line))
+  if (addsText)
+    for (const [f, text] of Object.entries(
+      readBlobs(
+        clone,
+        head,
+        [...tree].filter((f) => PY_TEST.test(f)),
+      ),
+    ))
+      if (walksRepo(text, python)) listed.add(f)
+  for (const f of [...listed].sort()) console.log(f)
 }
 
 const splitResponse = (text: string): [Record<string, string>, string] => {
