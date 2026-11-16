@@ -147,7 +147,8 @@ describe("--ssh runs the probe's claude on another machine", () => {
       const remote = launchOf(r).match(/mkdir -m 700 (\S+) /)?.[1] ?? ""
       const built = JSON.parse(readFileSync(lw(r.home, file), "utf8"))
       expect(built.sandbox.filesystem.allowWrite).toContain(remote)
-      expect(launchOf(r)).toContain(`--settings ${remote}/${file} `)
+      // the remote command rides ssh as one %q-quoted word, each space escaped
+      expect(launchOf(r)).toContain(`--settings\\ ${remote}/${file}\\ `)
       expect(existsSync(lw(r.home, file.replace("-probe-far", "")))).toBe(false)
     },
   )
