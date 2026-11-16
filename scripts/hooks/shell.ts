@@ -1096,7 +1096,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       cmd.group = true
       const members = topLevel(lx.commands.slice(from), scope)
       cmd.inner = () => members
-    } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
+    } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx))
     } else if (redirect) {
       lx.i += redirect[0].length
@@ -1104,7 +1104,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const [, fd] = redirect
       // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
-      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
+      const target = /^[<=]\(/.test(src.slice(lx.i, lx.i + 2)) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -1136,7 +1136,7 @@ function topLevel(cmds: Command[], scope: number): Command[] {
   return cmds.filter((c) => !fed.has(c) && c.scope === scope)
 }
 
-// A process substitution, carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
+// A process substitution (`<(…)`, `>(…)`, zsh's `=(…)`), carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
 function procSub(lx: Lexer): Word {
   lx.i += 2
   const from = lx.commands.length
@@ -2210,10 +2210,10 @@ export function spelledText(text: string): string {
     .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
     .flatMap((token) => {
-      // a subshell's or a substitution's opening paren, a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
+      // a subshell's, a substitution's or a zsh `=(…)` process substitution's opening paren, a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
       const parts = token
         .split(/(?=\$\()|\|+(?=\()/)
-        .map((part) => part.replace(/^(?:\$?\(|['"])+/, ""))
+        .map((part) => part.replace(/^(?:[$=]?\(|['"])+/, ""))
       return [token, ...parts.filter((part) => part !== token)]
     })
     .filter((token) => /[{(]/.test(token))

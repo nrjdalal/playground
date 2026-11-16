@@ -1141,7 +1141,7 @@ function walk(lx, scope, nested, inherit) {
       cmd.group = true;
       const members = topLevel(lx.commands.slice(from), scope);
       cmd.inner = () => members;
-    } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
+    } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx));
     } else if (redirect) {
       lx.i += redirect[0].length;
@@ -1149,7 +1149,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
-      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
+      const target = /^[<=]\(/.test(src.slice(lx.i, lx.i + 2)) ? procSub(lx) : word(lx);
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -2081,7 +2081,7 @@ function globSpells(text, names) {
 }
 function spelledText(text) {
   const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).flatMap((token) => {
-    const parts = token.split(/(?=\$\()|\|+(?=\()/).map((part) => part.replace(/^(?:\$?\(|['"])+/, ""));
+    const parts = token.split(/(?=\$\()|\|+(?=\()/).map((part) => part.replace(/^(?:[$=]?\(|['"])+/, ""));
     return [token, ...parts.filter((part) => part !== token)];
   }).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
     const sequenced = word.replace(SEQUENCE, sequenceSpelling);
