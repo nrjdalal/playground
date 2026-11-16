@@ -14,7 +14,6 @@ import {
   answerItem,
   attachmentDownloadName,
   dismissItems,
-  endLostRoots,
   listItems,
   markRead,
   provideSecret,
@@ -85,17 +84,11 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner; an approved root step with no result 6 minutes on, its run cut off by a restart, is first recorded failed and its poster told; while `playground focus` stands, `quiet` names each item that came in since it began, an alert update aside, and the count leaves those out until it ends",
+        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner; while `playground focus` stands, `quiet` names each item that came in since it began, an alert update aside, and the count leaves those out until it ends",
       responses: { 200: { description: "OK" }, ...authErrorResponses, ...forbiddenErrorResponses },
     }),
     async (c) => {
       const now = new Date()
-      const user = c.get("user")
-      await endLostRoots(db, now, {
-        actor: { email: user.email, id: user.id },
-        deliver,
-        dispatcher: DISPATCHER,
-      })
       return c.json({ data: await listItems(db, now, await standingFocus(dataDir(), now)) })
     },
   )

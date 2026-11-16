@@ -487,9 +487,10 @@
   A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
   Approve takes `seen`, as a guard's does, and Edit is refused.
   It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
-  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window, `127` that no window could ask and `143` that it stopped at 5 minutes,
+  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window,
+  `127` that no window could ask and `143` that the window got no answer in 5 minutes,
   and its poster is told.
-  An API restart cuts that run off, so the next Inbox read records an approved root card with no `rooted` 6 minutes on (`ROOT_LOST_MS`) as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`); a result that lands later takes its place.
+  The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
   A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
 

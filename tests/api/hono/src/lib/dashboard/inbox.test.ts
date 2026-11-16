@@ -1568,7 +1568,7 @@ describe("a root step decision (PG-2433)", () => {
     const killed = async () => ({ code: 143, err: "", out: "" })
     expect(await rootRun(killed, preview, async () => undefined)).toEqual({
       exitCode: 143,
-      line: "it stopped after 5 minutes: the password window got no answer, or the step ran that long",
+      line: "the password window got no answer in 5 minutes, so nothing ran as root",
     })
   })
 })
@@ -5982,16 +5982,15 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(run.calls).toHaveLength(0)
     })
 
-    test("a run an API restart cut off ends ROOT_LOST_MS on as failed, its poster told, and a late result still takes its place", async () => {
+    test("a run an API restart cut off ends at the next start as failed, its poster told once", async () => {
       const posted = await post(decision(ROOT_INSTALL))
       const at = new Date("2026-11-03T20:00:00.000Z")
-      const run = pkexec()
-      // the run never returns, as one this process lost to a restart
+      // the run never returns, as one the old process took with it
       await store.answerItem(
         db,
         posted.id,
         { action: "approve", seen: posted.updatedAt },
-        { actor, now: at, root: run.root },
+        { actor, now: at, root: () => new Promise(() => {}) },
       )
       const sent: Delivery[] = []
       const telling = {
@@ -6001,14 +6000,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           return { at: "2026-11-03T20:07:00.000Z", ok: true as const, sessionId: "s1" }
         },
       }
-      const early = new Date(at.getTime() + store.ROOT_LOST_MS - 1000)
-      expect(await store.endLostRoots(db, early, telling)).toHaveLength(0)
-      expect((await store.getItem(db, posted.id))?.answer).not.toHaveProperty("rooted")
-      const late = new Date(at.getTime() + store.ROOT_LOST_MS)
-      const ended = await store.endLostRoots(db, late, telling)
+      // a card claimed at this start's own instant is this process's to run
+      expect((await store.endLostRoots(db, at, telling)).map((one) => one.id)).not.toContain(
+        posted.id,
+      )
+      const started = new Date(at.getTime() + 1)
+      const ended = await store.endLostRoots(db, started, telling)
       expect(ended.map((item) => item.id)).toContain(posted.id)
-      const item = await store.getItem(db, posted.id)
-      expect(item?.answer).toMatchObject({
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
         rooted: { exitCode: 1, line: store.ROOT_LOST_LINE },
       })
       expect(sent).toHaveLength(1)
@@ -6016,19 +6015,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         rooted: { exitCode: 1, line: store.ROOT_LOST_LINE },
         type: "root",
       })
-      // read again, it ends nothing twice
-      expect((await store.endLostRoots(db, late, telling)).map((one) => one.id)).not.toContain(
+      // the next start ends nothing twice
+      expect((await store.endLostRoots(db, started, telling)).map((one) => one.id)).not.toContain(
         posted.id,
       )
-      run.release()
-      for (let i = 0; i < 100; i++) {
-        const now = await store.getItem(db, posted.id)
-        if (now?.answer && "rooted" in now.answer && now.answer.rooted?.exitCode === 0) break
-        await Bun.sleep(20)
-      }
-      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
-        rooted: { exitCode: 0 },
-      })
+      expect(sent).toHaveLength(1)
+    })
+
+    test("the API ends lost root runs once at its start on a stack that reads this machine, and the Inbox's read writes nothing", async () => {
+      const read = (path: string) =>
+        Bun.file(join(import.meta.dir, "../../../../../../api/hono/src", path)).text()
+      const local = await read("local.ts")
+      expect(local).toMatch(/if \(readsLive\(\)\) \{\n  endLostRoots\(db, new Date\(\),/)
+      expect(await read("routers/inbox.ts")).not.toContain("endLostRoots")
     })
   })
 

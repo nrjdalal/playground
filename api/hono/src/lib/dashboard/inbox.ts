@@ -2263,22 +2263,19 @@ function stepOf(
 const ROOT_EXITS: Record<number, string> = {
   126: "you closed the password window, so nothing ran as root",
   127: "your computer could not ask for your password, so nothing ran as root",
-  143: `it stopped after ${ROOT_TIMEOUT_MS / 60_000} minutes: the password window got no answer, or the step ran that long`,
+  143: `the password window got no answer in ${ROOT_TIMEOUT_MS / 60_000} minutes, so nothing ran as root`,
 }
-
-// How long after its Approve a root card with no result was lost to an API restart: its run ends by ROOT_TIMEOUT_MS, and a minute more lets that result land.
-export const ROOT_LOST_MS = ROOT_TIMEOUT_MS + 60_000
 
 export const ROOT_LOST_LINE =
   "the Dashboard restarted while it ran, so its result is unknown: check it before you approve it again"
 
-// Ends each approved root card whose run an API restart cut off, ROOT_LOST_MS on with no result, as a failed rooted that says so, then tells its poster as its own run would have; a result that lands later still takes its place.
+// Run once at API start: ends each approved root card with no result answered before this process started, as a failed rooted that says so, then tells its poster as its own run would have; only the process that claimed a card runs it, so a restart lost each one.
 export async function endLostRoots(
   db: Database,
   now: Date,
   telling?: Omit<Sending, "now">,
 ): Promise<InboxItem[]> {
-  const cutoff = new Date(now.getTime() - ROOT_LOST_MS).toISOString()
+  const cutoff = now.toISOString()
   const rooted: RunResult = { exitCode: 1, line: ROOT_LOST_LINE }
   const rows = await db
     .update(inboxItem)
@@ -2293,7 +2290,7 @@ export async function endLostRoots(
         sql`${inboxItem.preview} ->> 'type' = 'root'`,
         sql`${inboxItem.answer} ->> 'choice' = 'approve'`,
         sql`${inboxItem.answer} -> 'rooted' is null`,
-        sql`(${inboxItem.answer} ->> 'at')::timestamptz <= ${cutoff}::timestamptz`,
+        sql`(${inboxItem.answer} ->> 'at')::timestamptz < ${cutoff}::timestamptz`,
       ),
     )
     .returning()

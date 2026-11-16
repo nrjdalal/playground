@@ -192,7 +192,7 @@ describe("runArgv's timeout (PG-2433)", () => {
   test("stops a run past its timeout", async () => {
     const started = Date.now()
     const ran = await runArgv(["sleep", "5"], 200)
-    expect(ran.code).not.toBe(0)
+    expect(ran.code).toBe(143)
     expect(Date.now() - started).toBeLessThan(3000)
   })
 })
