@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import {
   procRoot,
+  procUsedBytes,
   readIdle,
   readSysctl,
   type SysctlName,
@@ -61,6 +62,11 @@ describe("each sysctl name reads its /proc text where sysctl does not answer", (
       "total = 16384.00M  used = 512.00M  free = 15872.00M",
     )
   })
+
+  test("the memory in use is MemTotal less MemAvailable, as procps's free counts it, in bytes", () => {
+    onLinux(procDir({ free: 25 }))
+    expect(procUsedBytes()).toBe(96 * 1024 ** 3)
+  })
 })
 
 describe("a reading that cannot be taken is unread, never 0", () => {
@@ -98,6 +104,11 @@ describe("a reading that cannot be taken is unread, never 0", () => {
     onLinux(procDir({ load1: 30, load5: 30 }))
     const mac = async () => ({ code: 0, out: "{ 1.00 2.00 3.00 }\n" })
     expect(await readSysctl(mac, "vm.loadavg")).toBe("{ 1.00 2.00 3.00 }")
+  })
+
+  test("the memory in use with no /proc/meminfo", () => {
+    onLinux(procDir({}, ["meminfo"]))
+    expect(procUsedBytes()).toBeNull()
   })
 })
 

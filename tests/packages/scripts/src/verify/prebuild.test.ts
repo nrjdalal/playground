@@ -343,9 +343,10 @@ test("a scratch test's absolute import outside the checkout stays unread", async
   }
 })
 
-test("every workspace package verify or pr-merge imports is a dependency of @packages/scripts, so its build covers it", async () => {
+// @packages/scripts's own exports serve its src, which no build writes, so a source reaching its own package (proc-start.ts's procRoot, through probe.ts) needs no dependency
+test("every workspace package verify or pr-merge imports is a dependency of @packages/scripts or itself, so its build covers it", async () => {
   const pkg = await Bun.file(join(ROOT, "packages/scripts/package.json")).json()
-  const declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
+  const declared = [pkg.name, ...Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })]
   for (const sources of [await sourcesIn("verify"), await sourcesIn("pr-merge")]) {
     const imported = workspaceImports(sources).map((specifier) =>
       specifier.split("/").slice(0, 2).join("/"),

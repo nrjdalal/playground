@@ -355,7 +355,7 @@
   ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
   Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, or `{type: "keychain", item}`,
-  one of this Mac's Keychain items `keychainSpec` in `api/hono/src/lib/keychain-items.ts` allows, always as the Mac's signed-in user:
+  one of this computer's secret store items `keychainSpec` in `api/hono/src/lib/keychain-items.ts` allows, always as this computer's signed-in user:
   a typed one by name, `slack` (the Slack user token the Slack extension reads) or `yard` (the Mac's one Yard token, which `playground yard`, the local Dashboard and the relay read), whose value must take its shape (`KEYCHAIN_ITEMS`),
   or any other of Playground's own by its full service, `playground-` then lower-case letters, digits and hyphens (`PLAYGROUND_SERVICE`), whose value is 1 to 4096 printable characters with no quote, backslash or line break and no space at either end; every other service is refused, so no card names a browser's or the login keychain's items.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, then the comment box, whose words go through Reply alone, never with Submit, and Reply refuses words equal to what the field holds (`commentRefused` in `web/next/src/lib/inbox.ts`), so a value still in the field never reaches a transcript through Reply; Later, Archive and Dismiss stay, since none carries a value.
@@ -381,7 +381,7 @@
   EOF
   ```
 
-- A `reveal` card shows the owner a value already in this Mac's Keychain (a key to paste into another app), on the owner's click alone: no row, log line, transcript, delivery, error or argv holds it.
+- A `reveal` card shows the owner a value already in this computer's secret store (a key to paste into another app), on the owner's click alone: no row, log line, transcript, delivery, error or argv holds it.
   Its `service` names the item in full, a `playground-` service as a keychain sink takes it (above), and `why` says what the owner needs it for; the card shows both, so the owner sees which item it reads.
   While the card is open and not archived, it shows a masked value with Show and Copy (`RevealField` in `web/next/src/components/dashboard/inbox.tsx`): each posts to `POST /api/v1/inbox/:id/reveal`, which `revealSecret()` answers with `{value}` in that one response, `Cache-Control: no-store`, and writes nothing.
   Show draws the value until Hide, the card folding or 30 seconds (`REVEAL_SHOWN_MS`); Copy puts it on the clipboard and never draws it.

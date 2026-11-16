@@ -716,7 +716,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
       if (preview.sink.type === "keychain")
         return (
           <p>
-            On Submit, the value is saved in this Mac's Keychain as its{" "}
+            On Submit, the value is saved in this computer's secret store as its{" "}
             <code className="font-mono">{preview.sink.item}</code> item. It is kept nowhere else.
           </p>
         )
@@ -793,9 +793,8 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
       return (
         <>
           <p>
-            Shows this Mac&apos;s Keychain item{" "}
-            <code className="font-mono break-all">{preview.service}</code> here when you click Show
-            or Copy. It is kept nowhere else.
+            Shows the <code className="font-mono break-all">{preview.service}</code> item from this
+            computer&apos;s secret store here when you click Show or Copy. It is kept nowhere else.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
           {item.status === "open" && !isArchived(item) && !config.hosted && (

@@ -113,8 +113,9 @@ prebuild() {
   git diff --quiet HEAD "$target" -- packages/db/drizzle/ || { say "${target:0:7} migrates; building after the stop"; return 0; }
   rm -rf "$stage"; git worktree prune
   git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; drop_stage; return 0; }
-  # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
-  if ! { { [ ! -d node_modules ] || slot_step clone . cp -cR node_modules "$stage/"; } && (unset NODE_ENV SKIP_ENV_VALIDATION && slot_step install "$stage" bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+  # node_modules as a copy-on-write clone of the checkout's (cp -c on macOS; --reflink=auto elsewhere, since GNU cp has no -c), then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
+  local clone=(-cR); [ "$(uname -s)" = Darwin ] || clone=(-R --reflink=auto)
+  if ! { { [ ! -d node_modules ] || slot_step clone . cp "${clone[@]}" node_modules "$stage/"; } && (unset NODE_ENV SKIP_ENV_VALIDATION && slot_step install "$stage" bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
     [ ! -s "$S/prebuild-skip" ] || { skip_roll "$target"; drop_stage; return 1; }
     say "the staging worktree's install for ${target:0:7} failed; building after the stop"
     drop_stage; return 0

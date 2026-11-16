@@ -68,10 +68,14 @@ const BUNDLES: TypeStep = {
 const touchesHooks = (paths: string[]): boolean =>
   paths.some((path) => /^(scripts\/hooks|packages)\//.test(path))
 
+// Pure: cp's flags for a copy-on-write clone of a folder, by scripts/README.md's "A worktree's node_modules": -c on macOS (APFS), --reflink=auto elsewhere, since GNU cp has no -c and reflink clones where the file system can and copies where it cannot.
+export const cloneArgs = (platform: NodeJS.Platform = process.platform): string[] =>
+  platform === "darwin" ? ["-cR"] : ["-R", "--reflink=auto"]
+
 // CI's own type steps (.github/workflows/auto-check-build.yml), after what node_modules needs: a clone by scripts/README.md's "A worktree's node_modules" then its forced install, or a plain install into the kept node_modules, since a forced one rewrites every package; each through the run slot.
 export const ciSteps: TypeSteps = ({ canary, checkout, hooks, prepare, worktree }) => {
   const clone = {
-    argv: ["cp", "-cR", join(checkout, "node_modules"), `${worktree}/`],
+    argv: ["cp", ...cloneArgs(), join(checkout, "node_modules"), `${worktree}/`],
     name: "clone",
   }
   const install = {
