@@ -229,6 +229,22 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     }
   })
 
+  test("a repeat update with the same poster and title prints the first card's id and #iN, edited or unchanged (PG-2298)", async () => {
+    const update = (text: string) => ({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title: "PG-2298 repeat",
+    })
+    const { id, tag } = await post(update("40%"))
+    const edited = await cli(["new"], JSON.stringify(update("80%")))
+    expect(edited).toMatchObject({ code: 0, stdout: `${id}\n` })
+    expect(edited.stderr).toContain(`ask: edited ${tag}, your update with this title`)
+    const same = await cli(["new"], JSON.stringify(update("80%")))
+    expect(same).toMatchObject({ code: 0, stdout: `${id}\n` })
+    expect(same.stderr).toContain(`ask: unchanged ${tag}`)
+  })
+
   test("refuses a delete decision that names its target by a short name, naming the full path, and posts one that names the full path", async () => {
     const target = mkdtempSync(join(tmpdir(), "ask-delete-"))
     try {
