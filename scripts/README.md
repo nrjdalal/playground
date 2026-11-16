@@ -9,7 +9,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## spawn.sh
 
 - While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
-  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, a session's own window or a job's own start file, `priority-start.json`, each writer keeping its own file.
+  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, a session's own window for that session's own start or a job's own start file, `priority-start.json`, each writer keeping its own file.
   Each one passes focus, and the gates SPAWN.md's Capacity gate names for a priority start.
 - A session opens a priority window only with `playground priority on <session> --reason "<why>"`, which writes `priority-<session>.json` naming the session, who opened it, the reason and the time, and lifts it with `playground priority off <session> --reason "<why>"`; a window written by hand passes no review of who opened it or why.
   spawn.sh reads no window's content, so while one stands every `--priority` start passes, not only the start of the session it names: lift it once that start is done.

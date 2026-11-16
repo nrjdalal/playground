@@ -23,7 +23,7 @@ set -euo pipefail
 #   spawn.sh read      <name> [session-id]              prints the last 200 lines of the herdr pane spawn.sh opened for <name>, found as close finds it, on the server its resume record names, playground-probes included, and writes nothing
 #   --size <small|medium|big>  with any mode but restore, close or read, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore, close or read, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore, close or read, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   --priority         with any mode but restore, close or read, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, for that session's own start alone until off or the lapse moves it aside as .lifted-<ts>, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does, and a priority*.json that is no JSON object passes none.
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate while the other gates still hold it (playbook's SPAWN.md, Capacity gate)
 #   --remote-control <name>  with probe alone, anywhere among its words: the probe's claude starts with Claude Code's --remote-control <name>, a name of lowercase words joined by hyphens; it warns on a start that runs on a token (an --account one, or an --ssh one whose machine holds no ~/.claude/.credentials.json), where Remote Control forms no link; restore leaves a probe started with it down
@@ -72,11 +72,28 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The priority file standing in the data folder, exit 1 when none does, its content unread: every priority*.json (priority.json, an org's own priority-<name>.json, a session's from playground priority, or a job's own start file, priority-start.json, each writer keeping its own) passes focus and the gates playbook's SPAWN.md, Capacity gate, names for a priority start.
+# PRIORITY_FILE, the first priority*.json in the data folder that passes this start's --priority, exit 1 when none does, PRIORITY_KEPT then naming each that stands and why it passes none: a JSON object with no session key (priority.json, an org's own priority-<name>.json, a job's own start file, priority-start.json) passes any start, a session's own window, from playground priority on, passes only the start it names as run-slot.sh window reads it, and a file that is no JSON object passes none, since a window cut short mid-write reads as one.
 priority_file() {
-  local f
+  local f kind s
+  PRIORITY_FILE= PRIORITY_KEPT=
   for f in "$DATA"/priority*.json; do
-    [ -e "$f" ] && { echo "$f"; return 0; }
+    [ -f "$f" ] || continue
+    kind=$(python3 -I -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    d = None
+print("window" if isinstance(d, dict) and "session" in d else "shared" if isinstance(d, dict) else "bad")' "$f" 2>/dev/null)
+    case $kind in
+      shared) PRIORITY_FILE=$f; return 0 ;;
+      window)
+        s=$(bash "$REPO/scripts/ops/run-slot.sh" window "$f" 2>/dev/null) || s=
+        [ -n "$s" ] && [ "$s" = "$NAME" ] && { PRIORITY_FILE=$f; return 0; }
+        if [ -n "$s" ]; then PRIORITY_KEPT+="${PRIORITY_KEPT:+, }${f##*/} is $s's own window"
+        else PRIORITY_KEPT+="${PRIORITY_KEPT:+, }${f##*/} names a session but is no window in playground priority on's shape"; fi
+        ;;
+      *) PRIORITY_KEPT+="${PRIORITY_KEPT:+, }${f##*/} is no JSON object" ;;
+    esac
   done
   return 1
 }
@@ -551,7 +568,7 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load, and a manager passes while the CPU reads idle (manager_room); the memory gate still reads all three
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file passes it (PRIORITY_FILE), since priority work comes first, a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load, and a manager passes while the CPU reads idle (manager_room); the memory gate still reads all three
         if priority:
             readings["priority"] = priority
         elif just_closed:
@@ -1829,7 +1846,11 @@ esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
-  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
+  priority_file || if [ -n "$PRIORITY_KEPT" ]; then
+    refuse "--priority starts only on a priority file that passes it, and none in $DATA does: $PRIORITY_KEPT; a session's own window passes only its own start, and playground priority on $NAME --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
+  else
+    refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does: playground priority on <session> --reason \"<why>\" opens one, on the owner's or the dispatcher's word"
+  fi
 fi
 # JUST_CLOSED names a just-closed resume, whose pass playbook's SPAWN.md, Capacity gate, holds: a resume within 15 minutes of spawn.sh closing its row while it read live, as a Claude Code update's close and resume are.
 JUST_CLOSED=
@@ -1839,7 +1860,7 @@ if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at clos
     *) if [[ $closed_at =~ ^[0-9]+$ ]] && age=$(($(date -u +%s) - closed_at)) && [ "$age" -ge 0 ] && [ "$age" -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
   esac
 fi
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file (below).
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on a priority file that passes it (priority_file, below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
@@ -1852,7 +1873,7 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while any priority file stands, a job's own start file included, since no gate but the machine's own delays a job's ticket start
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while a priority file passes it, a job's own start file included, since no gate but the machine's own delays a job's ticket start
   [ -n "$PRIORITY_FILE" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
