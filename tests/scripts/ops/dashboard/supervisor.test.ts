@@ -1241,8 +1241,9 @@ const slotRun = async (body: string, at: string) => {
   return { code, out: (await new Response(proc.stdout).text()).trim() }
 }
 const stage = join(kept, "staging")
+const cloneFlags = (system: string) => (system === "Darwin" ? "-cR" : "-R --reflink=auto")
 const steps = [
-  `slot cp -cR node_modules ${stage}/`,
+  `slot cp ${cloneFlags(process.platform === "darwin" ? "Darwin" : "Linux")} node_modules ${stage}/`,
   "slot bun install --frozen-lockfile --ignore-scripts",
   "slot bun run build",
 ]
@@ -1273,6 +1274,22 @@ describe("the supervisor's build before the stop queues in run-slot (#1099)", ()
     ])
     expect(existsSync(stage)).toBe(false)
   })
+
+  // GNU cp has no -c, so the macOS clone flag failed the clone on Linux (#2334); uname is a shell function here, which the prebuild's command substitution sees
+  for (const system of ["Darwin", "Linux"]) {
+    test(`on ${system} the clone runs cp ${cloneFlags(system)}`, async () => {
+      fresh()
+      await slotted()
+      const rolled = await slotRun(
+        `uname() { echo ${system}; }\nrunning=${c1}; roll_to ${c2} canary; echo "$running"`,
+        c1,
+      )
+      expect(rolled).toEqual({ code: 0, out: c2 })
+      expect((await keptLines(/^slot cp /))[0]).toBe(
+        `slot cp ${cloneFlags(system)} node_modules ${stage}/`,
+      )
+    })
+  }
 
   // the stand-in takes every argv, so the head's run-slot reads the lane each one takes, on a data folder of its own with no runs.log history to steer quick
   test("the head's run-slot sends the clone to the clone lane, the install to the quick lane and the build to the queue", async () => {
