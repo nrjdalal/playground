@@ -29,7 +29,6 @@
     "@packages/env": "workspace:*",
     "@packages/message": "workspace:*",
     "@packages/safe-delete": "workspace:*",
-    "@packages/scripts": "workspace:*",
     "@packages/settings": "workspace:*",
     "@scalar/api-reference": "catalog:",
     "@scalar/hono-api-reference": "catalog:",
@@ -42,6 +41,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@packages/scripts": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "@types/ws": "catalog:",

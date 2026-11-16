@@ -107,7 +107,7 @@ A package with no env of its own can pass another package's `env`/`getSafeEnv`, 
 
 ## Build-only script shape (adds to the skeleton)
 
-No `build`, no `exports`, no `files`, no `tsdown`; add only the script's own tool deps (e.g. `tldts`) as devDependencies. A tool the script spawns inside another package rather than imports (the auth CLI, run from `packages/auth` so it reads that tsconfig's paths) is that package's devDependency, since `bunx` resolves it from the working directory. The entry is a Bun script using `Bun.*` / `import.meta.dir` / `node:*`, and the native tsc preview (tsc) will not auto-include `@types/*` for it, so pin `types: ["bun"]` exactly as `packages/scripts` (the repo's Bun package) does:
+No `build`, no `exports`, no `files`, no `tsdown`; add only the script's own tool deps (e.g. `tldts`) as devDependencies. The one exception is a module a server's bundle inlines: the package exports it by its `src` file alone, as `packages/scripts` exports `./ops-machine/readings` for the API's System sampler, and the consumer still takes the package as a devDependency. A tool the script spawns inside another package rather than imports (the auth CLI, run from `packages/auth` so it reads that tsconfig's paths) is that package's devDependency, since `bunx` resolves it from the working directory. The entry is a Bun script using `Bun.*` / `import.meta.dir` / `node:*`, and the native tsc preview (tsc) will not auto-include `@types/*` for it, so pin `types: ["bun"]` exactly as `packages/scripts` (the repo's Bun package) does:
 
 ```json
 {

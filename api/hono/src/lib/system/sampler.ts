@@ -589,5 +589,5 @@ const sampler = new Sampler({
   schedule: (tick, ms) => setInterval(tick, ms),
 })
 
-// The commands are macOS's; elsewhere each one that fails is named in problems.
+// The commands are macOS's, while Linux's memory readings come from /proc; elsewhere each one that fails is named in problems.
 export const systemReport = (): Promise<SystemReport> => sampler.report()
