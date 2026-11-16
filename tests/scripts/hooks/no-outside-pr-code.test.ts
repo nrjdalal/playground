@@ -1081,7 +1081,7 @@ describe("no-outside-pr-code's live lookup", () => {
       cwd: scratch,
       env: { ...environment, PATH: `${bin}:/usr/bin:/bin` },
     })
-    expect(JSON.parse(child.stdout.toString())).toEqual(pr)
+    expect(child.stdout.toString().trim()).toBe(JSON.stringify(pr))
     expect(await Bun.file(file).json()).toEqual(pr)
   })
 
