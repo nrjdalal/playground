@@ -94,7 +94,8 @@ A job you turn off is disabled with `systemctl --user disable`, its unit moved t
 Only Playground's own units (`com.playground.*.service`) are installed or removed, so no other user unit is touched.
 `playground doctor` checks each one with `systemctl --user is-active`, and `playground uninstall` disables and removes it.
 
-A user's units stop when that user logs out unless lingering is on, so the machine's bootstrap turns it on once, with sudo: `sudo loginctl enable-linger <user>`.
+A user's units stop when that user logs out unless lingering is on, so a pass that starts a unit turns it on once with `loginctl enable-linger <uid>`, which asks for no password, and says so in `<data>/ops/up.log`; when the machine refuses it, that log names the refusal, the units still run while you are logged in, and `playground doctor`'s `linger` line names the command.
+Each `systemctl --user` call finds your session's bus in `/run/user/<uid>` when `XDG_RUNTIME_DIR` is unset, as in a terminal pane, a cron job or ssh.
 
 ## Bring an existing jobs.json in
 

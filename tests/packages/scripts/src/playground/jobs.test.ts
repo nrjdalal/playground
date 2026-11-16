@@ -15,9 +15,16 @@ import { join, resolve } from "node:path"
 import { jobsExit, renderJobsFile } from "../../../../../packages/scripts/src/playground/jobs"
 import { extGit, writeFiles, writeRoot } from "../../../../../packages/settings/src/folder"
 import { extensionsDir, scopeDir } from "../../../../../packages/settings/src/rendered"
+import { liveBusLines } from "../../../../systemd-stand-ins"
 
 const CHECKOUT = resolve(import.meta.dir, "../../../../..")
 const scratch = mkdtempSync(join(tmpdir(), "jobs-render-"))
+// a runtime folder of the scratch's own for each command-line render on Linux, so no systemd call finds the live bus, whatever the shell running the suite has set
+const runtime = join(scratch, "run")
+const SYSTEMD_ENV = {
+  DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtime}/bus`,
+  XDG_RUNTIME_DIR: runtime,
+}
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 const fill = {
@@ -681,20 +688,29 @@ test("on Linux the command line's render installs through systemctl --user, maki
   const bin = join(scratch, "cli-linux", "bin")
   mkdirSync(bin, { recursive: true })
   const said = join(bin, "said")
+  // each fake also logs the bus it was given, which must never be the user's live one
+  const bus = join(bin, "bus")
+  const logBus = `echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS" >> "${bus}"`
   writeFileSync(
     join(bin, "systemctl"),
-    `#!/bin/sh\necho "$*" >> "${said}"\n[ "$2" = is-active ] && exit 3\nexit 0\n`,
+    `#!/bin/sh\n${logBus}\necho "$*" >> "${said}"\n[ "$2" = is-active ] && exit 3\nexit 0\n`,
     { mode: 0o755 },
   )
   // a fake loginctl too, so the real one never turns linger on for whoever runs the suite
-  writeFileSync(join(bin, "loginctl"), `#!/bin/sh\necho "loginctl $*" >> "${said}"\necho yes\n`, {
-    mode: 0o755,
-  })
+  writeFileSync(
+    join(bin, "loginctl"),
+    `#!/bin/sh\n${logBus}\necho "loginctl $*" >> "${said}"\necho yes\n`,
+    { mode: 0o755 },
+  )
   const units = join(scratch, "cli-linux", "home", ".config", "systemd", "user")
   const err: string[] = []
   const code = await jobsExit(
     ["render", "--data", data, "--jobs", join(data, "ops", "jobs.json"), "--install", units],
-    { HOME: join(scratch, "cli-linux", "home"), PATH: `${bin}:${process.env.PATH}` },
+    {
+      ...SYSTEMD_ENV,
+      HOME: join(scratch, "cli-linux", "home"),
+      PATH: `${bin}:${process.env.PATH}`,
+    },
     () => {},
     (l) => err.push(l),
     "linux",
@@ -710,6 +726,9 @@ test("on Linux the command line's render installs through systemctl --user, maki
     `StandardOutput=append:${data}/ops/tick/launchd.log`,
   )
   expect(statSync(join(data, "ops", "tick")).isDirectory()).toBe(true)
+  const buses = readFileSync(bus, "utf8")
+  expect(buses).toContain(`XDG_RUNTIME_DIR=${runtime} `)
+  expect(liveBusLines(buses)).toEqual([])
 })
 
 test("on Linux with no systemctl on PATH the command line's render names the refused enable and exits 1", async () => {
@@ -727,7 +746,7 @@ test("on Linux with no systemctl on PATH the command line's render names the ref
       "--install",
       join(scratch, "cli-no-systemctl", "home", ".config", "systemd", "user"),
     ],
-    { HOME: join(scratch, "cli-no-systemctl", "home"), PATH: empty },
+    { ...SYSTEMD_ENV, HOME: join(scratch, "cli-no-systemctl", "home"), PATH: empty },
     () => {},
     (l) => err.push(l),
     "linux",
