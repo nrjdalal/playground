@@ -1,12 +1,9 @@
 import "@packages/env/load-dotenv"
 
-// A bin that reads the Dashboard's database imports this before @packages/env/db, whose check throws on an empty POSTGRES_URL with its schema's words; during first-run setup there is no database yet, so this says so in one line and exits 1. Under a skip flag @packages/env fills a dummy URL in its place (lib/polyfill.ts), so this stands aside as well.
-const skipped = [process.env.SKIP_ENV_VALIDATION, process.env.SKIP_ENV_VALIDATION_SERVER].includes(
-  "true",
-)
-if (!skipped && !process.env.POSTGRES_URL?.trim()) {
-  console.error(
-    "there is no database yet: finish first-run setup on the Dashboard, then run this again",
-  )
+// ask and thread read the database, which first run's setup has not made while POSTGRES_URL is empty, so they say so in one line rather than throw @packages/env/db's issue dump; imported before it validates, and on the same skip flags its polyfill reads.
+const skipped =
+  process.env.SKIP_ENV_VALIDATION === "true" || process.env.SKIP_ENV_VALIDATION_SERVER === "true"
+if (!process.env.POSTGRES_URL && !skipped) {
+  console.error("No database yet: finish first-run setup on the Dashboard, then run this again.")
   process.exit(1)
 }

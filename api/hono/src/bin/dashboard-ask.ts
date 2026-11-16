@@ -20,7 +20,7 @@ import {
   getPickLine,
   itemTag,
   openItems,
-  postItem,
+  postOrEdit,
   readAnswer,
   resolveItem,
   settleItem,
@@ -34,7 +34,7 @@ import { livePair, mainCheckoutOf, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]` lists the open items, oldest first, those posted in that window alone when given, each whole as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr), an update titled as one of its poster's an edit still takes editing that card in place (postOrEdit); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]` lists the open items, oldest first, those posted in that window alone when given, each whole as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (the plain-words skill)
@@ -43,6 +43,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 its Slack link's thread on Send or Approve, before its words
                                                 an update with text and attachments is a read-only card: it shows
                                                 them as an ask does, with no Approve or Deny
+                                                an update titled as one of yours an edit still takes edits that
+                                                card in place and prints its id, edited or unchanged, never a
+                                                second card
                                                 a secret ask names a key and a sink (a Vercel project, or a Keychain
                                                 item such as yard); the owner's value goes to the sink, and get shows
                                                 only when and each exit status, or saved
@@ -267,7 +270,7 @@ if (command === "new" || command === "edit") {
   const result =
     command === "edit"
       ? await editItem(db, key as string, kept.ok ? kept.input : input, undefined, dataDir())
-      : await postItem(db, kept.ok ? kept.input : input, flags?.thread, undefined, dataDir())
+      : await postOrEdit(db, kept.ok ? kept.input : input, flags?.thread, undefined, dataDir())
   if (!result.ok)
     fail(
       command === "edit" && result.code === "NOT_FOUND" ? `no inbox item ${key}` : result.message,
@@ -275,7 +278,14 @@ if (command === "new" || command === "edit") {
   else {
     // the id alone on stdout, as a poster's `id=$(bun run ask new < f)` takes it; the tag the owner sees beside it on stderr
     if (command === "new") console.log(result.item.id)
-    console.error(`ask: ${command === "edit" ? "edited" : "posted"} ${itemTag(result.item.ref)}`)
+    const tag = itemTag(result.item.ref)
+    console.error(
+      "unchanged" in result && result.unchanged
+        ? `ask: unchanged ${tag}: your update with this title already says this`
+        : "edited" in result && result.edited
+          ? `ask: edited ${tag}, your update with this title, in place of a second card`
+          : `ask: ${command === "edit" ? "edited" : "posted"} ${tag}`,
+    )
     if ("reopened" in result && result.reopened)
       console.error(
         "ask: reopened it: the owner had marked it Done, and it is back in the list as unread",

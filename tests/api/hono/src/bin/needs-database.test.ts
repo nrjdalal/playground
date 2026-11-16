@@ -1,28 +1,34 @@
-import { afterAll, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { afterAll, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-// Each bin starts as its own process, which a loaded runner takes seconds over.
-setDefaultTimeout(30_000)
-
+// A folder that is no git clone, two levels deep so load-dotenv's ../../.env stays inside it, with no .env: so no hand-off to a live checkout and no database to reach.
 const BIN = join(import.meta.dir, "../../../../../api/hono/src/bin")
-// a folder outside any checkout, with no .env for bun or load-dotenv to find, as a fresh machine's first run has
-const away = mkdtempSync(join(tmpdir(), "needs-database-"))
-afterAll(() => rmSync(away, { force: true, recursive: true }))
+const scratch = mkdtempSync(join(tmpdir(), "playground-needs-database-"))
+const cwd = join(scratch, "a", "b")
+mkdirSync(cwd, { recursive: true })
+afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// #2318: first run's setup has no database yet, so the bins say so in one line rather than the env check's schema dump.
-test.each([
-  ["ask", "dashboard-ask.ts", ["open"]],
-  ["thread", "dashboard-thread.ts", ["list"]],
-])("%s with an empty POSTGRES_URL says there is no database yet, in one line", (_, bin, args) => {
-  const run = Bun.spawnSync(["bun", "--no-env-file", join(BIN, bin), ...args], {
-    cwd: away,
-    env: { HOME: away, PATH: process.env.PATH, POSTGRES_URL: "" },
+const run = (bin: string, ...args: string[]) => {
+  const { SKIP_ENV_VALIDATION: _, SKIP_ENV_VALIDATION_SERVER: __, ...rest } = process.env
+  return Bun.spawnSync([process.execPath, join(BIN, bin), ...args], {
+    cwd,
+    env: { ...rest, PLAYGROUND_DATA_DIR: join(scratch, "data"), POSTGRES_URL: "" },
+    stderr: "pipe",
+    stdout: "pipe",
   })
-  expect(run.exitCode).toBe(1)
-  expect(run.stderr.toString()).toBe(
-    "there is no database yet: finish first-run setup on the Dashboard, then run this again\n",
-  )
-  expect(run.stdout.toString()).toBe("")
-})
+}
+
+for (const [bin, args] of [
+  ["dashboard-ask.ts", ["open"]],
+  ["dashboard-thread.ts", ["list"]],
+] as const)
+  test(`${bin} with an empty POSTGRES_URL says there is no database yet, in one line with no stack, and exits 1 (#2318)`, () => {
+    const done = run(bin, ...args)
+    expect(done.stderr.toString()).toBe(
+      "No database yet: finish first-run setup on the Dashboard, then run this again.\n",
+    )
+    expect(done.stdout.toString()).toBe("")
+    expect(done.exitCode).toBe(1)
+  })

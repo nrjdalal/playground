@@ -23,6 +23,8 @@ Its scope as your worker's lead ruled it, the bar you score against, and any har
 
 Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `rm` or `sh -c` wrapper, under the factory's **signal** and **slots** rules.
 
+**hold**: when your worker's lead tells you your PR is held, by its own line in the held list, stop your push waiter (`state.ts wait` or `checks`) by its own handle (`TaskStop`) and open no round while the hold stands, since a push the hold did not expect, from another machine, once opened a round on a held PR; on that lead's resume word, run `state.ts pr` and start the waiter code-review-loop's step 8 names, so a push made during the hold gets its round then. A ship's freeze is no hold: it holds the merge alone, so your waiter stays.
+
 **stop**: an urgent ticket gets the Mac, so on the Builder's stop set your round aside in your scratchpad, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; at the all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
 
 ## Steps
