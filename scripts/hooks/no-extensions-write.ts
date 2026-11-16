@@ -1586,7 +1586,7 @@ function ansiOut(text: string): string {
   return out
 }
 
-// The parts of a line the shell runs as code where the lexer reads a plain word, found outside a quoted heredoc's body, single quotes and a double-quoted text with no $: a zsh e glob qualifier, an e or P parameter flag's expansion and a zsh =(…), each as written with its single-quoted spans collapsed; a prompt expansion (@P) or a glob substitution (`${~…}`, `$~…`), which runs a value set elsewhere, gives the whole line
+// The parts of a line the shell runs as code, found outside a quoted heredoc's body, single quotes and a double-quoted text with no $: a zsh e glob qualifier and an e or P parameter flag's expansion, where the lexer reads a plain word, and a zsh =(…), whose commands the lexer reads too, each as written with its single-quoted spans collapsed; a prompt expansion (@P) or a glob substitution (`${~…}`, `$~…`), which runs a value set elsewhere, gives the whole line
 function evaluatedParts(text: string): string[] {
   const unquoted = singleQuotesOut(quotedBodiesOut(ansiOut(text)))
   // a double-quoted text right after an e may be a qualifier's code (`f(e"…")`), so it stays
