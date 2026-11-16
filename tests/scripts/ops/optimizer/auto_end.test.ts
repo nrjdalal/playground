@@ -10,12 +10,15 @@ import {
   cleanWorktree,
   cleanupHeld,
   cleanupLive,
+  type Carried,
   containersFor,
+  drainCarried,
   type EndDeps,
   endMerged,
   endOne,
   reportArgv,
   finishedOf,
+  leftoversOf,
   reasonOf,
   sweep,
   type Target,
@@ -1470,6 +1473,89 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       rest.map((p) => `removed ${p}`),
     )
   })
+
+  // #2407: safe-delete's cap of 3 moves a minute for each charged name, as a count; each move's name and each carried move kept
+  const capped = (deps: CleanupDeps, spent: Record<string, number> = {}) => {
+    const charged: string[] = []
+    const carried: Carried[] = []
+    const spend = (who: string, path: string) => {
+      charged.push(`${who} ${path}`)
+      spent[who] = (spent[who] ?? 0) + 1
+    }
+    const { rm } = deps
+    const over: Partial<CleanupDeps> = {
+      carry: async (item) => void carried.push(item),
+      rm: async (path, reason, pr, discard, who) => (
+        spend(who!, path),
+        rm(path, reason, pr, discard)
+      ),
+      rmOwn: async (path, _reason, who) => (spend(who, path), { ok: true, out: "" }),
+      room: (who) => (spent[who] ?? 0) < 3,
+    }
+    Object.assign(deps, over)
+    return { carried, charged, spent }
+  }
+
+  test("an ended checker's clone and leftovers are each charged to the checker, so its worker's own rm right after has its whole minute (#2407)", async () => {
+    const { clone, main, projects, target } = cloned()
+    const leftovers = ["scratch-k3m9px-reviewer", "tmp-k3m9px-reviewer"].map((n) =>
+      join(main, "..", n),
+    )
+    const { deps } = fakes(main, [], undefined, { leftovers: () => leftovers })
+    const { charged, spent } = capped(deps)
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual(
+      [clone, ...leftovers].map((p) => `removed ${p}`),
+    )
+    expect(charged).toEqual([clone, ...leftovers].map((p) => `k3m9px-reviewer ${p}`))
+    expect(spent["k3m9px-worker"]).toBeUndefined()
+    expect(deps.room!("k3m9px-worker")).toBe(true)
+  })
+
+  test("a checker with two clones of one PR has both removed under its name: the one past the cap is carried, never failed, and the next beat takes it (#2407)", async () => {
+    const { clone, main, projects, rest, target } = cloned(["test-7", "test-7-before"])
+    const [before] = rest as [string]
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    const { deps } = fakes(main, [])
+    const spent: Record<string, number> = { "k3m9px-tester": 2 }
+    const { carried, charged } = capped(deps, spent)
+    expect(await cleanupLive(projects, async () => deps)(tester)).toEqual([
+      `removed ${clone}`,
+      `kept ${before}: carried to the next auto-end beat, since k3m9px-tester has made its moves for this minute`,
+    ])
+    expect(carried).toEqual([
+      {
+        path: before,
+        pr: target.pr,
+        reason: "k3m9px-tester ended",
+        who: "k3m9px-tester",
+        worktree: true,
+      },
+    ])
+    expect(existsSync(before)).toBe(true)
+    spent["k3m9px-tester"] = 0
+    expect(await drainCarried(carried, deps)).toEqual([`removed ${before}`])
+    expect(charged).toEqual([clone, before].map((p) => `k3m9px-tester ${p}`))
+    expect(existsSync(before)).toBe(false)
+    expect(await drainCarried(carried, deps)).toEqual([])
+  })
+
+  test("a leftover safe-delete refuses, one over the tripwire, is kept with its refusal while the rest go (#2407)", async () => {
+    const { main, projects, target } = cloned()
+    const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
+    const [big, small] = ["tmp-big", "tmp-small"].map((n) => join(main, "..", n)) as [
+      string,
+      string,
+    ]
+    const refusal = `refused ${big}: it holds 5001 files, over the 5000-file tripwire`
+    const { deps } = fakes(main, [], undefined, { leftovers: () => [big, small] })
+    capped(deps)
+    deps.rmOwn = async (path) =>
+      path === big ? { ok: false, out: refusal } : { ok: true, out: "" }
+    expect(await cleanupLive(projects, async () => deps)(worker)).toEqual([
+      `kept ${big}: ${refusal}`,
+      `removed ${small}`,
+    ])
+  })
 })
 
 describe("endMerged: a closed session's worktrees are cleaned after its close, and only then", () => {
@@ -1507,5 +1593,30 @@ describe("reportArgv: the roster write that ends a row records why", () => {
       `endReason=${reason}`,
       "status=ended",
     ])
+  })
+})
+
+describe("an ended session's leftovers and the moves its end carried (#2407)", () => {
+  test("leftoversOf names its scratch and scratchpad folders, its memory settings file and, on Linux, each temp folder spawn.sh made it, never a longer name's", () => {
+    const tmp = [
+      "playground-k3m9px-worker.AbC123",
+      "playground-k3m9px-worker.Zz9",
+      "playground-k3m9px-worker-x.Q1",
+      "playground-builder.Z2",
+    ]
+    expect(leftoversOf("k3m9px-worker", "/d", tmp)).toEqual([
+      "/d/scratch/k3m9px-worker",
+      "/d/scratchpad/k3m9px-worker",
+      "/d/factory-settings-400k-memory-k3m9px-worker.json",
+      ...(process.platform === "linux"
+        ? ["/tmp/playground-k3m9px-worker.AbC123", "/tmp/playground-k3m9px-worker.Zz9"]
+        : []),
+    ])
+  })
+
+  test("the sweep makes the moves an earlier end carried before it ends anyone", async () => {
+    const line = { text: "Cleanup an earlier end carried: removed /x", to: "ops" }
+    const { deps } = fakes({ carried: async () => [line] })
+    expect(await sweep(input(), deps)).toEqual([line])
   })
 })

@@ -217,7 +217,7 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
-// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path), while scratch/ is a real folder reached through no symlink from the real HOME; none for a name no session may hold.
+// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, path when it is the memory trial's settings file spawn.sh wrote for the session, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path), while scratch/ is a real folder reached through no symlink from the real HOME; none for a name no session may hold.
 const ownScratchOf = (home: string, session: string, path: string): string[] => {
   if (!SESSION.test(session)) return []
   const name = basename(path)
@@ -228,12 +228,17 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
     dirname(path) === scratch &&
     (name.startsWith(`${session}-`) || name.startsWith(`${session}.`)) &&
     (!stat || stat.isFile())
+  const settings = join(
+    real(join(home, ".playground")),
+    `factory-settings-400k-memory-${session}.json`,
+  )
   return [
     ...[
       join(home, ".playground", "scratch", session),
       join(home, ".playground", "scratchpad", session),
     ].map(real),
     ...(loose ? [path] : []),
+    ...(path === settings && (!stat || stat.isFile()) ? [path] : []),
   ]
 }
 

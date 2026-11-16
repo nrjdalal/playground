@@ -335,48 +335,13 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     console.error(`playground: ${relinkRefused}`)
     return 1
   }
-  const session = "restore" in args ? "" : await deps.session()
-  const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
-  const repo = "worktree" in args && args.worktree ? worktreeRepo(args.path, roots) : null
-  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
-  const own =
-    "worktree" in args && args.worktree ? await deps.prState(args.path, args.pr) : undefined
-  const freed = own === undefined ? undefined : freedOf(own)
-  const done =
-    "restore" in args
-      ? restore(args.restore, roots)
-      : quarantine(
-          args.path,
-          {
-            ...(git ? { git } : {}),
-            ended: { live: STATUSES.live, roster: join(deps.data, "roster.json") },
-            reason: args.reason,
-            session,
-            worktree: args.worktree
-              ? {
-                  ...(own === "none" ? { archive: join(deps.data, "scratchpad", "archive") } : {}),
-                  clones: deps.clones,
-                  defaultBranch: deps.defaultBranch,
-                  discard: args.discard,
-                  ...(freed ? { freed } : {}),
-                  live: STATUSES.live,
-                  merged: deps.merged,
-                  note: (line: string) => console.log(`playground: ${line}`),
-                  places: deps.places,
-                  ...(args.pr ? { pr: args.pr } : {}),
-                  procs: deps.procs(),
-                  roster: join(deps.data, "roster.json"),
-                }
-              : undefined,
-          },
-          roots,
-        )
-  if ("refused" in done) {
-    if (done.kind !== "refused") deps.notify(`${session || "restore"}: ${done.refused}`)
-    console.error(`playground: ${done.refused}`)
-    return 1
-  }
-  if ("path" in done) {
+  if ("restore" in args) {
+    const done = restore(args.restore, roots)
+    if ("refused" in done) {
+      if (done.kind !== "refused") deps.notify(`restore: ${done.refused}`)
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
     const relinked = keptGit ? relink(done.path, repoOf(keptGit), keptGit) : null
     if (relinked) {
       console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
@@ -387,9 +352,63 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     )
     return 0
   }
-  if (repo) Bun.spawnSync(["git", "-C", repo, "worktree", "prune"])
-  console.log(
-    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}${done.bundle ? `; its commits no remote holds are kept in ${done.bundle}, which git -C ${repo ?? deps.main} fetch ${done.bundle} HEAD brings back` : ""}`,
+  const moved = await removePath(args, await deps.session(), deps, (line) =>
+    console.log(`playground: ${line}`),
   )
+  if (!moved.ok) {
+    console.error(`playground: ${moved.line}`)
+    return 1
+  }
+  console.log(moved.line)
   return 0
+}
+
+// One move into the trash charged to session, the name whose per-minute cap it spends: playground rm's with the session's own name, and auto-end's with the ended session's, so the holder checks, the cap and the move live here alone; a protected or tripwire refusal goes to the dispatcher.
+export async function removePath(
+  args: { discard: boolean; path: string; pr?: string; reason: string; worktree: boolean },
+  session: string,
+  deps: RmDeps,
+  note: (line: string) => void,
+): Promise<{ line: string; ok: boolean }> {
+  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
+  const git = args.worktree ? worktreeGit(args.path) : undefined
+  const repo = args.worktree ? worktreeRepo(args.path, roots) : null
+  // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
+  const own = args.worktree ? await deps.prState(args.path, args.pr) : undefined
+  const freed = own === undefined ? undefined : freedOf(own)
+  const done = quarantine(
+    args.path,
+    {
+      ...(git ? { git } : {}),
+      ended: { live: STATUSES.live, roster: join(deps.data, "roster.json") },
+      reason: args.reason,
+      session,
+      worktree: args.worktree
+        ? {
+            ...(own === "none" ? { archive: join(deps.data, "scratchpad", "archive") } : {}),
+            clones: deps.clones,
+            defaultBranch: deps.defaultBranch,
+            discard: args.discard,
+            ...(freed ? { freed } : {}),
+            live: STATUSES.live,
+            merged: deps.merged,
+            note,
+            places: deps.places,
+            ...(args.pr ? { pr: args.pr } : {}),
+            procs: deps.procs(),
+            roster: join(deps.data, "roster.json"),
+          }
+        : undefined,
+    },
+    roots,
+  )
+  if ("refused" in done) {
+    if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+    return { line: done.refused, ok: false }
+  }
+  if (repo) Bun.spawnSync(["git", "-C", repo, "worktree", "prune"])
+  return {
+    line: `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back${done.stripped ? ", and a bun install in it rebuilds what the strip removed" : ""}${done.stripFailed ? ` (the strip stopped partway: ${done.stripFailed}; the hourly strip takes the rest)` : ""}${done.bundle ? `; its commits no remote holds are kept in ${done.bundle}, which git -C ${repo ?? deps.main} fetch ${done.bundle} HEAD brings back` : ""}`,
+    ok: true,
+  }
 }

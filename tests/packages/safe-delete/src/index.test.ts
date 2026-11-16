@@ -209,6 +209,24 @@ describe("isProtected", () => {
     expect(restore(entry!.id, roots)).toEqual({ path })
     expect(readFileSync(path, "utf8")).toBe("probe")
   })
+
+  // #2407: a worker's end takes the memory trial's settings file spawn.sh wrote for it, which sits in the protected data folder.
+  test("lets the caller's own memory settings file go, and refuses another's, a link and the shared file", () => {
+    const roots = machine()
+    const data = join(roots.home, ".playground")
+    const own = file(join(data, `factory-settings-400k-memory-${opts.session}.json`), "{}")
+    expect(isProtected(own, roots, opts.session)).toBeNull()
+    expect(isProtected(own, roots)).toBeString()
+    expect(quarantine(own, opts, roots, { now: NOW })).toMatchObject({ files: 1 })
+    expect(existsSync(own)).toBe(false)
+    symlinkSync(file(join(roots.root, "elsewhere.json")), own)
+    for (const path of [
+      own,
+      file(join(data, "factory-settings-400k-memory-a4b5c6-worker.json")),
+      file(join(data, "factory-settings-400k.json")),
+    ])
+      expect(isProtected(path, roots, opts.session)).toBeString()
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
