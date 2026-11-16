@@ -265,6 +265,8 @@ const setup = ({
       'case "$url" in',
       `  https://bun.sh/install) ${fail.includes("bun") ? "exit 22" : `echo 'echo "bun installer $*" >> ${log}; mkdir -p "$HOME/.bun/bin" && cp ${store}/bun "$HOME/.bun/bin/bun"'`} ;;`,
       `  https://claude.ai/install.sh) ${fail.includes("claude") ? "exit 22" : `echo 'mkdir -p "$HOME/.local/bin" && cp ${store}/claude "$HOME/.local/bin/claude"'`} ;;`,
+      // uv's installer puts uv where UV_INSTALL_DIR names, and writes a startup line unless UV_NO_MODIFY_PATH is 1
+      `  https://astral.sh/uv/install.sh) ${fail.includes("uv") ? "exit 22" : `echo 'echo "uv installer UV_INSTALL_DIR=$UV_INSTALL_DIR UV_NO_MODIFY_PATH=$UV_NO_MODIFY_PATH" >> ${log}; mkdir -p "$UV_INSTALL_DIR" && cp ${store}/uv "$UV_INSTALL_DIR/uv"; [ "$UV_NO_MODIFY_PATH" = 1 ] || echo ". uv-env" >> "$HOME/.zshrc"'`} ;;`,
       `  https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh) ${fail.includes("brew") ? "exit 22" : `echo 'read -r answer; echo "homebrew installer read $answer" >> ${log}; mkdir -p ${prefix}/bin && cp ${store}/brew ${prefix}/bin/brew'`} ;;`,
       "  *) exit 22 ;;",
       "esac",
@@ -954,6 +956,68 @@ describe("install.sh", () => {
       expect(left).toEqual([])
       expect(out).not.toContain("portless's proxy service")
       expect(out).toEndWith("playground started\n")
+    }, 60_000)
+  })
+
+  describe("on Linux", () => {
+    const LINUX = { env: { INSTALL_OS: "Linux" } }
+    const UV_FIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
+
+    test("a missing uv comes from uv's own installer into ~/.local/bin, which on_path puts on PATH once, with no brew", () => {
+      const { home, rc, run } = setup({ missing: ["uv"] })
+      const { calls, code, left, out } = run(LINUX)
+      expect(calls).toContain("curl -LsSf https://astral.sh/uv/install.sh")
+      expect(calls).toContain(`uv installer UV_INSTALL_DIR=${home}/.local/bin UV_NO_MODIFY_PATH=1`)
+      expect(existsSync(join(home, ".local/bin/uv"))).toBe(true)
+      expect(count(rc() ?? "", PATH_LINE(join(home, ".local/bin")))).toBe(1)
+      expect(rc()).not.toContain("uv-env")
+      expect(calls).not.toContain("brew install")
+      expect(left).toEqual([])
+      expect(code).toBe(0)
+      expect(out).toEndWith("playground started\n")
+    }, 60_000)
+
+    test("a tool that needs the system's packages or Docker Engine goes on the list with Linux's fix, and nothing names brew", () => {
+      const { calls, left } = setup({
+        fail: ["uv"],
+        missing: ["docker", "gh", "python3", "uv"],
+        tty: true,
+      }).run(LINUX)
+      expect(left).toContain(
+        "docker: install Docker Engine: https://docs.docker.com/engine/install/",
+      )
+      expect(left).toContain(
+        "gh: install gh: https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+      )
+      expect(left).toContain(
+        "python3: your distro's python3 package, such as sudo apt install python3",
+      )
+      expect(left).toContain(`uv: ${UV_FIX}`)
+      expect(left.filter((item) => /brew|Homebrew/.test(item))).toEqual([])
+      expect(calls).not.toMatch(
+        /^(brew install|open |curl -fsSL https:\/\/raw\.githubusercontent\.com\/Homebrew)/m,
+      )
+    }, 60_000)
+
+    test("with no git and node it lists Linux's fixes and stops before the clone", () => {
+      const { dir, run } = setup({ missing: ["git", "node"], tty: true })
+      const { calls, code, left } = run(LINUX)
+      expect(code).toBe(1)
+      expect(left).toContain("git: your distro's git package, such as sudo apt install git")
+      expect(left).toContain("node: install Node from https://nodejs.org/en/download")
+      expect(left.filter((item) => /brew|Homebrew/.test(item))).toEqual([])
+      expect(calls).not.toContain("brew install")
+      expect(() => lstatSync(dir)).toThrow()
+    }, 60_000)
+
+    test("--check lists a missing uv with uv's own installer and runs none", () => {
+      const { bin, run } = setup()
+      expect(run(LINUX).code).toBe(0)
+      rmSync(join(bin, "uv"))
+      const { calls, left } = run({ args: ["--check"], ...LINUX })
+      expect(left).toContain(`uv: ${UV_FIX}`)
+      expect(left.filter((item) => /brew|Homebrew/.test(item))).toEqual([])
+      expect(calls).not.toContain("uv installer")
     }, 60_000)
   })
 

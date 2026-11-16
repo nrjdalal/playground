@@ -33,6 +33,10 @@ A tool it cannot install goes on the **Left for you** list it prints at the end,
 | `python3` | the background jobs                                                  | `brew install python`                                                                                    |
 | `uv`      | optional: the skills' own tests                                      | `brew install uv`                                                                                        |
 
+On Linux it installs only the tools whose own installers need no root: `bun`, `claude`, and `uv`, whose installer (`curl -LsSf https://astral.sh/uv/install.sh | sh`) puts it in `~/.local/bin`, which the installer adds to your `PATH`.
+Each other missing tool goes on the list with its Linux fix in place of Homebrew's: your distro's `git` and `python3` packages, Node from [nodejs.org](https://nodejs.org/en/download), `gh` from [its Linux install page](https://github.com/cli/cli/blob/trunk/docs/install_linux.md), and [Docker Engine](https://docs.docker.com/engine/install/).
+`playground doctor` names the same fixes.
+
 It stops to wait for you only where it cannot act alone, and only when it runs in a terminal; otherwise each of these goes on the list:
 
 - Homebrew's installer asks for your Mac's password.
