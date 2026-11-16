@@ -919,6 +919,37 @@ describe("status", () => {
   })
 })
 
+// spawn.sh resume reads why a row ended, so a session auto-end or a done ended stays down unless --force (#2351).
+describe("endReason", () => {
+  test("a done row records done, a reason given wins, and a live status or an assign drops it", async () => {
+    const config = configWith([WITH_PR])
+    const done = await run(config, ["set", "worker-greed", "status=done"])
+    expect(agentOf(done.roster, "worker-greed")?.endReason).toBe("done")
+    const given = await run(config, [
+      "report",
+      "worker-greed",
+      "ended automatically: worker-prs-done",
+      "endReason=worker-prs-done",
+      "status=ended",
+    ])
+    expect(agentOf(given.roster, "worker-greed")).toMatchObject({
+      endReason: "worker-prs-done",
+      status: "ended",
+    })
+    const back = await run(config, ["set", "worker-greed", "status=starting"])
+    expect(agentOf(back.roster, "worker-greed")?.endReason).toBeUndefined()
+    await run(config, ["set", "worker-greed", "status=done"])
+    const assigned = await run(config, ["assign", "worker-greed", "Next", "Do the next one"])
+    expect(agentOf(assigned.roster, "worker-greed")?.endReason).toBeUndefined()
+  })
+
+  test("a plain ended write records none, so a close then a resume needs no --force", async () => {
+    const r = await run(configWith([WITH_PR]), ["set", "worker-greed", "status=ended"])
+    expect(agentOf(r.roster, "worker-greed")).toMatchObject({ status: "ended" })
+    expect(agentOf(r.roster, "worker-greed")?.endReason).toBeUndefined()
+  })
+})
+
 // a worker sent its lead the literal placeholder <ETA>, and the roster stored it.
 describe("eta", () => {
   test.each([
