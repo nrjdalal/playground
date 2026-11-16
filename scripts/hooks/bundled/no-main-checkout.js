@@ -6137,7 +6137,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -8294,24 +8294,23 @@ var testsAName = (args, expands) => args.some((w, k) => {
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
-function steadyNames(named, commands, past = false) {
+function setterCounts(named, commands, parses) {
   if (named.blind || named.counts.has("IFS"))
-    return () => NONE2;
+    return;
   const counts = new Map(named.counts);
-  const parses = commands.map((cmd) => parse3(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name) || marked(name))
-      return () => NONE2;
+      return;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
-      return () => NONE2;
+      return;
     if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
-      return () => NONE2;
+      return;
     if (name === "print" && flagged(/P/))
-      return () => NONE2;
+      return;
     if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
-      return () => NONE2;
+      return;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
@@ -8323,13 +8322,20 @@ function steadyNames(named, commands, past = false) {
       if (!word)
         continue;
       if (marked(word.value.split("=")[0]))
-        return () => NONE2;
+        return;
       if (word.quoted && word.value.includes("["))
-        return () => NONE2;
+        return;
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
+  return counts;
+}
+function steadyNames(named, commands, past = false) {
+  const parses = commands.map((cmd) => parse3(cmd));
+  const counts = setterCounts(named, commands, parses);
+  if (!counts)
+    return () => NONE2;
   const set = new Map;
   const pasts = new Map;
   let moves = false;
