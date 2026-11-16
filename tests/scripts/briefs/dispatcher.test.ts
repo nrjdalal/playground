@@ -37,8 +37,13 @@ test("the dispatcher reads the Dashboard by /api/health and the Inbox by bun run
   expect(step).toContain(
     '`curl -sS ${C:+--cacert} ${C:+"$C"} "$(cd "$D" && PORTLESS_STATE_DIR="$P" bunx portless get api.playground)/api/health"`',
   )
-  expect(step).toContain('`"message":"ok"`')
-  expect(step).toContain('`"degraded"`')
+  expect(step).toContain(
+    'up in first-run setup, with no database yet, when it answers `"setup":true`',
+  )
+  expect(step).toContain(
+    'its database read from `db`, reachable on `"db":"ok"` and unreachable on `"db":"unreachable"`',
+  )
+  expect(step).not.toContain('`"message":"ok"`')
   expect(step).toContain("down on any other answer")
   expect(step).toContain('`bun run --cwd "$D" ask open`')
   expect(step).toContain("it has run neither read")

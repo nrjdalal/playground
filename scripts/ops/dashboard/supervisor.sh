@@ -310,7 +310,7 @@ quiet_for() { local c; c=$(dashboard_container) || return 0; docker exec "$c" ps
 owner_idle() {
   local q a newest
   q=$(quiet_for); [ -n "$q" ] || return 0
-  newest=$(stat -f %m "$ASKS"/*.json 2>/dev/null | sort -n | tail -1)
+  newest=$({ stat -c %Y "$ASKS"/*.json 2>/dev/null || stat -f %m "$ASKS"/*.json 2>/dev/null; } | sort -n | tail -1)
   a=$(( $(date +%s) - ${newest:-0} ))
   [ "$a" -lt "$q" ] && echo "$a" || echo "$q"
 }

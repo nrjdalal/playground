@@ -1932,3 +1932,19 @@ describe("trash_build", () => {
     ).toContain(`dashboard-supervisor: ${staging} is not directly in ${join(state, "builds")}`)
   }, 30_000)
 })
+
+describe("the supervisor's owner idle", () => {
+  test("reads an Inbox answer's mtime in GNU stat's form or BSD's, so a fresh answer counts on Linux too", async () => {
+    const asks = join(scratch, "asks")
+    mkdirSync(asks, { recursive: true })
+    const owner = script.match(/^owner_idle\(\) \{\n[\s\S]*?\n\}$/m)?.[0]
+    expect(owner).toBeDefined()
+    const proc = Bun.spawn(
+      ["bash", "-c", `quiet_for() { echo 999999; }\n${owner}\ntouch "$ASKS/a.json"\nowner_idle`],
+      { env: { ...process.env, ASKS: asks }, stdout: "pipe" },
+    )
+    const idle = Number((await new Response(proc.stdout).text()).trim())
+    expect(idle).toBeGreaterThanOrEqual(0)
+    expect(idle).toBeLessThan(60)
+  })
+})
