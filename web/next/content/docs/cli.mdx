@@ -137,6 +137,7 @@ The HTML moves first and the record drops second, so a refused move leaves the p
 `playground ci-wait <pr>` waits until each check `pr:merge` needs, `Audit, Lint, and Build` and `test`, exists at the PR's head and has finished, then prints each result and exits 0 when all passed, else 1.
 It reads GitHub every 5 minutes, waits out a rate limit, and starts over when a push moves the head.
 When a check's workflow run ends without creating the check, it exits 1 and names the `gh run rerun` that brings it.
+When the PR conflicts with its base, it exits 1 at once with `#<n> conflicts with <base>: no CI runs until <base> is merged in`, since GitHub starts no CI on such a PR; while GitHub has not yet worked out whether an open PR merges, it waits, and a merged or closed PR, whose answer stays unknown, has its checks read as they stand.
 When GitHub does not know the PR or repo, or refuses your login, it exits 2 at once.
 `--repo <owner/name>` points it at another repo; it reads the factory's own by default.
 Run it as a background task, and read the head's checks once more yourself before you call it green.
