@@ -25,7 +25,7 @@ packages/cli/         # the zerostarter scaffolding CLI (canonical repo only; in
 tests/                # the whole suite, mirroring each subject's path; *.e2e.test.ts drive a running stack (canonical repo only; forks take no tests)
 ```
 
-Read `AGENTS.md` first for the rules (the dashboard app's are in `.agents/dashboard/<topic>.md`: AGENTS.md holds each ALWAYS rule in one line and a pointer naming when to read its file); `curl "${CA[@]}" "$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground)/llms-full.txt"`, with `PDIR` and `CA` set as in the `dev` skill's Start, dumps the whole codebase as one context file.
+Read `AGENTS.md` first for the rules (the dashboard app's are in `.agents/dashboard/<topic>.md`: AGENTS.md holds each ALWAYS rule in one line and a pointer naming when to read its file); `curl --cacert <pdir>/ca.pem "$(PORTLESS_STATE_DIR=<pdir> bunx portless get playground)/llms-full.txt"`, with `<pdir>` the path the `dev` skill's Start prints, dumps the whole codebase as one context file.
 
 ## Trace a feature across the stack
 
