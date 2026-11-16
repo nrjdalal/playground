@@ -2,6 +2,7 @@
   It runs that branch's latest head on `origin`, never one off hashes, branches or worktrees, and only rolls forward: a head the running one already holds (`main` behind a checkout that rolled on `canary`) waits, logged once, until the branch passes it.
   Each git call that reaches `origin` goes through `net-git.sh`, with no prompt and no credential helper and stopped after 20 seconds, so a hidden keychain prompt costs one logged line and the head stays.
   Its checkout stays on the branch `live.branch` names (`live/dashboard` by default), since the source rule and portless need that name, and ops-dashboard's supervisor (`scripts/ops/dashboard/supervisor.sh`) rolls it.
+  `playground rm --worktree` refuses that checkout outright, `--discard` included, even with the Dashboard stopped (`worktreeRefusal` in `packages/safe-delete/src/index.ts`), so it moves only by this roll.
   On each move of that branch it first builds the new head while the old stack serves (`prebuild`): from a detached staging worktree, `ops/dashboard/staging`, its `node_modules` a copy-on-write clone of the checkout's and its `.env` the checkout's, into `ops/dashboard/builds/<sha>` by `build_head`, then removes the staging worktree, whether the build passed or failed.
   That clone runs `cp -cR` on macOS and `cp -R --reflink=auto` on Linux, whose `cp` has no `-c`.
   It installs there with `NODE_ENV` and `SKIP_ENV_VALIDATION` unset, as `redeploy-pull.sh` does, so bun keeps the dev dependencies the build needs.
