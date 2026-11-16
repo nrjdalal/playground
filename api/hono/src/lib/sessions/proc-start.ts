@@ -1,12 +1,10 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { procRoot } from "@packages/scripts/ops-machine/readings"
+
 // Claude Code's registry file records when its process started (procStart) in its machine's own form: on macOS as `ps -o lstart=` prints it under C (`Mon Nov 16 07:02:17 2026`), on Linux as clock ticks since boot, field 22 of /proc/<pid>/stat (`1801742`), which this shape tells apart.
 export const TICKS = /^\d+$/
-
-// The folder /proc's text comes from, by the rule packages/scripts/src/ops-machine/readings.ts reads it by: PLAYGROUND_PROC under the test sandbox's marker alone (TEST_SANDBOX_HOME), where a test points it at recorded text; else /proc.
-const procRoot = (): string =>
-  (process.env.TEST_SANDBOX_HOME && process.env.PLAYGROUND_PROC) || "/proc"
 
 // When pid's process started, in clock ticks since boot, or null when /proc lists no such process. Its command (field 2) sits in parentheses and may hold spaces or a parenthesis, so the fields are counted past its last ")".
 export function ticksOf(pid: number): string | null {
