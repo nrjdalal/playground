@@ -12,6 +12,9 @@ const lint = async (code: string) => {
     join(REPO, "node_modules/.bin/oxlint"),
     "-c",
     join(REPO, ".oxlintrc.jsonc"),
+    // one output layout everywhere, since oxlint picks its own layout under an agent session
+    "-f",
+    "unix",
     file,
   ])
   return { exitCode: run.exitCode, out: run.stdout.toString() }
@@ -21,7 +24,7 @@ test("an unused import fails lint, so it never reaches canary as a warning (#232
   const { exitCode, out } = await lint(
     'import { join, sep } from "node:path"\nexport const root = sep\n',
   )
-  expect(out).toContain("error eslint(no-unused-vars)")
+  expect(out).toContain("[Error/eslint(no-unused-vars)]")
   expect(exitCode).toBe(1)
 })
 
