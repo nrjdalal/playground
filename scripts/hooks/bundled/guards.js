@@ -17453,6 +17453,7 @@ var FETCH_OPTIONS = new Set([
   "-t"
 ]);
 var QUIET = new Set(["-q", "--quiet"]);
+var STATE_READS = new Set(["checks", "delta", "fresh", "pr", "scan", "touched-tests", "wait"]);
 var SED_ADDRESS2 = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 var SED_PRINT = new RegExp(`^${SED_ADDRESS2}(?:,${SED_ADDRESS2})?p$`);
 var SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/;
@@ -17573,6 +17574,7 @@ async function inspect14(command, directory, environment, lookup, own = []) {
     const path = real3(written);
     return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/") && lookup.tracked(path);
   };
+  const runsPrTests = (script, rest) => script !== undefined && real3(script).endsWith("/code-review-loop/scripts/state.ts") && !STATE_READS.has(rest[0] ?? "") && !(rest[0] === "merge" && rest.includes("--conflict-only"));
   const inMain = (folder) => {
     if (folder === undefined)
       return false;
@@ -17621,7 +17623,7 @@ async function inspect14(command, directory, environment, lookup, own = []) {
     if (first && first.value.includes("/")) {
       if (program && under(program, slot) && program.length === slot.length)
         return true;
-      if (!skillScript(program))
+      if (!skillScript(program) || runsPrTests(program, args.map((a) => a.value)))
         return false;
       const runner = lookup.runner(real3(program));
       return runner === undefined || FOLDERLESS.has(runner) || inMain(here.cwd);
@@ -17687,8 +17689,10 @@ async function inspect14(command, directory, environment, lookup, own = []) {
       }
       return GH2.has(group) && !checkout && !words.includes("--");
     }
-    if (INTERPRETERS2.has(name) && args[0] && !args[0].value.startsWith("-"))
-      return skillScript(pathOf(args[0], here));
+    if (INTERPRETERS2.has(name) && args[0] && !args[0].value.startsWith("-")) {
+      const script = pathOf(args[0], here);
+      return skillScript(script) && !runsPrTests(script, args.slice(1).map((a) => a.value));
+    }
     return false;
   };
   const visit = async (cmd, parsed, env) => {
@@ -18130,7 +18134,7 @@ if (false) {}
 import { realpathSync as realpathSync6 } from "fs";
 import { basename as basename9, dirname as dirname10, resolve as resolve11, sep as sep4 } from "path";
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
-var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary.";
+var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary or on a branch origin still holds.";
 var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
 var shown2 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([

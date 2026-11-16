@@ -15,12 +15,13 @@ export type Run = (
   options?: { cwd?: string; env?: Record<string, string | undefined>; timeoutMs?: number },
 ) => Promise<{ code: number; err: string; out: string }>
 
-// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout, repo the checkout this job runs from, and factory the factory's GitHub repository (factory.repo by default).
+// cfg is Claude Code's config folder, data the factory's folder in it, ops the ops jobs' state, dashboard the live dashboard's checkout, main the main checkout, repo the checkout this job runs from, factory the factory's GitHub repository (factory.repo by default), and herdr a read of herdr's CLI on one server.
 export type Context = {
   cfg: string
   data: string
   dashboard: string
   factory?: () => Promise<string>
+  herdr?: (server: string, args: string[]) => Promise<string>
   load: () => number
   main: string
   now: () => number
@@ -110,6 +111,46 @@ export async function registry(ctx: Context): Promise<Map<string, string>> {
       live.set(d.name, typeof d.status === "string" ? d.status : "")
   }
   return live
+}
+
+// An --ssh probe's claude runs on the far box, out of this machine's registry, so it counts live while any pane labelled with its name still runs ssh; one pane list a server, read only when such a probe is unended.
+export async function sshLive(ctx: Context, names: string[]): Promise<string[]> {
+  const byServer = new Map<string, string[]>()
+  for (const name of names) {
+    const record = await Bun.file(join(ctx.data, "resume", `${name}.sh`))
+      .text()
+      .catch(() => "")
+    if (!/^exec .* --ssh /m.test(record)) continue
+    const server = record.match(/^# server: (.+)$/m)?.[1] ?? "playground"
+    byServer.set(server, [...(byServer.get(server) ?? []), name])
+  }
+  if (!ctx.herdr || !byServer.size) return []
+  const herdr = ctx.herdr
+  const read = async (server: string, args: string[]): Promise<Json> => {
+    try {
+      return JSON.parse(await herdr(server, args)) as Json
+    } catch {
+      return {}
+    }
+  }
+  const out: string[] = []
+  for (const [server, wanted] of byServer) {
+    const result = (await read(server, ["pane", "list"])).result as Json | undefined
+    const panes = (Array.isArray(result?.panes) ? result.panes : []) as Json[]
+    for (const name of wanted) {
+      for (const { label, pane_id: pane } of panes) {
+        if (label !== name || typeof pane !== "string") continue
+        const info = (await read(server, ["pane", "process-info", "--pane", pane])).result as
+          | { process_info?: { foreground_processes?: { name?: string }[] } }
+          | undefined
+        if (info?.process_info?.foreground_processes?.some((p) => p.name === "ssh")) {
+          out.push(name)
+          break
+        }
+      }
+    }
+  }
+  return out
 }
 
 // Records a usage sample, then projects each window to its reset from the recent rate (5h: the last hour, 7d: the last 3 hours).
@@ -703,12 +744,17 @@ export async function check(ctx: Context): Promise<string[]> {
     return [`roster-unreadable:${e.code ?? e.name ?? "Error"}`]
   }
   const agents = (Array.isArray(roster.agents) ? roster.agents : []) as Json[]
+  const kinds = new Map(agents.map((a) => [a.name, a.kind]))
   const live = await registry(ctx)
+  const unended = agents
+    .filter((a) => a.status !== "ended" && a.status !== "parked" && typeof a.name === "string")
+    .map((a) => a.name as string)
+    .filter((name) => !live.has(name) && kindOf(name, kinds.get(name)) === "probe")
+  for (const name of await sshLive(ctx, unended)) live.set(name, "")
   const now = Math.floor(seconds(ctx))
   const seenPath = join(here(ctx), "probe-first-seen.json")
   const seen = numbers(await readJson(seenPath, {}))
   const recorded = new Set(agents.filter((a) => a.status !== "ended").map((a) => a.name))
-  const kinds = new Map(agents.map((a) => [a.name, a.kind]))
   const found: string[] = []
   for (const a of agents) {
     const name = typeof a.name === "string" ? a.name : ""

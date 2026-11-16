@@ -18,7 +18,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, else the --pr its record names, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
 #   spawn.sh close     <name> [session-id]              closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; a session whose start stopped before its runtime pin closes too while its record stands and one pane carries its label, the pin written first; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close; with a session id, it closes the one labelled pane whose claude runs that session, so one of two panes under the name closes, the row and its close time left to the other while it stands
 #   spawn.sh read      <name> [session-id]              prints the last 200 lines of the herdr pane spawn.sh opened for <name>, found as close finds it, on the server its resume record names, playground-probes included, and writes nothing
 #   --size <small|medium|big>  with any mode but restore, close or read, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
@@ -665,6 +665,60 @@ try:
                 parked[row["email"].lower()] = row["parkedUntil"]
         except (KeyError, TypeError, ValueError, AttributeError):
             pass
+    # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
+    # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
+    pace_off = None
+    try:
+        with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
+            until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
+        if until.tzinfo is not None and until > now:
+            pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    except (OSError, ValueError):
+        pass
+
+    # One login's reading: what it read, and why it is over the gate (None when it passes).
+    def judge(name, usage, limit, writer):
+        seen = {}
+        try:
+            written = from_iso(usage["writtenAt"])
+        except (KeyError, TypeError, ValueError):
+            return seen, f"it cannot read {name} (does not read)"
+        age = int((now - written).total_seconds() // 60)
+        if age >= limit:
+            return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
+        rate = usage.get("rate_limits")
+        if not isinstance(rate, dict):
+            return seen, f"{name} holds no rate_limits (does not read)"
+        try:
+            week = rate["seven_day"]
+            resets = from_iso(week["resets_at"])
+            week_pct = week["used_percentage"]
+            if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
+                raise TypeError
+        except (KeyError, TypeError, ValueError):
+            return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
+        five = rate.get("five_hour")
+        five_hour = five.get("used_percentage") if isinstance(five, dict) else None
+        if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+        seen["fiveHour"] = "none" if five_hour is None else five_hour
+        if five_hour is not None and five_hour >= 90:
+            try:
+                reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
+            except (KeyError, TypeError, ValueError):
+                reset = "later"
+            return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
+        seen["week"] = week_pct
+        if pace_off:
+            if week_pct >= 98:
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+        else:
+            days_in = 7 - (resets - now).total_seconds() / 86400
+            pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
+            if week_pct > pace:
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
+        return seen, None
+
     if account:
         if account.lower() in parked:
             refuse("usage", f"--account {account} is parked until {parked[account.lower()]} (usage.accounts parkedUntil). Name another account, or none, so it starts on the login with the most room")
@@ -702,7 +756,22 @@ try:
                 roomiest = min(((acct, week) for key, (acct, week, _) in weeks.items() if key != account.lower() and week < 100), key=lambda pair: pair[1], default=None)
                 hint = f"Name {roomiest[0]}, the account with the most room (its week reads {fmt(roomiest[1])}%), or, for a session that may run on this machine's login, none" if roomiest else "No account in usage.json's accounts has room; wait for a week to reset"
                 refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% (usage.json accounts) until {resets:%a %H:%M} UTC. {hint}")
-        readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
+        # its own usage-<local part>.json, which the ops tick's other-logins beat writes every 30 minutes (account-watch.py), judged at a bare start's pace while under its hour; with none fresh, the check skips
+        name = f"usage-{account.split('@')[0]}.json"
+        other, other_detail = load(name)
+        try:
+            age = (now - from_iso(other["writtenAt"])).total_seconds() / 60 if not other_detail and str(other.get("account") or "").lower() == account.lower() else None
+        except (AttributeError, KeyError, TypeError, ValueError):
+            age = None
+        if age is None or age >= 60:
+            readings["usage"] = f"skipped (--account {account}: this machine holds no {name} for it under 60 minutes old, which the ops tick's other-logins beat writes)"
+        else:
+            seen, detail = judge(name, other, 60, "")
+            readings.update(seen)
+            if pace_off:
+                readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+            if detail:
+                refuse("usage", f"--account {account}: {detail}. Name another account, or none, so it starts on the login with the most room")
     elif backend == "glm":
         beat = read("ops/ops-zai-usage.json")
         if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
@@ -739,64 +808,10 @@ try:
             week_pct = None
         readings["week"] = week_pct
     else:
-        # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
-        # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
-        pace_off = None
-        try:
-            with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
-                until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
-            if until.tzinfo is not None and until > now:
-                pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        except (OSError, ValueError):
-            pass
         if pace_off:
             readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
-
-        # One login's reading: what it read, and why it is over the gate (None when it passes).
-        def judge(name, usage, limit, writer):
-            seen = {}
-            try:
-                written = from_iso(usage["writtenAt"])
-            except (KeyError, TypeError, ValueError):
-                return seen, f"it cannot read {name} (does not read)"
-            age = int((now - written).total_seconds() // 60)
-            if age >= limit:
-                return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
-            rate = usage.get("rate_limits")
-            if not isinstance(rate, dict):
-                return seen, f"{name} holds no rate_limits (does not read)"
-            try:
-                week = rate["seven_day"]
-                resets = from_iso(week["resets_at"])
-                week_pct = week["used_percentage"]
-                if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
-                    raise TypeError
-            except (KeyError, TypeError, ValueError):
-                return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
-            five = rate.get("five_hour")
-            five_hour = five.get("used_percentage") if isinstance(five, dict) else None
-            if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-                five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
-            seen["fiveHour"] = "none" if five_hour is None else five_hour
-            if five_hour is not None and five_hour >= 90:
-                try:
-                    reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
-                except (KeyError, TypeError, ValueError):
-                    reset = "later"
-                return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
-            seen["week"] = week_pct
-            if pace_off:
-                if week_pct >= 98:
-                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
-            else:
-                days_in = 7 - (resets - now).total_seconds() / 86400
-                pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
-                if week_pct > pace:
-                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
-            return seen, None
-
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-        # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
+        # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
         usage, detail = load("usage.json")
         own = usage.get("account") if isinstance(usage, dict) else None
         writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -831,7 +846,7 @@ try:
             email = other.get("account") if isinstance(other, dict) else None
             if not isinstance(email, str) or not email or email.lower() in known:
                 continue
-            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
+            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and the ops tick's other-logins beat (account-watch.py <email>) every other account's every 30 minutes.")
             logins.append((email, name, email, seen, detail))
             # a refused file leaves the account open to its login-flip reading below
             if detail is None:
@@ -864,7 +879,10 @@ try:
         if not passing:
             readings.update(logins[0][3])
             if len(logins) == 1:
-                refuse("usage", logins[0][4])
+                # the one login this machine reads is parked: name each usage.accounts Claude row neither parked nor read here, the way out on a machine with one login
+                only = str(logins[0][0]).lower()
+                others = [row["email"] for row in gates["accounts"] if isinstance(row, dict) and isinstance(row.get("email"), str) and row.get("provider") in (None, "claude") and row["email"].lower() not in parked and row["email"].lower() != only] if only in parked else []
+                refuse("usage", logins[0][4] + (f". usage.accounts also lists {', '.join(others)}, not parked and not signed in on this machine: sign one in with Add account in the Dashboard's Settings, then start it again" if others else ""))
             readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
             refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
         # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (playbook's SPAWN.md, --account), else the lowest week
@@ -1786,6 +1804,37 @@ restoring_row_down() {
   return 1
 }
 ! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
+# Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the session's folder and each folder above it up to the checkout's root and no further (measured on 2.1.325), so the yes on the checkout's root covers every worktree in it and a yes on a folder above the checkout counts for nothing.
+# A Claude session in this checkout starts only once that yes is there, which first run's Trust this folder records; a folder outside it keeps herdr_answer's answer, and an --ssh probe's claude runs on the other machine, whose own config it reads.
+claude_trusts() {
+  python3 -I - "$(own_config)" "$1" "$2" <<'PY'
+import json, os, sys
+try:
+    projects = json.load(open(sys.argv[1])).get("projects") or {}
+except Exception:
+    sys.exit(1)
+yes = set()
+for path, project in projects.items():
+    if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
+        yes |= {os.path.abspath(path), os.path.realpath(path)}
+for d, top in ((os.path.abspath(sys.argv[2]), os.path.abspath(sys.argv[3])), (os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[3]))):
+    while True:
+        if d in yes:
+            sys.exit(0)
+        if d == top or os.path.dirname(d) == d:
+            break
+        d = os.path.dirname(d)
+sys.exit(1)
+PY
+}
+if [ "$HARNESS" != codex ] && [ -z "$SSH_HOST" ]; then
+  for checkout in "$MAIN" "${PLAYGROUND_REPO:-$MAIN}"; do
+    [[ ${DIR:-$REPO}/ == "$checkout"/* ]] || continue
+    claude_trusts "${DIR:-$REPO}" "$checkout" ||
+      refuse "Claude Code would stop on its folder trust question in ${DIR:-$REPO}, since $(own_config) holds no yes for $checkout: click Trust this folder on Claude Code's card, in the Dashboard's first run or Settings' Harness section, then start it again"
+    break
+  done
+fi
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in

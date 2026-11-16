@@ -10,7 +10,13 @@ import {
   managerOf,
 } from "@packages/config/kinds"
 import { purgeTrash, stripTrash } from "@packages/safe-delete"
-import { accountSettings, readPolicy, ruleSettings } from "@packages/settings"
+import {
+  accountKey,
+  accountSettings,
+  accountsOf,
+  readPolicy,
+  ruleSettings,
+} from "@packages/settings"
 
 import {
   sweep as autoEndSweep,
@@ -98,8 +104,8 @@ const lines = (out: string): string[] =>
     .map((line) => line.trimEnd())
     .filter(Boolean)
 
-const python = (ctx: Context, path: string, isolated = true) =>
-  ctx.run(["python3", ...(isolated ? ["-I"] : []), join(ctx.ops, path)])
+const python = (ctx: Context, path: string, isolated = true, args: string[] = []) =>
+  ctx.run(["python3", ...(isolated ? ["-I"] : []), join(ctx.ops, path), ...args])
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await Bun.file(path).text())
 
@@ -703,6 +709,54 @@ const glmCredits = async (ctx: Context) => {
   )
 }
 
+// Every Claude row of usage.accounts but the stored login, which ops-usage reads, read by account-watch.py into usage-<local part>.json, so spawn.sh judges an --account start on a reading under its hour; each line lands in ops/log/account-watch.log, and a read that fails throws, so the beat reads failed. A login whose read fails twice in a row has a file past that hour, which spawn.sh skips, so ops is told once per run of failures, kept in tick/other-logins.json by login until a read passes.
+export const otherLogins = async (ctx: Context) => {
+  const read = await readPolicy(join(ctx.ops, ".."))
+  if (read.refusal !== undefined) throw new Error(`the policy does not read: ${read.refusal}`)
+  const stored = (await readJson(join(ctx.ops, "usage", "stored-login.json")).catch(
+    () => null,
+  )) as {
+    account?: unknown
+  } | null
+  const skip = typeof stored?.account === "string" ? stored.account.toLowerCase() : ""
+  const emails = accountsOf(accountSettings.get(read.settings, "usage.accounts"), "claude")
+    .map(accountKey)
+    .filter((email) => email.includes("@") && email.toLowerCase() !== skip)
+  const streakPath = join(ctx.ops, "tick", "other-logins.json")
+  const streaks = ((await readJson(streakPath).catch(() => ({}))) ?? {}) as Record<
+    string,
+    { failed: number; told?: boolean }
+  >
+  const before = JSON.stringify(streaks)
+  const failed: string[] = []
+  const log: string[] = []
+  for (const email of emails) {
+    const { code, out } = await python(ctx, "usage/account-watch.py", true, [email])
+    const line = lines(out).at(-1) ?? `${email}: exit ${code}`
+    log.push(`${isoSeconds(ctx.now)} ${line.slice(0, 300)}\n`)
+    if (!code) {
+      delete streaks[email]
+      continue
+    }
+    failed.push(line)
+    const streak = (streaks[email] = {
+      failed: (streaks[email]?.failed ?? 0) + 1,
+      told: streaks[email]?.told,
+    })
+    if (streak.failed >= 2 && !streak.told) {
+      const text = `other-logins: ${email}'s usage read failed ${streak.failed} times in a row, so spawn.sh skips the usage check for --account ${email}: ${line.slice(0, 300)}`
+      if (await ctx.send("ops", text, true)) streak.told = true
+    }
+  }
+  for (const email of Object.keys(streaks)) if (!emails.includes(email)) delete streaks[email]
+  if (JSON.stringify(streaks) !== before) await writeAtomic(streakPath, JSON.stringify(streaks))
+  if (log.length) {
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(join(ctx.ops, "log", "account-watch.log"), log.join(""))
+  }
+  if (failed.length) throw new Error(failed.join("; "))
+}
+
 const freeBytes = (dir: string): number => {
   const fs = statfsSync(dir)
   return fs.bavail * fs.bsize
@@ -1006,6 +1060,12 @@ export const BEATS: Beat[] = [
   { cron: "7,37 * * * *", name: "sweep", run: sweep, to: "the session's lead, ops, dispatcher" },
   { cron: "*/5 * * * *", name: "auto-end", run: autoEnd(), to: "the session's lead" },
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
+  {
+    cron: "21,51 * * * *",
+    name: "other-logins",
+    run: otherLogins,
+    to: "ops/log/account-watch.log",
+  },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
   {
