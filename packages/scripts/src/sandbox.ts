@@ -6,13 +6,16 @@ import { makeScratch } from "@packages/safe-delete"
 
 import { BOX_ENV_KEYS, boxEnv } from "./box-env"
 
-// The caller's variables a test or check still reads: the suite's own switches and Docker's socket; every other one, the live state an absolute path names included, stays out
+// The caller's variables a test or check still reads: the suite's own switches, Docker's socket and the URLs `test:e2e` passes; every other one, the live state an absolute path names included, stays out
 export const SANDBOX_KEYS: readonly string[] = [
   ...BOX_ENV_KEYS,
   "CI",
   "CLAUDECODE",
   "CLOCK_AHEAD_DAYS",
   "DOCKER_HOST",
+  "E2E_API_URL",
+  "E2E_POSTGRES_URL",
+  "E2E_WEB_URL",
   "NODE_ENV",
   "SKIP_ENV_VALIDATION",
 ]

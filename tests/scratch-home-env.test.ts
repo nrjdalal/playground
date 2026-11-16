@@ -47,8 +47,10 @@ const literalAt = (text: string, at: number) => {
       depth--
     } else if (
       depth === 0 &&
-      /^HOME\s*:(?!\s*process\.env\.HOME\b)/.test(text.slice(end, end + 40)) &&
-      !/\w/.test(text[end - 1] ?? "")
+      /^(?:"HOME"|'HOME'|HOME)\s*(?::(?!\s*process\.env\.HOME\b)|[,}])/.test(
+        text.slice(end, end + 40),
+      ) &&
+      !/[\w.$]/.test(text[end - 1] ?? "")
     )
       home = true
   }
@@ -87,6 +89,10 @@ const tracked = () =>
 
 test("the scan finds a plain, a rest and a filtered spread of process.env beside a HOME, and leaves a real HOME alone", () => {
   expect(spreads("const env = { ...process.env, HOME: home }")).toHaveLength(1)
+  expect(spreads("const env = { ...process.env, HOME }")).toHaveLength(1)
+  expect(spreads("const env = { ...process.env, HOME, PATH: p }")).toHaveLength(1)
+  expect(spreads('const env = { ...process.env, "HOME": home }')).toHaveLength(1)
+  expect(spreads("const env = { ...process.env, X: process.env.HOME, HOMEDIR: d }")).toEqual([])
   expect(spreads("const { A: _, ...rest } = process.env\nrun({ ...rest, HOME: at })")).toHaveLength(
     1,
   )
