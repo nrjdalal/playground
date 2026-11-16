@@ -681,7 +681,7 @@ describe("headerIcons over a cluster", () => {
     const cpu = icons(read).icons.find((i) => i.key === "cpu")!
     expect(cpu.value).toBe("20")
     expect(cpu.hover).toBe(
-      "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores",
+      "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores, 5 min.",
     )
   })
 })
