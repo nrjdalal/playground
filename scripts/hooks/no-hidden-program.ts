@@ -22,7 +22,7 @@ const changedIn = (command: string): Set<string> =>
 // A zsh numeric range glob (`<->`, `<1-5>`), which zsh globs into a word with no option set while the shared reader keeps reading its `<` as a redirect, as every other guard does; found anywhere in the call's text, so a script the walk follows is covered too
 const NUMERIC_RANGE = /<\d*-\d*>/
 
-// Judges the readings that run: the primary parse's program word and the program a package runner runs (`npx pkill`), never another reading that takes an option's value as the program (`nice -n $N ls`)
+// Judges the readings that run: the primary parse's program word and the program a package runner runs (`npx oxfmt`), never another reading that takes an option's value as the program (`nice -n $N ls`)
 const visitOf =
   (changed: ReadonlySet<string>): Visit =>
   async (cmd, { first, via }, at) => {

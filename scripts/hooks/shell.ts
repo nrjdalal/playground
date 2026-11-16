@@ -2073,7 +2073,7 @@ function subcommandAt(manager: string, args: Word[], options: Options): number {
   return args.length
 }
 
-// The reading of the program a package runner runs (`npx pkill`, `pnpm exec sh -c …`, `bun run x`), its `via` the runner, judged beside the reading of the runner itself, so a hook that reads the runner by its name reads it as before; pnpm runs a name none of its commands takes as `pnpm exec` does (`via` "pnpm"), and a file bun run or deno run runs (`bun run scripts/x.ts`, `deno run main.ts`) is no program, while deno's `npm:` package is
+// The reading of the program a package runner runs (`npx oxfmt`, `pnpm exec sh -c …`, `bun run x`), its `via` the runner, judged beside the reading of the runner itself, so a hook that reads the runner by its name reads it as before; pnpm runs a name none of its commands takes as `pnpm exec` does (`via` "pnpm"), and a file bun run or deno run runs (`bun run scripts/x.ts`, `deno run main.ts`) is no program, while deno's `npm:` package is
 function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undefined {
   const { args, name } = parsed
   let key = RUNNERS.has(name) ? name : undefined
