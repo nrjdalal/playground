@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port too, which stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
 
 import { input } from "./input"
 import { fromFactory } from "./role"
@@ -24,8 +24,11 @@ const BY_NAME = new Set(["killall", "pkill"])
 const KILLS = ["fuser", "kill", "killall", "pkill"]
 const SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"])
 const READS_ONLY = new Set(["--help", "--version", "-V", "-h"])
-// The programs that run a package's binary by its first word that is no flag: bunx portless, npx -y portless
-const RUNNERS = new Set(["bunx", "npx", "pnpx"])
+// The programs that run portless from a word of theirs: bunx portless, npx -p portless portless, pnpm dlx portless, yarn portless, node node_modules/portless/dist/cli.js
+const LAUNCHERS = new Set(["bun", "bunx", "node", "npm", "npx", "pnpm", "pnpx", "yarn"])
+// portless's global flags, which it strips before it reads the subcommand (cli.js:8188-8226), and the ones of them that take a value
+const GLOBAL_FLAGS = new Set(["--cloudflare", "--funnel", "--lan", "--ngrok", "--tailscale"])
+const GLOBAL_VALUED = new Set(["--ip", "--lan-ip-auto", "--script"])
 
 const WAY_OUT =
   "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file)."
@@ -44,21 +47,27 @@ const readsOnly = (cmd: Command, first: Word | undefined, args: Word[]) => {
   )
 }
 
-// The words after portless when the command runs it: by its name or a path to it, a runner's first word that is no flag, or bun x's
-const portlessArgs = (name: string, args: Word[]): Word[] | undefined => {
-  if (name === "portless") return args
-  const from = RUNNERS.has(name) ? 0 : name === "bun" && args[0]?.value === "x" ? 1 : -1
-  if (from < 0) return undefined
-  const at = args.findIndex((a, i) => i >= from && !a.value.startsWith("-"))
-  return at >= 0 && program(args[at]!.value) === "portless" ? args.slice(at + 1) : undefined
+const isPortless = (word: string) =>
+  program(word) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(word)
+
+// The words after each word that may run portless: the program itself, or any word of a launcher's, so npx -p portless portless yields both readings and either may be the stop
+const portlessRuns = (name: string, args: Word[]): string[][] => {
+  const values = args.map((a) => a.value)
+  if (isPortless(name)) return [values]
+  if (!LAUNCHERS.has(name)) return []
+  return values.flatMap((v, i) => (isPortless(v) ? [values.slice(i + 1)] : []))
 }
 
-// portless 0.15.11 reads a stop's port as cli.js:7048 does, the word after the first --port, else after the first -p; with none it probes 443, 80 and 1355 and stops whichever proxy answers (cli.js:2121)
-const probingStop = (args: Word[]) => {
-  if (args[0]?.value !== "proxy" || args[1]?.value !== "stop") return false
-  const values = args.map((a) => a.value)
-  const flag = values.includes("--port") ? values.indexOf("--port") : values.indexOf("-p")
-  return flag < 0 || !/^\d+$/.test(values[flag + 1] ?? "")
+// portless 0.15.11 with its global flags stripped: a proxy stop reads its port as cli.js:7048 does, the word after the first --port, else after the first -p, and with none probes 443, 80 and 1355 and stops whichever proxy answers (cli.js:2121); clean stops the proxy discoverState finds and takes no port (cli.js:6326-6330)
+const probingStop = (words: string[]) => {
+  const args = words.filter(
+    (v, i) =>
+      !GLOBAL_FLAGS.has(v) && !GLOBAL_VALUED.has(v) && !GLOBAL_VALUED.has(words[i - 1] ?? ""),
+  )
+  if (args[0] === "clean") return !args.slice(1).some((v) => v === "--help" || v === "-h")
+  if (args[0] !== "proxy" || args[1] !== "stop") return false
+  const flag = args.includes("--port") ? args.indexOf("--port") : args.indexOf("-p")
+  return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "")
 }
 
 // ps given a pid (-p, -q, --pid, --quick-pid) checks that one process, which is the way out's own liveness check
@@ -121,11 +130,10 @@ async function inspect(raw: string) {
         "a command built from a value it cannot read, in a call that names a kill",
         " Write the program and its words out in the call.",
       )
-    const stop = portlessArgs(name, args)
-    if (stop && probingStop(stop))
+    if (portlessRuns(name, args).some(probingStop))
       return refuse(
-        "a portless proxy stop with no port",
-        " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with -p <its port>.",
+        "a portless proxy stop with no port, or a portless clean",
+        " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with portless proxy stop -p <its port>.",
       )
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))

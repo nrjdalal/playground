@@ -19,6 +19,24 @@ const held = (): Row[] => [
     "a proxy stop as run-slot's command",
     "~/.playground/ops/run-slot.sh w -- bunx portless proxy stop",
   ],
+  // round 1: portless strips its global flags before it reads the subcommand (cli.js:8188-8226), and clean stops the proxy discoverState finds with no port to give (cli.js:6326-6330)
+  ["a proxy stop behind a global flag", "portless --lan proxy stop"],
+  ["a proxy stop by bunx behind a global flag", "bunx portless --lan proxy stop"],
+  ["a proxy stop behind --tailscale", "portless --tailscale proxy stop"],
+  ["a proxy stop behind --script and its value", "portless --script dev proxy stop"],
+  ["a clean, which stops whichever proxy it finds", "portless clean"],
+  ["a clean by bunx", "bunx portless clean"],
+  ["a proxy stop by npx -p", "npx -p portless portless proxy stop"],
+  ["a proxy stop by npx --package", "npx --package portless portless proxy stop"],
+  ["a proxy stop by pnpm exec", "pnpm exec portless proxy stop"],
+  ["a proxy stop by pnpm dlx", "pnpm dlx portless proxy stop"],
+  ["a proxy stop by npm exec", "npm exec portless proxy stop"],
+  ["a proxy stop by yarn", "yarn portless proxy stop"],
+  [
+    "a proxy stop by node on portless's cli.js",
+    "node node_modules/portless/dist/cli.js proxy stop",
+  ],
+  ["a proxy stop by bun on a path to portless", "bun node_modules/.bin/portless proxy stop"],
 ]
 
 const controls = (): Row[] => [
@@ -28,6 +46,14 @@ const controls = (): Row[] => [
   ["a URL read by portless", "bunx portless get api.playground"],
   ["a proxy stop as text", "echo 'portless proxy stop'"],
   ["a search for a proxy stop", 'git grep -n "portless proxy stop"'],
+  ["a proxy stop behind a global flag on its own port", "portless --lan proxy stop -p 14155"],
+  ["a proxy stop by npx -p on its own port", "npx -p portless portless proxy stop -p 14155"],
+  [
+    "a proxy stop by node on its own port",
+    "node node_modules/portless/dist/cli.js proxy stop -p 14155",
+  ],
+  ["a clean's help, which portless answers and exits", "portless clean --help"],
+  ["portless added as a package", "bun add portless"],
 ]
 
 export const groups: Group[] = [

@@ -14,8 +14,9 @@ background task. So no text file in the repo (scripts, tests, skills, docs) may:
   that later reaches kill
 - walk processes with psutil, or call os.kill or process.kill in a file that runs pgrep,
   pidof or `lsof -t` to find pids
-- stop a portless proxy without its port (`portless proxy stop` with no `-p <port>`), which
-  probes 443, 80 and 1355 and stops whichever proxy answers, the live one included
+- stop a portless proxy without its port (`portless proxy stop` with no `-p <port>`, global
+  flags such as `--lan` read past) or run `portless clean`, each of which probes 443, 80 and
+  1355 and stops whichever proxy answers, the live one included
 
 Reading pids (`pgrep -f x` to check something runs) stays allowed. Markdown prose is read
 as prose: a line holding `kill-check: names only` is skipped, and backticks are inline code,
@@ -74,10 +75,11 @@ SEARCH_ARGV_MD = re.compile(rf"""['"](?:pgrep|pidof)\b|['"]{LSOF_PIDS}""")
 KILL_CALL = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"`]kill\b""")
 KILL_CALL_MD = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"]kill\b""")
 FENCE = re.compile(r"^\s*(```|~~~)")
-# a portless proxy stop names its port, as -p or --port and a word, or portless probes 443, 80 and 1355 and stops whichever proxy answers
+# a portless proxy stop names its port in its own command, as -p or --port and a word, past any global flag (--lan, --script dev); else portless probes 443, 80 and 1355 and stops whichever proxy answers, and clean stops it with no port to give
 PROXY_STOP = re.compile(
-    r"""\bportless\s+proxy\s+stop\b(?![^\n]*\s(?:-p|--port)\s+[^\s-])"""
-    r"""|['"]proxy['"],\s*['"]stop['"](?![^\n]*['"](?:-p|--port)['"])"""
+    r"""\bportless(?:\s+--[\w-]+(?:\s+[^\s-]\S*)?)*?\s+(?:proxy\s+stop\b(?![^\n;&|`)'"]*\s(?:-p|--port)\s+[^\s-])|clean\b(?!\s+(?:--help|-h)\b))"""
+    r"""|['"]proxy['"],\s*['"]stop['"](?![^\]\n]*['"](?:-p|--port)['"])"""
+    r"""|\bportless['"]?,\s*['"]clean['"]"""
 )
 
 
@@ -186,7 +188,7 @@ def problems_in(rel, text):
         elif PIPED.search(line) or substituted.search(line):
             found.append(f"{rel}:{n}: kills the pids a search by name or pattern found")
         elif PROXY_STOP.search(line):
-            found.append(f"{rel}:{n}: stops a portless proxy with no port, which stops whichever proxy answers on 443, 80 or 1355")
+            found.append(f"{rel}:{n}: stops a portless proxy with no port, or cleans, which stops whichever proxy answers on 443, 80 or 1355")
     # strings and comments are blanked to find where a loop ends; only comments, to find a kill, since `sh -c "kill $p"` kills
     blanked = blank(code)
     uncommented = blank(code, strings=False)
@@ -305,6 +307,12 @@ def self_test():
         ("run.sh", "portless proxy stop --port=14155"),
         ("doc.md", "Stop it with `bunx portless proxy stop`."),
         ("run.ts", 'run([portless, "proxy", "stop"], { env })'),
+        ("run.sh", "portless --lan proxy stop"),
+        ("run.sh", "portless --script dev proxy stop"),
+        ("run.sh", "bunx portless clean"),
+        ("doc.md", "Stop it with `bunx portless proxy stop`, then start it with `portless proxy start -p 1355`."),
+        ("run.ts", 'run(["portless", "proxy", "stop"]); run(["x", "-p"])'),
+        ("run.ts", 'run([portless, "clean"])'),
     ]
     good = [
         ("run.sh", 'kill -TERM "$PID"'),
@@ -340,6 +348,9 @@ def self_test():
         ("doc.md", "Stop it with `bunx portless proxy stop -p <number>`."),
         ("run.ts", 'run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })'),
         ("doc.md", "A bare `portless proxy stop` probes 443. <!-- kill-check: names only -->"),
+        ("run.sh", "portless --lan proxy stop -p 14155"),
+        ("run.sh", "portless clean --help"),
+        ("doc.md", "Read `portless --help`, then `portless proxy start -p 1355`."),
     ]
     wrong = [f"not flagged: {line!r}" for rel, line in bad if not problems_in(rel, line)]
     wrong += [f"flagged: {line!r}" for rel, line in good if problems_in(rel, line)]

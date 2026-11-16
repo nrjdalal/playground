@@ -16019,28 +16019,32 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
-var RUNNERS5 = new Set(["bunx", "npx", "pnpx"]);
+var LAUNCHERS2 = new Set(["bun", "bunx", "node", "npm", "npx", "pnpm", "pnpx", "yarn"]);
+var GLOBAL_FLAGS = new Set(["--cloudflare", "--funnel", "--lan", "--ngrok", "--tailscale"]);
+var GLOBAL_VALUED = new Set(["--ip", "--lan-ip-auto", "--script"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
 var refuse9 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
 };
-var portlessArgs = (name, args) => {
-  if (name === "portless")
-    return args;
-  const from = RUNNERS5.has(name) ? 0 : name === "bun" && args[0]?.value === "x" ? 1 : -1;
-  if (from < 0)
-    return;
-  const at = args.findIndex((a, i) => i >= from && !a.value.startsWith("-"));
-  return at >= 0 && program(args[at].value) === "portless" ? args.slice(at + 1) : undefined;
-};
-var probingStop = (args) => {
-  if (args[0]?.value !== "proxy" || args[1]?.value !== "stop")
-    return false;
+var isPortless = (word) => program(word) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(word);
+var portlessRuns = (name, args) => {
   const values = args.map((a) => a.value);
-  const flag = values.includes("--port") ? values.indexOf("--port") : values.indexOf("-p");
-  return flag < 0 || !/^\d+$/.test(values[flag + 1] ?? "");
+  if (isPortless(name))
+    return [values];
+  if (!LAUNCHERS2.has(name))
+    return [];
+  return values.flatMap((v, i) => isPortless(v) ? [values.slice(i + 1)] : []);
+};
+var probingStop = (words) => {
+  const args = words.filter((v, i) => !GLOBAL_FLAGS.has(v) && !GLOBAL_VALUED.has(v) && !GLOBAL_VALUED.has(words[i - 1] ?? ""));
+  if (args[0] === "clean")
+    return !args.slice(1).some((v) => v === "--help" || v === "-h");
+  if (args[0] !== "proxy" || args[1] !== "stop")
+    return false;
+  const flag = args.includes("--port") ? args.indexOf("--port") : args.indexOf("-p");
+  return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
 async function inspect8(raw) {
@@ -16074,9 +16078,8 @@ async function inspect8(raw) {
     const { args, first, name, xargs } = parsed;
     if (parsed.unread && namesKill)
       return refuse9("a command built from a value it cannot read, in a call that names a kill", " Write the program and its words out in the call.");
-    const stop = portlessArgs(name, args);
-    if (stop && probingStop(stop))
-      return refuse9("a portless proxy stop with no port", " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with -p <its port>.");
+    if (portlessRuns(name, args).some(probingStop))
+      return refuse9("a portless proxy stop with no port, or a portless clean", " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with portless proxy stop -p <its port>.");
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
@@ -17993,7 +17996,7 @@ var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
 var DELETER_PROGRAMS = new Set([...DEL, "rimraf"]);
-var RUNNERS6 = new Map([
+var RUNNERS5 = new Map([
   ["bun", ["x"]],
   ["bunx", []],
   ["npm", ["exec", "x"]],
@@ -18018,7 +18021,7 @@ var JUDGED = new Set([
   "rsync"
 ]);
 function packageOf(name, args) {
-  const subs = RUNNERS6.get(name);
+  const subs = RUNNERS5.get(name);
   if (!subs)
     return;
   const words = args.filter((a) => !a.value.startsWith("-"));
@@ -18778,9 +18781,9 @@ function judgeApi2(rest, flags, built) {
 }
 var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
 var STEP_HELP = new Set(["--help", "-h"]);
-var RUNNERS7 = new Set(["npm", "pnpm", "yarn"]);
+var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
 function yardStep(name, args, shell) {
-  if (RUNNERS7.has(name))
+  if (RUNNERS6.has(name))
     return args.some((a) => a.value === "ship:yard");
   if (name !== "bun")
     return false;
@@ -19500,7 +19503,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS8 = new Set(["bunx", "npx"]);
+var RUNNERS7 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -19594,7 +19597,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS8.has(name)) {
+  if (RUNNERS7.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;
