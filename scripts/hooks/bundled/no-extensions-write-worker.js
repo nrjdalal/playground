@@ -7225,7 +7225,7 @@ function walk(lx, scope, nested, inherit) {
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
-        lx.commands.push({ ...of, detached: of.detached || done.detached, redirects, words });
+        of.glob = { detached: of.detached || done.detached, redirects, words };
       }
     }
     cmd = fresh();
@@ -7946,7 +7946,7 @@ async function runAll(lexed, env, visit, builtins) {
     const at = envOf(cmd.scope);
     if (cmd.repeated && !lexed.commands[k - 1]?.repeated)
       repass(lexed.commands.slice(k), envs);
-    const verdict = await examine(cmd, at, visit, builtins);
+    const verdict = await examine(cmd, at, visit, builtins) ?? (cmd.glob && await examine({ ...cmd, ...cmd.glob, glob: undefined }, at, visit, builtins));
     if (verdict)
       return verdict;
     unbind.get(cmd)?.();

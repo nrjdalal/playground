@@ -45,6 +45,8 @@ export type Command = {
   feedsShell?: boolean
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
+  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so no reader of that list reads it
+  glob?: Pick<Command, "detached" | "redirects" | "words">
   group?: boolean
   // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
   held?: boolean
@@ -1072,7 +1074,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.commands.push(done)
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin
-        lx.commands.push({ ...of, detached: of.detached || done.detached, redirects, words })
+        of.glob = { detached: of.detached || done.detached, redirects, words }
       }
     }
     cmd = fresh()
@@ -1906,7 +1908,9 @@ async function runAll(
   for (const [k, cmd] of lexed.commands.entries()) {
     const at = envOf(cmd.scope)
     if (cmd.repeated && !lexed.commands[k - 1]?.repeated) repass(lexed.commands.slice(k), envs)
-    const verdict = await examine(cmd, at, visit, builtins)
+    const verdict =
+      (await examine(cmd, at, visit, builtins)) ??
+      (cmd.glob && (await examine({ ...cmd, ...cmd.glob, glob: undefined }, at, visit, builtins)))
     if (verdict) return verdict
     unbind.get(cmd)?.()
     bind(lexed.commands, k, at, unbind)
