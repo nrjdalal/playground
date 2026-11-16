@@ -31,6 +31,7 @@ import {
   staleContainers,
   staleVolumes,
   staleWorktrees,
+  tempFolders,
   trashIdOf,
   trashSince,
   workIn,
@@ -492,6 +493,25 @@ describe("the rehearsal backstop", () => {
       line: "removed 0 (0.0 GB)",
     })
   })
+
+  // round 1 of the review: the Linux read of each session's /tmp/playground-<name>.<suffix>, which spawn.sh makes per launch; macOS reads getconf's one folder instead
+  test.skipIf(process.platform === "darwin")(
+    "on Linux the temp folders are each playground-<name>.<suffix> folder in tmp, and nothing else",
+    () => {
+      const tmp = scratch()
+      for (const dir of [
+        "playground-5tr36f-worker.SGfErz",
+        "playground-ops.XpWpMU",
+        "playground-x",
+        "other.abc",
+      ])
+        mkdirSync(join(tmp, dir))
+      writeFileSync(join(tmp, "playground-file.abc"), "")
+      expect(tempFolders(tmp).sort()).toEqual(
+        [join(tmp, "playground-5tr36f-worker.SGfErz"), join(tmp, "playground-ops.XpWpMU")].sort(),
+      )
+    },
+  )
 })
 
 describe("one night's run against a fixture data folder", () => {

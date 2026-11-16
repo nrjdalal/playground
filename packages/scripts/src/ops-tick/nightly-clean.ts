@@ -305,14 +305,14 @@ export function pruneRehearsals(temps: string[], now: Date): { gone: string[]; l
 }
 
 // The temp folders a session makes a rehearsal in: macOS's per-user one, which every session shares; else on Linux each real /tmp/playground-<name>.<suffix> folder this user owns, since spawn.sh makes one at each launch.
-export function tempFolders(): string[] {
+export function tempFolders(tmp = "/tmp"): string[] {
   const mac = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"], { stderr: "ignore" })
   if (mac.exitCode === 0 && mac.stdout.toString().trim()) return [mac.stdout.toString().trim()]
   const uid = process.getuid?.()
-  return readdirSync("/tmp", { withFileTypes: true })
+  return readdirSync(tmp, { withFileTypes: true })
     .filter((e) => e.isDirectory() && /^playground-[^/]+\.[^/.]+$/.test(e.name))
-    .map((e) => join("/tmp", e.name))
-    .filter((dir) => lstatSync(dir).uid === uid)
+    .map((e) => join(tmp, e.name))
+    .filter((dir) => lstatSync(dir, { throwIfNoEntry: false })?.uid === uid)
 }
 
 // rm quarantines at most 3 paths a session per minute; the beat paces every move its worktree step makes under that cap, cleanWorktree's own included, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.

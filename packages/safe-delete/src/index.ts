@@ -1099,7 +1099,8 @@ export function removeStale(
   for (const entry of entriesOf(root)) {
     const at = join(root, entry.name)
     if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue
-    if (lstat(at)!.mtimeMs >= now.getTime() - olderThanMs) continue
+    const st = lstat(at)
+    if (!st || st.mtimeMs >= now.getTime() - olderThanMs) continue
     if (!lstat(join(at, MARKER))?.isFile()) continue
     const { size } = measure(at)
     if (removeScratch(at, root) === null) removed.push({ bytes: size, path: at })
