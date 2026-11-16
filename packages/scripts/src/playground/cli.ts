@@ -272,7 +272,8 @@ const dashboard = async (): Promise<number> => {
         await pause(2000)
       }
     } else {
-      const ready = urls ?? dashboardUrls(checkout)
+      // read again for the same reason as the wait's polls: the URLs read at the run's start can name an idle ~/.portless's
+      const ready = dashboardUrls(checkout)
       if (!ready) {
         failed.push("The Dashboard didn't open: portless gives no URL for it")
         return close()

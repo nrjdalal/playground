@@ -164,18 +164,19 @@ describe("dashboardUrls", () => {
     writeFileSync(join(fallback, "proxy.pid"), String(process.pid))
     writeFileSync(join(fallback, "proxy.port"), String(proxy.port))
     writeFileSync(join(fallback, "proxy.tls"), "1")
-    const saved = { home: process.env.HOME, state: process.env.PORTLESS_STATE_DIR }
+    // every PORTLESS* key is set aside, as install.test.ts's gitEnv drops them, so portless reads only the folders this test made
+    const saved = Object.entries(process.env).filter(([key]) => key.startsWith("PORTLESS"))
+    const savedHome = process.env.HOME
     process.env.HOME = home
-    delete process.env.PORTLESS_STATE_DIR
+    for (const [key] of saved) delete process.env[key]
     try {
       expect(dashboardUrls(dashboard)).toEqual({
         api: `https://api.playground.localhost:${proxy.port}`,
         web: `https://playground.localhost:${proxy.port}`,
       })
     } finally {
-      process.env.HOME = saved.home
-      if (saved.state === undefined) delete process.env.PORTLESS_STATE_DIR
-      else process.env.PORTLESS_STATE_DIR = saved.state
+      process.env.HOME = savedHome
+      for (const [key, value] of saved) process.env[key] = value
       proxy.stop(true)
       rmSync(home, { force: true, recursive: true })
       rmSync(dashboard, { force: true, recursive: true })

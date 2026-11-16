@@ -20,6 +20,10 @@ const script = await Bun.file(join(root, "scripts", "ops", "dashboard", "supervi
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-urls-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// This process's env with no PORTLESS* key, as install.test.ts's gitEnv drops them, so a test's portless reads only the folders it made.
+const noPortless = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PORTLESS")))
+
 const fn = (name: string) => script.match(new RegExp(`^${name}\\(\\) \\{.*\\}$`, "m"))?.[0]
 
 // A stand-in for bunx that answers `portless get <name>` from a file, as portless 0.15 names a URL from whatever proxy runs when it is asked; STATE in the file reads as the PORTLESS_STATE_DIR it was asked under.
@@ -179,7 +183,7 @@ describe("the supervisor's dashboard URLs", () => {
     await Bun.write(join(home, ".portless", "routes.json"), "[]")
     await Bun.write(join(fallback, "proxy.pid"), String(process.pid))
     await Bun.write(answer, "STATE NAME\n")
-    const { PORTLESS_STATE_DIR: _, ...env } = process.env
+    const env = noPortless()
     const proc = run(`${fn("dashboard_urls")}\ndashboard_urls && echo "$WEB|$API"`, {
       ...env,
       HOME: home,
@@ -1860,7 +1864,7 @@ describe("the supervisor's alias check", () => {
     await Bun.write(answer, "https://desk.NAME.localhost\n")
     // the API launcher's 2 s alias sync, run every 300 ms on the fallback folder until the check ends
     const sync = `bun -e "const l = await import('${join(root, "api", "hono", "src", "lib", "dev", "launch.ts")}'); setInterval(() => l.syncAliases(l.dashboardAliasPairs('desk'), '${fallback}'), 300)" & SYNC=$!`
-    const { PORTLESS_STATE_DIR: _, ...env } = process.env
+    const env = noPortless()
     const proc = Bun.spawn(
       [
         "bash",
