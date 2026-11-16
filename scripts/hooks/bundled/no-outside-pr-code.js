@@ -5759,11 +5759,11 @@ var CURL_TAKES = new Set([
   ...CURL_DATA,
   "-A",
   "--user-agent",
-  "--cacert",
   "-b",
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -7923,7 +7923,7 @@ function noExec(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let set = false;
   for (const { value } of args) {
-    if (/^[-+][oO]$/.test(value))
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
       return false;
     if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
       break;

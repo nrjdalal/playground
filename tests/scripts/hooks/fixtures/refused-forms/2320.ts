@@ -115,6 +115,22 @@ export const groups: Group[] = [
         "a removal piped into bash with noexec undone by name",
         `echo 'rm -rf ${NEVER_MADE}' | bash -n +o noexec`,
       ],
+      [
+        "a write piped into bash with noexec undone in a +xo cluster",
+        `echo 'touch ${NEVER_MADE}/x' | bash -n +xo noexec`,
+      ],
+      [
+        "a write piped into bash with noexec undone in a +eo cluster",
+        `echo 'touch ${NEVER_MADE}/x' | bash -n +eo noexec`,
+      ],
+      [
+        "a write piped into sh with noexec undone in a +vo cluster",
+        `echo 'touch ${NEVER_MADE}/x' | sh -n +vo noexec`,
+      ],
+      [
+        "a write piped into zsh with noexec undone by a long option",
+        `echo 'touch ${NEVER_MADE}/x' | zsh -n --no-noexec`,
+      ],
       ["a bare pkexec, a root shell reading stdin", "pkexec"],
       ["a pkexec run by command, a root shell reading stdin", "command pkexec"],
       [
@@ -141,6 +157,10 @@ export const groups: Group[] = [
       [
         "a case pattern's substitution running a recursive rm",
         `case x in $(rm -rf ${NEVER_MADE})) ;; esac`,
+      ],
+      [
+        "a recursive rm piped into bash with noexec undone in a +xo cluster",
+        `echo 'rm -rf ${NEVER_MADE}' | bash -n +xo noexec`,
       ],
       ["an ssh call to this machine with a recursive rm", `ssh localhost 'rm -rf ${NEVER_MADE}'`],
       [

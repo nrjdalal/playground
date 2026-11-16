@@ -697,11 +697,11 @@ export const CURL_TAKES = new Set([
   ...CURL_DATA,
   "-A",
   "--user-agent",
-  "--cacert",
   "-b",
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -3465,12 +3465,12 @@ export function isFolder(path: string): boolean {
 const SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"])
 const BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"])
 
-// Whether a shell's options before its first operand leave -n (noexec) set, the last -n or +n winning, so it reads its script and runs none of it; any -o, +o, -O or +O, which can set the option by name, keeps it unset.
+// Whether a shell's options before its first operand leave -n (noexec) set, the last -n or +n winning, so it reads its script and runs none of it; a cluster holding o or O (-o, +xo, -eO) or a long option (zsh's --no-noexec), each of which can set an option by name, keeps it unset.
 export function noExec(args: Word[], shell: string): boolean {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
   let set = false
   for (const { value } of args) {
-    if (/^[-+][oO]$/.test(value)) return false
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || (value.startsWith("--") && value !== "--")) return false
     if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value)) break
     if (value.includes("n")) set = value.startsWith("-")
   }

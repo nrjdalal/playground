@@ -61,6 +61,26 @@ const DATA = join(HOME, ".playground")
 const ROOT = join(DATA, "extensions")
 const SCOPE = join(ROOT, "login")
 const OTHER = join(SCRATCH, "other")
+// One fixed listing of / that no-extensions-write judges a glob in / against, a Linux machine's, so a row reads the same on a Mac, whose / holds Applications, Library and Users
+const ROOT_NAMES = [
+  "bin",
+  "boot",
+  "dev",
+  "etc",
+  "home",
+  "lib",
+  "mnt",
+  "opt",
+  "proc",
+  "root",
+  "run",
+  "sbin",
+  "srv",
+  "sys",
+  "tmp",
+  "usr",
+  "var",
+]
 const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
@@ -403,7 +423,7 @@ const guardsOf = (
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
       tmp: ["/tmp", HOME],
     },
-    run: (raw, home) => c.extensionsWrite(raw, { HOME: home }),
+    run: (raw, home) => c.extensionsWrite(raw, { HOME: home }, undefined, () => ROOT_NAMES),
   },
   "no-glm-heavy-path": {
     folders: { "glm org repo": [GLM_ORG_REPO, HOME], "glm repo": [GLM_REPO, HOME] },
