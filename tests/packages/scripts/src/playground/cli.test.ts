@@ -41,7 +41,7 @@ describe("the shebang", () => {
 })
 
 describe("bare dispatcher", () => {
-  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts and the dev stack's proxy.ts and live-dashboard.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
+  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts, the dev stack's proxy.ts and live-dashboard.ts and the sessions' proc-start.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
   const dispatcher = async (
     python3: string,
     more: Record<string, string> = {},
@@ -61,6 +61,10 @@ describe("bare dispatcher", () => {
         join(dirname(CLI), "../../../../api/hono/src/lib/dev", file),
         join(repo, "api/hono/src/lib/dev", file),
       )
+    cpSync(
+      join(dirname(CLI), "../../../../api/hono/src/lib/sessions/proc-start.ts"),
+      join(repo, "api/hono/src/lib/sessions/proc-start.ts"),
+    )
     cpSync(
       join(dirname(CLI), "../../../settings/src/rendered.ts"),
       join(repo, "packages/settings/src/rendered.ts"),
