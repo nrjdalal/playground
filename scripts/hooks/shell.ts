@@ -1198,20 +1198,38 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`), as zsh reads one after a program word; `time`, `repeat`, `nocorrect` and a header's opener keep it a subshell, `()` defines a function, and a group holding a blank, which names no program, keeps canary's subshell reading, as does a paren in any other argument
+// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`, `nice $E (r|x)m`), as zsh reads one after a program word; a command of `time`, `nocorrect` or `repeat N` alone and a header's opener keep it a subshell, an empty `()` defines a function, and a paren in any other argument stays a subshell
 function globOpens(cmd: Command, src: string, at: number): boolean {
-  const program = cmd.words.find((w) => w.quoted || !MARKERS.has(w.value))
+  const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
+  if (program < 0) return false
+  const lead = cmd.words.slice(program)
   const next: Word = { quoted: false, value: "(" }
+  let words = [...cmd.words, next]
+  let { first } = parse({ ...cmd, words })
+  // a word that may expand to no word leaves the next one the program, as emptyProgram reads it
+  while (first && first !== next && words.includes(first) && maySkip(first)) {
+    const dropped = first
+    words = words.filter((w) => w !== dropped)
+    ;({ first } = parse({ ...cmd, words }))
+  }
   return (
-    !!program &&
-    parse({ ...cmd, words: [...cmd.words, next] }).first === next &&
+    first === next &&
     src[at + 1] !== ")" &&
-    !/\s/.test(src.slice(at, balanced(src, at, "(", ")")).replace(/\\\n/g, "")) &&
-    !SUBSHELL_AFTER.has(program.value) &&
+    !subshellPrefix(lead) &&
     !HEADERS.has(cmd.words[0]?.value ?? "")
   )
 }
-const SUBSHELL_AFTER = new Set(["nocorrect", "repeat", "time"])
+// zsh's own prefixes that run a subshell after them: `time (…)`, `nocorrect (…)`, `repeat N (…)`
+const subshellPrefix = (lead: Word[]): boolean =>
+  lead.every((w) => !w.quoted) &&
+  (lead.length === 1
+    ? lead[0].value === "time" || lead[0].value === "nocorrect"
+    : lead.length === 2 && lead[0].value === "repeat")
+// Whether a word the reader read none of may expand to no word, before any value is known (mayVanish, read without the env)
+const maySkip = (w: Word): boolean =>
+  !!w.source &&
+  /^\u0000+$/.test(w.value) &&
+  (/^\u0000+$/.test(w.source) || vanishingParts(w.source))
 const HEADERS = new Set(["case", "for", "foreach", "function", "select"])
 
 function word(lx: Lexer, opening = false): Word {
@@ -2235,10 +2253,8 @@ export function globSpells(text: string, names: string[]): boolean {
 
 // A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again cut before each `$(` and at a pipe before a paren, each part without a leading paren, `$(` or quote, beside its typed form
 export function spelledText(text: string): string {
-  const spelled = text
-    .replace(/\\\n/g, "")
-    .replace(/\\/g, "")
-    .split(/[\s;&<>`]+/)
+  const plain = text.replace(/\\\n/g, "").replace(/\\/g, "")
+  const spelled = [...plain.split(/[\s;&<>`]+/), ...blankGroups(plain)]
     .flatMap((token) => {
       // a subshell's, a substitution's or a zsh `=(…)` process substitution's opening paren (an assignment's value or an array's element too), a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
       const parts = token
@@ -2262,6 +2278,20 @@ export function spelledText(text: string): string {
     )
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text
 }
+
+// Each zsh group holding a blank (`(r|x y)m`), with the word's parts glued to it, which the line split cuts apart, so spelledText spells it too
+function blankGroups(text: string): string[] {
+  const out: string[] = []
+  for (const { 0: group, index } of text.matchAll(/\([^()\s]*\s[^()]*\)/g)) {
+    let from = index
+    while (from > 0 && !BETWEEN.test(text[from - 1])) from--
+    let to = index + group.length
+    while (to < text.length && !BETWEEN.test(text[to])) to++
+    out.push(text.slice(from, to))
+  }
+  return out
+}
+const BETWEEN = /[\s;&<>`]/
 
 // A brace sequence (`{a..c}`, `{1..9..2}`), which braceWords leaves as written
 const SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g
@@ -2394,6 +2424,7 @@ export async function examine(
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
     ...(brace ? [globRun(brace, parse(brace).first, env)] : []),
+    ...vanished.map((v) => globRun(v, parse(v).first, env)),
   ]
   const resolving = [
     ...split,
@@ -2745,15 +2776,12 @@ function binds({ words }: Command): string[] {
 
 // Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`), set to nothing or blanks alone, or one a builtin may have changed (`change`), or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
-  !!w.source &&
-  /^\u0000+$/.test(w.value) &&
-  (/^\u0000+$/.test(w.source) ||
-    (vanishingParts(w.source) &&
-      [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
-        const set = env.vars.get(name)
-        // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
-        return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
-      })))
+  maySkip(w) &&
+  [...(w.source ?? "").matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+    const set = env.vars.get(name)
+    // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
+    return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
+  })
 
 // The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
 function emptyProgram(cmd: Command, env: Env): Command[] {

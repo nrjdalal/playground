@@ -1242,11 +1242,22 @@ function expandHeredoc(body) {
   return /\$[\w{(@*#?!$-]|`/.test(joined.replace(/\\[\\$`]/g, "")) ? { unknown: "an expansion in an unquoted heredoc", value } : { value };
 }
 function globOpens(cmd, src, at) {
-  const program = cmd.words.find((w) => w.quoted || !MARKERS.has(w.value));
+  const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value));
+  if (program < 0)
+    return false;
+  const lead = cmd.words.slice(program);
   const next = { quoted: false, value: "(" };
-  return !!program && parse({ ...cmd, words: [...cmd.words, next] }).first === next && src[at + 1] !== ")" && !/\s/.test(src.slice(at, balanced(src, at, "(", ")")).replace(/\\\n/g, "")) && !SUBSHELL_AFTER.has(program.value) && !HEADERS.has(cmd.words[0]?.value ?? "");
+  let words = [...cmd.words, next];
+  let { first } = parse({ ...cmd, words });
+  while (first && first !== next && words.includes(first) && maySkip(first)) {
+    const dropped = first;
+    words = words.filter((w) => w !== dropped);
+    ({ first } = parse({ ...cmd, words }));
+  }
+  return first === next && src[at + 1] !== ")" && !subshellPrefix(lead) && !HEADERS.has(cmd.words[0]?.value ?? "");
 }
-var SUBSHELL_AFTER = new Set(["nocorrect", "repeat", "time"]);
+var subshellPrefix = (lead) => lead.every((w) => !w.quoted) && (lead.length === 1 ? lead[0].value === "time" || lead[0].value === "nocorrect" : lead.length === 2 && lead[0].value === "repeat");
+var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
 var HEADERS = new Set(["case", "for", "foreach", "function", "select"]);
 function word(lx, opening = false) {
   const { src } = lx;
@@ -2094,7 +2105,8 @@ function globSpells(text, names) {
   return false;
 }
 function spelledText(text) {
-  const spelled = text.replace(/\\\n/g, "").replace(/\\/g, "").split(/[\s;&<>`]+/).flatMap((token) => {
+  const plain = text.replace(/\\\n/g, "").replace(/\\/g, "");
+  const spelled = [...plain.split(/[\s;&<>`]+/), ...blankGroups(plain)].flatMap((token) => {
     const parts = token.split(/(?=[$=]\()|\|+(?=\()/).map((part) => part.replace(/^(?:[$=]?\(|['"])+/, ""));
     return [token, ...parts.filter((part) => part !== token)];
   }).filter((token) => /[{(]/.test(token)).flatMap((token) => (braceWords(token) ?? anyText(token, /\{[^{}]*\}/g)).flatMap((word) => {
@@ -2106,6 +2118,20 @@ function spelledText(text) {
   })).map((word) => word.replace(/["']/g, "")).flatMap((word) => /^[*?]+$/.test(word.slice(word.lastIndexOf("/") + 1)) ? [word, ANY_NAME] : [word]);
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text;
 }
+function blankGroups(text) {
+  const out = [];
+  for (const { 0: group, index } of text.matchAll(/\([^()\s]*\s[^()]*\)/g)) {
+    let from = index;
+    while (from > 0 && !BETWEEN.test(text[from - 1]))
+      from--;
+    let to = index + group.length;
+    while (to < text.length && !BETWEEN.test(text[to]))
+      to++;
+    out.push(text.slice(from, to));
+  }
+  return out;
+}
+var BETWEEN = /[\s;&<>`]/;
 var SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g;
 var sequenceSpelling = (_, from, to) => /^[A-Za-z]$/.test(from) && /^[A-Za-z]$/.test(to) ? `[${from < to ? from : to}-${from < to ? to : from}]` : /^-?\d+$/.test(from) && /^-?\d+$/.test(to) ? "[0-9-]*" : "*";
 function anyText(word, part) {
@@ -2218,7 +2244,8 @@ async function examine(cmd, env, visit, builtins) {
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
-    ...brace ? [globRun(brace, parse(brace).first, env)] : []
+    ...brace ? [globRun(brace, parse(brace).first, env)] : [],
+    ...vanished.map((v) => globRun(v, parse(v).first, env))
   ];
   const resolving = [
     ...split,
@@ -2509,10 +2536,10 @@ function binds({ words }) {
   }
   return names.filter((w) => NAME.test(w));
 }
-var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+var mayVanish = (w, env) => maySkip(w) && [...(w.source ?? "").matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
   return !set || !!set.vanishes || !set.unknown && /^[ \t\n]*$/.test(set.value);
-}));
+});
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))
     return [];

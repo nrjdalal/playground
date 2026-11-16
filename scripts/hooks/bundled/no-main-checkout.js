@@ -5885,11 +5885,22 @@ function expandHeredoc(body) {
   return /\$[\w{(@*#?!$-]|`/.test(joined.replace(/\\[\\$`]/g, "")) ? { unknown: "an expansion in an unquoted heredoc", value } : { value };
 }
 function globOpens(cmd, src, at) {
-  const program = cmd.words.find((w) => w.quoted || !MARKERS.has(w.value));
+  const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value));
+  if (program < 0)
+    return false;
+  const lead = cmd.words.slice(program);
   const next = { quoted: false, value: "(" };
-  return !!program && parse3({ ...cmd, words: [...cmd.words, next] }).first === next && src[at + 1] !== ")" && !/\s/.test(src.slice(at, balanced(src, at, "(", ")")).replace(/\\\n/g, "")) && !SUBSHELL_AFTER.has(program.value) && !HEADERS2.has(cmd.words[0]?.value ?? "");
+  let words = [...cmd.words, next];
+  let { first } = parse3({ ...cmd, words });
+  while (first && first !== next && words.includes(first) && maySkip(first)) {
+    const dropped = first;
+    words = words.filter((w) => w !== dropped);
+    ({ first } = parse3({ ...cmd, words }));
+  }
+  return first === next && src[at + 1] !== ")" && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
 }
-var SUBSHELL_AFTER = new Set(["nocorrect", "repeat", "time"]);
+var subshellPrefix = (lead) => lead.every((w) => !w.quoted) && (lead.length === 1 ? lead[0].value === "time" || lead[0].value === "nocorrect" : lead.length === 2 && lead[0].value === "repeat");
+var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
 var HEADERS2 = new Set(["case", "for", "foreach", "function", "select"]);
 function word(lx, opening = false) {
   const { src } = lx;
@@ -6830,7 +6841,8 @@ async function examine(cmd, env, visit, builtins) {
     globRun(cmd, primary.first, env),
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse3(v).first, env, true)),
-    ...brace ? [globRun(brace, parse3(brace).first, env)] : []
+    ...brace ? [globRun(brace, parse3(brace).first, env)] : [],
+    ...vanished.map((v) => globRun(v, parse3(v).first, env))
   ];
   const resolving = [
     ...split,
@@ -7119,10 +7131,10 @@ function binds({ words }) {
   }
   return names.filter((w) => NAME.test(w));
 }
-var mayVanish = (w, env) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source) && [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+var mayVanish = (w, env) => maySkip(w) && [...(w.source ?? "").matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
   const set = env.vars.get(name);
   return !set || !!set.vanishes || !set.unknown && /^[ \t\n]*$/.test(set.value);
-}));
+});
 function emptyProgram(cmd, env) {
   if (!cmd.words.some((w) => mayVanish(w, env)))
     return [];
