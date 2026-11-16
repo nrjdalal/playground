@@ -96,6 +96,7 @@ export function viewPulls(
       queued.push({
         approvals: 0,
         ci: "none",
+        conflicts: false,
         draft: false,
         etaMerge: entry.etaMerge,
         number: entry.pr,

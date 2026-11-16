@@ -15,6 +15,7 @@ type PullsQueue = NonNullable<Parameters<typeof viewPulls>[3]>
 const pull = (number: number, fields: Partial<Pull> = {}): Pull => ({
   approvals: 0,
   ci: "passing",
+  conflicts: false,
   draft: false,
   number,
   queued: false,
