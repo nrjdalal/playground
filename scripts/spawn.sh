@@ -185,7 +185,7 @@ restore_waits() {
   [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
 }
 
-# The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
+# The live sessions: a registry file whose pid is alive with the start time the file records, in the form it records it, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
   python3 - "$REGISTRY" "$1" "$REPO" <<'PY'
 import json, os, subprocess, sys
@@ -232,12 +232,21 @@ if me not in starts:
     sys.exit("neither ps nor the kernel's process table listed this process")
 def field(value):
     return " ".join(value.split()) if isinstance(value, str) and value.strip() else "-"
+# A procStart of digits alone is Linux's, clock ticks since boot, so its pid's start is field 22 of /proc/<pid>/stat, as api/hono/src/lib/sessions/proc-start.ts reads it; PROC is PLAYGROUND_PROC under the test sandbox's marker alone, else /proc.
+PROC = (os.environ.get("TEST_SANDBOX_HOME") and os.environ.get("PLAYGROUND_PROC")) or "/proc"
+def ticks(pid):
+    try:
+        with open(os.path.join(PROC, str(pid), "stat")) as handle:
+            return handle.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
 for pid, data in sorted(entries.items()):
     start = data.get("procStart")
-    if pid not in starts or (isinstance(start, str) and " ".join(start.split()) != starts[pid]):
+    now = ticks(pid) if isinstance(start, str) and start.isascii() and start.isdigit() else starts.get(pid)
+    if now is None or (isinstance(start, str) and " ".join(start.split()) != now):
         continue
     if data.get("name") == wanted and data.get("entrypoint") != "sdk-cli":
-        print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
+        print(pid, field(data.get("sessionId")), field(data.get("cwd")), now, sep="\t")
 PY
 }
 # The capacity gate, whose gates and rules playbook's SPAWN.md, Capacity gate, holds in order; python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.

@@ -34,6 +34,14 @@ test("the research worker template's last step reports, then the planner closes 
   )
 })
 
+// issue 2311: without --reports-to, spawn.sh tells a research worker it reports to the builder
+test("the planner starts each research worker reporting to itself", async () => {
+  const planner = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/planner.md")).text()
+  expect(planner).toContain(
+    '`"${PLAYGROUND_REPO:?}/scripts/spawn.sh" worker <id>-worker <brief> --title "<title>" --account <email> --reports-to <your session name>`',
+  )
+})
+
 test("the download, PDF and site-write lines live in the template, not in planner.md", async () => {
   const template = await read()
   const planner = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/planner.md")).text()

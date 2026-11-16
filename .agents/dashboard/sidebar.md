@@ -95,7 +95,7 @@
   Every handler reads `player.current` as it runs, never a value taken during render, which the React compiler caches as null, and a hot reload takes over the frame's host and the player kept on `globalThis.playgroundMusic`, so the song plays on with its controls.
   The readings come from `systemReadings()` in `web/next/src/lib/system.ts` (the header's through `glanceReadings()`).
   Each is green, orange or red by its own levels, from the one table `READING_LEVELS` beside them: swap past 90% and 97%, the load past 0.8 and 1 a core, disk under 50 and 20 GB free, the 5-hour window and the week past 70% and 90%;
-  memory is judged by macOS's memory pressure alone (warn orange, critical red), and the week is also orange over its pace (9 points a day from the window's start).
+  memory is judged by the memory pressure alone (macOS's level, on Linux PSI's: warn orange, critical red), and the week is also orange over its pace (9 points a day from the window's start).
   A usage window that usage.json no longer holds shows the last reading the dashboard saw, its icon gray (`text-inactive`) and dimmed (`opacity-60`), judged by nothing, so `systemHealth()` passes it by, its hover saying stale and giving its reset and when it was last seen (`seenAt`, `.agents/dashboard/dashboard.md`).
   Orange is the `caution` token (orange-600 light, orange-500 dark), so the theme's amber `warning` stays as it is elsewhere.
   The header's health is the icons': `systemHealth()`'s worst hardware reading (memory, load, swap and disk) shows as the reddest icon, amber for a failed read or a sample over 90s old, and red while the live feed is lost; the week and the 5-hour window judge their own icons, the hardware alone colouring the header's health.

@@ -5784,7 +5784,7 @@ function walk(lx, scope, nested, inherit) {
       cmd.group = true;
       const members = topLevel(lx.commands.slice(from), scope);
       cmd.inner = () => members;
-    } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
+    } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx));
     } else if (redirect) {
       lx.i += redirect[0].length;
@@ -5792,7 +5792,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
-      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
+      const target = src.startsWith("<(", lx.i) || src.startsWith("=(", lx.i) ? procSub(lx) : word(lx);
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -5891,7 +5891,12 @@ function word(lx) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
-    if (c === "(") {
+    if (c === "(" && /^(?:[A-Za-z_]\w*(?:\[[^\]]*\])?|\[[^\]]*\])\+?==$/.test(src.slice(start, lx.i))) {
+      out.value = out.value.slice(0, -1);
+      bare = bare.slice(0, -1);
+      lx.i--;
+      merge(out, procSub(lx));
+    } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")");
       out.value += src.slice(lx.i, end);
       bare += src.slice(lx.i, end);
@@ -6037,7 +6042,7 @@ function inner(lx, src) {
   while (sub.i < src.length) {
     tick();
     const from = sub.i;
-    if ((src[sub.i] === "<" || src[sub.i] === ">") && src[sub.i + 1] === "(")
+    if ((src[sub.i] === "<" || src[sub.i] === ">" || src[sub.i] === "=") && src[sub.i + 1] === "(")
       procSub(sub);
     else
       word(sub);

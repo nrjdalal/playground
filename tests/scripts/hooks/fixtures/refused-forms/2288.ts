@@ -6,7 +6,7 @@ import { type Group, NEVER_MADE, type Row } from "./_shared"
 const overCap = (last: string) =>
   `(${Array.from({ length: 65 }, (_, k) => `z${k}`).join("|")}|${last})`
 
-// quoted argument text, a paren-joined plain word and a glob qualifier, which the shell runs as no program
+// calls that run no guarded program: guarded names in quoted text or a search pattern, a subshell that changes folder and lints, a glob qualifier, and a date read into an assignment
 const controls = (): Row[] => [
   ["a commit message that opens with a delete", `git commit -m "rm stale files"`],
   ["a reason that opens with a kill by name", `x --reason "pkill the watcher"`],

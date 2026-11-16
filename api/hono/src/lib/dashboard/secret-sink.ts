@@ -71,7 +71,7 @@ export const runSink: SinkRun = (argv, value) =>
 export const keychainWriter = (item: string, run?: Run) =>
   keychainSpec(item) === KEYCHAIN_ITEMS.yard ? keychain(run) : keychainItem(item, { run })
 
-// A keychain sink's writer, on the same terms: only a stack that reads the live machine writes this Mac's Keychain, and any other saves nothing.
+// A keychain sink's writer, on the same terms: only a stack that reads the live machine writes this computer's secret store, and any other saves nothing.
 export const saveToKeychain: KeychainSave = (item, value) =>
   readsLive() ? keychainWriter(item).write(value) : Promise.resolve()
 

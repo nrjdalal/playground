@@ -70,7 +70,7 @@ describe("an allowlisted Keychain item", () => {
   test("names a refusal by its first line, with the value cut out", async () => {
     const { item } = fake({ code: 1, stderr: "security: could not add yard_made-up\nmore" })
     await expect(item.write("yard_made-up")).rejects.toThrow(
-      "the Keychain refused it: security: could not add …",
+      "the secret store refused it: security: could not add …",
     )
   })
 })

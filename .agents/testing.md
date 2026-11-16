@@ -20,7 +20,7 @@ It does the same when those files leave a key the apps' schemas require unset or
 
 ## The run
 
-`bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, which point at `dist`, so on a fresh checkout an unbuilt package resolves to nothing.
+`bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, and an entry with no `bun` condition points at `dist` alone, so on a fresh checkout an unbuilt package resolves to nothing.
 It builds them under `NODE_ENV=production SKIP_ENV_VALIDATION=true`, as `prebuildTests` does, since `@packages/auth`'s build validates the env, which a worktree with no `.env` leaves empty.
 Only the shared packages (`@packages/*` and `@api/hono`) are built, never the web: a test imports the web's code by source path and never through a `dist`.
 `bun run test:file <paths>` builds every shared package whose `dist` is missing (`@packages/*` and `@api/hono`, turbo's cache keeping the rest cheap),

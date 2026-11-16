@@ -1096,7 +1096,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       cmd.group = true
       const members = topLevel(lx.commands.slice(from), scope)
       cmd.inner = () => members
-    } else if ((c === "<" || c === ">") && src[lx.i + 1] === "(") {
+    } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
       cmd.words.push(procSub(lx))
     } else if (redirect) {
       lx.i += redirect[0].length
@@ -1104,7 +1104,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const [, fd] = redirect
       // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
-      const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
+      const target =
+        src.startsWith("<(", lx.i) || src.startsWith("=(", lx.i) ? procSub(lx) : word(lx)
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -1136,7 +1137,7 @@ function topLevel(cmds: Command[], scope: number): Command[] {
   return cmds.filter((c) => !fed.has(c) && c.scope === scope)
 }
 
-// A process substitution, carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
+// A process substitution (`<(…)`, `>(…)`, zsh's `=(…)`), carrying the commands whose output leaves it, so a shell that reads it as a script can read that output.
 function procSub(lx: Lexer): Word {
   lx.i += 2
   const from = lx.commands.length
@@ -1207,7 +1208,16 @@ function word(lx: Lexer): Word {
     tick()
     const c = src[lx.i]
     const next = src[lx.i + 1] ?? ""
-    if (c === "(") {
+    if (
+      c === "(" &&
+      /^(?:[A-Za-z_]\w*(?:\[[^\]]*\])?|\[[^\]]*\])\+?==$/.test(src.slice(start, lx.i))
+    ) {
+      // zsh's `=(…)` as an assignment's value (`x==(…)`, `x[1]==(…)`, `typeset x==(…)`) or an array's indexed or keyed value (`a=([1]==(…))`), its commands lexed as at a word's start
+      out.value = out.value.slice(0, -1)
+      bare = bare.slice(0, -1)
+      lx.i--
+      merge(out, procSub(lx))
+    } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")")
       out.value += src.slice(lx.i, end)
       bare += src.slice(lx.i, end)
@@ -1361,7 +1371,8 @@ function inner(lx: Lexer, src: string): void {
   while (sub.i < src.length) {
     tick()
     const from = sub.i
-    if ((src[sub.i] === "<" || src[sub.i] === ">") && src[sub.i + 1] === "(") procSub(sub)
+    if ((src[sub.i] === "<" || src[sub.i] === ">" || src[sub.i] === "=") && src[sub.i + 1] === "(")
+      procSub(sub)
     else word(sub)
     if (sub.i === from) sub.i++
   }
@@ -2210,10 +2221,10 @@ export function spelledText(text: string): string {
     .replace(/\\/g, "")
     .split(/[\s;&<>`]+/)
     .flatMap((token) => {
-      // a subshell's or a substitution's opening paren, a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
+      // a subshell's, a substitution's or a zsh `=(…)` process substitution's opening paren (an assignment's value or an array's element too), a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
       const parts = token
-        .split(/(?=\$\()|\|+(?=\()/)
-        .map((part) => part.replace(/^(?:\$?\(|['"])+/, ""))
+        .split(/(?=[$=]\()|\|+(?=\()/)
+        .map((part) => part.replace(/^(?:[$=]?\(|['"])+/, ""))
       return [token, ...parts.filter((part) => part !== token)]
     })
     .filter((token) => /[{(]/.test(token))
