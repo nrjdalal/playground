@@ -57,6 +57,8 @@ const extensionsControls = ({ DATA, HOME }: Paths): Row[] => [
     "ssh spark-9dfb bash -s <<'EOF'\nif [ -r /etc/os-release ]; then . /etc/os-release && echo \"${PRETTY_NAME:-unknown}\"; fi\nEOF",
   ],
   ["a source of os-release by . from the home", ". /etc/os-release && echo ok", "home"],
+  ["a RemoteCommand that writes nothing", "ssh -o RemoteCommand=uptime box"],
+  ["a remote uptime after a port option past the host", "ssh box -p 22 uptime"],
 ]
 
 const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
@@ -162,6 +164,46 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
   ],
   ["a ProxyCommand the hook cannot read", `ssh -o ProxyCommand="$CMD" host true`],
   ["a -o the hook cannot read", `ssh -o "$OPT" host true`],
+  ["a log file in the root by -E past the host", `ssh box -E ${ROOT}/x ls`],
+  [
+    "a known-hosts file in the root by -o past the host",
+    `ssh box -o UserKnownHostsFile=${ROOT}/kh ls`,
+  ],
+  ["a control socket in the root by -S past the host", `ssh box -S ${ROOT}/sock -M ls`],
+  ["a forwarded socket in the root by -L past the host", `ssh box -L ${ROOT}/sock:localhost:80 -N`],
+  [
+    "a remote touch through a ? glob after GLOBIGNORE",
+    "ssh box 'GLOBIGNORE=x; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote chmod of a ? glob after GLOBIGNORE",
+    "ssh box 'GLOBIGNORE=x; chmod -R 777 ?playground'",
+  ],
+  [
+    "a remote touch through a ? glob after GLOB_DOTS spelled with underscores",
+    "ssh box 'setopt g_l_o_b_d_o_t_s; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a quoted dotglob",
+    `ssh box "shopt -s dot''glob; touch ?playground/extensions/y"`,
+  ],
+  [
+    "a remote touch through a ? glob in zsh -4",
+    `ssh box "zsh -4 -c 'touch ?playground/extensions/y'"`,
+  ],
+  [
+    "a touch through a ? glob in zsh -4 from the home",
+    "zsh -4 -c 'touch ?playground/extensions/y'",
+    "home",
+  ],
+  [
+    "a fed file the line rewrites from the root before ssh reads it",
+    `cat ${ROOT}/policy.json > ${HOME}/peer-check.sh; ssh h bash -s < ${HOME}/peer-check.sh`,
+  ],
+  [
+    "a python write piped to a remote python3, read from the home",
+    `echo 'open(".playground/extensions/x","w")' | ssh box python3`,
+  ],
 ]
 
 export const groups: Group[] = [

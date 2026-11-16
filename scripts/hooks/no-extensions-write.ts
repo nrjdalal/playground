@@ -1853,34 +1853,36 @@ function narrow(cmd: Command, env: Env): boolean {
 }
 
 // Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
-function rooted(commands: Command[], from?: string): boolean {
+function rooted(commands: Command[], files?: Files): boolean {
   if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
-      (!!stdinShell(cmd) && !sshSpared(cmd, from)) ||
-      (!!cmd.inner && rooted(cmd.inner(), from)) ||
+      (!!stdinShell(cmd) && !sshSpared(cmd, files)) ||
+      (!!cmd.inner && rooted(cmd.inner())) ||
       [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
-        (word) => !!word.procs && rooted(word.procs, from),
+        (word) => !!word.procs && rooted(word.procs),
       ),
   )
 }
 
 // Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
-function sshSpared(cmd: Command, from: string | undefined): boolean {
+function sshSpared(cmd: Command, files: Files | undefined): boolean {
   if (cmd.stdin || !sshCall(parse(cmd))) return false
-  const text = sshText(cmd, from)
+  const text = sshText(cmd, files)
   return text !== undefined && !rooted(lex(text).commands)
 }
 
-// The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or a file named by a literal path, absolute or from `from` (the tool's folder on a line that moves no folder), read when it is a regular file within 1 MiB; undefined for any other
-function sshText(cmd: Command, from: string | undefined): string | undefined {
+// Whether sshText may read a fed file: only on a line of one command, from `from` (the tool's folder on a line that moves no folder) for a relative path
+type Files = { from?: string }
+// The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or, when `files` allows, a file named by a literal path, absolute or from its `from`, read when it is a regular file within 1 MiB; undefined for any other
+function sshText(cmd: Command, files: Files | undefined): string | undefined {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
   if (input?.body)
     return input.body.unknown || marked(input.body.value) ? undefined : input.body.value
   const path = input?.op === "<" ? input.target?.value : undefined
-  if (!path || marked(path) || input?.target?.glob || (!path.startsWith(sep) && !from))
-    return undefined
-  const file = resolve(from ?? sep, path)
+  if (!files || !path || marked(path) || input?.target?.glob) return undefined
+  if (!path.startsWith(sep) && !files.from) return undefined
+  const file = resolve(files.from ?? sep, path)
   try {
     const stat = statSync(file)
     return stat.isFile() && stat.size <= 1_048_576 ? readFileSync(file, "utf8") : undefined
@@ -2148,8 +2150,11 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // dotglob or zsh's GLOB_DOTS set on the line lets a glob match a name led by a dot
-  const dotsOn = typeof input.command === "string" && /dot_?glob|glob_?dots/i.test(input.command)
+  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) on the line lets a glob match a name led by a dot
+  const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : ""
+  const dotsOn =
+    /dotglob|globdots|globignore/i.test(bare) ||
+    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2358,6 +2363,9 @@ async function inspect(
   const slotOf = new WeakMap<Command, Command>()
   let whole = false
   let rootLine = false
+  // the commands whose output an ssh's remote side reads as code, and ssh's own words with its remote line taken out, judged as any program's
+  let sshFed = new Set<Command>()
+  const sshOwn = new WeakSet<Command>()
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
   let bodies = new WeakMap<Command, Command[]>()
@@ -2393,7 +2401,12 @@ async function inspect(
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
     // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
-    const ssh = sshCall(parsed)
+    // a command ssh's stdin reads as code was typed here, so its text is judged from the remote home too, as its local twin there would be
+    if (sshFed.has(cmd) && !env.remote) {
+      const verdict = await visit(cmd, parsed, remoteEnv(env, ""))
+      if (verdict) return verdict
+    }
+    const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed)
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))
         return refuse(
@@ -2410,7 +2423,8 @@ async function inspect(
     if (ssh?.host && ssh.remote.length > 0 && cmd.words.includes(ssh.host)) {
       const line = ssh.remote.map((w) => w.value).join(" ")
       const at = remoteEnv(env, line)
-      const own = { ...cmd, words: cmd.words.slice(0, cmd.words.indexOf(ssh.host) + 1) }
+      const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) }
+      sshOwn.add(own)
       return (await visit(own, parse(own), env)) ?? run(lex(line, at.known), at, visit, true)
     }
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
@@ -3133,7 +3147,24 @@ async function inspect(
     visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
-  rootLine = rooted(lexed.commands, /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory)
+  // a file fed to ssh is read only when the ssh is the line's one command, since another could write the file before ssh reads it
+  const [only, ...rest] = lexed.commands
+  const alone =
+    !!only &&
+    rest.length === 0 &&
+    !only.inner &&
+    ![...only.words, ...only.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
+      (word) => word.procs,
+    )
+  rootLine = rooted(
+    lexed.commands,
+    alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
+  )
+  sshFed = new Set(
+    [...codeFed(lexed.commands)]
+      .filter(([, { consumer }]) => !!sshCall(parse(consumer)))
+      .map(([producer]) => producer),
+  )
   if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
