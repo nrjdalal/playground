@@ -1413,6 +1413,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It fails closed only on a call that reads as a comment; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
+  On a machine with extensions the owners come from the data folder's `extensions/hooks/release-owners.json`, built from each scope's `lists/release-owners.json`, so a search of the checkout finds no owner while the hook still guards one; `bun packages/scripts/src/playground/rendered.ts hooks/release-owners.json` prints that file's path.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
 
 ## no-stash
