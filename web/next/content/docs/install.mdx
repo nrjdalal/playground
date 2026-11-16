@@ -54,7 +54,7 @@ A GitHub login (`gh auth login`) is optional for the install, and syncing your e
 
 ## What it does
 
-1. Installs whatever is missing of Homebrew, `git`, `node` and `bun`, since every later step runs on them; `playground doctor` checks that `node` is 20.9 or newer.
+1. Installs whatever is missing of Homebrew, `git`, `node` and `bun`, since every later step runs on them; `playground doctor` checks that `node` is 20.9 or newer. On Linux it installs `bun` alone, and a missing `git` or `node` goes on the list and stops the run.
 2. Prints every place outside its folder it will write to, before it writes there.
 3. Clones Playground into its folder, or, when the folder already holds a checkout, fast-forwards it. With a GitHub login it clones through `gh`, else over HTTPS.
 4. Installs the rest of `playground doctor`'s tool list that is missing, then the pinned `herdr`, and signs Claude Code in.
