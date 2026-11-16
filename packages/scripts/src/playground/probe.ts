@@ -16,13 +16,14 @@ import {
 } from "@packages/settings"
 
 import { inRecordedForm } from "../../../../api/hono/src/lib/sessions/proc-start"
-import { portlessCa } from "../portless-ca"
+import { portlessCa, portlessDir } from "../portless-ca"
 import {
   dashboardBeatOf,
   staleBeat,
   type DashboardBeat,
   type Dispatcher,
   type Probes,
+  type Redirect,
 } from "./plan"
 
 // The data folder spawn.sh keeps its briefs and backend pins in: PLAYGROUND_DATA_DIR, else ~/.playground, never CLAUDE_CONFIG_DIR.
@@ -34,8 +35,13 @@ const configDir = (): string =>
     ? join(homedir(), ".claude")
     : process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 
-const run = (argv: string[], cwd?: string, timeout = 10_000): { code: number; out: string } => {
-  const child = Bun.spawnSync(argv, { cwd, stderr: "pipe", stdout: "pipe", timeout })
+const run = (
+  argv: string[],
+  cwd?: string,
+  timeout = 10_000,
+  env?: Record<string, string | undefined>,
+): { code: number; out: string } => {
+  const child = Bun.spawnSync(argv, { cwd, env, stderr: "pipe", stdout: "pipe", timeout })
   return { code: child.exitCode ?? 1, out: child.stdout.toString().trim() }
 }
 
@@ -85,33 +91,51 @@ export const cutDashboardCheckout = (
 
 export type Urls = { api: string; web: string }
 
-// The dashboard opens on its bare name, which its stack aliases beside its own `desk.`-prefixed ones, while its API keeps the `desk.`-prefixed name its page calls.
+// The dashboard opens on its bare name, which its stack aliases beside its own `desk.`-prefixed ones, while its API keeps the `desk.`-prefixed name its page calls. portless get reads the state folder portlessDir() picks, so each URL names the proxy that serves, the 1355 fallback's scheme and port included, never an idle ~/.portless's guess.
 export const dashboardUrls = (dashboard: string): Urls | null => {
-  const web = run(["bunx", "portless", "get", "playground", "--no-worktree"], dashboard).out
-  const api = run(["bunx", "portless", "get", "api.playground"], dashboard).out
+  const env = { ...process.env, PORTLESS_STATE_DIR: portlessDir() }
+  const get = (...name: string[]) =>
+    run(["bunx", "portless", "get", ...name], dashboard, 10_000, env).out
+  const web = get("playground", "--no-worktree")
+  const api = get("api.playground")
   return web.startsWith("http") && api.startsWith("http") ? { api, web } : null
 }
 
 // portless answers 404 for a name no stack serves, so only the stack's own answer counts as up; an https dashboard's certificate is checked against portless's CA, which Bun's own store lacks.
-const answers = async (url: string, up: (status: number) => boolean): Promise<boolean> => {
+const answers = async (url: string): Promise<Response | null> => {
   const ca = portlessCa()
   try {
-    const response = await fetch(url, {
+    return await fetch(url, {
       redirect: "manual",
       signal: AbortSignal.timeout(3000),
       ...(ca ? { tls: { ca: Bun.file(ca) } } : {}),
     })
-    return up(response.status)
   } catch {
-    return false
+    return null
   }
 }
 
-export const apiUp = (urls: Urls | null): Promise<boolean> =>
-  urls ? answers(`${urls.api}/api/health`, (status) => status === 200) : Promise.resolve(false)
+// The API's health read: up on a 200 alone; a 3xx, as the 1355 proxy's from http to https, keeps the URL asked and where it was sent, so the wait can name the address it should ask.
+export const apiRead = async (
+  urls: Urls | null,
+): Promise<{ redirect: Redirect | null; up: boolean }> => {
+  if (!urls) return { redirect: null, up: false }
+  const from = `${urls.api}/api/health`
+  const response = await answers(from)
+  const status = response?.status ?? 0
+  const to = response?.headers.get("location") ?? "no Location header"
+  return {
+    redirect: status >= 300 && status < 400 ? { from, status, to } : null,
+    up: status === 200,
+  }
+}
 
-export const webUp = (urls: Urls | null): Promise<boolean> =>
-  urls ? answers(urls.web, (status) => status < 400) : Promise.resolve(false)
+export const apiUp = async (urls: Urls | null): Promise<boolean> => (await apiRead(urls)).up
+
+export const webUp = async (urls: Urls | null): Promise<boolean> => {
+  const response = urls ? await answers(urls.web) : null
+  return !!response && response.status < 400
+}
 
 // The live sessions holding a dispatcher's name: a registry file whose pid runs with the start time the file records, in the form it records it (inRecordedForm), as spawn.sh counts them.
 export const liveDispatchers = (): Dispatcher[] => liveSessions((name) => slotOfName(name) !== null)
