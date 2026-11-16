@@ -94,6 +94,16 @@ export function abLine(body: string): boolean {
     })
 }
 
+// Pure: the first Evidence line whose prose, outside a code fence and inline code, holds the word TBD in any case, trimmed, else null.
+export function tbdLine(body: string): string | null {
+  let fenced = false
+  for (const line of evidenceOf(body).split(/\r?\n/)) {
+    if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
+    else if (!fenced && /\btbd\b/i.test(line.replace(/(`+)[^`\n]*?\1/g, " "))) return line.trim()
+  }
+  return null
+}
+
 // Pure: the pr template's own placeholders, each <...> inside the first markdown fence of its SKILL.md (extensions/core/skills/pr/SKILL.md), read from the file so the gate holds no copy.
 export function templatePlaceholders(skill: string): string[] {
   const fence = /^```markdown\n([\s\S]*?)^```$/m.exec(skill)?.[1] ?? ""
@@ -124,7 +134,7 @@ const tokensIn = (prose: string): string[] => [...new Set(prose.match(BARE_TOKEN
 // Pure: each bare all-caps token with an underscore in a body's prose (SUITE_LINE), once, the shape a fill token left unfilled takes.
 export const bareTokens = (body: string): string[] => tokensIn(proseOf(body))
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line and no TBD (tbdLine), its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
 export function bodyRefusal(
   body: string,
   files: string[] = [],
@@ -139,6 +149,10 @@ export function bodyRefusal(
   }
   if (!abLine(body)) {
     return "its body's Evidence holds no A/B line: open one with `A/B:` and give A and B against the bar (`A/B: <metric>, A canary <value>, B branch <value>, n=<N>`), or `A/B: No runtime metric` and the check that stands in"
+  }
+  const tbd = tbdLine(body)
+  if (tbd) {
+    return `its body's Evidence holds TBD: "${tbd}"; write what was measured, or say what is pending and when`
   }
   const prose = proseOf(body)
   const unfilled = [
