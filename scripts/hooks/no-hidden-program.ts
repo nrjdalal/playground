@@ -9,15 +9,7 @@ import {
   plainProgram,
   run,
   type Visit,
-  type Word,
 } from "./shell"
-
-// Whether a word before the program is command's -v or -V, which looks the program up and runs nothing
-const lookedUp = (words: Word[], first: Word): boolean => {
-  const before = words.slice(0, words.indexOf(first))
-  const at = before.findLastIndex((w) => !w.quoted && w.value === "command")
-  return at >= 0 && before.slice(at + 1).some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value))
-}
 
 // The prefix variables a line changes where the reader records no value: a `+=`, or a `${NAME=…}`, `${NAME:=…}` or `${NAME::=…}`
 const changedIn = (command: string): Set<string> =>
@@ -27,6 +19,9 @@ const changedIn = (command: string): Set<string> =>
     ),
   )
 
+// A zsh numeric range glob (`<->`, `<1-5>`), which zsh globs into a word with no option set while the shared reader keeps reading its `<` as a redirect, as every other guard does; found anywhere in the call's text, so a script the walk follows is covered too
+const NUMERIC_RANGE = /<\d*-\d*>/
+
 // Judges the reading that runs alone, the primary parse's program word, never another reading that takes an option's value as the program (`nice -n $N ls`)
 const visitOf =
   (changed: ReadonlySet<string>): Visit =>
@@ -34,7 +29,7 @@ const visitOf =
     const typed = first?.source ?? first?.value
     const primary = parse(cmd).first
     if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value)) return
-    if (lookedUp(cmd.words, first) || plainProgram(first, at, changed)) return
+    if (plainProgram(first, at, changed)) return
     const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1]
     const value = held === undefined ? undefined : at.vars.get(held)
     const rewrite =
@@ -57,6 +52,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     process: environment,
     vars: new Map(),
   }
+  if (NUMERIC_RANGE.test(command))
+    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and write a literal `<…-…>` some other way."
   return run(lex(command, env.known), env, visitOf(changedIn(command)))
 }
 

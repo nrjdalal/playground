@@ -1150,7 +1150,7 @@ function walk(lx, scope, nested, inherit) {
   while (lx.i < src.length) {
     tick();
     const c = src[lx.i];
-    const redirect = NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)) ? null : REDIRECT.exec(src.slice(lx.i, lx.i + 8));
+    const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8));
     if (c === " " || c === "\t")
       lx.i++;
     else if (c === "\\" && src[lx.i + 1] === `
@@ -1367,7 +1367,7 @@ function word(lx, opening = false) {
   const start = lx.i;
   const out = { quoted: false, value: "" };
   let bare = "";
-  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")" || NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)))) {
+  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")")) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
@@ -1376,12 +1376,6 @@ function word(lx, opening = false) {
       bare = bare.slice(0, -1);
       lx.i--;
       merge(out, procSub(lx));
-    } else if (c === "<") {
-      const range = NUMERIC_GLOB.exec(src.slice(lx.i, lx.i + 64))[0];
-      out.value += range;
-      bare += range;
-      out.glob = true;
-      lx.i += range.length;
     } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")", false, opening);
       out.value += src.slice(lx.i, end);
@@ -1439,7 +1433,6 @@ function word(lx, opening = false) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
-var NUMERIC_GLOB = /^\d*<\d*-\d*>/;
 var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
 var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;
@@ -2376,7 +2369,7 @@ function plainProgram(first, env, changed = new Set) {
       bare += c;
     }
   }
-  return !/[*?(#^<]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare);
+  return !/[*?(#^]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare);
 }
 var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
@@ -16092,18 +16085,14 @@ async function refusal(raw, environment = process.env, load5 = currentLoad5()) {
 if (false) {}
 
 // scripts/hooks/no-hidden-program.ts
-var lookedUp = (words, first) => {
-  const before = words.slice(0, words.indexOf(first));
-  const at = before.findLastIndex((w) => !w.quoted && w.value === "command");
-  return at >= 0 && before.slice(at + 1).some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value));
-};
 var changedIn = (command) => new Set([...PLAIN_PREFIXES].filter((name) => new RegExp(`(?:^|[\\s;&|(){}])${name}\\+=|\\$\\{${name}:{0,2}=`).test(command)));
+var NUMERIC_RANGE = /<\d*-\d*>/;
 var visitOf = (changed) => async (cmd, { first }, at) => {
   const typed = first?.source ?? first?.value;
   const primary = parse(cmd).first;
   if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value))
     return;
-  if (lookedUp(cmd.words, first) || plainProgram(first, at, changed))
+  if (plainProgram(first, at, changed))
     return;
   const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1];
   const value = held === undefined ? undefined : at.vars.get(held);
@@ -16125,6 +16114,8 @@ async function inspect8(raw, environment) {
     process: environment,
     vars: new Map
   };
+  if (NUMERIC_RANGE.test(command))
+    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and write a literal `<\u2026-\u2026>` some other way.";
   return run2(lex(command, env.known), env, visitOf(changedIn(command)));
 }
 async function check12(raw, environment = process.env) {

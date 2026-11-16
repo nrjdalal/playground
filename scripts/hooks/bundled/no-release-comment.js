@@ -1038,7 +1038,7 @@ function walk(lx, scope, nested, inherit) {
   while (lx.i < src.length) {
     tick();
     const c = src[lx.i];
-    const redirect = NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)) ? null : REDIRECT.exec(src.slice(lx.i, lx.i + 8));
+    const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8));
     if (c === " " || c === "\t")
       lx.i++;
     else if (c === "\\" && src[lx.i + 1] === `
@@ -1255,7 +1255,7 @@ function word(lx, opening = false) {
   const start = lx.i;
   const out = { quoted: false, value: "" };
   let bare = "";
-  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")" || NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)))) {
+  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")")) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
@@ -1264,12 +1264,6 @@ function word(lx, opening = false) {
       bare = bare.slice(0, -1);
       lx.i--;
       merge(out, procSub(lx));
-    } else if (c === "<") {
-      const range = NUMERIC_GLOB.exec(src.slice(lx.i, lx.i + 64))[0];
-      out.value += range;
-      bare += range;
-      out.glob = true;
-      lx.i += range.length;
     } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")", false, opening);
       out.value += src.slice(lx.i, end);
@@ -1327,7 +1321,6 @@ function word(lx, opening = false) {
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
-var NUMERIC_GLOB = /^\d*<\d*-\d*>/;
 var BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/;
 var BRACE = "a brace expansion";
 var TILDE = /^~[-+](?=\/|$|\u0000)/;

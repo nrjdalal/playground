@@ -387,15 +387,11 @@ const controls = (): Row[] => [
     'case "$c" in *x*) ;; *) echo "$(date)";; esac',
   ],
   ["a glob in an argument", "ls *.ts"],
-  ["a numeric range in an argument", "cat <->"],
   ["a group spelling in a comment", "# nice (r|\\))m /tmp/x"],
   ["a group holding a literal slash, which zsh refuses as a bad pattern", "nice (r/x)m"],
   ["a group in an argument", "echo (r|x)m"],
   ["a group in a listing's argument", "ls (a|b)"],
   ["a subshell after a repeat count and time", "repeat 1 time (ls)"],
-  ["a lookup of a program held in a variable", "X=git; command -v $X"],
-  ["a quoted lookup of a program held in a variable", 'X=git; command -V "$X"'],
-  ["a lookup of a loop variable", "for b in git bun; do command -v $b; done"],
   ["a wrapper's option value held in a variable", "N=5; nice -n $N ls"],
   ["exec's name held in a variable", 'X=foo; exec -a "$X" ls'],
   ["sudo's user held in a variable", "U=me; sudo -u $U ls"],
@@ -446,6 +442,30 @@ const spelled = (): Row[] => [
     "nice =pkill -f watcher",
   ),
   ["a program under a HOME the line appends to", "HOME+=/x; $HOME/bin/ls"],
+  ["a numeric range in an argument, refused with its command", "cat <->"],
+  ["a lookup of a program held in a variable", "X=git; command -v $X"],
+  ["a quoted lookup of a program held in a variable", 'X=git; command -V "$X"'],
+  ["a lookup of a loop variable", "for b in git bun; do command -v $b; done"],
+  ...twins(
+    "an rm env -v runs after command, an extendedglob # spelling it",
+    `setopt extendedglob; command env -v /bin/rmm# -rf ${NEVER_MADE}`,
+  ),
+  ...twins(
+    "a kill by name env -v runs after command, an extendedglob # spelling it",
+    "command env -v /usr/bin/pkilll# -f watcher",
+  ),
+  ...twins(
+    "a stash pop env -v runs after command, an extendedglob # spelling it",
+    "setopt extendedglob; command env -v /usr/bin/gitt# stash pop",
+  ),
+  ...twins(
+    "a program env -v runs after command, a numeric range spelling it",
+    "command env -v py<-> a",
+  ),
+  ...twins(
+    "an rm time -v runs after command, a zsh group spelling it",
+    `command time -v (r|x)m -rf ${NEVER_MADE}`,
+  ),
   ["a program under a HOME a := expansion sets", ": ${HOME::=/tmp/x}; $HOME/bin/ls"],
   ["a program under a HOME a default expansion sets", ": ${HOME:=/tmp/x}; $HOME/bin/ls"],
   ["a program under a HOME an unset default sets", ": ${HOME=/tmp/x}; $HOME/bin/ls"],
@@ -468,5 +488,21 @@ export const groups: Group[] = [
     ],
   },
 ]
+
+// The shared reader keeps canary's redirect reading of a numeric range's `<` (Command.numericRange), so no other guard loosens: the write canary read into the main checkout stays refused there
+groups.push({
+  folders: ["checkout"],
+  guards: ["no-main-checkout"],
+  rows: ({ MAIN }) => [
+    [
+      "a numeric range before a main checkout file, read as canary reads it",
+      `echo x <1-2>${MAIN}/README.md`,
+    ],
+    [
+      "an open numeric range before a main checkout file, read as canary reads it",
+      `echo x <->${MAIN}/README.md`,
+    ],
+  ],
+})
 
 export const allowed: string[] = controls().map(([what]) => what)

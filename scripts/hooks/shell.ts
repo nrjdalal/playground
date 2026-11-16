@@ -1122,9 +1122,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   while (lx.i < src.length) {
     tick()
     const c = src[lx.i]
-    const redirect = NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64))
-      ? null
-      : REDIRECT.exec(src.slice(lx.i, lx.i + 8))
+    const redirect = REDIRECT.exec(src.slice(lx.i, lx.i + 8))
     if (c === " " || c === "\t") lx.i++
     else if (c === "\\" && src[lx.i + 1] === "\n") lx.i += 2
     else if (c === "\n") {
@@ -1345,8 +1343,7 @@ function word(lx: Lexer, opening = false): Word {
   while (
     lx.i < src.length &&
     (!BREAK.has(src[lx.i]) ||
-      (src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")") ||
-      NUMERIC_GLOB.test(src.slice(lx.i, lx.i + 64)))
+      (src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")"))
   ) {
     tick()
     const c = src[lx.i]
@@ -1360,12 +1357,6 @@ function word(lx: Lexer, opening = false): Word {
       bare = bare.slice(0, -1)
       lx.i--
       merge(out, procSub(lx))
-    } else if (c === "<") {
-      const range = (NUMERIC_GLOB.exec(src.slice(lx.i, lx.i + 64)) as RegExpExecArray)[0]
-      out.value += range
-      bare += range
-      out.glob = true
-      lx.i += range.length
     } else if (c === "(") {
       const end = balanced(src, lx.i, "(", ")", false, opening)
       out.value += src.slice(lx.i, end)
@@ -1417,9 +1408,6 @@ function word(lx: Lexer, opening = false): Word {
 }
 
 const GLOB_CHARS = /[*?[{(]/
-
-// A zsh numeric range glob (`<->`, `<1-5>`), which zsh reads as part of a word, an fd's digits before it included (`2<->`), never as a redirect
-const NUMERIC_GLOB = /^\d*<\d*-\d*>/
 
 // A brace list or sequence the shell expands, its close found by a lookahead once, so a { with no } costs its length rather than its square
 const BRACE_LIST = /\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/
@@ -2523,7 +2511,7 @@ function loopClose(commands: Command[], k: number): Command | undefined {
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
-// Whether a program word is spelled plainly: one name once its quotes and backslashes are removed, with no glob, zsh group, brace list, numeric range or extendedglob operator (`#`, `^`, a `~` past the start) outside quotes, no leading `=` (zsh's path lookup), no ANSI-C escape, and no expansion but a folder the session's starting env names (`PLAIN_PREFIXES`) as a plain `$NAME`, `${NAME}`, `${NAME:?…}` or `${NAME:-<a default with no $ or backquote>}` before a slash, never one the line sets or `changed` names; `[` and `[[` stay plain, as zsh reads a bracket with no close as itself
+// Whether a program word is spelled plainly: one name once its quotes and backslashes are removed, with no glob, zsh group, brace list or extendedglob operator (`#`, `^`, a `~` past the start) outside quotes, no leading `=` (zsh's path lookup), no ANSI-C escape, and no expansion but a folder the session's starting env names (`PLAIN_PREFIXES`) as a plain `$NAME`, `${NAME}`, `${NAME:?…}` or `${NAME:-<a default with no $ or backquote>}` before a slash, never one the line sets or `changed` names; `[` and `[[` stay plain, as zsh reads a bracket with no close as itself
 export function plainProgram(
   first: Word,
   env: Env,
@@ -2565,7 +2553,7 @@ export function plainProgram(
       bare += c
     }
   }
-  return !/[*?(#^<]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)
+  return !/[*?(#^]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)
 }
 // The variables a program word may name a folder by: the session's home, and the Playground checkout the factory's docs spell spawn.sh's path with
 export const PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"])
