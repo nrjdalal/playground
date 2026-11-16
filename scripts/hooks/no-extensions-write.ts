@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
@@ -56,10 +56,12 @@ import {
   program,
   READ,
   readPath,
+  remoteEnv,
   run,
   SHELLS,
   shellOperand,
   slotWords,
+  sshCall,
   stdinOf,
   stdinShell,
   type Text,
@@ -397,6 +399,23 @@ function mayMatch(segment: string, name: string): boolean {
     } else source += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   }
   return new RegExp(`^${source}$`, "is").test(name)
+}
+// The words a zsh group of plain alternatives spells (`(unconfined)`, `(a|.b)`), each group no `*`, `?`, `+`, `@` or `!` leads and holding no glob or group of its own, so one ksh operator's or zsh qualifier's group stays a glob
+function alternatives(word: string): string[] {
+  const group = /(?<![*?+@!\\])\(([^()*?[\]#^~<>]*)\)/.exec(word)
+  if (!group || word.split("(").length > 7) return [word]
+  const [before, after] = [word.slice(0, group.index), word.slice(group.index + group[0].length)]
+  return group[1].split("|").flatMap((alt) => alternatives(before + alt + after))
+}
+// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with no dotglob or GLOB_DOTS (`dots`), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group or a zsh qualifier follows
+function globMatches(segment: string, name: string, dots: boolean): boolean {
+  const words = braceWords(segment)?.flatMap(alternatives)
+  if (!words || words.length > 64) return true
+  return words.some((word) => {
+    const text = word.replace(/(?<!\\)[{}]/g, "\\$&")
+    if (!dots && name.startsWith(".") && /^[*?[]/.test(text) && !text.includes("(")) return false
+    return mayMatch(text, name)
+  })
 }
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
@@ -1101,30 +1120,6 @@ function scoreAsOther(words: Word[], cmd: Command, parsed: Parsed, env: Env): bo
   const all = parsed.first ? [parsed.first, ...parsed.args] : parsed.args
   const at = cmd.words.indexOf(all[all.length - words.length - 1])
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at))
-}
-
-// ssh's flags and its options that take a value (OpenSSH's getopt string), and the words after its host, which it joins with blanks into the command line the remote shell runs; undefined for no command, or an option off these lists, so canary's reading holds
-const SSH_FLAGS = "46AaCfGgKkMNnqsTtVvXxYy"
-const SSH_VALUES = "BbcDEeFIiJLlmOoPpQRSWw"
-function sshRemote({ args, first }: Parsed): { host: Word; line: string } | undefined {
-  if (program(first?.value ?? "") !== "ssh") return
-  for (let k = 0; k < args.length; k++) {
-    const { value } = args[k]
-    if (value === "--" || !value.startsWith("-") || value === "-") {
-      const at = value === "--" ? k + 1 : k
-      const rest = args.slice(at + 1)
-      return args[at] && rest.length > 0
-        ? { host: args[at], line: rest.map((w) => w.value).join(" ") }
-        : undefined
-    }
-    for (let c = 1; c < value.length; c++) {
-      if (SSH_VALUES.includes(value[c])) {
-        if (c === value.length - 1) k++
-        break
-      }
-      if (!SSH_FLAGS.includes(value[c])) return
-    }
-  }
 }
 
 const AWKS = new Set(["awk", "gawk", "mawk", "nawk"])
@@ -1862,12 +1857,34 @@ function rooted(commands: Command[]): boolean {
   if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
-      !!stdinShell(cmd) ||
+      (!!stdinShell(cmd) && !sshSpared(cmd)) ||
       (!!cmd.inner && rooted(cmd.inner())) ||
       [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
         (word) => !!word.procs && rooted(word.procs),
       ),
   )
+}
+
+// Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
+function sshSpared(cmd: Command): boolean {
+  if (cmd.stdin || !sshCall(parse(cmd))) return false
+  const text = sshText(cmd)
+  return text !== undefined && !rooted(lex(text).commands)
+}
+
+// The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or a file named by a literal absolute path, read when it is a regular file within 1 MiB; undefined for any other
+function sshText(cmd: Command): string | undefined {
+  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
+  if (input?.body)
+    return input.body.unknown || marked(input.body.value) ? undefined : input.body.value
+  const path = input?.op === "<" ? input.target?.value : undefined
+  if (!path || !path.startsWith(sep) || marked(path) || input?.target?.glob) return undefined
+  try {
+    const stat = statSync(path)
+    return stat.isFile() && stat.size <= 1_048_576 ? readFileSync(path, "utf8") : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // a -C word naming, as one literal absolute path, the folder every place the shell may be in resolves to
@@ -2110,6 +2127,27 @@ async function inspect(
     const at = real(path)
     return at === sep ? remover : root.startsWith(at + sep)
   }
+  // the names in a folder above the root, but the filesystem's own, through which a glob there may reach it: the next folder down to the root and each link there into the root's path, each folder read once
+  const reachSeen = new Map<string, string[]>()
+  const reachNames = (folder: string): string[] => {
+    const at = real(folder)
+    const seen = reachSeen.get(at)
+    if (seen) return seen
+    const names = root.startsWith(at + sep) ? [root.slice(at.length + 1).split(sep)[0]] : []
+    try {
+      for (const entry of readdirSync(at)) {
+        const path = join(at, entry)
+        if (lstatSync(path).isSymbolicLink() && (inRoot(path) || above(path, false)))
+          names.push(entry)
+      }
+    } catch {
+      // a folder it cannot list adds no link
+    }
+    reachSeen.set(at, names)
+    return names
+  }
+  // dotglob or zsh's GLOB_DOTS set on the line lets a glob match a name led by a dot
+  const dotsOn = typeof input.command === "string" && /dot_?glob|glob_?dots/i.test(input.command)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2165,7 +2203,7 @@ async function inspect(
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
   const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
     const quotedGlob = literal && !word.glob
-    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${word.value}`
+    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${!!env.remote}\0${word.value}`
     if (!judged.has(key)) judged.set(key, judge(word, env, remover, quotedGlob))
     return judged.get(key)
   }
@@ -2185,13 +2223,19 @@ async function inspect(
       if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env)
         const folder = dir && dirname(dir)
-        // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none
+        // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none; any other folder above the root fails closed on a glob, since code text (`node -e '…'`, an awk program) reads as one there
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0]
-        const reaches =
-          !folder ||
-          resolve(folder) !== sep ||
-          rootNames().some((entry) => mayMatch(segment, entry))
-        if (folder && (inRoot(folder) || above(folder, true)) && reaches)
+        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in the home reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it
+        const climbs = text.value.slice(glob.index).split("/").includes("..")
+        const reaches = (folder: string) =>
+          inRoot(folder) ||
+          (real(folder) === sep
+            ? rootNames().some((entry) => mayMatch(segment, entry))
+            : !env.remote ||
+              remover ||
+              climbs ||
+              reachNames(folder).some((name) => globMatches(segment, name, dotsOn)))
+        if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`
       }
     }
@@ -2346,14 +2390,26 @@ async function inspect(
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
-    // ssh runs the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed here, and ssh itself by its own words up to the host, a local redirect included
-    const remote = sshRemote(parsed)
-    if (remote && cmd.words.includes(remote.host)) {
-      const own = { ...cmd, words: cmd.words.slice(0, cmd.words.indexOf(remote.host) + 1) }
-      return (
-        (await visit(own, parse(own), env)) ??
-        run(lex(remote.line, env.known), { ...env, vars: new Map() }, visit, true)
+    // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
+    const ssh = sshCall(parsed)
+    for (const local of ssh?.local ?? []) {
+      if (marked(local.value.split(/[=\s]/)[0] ?? ""))
+        return refuse(
+          `an ssh -o of ${shown(local)}, a value the hook cannot read, which may name a command ssh runs on this machine through a shell; write the option literally`,
+        )
+      const verdict = await run(
+        lex(local.value, env.known),
+        { ...env, vars: new Map() },
+        visit,
+        true,
       )
+      if (verdict) return verdict
+    }
+    if (ssh?.host && ssh.remote.length > 0 && cmd.words.includes(ssh.host)) {
+      const line = ssh.remote.map((w) => w.value).join(" ")
+      const at = remoteEnv(env, line)
+      const own = { ...cmd, words: cmd.words.slice(0, cmd.words.indexOf(ssh.host) + 1) }
+      return (await visit(own, parse(own), env)) ?? run(lex(line, at.known), at, visit, true)
     }
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
