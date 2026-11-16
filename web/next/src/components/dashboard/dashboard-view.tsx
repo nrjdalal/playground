@@ -187,10 +187,10 @@ function Checklist({ name }: { name: string }) {
             {pick.error && <p className="text-destructive text-xs">{pick.error.message}</p>}
           </div>
         ) : undefined,
-      done: `${label ?? "It"} is installed and signed in.`,
+      done: `${label ?? "It"} is ready.`,
       kept: true,
       title: "Harness",
-      todo: `Pick what ${name} runs on. Start turns on once it is installed and signed in.`,
+      todo: `Pick what ${name} runs on. Start turns on once each of its checks passes.`,
     },
     settings: {
       action:
