@@ -14,14 +14,12 @@ import {
 import { dirname, join } from "node:path"
 
 import {
-  bin,
   capacityLog,
   execLine,
   herdrPin,
   launchAfterRm,
   launchOf,
   lw,
-  opened,
   placing,
   projectOf,
   ranIn,
@@ -30,7 +28,6 @@ import {
   script,
   spawn,
   transcript,
-  usage,
 } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
