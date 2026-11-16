@@ -23,6 +23,7 @@ import {
   type InboxItem,
   type ShipFacts,
 } from "../../../../../packages/scripts/src/pr-merge/ship-merge"
+import { storeWith } from "../../../../scripts/hooks/render-set"
 import "./scratch-config"
 import { greenChecks } from "./suite"
 
@@ -41,6 +42,7 @@ const ready = (): ShipFacts => ({
   body: `Two sentences.\n\n${gateLine(HEAD, false)}\n${rehearsalLine(HEAD, "PASS")}\n\n## What ships\n`,
   checks: greenChecks(),
   decision: null,
+  dispatcher: "dispatcher",
   freeze: freezeLine("v0.0.84"),
   head: HEAD,
   state: "OPEN",
@@ -120,6 +122,7 @@ const decision = (): InboxItem => ({
       { label: "Copy only this fix to main now, outside the usual ship" },
     ],
     text: "Ship v0.0.84 now: the fix and two more.",
+    type: "ask",
   },
   status: "approved",
   title: "Ship the fix now, or wait?",
@@ -171,11 +174,14 @@ describe("shipRefusals takes a new-user gate waived by an approved Inbox decisio
       ])
   })
 
-  test("another kind or another sender refuses", () => {
+  test("another kind or another sender refuses; the sender is the dispatcher's configured name", () => {
     expect(waiver({ kind: "draft" })).toEqual([`gate: Inbox ${ID} is a draft, not a decision`])
     expect(waiver({ from: "builder" })).toEqual([
       `gate: Inbox ${ID} is from builder, not dispatcher`,
     ])
+    const alpha = { body: waived, decision: { ...decision(), from: "alpha" } }
+    expect(refusals({ ...alpha, dispatcher: "alpha" })).toEqual([])
+    expect(refusals(alpha)).toEqual([`gate: Inbox ${ID} is from alpha, not dispatcher`])
   })
 
   test("a decision naming another version, or this one only as a prefix, refuses", () => {
@@ -188,20 +194,52 @@ describe("shipRefusals takes a new-user gate waived by an approved Inbox decisio
     ])
   })
 
-  test("an Approve on a row that names no new-user waiver refuses, as does an Edit with no row", () => {
+  test("an Approve on a row that does not skip the new-user check refuses, as does an Edit", () => {
     expect(waiver({ answer: { choice: "approve", option: 1 } })).toEqual([
       `gate: Inbox ${ID} approved option 1 "Copy only this fix to main now, outside the usual ship", which names no new-user waiver`,
     ])
+    const wait = { label: "Wait until the new-user check passes" }
+    const rows = { ...decision().preview, options: [wait, { label: "Ship now, skip the check" }] }
+    expect(waiver({ preview: rows })).toEqual([
+      `gate: Inbox ${ID} approved option 0 "Wait until the new-user check passes", which names no new-user waiver`,
+    ])
     expect(waiver({ answer: { choice: "edit", editedText: "ship it" } })).toEqual([
-      expect.stringContaining("which names no new-user waiver"),
+      `gate: Inbox ${ID} was approved by edit, whose own words name no row`,
     ])
   })
 
-  test("a decision with no rows needs the new-user check named in its title or text", () => {
-    const plain = { answer: { choice: "approve" }, preview: { text: "Ship v0.0.84 now." } }
-    expect(waiver(plain)).toEqual([
-      `gate: Inbox ${ID} names no new-user waiver in its title or text`,
+  test("a one-row ask approved with no option reads its row, as the Inbox does", () => {
+    const one = [{ label: "Ship v0.0.84 now, skip the new-user check" }]
+    const preview = { ...decision().preview, options: one }
+    expect(waiver({ answer: { choice: "approve" }, preview })).toEqual([])
+  })
+
+  test("an ask's approve label is its row: it must skip the new-user check, whatever the text says", () => {
+    const text = "The new-user check failed on v0.0.84; skip it?"
+    const held = { approve: "Hold the ship and fix it first", text, type: "ask" }
+    expect(waiver({ answer: { choice: "approve" }, preview: held })).toEqual([
+      `gate: Inbox ${ID} approved option 0 "Hold the ship and fix it first", which names no new-user waiver`,
     ])
+    const skip = { ...held, approve: "Ship now, waive the new-user check" }
+    expect(waiver({ answer: { choice: "approve" }, preview: skip })).toEqual([])
+  })
+
+  test("a multi-question ask refuses: a waiver takes a single-question decision", () => {
+    const questions = [{ options: [{ label: "Skip the new-user check" }], question: "Ship?" }]
+    const preview = { questions, text: "Ship v0.0.84?", type: "ask" }
+    expect(waiver({ answer: { choice: "approve", options: [0, 0] }, preview })).toEqual([
+      `gate: Inbox ${ID} is a multi-question ask: a waiver takes a single-question decision`,
+    ])
+  })
+
+  test("a decision with no row of its poster's needs the title or text to skip the new-user check", () => {
+    const plain = {
+      answer: { choice: "approve" },
+      preview: { text: "Ship v0.0.84 now.", type: "ask" },
+    }
+    const none = `gate: Inbox ${ID} names no new-user waiver in its title or text`
+    expect(waiver(plain)).toEqual([none])
+    expect(waiver({ ...plain, title: "Wait for the new-user check on v0.0.84?" })).toEqual([none])
     expect(waiver({ ...plain, title: "Skip the new-user check for v0.0.84?" })).toEqual([])
   })
 })
@@ -278,6 +316,19 @@ describe("shipMerge (#1659)", () => {
     asked.length = 0
     await shipFactsOf(stub(ready().body).run, REPO, 1633, Date.now(), ask)
     expect(asked).toEqual([])
+  })
+
+  test("the dispatcher's name comes from sessions.names, its default until set (#2355)", async () => {
+    const data = process.env.PLAYGROUND_DATA_DIR!
+    const { run } = stub(ready().body)
+    expect((await shipFactsOf(run, REPO, 1633)).dispatcher).toBe("dispatcher")
+    const names = { builder: "builder", dispatcher: "alpha", ops: "ops", planner: "planner" }
+    storeWith(data, {}, { "factory.repo": REPO, "sessions.names": names })
+    try {
+      expect((await shipFactsOf(run, REPO, 1633)).dispatcher).toBe("alpha")
+    } finally {
+      storeWith(data, {}, { "factory.repo": REPO })
+    }
   })
 
   test("an Inbox that does not answer refuses the waived ship, naming why (#2355)", async () => {

@@ -1,5 +1,9 @@
 // ship:merge <n>: merges the ship PR into main with a merge commit at its head, only when its body holds the pin's gate line (or its waiver by the owner's Inbox go) and rehearsal line, both gate checks are green there, and the ship's freeze names the next version.
 
+import { rowOfAnswer } from "@packages/config/inbox"
+import { dataDir } from "@packages/env/data-dir"
+import { readSessionNames } from "@packages/settings"
+
 import { ciGate, REQUIRED_CHECKS, type Check } from "./gates"
 import { freezeLine, freezeStatus, heldPath } from "./held"
 import { gh, repoOf, runGh, type Run } from "./merge"
@@ -7,11 +11,17 @@ import { gateLine, REHEARSAL_RESULTS, rehearsalLine, waiverLine } from "./ship-l
 
 // An Inbox item as playground ask get prints it: the fields a waiver reads.
 export type InboxItem = {
-  answer?: { option?: number; [key: string]: unknown }
+  answer?: { choice?: string; option?: number; options?: number[]; [key: string]: unknown }
   from?: string
   id?: string
   kind?: string
-  preview?: { options?: { label: string }[]; text?: string }
+  preview?: {
+    approve?: string
+    options?: { label: string }[]
+    questions?: unknown[]
+    text?: string
+    type?: string
+  }
   status?: string
   title?: string
 }
@@ -22,6 +32,8 @@ export type ShipFacts = {
   checks: Check[]
   // The Inbox decision the body's waiver line for the head names, or why it did not read; null when the body holds no such line.
   decision: InboxItem | string | null
+  // The dispatcher's session name, sessions.names' own, the one sender a waiver's decision may come from.
+  dispatcher: string
   // The `"*"` line while it holds, null when none is set or it has lapsed.
   freeze: string | null
   head: string
@@ -33,7 +45,8 @@ export type ShipFacts = {
 // An Inbox id as playground ask get takes it, a uuid or #iN, so a waiver line passes no flag to it.
 const INBOX_ID = /^(#i\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
-const NEW_USER = /\bnew-user\b/i
+// Words that skip the new-user check: the check named, and a skip or a waive.
+const waives = (words: string) => /\bnew-user\b/i.test(words) && /\b(skip|waive)/i.test(words)
 
 const bodyLines = (body: string) => new Set(body.split(/\r?\n/).map((line) => line.trim()))
 
@@ -47,29 +60,39 @@ export function waiverId(body: string, head: string): string | null {
   return null
 }
 
-// Pure: why the decision a waiver names does not skip this ship's gate: the dispatcher's decision, the owner's Approve (only the owner's own answer sets approved, .agents/dashboard/asks.md), on a row naming the new-user check, for this version.
-function waiverRefusals(id: string, item: InboxItem | string | null, version: string): string[] {
+// Pure: why the decision a waiver names does not skip this ship's gate: the dispatcher's decision, the owner's Approve (only the owner's own answer sets approved, .agents/dashboard/asks.md), on a row that skips the new-user check, for this version.
+function waiverRefusals(
+  id: string,
+  item: InboxItem | string | null,
+  version: string,
+  dispatcher: string,
+): string[] {
   const at = `gate: Inbox ${id}`
   if (item === null || typeof item === "string")
     return [`${at} did not read (${item ?? "not read"})`]
   const refusals: string[] = []
   if (item.kind !== "decision") refusals.push(`${at} is a ${item.kind}, not a decision`)
-  if (item.from !== "dispatcher") refusals.push(`${at} is from ${item.from}, not dispatcher`)
+  if (item.from !== dispatcher) refusals.push(`${at} is from ${item.from}, not ${dispatcher}`)
   if (item.status !== "approved")
     refusals.push(`${at} reads ${item.status}, not approved by the owner`)
   const words = `${item.title ?? ""}\n${item.preview?.text ?? ""}`
   const named = new RegExp(`(?<![\\w.])${version.replaceAll(".", "\\.")}(?!\\w|\\.\\d)`)
   if (!named.test(words)) refusals.push(`${at} names no ${version} in its title or text`)
-  const options = item.preview?.options ?? []
-  if (item.status === "approved" && options.length > 0) {
-    const option = item.answer?.option
-    const label = typeof option === "number" ? options[option]?.label : undefined
-    if (!NEW_USER.test(label ?? ""))
+  if (item.status !== "approved") return refusals
+  const { approve, options, questions, type } = item.preview ?? {}
+  const { choice, option } = item.answer ?? {}
+  if (questions || item.answer?.options)
+    refusals.push(`${at} is a multi-question ask: a waiver takes a single-question decision`)
+  else if (choice !== "approve")
+    refusals.push(`${at} was approved by ${choice}, whose own words name no row`)
+  // A row its poster wrote, read as the Inbox reads the owner's pick; a default label ("Approve") says nothing, so the title or text speaks for it.
+  else if (type === "ask" && (options || approve)) {
+    const label = rowOfAnswer({ approve, options, type }, { choice, option })?.label ?? ""
+    if (!waives(label))
       refusals.push(
-        `${at} approved option ${option ?? "none"} "${label ?? ""}", which names no new-user waiver`,
+        `${at} approved option ${option ?? 0} "${label}", which names no new-user waiver`,
       )
-  } else if (options.length === 0 && !NEW_USER.test(words))
-    refusals.push(`${at} names no new-user waiver in its title or text`)
+  } else if (!waives(words)) refusals.push(`${at} names no new-user waiver in its title or text`)
   return refusals
 }
 
@@ -89,7 +112,7 @@ export function shipRefusals(facts: ShipFacts): string[] {
     )
   else if (!lines.has(pass)) {
     const id = waiverId(facts.body, facts.head)
-    if (id) refusals.push(...waiverRefusals(id, facts.decision, facts.version))
+    if (id) refusals.push(...waiverRefusals(id, facts.decision, facts.version, facts.dispatcher))
     else
       refusals.push(
         `gate: the body holds no "${pass}" line nor a "${waiverLine(facts.head, "<id>")}" line: run bun run gate:new-user ${facts.head} and write its last line into the body on a line of its own, or name the owner's approved Inbox decision that skips it`,
@@ -182,6 +205,7 @@ export async function shipFactsOf(
     body: view.body ?? "",
     checks: view.statusCheckRollup ?? [],
     decision: id ? await readItem(ask, id) : null,
+    dispatcher: readSessionNames(dataDir()).names.dispatcher,
     freeze: status && !status.lapsed ? status.line : null,
     head: view.headRefOid,
     state: view.state,
