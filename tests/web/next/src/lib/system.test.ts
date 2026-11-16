@@ -5,6 +5,7 @@ import {
   burnOf,
   byWeekReset,
   checkoutLabel,
+  clusterOf,
   combinedUsage,
   diskValue,
   glanceReadings,
@@ -32,6 +33,7 @@ import {
   weekPace,
   zaiReadings,
 } from "../../../../../web/next/src/lib/system"
+import { messageTime } from "../../../../../web/next/src/lib/time"
 
 type SystemReport = Parameters<typeof systemReadings>[0]
 
@@ -148,6 +150,7 @@ export const calm = (patch: (r: SystemReport) => void = () => {}): SystemReport 
     disk: { freeBytes: 729.4 * GB, totalBytes: 994 * GB },
     docker: { containers: [], problem: null, vmBytes: 2 * GB },
     history: [],
+    machines: [],
     memory: {
       freePercent: 40,
       pressure: "normal",
@@ -1197,5 +1200,66 @@ describe("accountLine", () => {
     expect(
       accountLine("agent@local.host", { account: undefined, owner: false, pending: false }),
     ).toBe("agent@local.host")
+  })
+})
+
+describe("clusterOf", () => {
+  type Machine = SystemReport["machines"][number]
+  const at = new Date(NOW)
+  const spark = (name: string, used: number, load: number, swapUsed: number): Machine => ({
+    down: null,
+    name,
+    reading: {
+      cores: 20,
+      load: [load, load, load],
+      memory: { totalBytes: 128 * GB, usedBytes: used * GB },
+      swap: { totalBytes: 16 * GB, usedBytes: swapUsed * GB },
+    },
+  })
+  const two = [spark("spark-a566", 12, 3.1, 1), spark("spark-9dfb", 4, 0.4, 0)]
+
+  test("one machine, or none named, is no cluster, so the page shows its own figures as before", () => {
+    expect(clusterOf([], "normal", at)).toBeNull()
+    expect(clusterOf([spark("spark-a566", 12, 3.1, 1)], "normal", at)).toBeNull()
+  })
+
+  test("each figure is the sum over both machines, its hover the split as a + b with each part named", () => {
+    const cluster = clusterOf(two, "normal", at)!
+    expect(cluster.cpu).toEqual({
+      detail: "1, 5 and 15 min.: 3.5 / 3.5 / 3.5",
+      hover: "spark-a566 3.1 on 20 + spark-9dfb 0.4 on 20 cores",
+      marker: null,
+      value: "3.5 on 40 cores",
+    })
+    expect(cluster.memory).toEqual({
+      detail: "94% free · pressure Normal here",
+      hover: "spark-a566 12.0 GB of 128.0 GB + spark-9dfb 4.0 GB of 128.0 GB",
+      marker: null,
+      value: "16.0 GB of 256.0 GB",
+    })
+    expect(cluster.swap).toEqual({
+      hover: "spark-a566 1.0 GB of 16.0 GB + spark-9dfb 0 MB of 16.0 GB",
+      marker: null,
+      value: "1.0 GB of 32.0 GB",
+    })
+  })
+
+  test("a machine that does not read is never a zero: the sums keep the rest, the value says 1 of 2 machines, and the hover gives the reason and since when", () => {
+    const since = new Date(NOW - 5 * 60_000).toISOString()
+    const down: Machine = {
+      down: { reason: "ssh you@10.0.0.2 ran past 5s", since },
+      name: "spark-9dfb",
+      reading: null,
+    }
+    const cluster = clusterOf([two[0]!, down], "normal", at)!
+    expect(cluster.cpu).toMatchObject({ marker: "1 of 2 machines", value: "3.1 on 20 cores" })
+    expect(cluster.memory).toMatchObject({
+      marker: "1 of 2 machines",
+      value: "12.0 GB of 128.0 GB",
+    })
+    expect(cluster.cpu.hover).toBe(
+      `spark-a566 3.1 on 20 cores\nspark-9dfb unreachable since ${messageTime(since, at)}: ssh you@10.0.0.2 ran past 5s`,
+    )
+    expect(cluster.swap.hover.split("\n")[1]).toStartWith("spark-9dfb unreachable since ")
   })
 })
