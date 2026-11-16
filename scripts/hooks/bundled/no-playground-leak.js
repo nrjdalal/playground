@@ -9917,7 +9917,6 @@ var pathsSettings = defineSettings({
   }
 });
 // packages/settings/src/rules.ts
-var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
   "clock.ownerZone": {
     default: "UTC",

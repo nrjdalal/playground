@@ -250,7 +250,6 @@ describe("the Review label carries its score's color (PG-157)", () => {
 
 describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
   test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
-    const step = await stepFour()
     const [line = "", done = ""] = await part("Lifecycle table")
     expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
     expect(line).toContain("in the PR's Evidence")
@@ -271,7 +270,6 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
 
 describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", () => {
   test("step 4 asks for a canary | head table from round 1, holds each canary refusal at the head, and its Done when checks it", async () => {
-    const step = await stepFour()
     const [line = "", done = ""] = await part("Refusal table")
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms/`")

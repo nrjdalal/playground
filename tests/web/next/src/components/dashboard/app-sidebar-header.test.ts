@@ -67,7 +67,6 @@ const iconTints = (html: string) =>
   iconTags(html).map((tag) =>
     [...classesOf(tag)].find((t) => /^text-(success|caution|destructive|inactive)$/.test(t)),
   )
-const itemTag = (html: string) => /<li [^>]*>/.exec(html)?.[0] ?? ""
 const srText = (html: string) =>
   [...html.matchAll(/<span class="sr-only">(.*?)<\/span>/g)].map(([, text]) => text).join(" ")
 const readingTints = (html: string) =>
