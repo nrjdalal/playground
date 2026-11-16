@@ -56,14 +56,25 @@ a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bar
 
 b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at the throwaway `<scratch>/home`.
    Put `PATH` together for the run: the stub folder first, then the throwaway `HOME`'s `.bun/bin`, then a folder holding the real `bun`, `bunx` and `node` alone, the runtimes the install, the build and the `playground` command run on (`bunx` since `bun install` runs the checkout's `prepare` script), then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout.
-   Seed the throwaway `HOME`'s bun cache by a copy-on-write clone, `mkdir -p <scratch>/home/.bun/install` and then `cp -c -R ~/.bun/install/cache <scratch>/home/.bun/install/cache` (`cp -R --reflink=auto` on Linux, whose `cp` has no `-c`) with that `cache` itself absent, since a `cache` already there takes the copy in as `cache/cache`, so the install reads packages it already has; the clone writes only the copy, so the before-state check still holds.
-   The realism it trades: the clone can hold packages an invitee's cache lacks, so the rehearsal no longer shows a package missing from a fresh cache.
+   Seed the throwaway `HOME`'s bun cache, `mkdir -p <scratch>/home/.bun/install` and then, with that `cache` itself absent, since a `cache` already there takes the copy in as `cache/cache`, so the install reads packages it already has:
+   on macOS a copy-on-write clone, `cp -c -R ~/.bun/install/cache <scratch>/home/.bun/install/cache`, which writes only the copy;
+   on Linux hardlinks, which add no file data where ext4's `cp -R --reflink=auto` writes a full copy (3.08 GB, measured on 16 Nov 2026), and that copy in their place when `cp -al` fails, as across two filesystems (EXDEV), after moving aside the `cache` folder a failed `cp -al` leaves:
+
+   ```bash
+   cp -al ~/.bun/install/cache <scratch>/home/.bun/install/cache ||
+     { [ ! -e <scratch>/home/.bun/install/cache ] || mv <scratch>/home/.bun/install/cache <scratch>/cache-partial; cp -R --reflink=auto ~/.bun/install/cache <scratch>/home/.bun/install/cache; }
+   ```
+
+   The links leave the real cache unchanged, measured on 16 Nov 2026 with bun 1.4.4: bun links cache files into `node_modules` and writes its cache only as new files renamed into the rehearsal's own folders, and the one package script that rewrites a package file, vue-demi's postinstall, unlinks it first, so the cache's 128,749 files read the same by inode, mode, size and mtime after a frozen install and build of a tag and the candidate.
+   Removing the scratch folder removes only the links, so the real cache keeps its files, while the folder still holds about 130,000 entries by count.
+   The realism it trades: the seeded cache can hold packages an invitee's cache lacks, so the rehearsal no longer shows a package missing from a fresh cache.
    Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
    Write each stub's link with its literal target path, one `ln -s` a line (`ln -s _stub <scratch>/stubs/gh`), since no-extensions-write refuses a link whose target holds a loop variable, and the whole call with it ([scripts/hooks/README.md](../../../scripts/hooks/README.md#no-extensions-write)).
    Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
-   Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs,
+   Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs, and on the `cp -al` route the real cache's stat listing, `find ~/.bun/install/cache -type f -printf '%i %m %s %T@ %p\n' | sort -k5`, since a write into a linked file writes the real one (ctime stays out, since a new link changes it),
    leaving out the main checkout's `.git/config`, which other sessions rewrite as they add branches and worktrees (two v0.0.27 rehearsals in a row read it changed), and the real data folder's `ops/run-slot*` files, which the rehearsal's own run-slot calls write.
-   Done when `<scratch>/home/.bun/install/cache` holds the cloned packages at its top level, every tool on the list is stubbed or absent, and the before-state is saved.
+   Done when `<scratch>/home/.bun/install/cache` holds the real cache's packages at its top level, every tool on the list is stubbed or absent, and the before-state is saved.
+   When the after-state's cache listing differs from the before-state's, the rehearsal fails red: its report names each changed file, says the real cache is suspect, and gives the repair, `bun pm cache rm`, after which the next install fetches again, and nothing ships until Ops clears or repairs the cache.
 
 c. **Invitee.** Clone from the mirror, check out the last tag on `main`, and install and build inside the containment, running the install and build steps of an invitee's install from the clone, since `install.sh` itself stops without `claude`:
 
