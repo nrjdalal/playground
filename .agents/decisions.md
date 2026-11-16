@@ -9,3 +9,4 @@ One line per finalized decision, the decision in one sentence, then `->` and its
 - Claude Code's auto-memory runs for the dispatcher, the builder, ops and planner leads and every second worker start, a trial its A/B keeps or reverts -> .agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md
 - Every Claude account's week is used to about 100% by its reset, with enough Claude work queued that no reset finds points unused and spawn.sh's usage gate as the only usage stop -> extensions/core/rules/usage.md
 - The hosted session's `PLAYGROUND_DATA_DIR` names its stack's own data folder, so a factory script it runs on a fixture stack never writes this machine's -> .agents/dashboard/messages.md
+- At API start, the Dashboard sends the owner's Approve answer, with a failed outcome, once per root card whose run a restart cut off, as deliver()'s fourth caller -> .agents/adr/0026-a-restart-sends-the-owners-approve-late.md
