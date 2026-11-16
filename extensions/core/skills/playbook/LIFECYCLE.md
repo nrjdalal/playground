@@ -218,7 +218,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
   Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 
-A Mac restart clears `/private/tmp`, so every scratchpad is lost.
+A restart clears `/tmp`, the system's temp folder that holds Claude Code's scratchpads, on macOS and Linux alike, so every scratchpad is lost.
 Anything a session needs across a restart goes under `~/.playground/scratchpad/<name>/`, which the restart leaves alone.
 After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .body` before it is edited, so a stale local copy never overwrites the live one.
 

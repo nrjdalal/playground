@@ -944,7 +944,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The gate covers the MCP tools and a curl whose URL it reads; out of its reach, as residual risk: a URL held in a shell variable, a URL in a `curl -K` config file, a crafted URL host (curl globbing, a second `@`), wget, Python's urllib and `bun -e` with `fetch`.
   A declaration that does not read refuses every such write, on any server named for Slack and by curl, with the fix; with none, Slack reads as above.
   The hook reads the declaration alone, and the extension's own gate stays the one check of a message's words.
-  A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
+  A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/tmp/claude-<uid>/<topic>/`, a `<topic>` that names no session and holds no term.
   When it cannot start it refuses and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says, and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
   Its term pattern also reads a public post's draft for `bun run ask new` and `edit`, through `factoryTerms` ([The public-draft check](#the-public-draft-check)).
@@ -1180,6 +1180,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   One whose runner reads no folder's files (bash, node, python, python3, sh or zsh), or that has no shebang, passes anywhere.
   Any other (bun, bun-canary, an `env` line read as another word, a script the hook cannot open) passes only where the working folder sits in the main checkout's own tree, the first folder up from it holding `.git` being the main checkout.
   bun reads files from the folder it runs in before the script (`bunfig.toml`'s preload, `.env`'s variables, and whatever a later bun adds), so the rule judges the place rather than each file; the PR's clone at any depth, a scratch folder outside every work tree and a folder the hook cannot read are refused, and a reviewer runs `state.ts` from the main checkout.
+  code-review-loop's step 8 waiters start there too (`cd <main> && <main>/extensions/core/skills/code-review-loop/scripts/state.ts wait <repo> <n> <head>`), since every machine has that folder.
   It holds a shell's `-c` script, whose commands are judged one by one, and a shell running such a skill script; `shell.ts`'s `visitShells` shows the hook each shell a line starts, since the walk follows a script file it cannot read as an empty one.
   It holds the factory's own run-slot, `<data folder>/ops/run-slot.sh`, whose command after `--` is judged in its place.
   It holds the `playground` command's read verbs (`PLAYGROUND_READS`, an item reviewer's `ext show` and `score` among them) in a folder with no `bunfig.toml` or in the main checkout's own tree, whose `bunfig.toml` is the factory's,
