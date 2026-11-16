@@ -428,8 +428,10 @@ describe("the runner host", () => {
     })
     expect(here.box).toBe("")
     expect(here.mac).toBe("run test:file tests/x.test.ts\n")
+    const elsewhere = join(run.root, "elsewhere")
+    mkdirSync(elsewhere)
     const other = await run(["bun", "run", "test:file", "tests/x.test.ts"], {
-      PLAYGROUND_REPO: join(run.root, "elsewhere"),
+      PLAYGROUND_REPO: elsewhere,
     })
     expect(other.box).toBe(`exec ${other.root} -- bun run test:file tests/x.test.ts\n`)
   })
