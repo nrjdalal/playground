@@ -7371,7 +7371,7 @@ function globOpens(cmd, src, at) {
     words = words.filter((w) => w !== dropped);
     ({ first } = parse3({ ...cmd, words }));
   }
-  return first === next && src[at + 1] !== ")" && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
+  return first === next && src[at + 1] !== ")" && !src.slice(at, balanced(src, at, "(", ")")).includes("/") && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
 }
 var subshellPrefix = (lead) => lead.every((w) => !w.quoted) && (lead.length === 1 ? lead[0].value === "time" || lead[0].value === "nocorrect" : lead.length === 2 && lead[0].value === "repeat");
 var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
