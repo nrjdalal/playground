@@ -15,6 +15,7 @@ import { doctor, report } from "./doctor"
 import { pinHere } from "./herdr-pin"
 import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
+import { syncPeers } from "./peer-sync"
 import {
   addCommand,
   aliasFailure,
@@ -338,18 +339,26 @@ const roll = async (): Promise<number> => {
   return 1
 }
 
-// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
+// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads (peer-sync.ts), then the roll.
 const update = (to?: string): Promise<number> =>
-  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"), (old) =>
-    refreshBriefs({
-      data: HOME_DATA,
-      live: (name) => liveSessions((live) => live === name).length > 0,
-      log: console.log,
-      managers: MANAGERS.map((kind) => ({ kind, name: nameOf(kind) })),
-      old,
-      repo: REPO,
-      send: sendBrief,
-    }),
+  runUpdate(
+    REPO,
+    spawnRun,
+    roll,
+    console.log,
+    to,
+    join(dataDir(), "ops", "update-head"),
+    (old) =>
+      refreshBriefs({
+        data: HOME_DATA,
+        live: (name) => liveSessions((live) => live === name).length > 0,
+        log: console.log,
+        managers: MANAGERS.map((kind) => ({ kind, name: nameOf(kind) })),
+        old,
+        repo: REPO,
+        send: sendBrief,
+      }),
+    (sha) => syncPeers(join(dashboardCheckout(REPO) ?? REPO, ".env"), sha),
   )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
