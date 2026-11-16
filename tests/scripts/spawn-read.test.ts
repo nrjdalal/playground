@@ -75,6 +75,8 @@ describe("spawn.sh read prints a pane spawn.sh opened, on its own server", () =>
     ["no name", ["read"]],
     ["a third word", ["read", "probe-far", SID, "x"]],
     ["--check", ["read", "probe-far", "--check"]],
+    ["--harness", ["read", "probe-far", "--harness", "codex"]],
+    ["--priority", ["read", "probe-far", "--priority"]],
   ])("it takes a name and a session id alone: %s", async (_, args) => {
     const r = await spawn(args, [], {}, undefined, undefined, opened())
     expect(r.code).toBe(2)
