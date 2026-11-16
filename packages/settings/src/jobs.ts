@@ -79,11 +79,6 @@ const bunJob = (name: string, root = "{checkout}") =>
 
 // The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
 export const JOBS: Record<string, Job> = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description:
-      "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true },
-  }),
   // Its sync runs in its script's checkout, so it runs from the Dashboard's, which holds the database's .env.
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
     cwd: "{dashboard}",
@@ -191,6 +186,9 @@ export const JOBS: Record<string, Job> = {
   }),
 }
 
+// The jobs Playground shipped and no longer does, A to Z: renderJobs turns an existing row of one off, so its teardown stops it on every install, its stored jobs.<camelName> row reads as no org's job, and the board leaves it out.
+export const RETIRED: string[] = ["ops-awake"]
+
 // A job's old setting keys: the switch imports jobs.json under its old names before the migration renames them.
 const OLD_KEYS: Record<string, string[]> = { "ops-dashboard": ["jobs.opsDesk"] }
 
@@ -274,7 +272,7 @@ const unitOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist and systemd user unit by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist and systemd user unit by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, and a RETIRED one kept paused, so the runner stops it; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
@@ -311,7 +309,11 @@ export const renderJobs = (
   jobs.push(
     ...(existing as Record<string, unknown>[])
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
-      .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
+      .map((job) =>
+        RETIRED.includes(String(job.name)) || (org && typeof job.org === "string")
+          ? { ...job, disabled: true }
+          : job,
+      ),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists, units }
 }
@@ -366,7 +368,11 @@ const runsFrom = (
 // An org's own job, marked with the org that adds it, which its jobs.json row keeps so a later pass can tell it from a row kept by hand.
 export type OrgJob = Job & { org: string }
 
-const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()])
+const REGISTRY_KEYS = new Set([
+  ...Object.keys(JOBS).map(jobKey),
+  ...Object.values(OLD_KEYS).flat(),
+  ...RETIRED.map(jobKey),
+])
 
 // Whether a key names an org's own job: a jobs.<camelName> key the registry lacks, under any spelling, which only orgJob can say is the job's name.
 export const orgJobKey = (key: string): boolean =>
