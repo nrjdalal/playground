@@ -180,6 +180,48 @@ export const herdrCheck = (path: string, want: string, version: string, own: str
         existsSync(path) ? `${path} is not the pinned ${version}` : `${path} is missing`,
       )
 
+// The test browser on Linux arm64, where Chrome for Testing has no build: Playwright's pinned Chromium, named in agent-browser's own user config (`agent-browser --help`: "~/.agent-browser/config.json  User-level defaults"), which every agent-browser call reads first; `--no-sandbox` since AppArmor blocks Chromium's sandbox.
+export const AGENT_BROWSER_PIN = "0.43.0"
+export const PLAYWRIGHT_PIN = "1.65.1"
+export const linuxChromium = (home: string): string =>
+  join(home, ".cache", "ms-playwright", "chromium-1255", "chrome-linux-arm64", "chrome")
+export const agentBrowserConfig = (home: string): string =>
+  join(home, ".agent-browser", "config.json")
+
+// ok while agent-browser is on PATH, the pinned Chromium is installed whole and runs, and agent-browser's config launches it without the sandbox; else MISSING with each step still to do.
+export const browserCheck = (
+  home: string,
+  has: (cmd: string) => boolean,
+  runs: (argv: string[]) => boolean,
+): Check => {
+  const chrome = linuxChromium(home)
+  const config = agentBrowserConfig(home)
+  let read: { args?: unknown; executablePath?: unknown } = {}
+  try {
+    read = JSON.parse(readFileSync(config, "utf8"))
+  } catch {
+    // no config, or one that does not parse, launches agent-browser's own Chrome
+  }
+  const fixes = [
+    !has("agent-browser") && `bun add -g agent-browser@${AGENT_BROWSER_PIN}`,
+    !(
+      existsSync(join(chrome, "..", "..", "INSTALLATION_COMPLETE")) && runs([chrome, "--version"])
+    ) && `npx -y playwright@${PLAYWRIGHT_PIN} install chromium`,
+    !(
+      read.executablePath === chrome &&
+      typeof read.args === "string" &&
+      read.args.split(/[\n,]/).includes("--no-sandbox")
+    ) && `write ${config} as {"executablePath": "${chrome}", "args": "--no-sandbox"}`,
+  ].filter((fix): fix is string => typeof fix === "string")
+  return check(
+    "test browser",
+    true,
+    fixes.length === 0,
+    fixes.join(", then "),
+    `agent-browser ${AGENT_BROWSER_PIN} on Playwright ${PLAYWRIGHT_PIN}'s Chromium, from ${config}`,
+  )
+}
+
 // portless's proxy, which serves the Dashboard's https://playground.localhost: ok by the stack's own rule, proxyDown, and optional while it is down, since `bun run dev` then starts it on FALLBACK_PORT with no password; Settings' Things to fix or install.sh sets it up with the Mac's password.
 export const proxyCheck = (repo: string, down: number | null): Check =>
   check(
@@ -346,7 +388,7 @@ export const launchdChecks = async (
   return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded, platform)
 }
 
-// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, the jobs launchd, or on Linux systemd, should hold, on Linux linger, and the tunnel's state while its job is on.
+// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, on Linux arm64 the test browser, the jobs launchd, or on Linux systemd, should hold, on Linux linger, and the tunnel's state while its job is on.
 export const doctor = async (repo: string, home: string, data: string): Promise<Check[]> => [
   ...tools(),
   dataCheck(data, existsSync),
@@ -359,6 +401,9 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
   ),
   ...(process.platform === "darwin"
     ? [proxyCheck(repo, await proxyDown(process.env, serviceDir(portlessDir())))]
+    : []),
+  ...(process.platform === "linux" && process.arch === "arm64"
+    ? [browserCheck(home, (cmd) => Bun.which(cmd) !== null, exitsZero)]
     : []),
   ...(process.platform === "darwin" || process.platform === "linux"
     ? await launchdChecks(data, jobLoaded(process.platform))

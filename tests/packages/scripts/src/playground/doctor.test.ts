@@ -13,6 +13,8 @@ import { join } from "node:path"
 
 import { proxyDown } from "../../../../../api/hono/src/lib/dev/proxy"
 import {
+  agentBrowserConfig,
+  browserCheck,
   dataCheck,
   herdrCheck,
   jobChecks,
@@ -20,6 +22,7 @@ import {
   line,
   lingerCheck,
   linkChecks,
+  linuxChromium,
   missing,
   proxyCheck,
   registryJobsText,
@@ -434,6 +437,58 @@ describe("herdrCheck", () => {
       `0.9.5 pinned at ${path}; your own herdr at /opt/homebrew/bin/herdr is left alone`,
     )
     expect(herdrCheck(path, SUM, "0.9.5", path).detail).toBe(`0.9.5 pinned at ${path}`)
+  })
+})
+
+describe("browserCheck", () => {
+  const home = join(scratch, "browser-home")
+  const chrome = linuxChromium(home)
+  const config = agentBrowserConfig(home)
+  const why = `agent-browser 0.43.0 on Playwright 1.65.1's Chromium, from ${config}`
+  const installChromium = "npx -y playwright@1.65.1 install chromium"
+  const writeConfig = `write ${config} as {"executablePath": "${chrome}", "args": "--no-sandbox"}`
+  const runs = (argv: string[]) => Bun.spawnSync(argv, { stdout: "ignore" }).exitCode === 0
+
+  test("a scratch cache with nothing in it is MISSING, naming every step", () => {
+    const empty = join(scratch, "empty-home")
+    const its = agentBrowserConfig(empty)
+    expect(browserCheck(empty, () => false, runs)).toEqual({
+      detail: `fix: bun add -g agent-browser@0.43.0, then ${installChromium}, then write ${its} as {"executablePath": "${linuxChromium(empty)}", "args": "--no-sandbox"} (agent-browser 0.43.0 on Playwright 1.65.1's Chromium, from ${its})`,
+      name: "test browser",
+      status: "MISSING",
+    })
+  })
+
+  test("a Chromium whose install did not finish, or that does not run, is MISSING with its install", () => {
+    mkdirSync(join(chrome, ".."), { recursive: true })
+    writeFileSync(chrome, "#!/bin/sh\necho 'Google Chrome for Testing 159.0.8154.6'\n")
+    chmodSync(chrome, 0o755)
+    mkdirSync(join(config, ".."), { recursive: true })
+    writeFileSync(config, JSON.stringify({ args: "--no-sandbox", executablePath: chrome }))
+    expect(browserCheck(home, () => true, runs).detail).toBe(`fix: ${installChromium} (${why})`)
+    writeFileSync(join(chrome, "..", "..", "INSTALLATION_COMPLETE"), "")
+    writeFileSync(chrome, "#!/bin/sh\nexit 1\n")
+    expect(browserCheck(home, () => true, runs).detail).toBe(`fix: ${installChromium} (${why})`)
+  })
+
+  test("a config that keeps the sandbox, or names another browser, is MISSING with the config to write", () => {
+    writeFileSync(chrome, "#!/bin/sh\necho 'Google Chrome for Testing 159.0.8154.6'\n")
+    writeFileSync(config, JSON.stringify({ executablePath: chrome }))
+    expect(browserCheck(home, () => true, runs).detail).toBe(`fix: ${writeConfig} (${why})`)
+    writeFileSync(config, JSON.stringify({ args: "--no-sandbox", executablePath: "/usr/bin/x" }))
+    expect(browserCheck(home, () => true, runs).detail).toBe(`fix: ${writeConfig} (${why})`)
+  })
+
+  test("the pinned Chromium, run from agent-browser's config without the sandbox, reads ok", () => {
+    writeFileSync(
+      config,
+      JSON.stringify({ args: "--mute-audio,--no-sandbox", executablePath: chrome }),
+    )
+    expect(browserCheck(home, () => true, runs)).toEqual({
+      detail: why,
+      name: "test browser",
+      status: "ok",
+    })
   })
 })
 

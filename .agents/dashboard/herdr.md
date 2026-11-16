@@ -56,8 +56,9 @@
   Every board reads herdr's servers, the registry and the transcripts afresh, so a prompt shows and an ended session leaves on the next board.
   The hub runs one refresh at a time, starts at most one a second (`REFRESH_GAP_MS` in `hub.ts`), and gives up on a read after 8s with an error frame but starts no new one until it settles, so slow reads never stack.
   The hub tails each live transcript on `fs.watch`, and every refresh, the 10s safety one (`SAFETY_REFRESH_MS`) and one whose sessions read fails included, reads each open tail again from its offset, since FSEvents drops change events under load (`.agents/testing.md` holds the measure), so a line whose event was lost reaches the board within one refresh and none is sent twice.
-- ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, which the dashboard's start-time read (`starts`) shares: `COMMANDS` holds each one's fixed argv (`sysctl`, `vm_stat`, `ps`, `lsof`, `docker ps`, `docker stats --no-stream`, `docker context inspect`), all reads run without a shell, and `commandOf()` lets a probe take only a whole-number uid,
-  a non-empty list of whole-number pids or an absolute socket path.
+- ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, which the dashboard's start-time read (`starts`) shares: `COMMANDS` holds each one's fixed argv (`sysctl`, `vm_stat`, `ps`, `lsof`, `docker ps`, `docker stats --no-stream`, `docker context inspect`,
+  and `peer`'s `ssh -o BatchMode=yes -o ConnectTimeout=3 <user@host> cat /proc/loadavg /proc/meminfo /proc/stat`), all reads run without a shell, and `commandOf()` lets a probe take only a whole-number uid,
+  a non-empty list of whole-number pids, an absolute socket path or a peer's `user@host` (org.ts's `peerSchema`).
   `memory_pressure` stays off the list (its `-l` simulates pressure, and `kern.memorystatus_level` is the free share it prints), and `sysctl` is never handed a `name=value`.
   On Linux the memory readings are file reads of `/proc` (`memory.ts`, dashboard.md's System report), so `sysctl` and `vm_stat` run on macOS alone.
   `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside those it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.

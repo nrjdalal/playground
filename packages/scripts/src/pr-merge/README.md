@@ -5,6 +5,8 @@ This file holds the gates, the merge lock and the merge queue's readers.
 
 ## Gates
 
+Every gate judges the PR's head as GitHub names it (`headRefOid`), which pr:merge and the train's forecast fetch from its pull ref, `refs/pull/<n>/head`, else, while GitHub has not made that ref yet, from its branch (`headRefName`), refusing a branch whose tip is another commit (`fetchHead` in `merge.ts`).
+
 A draft left green reaches `canary` too: when the owner's draft passes every gate but ready, pr:merge marks it ready (`gh pr ready`) just before its squash, merge-on-ready takes it, `--explain` names it, and an outside author's draft is never touched (`marksReady` in `gates.ts`).
 pr:merge refuses a PR the repo's owner did not open unless `--outside-author <login>` names its author (an outside PR's code runs here, so it merges only on a lead's go, after its read-only review), refuses a PR `~/.playground/ops/report/held-prs.json` lists at the gates or just before the merge call, naming its reason (`PLAYGROUND_HELD_PRS` moves it, as the tests do; a `"*"` line until it lapses (Holds and rulings), or a file that does not read, holds every PR), and refuses unless:
 

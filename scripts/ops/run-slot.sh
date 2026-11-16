@@ -2109,10 +2109,10 @@ may_reserve() {
   if [ -n "${5:-}" ]; then printf -v "$5" '%s' "$rr"; else echo "$rr"; fi
 }
 
-# Linux's readings, from /proc's text where macOS's commands do not read (spawn.sh's and packages/scripts/src/ops-machine/readings.ts's sources), each nothing when it does not read, never 0; builtins alone but proc_idle's and proc_swapins' one sleep.
-# PROC is the folder that text comes from: PLAYGROUND_PROC under the test sandbox's marker alone (TEST_SANDBOX_HOME), where a test points it at recorded text, so a session that sets it cannot feed the lanes a reading; else /proc.
-PROC=/proc
-[ -n "${TEST_SANDBOX_HOME:-}" ] && [ -n "${PLAYGROUND_PROC:-}" ] && PROC=$PLAYGROUND_PROC
+# Linux's readings, from /proc's text where macOS's commands do not read (spawn.sh's and packages/scripts/src/ops-machine/readings.ts's sources), each nothing when it does not read, never 0; builtins alone but proc_idle's and proc_swapins' one sleep, the second also proc_disk_rate's window.
+# PROC is the folder that text comes from: PLAYGROUND_PROC under the test sandbox's marker alone (TEST_SANDBOX_HOME), where a test points it at recorded text, so a session that sets it cannot feed the lanes a reading; else /proc. SYS stands for /sys beside it: that folder's sys folder, else /sys.
+PROC=/proc SYS=/sys
+[ -n "${TEST_SANDBOX_HOME:-}" ] && [ -n "${PLAYGROUND_PROC:-}" ] && PROC=$PLAYGROUND_PROC SYS=$PLAYGROUND_PROC/sys
 # /proc/loadavg's three loads in sysctl's `{ <1m> <5m> <15m> }`
 proc_loadavg() { local a b c; read -r a b c _ 2>/dev/null < "$PROC/loadavg" && [ -n "$c" ] && echo "{ $a $b $c }"; }
 # /proc/stat's cpu<n> lines, one per core
@@ -2160,18 +2160,39 @@ swapin_rate() {
 disk_rate() {
   iostat -d -c 2 -w 1 disk0 2>/dev/null | awk 'NF == 3 && $2 ~ /^[0-9]+$/ { n++; t = $2; m = $3 } END { if (n == 2) print t, m }'
 }
+# whether /proc/diskstats' device $1 is a whole disk: in /sys/class/block with no partition file, and not in /sys/devices/virtual/block, where loop, ram, zram and dm devices live
+whole_disk() { [ -e "$SYS/class/block/$1" ] && [ ! -e "$SYS/class/block/$1/partition" ] && [ ! -e "$SYS/devices/virtual/block/$1" ]; }
+# the first whole disk's `<reads and writes completed> <sectors read and written>` in /proc/diskstats, Linux's stand-in for disk0
+proc_disk() {
+  local maj min name r rmerged sr rtime w wmerged sw rest
+  while read -r maj min name r rmerged sr rtime w wmerged sw rest; do
+    whole_disk "$name" || continue
+    case "$r$sr$w$sw" in '' | *[!0-9]*) return 1 ;; esac
+    echo "$((r + w)) $((sr + sw))"
+    return
+  done 2>/dev/null < "$PROC/diskstats"
+  return 1
+}
+# that disk's `<transfers/s> <MB/s>` between proc_disk's reads $1 and $2, taken around proc_swapins' one-second wait, in iostat's units: sectors of 512 bytes, MB of 1,048,576
+proc_disk_rate() {
+  local io1 s1 io2 s2 c
+  read -r io1 s1 <<< "$1"; read -r io2 s2 <<< "$2"
+  [ -n "$s1" ] && [ -n "$s2" ] && [ "$io2" -ge "$io1" ] && [ "$s2" -ge "$s1" ] || return
+  c=$(((s2 - s1) * 512 * 100 / 1048576))
+  printf '%d %d.%02d\n' $((io2 - io1)) $((c / 100)) $((c % 100))
+}
 # the swap-ins a second at which memory has no room for another heavy run: spawn.sh's line for a GLM start, the gates.glmSwapinsMax setting's default (packages/settings/src/gates.ts): change both together
 SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
-# vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
+# vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures (on Linux proc_idle's, proc_swapins' and proc_disk_rate's over proc_swapins' second; a disk read with no swap-in read stays unread), which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the head waiter of a queue reads them every poll while they shut a slot, and, while they open one, whenever a fresh reading of them moves the readings past their stamp;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
 gauges() {
-  local now cached= idle= swap= tps= mbs= last= took lock="$OPS/run-slot.gauges.lock"
+  local now cached= idle= swap= tps= mbs= last= disk1= disk2= took lock="$OPS/run-slot.gauges.lock"
   now=$(date +%s)
   { read -r cached idle swap tps mbs last < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$cached" in ''|*[!0-9]*) cached=0 ;; esac
@@ -2181,8 +2202,12 @@ gauges() {
       [ -n "$idle" ] || idle=$(proc_idle)
       last=$swap
       swap=$(swapin_rate)
-      [ -n "$swap" ] || swap=$(proc_swapins)
+      if [ -z "$swap" ]; then
+        disk1=$(proc_disk)
+        swap=$(proc_swapins) && disk2=$(proc_disk)
+      fi
       read -r tps mbs <<< "$(disk_rate)"
+      [ -n "$tps" ] || read -r tps mbs <<< "$(proc_disk_rate "$disk1" "$disk2")"
       printf '%s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
       [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
     elif [ "$cached" -eq 0 ]; then

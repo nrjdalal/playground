@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
-// The machine's readings for the load and memory gates: macOS's sysctl answer when it reads, else the Linux /proc text that stands for it, put in sysctl's shape, else null, so a reading neither gives is never 0 or NaN; spawn.sh's and run-slot.sh's own readings take the same sources in the same order.
+// The machine's readings for the load and memory gates and ops-tick's boot time: macOS's sysctl answer when it reads, else the Linux /proc text that stands for it, put in sysctl's shape, else null, so a reading neither gives is never 0 or NaN; spawn.sh's and run-slot.sh's own readings take the same sources in the same order.
 
 export type Answer = { code: number; out: string }
 export type Run = (argv: string[]) => Promise<Answer>
@@ -115,6 +115,14 @@ export const procUsedBytes = (): number | null => {
 
 export const readSysctl = async (run: Run, name: SysctlName): Promise<string | null> =>
   sysctlOf(name, await run(["sysctl", "-n", name]))
+
+// The machine's latest boot or wake from sleep, in ms since the epoch: the later of macOS's kern.boottime and kern.waketime (`{ sec = <s>, usec = <us> } <date>` lines), else /proc/stat's btime alone, since Linux keeps no wake time in /proc, else 0.
+export const readUpSince = async (run: Run): Promise<number> => {
+  const { out } = await run(["sysctl", "-n", "kern.boottime", "kern.waketime"])
+  const times = [...out.matchAll(/\bsec = (\d+)/g)].map((m) => Number(m[1]) * 1000)
+  if (times.length) return Math.max(...times)
+  return (field(proc("stat") ?? "", /^btime (\d+)$/m) ?? 0) * 1000
+}
 
 // The CPU's idle share in percent: top's second sample on macOS, else idle and iowait's share of every field over two /proc/stat reads a wait apart, else null.
 export const readIdle = async (

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { type Io, runStore } from "../../../../../packages/scripts/src/playground/store"
+import { writeFiles } from "../../../../../packages/settings/src/folder"
 import { extensionsDir, scopeDir } from "../../../../../packages/settings/src/rendered"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
@@ -109,6 +110,22 @@ describe("playground settings", () => {
     expect((await run(["reset", "factory.repo", "--reason", "r"])).err).toBe(
       "playground settings: 409 factory.repo has no value at made-up-me: it is at its default",
     )
+  })
+
+  test("reset of a retired job's stored row exits 0 and takes the row out (#2339)", async () => {
+    const { data, run } = cli()
+    await run(["set", "factory.repo", "made-up-me/copy", "--reason", "make the login"])
+    const file = join(scopeDir(data, "made-up-me"), "settings.json")
+    const stored = { ...json(file), "jobs.opsAwake": { enabled: true } }
+    writeFiles(data, "made-up-me", new Map([["settings.json", JSON.stringify(stored)]]), {
+      author: "owner",
+      reason: "a row kept from before the job retired",
+    })
+    expect(await run(["reset", "jobs.opsAwake", "--reason", "clear it"])).toMatchObject({
+      code: 0,
+      err: "",
+    })
+    expect(json(file)).toEqual({ "factory.repo": "made-up-me/copy" })
   })
 
   test("import-jobs sets each job the registry knows at the login's scope, keeps the rest in jobs.json, and a dry run writes nothing", async () => {

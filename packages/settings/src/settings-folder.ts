@@ -13,7 +13,7 @@ import {
   writeFiles,
   writeRoot,
 } from "./folder"
-import { fromStored, jobSchema, orgJob, orgJobKey } from "./jobs"
+import { fromStored, jobSchema, orgJob, orgJobKey, retiredJobKey } from "./jobs"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
 import { secretIn } from "./secrets"
 import {
@@ -237,7 +237,7 @@ export const setSetting = (
   return { key: checked.key, ok: true, scope: input.scope, value: checked.value }
 }
 
-// Takes a setting back to its default at a scope by dropping it from the scope's file, under its name and each alias.
+// Takes a setting back to its default at a scope by dropping it from the scope's file, under its name and each alias; an org's job row or a retired job's goes under its own key.
 export const resetSetting = (
   data: string,
   input: { key: string; scope: string },
@@ -245,7 +245,8 @@ export const resetSetting = (
 ): Result<{ key: string; scope: string }> => {
   const bad = badScope(data, input.scope)
   if (bad) return bad
-  const key = resolveKey(input.key) ?? (orgJobKey(input.key) ? input.key : undefined)
+  const own = orgJobKey(input.key) || retiredJobKey(input.key)
+  const key = resolveKey(input.key) ?? (own ? input.key : undefined)
   if (!key) return { message: `no setting ${input.key}`, ok: false, status: 404 }
   const values = readValues(data, input.scope)
   const names = (resolveKey(key) ? namesOf(key) : [key]).filter((name) => name in values)
