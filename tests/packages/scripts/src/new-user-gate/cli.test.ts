@@ -41,6 +41,7 @@ import {
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { scratchEnv } from "../../../../scratch-env"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
 describe("the new-user gate's reads", () => {
@@ -294,7 +295,7 @@ describe("the gate's Add account on Linux (#2391)", () => {
     expect(accountKept(box, home, "gate@example.com")).toBe(false)
     const shim = join(import.meta.dir, "../../../../../packages/scripts/src/security/cli.ts")
     const saved = Bun.spawnSync([process.execPath, "--no-env-file", shim, "-i"], {
-      env: { HOME: home, PATH: process.env.PATH ?? "" },
+      env: scratchEnv(home, { PLAYGROUND_DATA_DIR: undefined }),
       stdin: new TextEncoder().encode(
         'add-generic-password -U -s "playground-claude-oauth" -a "gate@example.com" -w "made-up"\n',
       ),
