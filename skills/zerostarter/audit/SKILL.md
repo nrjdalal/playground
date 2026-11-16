@@ -6,7 +6,7 @@ source: https://github.com/nrjdalal/zerostarter
 
 # Dependency Audit
 
-The audit runs in three places.
+The audit runs in three places, and it is the one gate on a Next advisory, since Next's own agent-only build stop is off ([docs/dependencies.md](../../../docs/dependencies.md#next-its-agent-upgrade-stop-is-off-web)).
 The first two run through `packages/scripts/src/audit.ts`, which tries again when npm's advisories endpoint hangs or answers 5xx, so a failure that names an advisory is a real one:
 
 - **A PR**: GitHub's Audit step and local CI's `suite.sh` pass `--new-over`, so a PR fails only on an advisory its head adds over its merge base with `canary`, and prints `canary`'s own as a notice.

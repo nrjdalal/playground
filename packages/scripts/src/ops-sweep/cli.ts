@@ -4,6 +4,8 @@ import { join } from "node:path"
 import { configDirOf, dataDirOf } from "@packages/env/data-dir"
 
 import { mainCheckout } from "../main-checkout"
+import { herdrDir, serverEnv } from "../ops-herdr/herdr"
+import { herdrPath } from "../ops-herdr/pin"
 import { loadSessionNames } from "../playground/setting"
 import { beat, type Context, forecast, pass, type Run } from "./sweep"
 
@@ -39,6 +41,13 @@ const ctx: Context = {
   cfg,
   data,
   dashboard: join(main, ".claude", "worktrees", "desk"),
+  herdr: async (server, args) =>
+    (
+      await run([process.env.HERDR_BIN_PATH || herdrPath(process.env), ...args], {
+        env: serverEnv(process.env, herdrDir(process.env), server),
+        timeoutMs: 30_000,
+      })
+    ).out,
   load: () => loadavg()[0] ?? 0,
   main,
   now: () => Date.now(),

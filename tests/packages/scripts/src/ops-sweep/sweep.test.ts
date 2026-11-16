@@ -15,6 +15,7 @@ import {
   boxRoute,
   chaseStale,
   check,
+  CONFLICT_AFTER,
   type Context,
   forecast,
   IDLE_DB_AFTER,
@@ -100,6 +101,19 @@ const session = (ctx: Context, name: string, pid: number, status = "busy") =>
   write(join(ctx.cfg, "sessions", `${name}.json`), { name, pid, status })
 const roster = (ctx: Context, agents: Record<string, unknown>[]) =>
   write(join(ctx.data, "roster.json"), { agents })
+// A resume record as spawn.sh writes it: the server it ran on, then its exec line, with --ssh for a remote probe.
+const sshRecord = (
+  ctx: Context,
+  name: string,
+  server = "playground-probes",
+  ssh = " --ssh a@10.0.0.2 --key /k",
+) => {
+  mkdirSync(join(ctx.data, "resume"), { recursive: true })
+  writeFileSync(
+    join(ctx.data, "resume", `${name}.sh`),
+    `#!/bin/bash\n# server: ${server}\nexec /main/scripts/spawn.sh resume ${name} /main sid${ssh}\n`,
+  )
+}
 
 const DOCKER_PS = "docker ps --filter name=^playground-"
 const TEST_PS = "docker ps --filter name=^playground-test-"
@@ -273,6 +287,94 @@ describe("check", () => {
       "probe-old": now - 16 * 60,
       "probe-stray": now - 11 * 60,
     })
+  })
+
+  test("an --ssh probe is live while its labelled pane runs ssh, read once a server, and gone when the pane is gone or back at its shell", async () => {
+    const { ctx, sweep } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [
+      { kind: "probe", name: "ssh-live", status: "working" },
+      { kind: "probe", name: "ssh-old", status: "working" },
+      { kind: "probe", name: "ssh-shell", status: "working" },
+      { kind: "probe", name: "ssh-gone", status: "working" },
+      { name: "probe-local", status: "working" },
+    ])
+    sshRecord(ctx, "ssh-live")
+    sshRecord(ctx, "ssh-old")
+    sshRecord(ctx, "ssh-shell")
+    sshRecord(ctx, "ssh-gone")
+    sshRecord(ctx, "probe-local", "playground-probes", "")
+    write(join(sweep, "probe-first-seen.json"), { "ssh-old": NOW / 1000 - 16 * 60 })
+    const reads: string[] = []
+    ctx.herdr = async (server, args) => {
+      reads.push(`${server} ${args.join(" ")}`)
+      if (args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              { label: "ssh-live", pane_id: "w1:p1" },
+              { label: "ssh-old", pane_id: "w1:p2" },
+              { label: "ssh-shell", pane_id: "w1:p3" },
+              { label: "probe-local", pane_id: "w1:p4" },
+            ],
+          },
+        })
+      const name = args.at(-1) === "w1:p3" ? "bash" : "ssh"
+      return JSON.stringify({
+        result: { process_info: { foreground_processes: [{ name, pid: 1 }] } },
+      })
+    }
+    expect((await check(ctx)).sort()).toEqual([
+      "probe-gone-unended:probe-local",
+      "probe-gone-unended:ssh-gone",
+      "probe-gone-unended:ssh-shell",
+      "probe-over-15m:ssh-old",
+    ])
+    expect(reads.filter((r) => r.endsWith("pane list"))).toEqual(["playground-probes pane list"])
+    expect(read(join(sweep, "probe-first-seen.json"))).toEqual({
+      "ssh-live": NOW / 1000,
+      "ssh-old": NOW / 1000 - 16 * 60,
+    })
+  })
+
+  test("an --ssh probe is live when any pane under its label runs ssh, a stale shell pane listed first", async () => {
+    const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [{ kind: "probe", name: "ssh-again", status: "working" }])
+    sshRecord(ctx, "ssh-again")
+    ctx.herdr = async (_server, args) => {
+      if (args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              { label: "ssh-again", pane_id: "w1:p1" },
+              { label: "ssh-again", pane_id: "w1:p2" },
+            ],
+          },
+        })
+      const name = args.at(-1) === "w1:p1" ? "bash" : "ssh"
+      return JSON.stringify({
+        result: { process_info: { foreground_processes: [{ name, pid: 1 }] } },
+      })
+    }
+    expect(await check(ctx)).toEqual([])
+  })
+
+  test("an --ssh probe reads gone with no herdr reader, and no pane is read with no --ssh probe unended", async () => {
+    const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [
+      { kind: "probe", name: "ssh-live", status: "working" },
+      { kind: "probe", name: "ssh-ended", status: "ended" },
+    ])
+    sshRecord(ctx, "ssh-live")
+    sshRecord(ctx, "ssh-ended")
+    expect(await check(ctx)).toEqual(["probe-gone-unended:ssh-live"])
+    const reads: string[] = []
+    ctx.herdr = async (server, args) => {
+      reads.push(`${server} ${args.join(" ")}`)
+      return ""
+    }
+    roster(ctx, [{ name: "ssh-ended", status: "ended" }])
+    expect(await check(ctx)).toEqual([])
+    expect(reads).toEqual([])
   })
 
   test("a runner and a probe by their kind: an <id>-<kind> name, or a roster kind over any name", async () => {
@@ -567,6 +669,144 @@ describe("lateReviewers", () => {
     expect(told).toHaveLength(2)
     expect(told[1]!.argv[3]).toContain("PR #146 (bbbbb-worker)")
     expect(told[1]!.argv[3]).toContain("no live session for ghjkmn-reviewer")
+  })
+})
+
+describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
+  // PR 145 as GitHub's GraphQL answers it (#2443's shape: a rollup green from other apps, no GitHub Actions suite), its checks still pending so no late-reviewer line mixes in
+  const answer = (fields: Record<string, unknown> = {}, runs = 0) =>
+    JSON.stringify({
+      data: {
+        repository: {
+          p145: {
+            comments: { nodes: [] },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    checkSuites: { totalCount: runs },
+                    statusCheckRollup: { contexts: { nodes: [] }, state: "PENDING" },
+                  },
+                },
+              ],
+            },
+            headRefOid: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            isDraft: false,
+            mergeStateStatus: "DIRTY",
+            mergeable: "CONFLICTING",
+            state: "OPEN",
+            ...fields,
+          },
+        },
+      },
+    })
+  // one sweep's read at each of the given seconds after NOW, each answered by its own reply, with every queued line it told
+  const sweeps = async (replies: string[], step = 300) => {
+    const { ctx, sweep } = setup()
+    const told: Call[] = []
+    let at = 0
+    ctx.now = () => NOW + at * 1000
+    let reply = ""
+    ctx.run = async (argv, options = {}) => {
+      if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
+      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+    }
+    const agents = [
+      { kind: "builder", name: "builder" },
+      {
+        kind: "worker",
+        name: "abcdef-worker",
+        pr: "https://github.com/acme/app/pull/145",
+        status: "working",
+      },
+    ]
+    roster(ctx, agents)
+    const counts: number[] = []
+    for (const [i, out] of replies.entries()) {
+      at = i * step
+      reply = out
+      await lateReviewers(ctx, agents, new Map())
+      counts.push(told.length)
+    }
+    return { counts, state: read(join(sweep, "conflict-told.json")), told }
+  }
+
+  test("a conflict with no run at the head tells the worker and its lead one sweep after it is first seen, once per head", async () => {
+    const { counts, told } = await sweeps([answer(), answer(), answer()])
+    expect(counts).toEqual([0, 2, 2])
+    expect(told.map((c) => c.env?.NOTIFY_TO)).toEqual(["abcdef-worker", "builder"])
+    expect(told[0]!.argv[2]).toBe("sweep")
+    expect(told[0]!.argv[3]).toBe(
+      "PR #145 (abcdef-worker): it conflicts with its base at head c0ff1c7, so GitHub runs no CI on it. Merge canary into it and push.",
+    )
+  })
+
+  test("#2443's shape, a rollup green from other apps with no Actions run, gets the conflict line and no late-reviewer line", async () => {
+    const green = answer({
+      commits: {
+        nodes: [
+          {
+            commit: {
+              checkSuites: { totalCount: 0 },
+              statusCheckRollup: {
+                contexts: { nodes: [{ completedAt: new Date(NOW - 60 * 60_000).toISOString() }] },
+                state: "SUCCESS",
+              },
+            },
+          },
+        ],
+      },
+    })
+    const { counts, told } = await sweeps([green, green])
+    expect(counts).toEqual([0, 2])
+    expect(told.every((c) => c.argv[3]!.includes("it conflicts with its base"))).toBe(true)
+  })
+
+  test("a new head that conflicts again starts its own clock and tells again", async () => {
+    const moved = answer({ headRefOid: "c0ff2c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" })
+    const { counts, told } = await sweeps([answer(), answer(), moved, moved])
+    expect(counts).toEqual([0, 2, 2, 4])
+    expect(told[2]!.argv[3]).toContain("at head c0ff2c7")
+  })
+
+  test("a draft alerts too, since a draft gets CI; DIRTY alone or CONFLICTING alone is a conflict", async () => {
+    expect((await sweeps([answer({ isDraft: true }), answer({ isDraft: true })])).counts).toEqual([
+      0, 2,
+    ])
+    const dirty = answer({ mergeable: "UNKNOWN" })
+    expect((await sweeps([dirty, dirty])).counts).toEqual([0, 2])
+    const conflicting = answer({ mergeStateStatus: "UNKNOWN" })
+    expect((await sweeps([conflicting, conflicting])).counts).toEqual([0, 2])
+  })
+
+  test("stays quiet with a GitHub Actions run at the head, while GitHub works it out (UNKNOWN), and before CONFLICT_AFTER", async () => {
+    expect((await sweeps([answer({}, 1), answer({}, 1)])).told).toEqual([])
+    const unknown = answer({ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" })
+    const quiet = await sweeps([unknown, unknown])
+    expect(quiet.told).toEqual([])
+    expect(quiet.state).toEqual({})
+    expect((await sweeps([answer(), answer()], CONFLICT_AFTER - 1)).told).toEqual([])
+  })
+
+  test("an UNKNOWN read at the same head, as GitHub works it out again after the base moves, keeps the told mark and tells nothing", async () => {
+    const unknown = answer({ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" })
+    const { counts, state } = await sweeps([answer(), answer(), unknown, answer(), answer()])
+    expect(counts).toEqual([0, 2, 2, 2, 2])
+    expect(state["145"]).toMatchObject({
+      sha: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      told: true,
+    })
+    // an UNKNOWN read before the clock runs out neither tells nor restarts it
+    expect((await sweeps([answer(), unknown, answer()])).counts).toEqual([0, 0, 2])
+  })
+
+  test("keeps only PRs conflicting now, so a fixed conflict that comes back at the same head tells again", async () => {
+    const clean = answer({ mergeStateStatus: "CLEAN", mergeable: "MERGEABLE" })
+    const { counts, state } = await sweeps([answer(), answer(), clean, answer(), answer()])
+    expect(counts).toEqual([0, 2, 2, 2, 4])
+    expect(Object.keys(state)).toEqual(["145"])
+    const closed = await sweeps([answer(), answer({ state: "MERGED" })])
+    expect(closed.state).toEqual({})
   })
 })
 
