@@ -173,6 +173,21 @@ describe("--ssh runs the probe's claude on another machine", () => {
     )
   })
 
+  test("an --ssh probe reports with playground send and waits on its own alerts-wait, and a probe here keeps SendMessage (PG-2444)", async () => {
+    const there = await spawn([...probe, ...ssh], [], farPath, undefined, undefined, far())
+    expect(there.code).toBe(0)
+    // the remote command is printf %q's, so its prompt reads with each escape taken off
+    const remote = launchOf(there).replace(/\\(.)/g, "$1")
+    expect(remote).toContain(
+      ` Report to ${OLD.ops} with: playground send ${OLD.ops} <your text>, since SendMessage does not reach ${OLD.ops} from this machine, and keep playground alerts-wait probe-far running as a background task, started again after each line it prints, for the answers."`,
+    )
+    expect(remote).not.toContain("with SendMessage (to:")
+    const here = await spawn(probe, [])
+    expect(here.code).toBe(0)
+    expect(launchOf(here)).toContain(` Report to ${OLD.ops} with SendMessage (to: ${OLD.ops}).`)
+    expect(launchOf(here)).not.toContain("playground send")
+  })
+
   test("on Linux the remote folder takes the probe's own temp folder's name, which its settings' sandbox writes", async () => {
     const r = await spawn(
       probe.concat(ssh),

@@ -166,6 +166,12 @@ The after-resume re-send ([SPAWN.md](SPAWN.md#resume)) takes the same `re-send` 
 Before you report that a session is acting on your message, read its session-state record as Check a session reads it: a record still holding `stuck` or `usage-limit` holds the message unread.
 Done when the send, or its one re-send, returns success.
 
+`SendMessage` reaches the sessions of its own machine alone.
+A session on the other machine, a probe started over `spawn.sh --ssh`, takes `playground send <name> <text>` both ways: it queues `{at, from, id, text, to}` in the outbox's `ops-peer.jsonl`, which Ops' ops-peer-relay job copies to the other machine ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends)).
+The session it names reads it through its own `playground alerts-wait <its name>` ([Keep the sweep running](#keep-the-sweep-running)) as `[ops-peer] <at> <from>: <text>`, so each side keeps its waiter running while the other lives.
+On the machine the job runs on, Ops' drain also sends an `ops-peer` line to a session in that machine's registry, the backstop for one with no waiter, and leaves every other one in its file.
+Done when the send prints `queued <id> for <name>`.
+
 ## A headless run
 
 A Claude session whose own toolset lacks a docs tool's MCP server writes that tool's pages through headless `claude -p` runs from `~`, which loads the server (`<server>` below, with its `<fetch>` and `<update>` tools; the path is a Claude session's alone, the **glm** rule).
@@ -231,7 +237,8 @@ playground alerts-wait <your name>
 
 Its line leads with its queue's `[ops-<job>]` tag, as the relay's copy does.
 Run it with Bash `run_in_background`; when it exits it has printed one line: start it again at once, then act on the line, a stuck session's alert, a job's line such as a heads-up, or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
-A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
+A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each, a line copied from the other machine counted from its `relayedAt`, its arrival, so one sent while the link was down still prints;
+while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
 Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
 Done when the task is running; the relay sends the same line later, so drop that copy.

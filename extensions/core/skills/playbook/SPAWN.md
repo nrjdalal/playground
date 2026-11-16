@@ -266,6 +266,7 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   The remote command also puts that machine's own `$HOME/.bun/bin` on PATH, expanded by its shell, since ssh hands a command the system PATH alone: bun and the `security` link to the secret store, both in `~/.bun/bin`, are found there with no shell-file line.
   Its settings file is one of its own, `factory-settings-sandbox-400k-<name>.json` (`-closed-` with `--sandbox`), whose sandbox writes that folder, its TMPDIR there.
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
+  Its prompt's report line names `playground send <reports-to> <text>` and a background `playground alerts-wait <name>` in place of SendMessage, which reaches no other machine ([SESSIONS.md](SESSIONS.md#message-a-session)); a probe started here keeps SendMessage.
 - The probe keeps a probe's roster row, kind `probe`, written here.
   The capacity gate reads this machine alone, since the pane and its ssh run here.
   Before the pane opens, one more `ssh` with the same options reads that machine under the launch's PATH, its `~/.bun/bin` first:

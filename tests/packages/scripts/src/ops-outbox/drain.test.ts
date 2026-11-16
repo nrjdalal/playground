@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import {
   appendFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -11,7 +12,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { drain, pending } from "../../../../../packages/scripts/src/ops-outbox/drain"
+import { drain, localNames, pending } from "../../../../../packages/scripts/src/ops-outbox/drain"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -117,6 +118,47 @@ describe("drain", () => {
     writeFileSync(join(dir, "ops-dashboard.jsonl"), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
     await expect(drain(dir)).rejects.toThrow("relay.py")
     expect(existsSync(join(dir, "cursor.json"))).toBe(false)
+  })
+})
+
+describe("drain's ops-peer lines (PG-2444)", () => {
+  const peer = (to: string, text: string) =>
+    `${JSON.stringify({ at: "2026-11-16T20:00:00Z", from: "probe-a", id: crypto.randomUUID(), text, to })}\n`
+
+  test("sends a line whose to is a session of this machine, led by its sender, and moves past one for the other machine", async () => {
+    const dir = scratch()
+    const file = join(dir, "ops-peer.jsonl")
+    writeFileSync(file, "")
+    await drain(dir, new Set(["probe-b"]))
+    appendFileSync(file, peer("probe-far", "for the other machine"))
+    appendFileSync(file, peer("probe-b", "for here"))
+    expect((await drain(dir, new Set(["probe-b"]))).map((r) => [r.to, r.text])).toEqual([
+      ["probe-b", "[ops-peer] probe-a: for here"],
+    ])
+    expect(readFileSync(file, "utf8")).toContain("for the other machine")
+    appendFileSync(file, peer("probe-far", "another"))
+    expect(await drain(dir, new Set(["probe-b"]))).toEqual([])
+    expect(await pending(dir)).toEqual([])
+  })
+
+  test("reads this machine's sessions from Claude Code's registry", async () => {
+    const config = scratch()
+    mkdirSync(join(config, "sessions"))
+    writeFileSync(
+      join(config, "sessions", "1.json"),
+      JSON.stringify({ name: "probe-b", sessionId: "s1" }),
+    )
+    writeFileSync(join(config, "sessions", "2.json"), "not json")
+    expect([...(await localNames(config))]).toEqual(["probe-b"])
+  })
+
+  test("only returns lines for Ops' sweep to send: it reaches no pane and types into none", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../../../../../packages/scripts/src/ops-outbox/drain.ts"),
+      "utf8",
+    )
+    const imports = [...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1])
+    expect(imports.filter((path) => /deliver|herdr|pane|sdk/.test(path!))).toEqual([])
   })
 })
 

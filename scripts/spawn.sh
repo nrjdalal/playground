@@ -2056,6 +2056,8 @@ else
   [ "$ROLE" = worker ] && [ "$BACKEND" != glm ] && [ -f "$DATA/brief-rush.md" ] && BINDS=" $SHOWN/brief-rush.md binds you too, on this Claude lane."
   WHO="a $ROLE in the Playground factory; you report to $TO"
   REPORT=" Report to $TO with SendMessage (to: $TO)."
+  # SendMessage reaches no session on another machine, so a start over --ssh reports through the outbox, which ops-peer-relay copies across, and waits on its own queue for the answers.
+  [ -z "$SSH_HOST" ] || REPORT=" Report to $TO with: playground send $TO <your text>, since SendMessage does not reach $TO from this machine, and keep playground alerts-wait $NAME running as a background task, started again after each line it prints, for the answers."
   if [ "$ROLE" = dispatcher ]; then
     WHO="the Playground factory's dispatcher; $TO briefs you with a handoff"
     [ -z "$FIRST" ] || WHO="the Playground factory's dispatcher; you work with the owner, who talks to you here and in the Dashboard's chat"
