@@ -36,27 +36,33 @@ Start the stack on its own, as one Bash call with `run_in_background: true`:
 bun run dev --ui stream > /tmp/playground-dev.log 2>&1
 ```
 
-Then, in a separate foreground call, wait for it and check it:
+Then print portless's folder, as `portlessDir()` names it and `probe.ts` reads it, in a foreground call of its own:
 
 ```bash
-# portless's folder as portlessDir() names it, as probe.ts reads it: portless get names the 1355 proxy's https only there, and curl on Linux trusts its CA from no store
-PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
-CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
-# Resolve this worktree's URLs (branch-prefixed); the proxy needs a moment, so retry
-for i in $(seq 1 60); do WEB=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground 2>/dev/null); [ -n "$WEB" ] && break; sleep 1; done
-API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground)
-curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
-curl -sS "${CA[@]}" "$API/api/health"                        # {"data":{"db":"ok","dashboard":"fixture","message":"ok",...}}
-curl -sS "${CA[@]}" -o /dev/null -w "%{http_code}" "$WEB/"   # 307, to /dashboard
+bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())'
 ```
 
-`CA` stays empty when that folder holds no `ca.pem`; on Linux, a health curl without it fails with curl's error 60, a self-signed chain (measured on the 1355 proxy, 16 Nov). A bare `portless get` or `portless list` reads `~/.portless`, which on the 1355 fallback names `http://` where that proxy serves https and lists no route (measured 16 Nov, issue 2418), so every block in this skill asks portless in `PDIR`. Every curl block sets `PDIR` and `CA` itself, since a Bash call keeps no variable from the one before.
+Write the path it prints in place of `<pdir>` below, and wait for the stack and check it in the next foreground call:
 
-Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `307` to `/dashboard` (`200` with `curl -L`). To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `PORTLESS_STATE_DIR="$PDIR" bunx portless list` shows every active route.
+```bash
+# Resolve this worktree's URLs (branch-prefixed); the proxy needs a moment, so retry
+for i in $(seq 1 60); do WEB=$(PORTLESS_STATE_DIR=<pdir> bunx portless get playground 2>/dev/null); [ -n "$WEB" ] && break; sleep 1; done
+API=$(PORTLESS_STATE_DIR=<pdir> bunx portless get api.playground)
+# The proxy answers 404 "No app registered" until the API registers, which curl's --retry-connrefused never retries, so loop on the body
+for i in $(seq 1 90); do curl -sS --cacert <pdir>/ca.pem "$API/api/health" 2>/dev/null | grep -q '"message":"ok"' && break; sleep 1; done
+curl -sS --cacert <pdir>/ca.pem "$API/api/health"                        # {"data":{"db":"ok","dashboard":"fixture","message":"ok",...}}
+curl -sS --cacert <pdir>/ca.pem -o /dev/null -w "%{http_code}" "$WEB/"   # 307, to /dashboard
+```
+
+Drop `--cacert <pdir>/ca.pem` when that folder holds no `ca.pem`; on Linux, a health curl without it fails with curl's error 60, a self-signed chain (measured on the 1355 proxy, 16 Nov). A bare `portless get` or `portless list` reads `~/.portless`, which on the 1355 fallback names `http://` where that proxy serves https and lists no route (measured 16 Nov, issue 2418), so every block in this skill asks portless in `<pdir>`. Every block names `<pdir>` by its literal path, since a Bash call keeps no variable from the one before and the factory's guards read a literal path where a variable holding it reads as one they cannot place.
+
+Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `307` to `/dashboard` (`200` with `curl -L`). To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `PORTLESS_STATE_DIR=<pdir> bunx portless list` shows every active route.
+
+An edit to the fixture's `machine.json` that the System sampler reads (the made-up machine's size, load, update, origin and account) shows on the sampler's next cycle (`INTERVAL_MS` in `api/hono/src/lib/system/sampler.ts`), 25 to 50 s later as testers saw, so a reload before then still shows the old values.
 
 Then run `bun run verify health` (it checks the version against your `HEAD`) and grep the dev log for `Is port`: portless can hand a new API a port another worktree's Next already holds, and `/api/health` then answers from the other stack. `verify` runs one check a call: for several, run each (`verify health`, then `verify cursor`) or `verify all`, which a bare `bun run verify` runs too; a word after any check but `pages`, `extension-node`, `screenshots`, `cls`, `tooltips` or `all` is refused, not ignored, but for `ended`, which takes one session name.
 
-- Web / API base URLs: `PORTLESS_STATE_DIR="$PDIR" bunx portless get playground` / `PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground`, `PDIR` as in the block above
+- Web / API base URLs: `PORTLESS_STATE_DIR=<pdir> bunx portless get playground` / `PORTLESS_STATE_DIR=<pdir> bunx portless get api.playground`, `<pdir>` the path the first call above prints
 - Scalar API docs: `$API/api/docs`
 - Logs: `tail -f /tmp/playground-dev.log`
 
@@ -66,15 +72,13 @@ Then run `bun run verify health` (it checks the version against your `HEAD`) and
 
 The API dev task runs `bun --hot src/main.ts` (the dev entry: it serves `src/index.ts`, which picks `local.ts`'s app or, under `PLAYGROUND_HOSTED=1`, `hosted.ts`'s; or setup mode while `POSTGRES_URL` is unset), and **`--hot` does not pick up newly created files** (new routers, new schema exports). The symptom is a route that exists in source returning `{"error":{"code":"NOT_FOUND"}}`. Touching files does not clear it; only a full restart does.
 
-Stop the stack through the background task that started it: `TaskStop` with that task's id ends its whole process tree, turbo and every child it spawned. That includes `next-server`, which would otherwise keep its port, so the next `bun run dev` dies with "Another next dev server is already running", and the `.bin/portless` supervisors that hold this worktree's routes. Signal only processes you started; never select pids by name or pattern, since a pattern matches the live dashboard and every worker's stack. A stack whose starting session has ended is out of `TaskStop`'s reach: `bun run dev:stop` in its worktree ends it. When `dev:stop` or a second start refuses, read [STOP.md](STOP.md): the launcher's record, which processes `dev:stop` may signal, and what each refusal names. The launcher drops a fixture stack's scratch copy as it leaves, so the next start begins from the fixture again; it hands the stack `PLAYGROUND_FIXTURE_LAUNCHED`, so the API, which can outlive the launcher until `dev:stop` kills its group, never writes the copy back. In the live dashboard's checkout (branch `live.branch`) `dev:stop` signals nothing without `--live-dashboard`, since that stack is its runner's. When `dev:stop` refuses, report the stack to your lead, and carry on in a fresh worktree off the same head on a new branch, whose prefix gives it fresh routes and a fresh `.next`. `PORTLESS_STATE_DIR="$PDIR" bunx portless list` (`PDIR` as in **Start**) showing no route for this branch confirms the old stack is gone; the shared proxy keeps running, since it hosts every worktree's routes.
+Stop the stack through the background task that started it: `TaskStop` with that task's id ends its whole process tree, turbo and every child it spawned. That includes `next-server`, which would otherwise keep its port, so the next `bun run dev` dies with "Another next dev server is already running", and the `.bin/portless` supervisors that hold this worktree's routes. Signal only processes you started; never select pids by name or pattern, since a pattern matches the live dashboard and every worker's stack. A stack whose starting session has ended is out of `TaskStop`'s reach: `bun run dev:stop` in its worktree ends it. When `dev:stop` or a second start refuses, read [STOP.md](STOP.md): the launcher's record, which processes `dev:stop` may signal, and what each refusal names. The launcher drops a fixture stack's scratch copy as it leaves, so the next start begins from the fixture again; it hands the stack `PLAYGROUND_FIXTURE_LAUNCHED`, so the API, which can outlive the launcher until `dev:stop` kills its group, never writes the copy back. In the live dashboard's checkout (branch `live.branch`) `dev:stop` signals nothing without `--live-dashboard`, since that stack is its runner's. When `dev:stop` refuses, report the stack to your lead, and carry on in a fresh worktree off the same head on a new branch, whose prefix gives it fresh routes and a fresh `.next`. `PORTLESS_STATE_DIR=<pdir> bunx portless list` (`<pdir>` as in **Start**) showing no route for this branch confirms the old stack is gone; the shared proxy keeps running, since it hosts every worktree's routes.
 
-Then start it again as in **Start**: `bun run dev --ui stream > /tmp/playground-dev.log 2>&1` alone, with `run_in_background: true`, and in a separate foreground call:
+Then start it again as in **Start**: `bun run dev --ui stream > /tmp/playground-dev.log 2>&1` alone, with `run_in_background: true`, and in a separate foreground call, `<pdir>` as in **Start**:
 
 ```bash
-PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
-CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
-API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground)
-curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
+API=$(PORTLESS_STATE_DIR=<pdir> bunx portless get api.playground)
+for i in $(seq 1 90); do curl -sS --cacert <pdir>/ca.pem "$API/api/health" 2>/dev/null | grep -q '"message":"ok"' && break; sleep 1; done
 ```
 
 This worktree's apps re-register with the proxy on restart. In a linked worktree, every start but a `--serve` one renames the web's dev cache, `web/next/.next/dev`, to `dev-aside-<time>` beside it (`setNextDevAside()` in `api/hono/src/lib/dev/launch.ts`, printing `dev: the web's dev cache moved aside to <path>`), so the first page compiles cold. A restart over the kept cache reloaded every page every few seconds and never drew the sidebar's groups. `bun run clean`, `next build`'s clean step or the worktree's removal takes the asides, and a rename that fails refuses the start. The main checkout and a person's own clone keep their cache. Done when the previously-NOT_FOUND route responds.
@@ -111,11 +115,9 @@ Sign in as `LocalAgent` (local only, trusted Origin required). The route is gate
 Off a fixture stack its account is refused on the writes that act as the owner (`.agents/dashboard/writes.md`), and `no-live-sign-in` refuses a factory session's sign-in call to the live dashboard, so sign in on your own worktree's stack.
 
 ```bash
-PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
-CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
-WEB=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground); API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground)
-curl -sS "${CA[@]}" -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"
-curl -sS "${CA[@]}" -b cookies.txt "$API/api/v1/user"
+WEB=$(PORTLESS_STATE_DIR=<pdir> bunx portless get playground); API=$(PORTLESS_STATE_DIR=<pdir> bunx portless get api.playground)
+curl -sS --cacert <pdir>/ca.pem -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"
+curl -sS --cacert <pdir>/ca.pem -b cookies.txt "$API/api/v1/user"
 ```
 
 In the browser: a visit with no session to `/dashboard` shows first run's pane, which signs the one owner in again by itself, or, with no owner yet, lists this Mac's checks and on Continue makes and signs in this Mac's owner. To sign the browser in as `LocalAgent` instead, post the request above as a form from a page on the web origin, as `signIn` in `packages/scripts/src/verify/checks.ts` does from `/robots.txt`.
