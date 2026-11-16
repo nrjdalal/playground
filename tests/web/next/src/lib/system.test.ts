@@ -155,6 +155,7 @@ export const calm = (patch: (r: SystemReport) => void = () => {}): SystemReport 
       totalBytes: 48 * GB,
       usedBytes: 28.8 * GB,
     },
+    platform: "darwin",
     problems: [],
     pulls: null,
     sampledAt: new Date(NOW - 10_000).toISOString(),

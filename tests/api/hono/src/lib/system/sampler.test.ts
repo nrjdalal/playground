@@ -67,6 +67,7 @@ const readings = (cpu: { a: number; run: number }): Readings => ({
   },
   glmAccount: true,
   load: [11.7, 10.6, 9.1],
+  platform: "linux",
   problems: [],
   procs: [
     proc(4313, 1, 1000),
@@ -144,6 +145,7 @@ describe("compose", () => {
       usedBytes: 17 * GB,
     })
     expect(report.cpu).toEqual({ cores: 15, load: [11.7, 10.6, 9.1] })
+    expect(report.platform).toBe("linux")
     expect(report.docker).toEqual({
       containers: [{ bytes: 25 * MB, name: "playground-a-db", stack: "/r/wt/a" }],
       problem: null,

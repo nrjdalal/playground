@@ -124,6 +124,8 @@ export type SystemReport = {
     totalBytes: number
     usedBytes: number | null
   }
+  // The machine's operating system as Node names it (`darwin`, `linux`), so the panel words what differs between them; a fixture stack's made-up machine is `darwin` unless its fixture says otherwise.
+  platform: string
   problems: string[]
   // The pull requests page of this checkout's GitHub origin, which the sidebar's GitHub icon links to; null with no GitHub origin.
   pulls: string | null
@@ -146,6 +148,7 @@ export type Readings = {
   // Whether usage.accounts holds a GLM row, without which the GLM windows are a file left behind and show nowhere.
   glmAccount: boolean
   load: [number, number, number]
+  platform: string
   problems: string[]
   procs: Proc[]
   pulls: string | null
@@ -336,6 +339,7 @@ export function compose(
       totalBytes: readings.totalBytes,
       usedBytes: readings.usedBytes,
     },
+    platform: readings.platform,
     problems: readings.problems,
     pulls: readings.pulls,
     sampledAt: point.at,
@@ -458,6 +462,7 @@ export async function read(): Promise<Readings> {
           },
     glmAccount: hasGlmAccount(),
     load: made?.load ?? (loadavg() as [number, number, number]),
+    platform: made ? (made.platform ?? "darwin") : process.platform,
     problems,
     procs,
     pulls: machine ? pullsUrlOf(machine.origin ?? null) : checkoutPulls(),
