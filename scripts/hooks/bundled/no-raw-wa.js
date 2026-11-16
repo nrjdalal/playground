@@ -1135,6 +1135,8 @@ function walk(lx, scope, nested, inherit) {
       end(")");
       if (nested)
         return;
+    } else if (c === "(" && globOpens(cmd, src, lx.i)) {
+      cmd.words.push(word(lx, true));
     } else if (c === "(") {
       lx.i++;
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined;
@@ -1243,12 +1245,19 @@ function expandHeredoc(body) {
   const value = joined.replace(/\\([\\$`])/g, "$1");
   return /\$[\w{(@*#?!$-]|`/.test(joined.replace(/\\[\\$`]/g, "")) ? { unknown: "an expansion in an unquoted heredoc", value } : { value };
 }
-function word(lx) {
+function globOpens(cmd, src, at) {
+  const program = cmd.words.find((w) => w.quoted || !MARKERS.has(w.value));
+  const next = { quoted: false, value: "(" };
+  return !!program && parse({ ...cmd, words: [...cmd.words, next] }).first === next && src[at + 1] !== ")" && !/\s/.test(src.slice(at, balanced(src, at, "(", ")")).replace(/\\\n/g, "")) && !SUBSHELL_AFTER.has(program.value) && !HEADERS2.has(cmd.words[0]?.value ?? "");
+}
+var SUBSHELL_AFTER = new Set(["nocorrect", "repeat", "time"]);
+var HEADERS2 = new Set(["case", "for", "foreach", "function", "select"]);
+function word(lx, opening = false) {
   const { src } = lx;
   const start = lx.i;
   const out = { quoted: false, value: "" };
   let bare = "";
-  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")")) {
+  while (lx.i < src.length && (!BREAK.has(src[lx.i]) || src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")")) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";

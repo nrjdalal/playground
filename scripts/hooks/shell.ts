@@ -1086,6 +1086,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.i++
       end(")")
       if (nested) return
+    } else if (c === "(" && globOpens(cmd, src, lx.i)) {
+      cmd.words.push(word(lx, true))
     } else if (c === "(") {
       lx.i++
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
@@ -1196,14 +1198,31 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-function word(lx: Lexer): Word {
+// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`), as zsh reads one after a program word; `time`, `repeat`, `nocorrect` and a header's opener keep it a subshell, `()` defines a function, and a group holding a blank, which names no program, keeps canary's subshell reading, as does a paren in any other argument
+function globOpens(cmd: Command, src: string, at: number): boolean {
+  const program = cmd.words.find((w) => w.quoted || !MARKERS.has(w.value))
+  const next: Word = { quoted: false, value: "(" }
+  return (
+    !!program &&
+    parse({ ...cmd, words: [...cmd.words, next] }).first === next &&
+    src[at + 1] !== ")" &&
+    !/\s/.test(src.slice(at, balanced(src, at, "(", ")")).replace(/\\\n/g, "")) &&
+    !SUBSHELL_AFTER.has(program.value) &&
+    !HEADERS.has(cmd.words[0]?.value ?? "")
+  )
+}
+const SUBSHELL_AFTER = new Set(["nocorrect", "repeat", "time"])
+const HEADERS = new Set(["case", "for", "foreach", "function", "select"])
+
+function word(lx: Lexer, opening = false): Word {
   const { src } = lx
   const start = lx.i
   const out: Word = { quoted: false, value: "" }
   let bare = ""
   while (
     lx.i < src.length &&
-    (!BREAK.has(src[lx.i]) || (src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")"))
+    (!BREAK.has(src[lx.i]) ||
+      (src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")"))
   ) {
     tick()
     const c = src[lx.i]
