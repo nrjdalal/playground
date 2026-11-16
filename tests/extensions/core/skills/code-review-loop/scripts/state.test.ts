@@ -1229,6 +1229,8 @@ test("10 touched-tests: a Python test that walks the whole repo is listed whenev
     "tests/test_guard.py": 'files = subprocess.run(["git", "ls-files"]).stdout\n',
     "tests/test_named.py": 'for p in pathlib.Path("src/b").rglob("*.py"):\n    pass\n',
     "tests/test_plain.py": "assert True\n",
+    "tests/test_skip.py":
+      'SKIP = {"src/b"}\nfor root, dirs, names in os.walk(ROOT):\n    dirs[:] = [d for d in dirs if d not in SKIP]\n',
     "tests/test_walk.py":
       "ROOT = os.path.dirname(os.path.dirname(__file__))\nfor root, dirs, names in os.walk(ROOT):\n    pass\n",
   }
@@ -1241,24 +1243,19 @@ test("10 touched-tests: a Python test that walks the whole repo is listed whenev
   expect(image.listed).toEqual([])
   writeFiles(repo, { "docs/a.md": "y\n" })
   git(repo, "commit", "-qam", "a line of text")
-  expect(touched(repo).listed).toEqual([
+  const walkers = [
     "tests/test_guard.py",
     "tests/test_named.py",
+    "tests/test_skip.py",
     "tests/test_walk.py",
-  ])
-  // in a Python repo a walk that names a folder of the tree stays with the folder rule, while one from the root joins on any text
+  ]
+  expect(touched(repo).listed).toEqual(walkers)
+  // a Python repo lists the same, a walk that names a path to skip included, since the folder rule lists it only for a change under that path
   const py = scratch()
   scratchRepo(py, { ...files, "pyproject.toml": "" })
   writeFiles(py, { "docs/a.md": "y\n" })
   git(py, "commit", "-qam", "a line of text")
-  expect(touched(py).listed).toEqual(["tests/test_guard.py", "tests/test_walk.py"])
-  writeFiles(py, { "src/b/m.py": "y\n" })
-  git(py, "commit", "-qam", "a change in the named folder")
-  expect(touched(py).listed).toEqual([
-    "tests/test_guard.py",
-    "tests/test_named.py",
-    "tests/test_walk.py",
-  ])
+  expect(touched(py).listed).toEqual(walkers)
 })
 
 test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {

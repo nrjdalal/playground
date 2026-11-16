@@ -713,11 +713,9 @@ const stripValues = (text: string): string => {
 const GIT_GREP =
   /\bgit["'`]?(?:[\s,\[]+(?:["']?-[\w-]+["']?|\$?\{?[\w.$]+\}?|["'][^"'\n]*["'])){0,3}?[\s,\[]+["'`]?grep\b/
 const SCAN_PY = "rglob\\(|\\.glob\\(|os\\.walk|read_text\\("
-// A Python test that walks the whole repo, a guard reading every file's text, which names no changed path: one PR's touched tests ran green while CI went red on such a guard; in a Python repo a walk that names a folder of the tree stays with SCAN_PY's folder rule, and one from the root, naming none, joins here
+// A Python test that walks the whole repo, a guard reading every file's text, which names no changed path: one PR's touched tests ran green while CI went red on such a guard; a walk joins whatever paths its text names, since a root walk can still name one to skip
 const PY_TEST = /^tests\/(.+\/)?test_[^/]+\.py$/
-export const walksRepo = (text: string, python: boolean, paths: Set<string>): boolean =>
-  /ls-files/.test(text) ||
-  (/os\.walk\(|rglob\(/.test(text) && (!python || scannedPaths(text, paths).size === 0))
+const WALKS_REPO = /ls-files|os\.walk\(|rglob\(/
 // Tests whose imported source scans the repo, so no grep of their own text finds them
 const SCANS_THROUGH_SOURCE = [
   "tests/packages/scripts/src/parity/record.test.ts",
@@ -898,11 +896,11 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
   const grepTexts = readBlobs(clone, head, grepping)
   for (const [f, text] of Object.entries(grepTexts))
     if (GIT_GREP.test(stripValues(text))) picked.add(f)
-  const paths = new Set([...tree, ...folders(tree)])
   if (python) {
     const scanners = [...grep(clone, head, "-E", [SCAN_PY])].filter(
       (f) => tests.has(f) && f.endsWith(".py"),
     )
+    const paths = new Set([...tree, ...folders(tree)])
     const scannerTexts = readBlobs(clone, head, scanners)
     for (const [f, text] of Object.entries(scannerTexts))
       if (covers(scannedPaths(text, paths), changed)) picked.add(f)
@@ -922,7 +920,7 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
         [...tree].filter((f) => PY_TEST.test(f)),
       ),
     ))
-      if (walksRepo(text, python, paths)) listed.add(f)
+      if (WALKS_REPO.test(text)) listed.add(f)
   for (const f of [...listed].sort()) console.log(f)
 }
 
