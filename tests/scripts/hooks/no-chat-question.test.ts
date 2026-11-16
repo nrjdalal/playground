@@ -108,6 +108,18 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["settles it", "Your yes settles it."],
     ["is yours to", "The ship is yours to make."],
     ["if you want", "I can post it if you want."],
+    // 16 Nov: an offer in a status report still waits on his choice (PG-2316)
+    [
+      "an offer: if you want",
+      "If you want both used, I'll pass that to the Planner as its own job.",
+    ],
+    // a bold lead-in question asks, answered or rhetorical alike, so a lead-in is written as a label (PG-2316)
+    [
+      "a bold lead-in question its sentence answers",
+      "**Is there a reason the copy is made only once?** I searched the docs and found no recorded reason.",
+    ],
+    ["a bold lead-in question, rhetorical", "**Merge after the fix?** I think so."],
+    ["a rhetorical question", "Merge after the fix? I think so."],
     ["any case", "SHOULD I ship it."],
     ["an ask under a list", "Done:\n- merged #472\n\nShould I ship it."],
     ["a question addressed to Quilla by @", "@Quilla, should I ship it?"],
@@ -199,6 +211,12 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     ["when you can", "Add the key when you can."],
     ["when you get a chance", "Log in to Loom when you get a chance."],
     ["is waiting on you", "The ship is waiting on you."],
+    ["is waiting on you after no and a comma", "No rush, the merge is waiting on you."],
+    ["is waiting on you two words past no", "There is no doubt the merge is waiting on you."],
+    [
+      "is waiting on you after a no clause",
+      "No merge is waiting on you; the fix is waiting on you.",
+    ],
     ["<verb> it yourself", "Run it yourself from the main checkout."],
     ["a bare imperative addressed to Quilla", "Quilla, plug in the Mac."],
     ["a bare imperative addressed to @Quilla", "@Quilla: paste the token in 1Password."],
@@ -327,6 +345,13 @@ describe("what passes", () => {
     ["an update addressed to Quilla", "@Quilla: your PR is ready in the inbox as an update."],
     ["please inside a channel's name", "I posted your EOB to #projects-status-eob-please."],
     ["nothing waiting on him", "Nothing is waiting on you now."],
+    // 16 Nov: a status report saying no decision waits on him (PG-2316)
+    [
+      "no decision waiting on him",
+      "No decision is waiting on you, so nothing went to the Inbox: my last update reported the dispatcher's decision, which is already made, and asked you nothing.",
+    ],
+    ["no item waiting on him", "No item is waiting on you."],
+    ["no one waiting on him", "No one is waiting on you."],
     ["nothing he needs to do", "Nothing you need to do here."],
     ["a need under if", "If you need to roll back, run the old build."],
     ["a need under anything", "Anything you need to decide reaches you through your Inbox."],
