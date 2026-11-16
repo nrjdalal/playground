@@ -92,7 +92,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Fill it from the lead's ruling and the PR body's scope, and where the lead ruled nothing beyond the ticket, say so.
    Unlike the other slots, the `__SPEC__` fill replaces the backticked token together with its backticks, since the spec runs to paragraphs that inline code would break; the template keeps the backticks only so the slots test, which wants every slot backticked, stays green.
    Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, and spawn.sh starts the reviewer, since it refuses a brief still holding the `__SPEC__` token, naming it.
-   The tester template carries no such slot, since a tester drives the diff's surfaces for CI and posts PASS or FAIL, not a score against the scope.
+   The tester template carries no such slot, since a tester drives the diff's surfaces and posts PASS or FAIL, the `tester` gate on a `web/next/` diff, not a score against the scope.
    A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its pane (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
