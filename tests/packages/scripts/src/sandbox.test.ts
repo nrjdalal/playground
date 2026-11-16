@@ -183,6 +183,8 @@ test("on Linux wrap runs argv under bwrap in a pid view, over each live folder t
       join(home, ".ssh"),
       join(home, ".ssh"),
       ...ROOT_TOOLS.filter((tool) => existsSync(tool)).flatMap((tool) => ["--ro-bind", "/r", tool]),
+      "setsid",
+      "--wait",
       "bun",
       "test",
     ])

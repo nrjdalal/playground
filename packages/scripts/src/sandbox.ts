@@ -108,7 +108,7 @@ export const hidden = (home: string, uid: number, env: Record<string, string | u
 // The root tools a test could call by full path, where a fake first on PATH cannot reach
 export const ROOT_TOOLS = ["/usr/bin/pkexec", "/usr/bin/sudo"]
 
-// On Linux each child runs under bwrap in a pid view of its own, so no test can signal a live process (portless's stop finds the live proxy's pid by its port and signals it), with an empty folder over each live one, the root stand-in over each root tool and ~/.ssh read-only; the host network stays, since the Docker tests reach their containers on 127.0.0.1, and only a path that exists is mounted over, since bwrap would make a missing one on the real disk; macOS runs argv as it is
+// On Linux each child runs under bwrap in a pid view of its own, so no test can signal a live process (portless's stop finds the live proxy's pid by its port and signals it), with an empty folder over each live one, the root stand-in over each root tool and ~/.ssh read-only; the host network stays, since the Docker tests reach their containers on 127.0.0.1, only a path that exists is mounted over, since bwrap would make a missing one on the real disk, and argv leads a process group of its own, as on macOS, since a group whose leader is bwrap outside the view reads as group 0 there (the dev launcher's record then names none); macOS runs argv as it is
 export const wrap = (
   argv: string[],
   refused: string,
@@ -139,6 +139,8 @@ export const wrap = (
       refused,
       tool,
     ]),
+    "setsid",
+    "--wait",
     ...argv,
   ]
 }

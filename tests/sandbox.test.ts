@@ -71,4 +71,10 @@ describe.skipIf(process.platform !== "linux")("the test sandbox on Linux", () =>
     expect(outer).toBeGreaterThan(0)
     expect(() => process.kill(outer, 0)).toThrow()
   })
+
+  // the dev launcher records its process group, which read as 0 while its leader was bwrap, outside the pid view
+  test("a test's process group is one the pid view holds", () => {
+    const ps = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(process.pid)])
+    expect(Number(ps.stdout.toString().trim())).toBeGreaterThan(0)
+  })
 })
