@@ -2464,6 +2464,15 @@ export async function examine(
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
+  // a group word globOpens opened (`nice (pkill -f x)`) is also judged as the subshell its paren reads as outside that place, its commands run as a script, so the glob reading only adds refusals
+  for (const group of cmd.words.filter((w) => w.source?.startsWith("("))) {
+    const src = group.source as string
+    const inside = src.slice(1, balanced(src, 0, "(", ")") - 1)
+    const verdict = await nested(cmd, env, () =>
+      run(lexScript(known({ value: inside }), env), subshell(env), visit, builtins),
+    )
+    if (verdict) return verdict
+  }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
   for (const script of await scriptStdin(cmd, env)) {

@@ -32,7 +32,7 @@ const controls = (): Row[] => [
   ["a wrapper before a paren holding a command line of echoes", "nice (echo a; echo b)"],
 ]
 
-// zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; after `time time` zsh globs the paren, its second time the external program, and the reader keeps a subshell, which judges these bodies' commands but misses a group-spelled program, a known limit
+// zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; `time time`'s reading is a known limit the README's shared reader section names
 const stacked = (body: string, what: string): Row[] => [
   [`a subshell after time and repeat running ${what}`, `time repeat 1 (${body})`],
   [`a subshell after repeat and time running ${what}`, `repeat 1 time (${body})`],

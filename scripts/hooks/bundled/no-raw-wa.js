@@ -2245,6 +2245,13 @@ async function examine(cmd, env, visit, builtins) {
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
+  for (const group of cmd.words.filter((w) => w.source?.startsWith("("))) {
+    const src = group.source;
+    const inside = src.slice(1, balanced(src, 0, "(", ")") - 1);
+    const verdict = await nested(cmd, env, () => run(lexScript(known({ value: inside }), env), subshell(env), visit, builtins));
+    if (verdict)
+      return verdict;
+  }
   if (!cmd.runsStdin || stdinScript(primary))
     return;
   for (const script of await scriptStdin(cmd, env)) {
