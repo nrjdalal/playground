@@ -10,6 +10,8 @@
 set -u
 case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "run-slot.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 OPS=${RUN_SLOT_OPS:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops}
+# the data folder, where playground priority on keeps each session's window as priority-<session>.json (prio_holder)
+PDATA=${PLAYGROUND_DATA_DIR:-$HOME/.playground}
 # this copy's path and arguments, so a waiter can run a newer copy in its place (reread, below)
 SELF=$0
 ARGS=("$@")
@@ -1308,10 +1310,10 @@ case "$DOCKER" in refuse\ *) echo "${DOCKER#refuse }" >&2; rlog refused "docker"
 # a model-bound run skips the queue's lanes, run-slot-docker among them, and a build fills the VM rather than waiting on a model
 [ -n "$DOCKER" ] && [ -n "$MODEL_BOUND" ] && { echo "run-slot.sh refuses --model-bound for a docker build, which fills the Docker VM rather than waiting on a model: run it without --model-bound, so it takes run-slot-docker, one docker build at a time" >&2; rlog refused "docker"; exit 2; }
 [ -n "$HEAVY" ] && SIZE=big UNITS=3
-# Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) and a ship's own runs (ops-ship) go before the
-# rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
+# Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build), a ship's own runs (ops-ship) and ops-tick's upkeep go before the
+# rest and may use the small reserve, as may an org's run (below) and the priority pick (prio_holder). A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
-case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard|ops-ship) CLASS=0 ;; *) CLASS=2 ;; esac
+case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard|ops-ship|ops-tick) CLASS=0 ;; *) CLASS=2 ;; esac
 # the session a run counts as for the priority pick and its class: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
 # that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
 # while the priority named its session, until a lead named its commit-<worktree> by hand)
@@ -1536,6 +1538,9 @@ cheap_sig() {
   for d in "$@"; do
     for f in "$d"/run-slot*.holder; do l=; read -r l 2>/dev/null < "$f"; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
   done
+  # the priority windows, so the head, which compares no next_sig, looks again when one opens
+  windows_sig
+  SIG="$SIG$WSIG"
   # a look mark whose pid has ended is swept here, since the waiter it belonged to was killed past its trap and free() never ran
   for f in "$OPS"/.run-slot-ref-*; do [ -e "$f" ] || continue; p=${f##*-}; case "$p" in '' | *[!0-9]*) continue ;; esac; [ "$p" = "$$" ] && continue; alive "$p" || rm -f "$f"; done
 }
@@ -1544,7 +1549,17 @@ cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
 # whether this waiter's ticket is the queue's oldest, the one that names who goes next in run-slot.next
 oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
 # the lines a waiter behind the head watches: who the oldest waiter names next, and the lead's pick and focus, which name a session whatever its place
-next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l 2>/dev/null < "$f"; NSIG="$NSIG|$l"; done; }
+next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l 2>/dev/null < "$f"; NSIG="$NSIG|$l"; done; windows_sig; NSIG="$NSIG$WSIG"; }
+# each standing priority window by name with every line of it, builtins alone, so opening, lifting or rewriting one wakes every waiter and costs no process while none stands
+windows_sig() {
+  local f l
+  WSIG=
+  for f in "$PDATA"/priority-*.json; do
+    [ -e "$f" ] || continue
+    WSIG="$WSIG|$f"
+    while IFS= read -r l || [ -n "$l" ]; do WSIG="$WSIG=$l"; done 2>/dev/null < "$f"
+  done
+}
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
 # run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
 due_at() {
@@ -1645,16 +1660,63 @@ LOOKER=1
 LOOKED=
 G0_CACHE=
 
-# run-slot.priority (a lead's pick, under an hour old) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
+# the priority pick (run-slot.priority, a lead's pick under an hour old, or a session's window) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
 prio_holder() {
-  local m
+  local m h=
   # while run-slot.focus stands its session is the pick, whatever run-slot.priority says or its age, so focus never loses its slot to a lapse
   focus_holder && return
-  m=$(mtime "$OPS/run-slot.priority") || return
   # an mtime that reads back empty counts as no pick, rather than as a shell error, as in stale
-  case "$m" in '' | *[!0-9]*) return 1 ;; esac
-  [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
+  if m=$(mtime "$OPS/run-slot.priority"); then
+    case "$m" in '' | *[!0-9]*) ;; *) [ $(( $(date +%s) - m )) -lt 3600 ] && h=$(cut -d' ' -f1 "$OPS/run-slot.priority") ;; esac
+  fi
+  # a standing priority window (playground priority on) comes after the lead's pick, which is Ops acting now, and goes ahead of it while the pick's session has no run waiting
+  if windows_stand; then
+    [ -n "$h" ] && session_waiting "$h" && { printf '%s\n' "$h"; return; }
+    window_holder && return
+  fi
+  [ -n "$h" ] && printf '%s\n' "$h"
+}
+# whether any priority-*.json stands in the data folder, a builtin glob, so a machine with none pays nothing more for the pick
+windows_stand() { local f; for f in "$PDATA"/priority-*.json; do [ -f "$f" ] && return 0; done; return 1; }
+# whether session $1 owns a live ticket in the queue, its worktree's commit step's included (owner_of)
+session_waiting() {
+  local t n pid o
+  for t in "$QUEUE"/*; do
+    [ -e "$t" ] || continue
+    n=${t##*/}; pid=${n#*-}; pid=${pid%%-*}; o=${n#*-*-}
+    case "$o" in commit-*) o=$(owner_of "$o") ;; esac
+    [ "$o" = "$1" ] && alive "$pid" && return 0
+  done
+  return 1
+}
+WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)"(,?)$'
+# the session of the oldest window, by its since, whose session has a run waiting, read only from a file shaped as playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: `{` first and `}` last, every line between one of by, reason, session and since with a string value and a comma on each but the last, all four there, the session naming its file and not start
+window_holder() {
+  local f l s since by why open close bad sep best= bs=
+  for f in "$PDATA"/priority-*.json; do
+    [ -f "$f" ] || continue
+    s= since= by= why= open= close= bad= sep=
+    while IFS= read -r l || [ -n "$l" ]; do
+      [ -z "$close" ] || { bad=1; break; }
+      if [ -z "$open" ]; then
+        [ "$l" = '{' ] || { bad=1; break; }
+        open=1
+      elif [ "$l" = '}' ]; then
+        [ "$sep" = none ] || { bad=1; break; }
+        close=1
+      else
+        [[ $l =~ $WIN_LINE ]] && [ "$sep" != none ] || { bad=1; break; }
+        case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
+        [ -n "${BASH_REMATCH[4]}" ] && sep=, || sep=none
+      fi
+    done 2>/dev/null < "$f"
+    [ -z "$bad" ] && [ -n "$open" ] && [ -n "$close" ] && [ -n "$by" ] && [ -n "$why" ] && [[ $s =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [[ $since =~ ^[0-9][0-9TZ:.-]*$ ]] || continue
+    [ "$s" != start ] && [ "${f##*/}" = "priority-$s.json" ] || continue
+    [ -z "$bs" ] || [[ $since < $bs ]] || continue
+    session_waiting "$s" && best=$s bs=$since
+  done
+  [ -n "$best" ] && printf '%s\n' "$best"
 }
 # the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
 focus_holder() {
@@ -2097,7 +2159,7 @@ unit_fits() {
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
 reserve() { local r=$(($1 / 4)); [ "$r" -ge 1 ] && echo "$r" || echo 1; }
-# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the run-slot.priority pick, else the reserve; with $5 given it is set instead of echoed, and $6 given names the holder the walk read once, empty when none stands, so a walk pays no read a ticket; callers without $6 read their own (issue 1654), and the two no-holder shapes differ: empty says the walk found none and skips prio_for, unset says none was passed and prio_for reads its own, so the match needs a non-empty holder
+# the units a run must leave free: none for a small run, one that gates a merge (rank 0x), an org's run (1x) or the priority pick (prio_holder), else the reserve; with $5 given it is set instead of echoed, and $6 given names the holder the walk read once, empty when none stands, so a walk pays no read a ticket; callers without $6 read their own (issue 1654), and the two no-holder shapes differ: empty says the walk found none and skips prio_for, unset says none was passed and prio_for reads its own, so the match needs a non-empty holder
 may_reserve() {
   local rr
   case "$2" in small) rr=0 ;; *)
@@ -2551,7 +2613,7 @@ while :; do
   # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next); each write is a `next` line in run-slot.runs.log,
   # so a window where head named a waiter the line passed over reads back who the oldest named and when (issue 1477)
   if [ -n "$TICKET" ] && oldest_is_me; then
-    pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
+    pf=; { [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] || windows_stand; } && pf=$(prio_first)
     nx=; read -r nx 2>/dev/null < "$NEXTF"
     if [ "$nx" != "${fw:--} ${fw2:--} ${pf:--}" ]; then
       printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null && rlog next "${fw:--} ${fw2:--} ${pf:--}"
@@ -2594,8 +2656,8 @@ while :; do
       continue
     fi
     slot_open "$s" || continue
-    # run-slot.priority names the one session that takes run-slot next (a lead sets it, as for the owner's SDK demo); everyone else leaves
-    # run-slot to it while the file is under an hour old
+    # the priority pick (prio_holder) names the one session that takes run-slot next (a lead sets it, as for the owner's SDK demo); everyone
+    # else leaves run-slot to it while it stands
     if [ "$s" = run-slot ] && [ -n "$(prio_holder)" ] && ! prio_for "$WHO" && prio_waiting; then
       continue
     fi

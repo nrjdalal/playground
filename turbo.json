@@ -34,6 +34,8 @@
         "$TURBO_ROOT$/api/hono/src/lib/keychain-items.ts",
         "$TURBO_ROOT$/api/hono/src/lib/keychain.ts",
         "$TURBO_ROOT$/api/hono/src/lib/sessions/proc-start.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/system/parse.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/system/peer.ts",
         "$TURBO_ROOT$/api/hono/src/lib/usage/prices.ts",
         "$TURBO_ROOT$/api/hono/src/lib/yard/client.ts",
         "$TURBO_ROOT$/api/hono/src/lib/yard/keychain.ts",

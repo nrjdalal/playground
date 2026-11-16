@@ -779,6 +779,7 @@ describe("SessionRow's dropdown and group", () => {
   const pull = (fields: Partial<Pull> = {}): Pull => ({
     approvals: 0,
     ci: "passing",
+    conflicts: false,
     draft: false,
     number: 197,
     queued: false,
@@ -1047,6 +1048,13 @@ describe("SessionRow's dropdown and group", () => {
     ],
     ["fixing", { pr: pull({ score: "3/5" }) }, {}, "fixing", "text-caution"],
     ["working", { pr: null }, {}, "working", "text-info"],
+    [
+      "conflicts",
+      { pr: pull({ conflicts: true }), state: "idle" },
+      { light: "idle" },
+      "conflicts",
+      "text-destructive",
+    ],
     [
       "waiting",
       { pr: pull({ ci: "pending", score: null }), state: "idle" },

@@ -15,6 +15,8 @@ import {
 setDefaultTimeout(40_000)
 
 describe("the capacity gate refuses and spawns nothing", () => {
+  const SPARE_SKIPPED =
+    "skipped (--account spare@example.com: this machine holds no usage-spare.json for it under 60 minutes old, which the ops tick's other-logins beat writes)"
   const capResetsAt = new Date(Date.now() + 3_600_000)
   // Each row builds its file inside the test, so no stamp is older than the moment the case runs.
   const claudeUsageRefusals: [string, () => string, ...string[]][] = [
@@ -104,7 +106,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     ])
   })
 
-  test("a session on --account with no usage.json yet skips the usage check as before", async () => {
+  test("a session on --account with no usage.json and no usage-spare.json skips the usage check", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--account", "spare@example.com"],
       [],
@@ -114,7 +116,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(capacityLog(r)).toEqual([
       expect.objectContaining({
         readings: expect.objectContaining({
-          usage: "skipped (--account spare@example.com, whose usage this machine does not read)",
+          usage: SPARE_SKIPPED,
         }),
         verdict: "pass",
       }),
@@ -215,7 +217,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     )
   })
 
-  test("a session on --account skips the usage check, since the readings name one login", async () => {
+  test("a session on --account skips usage.json, whose readings name another login", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--account", "spare@example.com"],
       [],
@@ -226,9 +228,71 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect.objectContaining({
         verdict: "pass",
         readings: expect.objectContaining({
-          usage: "skipped (--account spare@example.com, whose usage this machine does not read)",
+          usage: SPARE_SKIPPED,
         }),
       }),
     ])
   })
+
+  // --account spare@example.com is judged on its own usage-spare.json, which the ops tick's other-logins beat writes every 30 minutes, at a bare start's pace while under 60 minutes old.
+  const spareWeek = (week: number, written = minutesAgo(10)) =>
+    JSON.stringify({
+      ...JSON.parse(weekAt(week)),
+      account: "spare@example.com",
+      writtenAt: written,
+    })
+  const onSpare = (env: Record<string, string>) =>
+    spawn(["worker", "worker-brave-otter", "b.md", "--account", "spare@example.com"], [], env)
+
+  test("a session on --account with a fresh usage-spare.json past its pace is refused", async () => {
+    const r = await onSpare({ SPARE_USAGE_JSON: spareWeek(29) })
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(
+      "the usage gate holds it: --account spare@example.com: the week is at 29% (usage-spare.json seven_day.used_percentage), past 14.3 points a day (2.0 days in, 28.6 is its pace)",
+    )
+  })
+
+  test("a session on --account with a fresh usage-spare.json under its pace starts, and its row reads that week", async () => {
+    const r = await onSpare({ SPARE_USAGE_JSON: spareWeek(20) })
+    expect(r.code).toBe(0)
+    expect(placing(r)).not.toEqual([])
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({ readings: expect.objectContaining({ week: 20 }), verdict: "pass" }),
+    ])
+  })
+
+  test("a session on --account with a fresh usage-spare.json past its pace starts while the pace check is off", async () => {
+    const r = await onSpare({ PACE_OFF_UNTIL: offUntilUtc, SPARE_USAGE_JSON: spareWeek(29) })
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({
+          pace: `skipped until ${offUntilUtc} (usage-pace-off-until)`,
+        }),
+        verdict: "pass",
+      }),
+    ])
+  })
+
+  test.each([
+    ["60 minutes old", () => spareWeek(29, minutesAgo(60))],
+    [
+      "naming another account",
+      () => JSON.stringify({ ...JSON.parse(spareWeek(29)), account: "spare@other.example" }),
+    ],
+    ["that does not read", () => "{ nope"],
+  ])(
+    "a session on --account with a usage-spare.json %s past its pace skips the usage check",
+    async (_, raw) => {
+      const r = await onSpare({ SPARE_USAGE_JSON: raw() })
+      expect(r.code).toBe(0)
+      expect(capacityLog(r)).toEqual([
+        expect.objectContaining({
+          readings: expect.objectContaining({ usage: SPARE_SKIPPED }),
+          verdict: "pass",
+        }),
+      ])
+    },
+  )
 })
