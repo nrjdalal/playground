@@ -9,6 +9,7 @@ import { guarded as extensionsWrite } from "./no-extensions-write"
 import { check as falseGreen } from "./no-false-green"
 import { refusal as glmHeavyPath } from "./no-glm-heavy-path"
 import { check as headlessLogin } from "./no-headless-login"
+import { check as hiddenProgram } from "./no-hidden-program"
 import { check as killByName } from "./no-kill-by-name"
 import { check as linearTicket } from "./no-linear-ticket"
 import { check as liveSignIn } from "./no-live-sign-in"
@@ -53,6 +54,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-false-green", run: (raw, env) => falseGreen(raw, env.SHELL ?? "zsh") },
   { factory: true, name: "no-glm-heavy-path", run: (raw, env) => glmHeavyPath(raw, env) },
   { factory: false, name: "no-headless-login", run: (raw, env) => headlessLogin(raw, env) },
+  { factory: true, name: "no-hidden-program", run: (raw, env) => hiddenProgram(raw, env) },
   { factory: true, name: "no-kill-by-name", run: (raw) => killByName(raw) },
   { factory: false, name: "no-linear-ticket", run: (raw, env) => linearTicket(raw, env) },
   { factory: true, name: "no-live-sign-in", run: (raw, env) => liveSignIn(raw, env) },
