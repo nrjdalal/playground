@@ -125,6 +125,8 @@
   A probe that fails is named in `problems` and leaves its part empty.
   It reports:
   - memory used as Activity Monitor adds it (from `vm_stat`), the free share and pressure level macOS reports (`kern.memorystatus_level`, `kern.memorystatus_vm_pressure_level`), swap, the load average against the cores, and disk free.
+    On Linux the memory readings come from `/proc` alone (`memoryReads()` in `memory.ts`, through `packages/scripts/src/ops-machine/readings.ts`), and no `sysctl` or `vm_stat` runs: used is `MemTotal` less `MemAvailable` as `free` counts it, the free share `MemAvailable`'s share, the pressure PSI's `/proc/pressure/memory` on macOS's scale, and swap `SwapTotal` less `SwapFree`.
+  - `platform`, the operating system as Node names it (`darwin`, `linux`; a fixture's made-up machine `darwin` unless its `system.platform` says otherwise), so the panel's swap note reads `swapDetail()`'s line for it: macOS grows swap as it needs it, Linux keeps it at a set size.
   - Docker's VM by the host process holding the daemon's socket (OrbStack Helper here, found by its socket, never its name), and each container's memory from `docker stats`.
   - each live session's footprint, placed by parentage, directory and socket, never by a process's name (`footprint.ts`).
     A session's claude pid comes from its registry file (`registeredSessions()` in `peers.ts`), Playground's own alone on a stack that reads this machine (`ownRegistered()` in `api/hono/src/lib/sessions/own.ts`, stack.md), and everything that descends from it is the session's. Each session pairs with its roster agent through `matchAgents()`,
@@ -138,7 +140,7 @@
     through a schema that keeps `oauthAccount.emailAddress` and `displayName` alone, so no token or other field of either file goes further, and nothing of them is kept between samples.
     usage.json's login wins, keeping the config's display name only when the two are one account (`accountFor`); with none, the config's account as before.
     A fixture stack reports its fixture's usage.json login (the shipped one's is made up), else its made-up `account`, and never opens the real config.
-  - `capacity` (`capacity.ts`): room for more workers at 1.3 GB and a core each, the lesser of memory room (macOS's free share less a 15% reserve) and CPU room (the cores less the 5-minute load), and none while pressure is warn or critical; swap is shown but not judged, since macOS grows it as it needs it.
+  - `capacity` (`capacity.ts`): room for more workers at 1.3 GB and a core each, the lesser of memory room (the free share less a 15% reserve) and CPU room (the cores less the 5-minute load), and none while pressure is warn or critical; swap is shown but not judged, since macOS grows it as it needs it and Linux's is a set size.
     Its `line` says the count and what limits it.
     `orchestrators` is the same read for more orchestrators, each a claude with no dev stack at 0.6 GB and 0.1 cores (`PER_ORCHESTRATOR`), its own `count`, `limitedBy` and `line`.
     `idle` names each worker's dev stack whose processes used under 1% of a core in every sample for 15 minutes, with what stopping them frees; a runner's or a manager's stack is never offered, and detached processes are not either, since one may be shared (the portless proxy).

@@ -106,6 +106,10 @@ type Reading = {
   value: string
 }
 
+// Pure: what qualifies the swap reading: macOS grows swap as it needs it, while Linux keeps it at the size its swap partition or file was given.
+export const swapDetail = (platform: string): string =>
+  platform === "linux" ? "Linux keeps swap at a set size" : "macOS grows swap as it needs it"
+
 function readingsOf(report: SystemReport): Reading[] {
   const { cpu, disk, docker, history, memory } = report
   const swap = memory.swap
@@ -132,7 +136,7 @@ function readingsOf(report: SystemReport): Reading[] {
       value: `${cpu.load[0]} on ${cpu.cores} cores`,
     },
     {
-      detail: "macOS grows swap as it needs it",
+      detail: swapDetail(report.platform),
       hour: (
         <Sparkline label="Swap used, GB" points={series(history, (p) => toGb(p.swapUsedBytes))} />
       ),
