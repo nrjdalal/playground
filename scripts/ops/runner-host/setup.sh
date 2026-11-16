@@ -59,7 +59,7 @@ say "sizing: $CORES cores and $RAM_GB GB give $RUNNERS runners and $SWAP of swap
 export DEBIAN_FRONTEND=noninteractive
 say "packages"
 apt-get update -q
-apt-get install -yq ca-certificates curl docker.io git golang-go jq ruby tar ufw unattended-upgrades unzip zsh
+apt-get install -yq ca-certificates curl docker.io git golang-go jq tar ufw unattended-upgrades unzip zsh
 
 say "swap"
 if ! swapon --show=NAME --noheadings | grep -qx /swapfile; then
