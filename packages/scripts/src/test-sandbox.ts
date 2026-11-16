@@ -18,7 +18,7 @@ const SERIAL = [
   "tests/check-types-env.test.ts",
 ]
 
-const { env, scratch } = sandbox()
+const { env, scratch, wrap } = sandbox()
 // a worktree .env set for a hosted stack would turn the hosted build's gates on in every test, and bun test fills only a key its env leaves unset, so both flags go in empty, which the env schemas read as unset; a test that wants the hosted build sets the flag itself
 Object.assign(env, { NEXT_PUBLIC_PLAYGROUND_HOSTED: "", PLAYGROUND_HOSTED: "" })
 const dropScratch = () => {
@@ -51,7 +51,7 @@ let passes = 0
 const runPass = async (argv: string[], deadline?: number) => {
   const status = join(scratch, `pass-${++passes}`)
   const child = Bun.spawn(
-    [
+    wrap([
       "sh",
       "-c",
       'f=$1; shift; trap : INT TERM; bun test "$@"; echo $? > "$f"; kill -KILL 0',
@@ -59,7 +59,7 @@ const runPass = async (argv: string[], deadline?: number) => {
       status,
       ...clock,
       ...argv,
-    ],
+    ]),
     { detached: true, env, stdio: ["inherit", "inherit", "inherit"] },
   )
   const stop = (signal: NodeJS.Signals) => {

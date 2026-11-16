@@ -13,7 +13,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
-import { sandbox } from "../../../../packages/scripts/src/sandbox"
+import { ROOT_TOOLS, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
 
 // Builds the sandbox while the parent reads Asia/Kolkata, as the Mac does, and returns the zone a Python child reports with that env plus the given overrides
 const childZone = (overrides: Record<string, string> = {}) => {
@@ -131,6 +131,63 @@ test("the sandbox's portless, runtime and herdr folders are in its scratch, what
     expect(existsSync(env.XDG_RUNTIME_DIR!)).toBe(true)
   } finally {
     rmSync(scratch, { force: true, recursive: true })
+  }
+})
+
+// a test in an agent session read CLAUDECODE where CI's does not, so the sandbox drops it as it drops every other agent variable
+test("the sandbox drops the caller's CLAUDECODE, so a test sees what CI sees", () => {
+  const was = process.env.CLAUDECODE
+  process.env.CLAUDECODE = "1"
+  const { env, scratch } = sandbox()
+  if (was === undefined) delete process.env.CLAUDECODE
+  else process.env.CLAUDECODE = was
+  try {
+    expect(env.CLAUDECODE).toBeUndefined()
+  } finally {
+    rmSync(scratch, { force: true, recursive: true })
+  }
+})
+
+test("on macOS wrap runs argv as it is", () => {
+  expect(wrap(["bun", "test"], "/r", "darwin")).toEqual(["bun", "test"])
+})
+
+test("on Linux wrap runs argv under bwrap in a pid view, over each live folder that exists, ~/.ssh read-only and each root tool", () => {
+  const home = mkdtempSync(join(tmpdir(), "sandbox-wrap-"))
+  try {
+    for (const dir of [".claude", ".playground", ".ssh", "elsewhere"]) mkdirSync(join(home, dir))
+    const argv = wrap(["bun", "test"], "/r", "linux", home, 4242, {
+      PLAYGROUND_DATA_DIR: join(home, "elsewhere"),
+    })
+    expect(argv.slice(0, 11)).toEqual([
+      "bwrap",
+      "--bind",
+      "/",
+      "/",
+      "--dev-bind",
+      "/dev",
+      "/dev",
+      "--proc",
+      "/proc",
+      "--unshare-pid",
+      "--die-with-parent",
+    ])
+    expect(argv.slice(11)).toEqual([
+      "--tmpfs",
+      join(home, ".claude"),
+      "--tmpfs",
+      join(home, "elsewhere"),
+      "--tmpfs",
+      join(home, ".playground"),
+      "--ro-bind",
+      join(home, ".ssh"),
+      join(home, ".ssh"),
+      ...ROOT_TOOLS.filter((tool) => existsSync(tool)).flatMap((tool) => ["--ro-bind", "/r", tool]),
+      "bun",
+      "test",
+    ])
+  } finally {
+    rmSync(home, { force: true, recursive: true })
   }
 })
 

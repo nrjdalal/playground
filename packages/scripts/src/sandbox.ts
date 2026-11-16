@@ -1,7 +1,9 @@
-// The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude, gh, herdr, launchctl, loginctl, portless and systemctl first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential), close a live herdr pane, start or stop a live ops job or the live proxy, or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. PORTLESS_STATE_DIR, XDG_RUNTIME_DIR, HERDR_CONFIG_PATH and HERDR_SOCKET_PATH name folders in the scratch, so a call that gets past a fake still finds no user bus or herdr server and writes none of portless's live state, though a real stop of portless's proxy still finds a proxy by its port; tests/live-tools-scan.test.ts fails on such a call in a test. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs a tool's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as a herdr session, the user's DBUS_SESSION_BUS_ADDRESS or the data folder, never reaches a test, nor does a git hook's GIT_DIR or GIT_INDEX_FILE, which would turn a test's scratch git init or commit onto the real repository. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
+// The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude, gh, herdr, launchctl, loginctl, portless and systemctl first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential), close a live herdr pane, start or stop a live ops job or the live proxy, or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. PORTLESS_STATE_DIR, XDG_RUNTIME_DIR, HERDR_CONFIG_PATH and HERDR_SOCKET_PATH name folders in the scratch, so a call that gets past a fake still finds no user bus or herdr server and writes none of portless's live state, though a real stop of portless's proxy still finds a proxy by its port; tests/live-tools-scan.test.ts fails on such a call in a test, and on Linux wrap (below) runs each child in a pid view of its own, which leaves it no live pid to signal. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs a tool's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as a herdr session, the user's DBUS_SESSION_BUS_ADDRESS or the data folder, never reaches a test, nor does a git hook's GIT_DIR or GIT_INDEX_FILE, which would turn a test's scratch git init or commit onto the real repository. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
 
+import { dataDirOf } from "@packages/env/data-dir"
 import { makeScratch } from "@packages/safe-delete"
 
 import { BOX_ENV_KEYS, boxEnv } from "./box-env"
@@ -10,7 +12,6 @@ import { BOX_ENV_KEYS, boxEnv } from "./box-env"
 export const SANDBOX_KEYS: readonly string[] = [
   ...BOX_ENV_KEYS,
   "CI",
-  "CLAUDECODE",
   "CLOCK_AHEAD_DAYS",
   "DOCKER_HOST",
   "E2E_API_URL",
@@ -78,5 +79,80 @@ export const sandbox = () => {
     },
     SANDBOX_KEYS,
   )
-  return { env, scratch }
+  // the runner's own pid, which tests/sandbox.test.ts tries to signal, to show a test cannot reach a process outside the suite
+  env.TEST_SANDBOX_OUTER_PID = String(process.pid)
+  // off PATH, since wrap binds it over each root tool's own path
+  const refused = join(scratch, "root-refused")
+  writeFileSync(
+    refused,
+    `#!/bin/sh\necho "the test sandbox stopped a real root call: no test may run a command as root (sandbox.ts)" >&2\nexit 99\n`,
+  )
+  chmodSync(refused, 0o755)
+  if (process.platform === "linux") {
+    const why = bwrapRefusal()
+    if (why) throw new Error(why)
+  }
+  return { env, scratch, wrap: (argv: string[]) => wrap(argv, refused) }
+}
+
+// The live state a full path reaches past a scratch HOME: the user's bus and keyring, Claude's own config, herdr's default server, the data folder with the factory's herdr sockets, and portless's folder
+export const hidden = (home: string, uid: number, env: Record<string, string | undefined>) => [
+  `/run/user/${uid}`,
+  join(home, ".claude"),
+  join(home, ".config", "herdr"),
+  dataDirOf(env, home),
+  join(home, ".playground"),
+  join(home, ".portless"),
+]
+
+// The root tools a test could call by full path, where a fake first on PATH cannot reach
+export const ROOT_TOOLS = ["/usr/bin/pkexec", "/usr/bin/sudo"]
+
+// On Linux each child runs under bwrap in a pid view of its own, so no test can signal a live process (portless's stop finds the live proxy's pid by its port and signals it), with an empty folder over each live one, the root stand-in over each root tool and ~/.ssh read-only; the host network stays, since the Docker tests reach their containers on 127.0.0.1, and only a path that exists is mounted over, since bwrap would make a missing one on the real disk; macOS runs argv as it is
+export const wrap = (
+  argv: string[],
+  refused: string,
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+  uid = userInfo().uid,
+  env: Record<string, string | undefined> = process.env,
+): string[] => {
+  if (platform !== "linux") return argv
+  const over = [...new Set(hidden(home, uid, env))].filter((dir) => existsSync(dir))
+  const ssh = join(home, ".ssh")
+  return [
+    "bwrap",
+    "--bind",
+    "/",
+    "/",
+    "--dev-bind",
+    "/dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--unshare-pid",
+    "--die-with-parent",
+    ...over.flatMap((dir) => ["--tmpfs", dir]),
+    ...(existsSync(ssh) ? ["--ro-bind", ssh, ssh] : []),
+    ...ROOT_TOOLS.filter((tool) => existsSync(tool)).flatMap((tool) => [
+      "--ro-bind",
+      refused,
+      tool,
+    ]),
+    ...argv,
+  ]
+}
+
+// Why bwrap cannot start a pid view here, or null: missing, or refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap), so a Linux run fails at its start rather than running any test unsandboxed
+export const bwrapRefusal = (): string | null => {
+  const tool = Bun.which("bwrap")
+  if (!tool)
+    return "the test sandbox needs bwrap on Linux: install the bubblewrap package (sandbox.ts)"
+  const run = Bun.spawnSync([tool, "--bind", "/", "/", "--unshare-pid", "true"], {
+    stderr: "pipe",
+    stdout: "ignore",
+  })
+  if (run.exitCode === 0) return null
+  const line = run.stderr.toString().trim().split("\n").at(-1) ?? ""
+  return `the test sandbox could not start bwrap (${line}): install the bubblewrap package, and where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them (sandbox.ts)`
 }
