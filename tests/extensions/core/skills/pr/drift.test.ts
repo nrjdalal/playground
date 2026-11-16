@@ -7,7 +7,8 @@ const UPSTREAM = join(import.meta.dir, "upstream")
 
 const TLDR =
   "## TL;DR\n\n- <a few short bullet points by the plain-words skill: what changes, and why>\n\n"
-const LINKS = "\n\n## Links\n\n<tickets, issues it closes, docs, related PRs>"
+const LINKS =
+  "\n\n## Links\n\n<tickets, issues it closes, docs, related PRs; a ship-now PR not titled fix( adds a line opening Owner ask: with the owner's Inbox #i id, PG issue or quoted words>"
 
 // The skill is upstream's whole, with only a TL;DR and a Links block added, so every edit beyond them is drift. The pinned copy is upstream's at the commit upstream/SOURCE names, so the test needs no network.
 describe("the pr skill", () => {
