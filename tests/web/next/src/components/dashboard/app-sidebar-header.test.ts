@@ -660,3 +660,28 @@ describe("Playground's row", () => {
     expect(row([], { tasks: [task] })).not.toContain('data-sidebar="menu-action"')
   })
 })
+
+// The header's readings sum the cluster as the System table does, so the owner's two 20-core machines read on 40 cores (#2425).
+describe("headerIcons over a cluster", () => {
+  const spark = (name: string) => ({
+    down: null,
+    name,
+    reading: {
+      cores: 20,
+      load: [10, 10, 10] as [number, number, number],
+      memory: { totalBytes: 128 * 1024 ** 3, usedBytes: 64 * 1024 ** 3 },
+      swap: { totalBytes: 16 * 1024 ** 3, usedBytes: 0 },
+    },
+  })
+  test("the load icon's number and hover are both machines', each named", () => {
+    const read = fresh((r) => {
+      r.machines = [spark("spark-a566"), spark("spark-9dfb")]
+      r.cpu = { cores: 20, load: [10, 10, 10] }
+    })
+    const cpu = icons(read).icons.find((i) => i.key === "cpu")!
+    expect(cpu.value).toBe("20")
+    expect(cpu.hover).toBe(
+      "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores",
+    )
+  })
+})
