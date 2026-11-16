@@ -427,18 +427,17 @@ var PNPM_FLAGS = "-c -r -w -y --aggregate-output --color --fail-if-no-match --ig
 var PNPM_VALUES = "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages";
 var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { joined: "-c --shell-mode", spec: true });
 var MISE = runner("--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all", "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets", { script: "-c --command", tools: true });
+var BUN_FLAGS = "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces";
+var BUN_VALUES = "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell";
+var DENO = runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true });
 var RUNNERS = new Map([
-  [
-    "bun run",
-    runner("-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces", "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell")
-  ],
+  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true })],
+  ["bun run", runner(BUN_FLAGS, BUN_VALUES)],
   ["bun x", BUNX],
   ["bunx", BUNX],
   ["corepack", runner("", "", { spec: true })],
-  [
-    "deno run",
-    runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true })
-  ],
+  ["deno run", DENO],
+  ["deno x", DENO],
   ["mise exec", MISE],
   ["mise x", MISE],
   ["npm exec", NPM],
@@ -459,6 +458,19 @@ var MANAGERS = new Map([
   ["pnpm", "pnpm exec"],
   ["volta", "volta run"],
   ["yarn", "yarn dlx"]
+]);
+var SCOPES = new Map([
+  ["yarn workspace", { names: 1, options: { flags: new Set, values: new Set } }],
+  [
+    "yarn workspaces foreach",
+    {
+      names: 0,
+      options: {
+        flags: new Set("-A -i -n -p -R -t -v -W --all --dry-run --interlaced --no-private --parallel --recursive --topological --topological-dev --verbose --worktree".split(" ")),
+        values: new Set("-j --exclude --from --include --jobs".split(" "))
+      }
+    }
+  ]
 ]);
 var PNPM_COMMANDS = new Set("access add adduser approve approve-builds audit bin bugs c cache cat-file cat-index change ci clean clean-install completion config create dedupe deploy deprecate dislink dist-tag dist-tags dlx docs doctor edit env exec fetch find find-hash fund get help home i ic ignored-builds import info init install install-clean install-test issues it la lane licences licenses link list ll ln login logout ls m multi outdated owner owners pack pack-app patch patch-commit patch-remove peers permissions ping pipeline pkg prefix profile prune publish purge rb rebuild recursive remove repo restart rm root rt run run-script runtime s sbom se search self-update set set-script setup shim show ss stage star stars start stop store t tasks team test token tst un undeprecate uni uninstall unlink unpublish unstar up update upgrade v version view whoami why with xmas".split(" "));
 function caseOpener(cmd) {
@@ -1822,6 +1834,8 @@ function unwrap(state, inside, budget) {
       const script = runs && namedOption(v, runs, runs.script);
       if (wrapper === "xargs")
         xargsOption(state.xargs ??= {}, w, next(), state);
+      if (runs && runs.joined !== true && joinsWords(v, runs.joined))
+        joined = true;
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1854,9 +1868,6 @@ function unwrap(state, inside, budget) {
         if (text)
           rest.push(text, ...SH_C);
         break;
-      } else if (runs && runs.joined !== true && runs.joined.has(v) && optionValue(v, runs) === "own") {
-        take();
-        joined = true;
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -1930,6 +1941,11 @@ function namedOption(v, { values }, names) {
       return names.has(option) ? k === v.length - 1 ? -1 : k + 1 : undefined;
   }
 }
+function joinsWords(v, joined) {
+  if (v.startsWith("--"))
+    return joined.has(v.split("=")[0]);
+  return v.startsWith("-") && [...v.slice(1)].some((letter) => joined.has(`-${letter}`));
+}
 function packageName(word) {
   const from = word.value.startsWith("npm:") ? 4 : 0;
   const name = word.value.slice(from).replace(/(?<=.)@[^@/]*$/, "");
@@ -1958,14 +1974,19 @@ function viaRunner(parsed, state, budget) {
   let implicit = false;
   const manager = MANAGERS.get(name);
   if (!key && manager) {
-    const at = subcommandAt(name, args, RUNNERS.get(manager));
+    let at = subcommandAt(name, args, RUNNERS.get(manager));
+    const from = at;
+    for (let scope = scopeAt(name, args, at);scope; scope = scopeAt(name, args, at)) {
+      const after = at + scope.words + scope.names;
+      at = after + subcommandAt(name, args.slice(after), scope.options);
+    }
     const sub = args[at]?.value;
     if (sub === undefined)
       return;
     if (RUNNERS.has(`${name} ${sub}`)) {
       key = `${name} ${sub}`;
-      words = args.toSpliced(at, 1);
-    } else if (name === "pnpm" && !PNPM_COMMANDS.has(sub)) {
+      words = args.toSpliced(from, at + 1 - from);
+    } else if (name === "pnpm" && !PNPM_COMMANDS.has(sub) || name === "deno" && sub.startsWith("npm:")) {
       key = manager;
       implicit = true;
     }
@@ -1994,6 +2015,12 @@ function viaRunner(parsed, state, budget) {
   return { ...reading, via: implicit ? name : key };
 }
 var SCRIPT_FILE = /\.[cm]?[jt]sx?$/;
+function scopeAt(name, args, at) {
+  const two = `${name} ${args[at]?.value} ${args[at + 1]?.value}`;
+  const one = `${name} ${args[at]?.value}`;
+  const scope = SCOPES.get(two) ?? SCOPES.get(one);
+  return scope && { ...scope, words: SCOPES.has(two) ? 2 : 1 };
+}
 function runsScript({ first, via }, env) {
   if (via !== "bun run" && via !== "pnpm")
     return false;

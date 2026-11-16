@@ -316,7 +316,7 @@ const runner = (
   tools: !!more.tools,
   values: new Set(values.split(" ")),
 })
-// Each runner's options, measured from its --help (npm 11.20, bun 1.4.4, pnpm 11) or, for one not installed here, from its docs: yarnpkg.com/cli/dlx and /cli/exec, mise.jdx.dev/cli/exec, docs.volta.sh/reference/run, docs.deno.com's run reference, github.com/nodejs/corepack; an option missing here is read both ways, as a wrapper's is
+// Each runner's options, measured from its --help (npm 11.20, bun 1.4.4, pnpm 12.21) or, for one not installed here, from its docs: yarnpkg.com/cli/dlx, /cli/exec, /cli/workspace and /cli/workspaces/foreach, mise.jdx.dev/cli/exec, docs.volta.sh/reference/run, docs.deno.com's run reference, github.com/nodejs/corepack; an option missing here is read both ways, as a wrapper's is
 const NPM = runner(
   "-y --dangerously-allow-all-scripts --include-workspace-root --no --strict-allow-scripts --workspaces --yes",
   "-c -w --allow-scripts --call --package --workspace",
@@ -341,25 +341,23 @@ const MISE = runner(
   "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets",
   { script: "-c --command", tools: true },
 )
+const BUN_FLAGS =
+  "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
+const BUN_VALUES =
+  "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell"
+const DENO = runner(
+  "-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch",
+  "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude",
+  { spec: true },
+)
 export const RUNNERS = new Map<string, Runner>([
-  [
-    "bun run",
-    runner(
-      "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces",
-      "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell",
-    ),
-  ],
+  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true })],
+  ["bun run", runner(BUN_FLAGS, BUN_VALUES)],
   ["bun x", BUNX],
   ["bunx", BUNX],
   ["corepack", runner("", "", { spec: true })],
-  [
-    "deno run",
-    runner(
-      "-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch",
-      "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude",
-      { spec: true },
-    ),
-  ],
+  ["deno run", DENO],
+  ["deno x", DENO],
   ["mise exec", MISE],
   ["mise x", MISE],
   ["npm exec", NPM],
@@ -382,7 +380,25 @@ const MANAGERS = new Map([
   ["volta", "volta run"],
   ["yarn", "yarn dlx"],
 ])
-// pnpm 11's own commands and their aliases (`pnpm help --all`); pnpm runs any other name as `pnpm exec` runs it, a script of that name first
+// A manager's scoping words, read past before its runner's subcommand (`yarn workspace app exec`, `yarn workspaces foreach -A exec`), with the names that follow them and their own options
+const SCOPES = new Map<string, { names: number; options: Options }>([
+  ["yarn workspace", { names: 1, options: { flags: new Set(), values: new Set() } }],
+  [
+    "yarn workspaces foreach",
+    {
+      names: 0,
+      options: {
+        flags: new Set(
+          "-A -i -n -p -R -t -v -W --all --dry-run --interlaced --no-private --parallel --recursive --topological --topological-dev --verbose --worktree".split(
+            " ",
+          ),
+        ),
+        values: new Set("-j --exclude --from --include --jobs".split(" ")),
+      },
+    },
+  ],
+])
+// pnpm 12.21's own commands and their aliases (`pnpm help --all`); pnpm runs any other name as `pnpm exec` runs it, a script of that name first
 const PNPM_COMMANDS = new Set(
   "access add adduser approve approve-builds audit bin bugs c cache cat-file cat-index change ci clean clean-install completion config create dedupe deploy deprecate dislink dist-tag dist-tags dlx docs doctor edit env exec fetch find find-hash fund get help home i ic ignored-builds import info init install install-clean install-test issues it la lane licences licenses link list ll ln login logout ls m multi outdated owner owners pack pack-app patch patch-commit patch-remove peers permissions ping pipeline pkg prefix profile prune publish purge rb rebuild recursive remove repo restart rm root rt run run-script runtime s sbom se search self-update set set-script setup shim show ss stage star stars start stop store t tasks team test token tst un undeprecate uni uninstall unlink unpublish unstar up update upgrade v version view whoami why with xmas".split(
     " ",
@@ -1756,7 +1772,7 @@ export type Parsed = {
   name: string
   // Set by examine on a reading whose program word, or whose eval's or shell -c's script, is built from an expansion no reading of the command resolves, so each guard applies its own rule for a command it cannot read
   unread?: boolean
-  // the package runner (a RUNNERS key, or "pnpm" for the name pnpm runs as exec does) whose program this reading is, beside the reading of the runner itself
+  // the package runner (a RUNNERS key, "pnpm" for the name pnpm runs as exec does, or "deno" for an npm: package deno runs with no subcommand) whose program this reading is, beside the reading of the runner itself
   via?: string
   xargs: Xargs
 }
@@ -1929,6 +1945,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       const v = w.value
       const script = runs && namedOption(v, runs, runs.script)
       if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
+      if (runs && runs.joined !== true && joinsWords(v, runs.joined)) joined = true
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1961,14 +1978,6 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         const text = script === -1 ? take() : slice(w, script)
         if (text) rest.push(text, ...SH_C)
         break
-      } else if (
-        runs &&
-        runs.joined !== true &&
-        runs.joined.has(v) &&
-        optionValue(v, runs) === "own"
-      ) {
-        take()
-        joined = true
       } else if (v === "--") {
         take()
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
@@ -2047,6 +2056,12 @@ function namedOption(v: string, { values }: Options, names: Set<string>): number
   }
 }
 
+// Whether a runner's option word turns on the mode that runs its words joined: the flag itself, a short cluster holding its letter (`-rc`), or the long flag with any value attached (`--shell-mode=true`), each read as on
+function joinsWords(v: string, joined: Set<string>): boolean {
+  if (v.startsWith("--")) return joined.has(v.split("=")[0])
+  return v.startsWith("-") && [...v.slice(1)].some((letter) => joined.has(`-${letter}`))
+}
+
 // A runner's package word as the program it names: deno's npm: prefix and a trailing @<version or tag> read past (`npm:portless@0.15.11`, `inscope@0.18.0`), its typed source cut the same way when it is spelled plain
 function packageName(word: Word): Word {
   const from = word.value.startsWith("npm:") ? 4 : 0
@@ -2073,7 +2088,7 @@ function subcommandAt(manager: string, args: Word[], options: Options): number {
   return args.length
 }
 
-// The reading of the program a package runner runs (`npx oxfmt`, `pnpm exec sh -c …`, `bun run x`), its `via` the runner, judged beside the reading of the runner itself, so a hook that reads the runner by its name reads it as before; pnpm runs a name none of its commands takes as `pnpm exec` does (`via` "pnpm"), and a file bun run or deno run runs (`bun run scripts/x.ts`, `deno run main.ts`) is no program, while deno's `npm:` package is
+// The reading of the program a package runner runs (`npx oxfmt`, `pnpm exec sh -c …`, `bun run x`), its `via` the runner, judged beside the reading of the runner itself, so a hook that reads the runner by its name reads it as before; pnpm runs a name none of its commands takes as `pnpm exec` does (`via` "pnpm"), and deno runs an `npm:` package with no subcommand as `deno run` does (`via` "deno"); a file bun run or deno run runs (`bun run scripts/x.ts`, `deno run main.ts`) is no program, while deno's `npm:` package is
 function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undefined {
   const { args, name } = parsed
   let key = RUNNERS.has(name) ? name : undefined
@@ -2081,13 +2096,21 @@ function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undef
   let implicit = false
   const manager = MANAGERS.get(name)
   if (!key && manager) {
-    const at = subcommandAt(name, args, RUNNERS.get(manager) as Options)
+    let at = subcommandAt(name, args, RUNNERS.get(manager) as Options)
+    const from = at
+    for (let scope = scopeAt(name, args, at); scope; scope = scopeAt(name, args, at)) {
+      const after = at + scope.words + scope.names
+      at = after + subcommandAt(name, args.slice(after), scope.options)
+    }
     const sub = args[at]?.value
     if (sub === undefined) return
     if (RUNNERS.has(`${name} ${sub}`)) {
       key = `${name} ${sub}`
-      words = args.toSpliced(at, 1)
-    } else if (name === "pnpm" && !PNPM_COMMANDS.has(sub)) {
+      words = args.toSpliced(from, at + 1 - from)
+    } else if (
+      (name === "pnpm" && !PNPM_COMMANDS.has(sub)) ||
+      (name === "deno" && sub.startsWith("npm:"))
+    ) {
       key = manager
       implicit = true
     }
@@ -2117,6 +2140,14 @@ function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undef
 }
 
 const SCRIPT_FILE = /\.[cm]?[jt]sx?$/
+
+// The scope a manager's words name at `at`, with how many words name it (`workspaces foreach` two)
+function scopeAt(name: string, args: Word[], at: number) {
+  const two = `${name} ${args[at]?.value} ${args[at + 1]?.value}`
+  const one = `${name} ${args[at]?.value}`
+  const scope = SCOPES.get(two) ?? SCOPES.get(one)
+  return scope && { ...scope, words: SCOPES.has(two) ? 2 : 1 }
+}
 
 // Whether bun run's or pnpm's name is a script of the nearest package.json at or above the folder the shell is in, which each runs in place of a program of that name (measured: `bun run echo` and `pnpm echo` run a script named echo, from a subfolder too); false wherever the folder is unread
 export function runsScript({ first, via }: Parsed, env: Env): boolean {
