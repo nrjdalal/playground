@@ -189,7 +189,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   it starts no Claude session, and names a missing dispatcher for you to start.
   Before ops-up it sets the Dashboard's database container (the `live.container` setting's) to restart with Docker and starts it when stopped, saying so in one line each (`ensureDatabase` in `packages/scripts/src/playground/database.ts`).
   Then it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles, else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
-  It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`); each early stop waits out a 30s grace for the start.
+  It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`), on an `ALIAS FAIL` since then that no `ALIAS PASS` has followed, naming the route (`aliasFailure`), and on a health read that answers a 3xx, naming the URL asked and the redirect's target (`apiRead` in `probe.ts`);
+  each early stop waits out a 30s grace for the start.
   Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
   skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
   A job row an older install stored keeps its job: its runtime, whatever word it holds, reads as `herdr`, and a key the schema does not name is dropped on the read (`fromStored` in `packages/settings/src/jobs.ts`), so it starts in herdr on the next pass, from any terminal.

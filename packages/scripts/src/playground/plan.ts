@@ -24,7 +24,7 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 // The server playground view opens: the sessions', since probes keep to a server of their own.
 export const VIEW_SERVER = "playground"
 
-export const HELP = `playground            start herdr's servers that are down and restore their sessions, set the Dashboard's database to start again with Docker and start it when stopped, start the Dashboard's stack and follower in herdr when down, start the dispatcher when it is not running (playground dispatcher), then wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
+export const HELP = `playground            start herdr's servers that are down and restore their sessions, set the Dashboard's database to start again with Docker and start it when stopped, start the Dashboard's stack and follower in herdr when down, start the dispatcher when it is not running (playground dispatcher), then wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops, its start fails, its alias check fails or the API's health answers a redirect, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher [--harness claude-code|codex] [--brief <file>]
                       start the dispatcher in a herdr workspace of its own, on the harness --harness names (spawn.sh --harness, the Dashboard's Start passing harness.alpha), its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md, or the data folder's <file> (a handoff Switch wrote): exit 0 started, 3 already running, 1 refused with spawn.sh's reason
@@ -438,7 +438,16 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.
 export type DashboardBeat = { ageMs: number; cycleSeconds: number; running: boolean }
-type WaitRead = { api: boolean; beat: DashboardBeat | null; failure: string | null; now: number }
+// A health read that answered a 3xx: the URL asked, its status and where it was sent.
+export type Redirect = { from: string; status: number; to: string }
+type WaitRead = {
+  alias?: string | null
+  api: boolean
+  beat: DashboardBeat | null
+  failure: string | null
+  now: number
+  redirect?: Redirect | null
+}
 type WaitOutcome = { done: string; ok: boolean } | { progress: string | null }
 
 // The results ops.ts's EXITED reads as a loop that has exited.
@@ -519,7 +528,17 @@ const stackFailure = (failed: string): string | null => {
   return why || "its API exited with no reason in its log"
 }
 
-// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
+// The supervisor's alias check as its results since the mark leave it: the words of the newest ALIAS FAIL no ALIAS PASS has followed, which it writes only once a mismatch has held past its confirm, else null.
+export const aliasFailure = (results: string[]): string | null => {
+  let failure: string | null = null
+  for (const line of results) {
+    const alias = line.match(/^\S+ ALIAS (PASS|FAIL) (.*)$/)
+    if (alias) failure = alias[1] === "FAIL" ? alias[2]! : null
+  }
+  return failure
+}
+
+// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start or that portless does not route its addresses, once the API's health answers a redirect, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
 export const waitOutcome = (
   read: WaitRead,
   state: { shownAt: number; startedAt: number },
@@ -531,6 +550,16 @@ export const waitOutcome = (
     if (read.failure)
       return {
         done: `the Dashboard's stack could not start: ${read.failure} (waited ${duration(spent)}); ${AGAIN}`,
+        ok: false,
+      }
+    if (read.alias)
+      return {
+        done: `portless does not route the Dashboard's addresses to its stack: ${read.alias} (waited ${duration(spent)}); ${AGAIN}`,
+        ok: false,
+      }
+    if (read.redirect)
+      return {
+        done: `the Dashboard's API answered ${read.redirect.status} at ${read.redirect.from}, a redirect to ${read.redirect.to}, so playground asks it at an address portless does not serve (waited ${duration(spent)}); ${AGAIN}`,
         ok: false,
       }
     if (!beat?.running)

@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  apiRead,
   apiUp,
   cutDashboardCheckout,
   dashboardCheckout,
@@ -57,6 +58,25 @@ describe("apiUp and webUp", () => {
     const server = serve(307)
     const url = `http://127.0.0.1:${server.port}`
     expect(await webUp({ api: url, web: url })).toBe(true)
+    server.stop(true)
+  })
+
+  // the 1355 proxy with TLS answers an http address with a 302 to https (#2301)
+  test("a health read that answers a redirect is down, and names the URL asked and where it was sent", async () => {
+    const server = Bun.serve({
+      fetch: () => Response.redirect("https://api.example.localhost:1355/api/health", 302),
+      hostname: "127.0.0.1",
+      port: 0,
+    })
+    const url = `http://127.0.0.1:${server.port}`
+    expect(await apiRead({ api: url, web: url })).toEqual({
+      redirect: {
+        from: `${url}/api/health`,
+        status: 302,
+        to: "https://api.example.localhost:1355/api/health",
+      },
+      up: false,
+    })
     server.stop(true)
   })
 

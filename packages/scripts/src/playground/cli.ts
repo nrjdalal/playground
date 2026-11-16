@@ -16,6 +16,7 @@ import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
 import {
   addCommand,
+  aliasFailure,
   extraWordRefusal,
   HELP,
   leftLines,
@@ -33,7 +34,7 @@ import {
   wantsHelp,
 } from "./plan"
 import {
-  apiUp,
+  apiRead,
   dashboardBeat,
   cutDashboardCheckout,
   dashboardCheckout,
@@ -241,13 +242,21 @@ const dashboard = async (): Promise<number> => {
       const state = { shownAt: started, startedAt: started }
       for (;;) {
         // read afresh each poll, as the supervisor's wait_dashboard does: the stack's API may start portless's 1355 proxy, with its own scheme, after the first read
-        const api = await apiUp(dashboardUrls(checkout))
+        const health = await apiRead(dashboardUrls(checkout))
         const now = Date.now()
-        const failure = startFailure(
-          await linesSince(logs.results, from.results),
-          await linesSince(logs.log, from.log),
+        const results = await linesSince(logs.results, from.results)
+        const failure = startFailure(results, await linesSince(logs.log, from.log))
+        const outcome = waitOutcome(
+          {
+            alias: aliasFailure(results),
+            api: health.up,
+            beat: dashboardBeat(now),
+            failure,
+            now,
+            redirect: health.redirect,
+          },
+          state,
         )
-        const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
             failed.push(`The Dashboard didn't come up: ${outcome.done}`)

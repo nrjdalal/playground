@@ -23,6 +23,7 @@ import {
   type DashboardBeat,
   type Dispatcher,
   type Probes,
+  type Redirect,
 } from "./plan"
 
 // The data folder spawn.sh keeps its briefs and backend pins in: PLAYGROUND_DATA_DIR, else ~/.playground, never CLAUDE_CONFIG_DIR.
@@ -101,25 +102,40 @@ export const dashboardUrls = (dashboard: string): Urls | null => {
 }
 
 // portless answers 404 for a name no stack serves, so only the stack's own answer counts as up; an https dashboard's certificate is checked against portless's CA, which Bun's own store lacks.
-const answers = async (url: string, up: (status: number) => boolean): Promise<boolean> => {
+const answers = async (url: string): Promise<Response | null> => {
   const ca = portlessCa()
   try {
-    const response = await fetch(url, {
+    return await fetch(url, {
       redirect: "manual",
       signal: AbortSignal.timeout(3000),
       ...(ca ? { tls: { ca: Bun.file(ca) } } : {}),
     })
-    return up(response.status)
   } catch {
-    return false
+    return null
   }
 }
 
-export const apiUp = (urls: Urls | null): Promise<boolean> =>
-  urls ? answers(`${urls.api}/api/health`, (status) => status === 200) : Promise.resolve(false)
+// The API's health read: up on a 200 alone; a 3xx, as the 1355 proxy's from http to https, keeps the URL asked and where it was sent, so the wait can name the address it should ask.
+export const apiRead = async (
+  urls: Urls | null,
+): Promise<{ redirect: Redirect | null; up: boolean }> => {
+  if (!urls) return { redirect: null, up: false }
+  const from = `${urls.api}/api/health`
+  const response = await answers(from)
+  const status = response?.status ?? 0
+  const to = response?.headers.get("location") ?? "no Location header"
+  return {
+    redirect: status >= 300 && status < 400 ? { from, status, to } : null,
+    up: status === 200,
+  }
+}
 
-export const webUp = (urls: Urls | null): Promise<boolean> =>
-  urls ? answers(urls.web, (status) => status < 400) : Promise.resolve(false)
+export const apiUp = async (urls: Urls | null): Promise<boolean> => (await apiRead(urls)).up
+
+export const webUp = async (urls: Urls | null): Promise<boolean> => {
+  const response = urls ? await answers(urls.web) : null
+  return !!response && response.status < 400
+}
 
 // The live sessions holding a dispatcher's name: a registry file whose pid runs with the start time the file records, in the form it records it (inRecordedForm), as spawn.sh counts them.
 export const liveDispatchers = (): Dispatcher[] => liveSessions((name) => slotOfName(name) !== null)
