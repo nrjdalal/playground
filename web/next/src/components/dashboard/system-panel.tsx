@@ -113,12 +113,14 @@ type Reading = {
 export const swapDetail = (platform: string): string =>
   platform === "linux" ? "Linux keeps swap at a set size" : "macOS grows swap as it needs it"
 
-// Pure: the readings table's rows, each summed over the cluster with its split on hover once report.machines names peers, else this machine's own.
+// Pure: the readings table's rows, each summed over the cluster with its split on hover once report.machines names peers, else this machine's own, which memory, CPU and swap say in their detail; disk and Docker are always this machine's, named in a cluster.
 export function readingsOf(report: SystemReport, now: Date): Reading[] {
   const { cpu, disk, docker, history, memory } = report
   const swap = memory.swap
   const containersBytes = docker.containers.reduce((sum, c) => sum + (c.bytes ?? 0), 0)
   const cluster = clusterOf(report.machines, memory.pressure, now)
+  const alone = cluster ? "" : " · This machine only"
+  const here = cluster ? ` on ${report.machines[0]!.name}` : ""
   const maxBytes = cluster
     ? report.machines.reduce((sum, m) => sum + (m.reading?.memory.totalBytes ?? 0), 0)
     : memory.totalBytes
@@ -126,7 +128,7 @@ export function readingsOf(report: SystemReport, now: Date): Reading[] {
     {
       detail:
         cluster?.memory.detail ??
-        `${memory.freePercent === null ? "Free share unknown" : `${memory.freePercent}% free`} · pressure ${memory.pressure ? PRESSURE_LABELS[memory.pressure] : "unknown"}`,
+        `${memory.freePercent === null ? "Free share unknown" : `${memory.freePercent}% free`} · pressure ${memory.pressure ? PRESSURE_LABELS[memory.pressure] : "unknown"}${alone}`,
       hour: (
         <Sparkline
           label="RAM used, GB"
@@ -143,7 +145,7 @@ export function readingsOf(report: SystemReport, now: Date): Reading[] {
         `${sizeLabel(memory.usedBytes)} of ${sizeLabel(memory.totalBytes)}`,
     },
     {
-      detail: cluster?.cpu.detail ?? `1, 5 and 15 min.: ${cpu.load.join(" / ")}`,
+      detail: cluster?.cpu.detail ?? `1, 5 and 15 min.: ${cpu.load.join(" / ")}${alone}`,
       hour: <Sparkline label="Load, 1 min." points={series(history, (p) => p.load1)} />,
       hover: cluster?.cpu.hover,
       id: "cpu",
@@ -152,7 +154,7 @@ export function readingsOf(report: SystemReport, now: Date): Reading[] {
       value: cluster?.cpu.value ?? `${cpu.load[0]} on ${cpu.cores} cores`,
     },
     {
-      detail: swapDetail(report.platform),
+      detail: `${swapDetail(report.platform)}${alone}`,
       hour: (
         <Sparkline label="Swap used, GB" points={series(history, (p) => toGb(p.swapUsedBytes))} />
       ),
@@ -165,7 +167,7 @@ export function readingsOf(report: SystemReport, now: Date): Reading[] {
         (swap ? `${sizeLabel(swap.usedBytes)} of ${sizeLabel(swap.totalBytes)}` : "-"),
     },
     {
-      detail: disk ? `of ${sizeLabel(disk.totalBytes)}` : "Could not be read",
+      detail: disk ? `of ${sizeLabel(disk.totalBytes)}${here}` : "Could not be read",
       hour: null,
       id: "disk",
       label: "Disk free",

@@ -45,22 +45,22 @@ describe("readingsOf", () => {
       value,
     }))
 
-  test("with no peers configured, the table is this machine's own, as before, with no hover", () => {
+  test("with no peers configured, the table is this machine's own with no hover, and memory, CPU load and swap say so in plain words", () => {
     expect(rows([])).toEqual([
       {
-        detail: "90% free · pressure Normal",
+        detail: "90% free · pressure Normal · This machine only",
         hover: undefined,
         id: "memory",
         value: "12.0 GB of 128.0 GB",
       },
       {
-        detail: "1, 5 and 15 min.: 3.1 / 2.9 / 2.5",
+        detail: "1, 5 and 15 min.: 3.1 / 2.9 / 2.5 · This machine only",
         hover: undefined,
         id: "cpu",
         value: "3.1 on 20 cores",
       },
       {
-        detail: "Linux keeps swap at a set size",
+        detail: "Linux keeps swap at a set size · This machine only",
         hover: undefined,
         id: "swap",
         value: "1.0 GB of 16.0 GB",
@@ -70,7 +70,7 @@ describe("readingsOf", () => {
     ])
   })
 
-  test("with a peer, memory, CPU load and swap show the cluster's sums with the split on hover, while disk and Docker stay this machine's", () => {
+  test("with a peer, memory, CPU load and swap show the cluster's sums with the split on hover, while disk and Docker stay this machine's, disk naming it", () => {
     const local = {
       cores: 20,
       load: [3.1, 2.9, 2.5] as [number, number, number],
@@ -93,5 +93,7 @@ describe("readingsOf", () => {
       ["disk", "700.0 GB", undefined],
       ["docker", "-", undefined],
     ])
+    expect(shown.find((r) => r.id === "disk")?.detail).toBe("of 994.0 GB on machine-a")
+    expect(shown.find((r) => r.id === "cpu")?.detail).not.toContain("This machine only")
   })
 })
