@@ -52,6 +52,8 @@ export type PrFacts = {
   draft: boolean
   files: string[]
   head: string
+  // The PR's label names; a `ship-now` one sends Ops the ship-now line once it merges (shipNowLine); left out where no view was read.
+  labels?: string[]
   // Why held-prs.json holds the PR, or null when it is not held.
   held: string | null
   // The lines canary added that a merge of canary into the PR dropped from git's own merge and the squash still lacks, or why they could not be read (lostLines).
