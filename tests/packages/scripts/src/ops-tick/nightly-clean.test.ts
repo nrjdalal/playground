@@ -146,7 +146,7 @@ describe("worktrees", () => {
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
     expect(
       discardable(
-        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash",
+        "kept /w: /w's HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): playground rm --worktree /w --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash",
       ),
     ).toBe(true)
     expect(

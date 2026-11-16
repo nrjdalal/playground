@@ -1320,14 +1320,12 @@ describe("worktreeRefusal", () => {
     expect(existsSync(wt)).toBe(false)
   })
 
-  test("refuses a worktree whose branch has not landed on canary, pushed or not, and --discard lets it go", () => {
+  test("refuses a worktree whose branch has not landed on canary or been pushed, and --discard lets it go", () => {
     const { holders, roots, wt } = withWorktree()
     const unmerged = { ...holders, merged: () => false }
     expect(worktreeRefusal(wt, roots, unmerged)).toBe(
-      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
+      `${wt}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
-    git(wt, "push", "-q", "origin", "PG-1-thing")
-    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
     expect(worktreeRefusal(wt, roots, { ...holders, merged: () => null })).toContain("not landed")
     expect(worktreeRefusal(wt, roots, { ...unmerged, discard: true })).toBeNull()
     expect(quarantine(wt, { ...opts, worktree: unmerged }, roots, { now: NOW })).toHaveProperty(

@@ -228,6 +228,7 @@ type Pull = NonNullable<Agent["pr"]>
 const pull = (fields: Partial<Pull> = {}): Pull => ({
   approvals: 0,
   ci: "passing",
+  conflicts: false,
   draft: false,
   number: 36,
   queued: false,
