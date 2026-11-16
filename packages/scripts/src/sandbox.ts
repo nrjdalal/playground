@@ -1,4 +1,4 @@
-// The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude and a fake gh first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential) or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs gh's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as PORTLESS_STATE_DIR, a herdr socket or the data folder, never reaches a test. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
+// The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude, gh, herdr, launchctl, loginctl, portless and systemctl first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential), close a live herdr pane, start or stop a live ops job or the live proxy, or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. PORTLESS_STATE_DIR, XDG_RUNTIME_DIR, HERDR_CONFIG_PATH and HERDR_SOCKET_PATH name folders in the scratch, so a call that gets past a fake still finds no user bus or herdr server and writes none of portless's live state, though a real stop of portless's proxy still finds a proxy by its port; tests/live-tools-scan.test.ts fails on such a call in a test. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs a tool's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as a herdr session, the user's DBUS_SESSION_BUS_ADDRESS or the data folder, never reaches a test, nor does a git hook's GIT_DIR or GIT_INDEX_FILE, which would turn a test's scratch git init or commit onto the real repository. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -37,6 +37,19 @@ export const sandbox = () => {
   }
   fake("claude", "no test may start a session")
   fake("gh", "no test may reach GitHub; put a fake gh ahead of it on PATH")
+  // each of these changes the live machine: a herdr call can close a live session's pane, launchctl, loginctl and systemctl start or stop its ops jobs, and portless can stop or move the proxy every stack routes through
+  const live: Record<string, string> = {
+    herdr: "no test may reach a live herdr server",
+    launchctl: "no test may load or stop a live launchd job",
+    loginctl: "no test may change the user's login settings",
+    portless: "no test may start, stop or install the live proxy",
+    systemctl: "no test may start or stop a live systemd unit",
+  }
+  for (const [name, why] of Object.entries(live))
+    fake(name, `${why}; put a fake ${name} ahead of it on PATH`)
+  // the folders each tool reads its live state from
+  const run = join(scratch, "run")
+  mkdirSync(run)
   // a push scan's git ls-remote of a test's GitHub URL would otherwise reach GitHub with the credential helper's real token
   writeFileSync(
     join(home, ".gitconfig"),
@@ -50,14 +63,18 @@ export const sandbox = () => {
     home,
     {
       CLAUDE_CONFIG_DIR: join(scratch, "claude-config"),
+      HERDR_CONFIG_PATH: join(scratch, "herdr", "config.toml"),
+      HERDR_SOCKET_PATH: join(scratch, "herdr", "herdr.sock"),
       PATH: `${bin}:${process.env.PATH ?? ""}`,
       PLAYGROUND_PROC: join(scratch, "no-proc"),
+      PORTLESS_STATE_DIR: join(scratch, "portless"),
       PYTHONDONTWRITEBYTECODE: "1",
       TEST_SANDBOX_HOME: scratch,
       TMPDIR: tmp,
       TZ: "UTC",
       UV_CACHE_DIR: uv("cache") || undefined,
       UV_PYTHON_INSTALL_DIR: uv("python") || undefined,
+      XDG_RUNTIME_DIR: run,
     },
     SANDBOX_KEYS,
   )
