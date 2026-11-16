@@ -404,7 +404,7 @@ export async function read(): Promise<Readings> {
   const made = machine?.system ?? null
   const update = machine ? { problem: null, update: machine.update ?? null } : updateCheck.read()
   if (update.problem) problems.push(update.problem)
-  const memory = memoryReads(!machine && process.platform === "linux")
+  const memory = memoryReads(!machine && process.platform === "linux", problems)
   const disk = made
     ? Promise.resolve(made.disk)
     : statfs(homedir()).then(
