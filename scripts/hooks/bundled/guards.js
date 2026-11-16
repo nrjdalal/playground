@@ -10384,10 +10384,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
+var RETIRED_KEYS = new Set(RETIRED.map(jobKey));
 var REGISTRY_KEYS = new Set([
   ...Object.keys(JOBS).map(jobKey),
   ...Object.values(OLD_KEYS).flat(),
-  ...RETIRED.map(jobKey)
+  ...RETIRED_KEYS
 ]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
@@ -10504,7 +10505,7 @@ var modelSettings = defineSettings({
 var liveSettings = defineSettings({
   "live.branch": {
     default: "live/dashboard",
-    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-desk's roll resets it to canary.",
+    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-dashboard's roll resets it to the head of the branch the main checkout sits on.",
     schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a git branch name")
   },
   "live.container": {
@@ -13614,7 +13615,7 @@ var GIT_MOVES = new Set([
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/;
 var GIT_FIX = `it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made by absolute path under the main checkout's .claude/worktrees/, so it nests in no other worktree, by git worktree add --no-track "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/<name>" -b <branch> origin/canary.`;
-var LIVE_FIX = "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each canary head, and a change it needs goes through a PR into canary.";
+var LIVE_FIX = "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each head of the branch the main checkout sits on, and a change it needs goes through a PR into canary.";
 function liveWrite(args, env, local) {
   const { also, cwd, rest, sub } = gitCall(args, env, local);
   if (sub && (sub === "commit" || sub === "merge" || gitMoves(sub, rest)))
@@ -16019,11 +16020,35 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
+var LAUNCHERS2 = new Set(["bun", "bunx", "node", "npm", "npx", "pnpm", "pnpx", "yarn"]);
+var GLOBAL_FLAGS = new Set(["--cloudflare", "--funnel", "--lan", "--ngrok", "--tailscale"]);
+var GLOBAL_VALUED = new Set(["--ip", "--lan-ip-auto", "--script"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
 var refuse9 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
+};
+var isPortless = (word) => {
+  const name = word.replace(/(?<=.)@[^@/]*$/, "");
+  return program(name) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(name);
+};
+var portlessRuns = (name, args) => {
+  const values = args.map((a) => a.value);
+  if (isPortless(name))
+    return [values];
+  if (!LAUNCHERS2.has(name))
+    return [];
+  return values.flatMap((v, i) => isPortless(v) ? [values.slice(i + 1)] : []);
+};
+var probingStop = (words) => {
+  const args = words.filter((v, i) => !GLOBAL_FLAGS.has(v) && !GLOBAL_VALUED.has(v) && !GLOBAL_VALUED.has(words[i - 1] ?? ""));
+  if (args[0] === "clean")
+    return !args.slice(1).some((v) => v === "--help" || v === "-h");
+  if (args[0] !== "proxy" || args[1] !== "stop")
+    return false;
+  const flag = args.includes("--port") ? args.indexOf("--port") : args.indexOf("-p");
+  return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
 async function inspect8(raw) {
@@ -16032,7 +16057,8 @@ async function inspect8(raw) {
     return;
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "");
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare) && !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) && !globSpells(bare, KILLS))
+  const namesKill = /\b(?:fuser|kill|killall|pkill)\b/.test(bare) || /(?:\$\{?\w+\}?){2,}/.test(bare) || /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) || globSpells(bare, KILLS);
+  if (!namesKill && !/\bportless\b/.test(bare))
     return;
   const lexed = lex(toolInput.command);
   const fresh = () => ({ files: new Map, known: {}, process: {}, vars: new Map });
@@ -16054,8 +16080,10 @@ async function inspect8(raw) {
       return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
     }
     const { args, first, name, xargs } = parsed;
-    if (parsed.unread)
+    if (parsed.unread && namesKill)
       return refuse9("a command built from a value it cannot read, in a call that names a kill", " Write the program and its words out in the call.");
+    if (portlessRuns(name, args).some(probingStop))
+      return refuse9("a portless proxy stop with no port, or a portless clean", " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with portless proxy stop -p <its port>.");
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
@@ -17900,11 +17928,13 @@ function ownLinesPast(text, owner) {
   }).join(`
 `);
 }
+var EXAMPLE_ADDRESS = /@(?:[a-z\d-]+\.)*example\.(?:com|net|org)$/i;
+var holds = (kind, re, text) => kind === "emails" ? (text.match(re) ?? []).some((hit) => !EXAMPLE_ADDRESS.test(hit)) : text.search(re) !== -1;
 function finder2(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
     const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
-    const found = kinds.find(([, re]) => said.search(re) !== -1);
+    const found = kinds.find(([kind, re]) => holds(kind, re, said));
     return found && SAID[found[0]];
   };
 }

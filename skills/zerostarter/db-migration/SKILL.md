@@ -17,7 +17,7 @@ Generate nothing until the shape is settled (the owner, 9 Oct: everything is aut
 
 Done when the reviewer's findings on the shape are settled and, before the merge, the PR names the dump's path (additive), or the owner has said go (breaking).
 
-Two reasons this is a hard step rather than a courtesy. A shape is cheap to argue about and expensive to change once rows exist, so the review has to happen before the write. And the live dashboard's database already holds every real session and transcript, and the runner hosting the dashboard applies a migration there on its first roll onto canary after the merge, so a shape that slips past review lands under the running dashboard.
+Two reasons this is a hard step rather than a courtesy. A shape is cheap to argue about and expensive to change once rows exist, so the review has to happen before the write. And the live dashboard's database already holds every real session and transcript, and the runner hosting the dashboard applies a migration there on its first roll onto a head that holds the merge, so a shape that slips past review lands under the running dashboard.
 
 ## 1. Edit the schema
 

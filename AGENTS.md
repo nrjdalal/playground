@@ -204,7 +204,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 - Dashboard: read `.agents/dashboard/dashboard.md` before you change `/dashboard`'s chat, an agent's view with its Pages tab, the System or Settings page, or `GET /api/v1/agents` and `GET /api/v1/system`.
 - Roster: read `.agents/dashboard/roster.md` before you change the roster's shape or its reader, `api/hono/src/lib/dashboard/roster.ts`.
 - Ingest: read `.agents/dashboard/ingest.md` before you change `bun run ingest`, and before you start or restart its follower.
-- Live: read `.agents/dashboard/live.md` before you change how the live dashboard rolls onto `canary`.
+- Live: read `.agents/dashboard/live.md` before you change how the live dashboard rolls to a new head.
 - Sessions: read `.agents/dashboard/sessions.md` before you change the Sessions pages.
 
 ### Shipping a Playground PR

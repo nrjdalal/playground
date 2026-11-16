@@ -6355,10 +6355,11 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     stored: fromStored
   }
 ])));
+var RETIRED_KEYS = new Set(RETIRED.map(jobKey));
 var REGISTRY_KEYS = new Set([
   ...Object.keys(JOBS).map(jobKey),
   ...Object.values(OLD_KEYS).flat(),
-  ...RETIRED.map(jobKey)
+  ...RETIRED_KEYS
 ]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
@@ -6466,7 +6467,7 @@ var modelSettings = defineSettings({
 var liveSettings = defineSettings({
   "live.branch": {
     default: "live/dashboard",
-    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-desk's roll resets it to canary.",
+    description: "The branch the live dashboard's checkout stays on: a stack on it reads the live machine, and ops-dashboard's roll resets it to the head of the branch the main checkout sits on.",
     schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/, "a git branch name")
   },
   "live.container": {
@@ -11553,11 +11554,13 @@ function ownLinesPast(text, owner) {
   }).join(`
 `);
 }
+var EXAMPLE_ADDRESS = /@(?:[a-z\d-]+\.)*example\.(?:com|net|org)$/i;
+var holds = (kind, re, text) => kind === "emails" ? (text.match(re) ?? []).some((hit) => !EXAMPLE_ADDRESS.test(hit)) : text.search(re) !== -1;
 function finder(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
     const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
-    const found = kinds.find(([, re]) => said.search(re) !== -1);
+    const found = kinds.find(([kind, re]) => holds(kind, re, said));
     return found && SAID[found[0]];
   };
 }
