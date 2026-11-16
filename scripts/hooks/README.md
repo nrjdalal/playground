@@ -969,7 +969,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - ALWAYS: Write each public repository's pull requests, issues, reviews and comments in plain words, naming no person, company or private record, since everything written there is public once the repository is and stays cached after.
   `scripts/hooks/no-public-leak.ts`, run on Bash by [guards](#guards) and registered in both settings files on the GitHub MCP tools, refuses a write to a public repository (`factory.publicRepo`, one or a list, or while unset the main checkout's origin, as trace-count's `kinds.ts` reads it)
-  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or any email address or link into the archive repository (`factory.archiveRepo`).
+  whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address or a link into the archive repository (`factory.archiveRepo`).
+  An address passes only when its domain is `example.com`, `example.org` or `example.net`, or ends in one after a dot (`mail.example.com`), since RFC 2606 keeps those for examples and they name no one, so a test's made-up address may go in a verdict or a PR body; `example.com.evil.io`, `examplecom.io` and every other domain still refuse (`EXAMPLE_ADDRESS` in the hook).
   An extensions root whose policy.json it cannot read for those two refuses the write, as a list it cannot trust does.
   Its reason names the kind, which text held it, as [no-playground-leak](#no-playground-leak)'s refusal does, and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
