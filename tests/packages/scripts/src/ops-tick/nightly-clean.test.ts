@@ -1455,6 +1455,58 @@ describe("one night's run against a fixture data folder", () => {
       `orphans: orphan pid 60001 ended by TERM (age 02:00:00, its test sandbox ${sandbox} gone): bun --no-env-file scripts/hooks/guards.ts`,
     )
   })
+  // #2402: the 16 Nov shape on Linux: the user's systemd --user adopts the orphans, which pid 1 alone never matched, and only the ended session's loop goes; a live session's double-forked daemon stays, and so does every user unit's main process, which the manager parents too
+  test("an orphan of the user's systemd --user under an ended session's removed sandbox is ended; a live session's, and the user units, are kept", async () => {
+    const { ctx, deps, ops, runs, wt } = night()
+    const main = dirname(dirname(dirname(wt("pg-3"))))
+    writeFileSync(
+      join(dirname(ops), "roster.json"),
+      JSON.stringify({
+        agents: [
+          { name: "42fmjw-reviewer", status: "ended" },
+          { name: "ab12cd-worker", status: "working" },
+        ],
+      }),
+    )
+    const loop = `bash -c touch "$0"; trap "" TERM; while :; do sleep 0.2; done`
+    const listed = [
+      "    1     0  9-00:00:00 /sbin/init",
+      " 1500     1  9-00:00:00 /usr/lib/systemd/systemd --user",
+      ` ${process.pid}  1500    00:00:05 bun packages/scripts/src/ops-tick/cli.ts`,
+      `61001  1500    04:00:00 ${loop}`,
+      `61002  1500    04:00:00 ${loop}`,
+      `61003 61000    04:00:00 ${loop}`,
+      "61004  1500  9-00:00:00 /home/u/.local/bin/herdr server",
+      `61005  1500  9-00:00:00 bash ${main}/scripts/ops/ops-dashboard/run.sh`,
+    ].join("\n")
+    const cwd = (name: string) => `${ops}/playground-${name}.deAm5P/test-sandbox-Ab1/t/run-slot-x`
+    const fake = ctx.run
+    const folders: [number, string][] = [
+      [process.pid, main],
+      [61001, cwd("42fmjw-reviewer")],
+      [61002, cwd("ab12cd-worker")],
+      [61004, wt("pg-3")],
+      [61005, main],
+    ]
+    let reads = 0
+    let read = ""
+    ctx.run = async (argv, timeoutMs, stdin) => {
+      if (argv[0] === "ps" && reads++ === 0) return { code: 0, out: listed }
+      if (argv.slice(0, CWDS.length).join(" ") !== CWDS.join(" "))
+        return fake(argv, timeoutMs, stdin)
+      read = argv.at(-1)!
+      return { code: 0, out: folders.map(([pid, dir]) => `p${pid}\nfcwd\nn${dir}\n`).join("") }
+    }
+    deps.sleep = async () => {}
+    await nightlyClean(deps)(ctx)
+    expect(read).toBe(`1500,${process.pid},61001,61002,61004,61005`)
+    expect(runs.filter((r) => r[0] === "kill").map((r) => r.join(" "))).toEqual([
+      "kill -TERM 61001",
+    ])
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      `orphans: orphan pid 61001 ended by TERM (age 04:00:00, its test sandbox ${dirname(dirname(cwd("42fmjw-reviewer")))} gone): ${loop} (reapers: 1,1500)`,
+    )
+  })
 })
 
 // #1778: the stale worktrees of every other repo the factory works in, each a real git checkout under a fake code root and org folder, PRs, lsof and the roster faked

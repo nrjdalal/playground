@@ -2,9 +2,9 @@ import { join } from "node:path"
 
 import type { Context } from "./tick"
 
-// The signal rule's one case beyond a session's own processes: a factory script's orphan, which the nightly-clean beat ends by its own pid once its parent is pid 1 and either its command runs a script from a worktree of this checkout that no longer exists (issue 1346), or its working folder sits under a test run's sandbox that no longer exists (issue 2177), so no session and no owner step is left to end it.
+// The signal rule's one case beyond a session's own processes: a factory script's orphan, which the nightly-clean beat ends by its own pid once its parent is an orphan's reaper (pid 1, or the user's systemd --user, orphan-reapers.ts) and either its command runs a script from a worktree of this checkout that no longer exists (issue 1346), or its working folder sits under a test run's sandbox that no longer exists (issue 2177) and the session whose temp folder holds that sandbox has ended, so no session and no owner step is left to end it.
 
-// cwd is the process's working folder as lsof names it, read only for a process whose parent is pid 1.
+// cwd is the process's working folder as lsof names it, read only for a process whose parent is a reaper.
 export type Proc = { age: string; command: string; cwd?: string; pid: number; ppid: number }
 export type Orphan = Proc & ({ sandbox: string } | { worktree: string })
 
@@ -34,29 +34,35 @@ export const cwdsOf = (out: string): Map<number, string> => {
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-// A dependency's file, never this repo's script: portless's shared proxy runs detached from a stack's node_modules with parent pid 1, and every stack routes through it.
+// A dependency's file, never this repo's script: portless's shared proxy runs detached from a stack's node_modules with a reaper as its parent, and every stack routes through it.
 const DEPENDENCY = /(^|\/)node_modules(\/|$)/
-// A script file, since an app opened on a worktree's folder or a reader of a log there can have parent pid 1 too.
+// A script file, since an app opened on a worktree's folder or a reader of a log there can have a reaper as its parent too.
 const SCRIPT = /\.(?:c?js|mjs|py|sh|tsx?)$/
 // The innermost test-sandbox-* folder a working folder sits under (sandbox.ts's makeScratch folder), which its run removes as it ends.
 const SANDBOX = /^(.*\/test-sandbox-[^/]+)(?:\/|$)/
+// The session a sandbox's run belongs to: on Linux each session's temp folder, which spawn.sh makes as /tmp/playground-<name>.<random>, holds the sandboxes its runs make; macOS's per-user temp folder names none.
+const SESSION = /\/playground-([^/]+)\.[^./]+\/test-sandbox-[^/]+$/
 
-// Pure but for exists: each process whose parent is pid 1 and whose command names a script file of this repo inside a worktree folder of worktrees, never one under node_modules, with every worktree its command names gone; a worktree is read by its whole folder name, so foo never stands for foo-2. Else one whose working folder sits under a test sandbox that is gone, so a live run's child is left alone.
+// Pure but for exists: each process whose parent is in reapers and whose command names a script file of this repo inside a worktree folder of worktrees, never one under node_modules, with every worktree its command names gone; a worktree is read by its whole folder name, so foo never stands for foo-2. Else one whose working folder sits under a test sandbox that is gone, so a live run's child is left alone, and whose session, when the sandbox's folder names one, has ended, so a live session's daemon its own test run left is kept too.
 export const orphansOf = (
   procs: Proc[],
   worktrees: string,
   exists: (path: string) => boolean,
+  reapers: Set<number>,
+  ended: (session: string) => boolean,
 ): Orphan[] => {
   const inside = new RegExp(`${escaped(worktrees)}/([^/\\s'"]+)/([^\\s'"]*)`, "g")
   return procs.flatMap((p): Orphan[] => {
-    if (p.ppid !== 1) return []
+    if (!reapers.has(p.ppid)) return []
     const paths = [...p.command.matchAll(inside)]
     const script = paths.find((m) => SCRIPT.test(m[2]!) && !DEPENDENCY.test(m[2]!))
     const named = new Set(paths.map((m) => join(worktrees, m[1]!)))
     if (script && [...named].every((path) => !exists(path)))
       return [{ ...p, worktree: join(worktrees, script[1]!) }]
     const sandbox = p.cwd && SANDBOX.exec(p.cwd)?.[1]
-    return sandbox && !exists(sandbox) ? [{ ...p, sandbox }] : []
+    if (!sandbox || exists(sandbox)) return []
+    const session = SESSION.exec(sandbox)?.[1]
+    return !session || ended(session) ? [{ ...p, sandbox }] : []
   })
 }
 
