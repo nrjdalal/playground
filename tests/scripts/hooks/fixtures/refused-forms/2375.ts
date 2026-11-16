@@ -489,7 +489,7 @@ export const groups: Group[] = [
   },
 ]
 
-// The shared reader keeps canary's redirect reading of a numeric range's `<` (Command.numericRange), so no other guard loosens: the write canary read into the main checkout stays refused there
+// The shared reader keeps canary's redirect reading of a numeric range's `<`, which no-hidden-program refuses by the call's text, so no other guard loosens: the write canary read into the main checkout stays refused there
 groups.push({
   folders: ["checkout"],
   guards: ["no-main-checkout"],
