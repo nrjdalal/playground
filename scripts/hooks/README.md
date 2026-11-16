@@ -1150,7 +1150,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - A reviewer or tester reads an outside author's PR and leaves its code unrun, since its tests, scripts and installs would run that author's code on this machine.
   `scripts/hooks/no-outside-pr-code.ts` puts a session role.ts places as a `reviewer` or `tester` in read mode, its sub-agents included (they carry its session id, `PLAYGROUND_ROLE` and hooks), while its roster row serves an outside PR or names none.
   It finds the row by the session's registry name, the same read role.ts makes, and takes its PRs from the row's `pr` and the pull URLs in its `prs`.
-  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`); a PR it cannot read counts as outside, that failure is kept for an hour, and the reason names the PR and its kept file, whose removal makes the next call read it again.
+  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`).
+  A PR it cannot read counts as outside, and that failure is kept for 5 minutes (`RETRY_MINUTES`, the **github** rule's limit of one poll per PR every 5 minutes), so the first call after them reads the PR again; the reason names the PR and when it is read again.
   An org repo's PRs are its colleagues', so a checker of those, or of the owner's own PRs, runs them as before.
   A row with no PR, or only an issue's URL, is read mode too, and its reason names the one-line fix its worker or lead runs, `bun scripts/roster.ts set <name> pr=<pull url>`, since a row written before `spawn.sh` required a checker's `--pr <pull url>` can name none.
   The reason names an item reviewer's read too, whose row names no PR by design: `playground ext show <scope> <kind> <key> --rev <sha>` piped into `jq`.

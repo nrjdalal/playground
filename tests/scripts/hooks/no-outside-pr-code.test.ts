@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -920,6 +921,12 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
   })
 
+  test("a PR the hook cannot read names when it is read again, and no step that clears the kept failure", async () => {
+    expect(await judge(call("bun test", OUTSIDE, "s-unread"))).toEndWith(
+      "It reads again on the first call 5 minutes or more after the failed read.",
+    )
+  })
+
   test("an item's reviewer, whose row names no PR, is told to read each revision with ext show", async () => {
     expect(await judge(call("bun test", OUTSIDE, "s-none"))).toContain(
       "playground ext show <scope> <kind> <key> --rev <sha>",
@@ -1051,6 +1058,31 @@ describe("no-outside-pr-code's live lookup", () => {
     )
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
+  })
+
+  test("a failure older than the backoff reads the PR again, and keeps the answer", async () => {
+    const cache = join(scratch, "data", "hook-outside-pr")
+    const bin = join(scratch, "bin")
+    mkdirSync(cache, { recursive: true })
+    mkdirSync(bin, { recursive: true })
+    const pr = { author: "acme-owner", owner: "acme-owner", ownerType: "User" }
+    await Bun.write(join(bin, "gh"), `#!/bin/sh\necho '${JSON.stringify(pr)}'\n`)
+    chmodSync(join(bin, "gh"), 0o755)
+    const file = join(cache, "acme-owner__widgets__511.json")
+    await Bun.write(file, JSON.stringify({ failedAt: Date.now() - 10 * 60 * 1000 }))
+    // bun finds a program on the PATH it started with, so the lookup runs in a child whose PATH leads with the stub gh
+    const hook = join(import.meta.dir, "../../../scripts/hooks/no-outside-pr-code.ts")
+    const script = join(scratch, "read-511.ts")
+    await Bun.write(
+      script,
+      `import { live } from ${JSON.stringify(hook)}\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", 511)))\n`,
+    )
+    const child = Bun.spawnSync([process.execPath, script], {
+      cwd: scratch,
+      env: { ...environment, PATH: `${bin}:/usr/bin:/bin` },
+    })
+    expect(JSON.parse(child.stdout.toString())).toEqual(pr)
+    expect(await Bun.file(file).json()).toEqual(pr)
   })
 
   // #1280: read mode runs a skill's script only while git in the main checkout reports it tracked and unchanged
