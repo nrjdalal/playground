@@ -1,7 +1,7 @@
 // The macOnly count: each call in the repo's code to a program or form that macOS alone has, with no Linux branch in front of it, so the ratchet stops a new one landing now the factory also runs on Linux. It is no private trace, so it stays out of kinds.ts, whose patterns no-public-leak refuses.
 import type { File } from "./count"
 
-// Each Mac-only call as its words, A to Z: a shell line runs them space-separated, and an argv names each as its own quoted string. `security find-generic-password` is no such call, since on Linux link-skills.sh puts packages/scripts/src/security/cli.ts first on PATH, which serves it.
+// Each Mac-only call as its words, A to Z: a shell line runs them space-separated, and an argv names each as its own quoted string. `security find-generic-password` is no such call, since on Linux link-skills.sh links packages/scripts/src/security/cli.ts to ~/.bun/bin/security, which serves it.
 const PROGRAMS = [
   ["brew", "install"],
   ["caffeinate"],

@@ -3,6 +3,7 @@ import { homedir } from "node:os"
 import { dirname, join, relative } from "node:path"
 
 import { withoutShebang } from "../shebang"
+import { userSystemctl } from "../user-systemctl"
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
@@ -29,14 +30,7 @@ const entry = async (job: Job, run: Run, platform: NodeJS.Platform) => {
   if (!job.launchd) return undefined
   if (platform === "linux") {
     const unit = `${job.launchd}.service`
-    const shown = await run([
-      "systemctl",
-      "--user",
-      "show",
-      "--property=ExecStart",
-      "--value",
-      unit,
-    ])
+    const shown = await run(userSystemctl(["show", "--property=ExecStart", "--value", unit]))
     const argv = /argv\[\]=([^;]*)/.exec(shown.out)?.[1]
     return shown.code === 0 && argv ? entryOf(argv.trim().split(/\s+/)) : undefined
   }

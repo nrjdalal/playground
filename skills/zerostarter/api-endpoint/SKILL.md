@@ -77,8 +77,10 @@ export const exampleRouter = new Hono().post(
 `bun --hot` will NOT see a new file, so restart the stack (see the `dev` skill), then:
 
 ```bash
-WEB=$(bunx portless get playground); API=$(bunx portless get api.playground)
-curl -sS -X POST -H "Content-Type: application/json" -H "Origin: $WEB" \
+PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
+CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
+WEB=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground); API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground)
+curl -sS "${CA[@]}" -X POST -H "Content-Type: application/json" -H "Origin: $WEB" \
   -d '{"email":"<your email>"}' "$API/api/<name>"
 ```
 
