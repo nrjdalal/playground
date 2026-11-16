@@ -1486,7 +1486,8 @@ function dollar(lx: Lexer, plain = false): Text {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain)
-    const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1]
+    // ${NAME:?message} and ${NAME?message} expand to NAME's value whenever it is set and not empty, the only way a known one is
+    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1]
     readText(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)

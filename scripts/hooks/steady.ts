@@ -440,29 +440,27 @@ const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
-// With past, an assignment of one absolute literal word (LITERAL) on an `&&` chain whose every command before it is a cd or a pushd is held past that chain too, as a writer's file alone (a hook holds a folder with past left out): when the cd fails the shell skips it, and the name, set nowhere else on the line, is then empty or the session's own, which the hook's process holds
-export function steadyNames(
+// Each name the line names but by reading it, with a setter's name words counted again, or undefined when no variable holds steady on it: a line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS
+function setterCounts(
   named: Namings,
   commands: Command[],
-  past = false,
-): (cmd: Command) => Steady {
-  if (named.blind || named.counts.has("IFS")) return () => NONE
+  parses: Parsed[],
+): Map<string, number> | undefined {
+  if (named.blind || named.counts.has("IFS")) return undefined
   const counts = new Map(named.counts)
-  const parses = commands.map((cmd) => parse(cmd))
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at]
-    if (RUNS_TEXT.has(name) || marked(name)) return () => NONE
+    if (RUNS_TEXT.has(name) || marked(name)) return undefined
     const flagged = (letters: RegExp) =>
       cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value))
-    if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return () => NONE
+    if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return undefined
     // let evaluates each word as arithmetic, which evaluates a variable's value as an expression
     if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
-      return () => NONE
+      return undefined
     // zsh's print -P expands its words as a prompt, which with PROMPT_SUBST set runs their expansions
-    if (name === "print" && flagged(/P/)) return () => NONE
+    if (name === "print" && flagged(/P/)) return undefined
     // a -v operand holds only as a PLAIN_NAME, since any other may name a subscript, and in test and [ a word that EXPANDS holds nothing, nor does a plain `$name` the hook cannot read but as a quoted operand
-    if (TESTS.has(name) && testsAName(parses[at].args, name !== "[[")) return () => NONE
+    if (TESTS.has(name) && testsAName(parses[at].args, name !== "[[")) return undefined
     const loop = cmd.words.findIndex(
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),
     )
@@ -478,12 +476,25 @@ export function steadyNames(
     // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any; a name word with a quote or a backslash and a `[` reads as subscripted whatever the subscript, so no quoted or escaped subscript in a setter's name passes
     for (const word of names) {
       if (!word) continue
-      if (marked(word.value.split("=")[0])) return () => NONE
-      if (word.quoted && word.value.includes("[")) return () => NONE
+      if (marked(word.value.split("=")[0])) return undefined
+      if (word.quoted && word.value.includes("[")) return undefined
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1)
     }
   }
+  return counts
+}
+
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
+// With past, an assignment of one absolute literal word (LITERAL) on an `&&` chain whose every command before it is a cd or a pushd is held past that chain too, as a writer's file alone (a hook holds a folder with past left out): when the cd fails the shell skips it, and the name, set nowhere else on the line, is then empty or the session's own, which the hook's process holds
+export function steadyNames(
+  named: Namings,
+  commands: Command[],
+  past = false,
+): (cmd: Command) => Steady {
+  const parses = commands.map((cmd) => parse(cmd))
+  const counts = setterCounts(named, commands, parses)
+  if (!counts) return () => NONE
   const set = new Map<string, { at: number; chain?: number }>()
   const pasts = new Map<string, number>()
   // whether every command of the current && chain so far is a cd or a pushd at the top level, or an assignment after one
@@ -553,6 +564,29 @@ export function steadyNames(
       past: (key) => (pasts.get(key) ?? here.at) < here.at,
     }
   }
+}
+
+// The variables of the session's starting environment, the hook's own, that hold their value for every command of a line, beside known (the line's HOME, TMPDIR and PWD), so a cd or a -C through one (`cd "${PLAYGROUND_REPO:?}"`, `git -C "$W"`) is judged by the folder it names: an uppercase name (zsh keeps its lowercase parameters apart from the environment) that the line names nowhere but by reading it, on a line setterCounts holds something on, and none the shell sets or ties to another, nor IFS or ZDOTDIR, which the shell takes from no environment as is, nor CLAUDE_*, some of which Claude Code sets in a hook's environment alone (CLAUDE_PROJECT_DIR)
+export function startingVariables(
+  command: string,
+  environment: Record<string, string | undefined>,
+  known: Record<string, string>,
+): Record<string, string> {
+  const commands = lex(command, known).commands
+  const counts = setterCounts(
+    namings(command),
+    commands,
+    commands.map((cmd) => parse(cmd)),
+  )
+  const starting: Record<string, string> = {}
+  if (!counts) return starting
+  for (const [key, value] of Object.entries(environment)) {
+    if (!value || key in known || !/^[A-Z_][A-Z0-9_]*$/.test(key) || counts.has(key)) continue
+    if (SHELL_SETS.has(key) || SHELL_SETS_PREFIX.test(key) || TIED.has(key)) continue
+    if (key === "IFS" || key === "ZDOTDIR" || key.startsWith("CLAUDE")) continue
+    starting[key] = value
+  }
+  return starting
 }
 
 // One literal word as an assignment writes its value: plain characters, or a quoted span holding no expansion, with no glob, ~ or blank; past holds an absolute one alone, since a relative one names a file in each folder the shell may be in, the starting one too
