@@ -270,12 +270,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## A factory script's orphan
 
-- A factory script left running after its starter and its worktree are gone (parent pid 1) belongs to no session, so the signal rule gives it to Ops: ops-tick's nightly clean ends it by its own pid, TERM then KILL past a 5-second grace, and names each in `ops/log/nightly-clean.log` and its outbox line, with nothing to the Inbox.
-  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is pid 1 and whose command names a script file of this repo (`.sh`, `.ts`, `.js`, `.py`) in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every worktree its command names is gone,
+- A factory script left running after its starter and its worktree are gone belongs to no session, so the signal rule gives it to Ops: ops-tick's nightly clean ends it by its own pid, TERM then KILL past a 5-second grace, and names each in `ops/log/nightly-clean.log` and its outbox line, with nothing to the Inbox.
+  Its parent is a reaper: pid 1, or on Linux the user's `systemd --user`, which adopts a desktop session's orphans in place of pid 1; `reapersOf` in `packages/scripts/src/orphan-reapers.ts` reads it among the caller's own ancestors, so one started outside that manager reads pid 1 alone, and the step's line names the reapers it read by (`reapers: 1,<pid>`).
+  The check lives in `packages/scripts/src/ops-tick/orphans.ts`: `orphansOf` selects a process whose parent is a reaper and whose command names a script file of this repo (`.sh`, `.ts`, `.js`, `.py`) in a worktree under the checkout's `.claude/worktrees`, read by its whole folder name, once every worktree its command names is gone,
   never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
-- A test's child left with parent pid 1 is ended the same way once its run's sandbox is gone: `orphansOf` also selects a parent-pid-1 process whose working folder, read with `lsof` (`CWDS`) for the parent-pid-1 rows alone, sits under a `test-sandbox-*` folder that no longer exists, so a live run's child is left alone.
+- A test's child a reaper adopted is ended the same way once its run's sandbox is gone and its session has ended: `orphansOf` also selects such a process whose working folder, read with `lsof` (`CWDS`) for those rows alone, sits under a `test-sandbox-*` folder that no longer exists, so a live run's child is left alone.
+  When the sandbox sits in a session's own temp folder, `/tmp/playground-<name>.<random>` on Linux, a sandbox nested in another run's included, that session's roster row must read `ended`, so a live session's daemon its test run left is kept; a missing row or an unreadable roster keeps it too, and macOS's per-user temp folder names no session.
   A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn.
-  Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts`.
+  Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
 ## bun run test:skills
 

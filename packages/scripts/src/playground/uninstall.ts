@@ -2,6 +2,7 @@
 import { lstatSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs"
 import { basename, join } from "node:path"
 
+import { userSystemctl } from "../user-systemctl"
 import { linksInto } from "./links"
 import type { Run } from "./update"
 
@@ -74,14 +75,14 @@ export const uninstall = async (o: Options): Promise<number> => {
   for (const file of ours) {
     await o.run(
       linux
-        ? ["systemctl", "--user", "disable", "--now", basename(file)]
+        ? userSystemctl(["disable", "--now", basename(file)])
         : ["launchctl", "bootout", `gui/${process.getuid!()}`, file],
     )
     rmSync(file, { force: true })
     o.log(`removed ${file}`)
   }
   // systemd forgets the removed units at a reload
-  if (linux && ours.length) await o.run(["systemctl", "--user", "daemon-reload"])
+  if (linux && ours.length) await o.run(userSystemctl(["daemon-reload"]))
   // a stack that would not stop is named with its last output line, and the run ends 1 once the rest is done
   let failed = false
   for (const checkout of o.stacks) {

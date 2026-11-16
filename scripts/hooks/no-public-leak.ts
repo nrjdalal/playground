@@ -1,4 +1,4 @@
-// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
+// PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address (but one on example.com, example.org or example.net, which RFC 2606 keeps for examples) or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { CONTRIBUTORS_HEADING, ownerWords } from "../../packages/scripts/src/release-notes/notes"
@@ -68,6 +68,15 @@ function ownLinesPast(text: string, owner: string[]): string {
     .join("\n")
 }
 
+// RFC 2606's example domains, exactly or as a subdomain's end: an address there names no one, so a test's made-up address may go in a public write.
+const EXAMPLE_ADDRESS = /@(?:[a-z\d-]+\.)*example\.(?:com|net|org)$/i
+
+// Whether the text holds the kind, every address on an example domain read past.
+const holds = (kind: Kind, re: RegExp, text: string): boolean =>
+  kind === "emails"
+    ? (text.match(re) ?? []).some((hit) => !EXAMPLE_ADDRESS.test(hit))
+    : text.search(re) !== -1
+
 // owner: owner.names alone, given only for a plain ship write, since the archive's owner is no name the owner goes by.
 function finder(
   list: PublicList,
@@ -77,7 +86,7 @@ function finder(
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind])
   return (text) => {
     const said = readPast(owner ? ownLinesPast(text, owner) : text, repos)
-    const found = kinds.find(([, re]) => said.search(re) !== -1)
+    const found = kinds.find(([kind, re]) => holds(kind, re, said))
     return found && SAID[found[0]]
   }
 }

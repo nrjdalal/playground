@@ -43,7 +43,7 @@ describe("the shebang", () => {
 })
 
 describe("bare dispatcher", () => {
-  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts, the dev stack's proxy.ts and live-dashboard.ts and the sessions' proc-start.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
+  // a copy of the dispatcher folder and the portless-ca.ts, user-systemctl.ts, store's rendered.ts, herdr pin, data-dir.ts, the dev stack's proxy.ts and live-dashboard.ts and the sessions' proc-start.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
   const dispatcher = async (
     python3: string,
     more: Record<string, string> = {},
@@ -56,7 +56,12 @@ describe("bare dispatcher", () => {
     const repo = join(root, "repo")
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
-    for (const file of ["portless-ca.ts", "swap-bundles.ts", "write-atomic.ts"])
+    for (const file of [
+      "portless-ca.ts",
+      "swap-bundles.ts",
+      "user-systemctl.ts",
+      "write-atomic.ts",
+    ])
       cpSync(join(dirname(CLI), "..", file), join(src, file))
     for (const file of ["live-dashboard.ts", "proxy.ts"])
       cpSync(
