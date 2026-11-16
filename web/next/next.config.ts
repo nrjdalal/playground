@@ -64,6 +64,8 @@ const nextConfig: NextConfig = {
   agentRules: false,
   devIndicators: false,
   env: { NEXT_PUBLIC_IS_PRIVATE: String(isPrivate) },
+  // Off because Next's agent-only upgrade stop (SecurityFatalError) halted every session's build while an advisory listed the installed Next, as CI stayed green; the audit gates catch a Next advisory instead (docs/dependencies.md, `next`)
+  experimental: { agentUpgrade: false },
   headers: async () => {
     const added = securityHeaders(env.NEXT_PUBLIC_PLAYGROUND_HOSTED)
     return added.length ? [{ headers: added, source: "/:path*" }] : []
