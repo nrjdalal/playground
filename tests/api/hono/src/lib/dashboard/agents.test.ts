@@ -108,7 +108,7 @@ describe("foldTranscript", () => {
       assistant("2026-10-06T10:03:00.000Z", bash("Run the agents tests")),
       toolResult("2026-10-06T10:03:05.000Z"),
     ].join("\n")
-    const facts = foldTranscript(text, DISPATCHER, new Set(), NONE)
+    const facts = foldTranscript(text, [DISPATCHER], new Map(), NONE)
     expect(facts.lastActivityAt).toBe("2026-10-06T10:03:05.000Z")
     expect(facts.report).toEqual({
       at: "2026-10-06T10:01:00.000Z",
@@ -117,20 +117,20 @@ describe("foldTranscript", () => {
   })
 
   test(`a reply to the uds address ${OLD.dispatcher} wrote from counts as a report; one to a peer does not`, () => {
-    const addresses = new Set<string>()
+    const addresses = new Map<string, Set<string>>()
     const text = [
       fromDispatcher("Go"),
       assistant("2026-10-06T10:01:00.000Z", send(DISPATCHER_ADDRESS, "Done: merged")),
       assistant("2026-10-06T10:02:00.000Z", send("worker-wrath", "Here is the roster module")),
     ].join("\n")
-    const facts = foldTranscript(text, DISPATCHER, addresses, NONE)
-    expect(addresses.has(DISPATCHER_ADDRESS)).toBe(true)
+    const facts = foldTranscript(text, [DISPATCHER], addresses, NONE)
+    expect(addresses.get(DISPATCHER)?.has(DISPATCHER_ADDRESS)).toBe(true)
     expect(facts.report?.text).toBe("Done: merged")
   })
 
   test(`a name with its [ref] still names ${OLD.dispatcher}`, () => {
     const text = assistant("2026-10-06T10:01:00.000Z", send(`${DISPATCHER} [3fa9c1]`, "Report"))
-    expect(foldTranscript(text, DISPATCHER, new Set(), NONE).report?.text).toBe("Report")
+    expect(foldTranscript(text, [DISPATCHER], new Map(), NONE).report?.text).toBe("Report")
   })
 
   test("lines that say nothing new keep what earlier lines said", () => {
@@ -140,8 +140,8 @@ describe("foldTranscript", () => {
     }
     const facts = foldTranscript(
       toolResult("2026-10-06T10:00:00.000Z"),
-      DISPATCHER,
-      new Set(),
+      [DISPATCHER],
+      new Map(),
       prior,
     )
     expect(facts.lastActivityAt).toBe("2026-10-06T10:00:00.000Z")
@@ -150,12 +150,47 @@ describe("foldTranscript", () => {
 
   test("the dispatcher's own transcript reports to no one", () => {
     const text = assistant("2026-10-06T10:01:00.000Z", send(DISPATCHER, "talking to myself"))
-    expect(foldTranscript(text, null, new Set(), NONE).report).toBeNull()
+    expect(foldTranscript(text, [], new Map(), NONE).report).toBeNull()
+  })
+
+  // #2429: a runner reports to Ops, its manager, so a runner's row reads its newest message to either
+  test("a message to another recipient given, by its name or the address it wrote from, is a report, and the newest of them wins", () => {
+    const OPS = "ops"
+    const OPS_ADDRESS = "uds:/tmp/cc-socks/31337.sock"
+    const fromOps = line({
+      type: "user",
+      uuid: "p-ops",
+      timestamp: "2026-10-06T10:00:30.000Z",
+      origin: { kind: "peer", name: OPS, from: OPS_ADDRESS, body: "Keep the stack up" },
+      message: { role: "user", content: "Keep the stack up" },
+    })
+    const lines = [
+      fromDispatcher("Go"),
+      fromOps,
+      assistant("2026-10-06T10:01:00.000Z", send(DISPATCHER, "To the dispatcher")),
+      assistant("2026-10-06T10:02:00.000Z", send(OPS, "Rolled canary 795c4c6")),
+    ]
+    const addresses = new Map<string, Set<string>>()
+    expect(foldTranscript(lines.join("\n"), [DISPATCHER, OPS], addresses, NONE).report).toEqual({
+      at: "2026-10-06T10:02:00.000Z",
+      text: "Rolled canary 795c4c6",
+    })
+    expect(addresses.get(OPS)?.has(OPS_ADDRESS)).toBe(true)
+    const byAddress = [
+      ...lines,
+      assistant("2026-10-06T10:03:00.000Z", send(OPS_ADDRESS, "Stack restarted")),
+    ]
+    expect(
+      foldTranscript(byAddress.join("\n"), [DISPATCHER, OPS], new Map(), NONE).report?.text,
+    ).toBe("Stack restarted")
+    // a session that reports to the dispatcher alone: its message to Ops, or to Ops' address, is no report
+    const worker = foldTranscript(byAddress.join("\n"), [DISPATCHER], new Map(), NONE)
+    expect(worker.report?.text).toBe("To the dispatcher")
   })
 
   test("a partial first line and junk are passed over", () => {
     const text = ['":"assistant","SendMessage"}', "not json", toolResult("2026-10-06T10:00:00Z")]
-    expect(foldTranscript(text.join("\n"), DISPATCHER, new Set(), NONE)).toEqual({
+    expect(foldTranscript(text.join("\n"), [DISPATCHER], new Map(), NONE)).toEqual({
       ...NONE,
       lastActivityAt: "2026-10-06T10:00:00Z",
     })
@@ -172,15 +207,15 @@ describe("scanTranscript", () => {
       path,
       `${fromDispatcher("Go")}\n${assistant("2026-10-06T10:01:00Z", bash("one"))}\n`,
     )
-    expect((await scanTranscript(path, true)).lastActivityAt).toBe("2026-10-06T10:01:00Z")
+    expect((await scanTranscript(path, [DISPATCHER])).lastActivityAt).toBe("2026-10-06T10:01:00Z")
     const next = assistant("2026-10-06T10:02:00Z", send(DISPATCHER_ADDRESS, "Halfway"))
     appendFileSync(path, next.slice(0, 20))
-    expect(await scanTranscript(path, true)).toMatchObject({
+    expect(await scanTranscript(path, [DISPATCHER])).toMatchObject({
       lastActivityAt: "2026-10-06T10:01:00Z",
       report: null,
     })
     appendFileSync(path, `${next.slice(20)}\n`)
-    const facts = await scanTranscript(path, true)
+    const facts = await scanTranscript(path, [DISPATCHER])
     expect(facts.report?.text).toBe("Halfway")
     expect(facts.lastActivityAt).toBe("2026-10-06T10:02:00Z")
   })
@@ -207,7 +242,7 @@ describe("scanTranscript", () => {
         "",
       ].join("\n"),
     )
-    const facts = await scanTranscript(path, true)
+    const facts = await scanTranscript(path, [DISPATCHER])
     expect(facts.report?.text).toBe("Early report")
     expect(facts.lastActivityAt).toBe("2026-10-06T10:05:00Z")
   })
@@ -215,9 +250,9 @@ describe("scanTranscript", () => {
   test("a file that shrank is read afresh", async () => {
     const path = join(dir, "t.jsonl")
     writeFileSync(path, `${assistant("2026-10-06T10:01:00Z", bash("a long first description"))}\n`)
-    await scanTranscript(path, true)
+    await scanTranscript(path, [DISPATCHER])
     writeFileSync(path, `${assistant("2026-10-06T10:05:00Z", bash("b"))}\n`)
-    expect((await scanTranscript(path, true)).lastActivityAt).toBe("2026-10-06T10:05:00Z")
+    expect((await scanTranscript(path, [DISPATCHER])).lastActivityAt).toBe("2026-10-06T10:05:00Z")
   })
 })
 
