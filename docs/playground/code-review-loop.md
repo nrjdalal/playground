@@ -101,7 +101,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
   A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
 - When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.ts pr` for each PR it holds and re-arms a waiter wherever none is running, `state.ts checks` on a head whose gate checks are not all green and `state.ts wait` on the rest, since an account flip kills the waiters with no notice.
-- A waiter starts from the tmp folder, and `state.ts wait` and `checks` move there as they start, so a waiter that outlives its PR holds no review worktree from the cleanup.
+- A waiter starts from the main checkout, which every machine has and no cleanup removes, and `state.ts wait` and `checks` move to the system's temp folder as they start, so a waiter that outlives its PR holds no review worktree from the cleanup.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's ticket skill, in its extension, for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
