@@ -111,7 +111,7 @@ export async function registry(ctx: Context): Promise<Map<string, string>> {
   return live
 }
 
-// An --ssh probe's claude runs on the far box, out of this machine's registry, so it counts live while the pane labelled with its name still runs ssh; one pane list a server, read only when such a probe is unended.
+// An --ssh probe's claude runs on the far box, out of this machine's registry, so it counts live while any pane labelled with its name still runs ssh; one pane list a server, read only when such a probe is unended.
 export async function sshLive(ctx: Context, names: string[]): Promise<string[]> {
   const byServer = new Map<string, string[]>()
   for (const name of names) {
@@ -136,12 +136,16 @@ export async function sshLive(ctx: Context, names: string[]): Promise<string[]> 
     const result = (await read(server, ["pane", "list"])).result as Json | undefined
     const panes = (Array.isArray(result?.panes) ? result.panes : []) as Json[]
     for (const name of wanted) {
-      const pane = panes.find((p) => p.label === name)?.pane_id
-      if (typeof pane !== "string") continue
-      const info = (await read(server, ["pane", "process-info", "--pane", pane])).result as
-        | { process_info?: { foreground_processes?: { name?: string }[] } }
-        | undefined
-      if (info?.process_info?.foreground_processes?.some((p) => p.name === "ssh")) out.push(name)
+      for (const { label, pane_id: pane } of panes) {
+        if (label !== name || typeof pane !== "string") continue
+        const info = (await read(server, ["pane", "process-info", "--pane", pane])).result as
+          | { process_info?: { foreground_processes?: { name?: string }[] } }
+          | undefined
+        if (info?.process_info?.foreground_processes?.some((p) => p.name === "ssh")) {
+          out.push(name)
+          break
+        }
+      }
     }
   }
   return out

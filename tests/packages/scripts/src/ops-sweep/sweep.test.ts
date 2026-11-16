@@ -335,6 +335,28 @@ describe("check", () => {
     })
   })
 
+  test("an --ssh probe is live when any pane under its label runs ssh, a stale shell pane listed first", async () => {
+    const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [{ kind: "probe", name: "ssh-again", status: "working" }])
+    sshRecord(ctx, "ssh-again")
+    ctx.herdr = async (_server, args) => {
+      if (args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              { label: "ssh-again", pane_id: "w1:p1" },
+              { label: "ssh-again", pane_id: "w1:p2" },
+            ],
+          },
+        })
+      const name = args.at(-1) === "w1:p1" ? "bash" : "ssh"
+      return JSON.stringify({
+        result: { process_info: { foreground_processes: [{ name, pid: 1 }] } },
+      })
+    }
+    expect(await check(ctx)).toEqual([])
+  })
+
   test("an --ssh probe reads gone with no herdr reader, and no pane is read with no --ssh probe unended", async () => {
     const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
     roster(ctx, [
