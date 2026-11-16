@@ -1957,12 +1957,13 @@ load1_max() {
 # of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with the
 # gauges, mem_ok's free share and pressure level and, when shut, why: the first of load1, cpu and mem that shut it (dispatcher, 5 Nov: retro 39
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither; an idle share that reads
-# - is a dark sensor, not a busy CPU, so it opens under the load stop and memory, and only a reading that says busy, or one below the bar, shuts (issue 1818)
+# - is a dark sensor, not a busy CPU, so it opens under the load stop and memory, and only a reading that says busy, or one below the bar, shuts (issue 1818);
+# a reading below the bar shuts only when the last one was below it too, or unread, as mem_ok reads the swap-ins, since a one-second sample spikes and falls back (issue 2405: on 16 Nov the next lanes line reopened all 59 CPU shuts, a median 17 s later)
 lanes_open() {
-  local idle swap tps mbs load need="" verdict=shut why="" seen free level
+  local idle swap tps mbs lastidle load need="" verdict=shut why="" seen free level
   # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, and, while they open one, whenever a fresh reading moves the readings past their stamp, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
   if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
-  read -r idle swap tps mbs _ <<< "$(gauges)"
+  read -r idle swap tps mbs _ lastidle <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so the lanes go by the load and memory alone" ;;
@@ -1971,7 +1972,7 @@ lanes_open() {
   if [ "${load%.*}" -lt "$(load1_max)" ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
-  elif [ "$idle" = busy ] || { [ "$idle" != - ] && ! [ "${idle%.*}" -ge "$need" ]; } 2>/dev/null; then
+  elif [ "$idle" = busy ] || { [ "$idle" != - ] && ! [ "${idle%.*}" -ge "$need" ] && ! [ "${lastidle%.*}" -ge "$need" ]; } 2>/dev/null; then
     why=cpu
   elif ! mem_ok; then
     why=mem
@@ -2185,19 +2186,20 @@ proc_disk_rate() {
 SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
-# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
+# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins> <the last reading's idle>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures (on Linux proc_idle's, proc_swapins' and proc_disk_rate's over proc_swapins' second; a disk read with no swap-in read stays unread), which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the head waiter of a queue reads them every poll while they shut a slot, and, while they open one, whenever a fresh reading of them moves the readings past their stamp;
+# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins> <last idle>`, a cache written before the last idle field reading it as -) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the head waiter of a queue reads them every poll while they shut a slot, and, while they open one, whenever a fresh reading of them moves the readings past their stamp;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
 gauges() {
-  local now cached= idle= swap= tps= mbs= last= disk1= disk2= took lock="$OPS/run-slot.gauges.lock"
+  local now cached= idle= swap= tps= mbs= last= lastidle= disk1= disk2= took lock="$OPS/run-slot.gauges.lock"
   now=$(date +%s)
-  { read -r cached idle swap tps mbs last < "$OPS/run-slot.gauges"; } 2>/dev/null
+  { read -r cached idle swap tps mbs last lastidle _ < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$cached" in ''|*[!0-9]*) cached=0 ;; esac
   if [ $((now - cached)) -ge 10 ]; then
     if took=$(gauges_lock "$now"); then
+      lastidle=$idle
       idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
       [ -n "$idle" ] || idle=$(proc_idle)
       last=$swap
@@ -2208,13 +2210,13 @@ gauges() {
       fi
       read -r tps mbs <<< "$(disk_rate)"
       [ -n "$tps" ] || read -r tps mbs <<< "$(proc_disk_rate "$disk1" "$disk2")"
-      printf '%s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
+      printf '%s %s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" "${lastidle:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
       [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
     elif [ "$cached" -eq 0 ]; then
-      idle=busy swap=busy
+      idle=busy swap=busy lastidle=
     fi
   fi
-  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--} ${last:--}"
+  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--} ${last:--} ${lastidle:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
 # takes about 2 s), and prints the mtime it took the lock at (scripts/ops/README.md says why two takeovers together are harmless)
@@ -2244,7 +2246,7 @@ mem_ok() {
     mem_unread suite "no second suite runs beside this one"
     return 1
   fi
-  read -r _ swap _ _ last <<< "$(gauges)"
+  read -r _ swap _ _ last _ <<< "$(gauges)"
   case "$swap" in
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
     busy) told busy "$BUSY_TOLD"; return 1 ;;

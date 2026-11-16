@@ -214,6 +214,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - Linux has no Keychain, so there `packages/scripts/src/security/cli.ts` answers as `security`, linked to `~/.bun/bin/security` by link-skills.sh, and every factory caller of `security` runs unchanged.
 - It serves the forms the factory runs: `find-generic-password -s <service> -a <account>`, with `-w` to print the value; `delete-generic-password -s -a`; `add-generic-password -s -a [-U] -w <value>`, a bare last `-w` reading the value from stdin; and `-i`, its `add-generic-password` lines read from stdin, so no argv holds a value.
   It exits 44 for an item that is not there and 45 for an add without `-U` over one that is, as macOS's `security` does, and 1 for any other form (`verify-cert` among them), naming the forms it serves.
+  Since it serves `find-generic-password`, trace-count's `macOnly` count leaves that call out (`packages/scripts/src/trace-count/mac-only.ts`).
 - Each item is a file `secrets/keychain/<service>/<account>` in the data folder (`dataDir()`, so `PLAYGROUND_DATA_DIR` moves it), each name percent-encoded with its dots, in folders at mode 700; a write makes a mode-600 file beside the item and renames it into place.
 - The item `Claude Code-credentials` is Claude Code's own login, which it keeps on Linux in `~/.claude/.credentials.json` at mode 600, so that item reads and writes that file.
 - Its output names no value but a `-w` read's; the closed sandbox denies the folder and the login file (spawn.sh above).
