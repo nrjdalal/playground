@@ -988,7 +988,7 @@ function word(lx) {
     tick();
     const c = src[lx.i];
     const next = src[lx.i + 1] ?? "";
-    if (c === "(" && /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?==$/.test(src.slice(start, lx.i))) {
+    if (c === "(" && /^(?:[A-Za-z_]\w*(?:\[[^\]]*\])?|\[[^\]]*\])\+?==$/.test(src.slice(start, lx.i))) {
       out.value = out.value.slice(0, -1);
       bare = bare.slice(0, -1);
       lx.i--;
