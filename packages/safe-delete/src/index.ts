@@ -296,7 +296,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders and its own loose scratch file (ownScratchOf), and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -555,7 +555,7 @@ export function quarantine(
             (dir) => own === join(real(join(roots.home, ".playground", dir)), opts.session),
           )
         ? refused(
-            `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/) once you end`,
+            `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: leave it in place whole, never split, for the nightly clean (scratch/) or your lead's cleanup (scratchpad/)`,
           )
         : refused(
             carve

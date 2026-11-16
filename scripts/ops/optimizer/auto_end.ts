@@ -335,14 +335,16 @@ export async function unsavedLive(
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
+// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
 export type CleanupDeps = {
+  carry?: (item: Carried) => Promise<void>
   checkers?: (pr: string) => Promise<string[] | null>
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   finished: (path: string, pr?: string) => Promise<boolean>
   git: (dir: string, args: string[]) => Promise<string | null>
   held: (path: string, pr?: string) => Promise<string | null>
+  heldBy?: (path: string) => string | null
   leftovers?: (name: string) => string[]
   live: (container: string) => boolean
   liveBranch: string
@@ -355,10 +357,8 @@ export type CleanupDeps = {
     discard?: boolean,
     who?: string,
   ) => Promise<{ ok: boolean; out: string }>
-  heldBy?: (path: string) => string | null
   rmOwn?: (path: string, reason: string, who: string) => Promise<{ ok: boolean; out: string }>
   room?: (who: string) => boolean
-  carry?: (item: Carried) => Promise<void>
 }
 
 // A move the per-minute cap held back, which the next auto-end beat makes.
@@ -517,6 +517,10 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
     }
   }
   return {
+    carry: async (item) => {
+      await mkdir(dirname(CARRIED), { recursive: true })
+      await appendFile(CARRIED, `${JSON.stringify(item)}\n`)
+    },
     checkers: async (pr) =>
       checkersOf(
         await Bun.file(join(rm.data, "roster.json"))
@@ -535,15 +539,6 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
     finished: async (path, pr) => finishedOf(await rm.prState(path, pr)),
     git,
     held: (path, pr) => cleanupHeld(path, pr, rm),
-    live: (container) => isLiveDatabase(container, pair),
-    liveBranch: pair.branch,
-    main: dirname(common),
-    removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
-    rm: async (path, reason, pr, discard, who) =>
-      moveOf(
-        { discard: !!discard, path, ...(pr ? { pr } : {}), reason, worktree: true },
-        who ?? (await rm.session()),
-      ),
     heldBy: (path) => {
       const held =
         process.platform === "linux"
@@ -555,14 +550,19 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
         ? `held by ${held.map((p) => `pid ${p.pid} (${p.command})`).join(", ")}, which still runs in it`
         : null
     },
-    rmOwn: (path, reason, who) => moveOf({ discard: false, path, reason, worktree: false }, who),
-    room: (who) => movesLeft(join(rm.data, "trash"), who) > 0,
-    carry: async (item) => {
-      await mkdir(dirname(CARRIED), { recursive: true })
-      await appendFile(CARRIED, `${JSON.stringify(item)}\n`)
-    },
     leftovers: (name) =>
       leftoversOf(name, rm.data, readdirSync("/tmp"), process.platform).filter(existsSync),
+    live: (container) => isLiveDatabase(container, pair),
+    liveBranch: pair.branch,
+    main: dirname(common),
+    removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
+    rm: async (path, reason, pr, discard, who) =>
+      moveOf(
+        { discard: !!discard, path, ...(pr ? { pr } : {}), reason, worktree: true },
+        who ?? (await rm.session()),
+      ),
+    rmOwn: (path, reason, who) => moveOf({ discard: false, path, reason, worktree: false }, who),
+    room: (who) => movesLeft(join(rm.data, "trash"), who) > 0,
   }
 }
 
