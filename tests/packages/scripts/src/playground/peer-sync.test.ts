@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { mainCheckout } from "../../../../../packages/scripts/src/main-checkout"
 import {
   cloneOf,
   cloneState,
@@ -58,6 +59,43 @@ describe("cloneOf", () => {
     expect(cloneOf("/home/you", "/home/you")).toBeNull()
     expect(cloneOf("/home/you/my code/playground", "/home/you")).toBeNull()
     expect(cloneOf("/home/you/code/$(x)", "/home/you")).toBeNull()
+  })
+
+  test("from a worktree, such as the live Dashboard's, the clone is the main checkout's place under home, never the worktree's", () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "peer-home-")))
+    const held = process.env.PLAYGROUND_REPO
+    delete process.env.PLAYGROUND_REPO
+    try {
+      const main = join(home, "code", "playground")
+      mkdirSync(join(main, "scripts"), { recursive: true })
+      writeFileSync(join(main, "scripts", "spawn.sh"), "")
+      const git = (cwd: string, ...args: string[]) =>
+        expect(
+          Bun.spawnSync(
+            [
+              "git",
+              "-c",
+              "core.hooksPath=/dev/null",
+              "-c",
+              "user.email=t@t",
+              "-c",
+              "user.name=t",
+              ...args,
+            ],
+            { cwd },
+          ).exitCode,
+        ).toBe(0)
+      git(main, "init", "-q", "-b", "main")
+      git(main, "add", ".")
+      git(main, "commit", "-q", "-m", "init")
+      const desk = join(main, ".claude", "worktrees", "desk")
+      git(main, "worktree", "add", "-q", "--detach", desk)
+      expect(cloneOf(desk, home)).toBe("~/code/playground/.claude/worktrees/desk")
+      expect(cloneOf(mainCheckout(desk), home)).toBe("~/code/playground")
+    } finally {
+      if (held !== undefined) process.env.PLAYGROUND_REPO = held
+      rmSync(home, { force: true, recursive: true })
+    }
   })
 })
 

@@ -8,6 +8,7 @@ import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { modelSettings, readPolicyOrDefaults, readSessionNames } from "@packages/settings"
 
 import { livePair } from "../../../../api/hono/src/lib/dev/live-dashboard"
+import { mainCheckout } from "../main-checkout"
 import { accountsIo, runAccounts } from "./accounts"
 import { refreshBriefs, type Send } from "./brief-refresh"
 import { type Docker, ensureDatabase } from "./database"
@@ -339,7 +340,7 @@ const roll = async (): Promise<number> => {
   return 1
 }
 
-// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads (peer-sync.ts), then the roll.
+// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads, at the main checkout's place under home whichever worktree runs it (peer-sync.ts), then the roll.
 const update = (to?: string): Promise<number> =>
   runUpdate(
     REPO,
@@ -359,7 +360,11 @@ const update = (to?: string): Promise<number> =>
         send: sendBrief,
       }),
     (sha) =>
-      syncPeers(join(dashboardCheckout(REPO) ?? REPO, ".env"), sha, cloneOf(REPO, homedir())),
+      syncPeers(
+        join(dashboardCheckout(REPO) ?? REPO, ".env"),
+        sha,
+        cloneOf(mainCheckout(REPO), homedir()),
+      ),
   )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
