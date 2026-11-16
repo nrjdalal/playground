@@ -98,9 +98,9 @@ const globs = (): Row[] => [
   ["a program chrt runs that a zsh group spells", `chrt -i 0 (r|x)m -rf ${NEVER_MADE}`],
   ["a program setsid runs that a zsh group spells", `setsid -w (r|x)m -rf ${NEVER_MADE}`],
   ["a program flock runs that a zsh group spells", `flock /tmp/l (r|x)m -rf ${NEVER_MADE}`],
-  ["a program npx runs that a zsh group spells", `npx (r|x)m -rf ${NEVER_MADE}`],
+  ["a program npx runs that a glob spells", "npx /usr/bin/pk?ll node"],
   ["a program pnpm exec runs that a variable holds", "pnpm exec $TOOL x"],
-  ["a program in npx's shell string that a zsh group spells", `npx -c '(r|x)m -rf ${NEVER_MADE}'`],
+  ["a program in npx's shell string that a glob spells", "npx -c '/usr/bin/pk?ll node'"],
 ]
 
 const globControls = (): Row[] => [
@@ -123,6 +123,14 @@ export const groups: Group[] = [
     folders: ["checkout", "process home", "system bin"],
     guards: ["no-hidden-program"],
     rows: () => [...globs(), ...globControls()],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      ["a del bun run runs where no package.json above names a del script", "bun run del old.log"],
+      ["a del pnpm runs where no package.json above names a del script", "pnpm del old.log"],
+    ],
   },
 ]
 
