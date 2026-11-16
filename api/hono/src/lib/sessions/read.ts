@@ -1,4 +1,4 @@
-import { join, sep } from "node:path"
+import { sep } from "node:path"
 
 import { claudeEntry, claudeSession, type Database } from "@packages/db"
 import {

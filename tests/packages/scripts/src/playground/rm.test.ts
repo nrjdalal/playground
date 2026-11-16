@@ -23,6 +23,7 @@ import {
   RM_USAGE,
   type PrState,
   prStateOf,
+  removePath,
   type RmDeps,
   rmArgs,
   rmDeps,
@@ -1812,4 +1813,37 @@ test("--pr naming a live reviewer's open PR lifts no hold under --discard, and i
   expect(existsSync(wt)).toBe(true)
   expect(await runRm(["--worktree", wt, "--discard", "--pr", url], at("MERGED"))).toBe(0)
   expect(existsSync(wt)).toBe(false)
+})
+
+// #2407: auto-end moves an ended session's set charged to that session, so a worker's own rm right after its checker's end still has its whole minute.
+test("removePath charges the name it is given: an ended checker's set spends its cap alone, and the worker's own rm right after still passes", async () => {
+  const { deps, home, told } = machine()
+  const checker = "k3m9px-reviewer"
+  const set = [
+    join(deps.data, "scratch", checker, "notes.md"),
+    join(deps.data, "scratchpad", checker, "brief.md"),
+    join(deps.data, `factory-settings-400k-memory-${checker}.json`),
+  ]
+  for (const path of set) file(path)
+  const own = (path: string) => ({
+    discard: false,
+    path,
+    reason: `${checker} ended`,
+    worktree: false,
+  })
+  for (const path of [
+    join(deps.data, "scratch", checker),
+    join(deps.data, "scratchpad", checker),
+    set[2]!,
+  ])
+    expect(await removePath(own(path), checker, deps, () => {})).toMatchObject({ ok: true })
+  expect(set.filter((path) => existsSync(path))).toEqual([])
+  const fourth = join(deps.data, "scratch", `${checker}-late.txt`)
+  file(fourth)
+  expect((await removePath(own(fourth), checker, deps, () => {})).line).toContain("refused a 4th")
+  const path = join(home, "old.txt")
+  writeFileSync(path, "x")
+  expect(await runRm([path], deps)).toBe(0)
+  expect(existsSync(path)).toBe(false)
+  expect(told.filter((line) => !line.startsWith(`${checker}:`))).toEqual([])
 })

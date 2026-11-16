@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 
 import { writeRoot } from "../../../packages/settings/src/folder"
 import { extensionsDir } from "../../../packages/settings/src/rendered"
@@ -1063,12 +1063,17 @@ describe("no-outside-pr-code's live lookup", () => {
   })
 
   // bun finds a program on the PATH it started with, so each read runs in a child whose PATH leads with a stub gh that answers the owner's own PR
-  const readAfter = async (n: number, minutesAgo: number, pollMinutes?: number) => {
+  const readAfter = async (
+    n: number,
+    minutesAgo: number,
+    pollMinutes?: number,
+    gh = `#!/bin/sh\necho '${JSON.stringify(OWN)}'\n`,
+  ) => {
     const data = join(scratch, `poll-${n}`)
     const bin = join(data, "bin")
     mkdirSync(join(data, "hook-outside-pr"), { recursive: true })
     mkdirSync(bin, { recursive: true })
-    await Bun.write(join(bin, "gh"), `#!/bin/sh\necho '${JSON.stringify(OWN)}'\n`)
+    await Bun.write(join(bin, "gh"), gh.replaceAll("$DATA", data))
     chmodSync(join(bin, "gh"), 0o755)
     if (pollMinutes !== undefined)
       writeRoot(
@@ -1096,17 +1101,57 @@ describe("no-outside-pr-code's live lookup", () => {
       cwd: data,
       env: { ...environment, PATH: `${bin}:/usr/bin:/bin`, PLAYGROUND_DATA_DIR: data },
     })
-    return { kept: await Bun.file(file).json(), read: child.stdout.toString().trim() }
+    return {
+      calls: (
+        await Bun.file(join(data, "calls"))
+          .text()
+          .catch(() => "")
+      ).length,
+      kept: await Bun.file(file).json(),
+      read: child.stdout.toString().trim(),
+    }
   }
+  // a stub gh that counts its calls in the data folder, fails the first with the given error and answers the owner's own PR after
+  const failsOnce = (error: string) =>
+    `#!/bin/sh\nprintf x >> "$DATA/calls"\n[ "$(wc -c < "$DATA/calls")" -gt 1 ] && { echo '${JSON.stringify(OWN)}'; exit 0; }\necho '${error}' >&2\nexit 1\n`
   const OWN = { author: "acme-owner", owner: "acme-owner", ownerType: "User" }
 
   test("a failure older than the github rule's poll interval, 5 minutes by default, reads the PR again and keeps the answer", async () => {
-    expect(await readAfter(511, 6)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
+    expect(await readAfter(511, 6)).toMatchObject({ kept: OWN, read: JSON.stringify(OWN) })
+  })
+
+  test("a read that fails with no 4xx (a network error, a 5xx) is tried once more before the failure is kept", async () => {
+    expect(
+      await readAfter(514, 6, undefined, failsOnce("error connecting to api.github.com")),
+    ).toEqual({
+      calls: 2,
+      kept: OWN,
+      read: JSON.stringify(OWN),
+    })
+    expect(await readAfter(515, 6, undefined, failsOnce("gh: Server Error (HTTP 502)"))).toEqual({
+      calls: 2,
+      kept: OWN,
+      read: JSON.stringify(OWN),
+    })
+  })
+
+  test("a read GitHub answers with a 4xx is kept as a failure at once, with no second call", async () => {
+    const { calls, kept, read } = await readAfter(
+      516,
+      6,
+      undefined,
+      failsOnce("gh: Not Found (HTTP 404)"),
+    )
+    expect({ calls, failed: typeof kept.failedAt, read }).toEqual({
+      calls: 1,
+      failed: "number",
+      read: "none",
+    })
   })
 
   test("a failure younger than github.pollMinutes is kept, read from the policy", async () => {
     expect((await readAfter(512, 10, 15)).read).toBe("none")
-    expect(await readAfter(513, 10, 8)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
+    expect(await readAfter(513, 10, 8)).toMatchObject({ kept: OWN, read: JSON.stringify(OWN) })
   })
 
   // #1280: read mode runs a skill's script only while git in the main checkout reports it tracked and unchanged

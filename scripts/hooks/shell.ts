@@ -34,6 +34,8 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
+  // Set on a case statement's pattern (casePatterns), which the shell matches and never runs, so its words name no program
+  casePattern?: boolean
   // Set on every command of a line that defines a function named cd or chpwd, or holds a word that, its quotes and backslashes removed, starts with chpwd (`chpwd_functions=(f)`, `chp""wd_functions`, `add-zsh-hook chpwd f`), so each cd there is unread
   cdRedefined?: boolean
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
@@ -45,7 +47,7 @@ export type Command = {
   feedsShell?: boolean
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
-  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so no reader of that list reads it
+  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so a hook that reads the command list itself reads the line as it did without the glob reading
   glob?: Pick<Command, "detached" | "redirects" | "words">
   group?: boolean
   // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
@@ -284,6 +286,36 @@ export const WRAPPERS = new Map<string, Options>(
   ]),
 )
 
+// A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
+function caseOpener(cmd: Command): boolean {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted)
+  const before = cmd.words.slice(0, Math.max(at, 0))
+  const word = cmd.words[at + 2]
+  return (
+    at !== -1 &&
+    (before.length === 0 || onlyReserved({ ...cmd, words: before })) &&
+    word?.value === "in" &&
+    !word.quoted
+  )
+}
+
+// The commands of a line that are a case statement's patterns, which the shell matches and never runs: the run of piped alternatives a ) ends, after the opener's `in` or a `;;`, with no redirect of its own; `scoped` reads past the commands of a substitution in the body's words (`*) echo "$(date)"`), which the lexer lists before the body
+export function casePatterns(all: Command[], scoped = false): Set<Command> {
+  const out = new Set<Command>()
+  for (let k = 0; k < all.length; k++) {
+    if (!caseOpener(all[k]) && all[k].follows !== ";;") continue
+    const commands = scoped ? all.slice(k).filter((c) => c.scope === all[k].scope) : all.slice(k)
+    let end = 0
+    while (commands[end + 1]?.follows === "|") end++
+    const body = commands[end + 1]
+    const run = commands.slice(0, end + 1)
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue
+    for (const c of run) out.add(c)
+  }
+  return out
+}
+
 // Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
 function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
   if (word.startsWith("--")) {
@@ -411,7 +443,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
     if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
     // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
     if (name === "su") return suCommand(args) ? undefined : "root"
-    if (!SHELLS.has(name)) return undefined
+    if (!SHELLS.has(name) || noExec(args, name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
     return inline || (operand && !STDIN_PATHS.has(operand.value)) ? undefined : "shell"
@@ -424,6 +456,14 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   }
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
+  // `command -v` or `-V` looks up the names after it and runs none of them, so no shell starts
+  if (
+    before.some(
+      (w, k) =>
+        !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? ""),
+    )
+  )
+    return undefined
   // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
   const wrappers: string[] = []
@@ -661,6 +701,7 @@ export const CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -862,6 +903,7 @@ export function lex(src: string, known: Record<string, string> = {}): Lexed {
   if (lx.commands.some((c) => c.words.some((w) => /^chpwd/.test(w.value))))
     for (const c of lx.commands) c.cdRedefined = true
   braced(lx.commands)
+  for (const c of casePatterns(lx.commands, true)) c.casePattern = true
   return { commands: lx.commands, scopes: lx.scopes }
 }
 
@@ -1271,11 +1313,12 @@ function plainAlternative(group: string, glued: boolean): boolean {
   }
   return plain && (glued || !empty)
 }
-// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`)
+// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`); a `time` right after a `time` is the external program, which globs the paren (`time time (r|x)m`)
 function subshellPrefix(lead: Word[]): boolean {
   let at = 0
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time") break
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
     else if (lead[at].value === "repeat" && at + 1 < lead.length) at += 2
     else break
   return at > 0 && at === lead.length
@@ -2477,6 +2520,53 @@ function loopClose(commands: Command[], k: number): Command | undefined {
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
+// Whether a program word is spelled plainly: one name once its quotes and backslashes are removed, with no glob, zsh group, brace list or extendedglob operator (`#`, `^`, a `~` past the start) outside quotes, no leading `=` (zsh's path lookup), no ANSI-C escape, and no expansion but a folder the session's starting env names (`PLAIN_PREFIXES`) as a plain `$NAME`, `${NAME}`, `${NAME:?…}` or `${NAME:-<a default with no $ or backquote>}` before a slash, never one the line sets or `changed` names; `[` and `[[` stay plain, as zsh reads a bracket with no close as itself
+export function plainProgram(
+  first: Word,
+  env: Env,
+  changed: ReadonlySet<string> = new Set(),
+): boolean {
+  const source = first.source ?? first.value
+  if (marked(first.value) && !/[$`]/.test(source)) return false
+  let bare = ""
+  let quote = ""
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (quote === "'") {
+      if (c === "'") quote = ""
+    } else if (c === "\\") i++
+    else if (quote === "" && c === "'") quote = "'"
+    else if (quote === "" && c === "$" && source[i + 1] === "'") {
+      const close = source.indexOf("'", i + 2)
+      if (close < 0 || source.slice(i + 2, close).includes("\\")) return false
+      i = close
+    } else if (c === '"') quote = quote === '"' ? "" : '"'
+    else if (c === "`") return false
+    else if (c === "$") {
+      const named = /^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[?-][^}$`]*)?\})/.exec(
+        source.slice(i),
+      )
+      const name = named?.[1] ?? named?.[2]
+      if (!named || !name || !PLAIN_PREFIXES.has(name) || env.vars.has(name) || changed.has(name))
+        return false
+      i += named[0].length - 1
+      if (
+        !source
+          .slice(i + 1)
+          .replace(/^"/, "")
+          .startsWith("/")
+      )
+        return false
+    } else if (quote === "") {
+      if ((c === "=" && i === 0) || (c === "~" && i > 0)) return false
+      bare += c
+    }
+  }
+  return !/[*?(#^]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)
+}
+// The variables a program word may name a folder by: the session's home, and the Playground checkout the factory's docs spell spawn.sh's path with
+export const PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"])
+
 // One command as run() reads it, cd, the shells it starts, eval, source or . of a process substitution or stdin's name, and piped input a command may run as code followed, for a hook that finds a command inside another (a wrapper's words).
 export async function examine(
   cmd: Command,
@@ -3375,6 +3465,18 @@ export function isFolder(path: string): boolean {
 const SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"])
 const BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"])
 
+// Whether a shell's options before its first operand leave -n (noexec) set, the last -n or +n winning, so it reads its script and runs none of it; a cluster holding o or O (-o, +xo, -eO) or a long option (zsh's --no-noexec), each of which can set an option by name, keeps it unset.
+export function noExec(args: Word[], shell: string): boolean {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
+  let set = false
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || (value.startsWith("--") && value !== "--")) return false
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value)) break
+    if (value.includes("n")) set = value.startsWith("-")
+  }
+  return set
+}
+
 // A shell's first operand, and whether -c makes it the script's text rather than a script file's name; no operand means the shell reads its script from stdin.
 export function shellOperand(args: Word[], shell: string): { inline: boolean; operand?: Word } {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES
@@ -3399,6 +3501,7 @@ async function shell(
 ): Promise<string | undefined> {
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
+  if (noExec(args, name)) return
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
     let script = operand.value

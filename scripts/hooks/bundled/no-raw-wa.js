@@ -366,6 +366,7 @@ function markers(words) {
   return out;
 }
 var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
+var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -401,6 +402,30 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(all, scoped = false) {
+  const out = new Set;
+  for (let k = 0;k < all.length; k++) {
+    if (!caseOpener(all[k]) && all[k].follows !== ";;")
+      continue;
+    const commands = scoped ? all.slice(k).filter((c) => c.scope === all[k].scope) : all.slice(k);
+    let end = 0;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(0, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 function optionValue(word, { flags, values }) {
   if (word.startsWith("--")) {
     const eq = word.indexOf("=");
@@ -511,7 +536,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -529,6 +554,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -755,6 +782,7 @@ var CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -932,6 +960,8 @@ function lex(src, known = {}) {
     for (const c of lx.commands)
       c.cdRedefined = true;
   braced(lx.commands);
+  for (const c of casePatterns(lx.commands, true))
+    c.casePattern = true;
   return { commands: lx.commands, scopes: lx.scopes };
 }
 var BRACED = new Set([
@@ -1316,7 +1346,9 @@ function plainAlternative(group, glued) {
 function subshellPrefix(lead) {
   let at = 0;
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time")
+      break;
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect")
       at++;
     else if (lead[at].value === "repeat" && at + 1 < lead.length)
       at += 2;
@@ -2254,6 +2286,7 @@ function loopClose(commands, k) {
     }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
+var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
   tick();
   orElse(cmd, env);
@@ -2923,6 +2956,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -2941,6 +2987,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;

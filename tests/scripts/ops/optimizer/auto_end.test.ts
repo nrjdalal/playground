@@ -10,12 +10,17 @@ import {
   cleanWorktree,
   cleanupHeld,
   cleanupLive,
+  type Carried,
   containersFor,
+  drainCarried,
   type EndDeps,
   endMerged,
   endOne,
   reportArgv,
   finishedOf,
+  leftoversOf,
+  procHoldersOf,
+  reasonOf,
   sweep,
   type Target,
   unsavedLive,
@@ -901,6 +906,44 @@ describe("unsavedLive: the worktrees a session used, read for unsaved work", () 
 })
 
 // PG-919: a merge cleans what each closed session used
+describe("reasonOf: the line a kept worktree names, from playground rm's or dev:stop's output (#2407)", () => {
+  const crash = [
+    "12 |   const moved = quarantine(path)",
+    "                 ^",
+    "error: ENOENT: no such file or directory, lstat '/made/up/trash'",
+    "      at quarantine (/made/up/index.ts:500:12)",
+    "",
+    "Bun v1.4.4 (Linux arm64)",
+    "",
+  ].join("\n")
+
+  test.each([
+    [
+      "a Bun crash names its error line, not the version footer",
+      crash,
+      "error: ENOENT: no such file or directory, lstat '/made/up/trash'",
+    ],
+    [
+      "a refusal names its own last line",
+      "checking /made/up/wt\nplayground: refused: it holds work no remote has",
+      "playground: refused: it holds work no remote has",
+    ],
+    [
+      "dev:stop's own line wins over the footer",
+      "starting\ndev:stop: no stack is recorded in /made/up/wt\nBun v1.4.4 (Linux x64)",
+      "dev:stop: no stack is recorded in /made/up/wt",
+    ],
+    [
+      "a footer alone after a plain line names that line",
+      "something failed\nBun v1.4.4 (Linux arm64)\n",
+      "something failed",
+    ],
+    ["no output at all names none", "", ""],
+  ])("%s", (_, out, line) => {
+    expect(reasonOf(out)).toBe(line)
+  })
+})
+
 describe("cleanWorktree: each worktree a closed session used, removed with its containers and branch once its work is saved", () => {
   const ENV = {
     ...process.env,
@@ -1432,6 +1475,108 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       rest.map((p) => `removed ${p}`),
     )
   })
+
+  // #2407: safe-delete's cap of 3 moves a minute for each charged name, as a count; each move's name and each carried move kept
+  const capped = (deps: CleanupDeps, spent: Record<string, number> = {}) => {
+    const charged: string[] = []
+    const carried: Carried[] = []
+    const spend = (who: string, path: string) => {
+      charged.push(`${who} ${path}`)
+      spent[who] = (spent[who] ?? 0) + 1
+    }
+    const { rm } = deps
+    const over: Partial<CleanupDeps> = {
+      carry: async (item) => void carried.push(item),
+      rm: async (path, reason, pr, discard, who) => (
+        spend(who!, path),
+        rm(path, reason, pr, discard)
+      ),
+      rmOwn: async (path, _reason, who) => (spend(who, path), { ok: true, out: "" }),
+      room: (who) => (spent[who] ?? 0) < 3,
+    }
+    Object.assign(deps, over)
+    return { carried, charged, spent }
+  }
+
+  test("an ended checker's clone and leftovers are each charged to the checker, so its worker's own rm right after has its whole minute (#2407)", async () => {
+    const { clone, main, projects, target } = cloned()
+    const leftovers = ["scratch-k3m9px-reviewer", "tmp-k3m9px-reviewer"].map((n) =>
+      join(main, "..", n),
+    )
+    const { deps } = fakes(main, [], undefined, { leftovers: () => leftovers })
+    const { charged, spent } = capped(deps)
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual(
+      [clone, ...leftovers].map((p) => `removed ${p}`),
+    )
+    expect(charged).toEqual([clone, ...leftovers].map((p) => `k3m9px-reviewer ${p}`))
+    expect(spent["k3m9px-worker"]).toBeUndefined()
+    expect(deps.room!("k3m9px-worker")).toBe(true)
+  })
+
+  test("a checker with two clones of one PR has both removed under its name: the one past the cap is carried, never failed, and the next beat takes it (#2407)", async () => {
+    const { clone, main, projects, rest, target } = cloned(["test-7", "test-7-before"])
+    const [before] = rest as [string]
+    const tester: Target = { ...target, kind: "tester", name: "k3m9px-tester" }
+    const { deps } = fakes(main, [])
+    const spent: Record<string, number> = { "k3m9px-tester": 2 }
+    const { carried, charged } = capped(deps, spent)
+    expect(await cleanupLive(projects, async () => deps)(tester)).toEqual([
+      `removed ${clone}`,
+      `kept ${before}: carried to the next auto-end beat, since k3m9px-tester has made its moves for this minute`,
+    ])
+    expect(carried).toEqual([
+      {
+        path: before,
+        pr: target.pr,
+        reason: "k3m9px-tester ended",
+        who: "k3m9px-tester",
+        worktree: true,
+      },
+    ])
+    expect(existsSync(before)).toBe(true)
+    spent["k3m9px-tester"] = 0
+    expect(await drainCarried(carried, deps)).toEqual([`removed ${before}`])
+    expect(charged).toEqual([clone, before].map((p) => `k3m9px-tester ${p}`))
+    expect(existsSync(before)).toBe(false)
+    expect(await drainCarried(carried, deps)).toEqual([])
+  })
+
+  test("a leftover a live process holds is kept with its pid in the lead's line and never moved, while the rest go (#2407)", async () => {
+    const { main, projects, target } = cloned()
+    const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
+    const [held, free] = ["tmp-held", "tmp-free"].map((n) => join(main, "..", n)) as [
+      string,
+      string,
+    ]
+    const { deps } = fakes(main, [], undefined, {
+      heldBy: (path) => (path === held ? "held by pid 4242 (sleep), which still runs in it" : null),
+      leftovers: () => [held, free],
+    })
+    const { charged } = capped(deps)
+    expect(await cleanupLive(projects, async () => deps)(worker)).toEqual([
+      `kept ${held}: held by pid 4242 (sleep), which still runs in it`,
+      `removed ${free}`,
+    ])
+    expect(charged).toEqual([`k3m9px-worker ${free}`])
+  })
+
+  test("a leftover safe-delete refuses, a temp folder past 2 GB, is kept with its refusal in the lead's line while the rest go (#2407)", async () => {
+    const { main, projects, target } = cloned()
+    const worker: Target = { ...target, kind: "worker", name: "k3m9px-worker" }
+    const [big, small] = ["tmp-big", "tmp-small"].map((n) => join(main, "..", n)) as [
+      string,
+      string,
+    ]
+    const refusal = `${big} holds over 2 GB, past the tripwire: it stays in place`
+    const { deps } = fakes(main, [], undefined, { leftovers: () => [big, small] })
+    capped(deps)
+    deps.rmOwn = async (path) =>
+      path === big ? { ok: false, out: refusal } : { ok: true, out: "" }
+    expect(await cleanupLive(projects, async () => deps)(worker)).toEqual([
+      `kept ${big}: ${refusal}`,
+      `removed ${small}`,
+    ])
+  })
 })
 
 describe("endMerged: a closed session's worktrees are cleaned after its close, and only then", () => {
@@ -1470,4 +1615,63 @@ describe("reportArgv: the roster write that ends a row records why", () => {
       "status=ended",
     ])
   })
+})
+
+describe("an ended session's leftovers and the moves its end carried (#2407)", () => {
+  test("leftoversOf names its scratch and scratchpad folders, its memory settings file and, on Linux alone, each temp folder spawn.sh made it, never a longer name's", () => {
+    const tmp = [
+      "playground-k3m9px-worker.AbC123",
+      "playground-k3m9px-worker.Zz9",
+      "playground-k3m9px-worker-x.Q1",
+      "playground-k3m9px-worker2.Q2",
+      "playground-builder.Z2",
+    ]
+    expect(leftoversOf("k3m9px-worker", "/d", tmp, "darwin")).toEqual([
+      "/d/scratch/k3m9px-worker",
+      "/d/scratchpad/k3m9px-worker",
+      "/d/factory-settings-400k-memory-k3m9px-worker.json",
+    ])
+    expect(leftoversOf("k3m9px-worker", "/d", tmp, "linux")).toEqual([
+      "/d/scratch/k3m9px-worker",
+      "/d/scratchpad/k3m9px-worker",
+      "/d/factory-settings-400k-memory-k3m9px-worker.json",
+      "/tmp/playground-k3m9px-worker.AbC123",
+      "/tmp/playground-k3m9px-worker.Zz9",
+    ])
+  })
+
+  test("the sweep makes the moves an earlier end carried before it ends anyone", async () => {
+    const line = { text: "Cleanup an earlier end carried: removed /x", to: "ops" }
+    const { deps } = fakes({ carried: async () => [line] })
+    expect(await sweep(input(), deps)).toEqual([line])
+  })
+})
+
+// #2407: a process still running in an ended session's leftover, an orphan that outlived it, keeps the leftover, named by its pid
+describe("a leftover a live process holds stays (#2407)", () => {
+  test.skipIf(process.platform !== "linux")(
+    "procHoldersOf names a child whose working folder is inside, and one holding a file there open, and nothing for a folder no process holds",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "held-")))
+      const [cwdHeld, fileHeld, free] = ["cwd", "file", "free"].map((n) => join(root, n)) as [
+        string,
+        string,
+        string,
+      ]
+      for (const dir of [cwdHeld, fileHeld, free]) mkdirSync(dir)
+      writeFileSync(join(fileHeld, "log"), "")
+      const sleeper = Bun.spawn(["sleep", "30"], { cwd: cwdHeld })
+      const tail = Bun.spawn(["tail", "-f", join(fileHeld, "log")], { cwd: root })
+      try {
+        await Bun.sleep(200)
+        expect(procHoldersOf(cwdHeld)).toContainEqual({ command: "sleep", pid: sleeper.pid })
+        expect(procHoldersOf(fileHeld)).toContainEqual({ command: "tail", pid: tail.pid })
+        expect(procHoldersOf(free)).toEqual([])
+        expect(procHoldersOf(join(root, "gone"))).toEqual([])
+      } finally {
+        sleeper.kill()
+        tail.kill()
+      }
+    },
+  )
 })
