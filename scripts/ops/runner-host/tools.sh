@@ -6,7 +6,7 @@ missing=0
 check() { if eval "$2" > /dev/null 2>&1; then echo "ok $1"; else echo "missing $1"; missing=1; fi; }
 as_runner() { runuser -u runner -- env -i HOME=/home/runner PATH=/home/runner/.bun/bin:/home/runner/.local/bin:/usr/bin:/bin bash -c "$1"; }
 check "runner's full name, which git needs" '[ -n "$(getent passwd runner | cut -d: -f5 | cut -d, -f1)" ]'
-for t in bun docker flock git go node ruby tar timeout uv zsh; do check "$t" "as_runner 'command -v $t'"; done
+for t in bun docker flock git go node tar timeout uv zsh; do check "$t" "as_runner 'command -v $t'"; done
 check "docker for the runner user" "as_runner 'docker info'"
 check systemd-run 'command -v systemd-run'
 exit "$missing"
