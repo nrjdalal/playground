@@ -95,4 +95,5 @@ So new comments, docs and tests are written in plain words, and the counts only 
 
 Each change is made in a worktree of its own, branched from the latest `canary`, and opened as a draft pull request.
 A reviewer session other than its author scores it out of 5, round by round, and the author fixes what it finds until it scores 5 on the latest commit with the checks green.
+A change to the web app also waits for its tester, a session that drives the change in a browser and posts its pass on that commit.
 Then it merges with `bun run pr:merge <n>`, or merge-on-ready lands it, the only two ways a change reaches `canary`.

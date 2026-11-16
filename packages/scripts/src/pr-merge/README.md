@@ -13,7 +13,7 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
 - `parent`: every PR the body says it is stacked on, each `Stacked on #N` anywhere in the body (playbook DISPATCH.md's stack line, in any case, a list such as `Stacked on #N and #M` included), reads `MERGED`, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's lines unreviewed (`parentGate` in `gates.ts`, each state read by `factsOf`).
   An open parent refuses, naming it; a parent closed without merging refuses until the body loses its `Stacked on #N` line, once its lines land another way; a state gh cannot read refuses, so the gate fails closed.
   A body with no such line meets no `parent` gate.
-- `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5.
+- `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
   A required check missing while every job of its workflow's run passed is GitHub's: it ended that run without creating the job and concluded it `failure`, as run 42670675952 did with all 20 jobs green, so `ci` names the run and its step, `gh run rerun <run id>`.
   That rerun tests the same merge, which suits this shape alone, since the run's code was green; a red check's step stays a fix or a merge of `canary`.
@@ -99,7 +99,7 @@ On every run, built or not, pr:merge and pr:train also stop on a worktree whose 
 ## When canary moves
 
 A PR behind `canary` that merges with it clean merges on its own head's checks and 5/5 once the `types` gate's check of the merged tree passes (its type check, and its bundles step for a PR touching `scripts/hooks/` or `packages/`), so several gated PRs merge back to back with no new GitHub run.
-When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own.
+When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own, and on a `web/next/` diff its own tester's PASS.
 A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body-file <file> --match-head-commit <head>`, `<file>` holding the body pr:merge would pass (above), the one hand merge the no-protected-push hook passes ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-protected-push)), on an override in the factory's **override** shape, and has pr:merge fixed.
 
 ## The merge queue
