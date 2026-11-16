@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { gateLine, rehearsalLine } from "../../../../packages/scripts/src/pr-merge/ship-lines"
+import {
+  gateLine,
+  rehearsalLine,
+  waiverLine,
+} from "../../../../packages/scripts/src/pr-merge/ship-lines"
 
 const ROOT = join(import.meta.dir, "../../../..")
 
@@ -48,6 +52,10 @@ describe("step 1 and the rehearsal write the lines ship:merge reads, in its own 
     const text = await step1()
     expect(text).toContain(`\`${gateLine("<sha>", false)}\``)
     expect(text).toContain(`\`${gateLine("<sha>", true)}\``)
+  })
+
+  test("step 1 names a waived gate's line as waiverLine reads it (#2355)", async () => {
+    expect(await step1()).toContain(`\`${waiverLine("<sha>", "<id>")}\``)
   })
 
   test("the rehearsal names its line as rehearsalLine reads it, PASS or not needed", async () => {
