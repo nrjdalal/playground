@@ -32,6 +32,7 @@ import {
   type Limit,
 } from "@/lib/system/capacity"
 import { footprintOf, type Container, type Session, type Stack } from "@/lib/system/footprint"
+import { memoryReads } from "@/lib/system/memory"
 import {
   parseContainers,
   parseContainerStats,
@@ -40,8 +41,6 @@ import {
   parseHolders,
   parsePs,
   parseSockets,
-  parseSysctl,
-  parseVmStat,
   type Pressure,
   type Proc,
   type Sockets,
@@ -401,6 +400,7 @@ export async function read(): Promise<Readings> {
   const made = machine?.system ?? null
   const update = machine ? { problem: null, update: machine.update ?? null } : updateCheck.read()
   if (update.problem) problems.push(update.problem)
+  const memory = memoryReads(!machine && process.platform === "linux")
   const disk = made
     ? Promise.resolve(made.disk)
     : statfs(homedir()).then(
@@ -414,16 +414,12 @@ export async function read(): Promise<Readings> {
         ? readLogin().then((login) => accountFor(login, machine.account ?? null))
         : readAccount(),
       readAccounts(),
-      settle("sysctl", probe("sysctl").then(parseSysctl), {
+      settle(memory.sysctl.what, memory.sysctl.read, {
         freePercent: null,
         pressure: null,
         swap: null,
       }),
-      settle(
-        "vm_stat",
-        probe("memory").then((out) => parseVmStat(out)?.usedBytes ?? null),
-        null,
-      ),
+      settle(memory.usedBytes.what, memory.usedBytes.read, null),
       settle("ps", probe("processes").then(parsePs), []),
       settle("lsof", probe("cwds", uid).then(parseCwds), new Map<number, string>()),
       settle("lsof", probe("sockets", uid).then(parseSockets), {
