@@ -90,7 +90,7 @@ describe("pinHerdr", () => {
       version: "0.9.5",
     })
     expect(result.code).toBe(3)
-    expect(result.line).toContain("macOS on arm64 or x64, or Linux on arm64")
+    expect(result.line).toContain("macOS or Linux, on arm64 or x64")
     expect(existsSync(path)).toBe(false)
   })
 })
@@ -161,6 +161,41 @@ describe("the Linux arm64 pin, read on any machine", () => {
       expect(await runHerdrPin(["--check"])).toBe(1)
       expect(errors).toHaveBeenCalledWith(
         `herdr-pin: ${pinnedAt(home)} has sha256 ${REAL_SUM}, not the pinned ${LINUX_SUM}; run playground herdr pin`,
+      )
+    } finally {
+      errors.mockRestore()
+    }
+  })
+})
+
+const LINUX_X64_SUM = "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d"
+
+describe("the Linux x64 pin, read on any machine", () => {
+  const real = { arch: process.arch, home: process.env.HOME, platform: process.platform }
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: real.platform })
+    Object.defineProperty(process, "arch", { value: real.arch })
+    process.env.HOME = real.home
+  })
+
+  test("downloads herdr-linux-x86_64 from the pinned release", () => {
+    expect(releaseUrl("0.9.5", "linux-x64")).toBe(
+      "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-linux-x86_64",
+    )
+  })
+
+  test("--check on a Linux x64 host reads its copy against the Linux x64 pin", async () => {
+    const home = join(scratch, "linux-x64-check")
+    process.env.HOME = home
+    Object.defineProperty(process, "platform", { value: "linux" })
+    Object.defineProperty(process, "arch", { value: "x64" })
+    mkdirSync(join(pinnedAt(home), ".."), { recursive: true })
+    await Bun.write(pinnedAt(home), FAKE)
+    const errors = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      expect(await runHerdrPin(["--check"])).toBe(1)
+      expect(errors).toHaveBeenCalledWith(
+        `herdr-pin: ${pinnedAt(home)} has sha256 ${REAL_SUM}, not the pinned ${LINUX_X64_SUM}; run playground herdr pin`,
       )
     } finally {
       errors.mockRestore()

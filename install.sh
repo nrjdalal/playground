@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs Playground: curl -fsSL <raw URL>/install.sh | bash
-# It installs every missing tool it can in one run, each through its project's own installer (on Linux only those that need no root: bun, claude and uv), and ends with a "Left for you" list of what it could not do, each with the one command that does it.
+# It installs every missing tool it can in one run, each through its project's own installer (on Linux only those that need no root: bun, claude, the pinned herdr and uv), and ends with a "Left for you" list of what it could not do, each with the one command that does it.
 # It waits only where it cannot act alone (Homebrew's password, Docker Desktop's first open, gh auth login, Claude's sign-in, the Mac's password for portless's proxy service), and only with a terminal; without one each goes on the list.
 # Every step checks before it acts, so a second run changes nothing. PLAYGROUND_DIR names the install folder; --check (or PLAYGROUND_INSTALL=0) prints what is missing and changes nothing.
 set -euo pipefail
