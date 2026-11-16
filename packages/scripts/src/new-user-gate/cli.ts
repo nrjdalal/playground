@@ -147,6 +147,13 @@ export const dropBox = (box: string) => {
   if (refused) console.error(`gate: ${refused}`)
 }
 
+// The made-up stored login where the box's security reads it: the stand-in's Keychain file on a Mac, and on Linux, where install links Playground's own security first on PATH, Claude's ~/.claude/.credentials.json (packages/scripts/src/security/cli.ts).
+export const plantLogin = (box: string, home: string, reading: ReturnType<typeof usageReading>) => {
+  writeFileSync(join(box, "keychain"), reading.keychain)
+  mkdirSync(join(home, ".claude"), { recursive: true })
+  writeFileSync(join(home, ".claude", ".credentials.json"), reading.credentials, { mode: 0o600 })
+}
+
 // A box at sha: the HOME, the stand-ins first on PATH, a bare source.git holding sha as pinned and as main, as a ship leaves it, beside origin's canary (HEAD main, as GitHub's), its clone at HOME/playground where install.sh finds it, and the box's own portless proxy on a high port with no TLS, so the box's stack never routes through this Mac's proxy.
 const prep = (box: string, sha: string) => {
   const home = join(box, "h")
@@ -198,7 +205,7 @@ const prep = (box: string, sha: string) => {
   const usageJob = join(home, "playground", "scripts", "ops", "usage", "run.py")
   if (existsSync(usageJob) && readFileSync(usageJob, "utf8").includes("PLAYGROUND_USAGE_API")) {
     const reading = usageReading(process.env.USER ?? "", Date.now())
-    writeFileSync(join(box, "keychain"), reading.keychain)
+    plantLogin(box, home, reading)
     mkdirSync(join(box, "usage-api"))
     writeFileSync(join(box, "usage-api", "profile"), JSON.stringify(reading.profile))
     writeFileSync(join(box, "usage-api", "usage"), JSON.stringify(reading.usage))
@@ -211,29 +218,31 @@ const prep = (box: string, sha: string) => {
   return { home, path: path.join(":") }
 }
 
-// install.sh piped to bash as `curl | bash` runs it, in the box's HOME with a clean environment and the test sandbox's stand-ins for the terminal, the OS, Homebrew and portless's service.
+// install.sh's whole env in the box: the box's HOME and the test sandbox's stand-ins for the terminal, Homebrew and portless's service, with no INSTALL_OS, so install.sh takes this host's from uname as a new user's run does (on Linux, uv from its own installer).
+export const installEnv = (box: string, home: string, path: string): Record<string, string> => ({
+  BUN_INSTALL_CACHE_DIR: join(homedir(), ".bun", "install", "cache"),
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_TERMINAL_PROMPT: "0",
+  HOME: home,
+  INSTALL_BREW_PREFIXES: "",
+  INSTALL_PORTLESS_PLIST: join(box, "plist"),
+  INSTALL_PROXY_UP: join(box, "proxy-up"),
+  INSTALL_TTY: join(box, "tty"),
+  LOGNAME: process.env.USER ?? "",
+  PATH: path,
+  PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
+  PORTLESS_SYNC_HOSTS: "0",
+  SHELL: "/bin/zsh",
+  TERM: "dumb",
+  TEST_SANDBOX_HOME: home,
+  USER: process.env.USER ?? "",
+})
+
+// install.sh piped to bash as `curl | bash` runs it, with installEnv's clean environment.
 const install = async (box: string, home: string, path: string): Promise<string> => {
   const child = Bun.spawn(["timeout", String(INSTALL_LIMIT_S), "bash"], {
     cwd: home,
-    env: {
-      BUN_INSTALL_CACHE_DIR: join(homedir(), ".bun", "install", "cache"),
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_TERMINAL_PROMPT: "0",
-      HOME: home,
-      INSTALL_BREW_PREFIXES: "",
-      INSTALL_OS: "Darwin",
-      INSTALL_PORTLESS_PLIST: join(box, "plist"),
-      INSTALL_PROXY_UP: join(box, "proxy-up"),
-      INSTALL_TTY: join(box, "tty"),
-      LOGNAME: process.env.USER ?? "",
-      PATH: path,
-      PLAYGROUND_LOAD_MULT: String(BOX_LOAD_MULT),
-      PORTLESS_SYNC_HOSTS: "0",
-      SHELL: "/bin/zsh",
-      TERM: "dumb",
-      TEST_SANDBOX_HOME: home,
-      USER: process.env.USER ?? "",
-    },
+    env: installEnv(box, home, path),
     stderr: "pipe",
     stdin: Bun.file(join(home, "playground", "install.sh")),
     stdout: "pipe",

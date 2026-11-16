@@ -21,8 +21,10 @@ import {
   databaseCheck,
   dropBox,
   installCheck,
+  installEnv,
   leftForYou,
   makeBox,
+  plantLogin,
   readAfter,
   report,
   resultLine,
@@ -35,7 +37,7 @@ import {
   usageWords,
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
-import { stubs } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
 describe("the new-user gate's reads", () => {
@@ -275,6 +277,42 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     ).toBe(
       "PASS 1. curl | bash exits 0\nINCONCLUSIVE 2. Alpha routes: spawn.sh's capacity gate refused a start (load gate: …)\n1 of 2 passed, 1 inconclusive",
     )
+  })
+})
+
+describe("the box on this host's OS (#2374)", () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-host-")))
+  afterAll(() => rmSync(parent, { force: true, recursive: true }))
+
+  test("install.sh reads the host's OS from uname, so on Linux its uv step takes uv's own installer, not brew", () => {
+    expect(
+      installEnv(join(parent, "box"), join(parent, "box", "h"), "/usr/bin"),
+    ).not.toHaveProperty("INSTALL_OS")
+  })
+
+  test("the made-up stored login reads through Linux's security, which takes Claude's login from ~/.claude/.credentials.json", () => {
+    const box = join(parent, "login")
+    const home = join(box, "h")
+    mkdirSync(home, { recursive: true })
+    const user = process.env.USER ?? "gate"
+    plantLogin(box, home, usageReading(user, Date.now()))
+    const shim = join(import.meta.dir, "../../../../../packages/scripts/src/security/cli.ts")
+    const read = Bun.spawnSync(
+      [
+        process.execPath,
+        "--no-env-file",
+        shim,
+        "find-generic-password",
+        "-a",
+        user,
+        "-s",
+        "Claude Code-credentials",
+        "-w",
+      ],
+      { env: { HOME: home, PATH: process.env.PATH ?? "", PLAYGROUND_DATA_DIR: join(box, "data") } },
+    )
+    expect(read.exitCode).toBe(0)
+    expect(JSON.parse(read.stdout.toString()).claudeAiOauth.accessToken).toBe("made-up")
   })
 })
 

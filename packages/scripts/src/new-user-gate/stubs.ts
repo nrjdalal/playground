@@ -82,12 +82,18 @@ handle "$@"
 // An ISO time as Python 3.9's fromisoformat reads it, with no fraction and no Z.
 const iso = (at: number) => new Date(at).toISOString().replace(/\.\d+Z$/, "+00:00")
 
-// Pure: the box's usage reading at now, which the ops-usage job reads as it reads Claude's: a made-up stored login in the Keychain file, and the profile and usage answers it reads through PLAYGROUND_USAGE_API from the box's files, a 5-hour window at 5% and a week at 10%, each resetting after now.
-export const usageReading = (user: string, now: number) => ({
-  keychain: `Claude Code-credentials\t${user}\t${JSON.stringify({ claudeAiOauth: { accessToken: "made-up", expiresAt: now + 30 * 86_400_000 } })}\n`,
-  profile: { account: { email: "gate@example.com" } },
-  usage: {
-    five_hour: { resets_at: iso(now + 3 * 3_600_000), utilization: 5 },
-    seven_day: { resets_at: iso(now + 5 * 86_400_000), utilization: 10 },
-  },
-})
+// Pure: the box's usage reading at now, which the ops-usage job reads as it reads Claude's: a made-up stored login, as the Keychain file's line and as Linux's credentials file, and the profile and usage answers it reads through PLAYGROUND_USAGE_API from the box's files, a 5-hour window at 5% and a week at 10%, each resetting after now.
+export const usageReading = (user: string, now: number) => {
+  const credentials = JSON.stringify({
+    claudeAiOauth: { accessToken: "made-up", expiresAt: now + 30 * 86_400_000 },
+  })
+  return {
+    credentials,
+    keychain: `Claude Code-credentials\t${user}\t${credentials}\n`,
+    profile: { account: { email: "gate@example.com" } },
+    usage: {
+      five_hour: { resets_at: iso(now + 3 * 3_600_000), utilization: 5 },
+      seven_day: { resets_at: iso(now + 5 * 86_400_000), utilization: 10 },
+    },
+  }
+}
