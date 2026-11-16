@@ -131,7 +131,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   Re-run it after adding, renaming or removing a skill ([scripts/README.md](./scripts/README.md#link-skillssh-and-rerere)).
 - The main checkout stays clean, since every installed skill follows it; each worktree keeps its own turbo cache ([scripts/README.md](./scripts/README.md#shared-git-hooks-and-the-turbo-cache)).
 - A worktree commits, pushes or merges once it has run its own `bun install`, since each shared git hook runs the committing worktree's own lefthook; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it ([scripts/README.md](./scripts/README.md#shared-git-hooks-and-the-turbo-cache)).
-- Run `bun run test:skills`, CI's `auto-test.yml` steps, before pushing a change to a hook, a script, a skill's frontmatter, or a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
+- Pre-push runs `bun run test:skills`, CI's `auto-test.yml` steps, when a push changes a file they read; run it yourself before pushing a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
 - The em-dash rule above has one exception: an output format the user specified, such as linear's table, where `—` marks an empty cell.
   `scripts/check-em-dashes.sh` skips inline code and table cells that hold only an em-dash.
 - ALWAYS: In every comment and review body on a repo whose owner `release-owners.json` lists, write "ship" or "publish step" where "release" (any case) would go, since an owner comment holding the word publishes to npm; `no-release-comment` refuses such a comment ([scripts/hooks/README.md](./scripts/hooks/README.md)).

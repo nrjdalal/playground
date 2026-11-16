@@ -188,6 +188,29 @@ pre-push:
       glob: *bundle-inputs
       # lefthook reads files: only for a run that names {files}, so the list goes in a shell comment, quoted so YAML keeps it
       run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary # {files}"
+    test-skills:
+      # CI's test check, which went red on 16 Nov after a branch changed the sandbox its steps run in while no local run caught it; a push of a branch that changed a file a step reads since it forked from the local origin/canary runs it, about 100 s (measured), through the commit slot as the pre-commit build is, so parallel pushes queue; a push of docs or briefs alone skips it
+      files: git diff --name-only origin/canary...HEAD
+      glob:
+        - "*SKILL.md"
+        - "extensions/core/skills/code-review-loop/scripts/*"
+        - "extensions/core/skills/setup/scripts/*"
+        - "packages/scripts/src/box-env.ts"
+        - "packages/scripts/src/docs-wrap/*"
+        - "packages/scripts/src/hooks-on-main.ts"
+        - "packages/scripts/src/sandbox.ts"
+        - "packages/scripts/src/skills-ref/*"
+        - "packages/scripts/src/test-sandbox.ts"
+        - "packages/scripts/src/test-skills.ts"
+        - "scripts/*.js"
+        - "scripts/*.json"
+        - "scripts/*.py"
+        - "scripts/*.sh"
+        - "scripts/*.ts"
+        - "tests/extensions/core/skills/code-review-loop/scripts/*"
+        - "tests/skill-frontmatter.test.ts"
+        - "tests/test_*.py"
+      run: "bun --no-env-file packages/scripts/src/commit-slot.ts bun run test:skills # {files}"
   # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
   scripts:
     # a pushed commit whose message holds a Co-authored-by trailer and that no live branch of the remote it pushes to holds yet, since a commit made with --no-verify skips commit-msg, and such a commit's message or a pushed branch or tag name holding a term from no-public-leak's list
