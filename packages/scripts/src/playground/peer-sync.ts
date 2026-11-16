@@ -33,6 +33,8 @@ const ssh = (key: string | undefined, target: string, words: string[]) => [
 ]
 
 const READ = ["git", "-C", CLONE, "status", "--porcelain", "--branch"]
+// a worktree cut from the clone (a replay run) reads its hooks through the clone's git dir, so a move under it changes what its later runs see
+const WORKTREES = ["git", "-C", CLONE, "worktree", "list", "--porcelain"]
 
 // The move, a step at a time, so a failure names its step; each touches the clone alone, bun's own cache aside, which the clone's first install made.
 const steps = (sha: string): [string, string[]][] => [
@@ -83,6 +85,11 @@ const syncPeer = async (
   const { branch, changed } = cloneState(read.out)
   if (changed) return "local changes, left as it is"
   if (branch !== null && branch !== "main") return `on ${branch}, not main, left as it is`
+  const listed = await run(ssh(key, target, WORKTREES), READ_MS)
+  if (listed.code !== 0) return `worktree list failed: ${firstLine(listed.out, listed.code)}`
+  const others = listed.out.split("\n").filter((line) => line.startsWith("worktree ")).length - 1
+  if (others > 0)
+    return `${others} ${others === 1 ? "worktree uses" : "worktrees use"} the clone, left as it is`
   for (const [name, words] of steps(sha)) {
     const done = await run(ssh(key, target, words), STEP_MS)
     if (done.code === 0) continue

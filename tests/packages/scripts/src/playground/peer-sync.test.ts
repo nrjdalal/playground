@@ -27,7 +27,13 @@ const SSH = ["ssh", "-i", "/home/you/.ssh/cluster", "-o", "BatchMode=yes", "-o",
 // A stub ssh: answers each call by the first of its remote words the script names, and records every argv.
 const stubSsh = (answers: Record<string, { code?: number; out?: string }> = {}) => {
   const calls: string[][] = []
-  const script: typeof answers = { status: { out: "## main...origin/main\n" }, ...answers }
+  const script: typeof answers = {
+    status: { out: "## main...origin/main\n" },
+    worktree: {
+      out: "worktree /home/you/Desktop/playground\nHEAD 0123\nbranch refs/heads/main\n\n",
+    },
+    ...answers,
+  }
   const run: PeerRun = async (argv) => {
     calls.push(argv)
     const hit = Object.entries(script).find(([word]) => argv.includes(word))
@@ -83,6 +89,16 @@ describe("syncPeers", () => {
         "git",
         "-C",
         "~/Desktop/playground",
+        "worktree",
+        "list",
+        "--porcelain",
+      ],
+      [
+        ...SSH,
+        "you@10.0.0.2",
+        "git",
+        "-C",
+        "~/Desktop/playground",
         "fetch",
         "-q",
         "origin",
@@ -118,7 +134,7 @@ describe("syncPeers", () => {
   test("a clone a sync left on a detached HEAD moves again", async () => {
     const { calls, run } = stubSsh({ status: { out: "## HEAD (no branch)\n" } })
     expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
-    expect(calls).toHaveLength(4)
+    expect(calls).toHaveLength(5)
   })
 
   test("a clone with local changes is left as it is: the read alone, never a fetch, checkout or reset", async () => {
@@ -134,6 +150,31 @@ describe("syncPeers", () => {
     const { calls, run } = stubSsh({ status: { out: "## canary...origin/canary\n" } })
     expect(await sync(ONE, run)).toEqual(["peer spark-b: on canary, not main, left as it is"])
     expect(calls).toHaveLength(1)
+  })
+
+  test("a clone other worktrees are cut from is left as it is, since their hooks read through its git dir; a list that fails moves nothing", async () => {
+    const two = stubSsh({
+      worktree: {
+        out: "worktree /home/you/Desktop/playground\nHEAD 0123\nbranch refs/heads/main\n\nworktree /home/you/replay/r1\nHEAD 0123\ndetached\n\nworktree /home/you/replay/r2\nHEAD 0123\ndetached\n\n",
+      },
+    })
+    expect(await sync(ONE, two.run)).toEqual([
+      "peer spark-b: 2 worktrees use the clone, left as it is",
+    ])
+    expect(two.calls).toHaveLength(2)
+    const one = stubSsh({
+      worktree: {
+        out: "worktree /home/you/Desktop/playground\n\nworktree /home/you/replay/r1\n\n",
+      },
+    })
+    expect(await sync(ONE, one.run)).toEqual([
+      "peer spark-b: 1 worktree uses the clone, left as it is",
+    ])
+    const failed = stubSsh({ worktree: { code: 129, out: "error: unknown option\n" } })
+    expect(await sync(ONE, failed.run)).toEqual([
+      "peer spark-b: worktree list failed: error: unknown option",
+    ])
+    expect(failed.calls).toHaveLength(2)
   })
 
   test("a peer ssh cannot reach prints why, and the next peer still moves", async () => {
@@ -155,7 +196,7 @@ describe("syncPeers", () => {
     expect(await sync(ONE, run)).toEqual([
       "peer spark-b: fetch failed: fatal: unable to access 'https://github.com/'",
     ])
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
   })
 
   test("a frozen lockfile that does not match fails as lockfile, with no plain install after it", async () => {
