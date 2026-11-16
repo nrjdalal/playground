@@ -1,5 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
-// claude-trust.ts [folder]: records the owner's yes to Claude Code's folder trust question for folder (the main checkout by default) in ~/.claude.json, as projects[<folder>].hasTrustDialogAccepted, which Claude Code's own question writes, so a session in it or any worktree under it starts with no question. First run's Trust this folder runs it on the owner's click; a config that does not read as a JSON object is left as it is.
+// claude-trust.ts [folder]: records the owner's yes to Claude Code's folder trust question for folder (the main checkout by default) in ~/.claude.json, as projects[<folder>].hasTrustDialogAccepted, which Claude Code's own question writes, so a session in it or any worktree under it starts with no question. install.sh runs it on the checkout it cloned, before the dispatcher starts, and first run's Trust this folder on the owner's click; a config that does not read as a JSON object is left as it is.
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"

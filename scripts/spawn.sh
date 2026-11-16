@@ -1790,7 +1790,7 @@ restoring_row_down() {
 }
 ! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
 # Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the session's folder and each folder above it up to the checkout's root and no further (measured on 2.1.325), so the yes on the checkout's root covers every worktree in it and a yes on a folder above the checkout counts for nothing.
-# A Claude session in this checkout starts only once that yes is there, which first run's Trust this folder records; a folder outside it keeps herdr_answer's answer, and an --ssh probe's claude runs on the other machine, whose own config it reads.
+# A Claude session in this checkout starts only once that yes is there, which install.sh records for the checkout it cloned and first run's Trust this folder records otherwise; a folder outside it keeps herdr_answer's answer, and an --ssh probe's claude runs on the other machine, whose own config it reads.
 claude_trusts() {
   python3 -I - "$(own_config)" "$1" "$2" <<'PY'
 import json, os, sys
