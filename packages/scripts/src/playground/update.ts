@@ -46,6 +46,7 @@ export const runUpdate = async (
   log: (line: string) => void = console.log,
   to?: string,
   done?: string,
+  briefs?: (old: string) => Promise<void>,
 ): Promise<number> => {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
   // a step whose output the terminal shows, named before it runs and again when it fails

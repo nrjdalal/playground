@@ -10,6 +10,8 @@ import { join } from "node:path"
 
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 
+import { type Send } from "./brief-refresh"
+
 // The lock one `playground add` holds at a time. Anything else that starts sessions and shares it takes it the same way, a folder holding `pid` renamed into place, so the lock is never seen empty.
 export const SPAWN_LOCK = "spawn.lock"
 
@@ -115,6 +117,7 @@ export const startDispatcher = async (o: {
   harness?: "codex"
   live: string[]
   name: string
+  send?: Send
   spawn: string
   template: string
 }): Promise<{ code: 0 | 1 | 3; message: string }> => {
