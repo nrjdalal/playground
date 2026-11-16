@@ -308,7 +308,7 @@ def kept_by(job):
 
 
 def render_jobs():
-    """jobs.json from the store's job settings and each org's own job rows, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, a turned-off job's plist going to the trash; a launchd job of Playground's own turned on and not loaded is installed in ~/Library/LaunchAgents when its plist is missing there and bootstrapped, and one turned off has its plist there trashed and is booted out while loaded, or on Linux the same as a systemd user unit in ~/.config/systemd/user, enabled, or disabled, trashed and stopped (exit 1 logs the one the trash kept, each refused bootstrap, bootout, enable, disable or stop and each org job row refused); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
+    """jobs.json from the store's job settings and each org's own job rows, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, a turned-off job's plist going to the trash; a launchd job of Playground's own turned on and not loaded is installed in ~/Library/LaunchAgents when its plist is missing there and bootstrapped, and one turned off has its plist there trashed and is booted out while loaded, or on Linux the same as a systemd user unit in ~/.config/systemd/user, enabled, or disabled, trashed and stopped, linger turned on before its first start (exit 1 logs the one the trash kept, each refused bootstrap, bootout, enable, disable or stop and each org job row refused, and exit 0 or 1 logs linger turned on or refused); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     if not (os.path.exists(bun) and os.path.exists(JOBS_RENDER)):
         return
@@ -320,8 +320,8 @@ def render_jobs():
         return
     if r.returncode in (0, 1) and r.stdout.strip() and "unchanged" not in r.stdout:
         log(r.stdout.strip())
-    named = [line for line in (r.stderr or "").splitlines() if line.startswith(("jobs: kept ", "jobs: refused "))]
-    if r.returncode == 1 and named:
+    named = [line for line in (r.stderr or "").splitlines() if line.startswith(("jobs: kept ", "jobs: refused ", "jobs: turned on "))]
+    if r.returncode in (0, 1) and named:
         log(" ".join(named))
     elif r.returncode not in (0, 3):
         log(f"jobs.json kept: {one_line_answer(r.stderr or r.stdout)}")

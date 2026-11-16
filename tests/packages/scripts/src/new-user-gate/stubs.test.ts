@@ -32,6 +32,14 @@ const call = (name: string, ...args: string[]) => {
   return { code: out.exitCode, out: out.stdout.toString() }
 }
 
+test("the box's systemctl and loginctl refuse every call and log it, so the box's jobs render never reaches the user's live manager", () => {
+  expect(call("systemctl", "--user", "stop", "com.playground.ops-tick.service").code).toBe(1)
+  expect(call("loginctl", "enable-linger", "1000").code).toBe(1)
+  const calls = readFileSync(join(box, "calls.log"), "utf8")
+  expect(calls).toContain("systemctl --user stop com.playground.ops-tick.service\n")
+  expect(calls).toContain("loginctl enable-linger 1000\n")
+})
+
 describe("the gate's pglaunch stand-in", () => {
   test("starts a labelled container published on loopback alone, and prints what first run reads as pglaunch's", () => {
     const { code, out } = call(

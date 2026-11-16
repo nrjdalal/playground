@@ -156,7 +156,7 @@ Playground's sessions run as a factory: the dispatcher manages, the Builder lead
 - ALWAYS: Signal only processes you started; never select pids by name or pattern.
   A name, pattern or port also matches the live dashboard, the proxy every worktree routes through and every worker's stack.
   Stop a background task with `TaskStop`, a dev stack whose starting session has gone with `bun run dev:stop`, and a child you spawned through its own pid or process group; every brief you write carries this rule.
-  A factory script's orphan (parent pid 1, its worktree or test sandbox gone) is the nightly clean's to end by its pid (`packages/scripts/src/ops-tick/orphans.ts`).
+  A factory script's orphan (adopted, its worktree or test sandbox gone) is the nightly clean's to end by its pid (`packages/scripts/src/ops-tick/orphans.ts`).
   The `no-kill-by-name` hook refuses a kill by name, pattern or port in a factory session's command, and `tests/test_kill_by_name.py` fails on one anywhere in the repo's text.
 
 ### The dashboard app
