@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
+import { scratchEnv } from "../scratch-env"
 import { OLD } from "../session-names"
 
 const root = join(import.meta.dir, "..", "..")
@@ -29,15 +30,14 @@ writeFileSync(join(fakeBin, "claude"), '#!/bin/bash\necho "$*" >> "$HOME/claude.
 chmodSync(join(fakeBin, "claude"), 0o755)
 
 // git's own variables are dropped and its system and XDG configs kept out, so a run inside a git hook never reaches the real checkout.
-const isolatedEnv = (home: string) => ({
-  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
-  GIT_CONFIG_NOSYSTEM: "1",
-  CLAUDE_CONFIG_DIR: "",
-  HOME: home,
-  PATH: `${fakeBin}:${process.env.PATH}`,
-  PLAYGROUND_DATA_DIR: "",
-  XDG_CONFIG_HOME: "",
-})
+const isolatedEnv = (home: string) =>
+  scratchEnv(home, {
+    GIT_CONFIG_NOSYSTEM: "1",
+    CLAUDE_CONFIG_DIR: "",
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    PLAYGROUND_DATA_DIR: "",
+    XDG_CONFIG_HOME: "",
+  })
 
 const git = (repo: string, home: string, ...args: string[]) => {
   const proc = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
