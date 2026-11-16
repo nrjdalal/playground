@@ -1331,7 +1331,7 @@ describe("systemReadings over a cluster", () => {
       "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores, 5 min.",
     )
     expect(pick(report, "memory").title).toBe(
-      "Memory 38% used\nspark-a566 50% + spark-9dfb 25% used",
+      "Memory 38% used, pressure normal on spark-a566\nspark-a566 50% + spark-9dfb 25% used",
     )
     expect(pick(report, "swap").title).toBe(
       "Swap 6% used, below the 90% warning level on each machine\nspark-a566 13% + spark-9dfb 0% used",

@@ -457,7 +457,10 @@ function clusterReadings(machines: Machine[], pressure: Pressure | null, now: Da
         reading(
           "memory",
           used === null ? "-" : String(used),
-          { hit: null, words: phrase },
+          {
+            hit: null,
+            words: pressure === "normal" ? `${phrase}, pressure normal on ${here}` : phrase,
+          },
           phrase,
           pressureHit ? [pressureHit] : [],
           pressure && !pressureHit ? `pressure ${pressure} on ${here}` : "",
