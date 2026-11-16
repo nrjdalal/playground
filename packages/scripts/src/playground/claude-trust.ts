@@ -35,12 +35,16 @@ export const withTrust = (text: string | null, folder: string): string | null =>
 export const trust = (home: string, folder: string): { code: number; line: string } => {
   const path = join(home, ".claude.json")
   const held = existsSync(path)
-  const next = withTrust(held ? readFileSync(path, "utf8") : null, folder)
+  const text = held ? readFileSync(path, "utf8") : null
+  const next = withTrust(text, folder)
   if (next === null)
     return {
       code: 1,
       line: `${path} does not read as Claude Code's config, so it is left as it is`,
     }
+  // a config that already holds the yes stays the same file, so a second install changes nothing
+  if (text !== null && JSON.parse(text).projects?.[folder]?.hasTrustDialogAccepted === true)
+    return { code: 0, line: `Claude Code already trusts ${folder}` }
   const tmp = `${path}.playground-${process.pid}`
   writeFileSync(tmp, next, { mode: 0o600 })
   chmodSync(tmp, held ? statSync(path).mode & 0o777 : 0o600)
