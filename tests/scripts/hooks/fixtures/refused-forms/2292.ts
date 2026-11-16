@@ -29,6 +29,7 @@ const controls = (): Row[] => [
   ["a coprocess's timed subshell", "coproc time (echo sub)"],
   ["a timed subshell in a brace group", "{ time (echo sub) }"],
   ["a paren after two times, read as a subshell", "time time (echo sub)"],
+  ["a wrapper before a paren holding a command line of echoes", "nice (echo a; echo b)"],
 ]
 
 // zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; after `time time` zsh globs the paren, its second time the external program, and the reader keeps a subshell, which judges these bodies' commands but misses a group-spelled program, a known limit
@@ -43,6 +44,16 @@ const stacked = (body: string, what: string): Row[] => [
   [`a coprocess's timed subshell running ${what}`, `coproc time (${body})`],
   [`a timed subshell in a brace group running ${what}`, `{ time (${body}) }`],
   [`a paren after two times running ${what}`, `time time (${body})`],
+]
+
+// a paren holding a command line after a wrapper, which zsh reads as a glob word but canary read as a subshell whose commands it judged
+const lines = (body: string, what: string): Row[] => [
+  [`a wrapper before a paren holding ${what}`, `nice (${body})`],
+  [`a wrapper before a paren holding ${what} after a semicolon`, `command (ls; ${body})`],
+  [`a wrapper before a paren holding ${what} before a semicolon`, `command (${body};x)`],
+  [`a wrapper before a paren holding ${what} before an ampersand`, `command (${body}&x)`],
+  [`a wrapper before a paren holding ${what} piped`, `nice (${body}|cat)`],
+  [`a wrapper before a paren holding ${what}, after a header line`, `#!/bin/sh\nnice (${body})`],
 ]
 
 const deleteControls = (): Row[] => [
@@ -150,6 +161,7 @@ export const groups: Group[] = [
         `command /bin/(r|x)m ${NEVER_MADE}`,
       ],
       ...stacked(`/bin/rm ${NEVER_MADE}`, "a plain rm"),
+      ...lines(`rm ${NEVER_MADE}`, "a plain rm"),
       ...controls(),
       ...deleteControls(),
     ],
@@ -200,6 +212,11 @@ export const groups: Group[] = [
         "nice $E (p|x)kill -f watcher",
       ],
       ...stacked("pkill -f watcher", "a kill by name"),
+      ...lines("pkill -f watcher", "a kill by name"),
+      [
+        "a wrapper before a paren holding a kill by name before a semicolon, bare",
+        "command (pkill;x)",
+      ],
       ...controls(),
       ...killControls(),
     ],
@@ -243,6 +260,7 @@ export const groups: Group[] = [
         "nice $E (g|x)it stash pop",
       ],
       ...stacked("git stash pop", "a stash pop"),
+      ...lines("git stash pop", "a stash pop"),
       ...controls(),
       ...stashControls(),
     ],
