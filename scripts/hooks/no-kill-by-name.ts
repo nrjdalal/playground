@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). A kill given a literal pid, $! or a pid file's contents passes, as does every search alone and `ps -p <pid>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
 
 import { input } from "./input"
 import { fromFactory } from "./role"
@@ -24,6 +24,11 @@ const BY_NAME = new Set(["killall", "pkill"])
 const KILLS = ["fuser", "kill", "killall", "pkill"]
 const SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"])
 const READS_ONLY = new Set(["--help", "--version", "-V", "-h"])
+// The programs that run portless from a word of theirs: bunx portless, npx -p portless portless, pnpm dlx portless, yarn portless, node node_modules/portless/dist/cli.js
+const LAUNCHERS = new Set(["bun", "bunx", "node", "npm", "npx", "pnpm", "pnpx", "yarn"])
+// portless's global flags, which it strips before it reads the subcommand (cli.js:8188-8226), and the ones of them that take a value
+const GLOBAL_FLAGS = new Set(["--cloudflare", "--funnel", "--lan", "--ngrok", "--tailscale"])
+const GLOBAL_VALUED = new Set(["--ip", "--lan-ip-auto", "--script"])
 
 const WAY_OUT =
   "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file)."
@@ -40,6 +45,32 @@ const readsOnly = (cmd: Command, first: Word | undefined, args: Word[]) => {
     ) ||
     (args.length > 0 && args.every((a) => READS_ONLY.has(a.value)))
   )
+}
+
+// portless by its name, a path to it or its dist/cli.js, a package name's trailing @<version or tag> read past (npx portless@0.15.11)
+const isPortless = (word: string) => {
+  const name = word.replace(/(?<=.)@[^@/]*$/, "")
+  return program(name) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(name)
+}
+
+// The words after each word that may run portless: the program itself, or any word of a launcher's, so npx -p portless portless yields both readings and either may be the stop
+const portlessRuns = (name: string, args: Word[]): string[][] => {
+  const values = args.map((a) => a.value)
+  if (isPortless(name)) return [values]
+  if (!LAUNCHERS.has(name)) return []
+  return values.flatMap((v, i) => (isPortless(v) ? [values.slice(i + 1)] : []))
+}
+
+// portless 0.15.11 with its global flags stripped: a proxy stop reads its port as cli.js:7048 does, the word after the first --port, else after the first -p, and with none probes 443, 80 and 1355 and stops whichever proxy answers (cli.js:2121); clean stops the proxy discoverState finds and takes no port (cli.js:6326-6330)
+const probingStop = (words: string[]) => {
+  const args = words.filter(
+    (v, i) =>
+      !GLOBAL_FLAGS.has(v) && !GLOBAL_VALUED.has(v) && !GLOBAL_VALUED.has(words[i - 1] ?? ""),
+  )
+  if (args[0] === "clean") return !args.slice(1).some((v) => v === "--help" || v === "-h")
+  if (args[0] !== "proxy" || args[1] !== "stop") return false
+  const flag = args.includes("--port") ? args.indexOf("--port") : args.indexOf("-p")
+  return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "")
 }
 
 // ps given a pid (-p, -q, --pid, --quick-pid) checks that one process, which is the way out's own liveness check
@@ -62,13 +93,12 @@ async function inspect(raw: string) {
         .join(" ")
     : ""
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
-  if (
-    !/\b(?:fuser|kill|killall|pkill)\b/.test(bare) &&
-    !/(?:\$\{?\w+\}?){2,}/.test(bare) &&
-    !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) &&
-    !globSpells(bare, KILLS)
-  )
-    return
+  const namesKill =
+    /\b(?:fuser|kill|killall|pkill)\b/.test(bare) ||
+    /(?:\$\{?\w+\}?){2,}/.test(bare) ||
+    /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) ||
+    globSpells(bare, KILLS)
+  if (!namesKill && !/\bportless\b/.test(bare)) return
   const lexed = lex(toolInput.command)
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
   // the whole call is read for a search first, since a loop's `done < <(pgrep …)` is read after the kill it feeds
@@ -98,10 +128,15 @@ async function inspect(raw: string) {
     }
     const { args, first, name, xargs } = parsed
     // a command the shell builds from a value the reader cannot read may be any kill, in a call whose text names one
-    if (parsed.unread)
+    if (parsed.unread && namesKill)
       return refuse(
         "a command built from a value it cannot read, in a call that names a kill",
         " Write the program and its words out in the call.",
+      )
+    if (portlessRuns(name, args).some(probingStop))
+      return refuse(
+        "a portless proxy stop with no port, or a portless clean",
+        " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with portless proxy stop -p <its port>.",
       )
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))

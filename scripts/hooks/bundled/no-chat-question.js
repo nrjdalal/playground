@@ -6188,9 +6188,9 @@ var within = (read) => Promise.race([
 ]);
 var SAY_TO_HIM = String.raw`(?:(?:^\s*(?:(?:[-*]|\d+[.)])\s+)?|[.!?]\s+|[,;:(]\s*)(?:(?:first|now|simply|so|then)\s+)?|\b(?:and|just|or|you(?:'d|'ll|\s+(?:can|could|just|may|might|will|would))?)\s+)say\s+`;
 var SAY = new RegExp(String.raw`${SAY_TO_HIM}(?:["'\`][^"'\`\n]+["'\`]|yes\b|go\b)`, "im");
-var PHRASES = /\b(?:can we|do you want|if you (?:still )?want|if you'd rather|is yours to|let me know which|one[\s-]word answer|settles it|shall I|should I|should we|tell me if|want me to|which do you|your call|your pick)\b/i;
+var PHRASES = String.raw`(?:can we|do you want|if you (?:still )?want|if you'd rather|is yours to|let me know which|one[\s-]word answer|settles it|shall I|should I|should we|tell me if|want me to|which do you|your call|your pick)`;
 var NOT_ASKED = String.raw`(?<!\b(?:anything|if|nothing|what|whatever)\s)`;
-var ACTION = new RegExp(String.raw`\b(?:could you|(?<!\b(?:no one|nobody|nothing)\s)(?<!(?:^\s*(?:(?:[-*]|\d+[.)])\s+)?|[.!?;]\s+)no \w+\s)is waiting on you\b(?!')|only you can(?!'|\s(?:access|open|read|see|view)\b)|(?<![-#\w])please(?![-\w])|when you can(?!')|when you get a chance|${NOT_ASKED}you have to|${NOT_ASKED}you must|${NOT_ASKED}you need to|${NOT_ASKED}you(?:'ll| will) need to|(?<!\byou can\s)(?!(?:\w+ed|did|made|ran|saw|wrote)\s)\w+ it yourself)\b`, "i");
+var ACTION = new RegExp(String.raw`\b(?:could you|(?<!\b(?:no one|nobody|nothing)\s)(?<!(?:^\s*(?:(?:[-*]|\d+[.)])\s+)?|[.!?;]\s+)no \w+\s)is waiting on you\b(?!')|only you can(?!'|\s(?:access|open|read|see|view)\b)|(?<![-#\w])please(?![-\w])|when you can(?!')|when you get a chance|${NOT_ASKED}you have to|${NOT_ASKED}you must|${NOT_ASKED}you need to|${NOT_ASKED}you(?:'ll| will) need to|(?<!\byou can\s)(?<!\bwithout (?:having to )?)(?!(?:\w+ed|did|made|ran|saw|wrote)\s)\w+ it yourself)\b`, "i");
 var QUESTION = /\?(?![\w/=&%#-])/;
 var BLOCKQUOTE = /^\s*>/;
 var FENCE = /```[\s\S]*?(?:```|$)/g;
@@ -6198,6 +6198,7 @@ var QUOTED = /^\s*(?:[-*]\s+)?(?!(?:i|we)\s)[@\w][\w@.' -]{0,40}?\s(?:asks|asked
 var escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var ownerOf = (owner) => owner.map(escape).join("|");
 var agentOf = (owner) => String.raw`(?:@${owner.length ? String.raw`(?!(?:${ownerOf(owner)})\b)` : ""}[\w-]+|light(?:man|kid|boy|plan)|${ID_NAME_SOURCE}|(?:worker|reviewer|tester|runner|probe)-[\w-]+)`;
+var phrases = (owner) => new RegExp(String.raw`\b(?<!\b(?:asked|told) (?!@?(?:you${owner.length ? `|${ownerOf(owner)}` : ""})\b)[\w@-]+ to )${PHRASES}\b`, "i");
 var BULLET = String.raw`(?:(?:[-*]|\d+[.)])\s+)?`;
 var ROLE_LABELS = new Set([...DISPATCHER_SLOT_LABELS, ...MANAGER_KINDS].map((label) => label.toLowerCase()));
 var shownNames = (names) => names.flatMap((name) => {
@@ -6225,11 +6226,12 @@ function ownWords(line, toAgentLine) {
 function asksDecision(reply, names = [], owner = []) {
   const toAgentLine = toAgent(names, owner);
   const toOwnerLine = toOwner(owner);
+  const phrasesLine = phrases(owner);
   const lines = reply.replace(FENCE, "").replace(CODE_SPAN, "").replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/\*\*|__/g, "").split(`
 `).filter((line) => line.trim() && !BLOCKQUOTE.test(line));
   return lines.some((line, i) => {
     const own = ownWords(line, toAgentLine).replace(QUOTE_SPAN, '""').replace(POINTER, "");
-    return SAY.test(own) || PHRASES.test(own) || QUESTION.test(own) && !answeredRow(line, lines[i + 1]) || ACTION.test(own) || !!toOwnerLine?.test(own);
+    return SAY.test(own) || phrasesLine.test(own) || QUESTION.test(own) && !answeredRow(line, lines[i + 1]) || ACTION.test(own) || !!toOwnerLine?.test(own);
   });
 }
 var STEP = /^\s*\d+[.)]\s/;

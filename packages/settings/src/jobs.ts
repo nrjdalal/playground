@@ -186,8 +186,8 @@ export const JOBS: Record<string, Job> = {
   }),
 }
 
-// The jobs Playground shipped and no longer does, A to Z: renderJobs turns an existing row of one off, so its teardown stops it on every install, its stored jobs.<camelName> row reads as no org's job, and the board leaves it out.
-export const RETIRED: string[] = ["ops-awake"]
+// The jobs Playground shipped and no longer does, A to Z: renderJobs turns an existing row of one off, so its teardown stops it on every install, its stored jobs.<camelName> row reads as no org's job and settings reset clears it, and the board and the sweep leave it out.
+export const RETIRED: readonly string[] = ["ops-awake"]
 
 // A job's old setting keys: the switch imports jobs.json under its old names before the migration renames them.
 const OLD_KEYS: Record<string, string[]> = { "ops-dashboard": ["jobs.opsDesk"] }
@@ -368,15 +368,20 @@ const runsFrom = (
 // An org's own job, marked with the org that adds it, which its jobs.json row keeps so a later pass can tell it from a row kept by hand.
 export type OrgJob = Job & { org: string }
 
+const RETIRED_KEYS = new Set(RETIRED.map(jobKey))
+
 const REGISTRY_KEYS = new Set([
   ...Object.keys(JOBS).map(jobKey),
   ...Object.values(OLD_KEYS).flat(),
-  ...RETIRED.map(jobKey),
+  ...RETIRED_KEYS,
 ])
 
 // Whether a key names an org's own job: a jobs.<camelName> key the registry lacks, under any spelling, which only orgJob can say is the job's name.
 export const orgJobKey = (key: string): boolean =>
   key.startsWith("jobs.") && !REGISTRY_KEYS.has(key)
+
+// Whether a key is the stored jobs.<camelName> row of a job RETIRED names.
+export const retiredJobKey = (key: string): boolean => RETIRED_KEYS.has(key)
 
 // One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused; a write of the row checks it the same way, as it stands, against the scope's own script folders, while a read hands it a stored row through fromStored.
 export const orgJob = (
