@@ -70,14 +70,19 @@ describe("readingsOf", () => {
     ])
   })
 
-  test("with a peer, memory, CPU load and swap show the cluster's sums with the split on hover, while disk and Docker stay this machine's, disk naming it", () => {
+  test("with a peer, memory, CPU load, swap and disk show the cluster's sums with the split on hover, while Docker stays this machine's", () => {
     const local = {
       cores: 20,
+      disk: { freeBytes: 700 * GB, totalBytes: 994 * GB },
       load: [3.1, 2.9, 2.5] as [number, number, number],
       memory: { totalBytes: 128 * GB, usedBytes: 12 * GB },
       swap: { totalBytes: 16 * GB, usedBytes: 1 * GB },
     }
-    const peer = { ...local, load: [0.4, 0.3, 0.2] as [number, number, number] }
+    const peer = {
+      ...local,
+      disk: { freeBytes: 300 * GB, totalBytes: 994 * GB },
+      load: [0.4, 0.3, 0.2] as [number, number, number],
+    }
     const shown = rows([
       { down: null, name: "machine-a", reading: local },
       { down: null, name: "machine-b", reading: peer },
@@ -90,10 +95,10 @@ describe("readingsOf", () => {
       ],
       ["cpu", "3.5 on 40 cores", "machine-a 3.1 on 20 + machine-b 0.4 on 20 cores"],
       ["swap", "2.0 GB of 32.0 GB", "machine-a 1.0 GB of 16.0 GB + machine-b 1.0 GB of 16.0 GB"],
-      ["disk", "700.0 GB", undefined],
+      ["disk", "1000.0 GB", "machine-a 700.0 GB + machine-b 300.0 GB"],
       ["docker", "-", undefined],
     ])
-    expect(shown.find((r) => r.id === "disk")?.detail).toBe("of 994.0 GB on machine-a")
+    expect(shown.find((r) => r.id === "disk")?.detail).toBe("of 1988.0 GB")
     expect(shown.find((r) => r.id === "cpu")?.detail).not.toContain("This machine only")
   })
 })
