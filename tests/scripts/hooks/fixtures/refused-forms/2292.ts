@@ -46,7 +46,7 @@ const stacked = (body: string, what: string): Row[] => [
   [`a paren after two times running ${what}`, `time time (${body})`],
 ]
 
-// a paren holding a command line after a wrapper, which zsh reads as a glob word but canary read as a subshell whose commands it judged
+// a paren holding a command line after a wrapper, which reads as a subshell alone, its commands judged as any subshell's
 const lines = (body: string, what: string): Row[] => [
   [`a wrapper before a paren holding ${what}`, `nice (${body})`],
   [`a wrapper before a paren holding ${what} after a semicolon`, `command (ls; ${body})`],
@@ -54,6 +54,32 @@ const lines = (body: string, what: string): Row[] => [
   [`a wrapper before a paren holding ${what} before an ampersand`, `command (${body}&x)`],
   [`a wrapper before a paren holding ${what} piped`, `nice (${body}|cat)`],
   [`a wrapper before a paren holding ${what}, after a header line`, `#!/bin/sh\nnice (${body})`],
+]
+
+// a paren inside a wrapper's group that a double quote or a backslash keeps as text, or a group with words after it, then a command after the group
+const after = (body: string, what: string): Row[] => [
+  [
+    `a wrapper before a group holding a double-quoted paren, then ${what}`,
+    `nice (a|")") ; ${body}`,
+  ],
+  [`a wrapper before a group holding an escaped paren, then ${what}`, `nice (a|\\)) ; ${body}`],
+  [
+    `a wrapper before a group holding a quoted paren, then ${what} after an and`,
+    `command (a|"x)") && ${body}`,
+  ],
+  [
+    `a wrapper before a group holding a quoted paren and glued text, then ${what}`,
+    `nice (a|")"|b)x; ${body}`,
+  ],
+  [
+    `a wrapper before two groups, one holding a quoted paren, then ${what}`,
+    `nice (a|")")(b|y); ${body}`,
+  ],
+  [
+    `a wrapper before a group holding a double-quoted paren, then ${what}, after a header line`,
+    `#!/bin/sh\nnice (a|")") ; ${body}`,
+  ],
+  [`a wrapper before a group, then ${what} as its arguments`, `nice (true) ${body}`],
 ]
 
 const deleteControls = (): Row[] => [
@@ -162,6 +188,11 @@ export const groups: Group[] = [
       ],
       ...stacked(`/bin/rm ${NEVER_MADE}`, "a plain rm"),
       ...lines(`rm ${NEVER_MADE}`, "a plain rm"),
+      ...after(`rm ${NEVER_MADE}`, "a plain rm"),
+      [
+        "nice running a plain rm a zsh group with a double-quoted paren spells",
+        `nice (r|")")m ${NEVER_MADE}`,
+      ],
       ...controls(),
       ...deleteControls(),
     ],
@@ -217,6 +248,15 @@ export const groups: Group[] = [
         "a wrapper before a paren holding a kill by name before a semicolon, bare",
         "command (pkill;x)",
       ],
+      ...after("pkill -f watcher", "a kill by name"),
+      [
+        "nice running a kill by name a zsh group with a double-quoted paren spells",
+        'nice (p|")")kill -f watcher',
+      ],
+      [
+        "nice running a kill by name a zsh group with an escaped paren spells",
+        "nice (p|\\))kill -f watcher",
+      ],
       ...controls(),
       ...killControls(),
     ],
@@ -261,8 +301,47 @@ export const groups: Group[] = [
       ],
       ...stacked("git stash pop", "a stash pop"),
       ...lines("git stash pop", "a stash pop"),
+      ...after("git stash pop", "a stash pop"),
+      [
+        "nice running a stash pop a zsh group with a double-quoted paren spells",
+        'nice (g|")")it stash pop',
+      ],
+      [
+        "nice running a stash pop a zsh group with an escaped paren spells",
+        "nice (g|\\))it stash pop",
+      ],
       ...controls(),
       ...stashControls(),
+    ],
+  },
+  // hooks that read the lexer's command list themselves, outside the shared walk: each sees a paren's commands after a wrapper as a subshell's
+  {
+    folders: ["checkout"],
+    guards: ["no-unslotted-run"],
+    rows: () => [
+      [
+        "a runner's shell script running next build in a paren after a wrapper",
+        "npx -p next sh -c 'nice (next build)'",
+      ],
+      [
+        "a runner's shell script running a turbo build in a paren after a wrapper",
+        "bunx -p turbo sh -c 'nice (turbo build)'",
+      ],
+      ["a heavy run after a group holding a double-quoted paren", 'nice (a|")") ; bun run test'],
+    ],
+  },
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a git hook's text running eval in a paren after a wrapper",
+        "printf 'nice (eval x)\\n' > .git/hooks/pre-commit",
+      ],
+      [
+        "a git hook's text running a variable's program in a paren after a wrapper",
+        "echo 'nice ($R x)' > .git/hooks/pre-commit",
+      ],
     ],
   },
 ]
