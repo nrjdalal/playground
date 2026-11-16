@@ -1,11 +1,12 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   DASHBOARD_DOWN_MINUTES,
   dashboardWatch,
+  STALE_MINUTES,
 } from "../../../../../packages/scripts/src/ops-tick/dashboard-watch"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { fakeRun } from "./fake-run"
@@ -90,6 +91,36 @@ test("a told run gone stale while ops-tick was stopped answers with its last dow
   )
   await minute(ops, DASHBOARD_DOWN_MINUTES + 9, true, banners)
   expect(banners).toHaveLength(2)
+})
+
+test(`a last down reading ${STALE_MINUTES - 1} minutes old is this run's own, and ${STALE_MINUTES} minutes old is stale`, async () => {
+  const fresh = scratch()
+  const banners: string[] = []
+  await toldThenStopped(fresh, banners)
+  await minute(fresh, DASHBOARD_DOWN_MINUTES + STALE_MINUTES - 1, true, banners)
+  expect(banners.at(-1)).toBe(
+    `The Dashboard answers again, after ${DASHBOARD_DOWN_MINUTES + STALE_MINUTES - 1} minutes down`,
+  )
+  const old = scratch()
+  const late: string[] = []
+  await toldThenStopped(old, late)
+  await minute(old, DASHBOARD_DOWN_MINUTES + STALE_MINUTES, true, late)
+  expect(late.at(-1)).toBe(
+    "The Dashboard answers again; its last down reading was at 2026-10-20 10:53 UTC, and ops-tick read nothing between",
+  )
+})
+
+test("a told run whose last down reading does not read as a time is stale, so it sends no count", async () => {
+  const ops = scratch()
+  mkdirSync(join(ops, "tick"), { recursive: true })
+  writeFileSync(
+    join(ops, "tick", "dashboard-watch.json"),
+    JSON.stringify({ downSince: "2026-10-20T10:48:10.000Z", lastDownAt: "soon", told: true }),
+  )
+  const banners: string[] = []
+  await minute(ops, 1, true, banners)
+  expect(banners).toHaveLength(1)
+  expect(banners[0]).toStartWith("The Dashboard answers again; its last down reading was at")
 })
 
 test("a run gone stale before it was told ends quietly on an answer", async () => {

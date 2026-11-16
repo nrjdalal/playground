@@ -3,11 +3,13 @@ import { join } from "node:path"
 
 import { apiUp, dashboardCheckout, dashboardUrls } from "../playground/probe"
 import { writeAtomic } from "../write-atomic"
-import { CYCLE_SECONDS } from "./cycle"
 import type { Context } from "./tick"
 
 // A live dashboard roll measured 15s down and a failed restart cycle about 2.5 minutes, so 5 minutes in a row is an outage no restart is fixing.
 export const DASHBOARD_DOWN_MINUTES = 5
+
+// This watch's beat runs every minute (its `* * * * *` cron in tick.ts's BEATS), so a last down reading 3 or more minutes old is 2 missed beats: ops-tick or the machine stopped in between.
+export const STALE_MINUTES = 3
 
 type DashboardWatch = { downSince: string; lastDownAt?: string; told?: boolean }
 
@@ -30,14 +32,17 @@ const utcMinute = (iso: string): string => `${iso.slice(0, 16).replace("T", " ")
 const minutesSince = (ctx: Context, since: string): number =>
   Math.floor((ctx.now.getTime() - Date.parse(since)) / 60_000)
 
-// A run whose last down reading is over two of ops-tick's cycles old (one cycle and a missed one) was not seen by this run: ops-tick or the machine stopped in between.
-const stale = (ctx: Context, state: DashboardWatch): boolean =>
-  Number.isNaN(Date.parse(state.downSince)) ||
-  Math.floor(
-    (ctx.now.getTime() - Date.parse(state.lastDownAt ?? state.downSince)) / (CYCLE_SECONDS * 1000),
-  ) > 2
+// A run this run of ops-tick did not see: its last down reading is STALE_MINUTES or more old, or either time is unreadable.
+const stale = (ctx: Context, state: DashboardWatch): boolean => {
+  const last = state.lastDownAt ?? state.downSince
+  return (
+    Number.isNaN(Date.parse(state.downSince)) ||
+    Number.isNaN(Date.parse(last)) ||
+    minutesSince(ctx, last) >= STALE_MINUTES
+  )
+}
 
-// Each cycle: the run of failures is kept in tick/dashboard-watch.json, one banner goes out once the dashboard has failed DASHBOARD_DOWN_MINUTES in a row, and one more when it answers again; an answer, or a stale run (stale), ends the run before then, quietly unless it was told, when the answer names the last down reading in place of a count no one saw.
+// Each minute: the run of failures is kept in tick/dashboard-watch.json, one banner goes out once the dashboard has failed DASHBOARD_DOWN_MINUTES in a row, and one more when it answers again; an answer, or a stale run (stale), ends the run before then, quietly unless it was told, when the answer names the last down reading in place of a count no one saw.
 export const dashboardWatch = async (ctx: Context, up = dashboardUp) => {
   const statePath = join(ctx.ops, "tick", "dashboard-watch.json")
   const state = (await Bun.file(statePath)
