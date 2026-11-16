@@ -4,6 +4,8 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "no
 import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
+import { readPolicy } from "../../packages/settings/src/rendered"
+import { ruleSettings } from "../../packages/settings/src/rules"
 import { patchPaths } from "./codex"
 import { input } from "./input"
 import { mainCheckout } from "./no-main-checkout"
@@ -172,9 +174,9 @@ const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? ""))
 const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/
 
-// Read mode's reason, by why the session is in it; a PR GitHub did not answer for names its kept answer, which a read retries an hour after the failure.
+// Read mode's reason, by why the session is in it; a PR GitHub did not answer for names when the hook reads it again.
 const unread = (repo: string, n: number) =>
-  `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again an hour after the failed read, or at once after its worker or lead removes hook-outside-pr/${repo.replace("/", "__")}__${n}.json in the data folder with playground rm.`
+  `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again on the first call once the github rule's poll interval (github.pollMinutes, 5 minutes by default) has passed since the failed read.`
 const REASONS = {
   none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>. An extension item's reviewer has no PR and stays in read mode: read each revision with playground ext show <scope> <kind> <key> --rev <sha> piped into jq (.content.files, .content.body), and say in the verdict that the item was read, not run.",
   outside:
@@ -597,18 +599,24 @@ export function trackedIn(main: string, script: string): boolean {
   )
 }
 
-// The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
+// The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for the github rule's poll interval, so a PR GitHub cannot answer costs one call each interval and a checker waits minutes, not an hour.
 export function live(environment: Environment): Lookup {
   const data = dataDirOf(environment)
   const cache = join(data, "hook-outside-pr")
-  const HOUR = 3600 * 1000
+  // github.pollMinutes, read at each kept failure so a change takes the next call; its default while the policy cannot be read
+  const pollMs = async () => {
+    const read = await readPolicy(data).catch(() => undefined)
+    const settings = read?.settings ?? { schemaVersion: 1 as const, values: {} }
+    return ruleSettings.get(settings, "github.pollMinutes") * 60_000
+  }
   return {
     author: async (repo, pr) => {
       const file = join(cache, `${repo.replace("/", "__")}__${pr}.json`)
       try {
         const kept = (await Bun.file(file).json()) as { failedAt?: number } | Pr
         if (isPr(kept)) return kept
-        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < HOUR) return
+        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < (await pollMs()))
+          return
       } catch {}
       const jq =
         "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}"

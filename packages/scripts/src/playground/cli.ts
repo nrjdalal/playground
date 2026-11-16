@@ -17,6 +17,7 @@ import { orgsCommand, orgsIo } from "./orgs"
 import { keepPage, pageArgs, removePage } from "./page"
 import {
   addCommand,
+  aliasFailure,
   extraWordRefusal,
   HELP,
   leftLines,
@@ -34,7 +35,7 @@ import {
   wantsHelp,
 } from "./plan"
 import {
-  apiUp,
+  apiRead,
   dashboardBeat,
   cutDashboardCheckout,
   dashboardCheckout,
@@ -243,17 +244,25 @@ const dashboard = async (): Promise<number> => {
       const started = await manager("dispatcher")
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
-      const ready = urls ?? dashboardUrls(checkout)
       const started = Date.now()
       const state = { shownAt: started, startedAt: started }
       for (;;) {
-        const api = await apiUp(ready)
+        // read afresh each poll, as the supervisor's wait_dashboard does: the stack's API may start portless's 1355 proxy, with its own scheme, after the first read
+        const health = await apiRead(dashboardUrls(checkout))
         const now = Date.now()
-        const failure = startFailure(
-          await linesSince(logs.results, from.results),
-          await linesSince(logs.log, from.log),
+        const results = await linesSince(logs.results, from.results)
+        const failure = startFailure(results, await linesSince(logs.log, from.log))
+        const outcome = waitOutcome(
+          {
+            alias: aliasFailure(results),
+            api: health.up,
+            beat: dashboardBeat(now),
+            failure,
+            now,
+            redirect: health.redirect,
+          },
+          state,
         )
-        const outcome = waitOutcome({ api, beat: dashboardBeat(now), failure, now }, state)
         if ("done" in outcome) {
           if (!outcome.ok) {
             failed.push(`The Dashboard didn't come up: ${outcome.done}`)
@@ -269,7 +278,8 @@ const dashboard = async (): Promise<number> => {
         await pause(2000)
       }
     } else {
-      const ready = urls ?? dashboardUrls(checkout)
+      // read again for the same reason as the wait's polls: the URLs read at the run's start can name an idle ~/.portless's
+      const ready = dashboardUrls(checkout)
       if (!ready) {
         failed.push("The Dashboard didn't open: portless gives no URL for it")
         return close()

@@ -444,3 +444,26 @@ describe("xargs fills its program from the input GNU's input options name", () =
     expect(await filled(line)).toContain(`${UNKNOWN} run`)
   })
 })
+
+// #2292: a paren where a wrapper's program word goes keeps its subshell reading in the command list, and its opener carries zsh's glob reading beside it
+describe("a wrapper's group word keeps the command list and carries the glob reading on its opener", () => {
+  const read = (line: string) => {
+    const { commands } = lex(line)
+    return {
+      commands: commands.map((c) => c.words.map((w) => w.value)),
+      glob: commands.flatMap((c) => (c.glob ? [c.glob.words.map((w) => w.value)] : [])),
+    }
+  }
+  test.each([
+    ["nice (r|x)m a", [["nice"], ["r"], ["x"], ["m", "a"]], [["nice", "(r|x)m", "a"]]],
+    [
+      "nice (r|x)(m|y) a",
+      [["nice"], ["r"], ["x"], [], ["m"], ["y"], ["a"]],
+      [["nice", "(r|x)(m|y)", "a"]],
+    ],
+    ["nice (bun test | tail)", [["nice"], ["bun", "test"], ["tail"], []], []],
+    ['nice (a|")") ; ls x', [["nice"], ["a"], [")"], [], ["ls", "x"]], [["nice", '(a|")")']]],
+  ])("%s", (line, commands, glob) => {
+    expect(read(line)).toEqual({ commands, glob })
+  })
+})

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -11,6 +12,8 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
+import { writeRoot } from "../../../packages/settings/src/folder"
+import { extensionsDir } from "../../../packages/settings/src/rendered"
 import {
   check,
   live,
@@ -920,6 +923,12 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
   })
 
+  test("a PR the hook cannot read names when it is read again, and no step that clears the kept failure", async () => {
+    expect(await judge(call("bun test", OUTSIDE, "s-unread"))).toEndWith(
+      "It reads again on the first call once the github rule's poll interval (github.pollMinutes, 5 minutes by default) has passed since the failed read.",
+    )
+  })
+
   test("an item's reviewer, whose row names no PR, is told to read each revision with ext show", async () => {
     expect(await judge(call("bun test", OUTSIDE, "s-none"))).toContain(
       "playground ext show <scope> <kind> <key> --rev <sha>",
@@ -1051,6 +1060,53 @@ describe("no-outside-pr-code's live lookup", () => {
     )
     expect(await live(environment).author("acme-owner/widgets", 501)).toEqual(pr)
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
+  })
+
+  // bun finds a program on the PATH it started with, so each read runs in a child whose PATH leads with a stub gh that answers the owner's own PR
+  const readAfter = async (n: number, minutesAgo: number, pollMinutes?: number) => {
+    const data = join(scratch, `poll-${n}`)
+    const bin = join(data, "bin")
+    mkdirSync(join(data, "hook-outside-pr"), { recursive: true })
+    mkdirSync(bin, { recursive: true })
+    await Bun.write(join(bin, "gh"), `#!/bin/sh\necho '${JSON.stringify(OWN)}'\n`)
+    chmodSync(join(bin, "gh"), 0o755)
+    if (pollMinutes !== undefined)
+      writeRoot(
+        extensionsDir(data),
+        new Map([
+          [
+            "policy.json",
+            JSON.stringify({
+              orgs: {},
+              schemaVersion: 1,
+              values: { "github.pollMinutes": pollMinutes },
+            }),
+          ],
+        ]),
+      )
+    const file = join(data, "hook-outside-pr", `acme-owner__widgets__${n}.json`)
+    const hook = join(import.meta.dir, "../../../scripts/hooks/no-outside-pr-code.ts")
+    const script = join(data, "read.ts")
+    // the child keeps the failure by its own clock, since a clock-ahead run shifts this process's and not the child's
+    await Bun.write(
+      script,
+      `import { live } from ${JSON.stringify(hook)}\nawait Bun.write(${JSON.stringify(file)}, JSON.stringify({ failedAt: Date.now() - ${minutesAgo * 60_000} }))\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", ${n})) ?? "none")\n`,
+    )
+    const child = Bun.spawnSync([process.execPath, script], {
+      cwd: data,
+      env: { ...environment, PATH: `${bin}:/usr/bin:/bin`, PLAYGROUND_DATA_DIR: data },
+    })
+    return { kept: await Bun.file(file).json(), read: child.stdout.toString().trim() }
+  }
+  const OWN = { author: "acme-owner", owner: "acme-owner", ownerType: "User" }
+
+  test("a failure older than the github rule's poll interval, 5 minutes by default, reads the PR again and keeps the answer", async () => {
+    expect(await readAfter(511, 6)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
+  })
+
+  test("a failure younger than github.pollMinutes is kept, read from the policy", async () => {
+    expect((await readAfter(512, 10, 15)).read).toBe("none")
+    expect(await readAfter(513, 10, 8)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
   })
 
   // #1280: read mode runs a skill's script only while git in the main checkout reports it tracked and unchanged
