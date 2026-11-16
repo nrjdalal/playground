@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, afterEach, expect, test } from "bun:test"
 import {
   copyFileSync,
   existsSync,
@@ -14,16 +14,29 @@ import { dirname, join } from "node:path"
 
 // the render_jobs harness runs jobs.ts through python, whose import graph (probe.ts's @packages/config/kinds among them) resolves through the built dists no import here reached, so a fresh checkout's render died on "Cannot find module" and its failure log then raised on the ops folder it never made (issue 1496); importing jobs.ts selects those builds
 import "../../../packages/scripts/src/playground/jobs"
+import { liveBusLines, systemdLog, systemdStandIns } from "../../systemd-stand-ins"
 
 const upPy = join(import.meta.dir, "..", "..", "..", "scripts", "ops", "up.py")
 const scratch = mkdtempSync(join(tmpdir(), "ops-up-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// bun first on PATH, behind a launchctl that refuses every call, so a pass's real render can never reach the real launchctl whatever jobs the registry turns on
+// bun first on PATH, behind a launchctl, a systemctl and a loginctl that refuse every call, so a pass's real render can never reach the real launchd or systemd whatever jobs the registry turns on
 const fakeBin = join(scratch, "fake-bin")
 mkdirSync(fakeBin)
 writeFileSync(join(fakeBin, "launchctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 })
+systemdStandIns(fakeBin)
 const BUN_PATH = `${fakeBin}:${dirname(process.execPath)}:/usr/bin:/bin`
+const SYS_PATH = `${fakeBin}:/usr/bin:/bin`
+// a runtime folder of the scratch's own, so no systemd call finds the live bus, whatever the shell running the suite has set
+const runtime = join(scratch, "run")
+mkdirSync(runtime)
+const SYSTEMD_ENV = {
+  DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtime}/bus`,
+  XDG_RUNTIME_DIR: runtime,
+}
+
+// a render on Linux that reached the user's live manager stopped its running ops jobs, so every test fails when a systemd call named /run/user/<uid>
+afterEach(() => expect(liveBusLines(systemdLog(fakeBin))).toEqual([]))
 
 // The data folder up.py reads under a config folder: its jobs.json, roster and up.log.
 const dataOf = (config: string) => join(config, "playground")
@@ -87,6 +100,7 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
       PATH: BUN_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -123,7 +137,8 @@ const exitOf = (jobs: object[], ...args: string[]) => {
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: "/usr/bin:/bin",
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -197,7 +212,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
     CLAUDE_CONFIG_DIR: config,
     PLAYGROUND_DATA_DIR: join(config, "playground"),
     HOME: scratch,
-    PATH: "/usr/bin:/bin",
+    PATH: SYS_PATH,
+    ...SYSTEMD_ENV,
   }
   const pass = (...args: string[]) => {
     const child = Bun.spawnSync(["python3", "-I", "-c", RESTARTED, upPy, ...args], {
@@ -219,7 +235,7 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
       join(ops, "up-state.json"),
       JSON.stringify({ "ops-x": now, "ops-y": now, "ops-z": now }),
     ],
-    { stdout: "pipe" },
+    { env: { ...SYSTEMD_ENV, PATH: SYS_PATH }, stdout: "pipe" },
   )
   const reader = holder.stdout.getReader()
   expect(new TextDecoder().decode((await reader.read()).value)).toContain("held")
@@ -290,7 +306,8 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: "/usr/bin:/bin",
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -348,7 +365,8 @@ test("a launchd job down 3 passes in a row is told to ops once, and again only a
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: "/usr/bin:/bin",
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -380,7 +398,8 @@ test("on Linux a launchd job down 3 passes in a row is told to ops as its system
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: "/usr/bin:/bin",
+        PATH: SYS_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
       stdout: "pipe",
@@ -414,7 +433,8 @@ test("the start line holds exec before the job", () => {
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
-      PATH: "/usr/bin:/bin",
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -458,6 +478,7 @@ const startExt = (config: string, command: string, rendered?: string) => {
         PLAYGROUND_DATA_DIR: dataOf(config),
         HOME: scratch,
         PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
       stdout: "pipe",
@@ -559,7 +580,8 @@ test("an empty lsof read leaves every job alone", () => {
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
-        PATH: "/usr/bin:/bin",
+        PATH: SYS_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
       stdout: "pipe",
@@ -594,6 +616,7 @@ test("a pass renders jobs.json from the store, keeps it when the store has no po
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
         PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
     })
@@ -636,6 +659,7 @@ test("a dead render with no ops folder shows the render's own error in up.log, n
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: scratch,
         PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
     },
@@ -671,6 +695,7 @@ test("a pass hands the render HOME's LaunchAgents folder to install into", () =>
         PLAYGROUND_DATA_DIR: dataOf(config),
         HOME: scratch,
         PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
     },
@@ -705,6 +730,7 @@ test("on Linux a pass hands the render HOME's systemd user unit folder to instal
         PLAYGROUND_DATA_DIR: dataOf(config),
         HOME: scratch,
         PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
       },
       stderr: "pipe",
     },
@@ -712,6 +738,42 @@ test("on Linux a pass hands the render HOME's systemd user unit folder to instal
   expect(pass.stderr.toString()).toBe("")
   const args = JSON.parse(readFileSync(argv, "utf8")) as string[]
   expect(args[args.indexOf("--install") + 1]).toBe(join(scratch, ".config", "systemd", "user"))
+})
+
+// #2314: the render turns linger on, a change to the machine, with exit 0, so up.log keeps its line, and a refusal's, at exit 0 too
+test("a pass logs the render's linger line, turned on or refused, at exit 0", () => {
+  const config = join(scratch, "config-linger")
+  mkdirSync(join(dataOf(config), "ops"), { recursive: true })
+  const render = join(scratch, "linger-render.ts")
+  writeFileSync(
+    render,
+    `console.error("jobs: turned on linger for user 1000")\nconsole.error("jobs: refused enable-linger of user 1001, exit 1: Access denied")\n`,
+  )
+  const pass = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}sys.platform = "linux"\nup.JOBS_RENDER = sys.argv[2]\nup.render_jobs()`,
+      upPy,
+      render,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: dataOf(config),
+        HOME: scratch,
+        PATH: BUN_PATH,
+        ...SYSTEMD_ENV,
+      },
+      stderr: "pipe",
+    },
+  )
+  expect(pass.stderr.toString()).toBe("")
+  const log = readFileSync(join(dataOf(config), "ops", "up.log"), "utf8")
+  expect(log).toContain(
+    "jobs: turned on linger for user 1000 jobs: refused enable-linger of user 1001, exit 1: Access denied",
+  )
 })
 
 test("a pass writes jobs.json into the data folder dataDir() resolves, playground over an old dispatcher beside it", () => {
@@ -724,6 +786,7 @@ test("a pass writes jobs.json into the data folder dataDir() resolves, playgroun
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
       PATH: BUN_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
   })
@@ -749,6 +812,7 @@ test("a pass moves a turned-off job's plist from ops/launch-agents to the data f
       PLAYGROUND_DATA_DIR: data,
       HOME: scratch,
       PATH: BUN_PATH,
+      ...SYSTEMD_ENV,
     },
     stderr: "pipe",
   })
@@ -801,7 +865,8 @@ test("a resume reads the roster and its backend pin from the data folder spawn.s
     env: {
       CLAUDE_CONFIG_DIR: config,
       HOME: scratch,
-      PATH: "/usr/bin:/bin",
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
       PLAYGROUND_DATA_DIR: data,
     },
     stderr: "pipe",
@@ -825,7 +890,12 @@ test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute
   const read = (value: string, cwd: string) => {
     const r = Bun.spawnSync(["python3", "-I", "-c", `${LOAD}\nprint(up.DATA)`, upPy], {
       cwd,
-      env: { HOME: at, PATH: process.env.PATH, PLAYGROUND_DATA_DIR: value },
+      env: {
+        ...SYSTEMD_ENV,
+        HOME: at,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        PLAYGROUND_DATA_DIR: value,
+      },
     })
     return { code: r.exitCode, err: r.stderr.toString(), out: r.stdout.toString().trim() }
   }

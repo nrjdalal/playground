@@ -10,7 +10,7 @@ A green type-check and a clean lint prove the code compiles, not that the page r
 
 ## 1. Run the stack
 
-Start the dev servers (`dev` skill). Under the default portless dev the base URLs are named and branch-prefixed, so resolve them once: `WEB=$(bunx portless get playground)` and `API=$(bunx portless get api.playground)` (or `PORTLESS=0 bun run dev` for the fixed `http://localhost:3000` / `http://localhost:4000`). Done when `$WEB/` answers 307 to `/dashboard` (200 with `curl -L`) and `$API/api/health` responds ok with `"dashboard":"fixture"`: the stack reads the fixture, a made-up machine, so nothing it shows is real (`.agents/dashboard/stack.md`). A stack reading `"live"` (the live dashboard, `PLAYGROUND_LIVE_READS`, or a person's own clone outside `.claude/worktrees/`) is for checks by text alone.
+Start the dev servers (`dev` skill). Under the default portless dev the base URLs are named and branch-prefixed, so resolve them once, as the `dev` skill's Start block does: `WEB=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground)` and `API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground)`, with `PDIR` from `portlessDir()` (or `PORTLESS=0 bun run dev` for the fixed `http://localhost:3000` / `http://localhost:4000`). Done when `$WEB/` answers 307 to `/dashboard` (200 with `curl -L`) and `$API/api/health` responds ok with `"dashboard":"fixture"`: the stack reads the fixture, a made-up machine, so nothing it shows is real (`.agents/dashboard/stack.md`). A stack reading `"live"` (the live dashboard, `PLAYGROUND_LIVE_READS`, or a person's own clone outside `.claude/worktrees/`) is for checks by text alone.
 
 ## 2. Drive the affected route
 

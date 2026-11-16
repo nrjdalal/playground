@@ -28,6 +28,7 @@ import {
 } from "@packages/settings"
 
 import { engineDataOf, lastRevision, REVISION } from "../ops-job/job"
+import { userSystemctl } from "../user-systemctl"
 import { dashboardPath } from "./probe"
 
 const USAGE =
@@ -84,10 +85,10 @@ const installScripts = async (
 
 type Run = (args: string[]) => Promise<{ code: number; out: string }>
 
-// On macOS the folder launchd loads each agent from at login (HOME's LaunchAgents), its gui domain's uid and the launchctl that loads into it; on Linux the folder systemd reads user units from (HOME's .config/systemd/user) and systemctl --user. A test fakes either.
+// On macOS the folder launchd loads each agent from at login (HOME's LaunchAgents), its gui domain's uid and the launchctl that loads into it; on Linux the folder systemd reads user units from (HOME's .config/systemd/user), systemctl --user, and loginctl with the user's uid, which keeps the user's units running with no one logged in. A test fakes each.
 export type Install =
   | { agents: string; launchctl: Run; uid: number }
-  | { systemctl: Run; units: string }
+  | { loginctl: Run; systemctl: Run; uid: number; units: string }
 
 // Each enabled launchd job launchd has not loaded gets its rendered plist in install's folder when none is there, and is bootstrapped, so a refused bootstrap is tried again on the next pass; each turned-off one has its plist there, if any, moved to the trash through the jobs-installed carve-out, then is booted out while launchd holds it, so a refused bootout is tried again too. A plist already there stays as it stands, since its PATH line differs with each shell the runner starts from and a rewrite would restart the job. A label that is not Playground's own (PLAYGROUND_AGENT) is left alone, so no other app's agent is loaded or stopped.
 const installAgents = async (
@@ -159,6 +160,21 @@ const installUnits = async (
     err(`jobs: refused ${verb} of ${unit}, exit ${done.code}: ${done.out.trim()}`)
     code = 1
   }
+  // linger keeps the user's units running after the last logout: read once a pass before the first start and turned on with loginctl, never asking for a password; a refusal is named and leaves the pass's exit alone, since the units still run while the user is logged in, and doctor names the command
+  let lingerRead = false
+  const linger = async () => {
+    if (lingerRead) return
+    lingerRead = true
+    const user = String(install.uid)
+    const shown = await install.loginctl(["show-user", user, "--property=Linger", "--value"])
+    if (shown.code !== 0 || shown.out.trim() !== "no") return
+    const turned = await install.loginctl(["--no-ask-password", "enable-linger", user])
+    err(
+      turned.code === 0
+        ? `jobs: turned on linger for user ${user}`
+        : `jobs: refused enable-linger of user ${user}, exit ${turned.code}: ${turned.out.trim()}`,
+    )
+  }
   for (const job of jobs) {
     const label = job.launchd
     if (typeof label !== "string" || !PLAYGROUND_UNIT.test(`${label}.service`)) continue
@@ -172,6 +188,7 @@ const installUnits = async (
       if (!existsSync(path)) writeIfChanged(path, text!)
       // systemd opens the log to append but makes no missing folder, so a first start would fail
       mkdirSync(dirname(logOf(String(job.name), fill)), { recursive: true })
+      await linger()
       const started = await install.systemctl(["enable", "--now", unit])
       if (started.code === 0) changed.push(`+${label}`)
       else refused("enable", unit, started)
@@ -382,7 +399,12 @@ export const jobsExit = async (
       install: !values.install
         ? undefined
         : platform === "linux"
-          ? { systemctl: spawned(["systemctl", "--user"], environment), units: values.install }
+          ? {
+              loginctl: spawned(["loginctl"], environment),
+              systemctl: spawned(userSystemctl([], environment), environment),
+              uid: process.getuid!(),
+              units: values.install,
+            }
           : {
               agents: values.install,
               launchctl: spawned(["launchctl"], environment),

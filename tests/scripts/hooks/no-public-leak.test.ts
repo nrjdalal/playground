@@ -199,12 +199,44 @@ describe("a write to the public repository holding private text is refused", () 
     ["a company term", "built for Vantorix", "Vantorix"],
     ["a Slack id", "settled in C0MADE0401", "C0MADE0401"],
     ["a Linear key", "fixes MADEVX-42", "MADEVX-42"],
-    ["an email address", "mail quilla@example.com", "quilla@example.com"],
+    ["an email address", "mail quilla@madeup.test", "quilla@madeup.test"],
     ["an archive link", "see https://github.com/acme/archive/pull/9", "acme/archive"],
   ])("its reason names %s, never the text", async (kind, body, term) => {
     const reason = await run(bash(`gh pr comment 1 ${R} --body "${body}"`))
     expect(reason).toContain(kind)
     expect(reason).not.toContain(term)
+  })
+
+  // RFC 2606's example domains name no one; each other address is built at run time, so the trace ratchet reads none in this file
+  const address = (domain: string) => ["quilla", domain].join("@")
+  test.each([
+    ["example.com"],
+    ["example.org"],
+    ["example.net"],
+    ["mail.example.com"],
+    ["EXAMPLE.COM"],
+  ])("an address on %s, an example domain, passes (#2403)", async (domain) => {
+    expect(await run(bash(`gh pr comment 1 ${R} --body "mail ${address(domain)}"`))).toBeUndefined()
+  })
+
+  test.each([
+    ["example.com.evil.io"],
+    ["examplecom.io"],
+    ["notexample.com"],
+    ["example.co"],
+    ["sub.exampleXcom"],
+    ["subXexample.com"],
+    ["gmail.com"],
+    ["madeup.test"],
+  ])("an address on %s, no example domain, still refuses (#2403)", async (domain) => {
+    expect(await run(bash(`gh pr comment 1 ${R} --body "mail ${address(domain)}"`))).toContain(
+      "an email address",
+    )
+  })
+
+  test("an example address beside another address still refuses (#2403)", async () => {
+    const body = `mail ${address("example.com")} or ${address("gmail.com")}`
+    expect(await run(bash(`gh pr comment 1 ${R} --body "${body}"`))).toContain("an email address")
   })
 
   test("a body it cannot read refuses", async () => {
@@ -404,7 +436,7 @@ describe("what it lets through", () => {
 
   test("a stranger's clone with no store still refuses the built-in kinds, and lets a key through, since keys come from the list alone", async () => {
     expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@example.com"`), stranger),
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@madeup.test"`), stranger),
     ).toContain("an email address")
     expect(
       await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
