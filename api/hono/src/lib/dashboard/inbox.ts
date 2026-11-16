@@ -1495,7 +1495,7 @@ const UNREAD = (item: InboxItem, now: Date): boolean =>
 export const inboxCount = (items: InboxItem[], now = new Date()): number =>
   items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item, now)).length
 
-// Pure: the ids of the items that came in since focus began, while it stands, which the Inbox holds quiet; an alert update stays loud, since the 5% battery alert or a failed ship cannot wait for focus to end.
+// Pure: the ids of the items that came in since focus began, while it stands, which the Inbox holds quiet; an alert update stays loud, since an alert such as a failed ship cannot wait for focus to end.
 export const quietIds = (items: InboxItem[], focus: { since: string } | null): string[] =>
   focus === null
     ? []

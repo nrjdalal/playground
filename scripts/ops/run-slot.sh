@@ -38,7 +38,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.battery run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -269,7 +269,7 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules, the battery's and focus's holds and burst_held open it, and unit_fits passes (the
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules, focus's hold and burst_held open it, and unit_fits passes (the
 # session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
 # slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads no queue order and no other waiter, only the ticket it is given, and run-slot.priority only through may_reserve's reserve
 CAN_TAKE=
@@ -287,7 +287,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while the battery's or focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start, and none while focus's hold stands), and the live tickets in the queue, which spawn.sh's slots gate reads
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -1661,27 +1661,16 @@ focus_holds() {
   FOCUS_HOLDER=$(focus_holder) || return 1
   ! focus_spares "$FOCUS_HOLDER" "$WHO"
 }
-# the wait under the battery's red mark or focus, its line naming the battery's first
+# the wait under focus
 hold_wait() {
   waited=$((SECONDS - WAIT_FROM))
   # each wait line prints at its first poll, its threshold 0, and again each time the clock's waited count crosses the next 300 s mark, whatever the poll slept
   if [ "$waited" -ge "$FAT" ]; then
-    if battery_holds; then
-      echo "run-slot.sh: waiting for the Mac's charge to rise (run-slot.battery, which ops-awake lifts once it does)" >&2
-    else
-      echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
-    fi
+    echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
     FAT=$(((waited / 300 + 1) * 300))
   fi
   sleep "$POLL"
 }
-# true while the battery's red mark holds this run: ops-awake keeps run-slot.battery standing while the charge is at 5% or under and falling, on battery or on a charger losing to the load, so every heavy run on this Mac waits, a focused session's too, but ops' upkeep (ops-tick's beats, the dashboard), as under focus
-battery_holds() {
-  switch_on run-slot.battery || return 1
-  case "$WHO" in ops-dashboard | ops-tick) return 1 ;; esac
-}
-# whether a hold the wait list obeys first stands, the one check the verdict reads share, so they cannot drift apart
-verdict_holds() { battery_holds || focus_holds; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
 prio_first() {
@@ -2332,8 +2321,8 @@ if [ -n "$KIND" ]; then
       END { if (ENVIRON["CUTOFF"] != "" && t > ENVIRON["CUTOFF"]) print t }')
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
-  # a commit's build, a merge or a clone is heavy, so it waits under focus or the battery's red mark; the quick slot's short runs go on
-  while [ "$KIND" != quick ] && verdict_holds; do
+  # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
+  while [ "$KIND" != quick ] && focus_holds; do
     [ -z "$CLONE_TICKET" ] || rm -f "$CLONE_TICKET"
     reread
     hold_wait
@@ -2468,7 +2457,7 @@ if [ -n "$ROOM_ONLY" ]; then
   free=0
   waiters=$(ordered_waiters | grep -c .)
   # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter; none while a hold stands, since it holds the queue's next run (issue 1818)
-  if ! verdict_holds; then
+  if ! focus_holds; then
     t=$(first_waiter)
     if [ -n "$t" ]; then
       set -- $(cat "$QUEUE/$t" 2>/dev/null)
@@ -2490,10 +2479,9 @@ if [ -n "$CAN_TAKE" ]; then
     # the ticket's own wait, its ask's time_ns in its name, so a small one past the backlog line answers for the hold the queue holds it under (issue 1417); a session-name ask has no wait to read and reads as fresh
     waited=$((($(date +%s) - ${CAN_TICKET%%-*} / 1000000000)))
   fi
-  # the holds the wait loop obeys first (its hold check) answer here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold, the battery's first as hold_wait names it, for ops-unstick's slot-stuck alert (issue 1842); the line comes from the reads verdict_holds made, FOCUS_HOLDER set only when the battery did not hold, so a lapse between two reads prints no empty name (issue 1647)
-  FOCUS_HOLDER=
-  if verdict_holds; then
-    if [ -n "$FOCUS_HOLDER" ]; then echo "run-slot.sh: held by run-slot.focus for $FOCUS_HOLDER" >&2; else echo "run-slot.sh: held by run-slot.battery" >&2; fi
+  # the hold the wait loop obeys first (its hold check) answers here too, so a held run reads closed to the verdict while it holds (issue 1818), and the stderr line names the hold for ops-unstick's slot-stuck alert (issue 1842); the line comes from the read focus_holds made, so a lapse between two reads prints no empty name (issue 1647)
+  if focus_holds; then
+    echo "run-slot.sh: held by run-slot.focus for $FOCUS_HOLDER" >&2
     exit 1
   fi
   reclaim "$OPS/$CAN_TAKE"
@@ -2547,8 +2535,8 @@ while :; do
     nap
     continue
   fi
-  # under the battery's red mark or focus a run keeps its place in the queue and takes no slot
-  if verdict_holds; then
+  # under focus a run keeps its place in the queue and takes no slot
+  if focus_holds; then
     hold_wait
     continue
   fi

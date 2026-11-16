@@ -135,7 +135,7 @@
   a reply (`re #iN`) wakes it at once by replacing the whole answer with the reply, so it reads `You: "<his words>"`, while an item woken by its time passing offers Later again (`schedulable`).
   While `playground focus` stands (its `focus.json` in the data folder, read by `standingFocus()` in `api/hono/src/lib/dashboard/focus.ts`), an item that comes in is stored as any other but held quiet: the list's `quiet` names it (`quietIds`), the count, the tab's dot and the Inbox square's count leave it out (`loudItems` in `web/next/src/lib/tab-dot.ts`), and its card reads Quiet after its kind;
   a look at the Inbox marks it seen with the rest, since the list shows it, while Needs you and a session row's waiting light, which read the list's items, still show it;
-  an `alert` update stays loud, the 5% battery alert among them.
+  an `alert` update stays loud, a failed ship's among them.
   Once focus ends, by `playground focus off` or at its end, ops-tick's focus card beat posts one update naming the runs that queued while it stood and their wait, and each held item counts again;
   the beat resolves that card once `bun run ask open --since <focus start> --until <focus end>` lists no ask, since everything it pointed at is answered.
   An update is an outcome, bold with a dot until a click on its title, its tick, its Done or its Dismiss marks it read; Done and Dismiss also move it to Done, and Mark all as read on the open row marks every update read.

@@ -3151,7 +3151,7 @@ describe("the Ops lead's tuning of a guard setting", () => {
     JSON.stringify({
       values: {
         "jobs.opsAlways": job({ enabled: true, schedule: { always: true } }),
-        "jobs.opsAwake": job({ enabled: true, schedule: { every: 300 } }),
+        "jobs.opsMachine": job({ enabled: true, schedule: { every: 300 } }),
         "jobs.opsOrg": job({ enabled: true, schedule: { every: 60 } }),
       },
     }),
@@ -3163,8 +3163,8 @@ describe("the Ops lead's tuning of a guard setting", () => {
       "me",
       {
         "jobs.opsAlways": { enabled: true },
-        "jobs.opsAwake": { enabled: true },
         "jobs.opsDesk": { enabled: true },
+        "jobs.opsMachine": { enabled: true },
       },
     ],
     ["acme", { "jobs.opsOrg": { enabled: true } }],
@@ -3210,7 +3210,7 @@ describe("the Ops lead's tuning of a guard setting", () => {
     ["glm.readOnlyLoad5 to a new limit", "playground settings set glm.readOnlyLoad5 20 --reason r"],
     [
       "a job's interval, its stored row otherwise as it stands",
-      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "the interval of a registry job no scope stores a row for",
@@ -3247,27 +3247,27 @@ describe("the Ops lead's tuning of a guard setting", () => {
     ["a reset of glm.readOnlyLoad5", "playground settings reset glm.readOnlyLoad5 --reason r"],
     [
       "a job turned off with its interval",
-      `playground settings set jobs.opsAwake '{"enabled":false,"schedule":{"every":600}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"enabled":false,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's row that drops a field",
-      `playground settings set jobs.opsAwake '{"schedule":{"every":600}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's row that adds a command",
-      `playground settings set jobs.opsAwake '{"command":"x","enabled":true,"schedule":{"every":300}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"command":"x","enabled":true,"schedule":{"every":300}}' --reason r`,
     ],
     [
       "a number in a job's config",
-      `playground settings set jobs.opsAwake '{"config":{"timeout":5},"enabled":true,"schedule":{"every":300}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"config":{"timeout":5},"enabled":true,"schedule":{"every":300}}' --reason r`,
     ],
     [
       "a job's interval that is no positive integer",
-      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":1.5}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":1.5}}' --reason r`,
     ],
     [
       "a job's whole rendered row with a new interval, which would pin the registry's fields",
-      `playground settings set jobs.opsAwake '{"callsModel":false,"command":"bun run x","cwd":"{checkout}","description":"a job","enabled":true,"runtime":"launchd","schedule":{"every":600}}' --reason r`,
+      `playground settings set jobs.opsMachine '{"callsModel":false,"command":"bun run x","cwd":"{checkout}","description":"a job","enabled":true,"runtime":"launchd","schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job whose rendered schedule is no interval, moved to one",
@@ -3287,9 +3287,9 @@ describe("the Ops lead's tuning of a guard setting", () => {
     ],
     [
       "a job's row at a scope",
-      `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --scope acme --reason r`,
+      `playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --scope acme --reason r`,
     ],
-    ["a reset of a job", "playground settings reset jobs.opsAwake --reason r"],
+    ["a reset of a job", "playground settings reset jobs.opsMachine --reason r"],
     ["import-jobs", "playground settings import-jobs /tmp/jobs.json --reason r"],
     [
       "live.branch, a key naming what a guard allows",
@@ -3302,31 +3302,31 @@ describe("the Ops lead's tuning of a guard setting", () => {
     ],
     [
       "a job's interval with PLAYGROUND_LOGIN set before it, which moves the set to another scope",
-      `PLAYGROUND_LOGIN=acme playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `PLAYGROUND_LOGIN=acme playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval after an export of PLAYGROUND_LOGIN",
-      `export PLAYGROUND_LOGIN=acme; playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `export PLAYGROUND_LOGIN=acme; playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval under env with PLAYGROUND_LOGIN",
-      `env PLAYGROUND_LOGIN=acme playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `env PLAYGROUND_LOGIN=acme playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval with another data folder",
-      `PLAYGROUND_DATA_DIR=/tmp/other playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `PLAYGROUND_DATA_DIR=/tmp/other playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval with another home",
-      `HOME=/tmp/other playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `HOME=/tmp/other playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval after a sourced file, which may export the login",
-      `. ./login.sh; playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+      `. ./login.sh; playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job's interval in a subshell",
-      `(playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r)`,
+      `(playground settings set jobs.opsMachine '{"enabled":true,"schedule":{"every":600}}' --reason r)`,
     ],
     [
       "glm.readOnlyLoad5 with PLAYGROUND_LOGIN set before it",

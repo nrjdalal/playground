@@ -1,6 +1,7 @@
 import { join } from "node:path"
 
 import type { Schedule } from "@packages/config/schedule"
+import { RETIRED } from "@packages/settings"
 import { z } from "zod"
 
 import { processStarts } from "@/lib/dashboard/peers"
@@ -16,7 +17,6 @@ export const JOBS_FILE = "jobs.json"
 
 // What each job core's registry holds does, in one line for its row's hover; any other job, an org's, shows its own jobs.json description, which its jobs setting gives, else NO_DESCRIPTION.
 export const OPS_DOES: Record<string, string> = {
-  "ops-awake": "Keeps this Mac awake on power and on battery",
   "ops-changelog": "Adds new merges to the Changelog",
   "ops-dashboard": "Keeps the Dashboard on its branch's latest head",
   "ops-dm-watch": "Passes your DM messages to Playground in Slack mode",
@@ -38,7 +38,6 @@ export const OPS_DOES: Record<string, string> = {
 
 // Each registry job's shown name, in plain words with no "ops" in it; its id shows on hover alone.
 export const RUNNER_NAMES: Record<string, string> = {
-  "ops-awake": "Keep Mac awake",
   "ops-changelog": "Changelog",
   "ops-dashboard": "Dashboard updates",
   "ops-dm-watch": "Your DM watcher",
@@ -267,12 +266,12 @@ export async function opsJobs(dir = opsDir()): Promise<string[]> {
   return jobs.toSorted()
 }
 
-// Every ops job's row, A to Z: each heartbeat file's, and each job jobs.json lists that has none, paused ones included, so the Scripts count and the Paused table hold them. A file that cannot be read reads as missing; whether each pid runs comes from the same ps read that proves a session live.
+// Every ops job's row, A to Z: each heartbeat file's, and each job jobs.json lists that has none, paused ones included, so the Scripts count and the Paused table hold them; a RETIRED job shows none, since its files outlive it. A file that cannot be read reads as missing; whether each pid runs comes from the same ps read that proves a session live.
 export async function readOps(dir = opsDir(), now = Date.now()): Promise<OpsRow[]> {
   const listed = jobsListed(await readText(join(dir, JOBS_FILE)).catch(() => null))
-  const jobs = [
-    ...new Set([...(await opsJobs(dir)), ...listed.enabled, ...listed.paused]),
-  ].toSorted()
+  const jobs = [...new Set([...(await opsJobs(dir)), ...listed.enabled, ...listed.paused])]
+    .filter((job) => !RETIRED.includes(job))
+    .toSorted()
   const texts = await Promise.all(
     jobs.map((job) => readText(join(dir, `${job}.json`)).catch(() => null)),
   )
