@@ -53,8 +53,32 @@ const setup = () => {
       repo,
       send,
     })
-  return { copy, data, run, send, sent }
+  return { copy, data, old, repo, run, send, sent }
 }
+
+test("an update back to an older template, as --to <older tag> moves, keeps an unedited copy on the template and logs no edits", async () => {
+  const { copy, data, old: v1, repo, send, sent } = setup()
+  const v2 = git(repo, "rev-parse", "HEAD")
+  writeFileSync(copy, "Brief v2.\n")
+  git(repo, "checkout", "-q", v1)
+  const said: string[] = []
+  await refreshBriefs({
+    data,
+    live: () => true,
+    log: (line) => said.push(line),
+    managers: [{ kind: "builder", name: "builder" }],
+    old: v2,
+    repo,
+    send,
+  })
+  expect(readFileSync(copy, "utf8")).toBe("Brief v1.\n")
+  expect(said.some((line) => line.includes("holds edits"))).toBe(false)
+  expect(sent).toHaveLength(1)
+  const diff = readFileSync(join(data, "brief-builder.sent.diff"), "utf8")
+  expect(diff).toStartWith("# brief-builder.md followed this change\n")
+  expect(diff).toContain("-Brief v2.")
+  expect(diff).toContain("+Brief v1.")
+})
 
 test("an unedited copy follows its template, and its live manager gets the template's diff", async () => {
   const { copy, data, run, sent } = setup()
