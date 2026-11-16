@@ -6190,7 +6190,7 @@ var SAY_TO_HIM = String.raw`(?:(?:^\s*(?:(?:[-*]|\d+[.)])\s+)?|[.!?]\s+|[,;:(]\s
 var SAY = new RegExp(String.raw`${SAY_TO_HIM}(?:["'\`][^"'\`\n]+["'\`]|yes\b|go\b)`, "im");
 var PHRASES = /\b(?:can we|do you want|if you (?:still )?want|if you'd rather|is yours to|let me know which|one[\s-]word answer|settles it|shall I|should I|should we|tell me if|want me to|which do you|your call|your pick)\b/i;
 var NOT_ASKED = String.raw`(?<!\b(?:anything|if|nothing|what|whatever)\s)`;
-var ACTION = new RegExp(String.raw`\b(?:could you|(?<!\b(?:no one|nobody|nothing)\s)is waiting on you\b(?!')|only you can(?!'|\s(?:access|open|read|see|view)\b)|(?<![-#\w])please(?![-\w])|when you can(?!')|when you get a chance|${NOT_ASKED}you have to|${NOT_ASKED}you must|${NOT_ASKED}you need to|${NOT_ASKED}you(?:'ll| will) need to|(?<!\byou can\s)(?!(?:\w+ed|did|made|ran|saw|wrote)\s)\w+ it yourself)\b`, "i");
+var ACTION = new RegExp(String.raw`\b(?:could you|(?<!\b(?:no one|nobody|nothing)\s)(?<!(?:^\s*(?:(?:[-*]|\d+[.)])\s+)?|[.!?;]\s+)no \w+\s)is waiting on you\b(?!')|only you can(?!'|\s(?:access|open|read|see|view)\b)|(?<![-#\w])please(?![-\w])|when you can(?!')|when you get a chance|${NOT_ASKED}you have to|${NOT_ASKED}you must|${NOT_ASKED}you need to|${NOT_ASKED}you(?:'ll| will) need to|(?<!\byou can\s)(?!(?:\w+ed|did|made|ran|saw|wrote)\s)\w+ it yourself)\b`, "i");
 var QUESTION = /\?(?![\w/=&%#-])/;
 var BLOCKQUOTE = /^\s*>/;
 var FENCE = /```[\s\S]*?(?:```|$)/g;
