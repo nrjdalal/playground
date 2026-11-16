@@ -9,8 +9,8 @@ const NOW = Date.parse("2026-11-14T08:00:00Z")
 
 type Reply = { body?: unknown; headers?: Record<string, string>; path: string; status?: string }
 
-const pr = (sha: string, mergeable: boolean | null = true): Reply => ({
-  body: { base: "canary", mergeable, sha },
+const pr = (sha: string, mergeable: boolean | null = true, state = "open"): Reply => ({
+  body: { base: "canary", mergeable, sha, state },
   path: `repos/${REPO}/pulls/7`,
 })
 const runs = (sha: string, ...checks: [string, string, string | null, number][]): Reply => ({
@@ -193,6 +193,16 @@ describe("playground ci-wait (PG-2113)", () => {
     expect(code).toBe(0)
     expect(sleeps).toEqual([POLL_SECONDS])
     expect(lines.join("\n")).not.toContain("conflicts")
+  })
+
+  // a merged or closed PR, which REST reads as state closed, reads mergeable null for good, so a wait on it reads its checks as they stand rather than waiting without end
+  test("a merged or closed PR whose mergeable reads null reads its checks at once", async () => {
+    const { code, sleeps } = await wait([
+      pr(A, null, "closed"),
+      runs(A, [BUILD, "completed", "success", 3], ["test", "completed", "success", 4]),
+    ])
+    expect(code).toBe(0)
+    expect(sleeps).toEqual([])
   })
 
   test("a PR that turns conflicting while its checks run stops at the next poll", async () => {

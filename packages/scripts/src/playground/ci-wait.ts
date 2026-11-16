@@ -58,18 +58,18 @@ export const newestRequired = (runs: Run[]): (Run | undefined)[] =>
 export async function ciWait(repo: string, n: string, deps: CiWaitDeps): Promise<number> {
   let head = ""
   for (;;) {
-    const pr = await read<{ base: string; mergeable: boolean | null; sha: string }>(
+    const pr = await read<{ base: string; mergeable: boolean | null; sha: string; state: string }>(
       deps,
       `repos/${repo}/pulls/${n}`,
-      "{base: .base.ref, mergeable, sha: .head.sha}",
+      "{base: .base.ref, mergeable, sha: .head.sha, state}",
     )
     if (!pr) continue
     if (pr.mergeable === false) {
       deps.out(`#${n} conflicts with ${pr.base}: no CI runs until ${pr.base} is merged in`)
       return 1
     }
-    // GitHub works mergeable out after a read asks for it, so a null is read again a poll on, before any check counts
-    if (pr.mergeable === null) {
+    // GitHub works mergeable out after a read asks for it, so an open PR's null is read again a poll on, before any check counts; a closed or merged PR reads null for good, so its checks are read as they stand
+    if (pr.mergeable === null && pr.state === "open") {
       await deps.sleep(POLL_SECONDS)
       continue
     }
