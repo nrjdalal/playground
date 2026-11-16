@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs"
 import { statfs } from "node:fs/promises"
-import { cpus, homedir, loadavg, totalmem } from "node:os"
+import { cpus, homedir, hostname, loadavg, totalmem } from "node:os"
 import { dirname, join } from "node:path"
+
+import type { Peer } from "@packages/config/org"
 
 import {
   accountFor,
@@ -19,6 +21,7 @@ import { checkoutPulls, pullsUrlOf } from "@/lib/dashboard/repo"
 import { readRoster, type RosterAgent } from "@/lib/dashboard/roster"
 import { updateCheck, type Update } from "@/lib/dashboard/update"
 import { unstickProblem } from "@/lib/dashboard/workers"
+import { org } from "@/lib/org"
 import { ownRegistered } from "@/lib/sessions/own"
 import { hasGlmAccount } from "@/lib/store/accounts"
 import {
@@ -39,8 +42,10 @@ import {
   parseCwds,
   parseDockerHost,
   parseHolders,
+  parsePeer,
   parsePs,
   parseSockets,
+  type MachineReading,
   type Pressure,
   type Proc,
   type Sockets,
@@ -83,6 +88,16 @@ export type SystemAgent = {
   stacks: SystemStack[]
 }
 
+// One machine of a cluster: its reading, or why it did not read and since when, so a total never drops to fewer machines quietly.
+export type SystemMachine = {
+  down: { reason: string; since: string } | null
+  name: string
+  reading: MachineReading | null
+}
+
+// One peer's read in a sample: its reading, or the problem that kept it out.
+export type PeerRead = { name: string; problem: string | null; reading: MachineReading | null }
+
 export type SystemPoint = {
   at: string
   load1: number
@@ -117,6 +132,8 @@ export type SystemReport = {
     vmBytes: number | null
   }
   history: SystemPoint[]
+  // This machine first, then each peer org.ts's cluster names, for the System page's sums; empty with no peers, so one machine shows alone.
+  machines: SystemMachine[]
   memory: {
     freePercent: number | null
     pressure: Pressure | null
@@ -147,7 +164,11 @@ export type Readings = {
   docker: { containers: Container[]; problem: string | null; vmPid: number | null }
   // Whether usage.accounts holds a GLM row, without which the GLM windows are a file left behind and show nowhere.
   glmAccount: boolean
+  // This machine's name on the System page beside its peers.
+  hostname: string
   load: [number, number, number]
+  // Each peer's read, in org.ts's cluster order; empty with no peers.
+  peers: PeerRead[]
   platform: string
   problems: string[]
   procs: Proc[]
@@ -165,10 +186,11 @@ export type Readings = {
   zai: ZaiUsage | null
 }
 
-// What a sample carries to the next: each process's CPU time as of sampledAt (the last sample whose ps answered), when each stack was last busy, and the hour of totals.
+// What a sample carries to the next: each process's CPU time as of sampledAt (the last sample whose ps answered), when each stack was last busy, since when each peer has not read, and the hour of totals.
 export type SamplerState = {
   busyAt: Map<string, number>
   cpuSeconds: Map<number, number>
+  downSince: Map<string, number>
   history: SystemPoint[]
   sampledAt: number | null
   startedAt: number
@@ -177,6 +199,7 @@ export type SamplerState = {
 export const freshState = (now: number): SamplerState => ({
   busyAt: new Map(),
   cpuSeconds: new Map(),
+  downSince: new Map(),
   history: [],
   sampledAt: null,
   startedAt: now,
@@ -285,11 +308,44 @@ export function compose(
     totalBytes: readings.totalBytes,
   }
   const room = roomOf(machine)
+  // With peers, the machines the System page sums: this one first, then each peer, one that did not read keeping since when it has not.
+  const local: MachineReading = {
+    cores: readings.cores,
+    load: readings.load.map(round) as [number, number, number],
+    memory: { totalBytes: readings.totalBytes, usedBytes: readings.usedBytes },
+    swap,
+  }
+  const downSince = new Map<string, number>()
+  const machines: SystemMachine[] =
+    readings.peers.length === 0
+      ? []
+      : [
+          { down: null, name: readings.hostname, reading: local },
+          ...readings.peers.map((peer): SystemMachine => {
+            if (peer.reading) return { down: null, name: peer.name, reading: peer.reading }
+            const since = state.downSince.get(peer.name) ?? now
+            downSince.set(peer.name, since)
+            return {
+              down: {
+                reason: peer.problem ?? "it did not read",
+                since: new Date(since).toISOString(),
+              },
+              name: peer.name,
+              reading: null,
+            }
+          }),
+        ]
+  // The hour's sparklines follow the figures beside them: the sums over every machine that read.
+  const parts =
+    machines.length === 0 ? [local] : machines.flatMap((m) => (m.reading ? [m.reading] : []))
+  const swaps = parts.flatMap((p) => (p.swap ? [p.swap.usedBytes] : []))
   const point: SystemPoint = {
     at: new Date(now).toISOString(),
-    load1: round(readings.load[0]),
-    swapUsedBytes: swap?.usedBytes ?? null,
-    usedBytes: readings.usedBytes,
+    load1: round(parts.reduce((sum, p) => sum + p.load[0], 0)),
+    swapUsedBytes: swaps.length === 0 ? null : swaps.reduce((a, b) => a + b, 0),
+    usedBytes: parts.some((p) => p.memory.usedBytes === null)
+      ? null
+      : parts.reduce((sum, p) => sum + (p.memory.usedBytes ?? 0), 0),
     week:
       readings.account && readings.usage?.sevenDay && !readings.usage.sevenDay.seenAt
         ? { account: readings.account.email, used: readings.usage.sevenDay.usedPercent }
@@ -332,6 +388,7 @@ export function compose(
       vmBytes: vm === null ? null : (procs.find((p) => p.pid === vm)?.rssBytes ?? null),
     },
     history,
+    machines,
     memory: {
       freePercent: sysctl.freePercent,
       pressure: sysctl.pressure,
@@ -354,6 +411,7 @@ export function compose(
     state: {
       busyAt,
       cpuSeconds: read ? new Map(procs.map((p) => [p.pid, p.cpuSeconds])) : state.cpuSeconds,
+      downSince,
       history,
       sampledAt: read ? now : state.sampledAt,
       startedAt: state.startedAt,
@@ -390,6 +448,24 @@ async function vmOf(procs: Proc[]): Promise<number | null> {
   return vmPid
 }
 
+// Each peer's ssh read, all at once beside the sample's other probes, each bounded by its ConnectTimeout and probe()'s kill, so a peer that is down or hangs never holds the sample: it comes back with its problem and no reading.
+export const readPeers = (peers: readonly Peer[]): Promise<PeerRead[]> =>
+  Promise.all(
+    peers.map(({ name, target }) =>
+      probe("peer", target)
+        .then((out) => {
+          const reading = parsePeer(out)
+          if (!reading) throw new Error("its /proc reading did not parse")
+          return { name, problem: null, reading }
+        })
+        .catch((error: unknown) => ({
+          name,
+          problem: error instanceof Error ? error.message : String(error),
+          reading: null,
+        })),
+    ),
+  )
+
 // One sample's readings, every probe at once, docker stats (the slowest, about 2s) among them. Each failure is named in problems and leaves its part empty, so one missing tool never blanks the panel.
 export async function read(): Promise<Readings> {
   const problems: string[] = []
@@ -412,6 +488,7 @@ export async function read(): Promise<Readings> {
         () => null,
       )
   const docker = Promise.allSettled([probe("containers"), probe("containerStats")])
+  const peers = readPeers(made ? (made.peers ?? []) : org.cluster.peers)
   const [account, accounts, sysctl, used, procs, cwds, sockets, registry, roster, usage, zai] =
     await Promise.all([
       machine
@@ -461,7 +538,9 @@ export async function read(): Promise<Readings> {
             vmPid: await vmOf(procs),
           },
     glmAccount: hasGlmAccount(),
+    hostname: made ? (made.hostname ?? "this machine") : hostname(),
     load: made?.load ?? (loadavg() as [number, number, number]),
+    peers: await peers,
     platform: made ? (made.platform ?? "darwin") : process.platform,
     problems,
     procs,
