@@ -836,7 +836,10 @@ try:
         if not passing:
             readings.update(logins[0][3])
             if len(logins) == 1:
-                refuse("usage", logins[0][4])
+                # the one login this machine reads is parked: name each usage.accounts Claude row neither parked nor read here, the way out on a machine with one login
+                only = str(logins[0][0]).lower()
+                others = [row["email"] for row in gates["accounts"] if isinstance(row, dict) and isinstance(row.get("email"), str) and row.get("provider") in (None, "claude") and row["email"].lower() not in parked and row["email"].lower() != only] if only in parked else []
+                refuse("usage", logins[0][4] + (f". usage.accounts also lists {', '.join(others)}, not parked and not signed in on this machine: sign one in with Add account in the Dashboard's Settings, then start it again" if others else ""))
             readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
             refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
         # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (playbook's SPAWN.md, --account), else the lowest week
