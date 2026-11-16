@@ -44,8 +44,6 @@ describe("defineSettings", () => {
         .map(({ key }) => key)
         .filter((key) => !key.startsWith("jobs.")),
     ).toEqual([
-      "battery.alert",
-      "battery.ask",
       "channel.skipUser",
       "channel.slackId",
       "clock.ownerZone",

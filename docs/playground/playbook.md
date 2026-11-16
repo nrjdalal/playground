@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
+and the standing rules (ask, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -132,7 +132,7 @@ A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
-What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
+What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as a failed ship.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.

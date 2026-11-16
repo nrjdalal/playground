@@ -3786,13 +3786,6 @@
           }
         },
         {
-          "heartbeat": "ops-awake",
-          "name": "ops-awake",
-          "schedule": {
-            "always": true
-          }
-        },
-        {
           "heartbeat": "ops-changelog",
           "name": "ops-changelog",
           "schedule": {
@@ -4429,14 +4422,6 @@
       "sessions": 12,
       "unreadable": [],
       "writtenAt": "2026-12-31T12:00:00.000Z"
-    },
-    "playground/ops/ops-awake.json": {
-      "cycleSeconds": 3600,
-      "job": "ops-awake",
-      "lastBeatAt": "2026-01-01T11:59:00.000Z",
-      "lastResult": "ok",
-      "pid": 900040,
-      "startedAt": "2026-01-01T08:00:00.000Z"
     },
     "playground/ops/ops-changelog.json": {
       "cycleSeconds": 3600,
@@ -5479,10 +5464,6 @@
     },
     "900033": {
       "command": "python3 ops/loop.py ops-report",
-      "start": "Thu Jan  1 08:00:00 2026"
-    },
-    "900040": {
-      "command": "python3 ops/loop.py ops-awake",
       "start": "Thu Jan  1 08:00:00 2026"
     },
     "900041": {

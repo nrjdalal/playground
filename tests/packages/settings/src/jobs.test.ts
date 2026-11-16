@@ -9,6 +9,7 @@ import {
   orgJobs,
   plistProgram,
   renderJobs,
+  RETIRED,
   settingFields,
   settingsFor,
 } from "../../../../packages/settings/src"
@@ -220,6 +221,21 @@ describe("the job registry", () => {
     expect(renderJobs({}, [kept], fill).jobs.find((job) => job.name === "ops-company")).toEqual(
       kept,
     )
+  })
+
+  test("a retired job's row turns off, so its teardown stops it, and its stored row is no org's job (#2313)", () => {
+    expect(RETIRED).toEqual([...RETIRED].sort())
+    for (const name of RETIRED) {
+      expect(JOBS[name]).toBeUndefined()
+      const old = { heartbeat: name, launchd: `com.playground.${name}`, name }
+      expect(renderJobs({}, [old], fill).jobs.find((job) => job.name === name)).toEqual({
+        ...old,
+        disabled: true,
+      })
+      expect(
+        orgJobs([{ key: jobKey(name), scope: "tester", value: { enabled: true } }], "tester", {}),
+      ).toEqual({ jobs: {}, refused: [] })
+    }
   })
 
   test("a write with an unknown key is refused, as one with a runtime other than herdr is", () => {
