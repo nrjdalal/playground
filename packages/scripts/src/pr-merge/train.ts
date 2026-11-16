@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { BASE, gatesOf, withReadyDraft, type PrFacts } from "./gates"
 import {
   factsOf,
+  fetchHead,
   gateOptions,
   gh,
   lockRootOf,
@@ -162,8 +163,10 @@ async function openPrs(run: Run, repo: string, drafts = false): Promise<number[]
     .map((pr) => pr.n)
 }
 
-async function fetchHeads(git: Run, ns: number[]) {
-  await git1(git, ["fetch", "--quiet", "origin", BASE, ...ns.map((n) => `refs/pull/${n}/head`)])
+// canary now, after fetching it and each PR's head (fetchHead: its pull ref, else its branch at that head).
+async function fetchHeads(git: Run, heads: Head[]) {
+  await git1(git, ["fetch", "--quiet", "origin", BASE])
+  for (const { branch, head, n } of heads) await fetchHead(git, n, head, branch)
   return git1(git, ["rev-parse", `origin/${BASE}`])
 }
 
@@ -173,8 +176,14 @@ export const sortByQueue = (ns: number[], queue: number[]): number[] => {
   return [...ns].sort((a, b) => place(a) - place(b))
 }
 
-const headOf = async (run: Run, repo: string, n: number) =>
-  gh(run, ["pr", "view", String(n), "-R", repo, "--json", "headRefOid", "--jq", ".headRefOid"])
+type Head = { branch: string; head: string; n: number }
+
+const headOf = async (run: Run, repo: string, n: number): Promise<Head> => {
+  const view = JSON.parse(
+    await gh(run, ["pr", "view", String(n), "-R", repo, "--json", "headRefName,headRefOid"]),
+  ) as { headRefName: string; headRefOid: string }
+  return { branch: view.headRefName, head: view.headRefOid, n }
+}
 
 export type Forecast = { canary: string; conflicts: Drop[]; order: number[] }
 
@@ -187,8 +196,8 @@ export async function forecast(
   const { git, queue } = resolve(local)
   const name = await repoOf(run, repo)
   const order = sortByQueue(await openPrs(run, name, true), await readQueue(queue))
-  const canary = await fetchHeads(git, order)
-  const picks = await Promise.all(order.map(async (n) => ({ head: await headOf(run, name, n), n })))
+  const picks = await Promise.all(order.map((n) => headOf(run, name, n)))
+  const canary = await fetchHeads(git, picks)
   const { dropped } = await chainOf(git, canary, picks, "forecast")
   return { canary, conflicts: dropped, order }
 }

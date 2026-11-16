@@ -18,6 +18,7 @@ import { join } from "node:path"
 
 import type { SpawnOptions, Subprocess } from "bun"
 
+import { orphanReapers } from "../../../packages/scripts/src/orphan-reapers"
 import { slowChild } from "../../slow-child"
 import { FAKE_SLEEP } from "../fixtures/proc"
 
@@ -112,6 +113,7 @@ export const endChildren = async () => {
     }
   }
   const live: { p: { exited: Promise<number> }; pid: number; groups: number[] }[] = []
+  const reapers = orphanReapers()
   for (const child of children.splice(0)) {
     const done = await exited(child.p)
     const groups: number[] = []
@@ -141,7 +143,8 @@ export const endChildren = async () => {
           Date.now() -
           (Number(days) * 86_400 + rest.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000
         const runsIt = started <= written + 1_000
-        if (done ? Number(ppid) === 1 && runsIt : Number(ppid) === child.p.pid) groups.push(command)
+        if (done ? reapers.has(Number(ppid)) && runsIt : Number(ppid) === child.p.pid)
+          groups.push(command)
       }
     if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
   }
@@ -188,7 +191,7 @@ export type Setup = {
   // the seconds between two looks of a waiting run (run-slot.sh's RUN_SLOT_POLL: 15 real for a queued run's looks, 5 for a clone's and an --after wait; 0.2 in the tests, 0.05 in the commit-lane files)
   poll?: number
   pressure?: number
-  // a folder of recorded /proc text (tests/scripts/fixtures/proc.ts): the machine answers as Ubuntu does, procps's sysctl knowing no macOS name, its top no -l and no vm_stat, so every reading comes from that text
+  // a folder of recorded /proc text (tests/scripts/fixtures/proc.ts): the machine answers as Ubuntu does, procps's sysctl knowing no macOS name, its top no -l, no vm_stat and sysstat's iostat refusing macOS's flags, so every reading comes from that text
   proc?: string
   roster?: unknown
   sandboxed?: boolean
@@ -268,6 +271,7 @@ esac
   chmodSync(join(bin, "iostat"), 0o755)
   if (proc) {
     const ubuntu = {
+      iostat: 'echo "Usage: iostat [ options ] [ <interval> [ <count> ] ]" >&2\nexit 1',
       sysctl:
         'echo "sysctl: cannot stat /proc/sys/${2//.//}: No such file or directory" >&2\nexit 255',
       top: "echo \"top: unknown option 'l'\" >&2\nexit 1",

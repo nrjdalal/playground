@@ -164,6 +164,7 @@ function stub({
           author: { login: author },
           baseRefName: "canary",
           body: viewBody,
+          headRefName: "PG-112-x",
           headRefOid: HEAD,
           isDraft: draft,
           labels: labels.map((name) => ({ name })),
@@ -673,6 +674,38 @@ describe("the merge lock", () => {
     await expect(
       prMerge(112, { repo: REPO }, stub().run, local({ template: "no fence here\n" })),
     ).rejects.toThrow("its first markdown fence holds none")
+  })
+
+  // origin as GitHub left #2367 at 15:00Z: no refs/pull/<n>/head yet, and the PR's branch at tip
+  const noPullRef = (tip: string) => {
+    const at = local()
+    const fetches: string[][] = []
+    const git: Run = async (args) => {
+      if (args[0] === "fetch") fetches.push(args)
+      if (args[0] === "fetch" && args.includes("refs/pull/112/head"))
+        return {
+          code: 128,
+          stderr: "fatal: couldn't find remote ref refs/pull/112/head\n",
+          stdout: "",
+        }
+      if (args[0] === "rev-parse" && args[1] === "FETCH_HEAD") return ok(`${tip}\n`)
+      return at.git(args)
+    }
+    return { fetches, local: { ...at, git } }
+  }
+
+  test("fetches the PR's branch when GitHub has not made its pull ref yet, and merges at that head (#2389)", async () => {
+    const world = noPullRef(HEAD)
+    const outcome = await prMerge(112, { repo: REPO }, stub().run, world.local)
+    expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+    expect(world.fetches).toContainEqual(["fetch", "--quiet", "origin", "refs/heads/PG-112-x"])
+  })
+
+  test("refuses a branch whose tip is not the PR's head, so the gates never judge another commit (#2389)", async () => {
+    const world = noPullRef("b".repeat(40))
+    await expect(prMerge(112, { repo: REPO }, stub().run, world.local)).rejects.toThrow(
+      "refs/pull/112/head is missing, and its branch PG-112-x is at bbbbbbb, not the head 69a6a4c",
+    )
   })
 
   test("outside the CLI, a run without a git stub throws before it fetches or locks, whatever NODE_ENV says", async () => {
