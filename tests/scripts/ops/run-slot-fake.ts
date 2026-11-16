@@ -18,6 +18,7 @@ import { join } from "node:path"
 
 import type { SpawnOptions, Subprocess } from "bun"
 
+import { orphanReapers } from "../../../packages/scripts/src/orphan-reapers"
 import { slowChild } from "../../slow-child"
 import { FAKE_SLEEP } from "../fixtures/proc"
 
@@ -78,19 +79,6 @@ type RunSlotOptions<
   ops?: string
 }
 const children: { p: { exited: Promise<number>; pid: number }; ops?: string; at: number }[] = []
-// Who adopts an orphan of this run: pid 1, or on Linux the nearest subreaper above it (systemd --user under a desktop session, #2350), which is always one of this process's ancestors.
-export const orphanReapers = (): Set<number> => {
-  const reapers = new Set([1])
-  for (let pid = process.ppid; pid > 1 && !reapers.has(pid);) {
-    reapers.add(pid)
-    pid = Number(
-      Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)])
-        .stdout.toString()
-        .trim(),
-    )
-  }
-  return reapers
-}
 // Starts `argv` recorded, so endChildren can end it; `ops` is the machine's ops folder, whose *.child files name the command's group once the run starts.
 export const runSlot = <
   const In extends Bun.SpawnOptions.Writable = "ignore",
