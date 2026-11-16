@@ -355,9 +355,11 @@ const limits = (): Row[] => [
     "a kill program word a group holding a blank next to another group spells",
     "nice (p|x y)(kill|z) -f watcher",
   ],
+  ["a group after a second time, the external program", `time time (r|x)m ${NEVER_MADE}`],
+  ["a kill program word a group after a second time spells", "time time (p|x)kill -f watcher"],
 ]
 
-// The spellings that stay plain: a quoted or escaped name, ~, HOME and PLAYGROUND_REPO folders, an assignment before the program, an argument held in a variable, a test bracket and a case's patterns
+// The spellings that stay plain: a quoted or escaped name, ~, HOME and PLAYGROUND_REPO folders, an assignment before the program, an argument held in a variable, a test bracket, a case's patterns and a subshell after time
 const controls = (): Row[] => [
   ["a program under ~", "~/.bun/bin/claude --version"],
   ["a program under $HOME", "$HOME/.bun/bin/bun --version"],
@@ -373,6 +375,8 @@ const controls = (): Row[] => [
   ["an argument held in a variable", 'p=x; bun "$p"'],
   ["an assignment before the program", "VAR=x git status"],
   ["an assignment through env", "env VAR=x git status"],
+  ["a subshell after time and a repeat count", "time repeat 1 (ls)"],
+  ["a second time before a plain program", "time time ls"],
   ["a quoted program name", '"git" status'],
   ["an escaped program name", "g\\it status"],
   ["a test bracket", "[ -n x ] && echo y"],

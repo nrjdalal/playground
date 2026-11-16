@@ -1304,11 +1304,12 @@ function plainAlternative(group: string, glued: boolean): boolean {
   }
   return plain && (glued || !empty)
 }
-// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`)
+// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`); a `time` right after a `time` is the external program, which globs the paren (`time time (r|x)m`)
 function subshellPrefix(lead: Word[]): boolean {
   let at = 0
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time") break
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
     else if (lead[at].value === "repeat" && at + 1 < lead.length) at += 2
     else break
   return at > 0 && at === lead.length

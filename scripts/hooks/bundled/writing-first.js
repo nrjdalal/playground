@@ -5982,7 +5982,9 @@ function plainAlternative(group, glued) {
 function subshellPrefix(lead) {
   let at = 0;
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time")
+      break;
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect")
       at++;
     else if (lead[at].value === "repeat" && at + 1 < lead.length)
       at += 2;
