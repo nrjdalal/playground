@@ -94,12 +94,15 @@ const write = (path: string, text: string, mode = 0o644) => {
   chmodSync(path, mode)
 }
 
-// git with no system config, no GIT_* from a hook that runs the suite, and the scratch HOME's .gitconfig; Claude Code's and Playground's folders are the scratch HOME's too
+// git with no system config, no GIT_* from a hook that runs the suite, and the scratch HOME's .gitconfig; Claude Code's, Playground's and portless's folders are the scratch HOME's too
 const gitEnv = (home: string) => ({
   ...Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
-        !key.startsWith("GIT_") && !key.startsWith("INSTALL_") && key !== "PLAYGROUND_INSTALL",
+        !key.startsWith("GIT_") &&
+        !key.startsWith("INSTALL_") &&
+        !key.startsWith("PORTLESS") &&
+        key !== "PLAYGROUND_INSTALL",
     ),
   ),
   CLAUDE_CONFIG_DIR: "",
