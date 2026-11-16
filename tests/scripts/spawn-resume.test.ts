@@ -639,8 +639,12 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     expect(r.out).toBe("")
   })
 
-  test("it takes no other words", async () => {
-    const r = await spawn(["restore", "worker-a"], [], {})
+  test.each([
+    ["a name", ["worker-a"]],
+    ["--harness", ["--harness", "codex"]],
+    ["--priority", ["--priority"]],
+  ])("it takes no other words: %s", async (_, words) => {
+    const r = await spawn(["restore", ...words], [], {})
     expect(r.code).toBe(2)
     expect(r.err).toContain("restore takes no other words")
   })
@@ -871,6 +875,8 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
     ],
     ["an option", ["close", "worker-x", "--runtime", "herdr"]],
     ["a size", ["close", "worker-x", "--size", "small"]],
+    ["--harness", ["close", "worker-x", "--harness", "codex"]],
+    ["--priority", ["close", "worker-x", "--priority"]],
   ])("it takes a session's name and its session id alone, so %s is usage", async (_, args) => {
     const r = await spawn(args, [], {}, undefined, undefined, opened())
     expect(r.code).toBe(2)
