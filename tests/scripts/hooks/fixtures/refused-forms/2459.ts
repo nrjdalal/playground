@@ -52,6 +52,11 @@ const extensionsControls = ({ DATA, HOME }: Paths): Row[] => [
     "a star glob in the remote home, which no dot-led name matches",
     "ssh spark-9dfb 'ls */extensions'",
   ],
+  [
+    "a runner-host survey sourcing os-release in a heredoc fed to a remote bash",
+    "ssh spark-9dfb bash -s <<'EOF'\nif [ -r /etc/os-release ]; then . /etc/os-release && echo \"${PRETTY_NAME:-unknown}\"; fi\nEOF",
+  ],
+  ["a source of os-release by . from the home", ". /etc/os-release && echo ok", "home"],
 ]
 
 const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
@@ -63,6 +68,11 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
     "a write under the root fed to a remote bash as a here-string",
     `ssh spark-9dfb bash -s <<< 'touch ${ROOT}/x'`,
   ],
+  [
+    "a source by . of a file in the root in a heredoc fed to a remote bash",
+    "ssh spark-9dfb bash -s <<'EOF'\n. .playground/extensions/x\nEOF",
+  ],
+  ["a source by . of a file in the root from the home", ". .playground/extensions/x", "home"],
   [
     "a reader piped to a remote bash inside a here-string, which roots the line",
     "ssh spark-9dfb bash -s <<< 'cat .playground/extensions/x | bash'",

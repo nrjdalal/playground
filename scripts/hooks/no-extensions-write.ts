@@ -1853,35 +1853,37 @@ function narrow(cmd: Command, env: Env): boolean {
 }
 
 // Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
-function rooted(commands: Command[]): boolean {
+function rooted(commands: Command[], from?: string): boolean {
   if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
-      (!!stdinShell(cmd) && !sshSpared(cmd)) ||
-      (!!cmd.inner && rooted(cmd.inner())) ||
+      (!!stdinShell(cmd) && !sshSpared(cmd, from)) ||
+      (!!cmd.inner && rooted(cmd.inner(), from)) ||
       [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
-        (word) => !!word.procs && rooted(word.procs),
+        (word) => !!word.procs && rooted(word.procs, from),
       ),
   )
 }
 
 // Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
-function sshSpared(cmd: Command): boolean {
+function sshSpared(cmd: Command, from: string | undefined): boolean {
   if (cmd.stdin || !sshCall(parse(cmd))) return false
-  const text = sshText(cmd)
+  const text = sshText(cmd, from)
   return text !== undefined && !rooted(lex(text).commands)
 }
 
-// The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or a file named by a literal absolute path, read when it is a regular file within 1 MiB; undefined for any other
-function sshText(cmd: Command): string | undefined {
+// The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or a file named by a literal path, absolute or from `from` (the tool's folder on a line that moves no folder), read when it is a regular file within 1 MiB; undefined for any other
+function sshText(cmd: Command, from: string | undefined): string | undefined {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
   if (input?.body)
     return input.body.unknown || marked(input.body.value) ? undefined : input.body.value
   const path = input?.op === "<" ? input.target?.value : undefined
-  if (!path || !path.startsWith(sep) || marked(path) || input?.target?.glob) return undefined
+  if (!path || marked(path) || input?.target?.glob || (!path.startsWith(sep) && !from))
+    return undefined
+  const file = resolve(from ?? sep, path)
   try {
-    const stat = statSync(path)
-    return stat.isFile() && stat.size <= 1_048_576 ? readFileSync(path, "utf8") : undefined
+    const stat = statSync(file)
+    return stat.isFile() && stat.size <= 1_048_576 ? readFileSync(file, "utf8") : undefined
   } catch {
     return undefined
   }
@@ -2934,9 +2936,11 @@ async function inspect(
       if (escaped.some((text) => holds(text, here)))
         return refuse(`${verb} with a script that names ${root} in its text`)
       const literal = !whole && narrow(cmd, here)
-      for (const word of [first, ...args].map(
-        (word) => heldWord(own(word), here, steady) ?? own(word),
-      )) {
+      for (const [at, word] of [first, ...args]
+        .map((word) => heldWord(own(word), here, steady) ?? own(word))
+        .entries()) {
+        // a `.` in the program word is the shell's source builtin, never the folder it spells, so `. /etc/os-release` from the home names its operand alone
+        if (at === 0 && first?.value === "." && word.value === ".") continue
         // a quiet commit's message, an in-place sed's or perl's script, a gh filter and a browser eval's script on a line read whole are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text =
           (quiet && /\s/.test(word.value)) ||
@@ -3129,7 +3133,7 @@ async function inspect(
     visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
-  rootLine = rooted(lexed.commands)
+  rootLine = rooted(lexed.commands, /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory)
   if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)

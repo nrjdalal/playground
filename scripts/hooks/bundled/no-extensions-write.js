@@ -11841,27 +11841,28 @@ function narrow(cmd, env) {
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1;
   return false;
 }
-function rooted(commands) {
+function rooted(commands, from) {
   if (codeFed(commands).size > 0)
     return true;
-  return commands.some((cmd) => !!stdinShell(cmd) && !sshSpared(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
+  return commands.some((cmd) => !!stdinShell(cmd) && !sshSpared(cmd, from) || !!cmd.inner && rooted(cmd.inner(), from) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs, from)));
 }
-function sshSpared(cmd) {
+function sshSpared(cmd, from) {
   if (cmd.stdin || !sshCall(parse3(cmd)))
     return false;
-  const text = sshText(cmd);
+  const text = sshText(cmd, from);
   return text !== undefined && !rooted(lex(text).commands);
 }
-function sshText(cmd) {
+function sshText(cmd, from) {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"));
   if (input?.body)
     return input.body.unknown || marked(input.body.value) ? undefined : input.body.value;
   const path = input?.op === "<" ? input.target?.value : undefined;
-  if (!path || !path.startsWith(sep2) || marked(path) || input?.target?.glob)
+  if (!path || marked(path) || input?.target?.glob || !path.startsWith(sep2) && !from)
     return;
+  const file = resolve5(from ?? sep2, path);
   try {
-    const stat = statSync3(path);
-    return stat.isFile() && stat.size <= 1048576 ? readFileSync4(path, "utf8") : undefined;
+    const stat = statSync3(file);
+    return stat.isFile() && stat.size <= 1048576 ? readFileSync4(file, "utf8") : undefined;
   } catch {
     return;
   }
@@ -12593,7 +12594,9 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       if (escaped.some((text) => holds(text, here)))
         return refuse(`${verb} with a script that names ${root} in its text`);
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
+      for (const [at, word] of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word)).entries()) {
+        if (at === 0 && first?.value === "." && word.value === ".")
+          continue;
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
@@ -12685,7 +12688,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     vars: new Map,
     visitShells: true
   };
-  rootLine = rooted(lexed.commands);
+  rootLine = rooted(lexed.commands, /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory);
   if (evaluatedParts(command).some((part) => touches(part, env)))
     return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);
