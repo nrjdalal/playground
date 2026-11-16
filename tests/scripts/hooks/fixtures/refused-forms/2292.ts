@@ -19,6 +19,10 @@ const controls = (): Row[] => [
     "a loop over regex text with a blank inside a group",
     `for pat in 'a' '\\d[\\d,]*\\+? (live )?units'; do echo "$pat"; done`,
   ],
+  ["a wrapper running a group word with a blank that spells echo", "command (e|x y)cho hi"],
+  ["a wrapper running a group word that spells echo after an unset name", "nice $E (e|x)cho hi"],
+  ["an escaped time running a group word that spells echo", "\\time (e|x)cho hi"],
+  ["time before a wrapper running a group word that spells echo", "time command (e|x)cho hi"],
 ]
 
 const deleteControls = (): Row[] => [
@@ -58,6 +62,59 @@ export const groups: Group[] = [
         "command running a plain rm one zsh group spells across a backslash-newline",
         `command (r|\\\nx)m ${NEVER_MADE}`,
       ],
+      // a wrapper after zsh's time, repeat or nocorrect, or a time zsh reads as a program word
+      [
+        "time before command running a plain rm one zsh group spells",
+        `time command (r|x)m ${NEVER_MADE}`,
+      ],
+      [
+        "repeat before command running a plain rm one zsh group spells",
+        `repeat 1 command (r|x)m ${NEVER_MADE}`,
+      ],
+      [
+        "nocorrect before command running a plain rm one zsh group spells",
+        `nocorrect command (r|x)m ${NEVER_MADE}`,
+      ],
+      [
+        "a negated time before command running a plain rm one zsh group spells",
+        `! time command (r|x)m ${NEVER_MADE}`,
+      ],
+      [
+        "time before nice running a plain rm one zsh group spells",
+        `time nice (r|x)m ${NEVER_MADE}`,
+      ],
+      ["an escaped time running a plain rm one zsh group spells", `\\time (r|x)m ${NEVER_MADE}`],
+      ["a quoted time running a plain rm one zsh group spells", `'time' (r|x)m ${NEVER_MADE}`],
+      [
+        "a branch's time before command running a plain rm one zsh group spells",
+        `if true; then time command (r|x)m ${NEVER_MADE}; fi`,
+      ],
+      // a group holding a blank, bare, escaped or quoted
+      [
+        "command running a plain rm a zsh group with a blank spells",
+        `command (r|x y)m ${NEVER_MADE}`,
+      ],
+      [
+        "command running a plain rm a zsh group with an escaped blank spells",
+        `command (r|x\\ y)m ${NEVER_MADE}`,
+      ],
+      [
+        "command running a plain rm a zsh group with a single-quoted blank spells",
+        `command (r|'x y')m ${NEVER_MADE}`,
+      ],
+      [
+        "nice running a plain rm a zsh group with a double-quoted blank spells",
+        `nice (r|"x y")m ${NEVER_MADE}`,
+      ],
+      // a word that may expand to no word before the group
+      [
+        "nice running a plain rm one zsh group spells after an unset name",
+        `nice $E (r|x)m ${NEVER_MADE}`,
+      ],
+      [
+        "command running a plain rm one zsh group spells after an unset name",
+        `command $E (r|x)m ${NEVER_MADE}`,
+      ],
       // a subshell zsh keeps after these, refused at canary and kept as pins
       ["a timed subshell running a plain rm", `time (/bin/rm ${NEVER_MADE})`],
       ["a repeated subshell running a plain rm", `repeat 1 (/bin/rm ${NEVER_MADE})`],
@@ -91,6 +148,31 @@ export const groups: Group[] = [
         "command running a kill by name two zsh groups spell across a backslash-newline",
         "command (p|\\\nx)(k|y)ill -f watcher",
       ],
+      [
+        "time before command running a kill by name one zsh group spells",
+        "time command (p|x)kill -f watcher",
+      ],
+      [
+        "an escaped time running a kill by name one zsh group spells",
+        "\\time (p|x)kill -f watcher",
+      ],
+      [
+        "repeat before nice running a kill by name one zsh group spells",
+        "repeat 1 nice (p|x)kill -f watcher",
+      ],
+      [
+        "command running a kill by name a zsh group with a blank spells",
+        "command (p|x y)kill -f watcher",
+      ],
+      [
+        "nice running a kill by name a zsh group with a quoted blank spells",
+        "nice (p|'x y')kill -f watcher",
+      ],
+      // refused at canary and kept as a pin
+      [
+        "nice running a kill by name one zsh group spells after an unset name",
+        "nice $E (p|x)kill -f watcher",
+      ],
       ...controls(),
       ...killControls(),
     ],
@@ -111,6 +193,27 @@ export const groups: Group[] = [
       [
         "command running a stash pop two zsh groups spell across a backslash-newline",
         "command (g|\\\nx)(i|y)t stash pop",
+      ],
+      [
+        "time before command running a stash pop one zsh group spells",
+        "time command (g|x)it stash pop",
+      ],
+      ["an escaped time running a stash pop one zsh group spells", "\\time (g|x)it stash pop"],
+      [
+        "nocorrect before exec running a stash pop one zsh group spells",
+        "nocorrect exec (g|x)it stash pop",
+      ],
+      [
+        "command running a stash pop a zsh group with a blank spells",
+        "command (g|x y)it stash pop",
+      ],
+      [
+        "exec running a stash pop a zsh group with an escaped blank spells",
+        "exec (g|x\\ y)it stash pop",
+      ],
+      [
+        "nice running a stash pop one zsh group spells after an unset name",
+        "nice $E (g|x)it stash pop",
       ],
       ...controls(),
       ...stashControls(),
