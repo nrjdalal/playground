@@ -202,8 +202,8 @@ stop_all() {
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
   [ "${1:-}" = keep-web ] || stop_web
 }
-# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (from 1355 to 443)
-dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
+# the dashboard's URLs as portless names them for this checkout, from the state folder portlessDir() picks (the 1355 proxy's while only it serves, so its https is named), read at every check, since portless's proxy can move (from 1355 to 443)
+dashboard_urls() { local dir; dir=$(bun --no-env-file -e "console.log((await import('$D/../../../api/hono/src/lib/dev/proxy.ts')).portlessDir())") && WEB=$(PORTLESS_STATE_DIR=$dir bunx portless get playground) && API=$(PORTLESS_STATE_DIR=$dir bunx portless get api.playground); }
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
 # The branch the dashboard rolls to, read once at start, and its head on origin, read each time
 UPSTREAM=$("$D/upstream.sh")

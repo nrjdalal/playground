@@ -237,11 +237,11 @@ const dashboard = async (): Promise<number> => {
       const started = await manager("dispatcher")
       if (started.code !== 0) failed.push(`The dispatcher didn't start: ${started.message}`)
     } else if (step === "wait") {
-      const ready = urls ?? dashboardUrls(checkout)
       const started = Date.now()
       const state = { shownAt: started, startedAt: started }
       for (;;) {
-        const api = await apiUp(ready)
+        // read afresh each poll, as the supervisor's wait_dashboard does: the stack's API may start portless's 1355 proxy, with its own scheme, after the first read
+        const api = await apiUp(dashboardUrls(checkout))
         const now = Date.now()
         const failure = startFailure(
           await linesSince(logs.results, from.results),

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -7,6 +7,7 @@ import {
   apiUp,
   cutDashboardCheckout,
   dashboardCheckout,
+  dashboardUrls,
   homeDataDir,
   liveBranch,
   linesSince,
@@ -123,6 +124,42 @@ describe("apiUp over https", () => {
 
   test("reads as down with no CA in portless's state folder", async () => {
     expect(await upUnder(join(dir, "missing"))).toBe(false)
+  })
+})
+
+// On Linux no portless service runs on 443, so the stack's API starts the 1355 proxy in ~/.portless/fallback with TLS on, and ~/.portless stays idle (#2299).
+describe("dashboardUrls", () => {
+  test("names the 1355 fallback proxy's https URLs while only it serves, not an idle ~/.portless's", () => {
+    const home = mkdtempSync(join(tmpdir(), "probe-urls-home-"))
+    const dashboard = mkdtempSync(join(tmpdir(), "probe-urls-desk-"))
+    symlinkSync(
+      join(import.meta.dir, "../../../../../node_modules"),
+      join(dashboard, "node_modules"),
+    )
+    mkdirSync(join(home, ".portless", "fallback"), { recursive: true })
+    writeFileSync(join(home, ".portless", "routes.json"), "[]")
+    // a stand-in for the fallback proxy: a port of the test's own, under the test's own pid
+    const proxy = Bun.serve({ fetch: () => new Response(""), hostname: "127.0.0.1", port: 0 })
+    const fallback = join(home, ".portless", "fallback")
+    writeFileSync(join(fallback, "proxy.pid"), String(process.pid))
+    writeFileSync(join(fallback, "proxy.port"), String(proxy.port))
+    writeFileSync(join(fallback, "proxy.tls"), "1")
+    const saved = { home: process.env.HOME, state: process.env.PORTLESS_STATE_DIR }
+    process.env.HOME = home
+    delete process.env.PORTLESS_STATE_DIR
+    try {
+      expect(dashboardUrls(dashboard)).toEqual({
+        api: `https://api.playground.localhost:${proxy.port}`,
+        web: `https://playground.localhost:${proxy.port}`,
+      })
+    } finally {
+      process.env.HOME = saved.home
+      if (saved.state === undefined) delete process.env.PORTLESS_STATE_DIR
+      else process.env.PORTLESS_STATE_DIR = saved.state
+      proxy.stop(true)
+      rmSync(home, { force: true, recursive: true })
+      rmSync(dashboard, { force: true, recursive: true })
+    }
   })
 })
 

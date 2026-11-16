@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -21,15 +22,22 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 const fn = (name: string) => script.match(new RegExp(`^${name}\\(\\) \\{.*\\}$`, "m"))?.[0]
 
-// A stand-in for bunx that answers `portless get <name>` from a file, as portless 0.15 names a URL from whatever proxy runs when it is asked.
+// A stand-in for bunx that answers `portless get <name>` from a file, as portless 0.15 names a URL from whatever proxy runs when it is asked; STATE in the file reads as the PORTLESS_STATE_DIR it was asked under.
 const bunx = join(scratch, "bunx")
 const answer = join(scratch, "answer")
-await Bun.write(bunx, `#!/bin/sh\n[ "$1 $2" = "portless get" ] && sed "s/NAME/$3/" "${answer}"\n`)
+await Bun.write(
+  bunx,
+  `#!/bin/sh\n[ "$1 $2" = "portless get" ] && sed "s/NAME/$3/; s|STATE|$PORTLESS_STATE_DIR|" "${answer}"\n`,
+)
 chmodSync(bunx, 0o755)
 
-const run = (body: string) =>
+const run = (body: string, env: Record<string, string | undefined> = process.env) =>
   Bun.spawn(["bash", "-c", body], {
-    env: { ...process.env, PATH: `${scratch}:${process.env.PATH}` },
+    env: {
+      ...env,
+      D: join(root, "scripts", "ops", "dashboard"),
+      PATH: `${scratch}:${process.env.PATH}`,
+    },
     stdout: "pipe",
   })
 
@@ -160,6 +168,25 @@ describe("the supervisor's dashboard URLs", () => {
     expect(await proc.exited).toBe(0)
     expect((await new Response(proc.stdout).text()).trim()).toBe(
       "https://desk.playground.localhost https://desk.api.playground.localhost",
+    )
+  })
+
+  // on Linux no portless service runs on 443, so the stack's API starts the 1355 proxy in ~/.portless/fallback with TLS on, and an idle ~/.portless names http (#2299)
+  test("are read from the folder portlessDir() picks, the 1355 fallback proxy's while only it serves", async () => {
+    const home = join(scratch, "urls-home")
+    const fallback = join(home, ".portless", "fallback")
+    mkdirSync(fallback, { recursive: true })
+    await Bun.write(join(home, ".portless", "routes.json"), "[]")
+    await Bun.write(join(fallback, "proxy.pid"), String(process.pid))
+    await Bun.write(answer, "STATE NAME\n")
+    const { PORTLESS_STATE_DIR: _, ...env } = process.env
+    const proc = run(`${fn("dashboard_urls")}\ndashboard_urls && echo "$WEB|$API"`, {
+      ...env,
+      HOME: home,
+    })
+    expect(await proc.exited).toBe(0)
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      `${fallback} playground|${fallback} api.playground`,
     )
   })
 

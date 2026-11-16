@@ -16,7 +16,7 @@ import {
 } from "@packages/settings"
 
 import { inRecordedForm } from "../../../../api/hono/src/lib/sessions/proc-start"
-import { portlessCa } from "../portless-ca"
+import { portlessCa, portlessDir } from "../portless-ca"
 import {
   dashboardBeatOf,
   staleBeat,
@@ -34,8 +34,13 @@ const configDir = (): string =>
     ? join(homedir(), ".claude")
     : process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 
-const run = (argv: string[], cwd?: string, timeout = 10_000): { code: number; out: string } => {
-  const child = Bun.spawnSync(argv, { cwd, stderr: "pipe", stdout: "pipe", timeout })
+const run = (
+  argv: string[],
+  cwd?: string,
+  timeout = 10_000,
+  env?: Record<string, string | undefined>,
+): { code: number; out: string } => {
+  const child = Bun.spawnSync(argv, { cwd, env, stderr: "pipe", stdout: "pipe", timeout })
   return { code: child.exitCode ?? 1, out: child.stdout.toString().trim() }
 }
 
@@ -85,10 +90,13 @@ export const cutDashboardCheckout = (
 
 export type Urls = { api: string; web: string }
 
-// The dashboard opens on its bare name, which its stack aliases beside its own `desk.`-prefixed ones, while its API keeps the `desk.`-prefixed name its page calls.
+// The dashboard opens on its bare name, which its stack aliases beside its own `desk.`-prefixed ones, while its API keeps the `desk.`-prefixed name its page calls. portless get reads the state folder portlessDir() picks, so each URL names the proxy that serves, the 1355 fallback's scheme and port included, never an idle ~/.portless's guess.
 export const dashboardUrls = (dashboard: string): Urls | null => {
-  const web = run(["bunx", "portless", "get", "playground", "--no-worktree"], dashboard).out
-  const api = run(["bunx", "portless", "get", "api.playground"], dashboard).out
+  const env = { ...process.env, PORTLESS_STATE_DIR: portlessDir() }
+  const get = (...name: string[]) =>
+    run(["bunx", "portless", "get", ...name], dashboard, 10_000, env).out
+  const web = get("playground", "--no-worktree")
+  const api = get("api.playground")
   return web.startsWith("http") && api.startsWith("http") ? { api, web } : null
 }
 
