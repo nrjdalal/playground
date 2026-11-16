@@ -47,12 +47,12 @@ PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/p
 CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
 curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
 curl -sS "${CA[@]}" "$API/api/health"                        # {"data":{"db":"ok","dashboard":"fixture","message":"ok",...}}
-curl -sS "${CA[@]}" -o /dev/null -w "%{http_code}" "$WEB/"   # 200
+curl -sS "${CA[@]}" -o /dev/null -w "%{http_code}" "$WEB/"   # 307, to /dashboard
 ```
 
-`CA` stays empty when that folder holds no `ca.pem`; on Linux, a health curl without it fails with curl's error 60, a self-signed chain (measured on the 1355 proxy, 16 Nov). Pass `"${CA[@]}"` to every curl below that reaches an https stack.
+`CA` stays empty when that folder holds no `ca.pem`; on Linux, a health curl without it fails with curl's error 60, a self-signed chain (measured on the 1355 proxy, 16 Nov). Every curl block in this skill sets `PDIR` and `CA` itself, since a Bash call keeps no variable from the one before.
 
-Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `200`. To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `bunx portless list` shows every active route.
+Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `307` to `/dashboard` (`200` with `curl -L`). To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `bunx portless list` shows every active route.
 
 Then run `bun run verify health` (it checks the version against your `HEAD`) and grep the dev log for `Is port`: portless can hand a new API a port another worktree's Next already holds, and `/api/health` then answers from the other stack. `verify` runs one check a call: for several, run each (`verify health`, then `verify cursor`) or `verify all`, which a bare `bun run verify` runs too; a word after any check but `pages`, `extension-node`, `screenshots`, `cls`, `tooltips` or `all` is refused, not ignored, but for `ended`, which takes one session name.
 
@@ -72,7 +72,8 @@ Then start it again as in **Start**: `bun run dev --ui stream > /tmp/playground-
 
 ```bash
 API=$(bunx portless get api.playground)
-# PDIR and CA as in Start
+PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
+CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
 curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
 ```
 
@@ -111,8 +112,10 @@ Off a fixture stack its account is refused on the writes that act as the owner (
 
 ```bash
 WEB=$(bunx portless get playground); API=$(bunx portless get api.playground)
-curl -sS -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"
-curl -sS -b cookies.txt "$API/api/v1/user"
+PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
+CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
+curl -sS "${CA[@]}" -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"
+curl -sS "${CA[@]}" -b cookies.txt "$API/api/v1/user"
 ```
 
 In the browser: a visit with no session to `/dashboard` shows first run's pane, which signs the one owner in again by itself, or, with no owner yet, lists this Mac's checks and on Continue makes and signs in this Mac's owner. To sign the browser in as `LocalAgent` instead, post the request above as a form from a page on the web origin, as `signIn` in `packages/scripts/src/verify/checks.ts` does from `/robots.txt`.
