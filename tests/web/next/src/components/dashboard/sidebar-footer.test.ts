@@ -90,7 +90,7 @@ describe("the sidebar's footer", () => {
     expect(dashboard).not.toContain("function DashboardSystem")
     expect(footer).toMatch(/export function DashboardFooter\(\) \{\s*return <MusicPlayer \/>/)
     expect(layout).toContain("footer={<DashboardFooter />}")
-    expect(dashboard).toMatch(/i === usage \? \(\s*<DispatcherUsage now=\{now\} read=\{read\} \/>/)
+    expect(dashboard).toMatch(/i === usage \? <DispatcherUsage now=\{now\} read=\{read\} \/>/)
   })
 
   test("the sidebar's footer carries no Documentation link: it lives in the user menu", async () => {
