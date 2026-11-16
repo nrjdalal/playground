@@ -17,6 +17,8 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
 
+import { scratchEnv } from "./scratch-env"
+
 const root = join(import.meta.dir, "..")
 // The repository install.sh clones, read from install.sh itself.
 const REPO = /^REPO=(\S+)$/m.exec(readFileSync(join(root, "install.sh"), "utf8"))![1]!
@@ -95,22 +97,13 @@ const write = (path: string, text: string, mode = 0o644) => {
 }
 
 // git with no system config, no GIT_* from a hook that runs the suite, and the scratch HOME's .gitconfig; Claude Code's, Playground's and portless's folders are the scratch HOME's too
-const gitEnv = (home: string) => ({
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !key.startsWith("GIT_") &&
-        !key.startsWith("INSTALL_") &&
-        !key.startsWith("PORTLESS") &&
-        key !== "PLAYGROUND_INSTALL",
-    ),
-  ),
-  CLAUDE_CONFIG_DIR: "",
-  GIT_CONFIG_NOSYSTEM: "1",
-  HOME: home,
-  PLAYGROUND_DATA_DIR: "",
-  XDG_CONFIG_HOME: "",
-})
+const gitEnv = (home: string) =>
+  scratchEnv(home, {
+    CLAUDE_CONFIG_DIR: "",
+    GIT_CONFIG_NOSYSTEM: "1",
+    PLAYGROUND_DATA_DIR: "",
+    XDG_CONFIG_HOME: "",
+  })
 const git = (cwd: string, home: string, ...args: string[]) =>
   Bun.spawnSync([realGit, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
     cwd,

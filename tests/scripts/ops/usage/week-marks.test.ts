@@ -12,6 +12,8 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { scratchEnv } from "../../../scratch-env"
+
 const script = join(
   import.meta.dir,
   "..",
@@ -88,12 +90,9 @@ const iso = (t: number) => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/,
 
 // one run of the script under the scratch HOME, its output's lines
 const run = (home: string) => {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
+  const env = scratchEnv(home, {
     PATH: `${join(home, "bin")}:${process.env.PATH}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  })
   const child = Bun.spawnSync(["python3", "-I", script], { env })
   expect(child.exitCode).toBe(0)
   return child.stdout.toString().split("\n")
@@ -115,12 +114,9 @@ test("a week past 90% and a 5-hour window past 85% each alert once", () => {
 // the owner's drain order: every account is used to 100%, where a seated second dispatcher switches, so no mark parks or stops work
 test("the 97% and 98% alerts say nothing parks and a seated second dispatcher switches at 100%", () => {
   const home = setup("drain", 99, 20)
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
+  const env = scratchEnv(home, {
     PATH: `${join(home, "bin")}:${process.env.PATH}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  })
   const out = Bun.spawnSync(["python3", "-I", script], { env }).stdout.toString()
   const lines = out.split("\n").filter((line) => /^ALERT 9[78] /.test(line))
   expect(lines).toHaveLength(2)
@@ -317,12 +313,9 @@ test("a spare account at 97% alerts once per its week reset, with the logged-in 
   })
   const home = setup("spare-97", 50, 20, spare(now + 172800))
   const marks = () => {
-    const env: Record<string, string | undefined> = {
-      ...process.env,
-      HOME: home,
+    const env = scratchEnv(home, {
       PATH: `${join(home, "bin")}:${process.env.PATH}`,
-    }
-    delete env.CLAUDE_CONFIG_DIR
+    })
     const child = Bun.spawnSync(["python3", "-I", script], { env })
     expect(child.exitCode).toBe(0)
     return child.stdout
@@ -357,12 +350,9 @@ test("a listed spare's marks fire while the logged-in account is outside usage.a
       '"account":"other@example.test"',
     ),
   )
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    HOME: home,
+  const env = scratchEnv(home, {
     PATH: `${join(home, "bin")}:${process.env.PATH}`,
-  }
-  delete env.CLAUDE_CONFIG_DIR
+  })
   const run = () => Bun.spawnSync(["python3", "-I", script], { env }).stdout.toString().split("\n")
   const lines = run()
   expect(lines[0]).toStartWith("other@example.test: not a factory account")

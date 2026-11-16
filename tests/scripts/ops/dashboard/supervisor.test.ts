@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { scratchEnv } from "../../../scratch-env"
 import { SCRIPT as RUN_SLOT, machine as slotMachine } from "../run-slot-fake"
 
 const root = join(import.meta.dir, "..", "..", "..", "..")
@@ -1903,7 +1904,7 @@ describe("trash_build", () => {
         `D=${join(root, "scripts", "ops", "dashboard")} LOG=${state}/supervisor.log\n${fn("say")}\n${fn("trash_build")}\ntrash_build "${path}" "a test"`,
       ],
       {
-        env: { ...process.env, HOME: home, PLAYGROUND_DATA_DIR: join(home, ".playground") },
+        env: scratchEnv(home, { PLAYGROUND_DATA_DIR: join(home, ".playground") }),
         stderr: "pipe",
         stdout: "pipe",
       },
