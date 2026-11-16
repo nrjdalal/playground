@@ -21,6 +21,7 @@ import {
   clean,
   databaseCheck,
   dropBox,
+  hostTools,
   installCheck,
   installEnv,
   leftForYou,
@@ -330,7 +331,7 @@ describe("the box on this host's OS (#2374)", () => {
     const has = install.match(/^has\(\) \{.*\}$/m)?.[0]
     const step = install.match(/^install_tool\(\) \{\n[\s\S]*?\n\}$/m)?.[0]
     const ran = Bun.spawnSync(["bash", "-c", `${has}\n${step}\nOS=Linux\ninstall_tool uv`], {
-      env: { HOME: join(box, "h"), PATH: boxPath(box, uv) },
+      env: { HOME: join(box, "h"), PATH: boxPath(box, hostTools(box, uv)) },
     })
     const calls = existsSync(join(box, "calls.log"))
       ? readFileSync(join(box, "calls.log"), "utf8")

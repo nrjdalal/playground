@@ -145,8 +145,8 @@ export const hostTools = (box: string, uv: string | null): string => {
   return tools
 }
 
-// The box's PATH: the stand-ins first, then the host's uv, bun, node and docker, and the system's folders.
-export const boxPath = (box: string, uv = Bun.which("uv")): string => {
+// The box's PATH: the stand-ins first, then tools (hostTools' folder), the host's bun, node and docker, and the system's folders.
+export const boxPath = (box: string, tools: string): string => {
   const node = dirname(
     Bun.spawnSync(["realpath", realBin("node")])
       .stdout.toString()
@@ -154,7 +154,7 @@ export const boxPath = (box: string, uv = Bun.which("uv")): string => {
   )
   return [
     join(box, "stubs"),
-    hostTools(box, uv),
+    tools,
     join(homedir(), ".bun", "bin"),
     node,
     dirname(realBin("docker")),
@@ -196,7 +196,7 @@ const prep = (box: string, sha: string) => {
   writeFileSync(join(box, "tty"), "y\n")
   for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
   writeFileSync(join(box, "proxy-up"), "")
-  const path = boxPath(box)
+  const path = boxPath(box, hostTools(box, Bun.which("uv")))
   run(["git", "fetch", "-q", "origin"], { cwd: REPO })
   run(["git", "init", "-q", "--bare", join(box, "source.git")])
   const pushed = run(

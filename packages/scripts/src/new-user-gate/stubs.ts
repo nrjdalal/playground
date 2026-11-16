@@ -14,12 +14,6 @@ const logged = (box: string, name: string) =>
 // Pure: each stand-in's file name and script for a box at box, with bunx execing realBunx for anything but pglaunch.
 export const stubs = (box: string, realBunx: string, realCurl = ""): Record<string, string> => ({
   brew: `${logged(box, "brew")}exit 1\n`,
-  // the real curl, with each URL it fetches logged and no other argument, since a header can carry a token
-  curl: `#!/bin/bash
-u=; for a in "$@"; do case "$a" in http://* | https://*) u="$u $a" ;; esac; done
-echo "curl$u" >> "${box}/calls.log"
-exec "${realCurl}" "$@"
-`,
   bunx: `${logged(box, "bunx")}pg=; name=; prev=
 for a in "$@"; do case "$a" in pglaunch@*) pg=1 ;; esac; [ "$prev" = -n ] && name=$a; prev=$a; done
 [ -n "$pg" ] || exec "${realBunx}" "$@"
@@ -34,6 +28,12 @@ echo "postgres://postgres:postgres@localhost:$port/postgres"
   claude: `${logged(box, "claude")}[ "$1" = setup-token ] && exec bun "${box}/h/playground/api/hono/src/fixtures/setup-token.ts" setup-token
 [ "$1 $2" = "auth status" ] && { echo '{"loggedIn": true}'; exit 0; }
 HERDR_AGENT=claude exec bun "${join(import.meta.dir, "claude.ts")}" "$@"
+`,
+  // the real curl, with each URL it fetches logged and no other argument, since a header can carry a token
+  curl: `#!/bin/bash
+u=; for a in "$@"; do case "$a" in http://* | https://*) u="$u $a" ;; esac; done
+echo "curl$u" >> "${box}/calls.log"
+exec "${realCurl}" "$@"
 `,
   gh: `${logged(box, "gh")}case "$1 $2" in
   "api user") echo gate-user ;;
