@@ -9,7 +9,7 @@ test("the reviewer template carries the hold: stop the push waiter with TaskStop
   const line = text.split("\n").find((l) => l.startsWith("**hold**:")) ?? ""
   expect(line).toContain("stop your push waiter")
   expect(line).toContain("`TaskStop`")
-  expect(line).toContain("your lead's resume word")
+  expect(line).toContain("that lead's resume word")
   expect(line).toContain("ship's freeze is no hold")
 })
 

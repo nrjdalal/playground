@@ -25,7 +25,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
       (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
     ).split("**Done when**")
     expect(step).toContain("stop its waiter with `TaskStop`")
-    expect(step).toContain("your lead's resume word")
+    expect(step).toContain("that lead's resume word")
     expect(step).toContain("a ship's freeze")
     expect(done ?? "").toContain("on a PR its lead holds, stopped until the lead's resume word")
     expect(await page()).toContain("stops its waiter while its lead holds the PR")

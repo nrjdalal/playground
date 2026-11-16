@@ -118,7 +118,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
 - Apply a patch copied from a GitHub comment with `git apply --recount <file>`, since a comment's patch often carries stale hunk counts.
 - A lead hands a reviewer's patch on by the reviewer's own path, its verdict comment or the file it saved, never as a copy the lead writes out again, since a rewritten copy lost the leading space of its blank context lines and failed `git apply --check`.
-- A lead that holds a PR (its own line in the held list, `packages/scripts/src/pr-merge/README.md`'s Holds) sends its reviewer the hold, then the resume, by `SendMessage`, as playbook's Chain sends a lead's word to a checker.
+- A lead that holds a PR (its own line in the held list, `packages/scripts/src/pr-merge/README.md`'s Holds and rulings) sends its reviewer the hold, then the resume, by `SendMessage`, as playbook's Chain sends a lead's word to a checker.
   The reviewer stops its push waiter with `TaskStop` until the resume (code-review-loop's step 8), so a push the hold did not expect opens no round; a ship's freeze is no such hold.
 
 Done when every finding of the round is fixed in the push, kept in the sort comment with its PR, or dropped there with its reason.
