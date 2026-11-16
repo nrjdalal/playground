@@ -74,7 +74,7 @@ const PASTE_MS = 300
 
 // What a test injects: the reader of the account a token signs in as, the binaries by path, so no case depends on PATH's order, the folder a Mac's browsers are found in, the data folder, the environment a Linux browser is found and opened with, the expiry, the platform, the folder fresh profiles are made in, the runtime folder X's auth file is read from, the wait for a token and the folder X's sockets are read from.
 type Deps = {
-  account?: (token: string) => Promise<string | null>
+  account?: (token: string) => Promise<string | null | false>
   applications?: string
   claude?: string
   data?: string
@@ -114,8 +114,11 @@ export const urlOf = (screen: string): string | undefined =>
 // setup-token's own refusal of a code, which it prints and then waits on Enter to retry.
 const refusedOn = (screen: string): boolean => /OAuth error:/.test(plain(screen))
 
+// Ink moves the cursor rather than printing a line break after the token, so each cursor code and carriage return reads as a break, and the token ends where it does on screen rather than running on into the next word.
 const tokenOf = (screen: string): string | undefined =>
-  plain(screen).match(/sk-ant-[A-Za-z0-9_-]{20,}/)?.[0]
+  Bun.stripANSI(screen.replace(/\x1b\[[0-9;?]*[A-Za-ln-z]|\r/g, "\n")).match(
+    /sk-ant-[A-Za-z0-9_-]{20,}/,
+  )?.[0]
 
 // A Linux window's display: the environment's own, else the one X socket this user owns with gdm's auth file beside it, since a stack started from a herdr pane carries no display; none when no socket or more than one is found.
 const displayOf = (deps: Deps): Record<string, string> | undefined => {
@@ -161,13 +164,14 @@ const shown = (found: Found | undefined): Browser | null =>
 export const profileUrl = (env: Record<string, string | undefined> = process.env): string =>
   env.PLAYGROUND_PROFILE_URL || "https://api.anthropic.com/api/oauth/profile"
 
-// The account a long-lived token signs in as, by Claude's own profile read, or null when it cannot say (a token scoped to inference alone may not read it).
-const profileOf = async (token: string): Promise<string | null> => {
+// The account a long-lived token signs in as, by Claude's own profile read: false when Claude refuses the token (401), or null when it cannot say (a token scoped to inference alone may not read it).
+const profileOf = async (token: string): Promise<string | null | false> => {
   try {
     const answer = await fetch(profileUrl(), {
       headers: { "anthropic-beta": "oauth-2025-04-20", authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(PROFILE_MS),
     })
+    if (answer.status === 401) return false
     if (!answer.ok) return null
     const body = (await answer.json()) as { account?: { email?: unknown } }
     return typeof body.account?.email === "string" ? body.account.email : null
@@ -311,6 +315,13 @@ export async function submitCode(
     }
   const token = answer
   const named = await (deps.account ?? (readsLive() ? profileOf : async () => signIn.email))(token)
+  if (named === false)
+    return {
+      message:
+        "Claude refused the token this sign-in made, so it is not kept: start again for a new one",
+      ok: false,
+      status: 409,
+    }
   if (named && named.toLowerCase() !== signIn.email.toLowerCase())
     return {
       message: `the sign-in was for ${named}, not ${signIn.email}: start again, and sign in with ${signIn.email}`,

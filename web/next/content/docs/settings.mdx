@@ -43,7 +43,7 @@ A Claude account takes its email (and an optional label), then three steps: open
 While Claude checks the code the dialog reads **Checking the code with Claude…**, for up to about 70 seconds; a code Claude refuses, no answer in that time, a sign-in that ended (most likely because Playground restarted) and a lost connection each say what happened over **Start again**, which opens a new sign-in.
 When the computer has none of those (Safari alone takes no fresh profile), or a Linux desktop's display cannot be found, the dialog shows the link with **Copy link**: open it in a private or guest window yourself.
 An account already on the list whose token this computer does not hold, such as one carried over from another computer, can be added again the same way: it keeps its row and gains the token, while one whose token is here is refused as already listed.
-The account is listed once the sign-in names the email you gave; a sign-in for another account is refused and its token dropped, and one whose account cannot be read back is listed with **account not confirmed**.
+The account is listed once the sign-in names the email you gave; a sign-in for another account is refused and its token dropped, a token Claude refuses is shown as refused and never kept, and one whose account cannot be read back is listed with **account not confirmed**.
 A GLM key takes its label and your Z.ai API key.
 The token goes to this computer's secret store, the Keychain on a Mac and on Linux a file only you can read in Playground's data folder, and is never shown again, and **Remove**, the bin on each row, takes the account off the list and its token out of the store.
 

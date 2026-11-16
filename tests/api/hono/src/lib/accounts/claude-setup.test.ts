@@ -102,7 +102,7 @@ const EMAIL = "made-up@example.test"
 const GONE =
   "This sign-in has ended, most likely because Playground restarted: start again for a new one"
 // The account the sign-in names, as the reader of a kept token would answer it.
-let signedIn: string | null = EMAIL
+let signedIn: string | null | false = EMAIL
 beforeEach(() => {
   signedIn = EMAIL
 })
@@ -367,6 +367,35 @@ describe("the guided Claude sign-in", () => {
       ok: true,
     })
     expect(logged()).not.toContain("open ")
+  })
+
+  test("a token Ink draws with a cursor move before the next word is read to its own end, the real one's 108 characters", async () => {
+    const data = fresh()
+    const started = await startSetup({ email: EMAIL }, { ...fakes, applications: apps(), data })
+    if (!started.ok) throw new Error(started.message)
+    expect(await submitCode(started.id, "drawn", who, { ...fakes, data })).toMatchObject({
+      ok: true,
+    })
+    const kept = logged().match(/-w "([^"]*)"/)?.[1] ?? ""
+    expect(kept).toBe(
+      `sk-ant-oat01-${createHash("sha256").update("drawn").digest("hex")}-made-up-${"A".repeat(22)}`,
+    )
+    expect(kept).toHaveLength(108)
+  })
+
+  test("a token Claude refuses is shown as refused, and neither kept nor listed", async () => {
+    const data = fresh()
+    const started = await startSetup({ email: EMAIL }, { ...fakes, applications: apps(), data })
+    if (!started.ok) throw new Error(started.message)
+    signedIn = false
+    expect(await submitCode(started.id, "made-up-code", who, { ...fakes, data })).toEqual({
+      message:
+        "Claude refused the token this sign-in made, so it is not kept: start again for a new one",
+      ok: false,
+      status: 409,
+    })
+    expect(logged()).not.toContain("add-generic-password")
+    expect(readSetting(data, "usage.accounts")?.value ?? []).toEqual([])
   })
 
   test("a token for another account than the email given is dropped, and nothing is listed", async () => {
