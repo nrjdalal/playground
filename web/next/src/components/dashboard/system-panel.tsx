@@ -113,14 +113,13 @@ type Reading = {
 export const swapDetail = (platform: string): string =>
   platform === "linux" ? "Linux keeps swap at a set size" : "macOS grows swap as it needs it"
 
-// Pure: the readings table's rows, each summed over the cluster with its split on hover once report.machines names peers, else this machine's own, which memory, CPU and swap say in their detail; disk and Docker are always this machine's, named in a cluster.
+// Pure: the readings table's rows, each summed over the cluster with its split on hover once report.machines names peers, else this machine's own, which memory, CPU and swap say in their detail; Docker is always this machine's.
 export function readingsOf(report: SystemReport, now: Date): Reading[] {
   const { cpu, disk, docker, history, memory } = report
   const swap = memory.swap
   const containersBytes = docker.containers.reduce((sum, c) => sum + (c.bytes ?? 0), 0)
   const cluster = clusterOf(report.machines, memory.pressure, now)
   const alone = cluster ? "" : " · This machine only"
-  const here = cluster ? ` on ${report.machines[0]!.name}` : ""
   const maxBytes = cluster
     ? report.machines.reduce((sum, m) => sum + (m.reading?.memory.totalBytes ?? 0), 0)
     : memory.totalBytes
@@ -167,11 +166,14 @@ export function readingsOf(report: SystemReport, now: Date): Reading[] {
         (swap ? `${sizeLabel(swap.usedBytes)} of ${sizeLabel(swap.totalBytes)}` : "-"),
     },
     {
-      detail: disk ? `of ${sizeLabel(disk.totalBytes)}${here}` : "Could not be read",
+      detail:
+        cluster?.disk.detail ?? (disk ? `of ${sizeLabel(disk.totalBytes)}` : "Could not be read"),
       hour: null,
+      hover: cluster?.disk.hover,
       id: "disk",
       label: "Disk free",
-      value: disk ? sizeLabel(disk.freeBytes) : "-",
+      marker: cluster?.disk.marker,
+      value: cluster?.disk.value ?? (disk ? sizeLabel(disk.freeBytes) : "-"),
     },
     {
       detail:

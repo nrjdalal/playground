@@ -1206,17 +1206,24 @@ describe("accountLine", () => {
 describe("clusterOf", () => {
   type Machine = SystemReport["machines"][number]
   const at = new Date(NOW)
-  const machine = (name: string, used: number, load: number, swapUsed: number): Machine => ({
+  const machine = (
+    name: string,
+    used: number,
+    load: number,
+    swapUsed: number,
+    diskFree: number | null = 700,
+  ): Machine => ({
     down: null,
     name,
     reading: {
       cores: 20,
+      disk: diskFree === null ? null : { freeBytes: diskFree * GB, totalBytes: 994 * GB },
       load: [load, load, load],
       memory: { totalBytes: 128 * GB, usedBytes: used * GB },
       swap: { totalBytes: 16 * GB, usedBytes: swapUsed * GB },
     },
   })
-  const two = [machine("machine-a", 12, 3.1, 1), machine("machine-b", 4, 0.4, 0)]
+  const two = [machine("machine-a", 12, 3.1, 1, 700), machine("machine-b", 4, 0.4, 0, 300)]
 
   test("one machine, or none named, is no cluster, so the page shows its own figures as before", () => {
     expect(clusterOf([], "normal", at)).toBeNull()
@@ -1241,6 +1248,22 @@ describe("clusterOf", () => {
       hover: "machine-a 1.0 GB of 16.0 GB + machine-b 0 MB of 16.0 GB",
       marker: null,
       value: "1.0 GB of 32.0 GB",
+    })
+    expect(cluster.disk).toEqual({
+      detail: "of 1988.0 GB",
+      hover: "machine-a 700.0 GB + machine-b 300.0 GB",
+      marker: null,
+      value: "1000.0 GB",
+    })
+  })
+
+  test("a machine whose disk did not read is a dash in the disk's hover, never a zero in its sum", () => {
+    const cluster = clusterOf([two[0]!, machine("machine-b", 4, 0.4, 0, null)], "normal", at)!
+    expect(cluster.disk).toEqual({
+      detail: "of 994.0 GB",
+      hover: "machine-a 700.0 GB + machine-b -",
+      marker: null,
+      value: "700.0 GB",
     })
   })
 
@@ -1267,11 +1290,18 @@ describe("clusterOf", () => {
 // The owner's cluster as the live System view read it on 16 Nov: two machines of 20 cores, each at a 5-minute load near 10 (#2425).
 describe("systemReadings over a cluster", () => {
   type Machine = SystemReport["machines"][number]
-  const spark = (name: string, load5: number, used: number, swapUsed: number): Machine => ({
+  const spark = (
+    name: string,
+    load5: number,
+    used: number,
+    swapUsed: number,
+    diskFree: number | null = 3470,
+  ): Machine => ({
     down: null,
     name,
     reading: {
       cores: 20,
+      disk: diskFree === null ? null : { freeBytes: diskFree * GB, totalBytes: 3755 * GB },
       load: [load5, load5, load5],
       memory: { totalBytes: 128 * GB, usedBytes: used * GB },
       swap: { totalBytes: 16 * GB, usedBytes: swapUsed * GB },
@@ -1285,14 +1315,17 @@ describe("systemReadings over a cluster", () => {
   const pick = (report: SystemReport, key: string) =>
     systemReadings(report, NOW).find((r) => r.key === key)!
 
-  test("memory, load and swap are the cluster's sums, each hover naming every machine's part, and disk names the machine it reads", () => {
-    const report = both(spark("spark-a566", 10, 64, 2), spark("spark-9dfb", 10.4, 32, 0))
+  test("memory, load, swap and disk are the cluster's sums, each hover naming every machine's part", () => {
+    const report = both(
+      spark("spark-a566", 10, 64, 2, 3470),
+      spark("spark-9dfb", 10.4, 32, 0, 3401),
+    )
     const readings = systemReadings(report, NOW)
     expect(readings.map((r) => `${r.key} ${r.value} ${r.level}`).slice(0, 4)).toEqual([
       "memory 38 green",
       "cpu 20 green",
       "swap 6 green",
-      "disk 729 green",
+      "disk 7T green",
     ])
     expect(pick(report, "cpu").title).toBe(
       "Load 20 on 40 cores, 5 min., below the 0.8 a core warning level on each machine\nspark-a566 10 on 20 + spark-9dfb 10 on 20 cores",
@@ -1304,7 +1337,7 @@ describe("systemReadings over a cluster", () => {
       "Swap 6% used, below the 90% warning level on each machine\nspark-a566 13% + spark-9dfb 0% used",
     )
     expect(pick(report, "disk").title).toBe(
-      "Disk 729 GB free on spark-a566, above the 50 GB warning level",
+      "Disk 6871 GB free, above the 50 GB warning level on each machine\nspark-a566 3470 + spark-9dfb 3401 GB free",
     )
   })
 
@@ -1327,6 +1360,15 @@ describe("systemReadings over a cluster", () => {
         "spark-a566 swap 94% used, over the 90% warning level",
       ],
     })
+    const full = both(spark("spark-a566", 10, 64, 2, 3470), spark("spark-9dfb", 10, 32, 0, 30))
+    expect(pick(full, "disk")).toMatchObject({
+      level: "amber",
+      reasons: ["spark-9dfb disk 30 GB free, under the 50 GB warning level"],
+      value: "3T",
+    })
+    expect(systemHealth(full, NOW).reasons).toEqual([
+      "spark-9dfb disk 30 GB free, under the 50 GB warning level",
+    ])
     const pressed = both(spark("spark-a566", 10, 64, 2), spark("spark-9dfb", 10, 32, 0))
     pressed.memory.pressure = "warn"
     expect(pick(pressed, "memory")).toMatchObject({
@@ -1349,5 +1391,18 @@ describe("systemReadings over a cluster", () => {
     })
     expect(pick(report, "memory").title).toEndWith(missing)
     expect(pick(report, "swap").title).toEndWith(missing)
+    expect(pick(report, "disk")).toMatchObject({
+      title: `Disk 3470 GB free, above the 50 GB warning level on each machine\nspark-a566 3470 GB free\n${missing}`,
+      value: "3T",
+    })
+  })
+
+  test("a peer that read with no disk keeps the sum to the machine that read it, its part a dash", () => {
+    const report = both(spark("spark-a566", 10, 64, 2, 3470), spark("spark-9dfb", 10, 32, 0, null))
+    expect(pick(report, "disk")).toMatchObject({
+      title:
+        "Disk 3470 GB free, above the 50 GB warning level\nspark-a566 3470 + spark-9dfb - GB free",
+      value: "3T",
+    })
   })
 })

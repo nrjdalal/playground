@@ -7,7 +7,7 @@ import { settledWithin } from "@/lib/settle"
 // A kill at a timeout is bounded: SIGTERM first, then this grace, then SIGKILL, and the pipes stop being waited on a moment later.
 const KILL_GRACE_MS = 3000
 
-// The System panel reads the machine through these commands alone, each a fixed argv run without a shell, and so does the dashboard when it reads when a session's process started. Every one only reports (memory_pressure is left out, since its -l simulates pressure; sysctl is never handed a name=value; a peer's ssh runs one fixed cat of /proc, never prompting), so nothing the panel runs can change a machine. Nothing else under lib/system starts a process.
+// The System panel reads the machine through these commands alone, each a fixed argv run without a shell, and so does the dashboard when it reads when a session's process started. Every one only reports (memory_pressure is left out, since its -l simulates pressure; sysctl is never handed a name=value; a peer's ssh runs one fixed df of its home and cat of /proc, never prompting), so nothing the panel runs can change a machine. Nothing else under lib/system starts a process.
 export const COMMANDS = {
   containerStats: () => ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
   containers: () => ["docker", "ps", "--format", "{{json .}}"],
@@ -22,6 +22,11 @@ export const COMMANDS = {
     "-o",
     "ConnectTimeout=3",
     target,
+    // df runs first, so the exit is cat's: a df that fails leaves out the peer's disk, never the peer
+    "df",
+    "-kP",
+    "~",
+    ";",
     "cat",
     "/proc/loadavg",
     "/proc/meminfo",
