@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -54,7 +61,7 @@ const stepTwo = async () => {
 // The step's call run in bash with fakes first on PATH: playground prints the setting given (or fails on null), bunx names an API, and curl prints its arguments one a line.
 const runStep = (
   shell: string,
-  opts: { branch: string | null; caDir?: string; cwd?: string; repo?: string },
+  opts: { branch: string | null; caDir?: string; cwd?: string; home?: string; repo?: string },
 ) => {
   const bin = mkdtempSync(join(tmpdir(), "dispatcher-step-bin-"))
   const fake = (name: string, body: string) => {
@@ -73,7 +80,7 @@ const runStep = (
   const child = Bun.spawnSync(["bash", "-c", shell], {
     cwd: opts.cwd,
     env: {
-      HOME: process.env.HOME!,
+      HOME: opts.home ?? process.env.HOME!,
       PATH: `${bin}:${bun}:/usr/bin:/bin`,
       ...(opts.caDir ? { PORTLESS_STATE_DIR: opts.caDir } : {}),
       ...(opts.repo ? { PLAYGROUND_REPO: opts.repo } : {}),
@@ -137,9 +144,12 @@ test("the health read passes portless's CA to curl when portless has one, as pro
 })
 
 // On Linux the stack's API starts the 1355 proxy in ~/.portless/fallback with TLS on, so portless get names its https URL only when asked in that folder (#2299).
-test("the health read asks portless get in the folder portlessDir() names, so it names the proxy that serves (#2299)", async () => {
+test("the health read asks portless get in the folder portlessDir() names, the 1355 proxy's while only it serves (#2299)", async () => {
   const { curl, finds } = await stepTwo()
-  const caDir = mkdtempSync(join(tmpdir(), "dispatcher-step-state-"))
-  const got = runStep(`${finds}; ${curl}`, { branch: "live", caDir, repo: fixtureRepo() })
-  expect(got.err).toContain(`state:${caDir}\n`)
+  const home = mkdtempSync(join(tmpdir(), "dispatcher-step-home-"))
+  const fallback = join(home, ".portless", "fallback")
+  mkdirSync(fallback, { recursive: true })
+  writeFileSync(join(fallback, "proxy.pid"), String(process.pid))
+  const got = runStep(`${finds}; ${curl}`, { branch: "live", home, repo: fixtureRepo() })
+  expect(got.err).toContain(`state:${fallback}\n`)
 })
