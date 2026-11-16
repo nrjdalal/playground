@@ -307,12 +307,16 @@ const pageFor = (route: string) =>
 
 // What the run has signed into, undone however it ends: a check undoes its own when it finishes, and an interrupt undoes whatever is still open before it exits, so no session or browser outlives the run.
 const cleanups = new Set<() => Promise<void>>()
+let stopping = false
+// A Ctrl-C reaches this run twice under withPortlessCa, from the terminal and from its parent, so a second signal waits on the first's cleanups rather than ending the run mid-close.
 const interrupted = async () => {
+  if (stopping) return
+  stopping = true
   await Promise.all([...cleanups].map((cleanup) => cleanup().catch(() => undefined)))
   process.exit(130)
 }
-process.once("SIGINT", interrupted)
-process.once("SIGTERM", interrupted)
+process.on("SIGINT", interrupted)
+process.on("SIGTERM", interrupted)
 
 const holding = async <T>(cleanup: () => Promise<void>, run: () => Promise<T>): Promise<T> => {
   cleanups.add(cleanup)
