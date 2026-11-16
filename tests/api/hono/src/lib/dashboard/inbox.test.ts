@@ -2934,6 +2934,20 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect((await again(update("PG-2298 other poster", "40%", "ops"))).item.id).not.toBe(mine.id)
     })
 
+    test("a twin is matched in the thread the repeat names, and a thread no item has is still refused", async () => {
+      const { createThread } = await import("../../../../../../api/hono/src/lib/dashboard/threads")
+      const threadId = await createThread(db, "PG-2298 thread")
+      const filed = await store.postOrEdit(db, update("PG-2298 threaded twin", "40%"), threadId)
+      if (!filed.ok) throw new Error(filed.message)
+      const inThread = await store.postOrEdit(db, update("PG-2298 threaded twin", "80%"), threadId)
+      expect(inThread).toMatchObject({ edited: true, item: { id: filed.item.id } })
+      const unthreaded = await again(update("PG-2298 threaded twin", "80%"))
+      expect(unthreaded.item.id).not.toBe(filed.item.id)
+      expect(
+        await store.postOrEdit(db, update("PG-2298 threaded twin", "90%"), "no-such-thread"),
+      ).toMatchObject({ code: "NOT_FOUND", ok: false })
+    })
+
     test("a decision with the same poster and title posts a second card, as before", async () => {
       const first = await post({ ...decision(PREVIEWS.budget), title: "PG-2298 decision" })
       const second = await again({ ...decision(PREVIEWS.budget), title: "PG-2298 decision" })

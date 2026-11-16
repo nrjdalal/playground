@@ -1721,7 +1721,7 @@ export async function editItem(
   return { item: toItem(row), ok: true, ...(reopens && { reopened: true as const }) }
 }
 
-// bun run ask new: an update whose poster already has one by that title it can still edit (its twin) edits that card on editItem's path, or leaves it as it is when the words match, so a repeat never makes a second card; anything else posts. postItem stays one card a call, since Yard's pendingCard gives two pending posts in one channel one title (api/hono/src/lib/yard/inbound.ts).
+// bun run ask new: an update whose poster already has one by that title in the same thread, or none, that it can still edit (its twin) edits that card on editItem's path, or leaves it as it is when the words match, so a repeat never makes a second card; anything else posts. postItem stays one card a call, since Yard's pendingCard gives two pending posts in one channel one title (api/hono/src/lib/yard/inbound.ts:127).
 export async function postOrEdit(
   db: Database,
   input: unknown,
@@ -1742,6 +1742,7 @@ export async function postOrEdit(
         eq(inboxItem.kind, "update"),
         eq(inboxItem.from, parsed.data.from),
         eq(inboxItem.title, parsed.data.title),
+        threadId === undefined ? isNull(inboxItem.threadId) : eq(inboxItem.threadId, threadId),
       ),
     )
     .orderBy(desc(inboxItem.createdAt))
