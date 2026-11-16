@@ -16,7 +16,7 @@ const py = (file: string, ...withs: string[]) => [
   `tests/${file}`,
 ]
 
-const steps: [string, string[]][] = [
+export const steps: [string, string[]][] = [
   ["skill frontmatter", ["bun", "run", "test:file", "tests/skill-frontmatter.test.ts"]],
   ["skills-ref validate", ["bun", "packages/scripts/src/skills-ref/cli.ts"]],
   ["links", py("test_links.py")],
