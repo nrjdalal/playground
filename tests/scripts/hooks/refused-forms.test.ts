@@ -22,6 +22,7 @@ import { check as extensionRepoWrite } from "../../../scripts/hooks/no-extension
 import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-write"
 import { check as glmHeavyPath } from "../../../scripts/hooks/no-glm-heavy-path"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
+import { check as hiddenProgram } from "../../../scripts/hooks/no-hidden-program"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
 import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
@@ -212,6 +213,7 @@ const CHECK_NAMES = [
   "extensionsWrite",
   "glmHeavyPath",
   "headlessLogin",
+  "hiddenProgram",
   "killByName",
   "linearTicket",
   "mainCheckout",
@@ -232,6 +234,7 @@ const SOURCE: Checks = {
   extensionsWrite,
   glmHeavyPath,
   headlessLogin,
+  hiddenProgram,
   killByName,
   linearTicket,
   mainCheckout,
@@ -252,6 +255,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   extensionsWrite: "no-extensions-write",
   glmHeavyPath: "no-glm-heavy-path",
   headlessLogin: "no-headless-login",
+  hiddenProgram: "no-hidden-program",
   killByName: "no-kill-by-name",
   linearTicket: "no-linear-ticket",
   mainCheckout: "no-main-checkout",
@@ -421,6 +425,14 @@ const guardsOf = (
         HOME: home,
         PLAYGROUND_ROLE: "worker",
       }),
+  },
+  "no-hidden-program": {
+    folders: {
+      checkout: [CHECKOUT, HOME],
+      "process home": [homedir(), homedir()],
+      "system bin": ["/bin", homedir()],
+    },
+    run: (raw) => c.hiddenProgram(raw, {}),
   },
   "no-kill-by-name": {
     folders: {
