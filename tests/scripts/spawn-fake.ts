@@ -34,6 +34,33 @@ export const script = join(root, "scripts", "spawn.sh")
 export const scratch = mkdtempSync(join(tmpdir(), "spawn-sh-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
+// The checkouts a case's session runs in: this one's main checkout, and the scratch folder each case's home, PLAYGROUND_REPO and copied checkouts sit in.
+const common = Bun.spawnSync([
+  "git",
+  "-C",
+  root,
+  "rev-parse",
+  "--path-format=absolute",
+  "--git-common-dir",
+])
+export const TRUSTED = [
+  common.exitCode === 0 ? dirname(common.stdout.toString().trim()) : root,
+  scratch,
+]
+
+// Pure: a Claude Code config's text with the owner's yes to its folder trust question for each of TRUSTED, as first run's Trust this folder records it; a config that does not read as an object stays as it is.
+export const trusting = (text: string | undefined): string => {
+  let config: Record<string, unknown> = {}
+  try {
+    config = text === undefined ? {} : JSON.parse(text)
+  } catch {
+    return text!
+  }
+  if (!config || typeof config !== "object") return text!
+  const projects = Object.fromEntries(TRUSTED.map((dir) => [dir, { hasTrustDialogAccepted: true }]))
+  return JSON.stringify({ ...config, projects: { ...projects, ...(config.projects as object) } })
+}
+
 export const LSTART = "Tue Oct 13 04:43:59 2026"
 
 // Fake cmux (which spawn.sh never calls), ps, sysctl, uptime and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
@@ -297,10 +324,15 @@ export async function spawn(
   // The week-pace override the dispatcher writes; unset leaves the file off, as it is on most days.
   if (env.PACE_OFF_UNTIL !== undefined)
     writeFileSync(join(acme, "usage-pace-off-until"), env.PACE_OFF_UNTIL)
-  // Claude Code's own config, which names this machine's login: ~/.claude.json, or the config folder's with CONFIG_DIR_CLAUDE_JSON.
-  if (env.CLAUDE_JSON !== undefined) writeFileSync(join(home, ".claude.json"), env.CLAUDE_JSON)
-  if (env.CONFIG_DIR_CLAUDE_JSON !== undefined)
-    writeFileSync(join(home, ".claude", ".claude.json"), env.CONFIG_DIR_CLAUDE_JSON)
+  // Claude Code's own config, which names this machine's login: ~/.claude.json, or the config folder's with CONFIG_DIR_CLAUDE_JSON; each holds the yes to Claude Code's folder trust question for every case's checkout, which NO_CLAUDE_TRUST leaves off, as on a fresh machine.
+  const config = (text: string | undefined) => (env.NO_CLAUDE_TRUST ? text : trusting(text))
+  const own = config(env.CLAUDE_JSON)
+  if (own !== undefined) writeFileSync(join(home, ".claude.json"), own)
+  const folder = config(env.CONFIG_DIR_CLAUDE_JSON)
+  if (folder !== undefined) {
+    mkdirSync(join(home, ".claude"), { recursive: true })
+    writeFileSync(join(home, ".claude", ".claude.json"), folder)
+  }
   if (env.BRIEF_FILE) {
     const brief = join(home, ".playground", env.BRIEF_FILE)
     mkdirSync(dirname(brief), { recursive: true })

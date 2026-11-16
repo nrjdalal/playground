@@ -1712,6 +1712,37 @@ restoring_row_down() {
   return 1
 }
 ! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
+# Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the folder and each folder above it, so the yes on the checkout's root covers every worktree in it.
+# A Claude session in this checkout starts only once that yes is there, which first run's Trust this folder records; a folder outside it keeps herdr_answer's answer.
+claude_trusts() {
+  python3 -I - "$(own_config)" "$1" <<'PY'
+import json, os, sys
+try:
+    projects = json.load(open(sys.argv[1])).get("projects") or {}
+except Exception:
+    sys.exit(1)
+yes = set()
+for path, project in projects.items():
+    if isinstance(project, dict) and project.get("hasTrustDialogAccepted") is True:
+        yes |= {os.path.abspath(path), os.path.realpath(path)}
+for d in {os.path.abspath(sys.argv[2]), os.path.realpath(sys.argv[2])}:
+    while True:
+        if d in yes:
+            sys.exit(0)
+        if os.path.dirname(d) == d:
+            break
+        d = os.path.dirname(d)
+sys.exit(1)
+PY
+}
+if [ "$HARNESS" != codex ]; then
+  for checkout in "$MAIN" "${PLAYGROUND_REPO:-$MAIN}"; do
+    [[ ${DIR:-$REPO}/ == "$checkout"/* ]] || continue
+    claude_trusts "${DIR:-$REPO}" ||
+      refuse "Claude Code would stop on its folder trust question in ${DIR:-$REPO}, since $(own_config) holds no yes for $checkout: click Trust this folder on Claude Code's card, in the Dashboard's first run or Settings' Harness section, then start it again"
+    break
+  done
+fi
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
 case "$SIZE" in

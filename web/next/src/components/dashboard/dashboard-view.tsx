@@ -93,7 +93,7 @@ export const homeOf = ({
 export const CHECKLIST_STEPS = ["github", "settings", "harness", "account"] as const
 export type ChecklistStep = (typeof CHECKLIST_STEPS)[number] | "start"
 
-// Pure: the onboarding checklist while no dispatcher runs: which rows are ticked, the one row whose button is active (the first undone one, Start once all are done), and whether Start shows. The harness row is done once the picked harness's card reads Installed and Signed in with nothing refusing its start. Until every fact is read (none undefined, the pick included) it is not known: nothing is ticked or live, and the home draws a neutral frame in its place, so no step shows on a guess.
+// Pure: the onboarding checklist while no dispatcher runs: which rows are ticked, the one row whose button is active (the first undone one, Start once all are done), and whether Start shows. The harness row is done once the picked harness's card reads Installed and Signed in (and Trusted, for Claude Code) with nothing refusing its start. Until every fact is read (none undefined, the pick included) it is not known: nothing is ticked or live, and the home draws a neutral frame in its place, so no step shows on a guess.
 export const checklistOf = (facts: {
   claude?: boolean
   github?: boolean

@@ -2,6 +2,7 @@
 export const FIX_IDS = [
   "claude",
   "claude-login",
+  "claude-trust",
   "codex",
   "codex-login",
   "database",

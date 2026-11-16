@@ -175,6 +175,20 @@ describe("each fix runs its fixed argv", () => {
     ])
   })
 
+  // #2307: Claude Code's folder trust question waits on the owner, so Trust this folder records the yes with this checkout's own script, on the owner's click
+  test("claude-trust runs this checkout's own claude-trust script, with nothing from the request", async () => {
+    const m = machine()
+    m.stub("bun")
+    const app = setup(m.fixes)
+    expect((await begin(app, `${FIX}/claude-trust`)).status).toBe(202)
+    expect((await settled(app, `${FIX}/claude-trust`)).state).toBe("ok")
+    expect(m.calls()).toEqual([
+      expect.stringMatching(
+        /^bun --no-env-file \/\S+\/packages\/scripts\/src\/playground\/claude-trust\.ts$/,
+      ),
+    ])
+  })
+
   test("trust runs this checkout's own portless trust under node, with nothing from the request", async () => {
     const m = machine()
     m.stub("node", 'echo "Local CA added to system trust store."')
@@ -660,12 +674,13 @@ describe("the guards", () => {
     expect(m.calls()).toEqual([expect.stringMatching(/ trust$/)])
   })
 
-  // #1835: the harnesses' install and sign-in fixes run only on the owner's own click, from a trusted origin over loopback
-  test.each(["claude-login", "codex", "codex-login"])(
+  // #1835, #2307: the harnesses' install, sign-in and trust fixes run only on the owner's own click, from a trusted origin over loopback
+  test.each(["claude-login", "claude-trust", "codex", "codex-login"])(
     "%s runs nothing off loopback or from another origin",
     async (id) => {
       const m = machine()
       m.stub("brew")
+      m.stub("bun")
       m.stub("claude")
       m.stub("codex")
       const app = full(m.fixes, [])
