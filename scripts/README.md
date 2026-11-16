@@ -275,7 +275,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
 - A test's child a reaper adopted is ended the same way once its run's sandbox is gone and its session has ended: `orphansOf` also selects such a process whose working folder, read with `lsof` (`CWDS`) for those rows alone, sits under a `test-sandbox-*` folder that no longer exists, so a live run's child is left alone.
   When the sandbox sits in a session's own temp folder, `/tmp/playground-<name>.<random>` on Linux, a sandbox nested in another run's included, that session's roster row must read `ended`, so a live session's daemon its test run left is kept; a missing row or an unreadable roster keeps it too, and macOS's per-user temp folder names no session.
-  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn.
+  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
 ## bun run test:skills
