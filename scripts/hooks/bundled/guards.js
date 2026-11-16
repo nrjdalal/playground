@@ -524,7 +524,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -542,6 +542,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -764,6 +766,7 @@ var CURL_TAKES = new Set([
   ...CURL_DATA,
   "-A",
   "--user-agent",
+  "--cacert",
   "-b",
   "--cookie",
   "-c",
@@ -3043,6 +3046,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][oO]$/.test(value))
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -3061,6 +3077,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;
@@ -14181,6 +14199,7 @@ var READERS2 = new Set([
   "[",
   "cat",
   "cmp",
+  "df",
   "diff",
   "grep",
   "head",
@@ -17745,11 +17764,14 @@ async function check19(raw, environment = process.env, lookup = live2(environmen
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
-  const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
+  const child = Bun.spawn(argv, { stderr: "pipe", stdout: "pipe" });
   const timer = setTimeout(() => child.kill(), 5000);
   try {
-    const text = await new Response(child.stdout).text();
-    return await child.exited === 0 ? text.trim() : undefined;
+    const [text, error] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ]);
+    return await child.exited === 0 ? { error, text: text.trim() } : { error };
   } finally {
     clearTimeout(timer);
   }
@@ -17820,7 +17842,9 @@ function live2(environment) {
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";
-      const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq]);
+      const argv = ["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq];
+      const once = await output(argv);
+      const text = once.text ?? (/HTTP 4\d\d/.test(once.error) ? undefined : (await Bun.sleep(1000).then(() => output(argv))).text);
       let read;
       try {
         read = text ? JSON.parse(text) : undefined;
@@ -18108,9 +18132,19 @@ var DATA = new Set([
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
 var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && browserEval(args);
+var BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"]);
+var BROWSER_VALUES = new Set(["--args", "--session"]);
 var browserEval = (args) => {
-  const at = args[0]?.value === "--session" ? 2 : args[0]?.value.startsWith("--session=") ? 1 : 0;
-  return args[at]?.value === "eval";
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "eval")
+      return true;
+    const [name, attached] = value.split(/=(.*)/s);
+    const own = BROWSER_VALUES.has(name) ? attached ?? args[++k]?.value : undefined;
+    if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own)))
+      return false;
+  }
+  return false;
 };
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
@@ -18159,7 +18193,7 @@ var RUNS2 = {
 var QUEUES = new Set(["at", "batch"]);
 var unversioned = (name) => name.replace(/(?<=.)@[^@/]*$/, "");
 var ATTACHED2 = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
-var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
+var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[dfiIPRrvWx]*[rR][dfiIPRrvWx]*$/.test(v);
 var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive3(part));
 var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test(word.value);
 var prefixOf = (v, option, shortest) => v.length >= shortest && option.startsWith(v);
@@ -18248,6 +18282,8 @@ async function inspect16(raw, environment) {
   const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const line = (text, at) => run2(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
+    if (cmd.casePattern)
+      return;
     const { args, name } = parsed;
     const verdict = await judge(cmd, parsed, at, reach);
     if (verdict)
