@@ -404,7 +404,7 @@ export async function cleanWorktree(
     if (!stopped.ok && !stopped.out.includes("no stack is recorded"))
       return `kept ${path}: ${stopped.out}`
     let moved = await deps.rm(path, reason, pr, discard)
-    // rm's refusal of work not landed on canary names --discard, which a finished PR's worktree takes
+    // rm's refusal of work landed on neither canary nor a branch origin holds names --discard, which a finished PR's worktree takes
     if (!moved.ok && !discard && moved.out.includes("--discard removes it anyway"))
       if (await deps.finished(path, pr)) moved = await deps.rm(path, reason, pr, true)
     if (!moved.ok) return `kept ${path}: ${moved.out}`
