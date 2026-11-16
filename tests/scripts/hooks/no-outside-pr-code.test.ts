@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { join } from "node:path"
 
 import { writeRoot } from "../../../packages/settings/src/folder"
 import { extensionsDir } from "../../../packages/settings/src/rendered"

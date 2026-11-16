@@ -20,29 +20,30 @@ set -euo pipefail
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, else the --pr its record names, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
 #   spawn.sh close     <name> [session-id]              closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; a session whose start stopped before its runtime pin closes too while its record stands and one pane carries its label, the pin written first; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close; with a session id, it closes the one labelled pane whose claude runs that session, so one of two panes under the name closes, the row and its close time left to the other while it stands
-#   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
-#   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore or close, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
+#   spawn.sh read      <name> [session-id]              prints the last 200 lines of the herdr pane spawn.sh opened for <name>, found as close finds it, on the server its resume record names, playground-probes included, and writes nothing
+#   --size <small|medium|big>  with any mode but restore, close or read, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
+#   --check            with any mode but restore, close or read, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
+#   --priority         with any mode but restore, close or read, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate while the other gates still hold it (playbook's SPAWN.md, Capacity gate)
 #   --remote-control <name>  with probe alone, anywhere among its words: the probe's claude starts with Claude Code's --remote-control <name>, a name of lowercase words joined by hyphens; restore leaves a probe started with it down
 #   --ssh <user@host> --key <file>  with probe alone, anywhere among its words, each needing the other: the probe's claude runs on that machine under ssh -tt from its pane here, a plain user@host and an absolute path to a readable key file, both checked before any pane opens; the pane first copies the launch's settings file and skill plugin into one new folder on that machine, the probe's temp folder, which the remote claude reads them from, and the other machine's own shell runs the launch with its own $HOME/.bun/bin put on PATH and reads an --account token from its own store; the gate reads this machine, the roster row and spawn.sh close stay as a probe's, and restore leaves it down
 #   --force            with resume alone, anywhere among its words: brings back a session whose roster row reads done, or ended with an endReason (an auto-end's), which a resume refuses without it, naming the reason; a row a plain close ended carries none, so a close then a resume needs no --force
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
-#   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
-#   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
+#   --account <email>  with any mode but restore, close or read, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
+#   --backend glm      with any mode but restore, close, read or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
 #   --harness claude-code  the default: the session runs in Claude Code.
 #     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
-#   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
-#   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
+#   --model <id>       with any mode but restore, close or read, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
+#   --effort <level>   with any mode but restore, close or read, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
-#   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
-#   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
+#   --memory <dir>     with any mode but restore, close or read, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
+#   --runtime herdr    with any mode but restore, close or read, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
 #     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
@@ -1110,6 +1111,34 @@ PY
     refuse "the herdr server $HERDR_SESSION_NAME is not running at $HERDR_DIR/$HERDR_SESSION_NAME.sock; playground, or bun run ops:herdr start, brings it up"
 }
 
+# What claude's sandbox needs on Linux, read in a POSIX shell: bwrap and socat on PATH, and a bwrap that opens the sandbox's network namespace, which Ubuntu 24.04's AppArmor refuses with no profile for it; one line a missing piece, then ok.
+SANDBOX_NEEDS='if [ "$(uname -s)" = Linux ]; then
+  for t in bwrap socat; do command -v "$t" >/dev/null 2>&1 || echo "missing $t"; done
+  if command -v bwrap >/dev/null 2>&1 && ! e=$(bwrap --ro-bind / / --unshare-net true 2>&1 >/dev/null); then echo "apparmor $(printf "%s\n" "$e" | head -n 1)"; fi
+fi
+echo ok'
+# A sandboxed start's claude exits in its pane, naming nothing here, when its machine lacks what the sandbox needs (failIfUnavailable), so that machine is read before the pane opens: an --ssh probe's over ssh, under the launch's PATH and with its first run finished there too, else this one; it installs nothing.
+sandbox_ready() {
+  local where said line why=
+  if [ -n "$SSH_HOST" ]; then
+    where=$SSH_HOST
+    said=$(ssh -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes "$SSH_HOST" "PATH=\"\$HOME/.bun/bin:\$PATH\"; grep -Eq '\"hasCompletedOnboarding\"[[:space:]]*:[[:space:]]*true' \"\$HOME/.claude.json\" 2>/dev/null || echo onboarding; $SANDBOX_NEEDS" </dev/null 2>&1) ||
+      refuse "it cannot read $SSH_HOST over ssh ($(tail -n 1 <<<"$said"))"
+  else
+    where="this machine"
+    said=$(bash -c "$SANDBOX_NEEDS" 2>&1) || refuse "it cannot read what this machine holds for claude's sandbox ($(tail -n 1 <<<"$said"))"
+  fi
+  [ "$(tail -n 1 <<<"$said")" = ok ] || refuse "it cannot read what $where holds for claude's sandbox ($(tail -n 1 <<<"$said"))"
+  while IFS= read -r line; do
+    case $line in
+      onboarding) why+="; ~/.claude.json there lacks \"hasCompletedOnboarding\": true, so claude would wait on its first-run screens: start claude there once by hand" ;;
+      "missing "*) why+="; ${line#missing } is not on PATH, and claude's sandbox needs it" ;;
+      "apparmor "*) why+="; bwrap cannot open the sandbox's network namespace (${line#apparmor }): Ubuntu 24.04's kernel.apparmor_restrict_unprivileged_userns=1 refuses it unless an AppArmor profile lets bwrap use user namespaces" ;;
+    esac
+  done <<<"$said"
+  [ -z "$why" ] || refuse "on $where ${why#; }, so its claude would exit in its pane (failIfUnavailable); spawn.sh installs nothing"
+}
+
 MODE=${1:-}
 [ $# -gt 0 ] && shift
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
@@ -1262,19 +1291,8 @@ PY
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it; a pin a stopped start left unwritten, it writes before the close.
-if [ "$MODE" = close ]; then
-  NAME=${1:-close} WANT_SID=${2:-}
-  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name, and its session id to pick one of two panes under the name"
-  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
-  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
-  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
-  unpinned=
-  if [ ! -e "$DATA/runtimes/$NAME" ]; then
-    unpinned=", and it has no runtime pin ($SHOWN/runtimes/$NAME)"
-  elif [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" != herdr ]; then
-    refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
-  fi
+# The pane spawn.sh opened for $NAME, by the label it set, on the server its resume record names, into $server and $panes: with WANT_SID the labelled pane whose claude runs that session, $stays counting the labelled panes it leaves, else the one labelled pane; each refusal ends on $unpinned and names $MODE.
+labelled_pane() {
   [ -f "$RESUME_DIR/$NAME.sh" ] || refuse "it has no resume record ($RESUME_DIR/$NAME.sh), which spawn.sh writes when herdr runs a session it opened$unpinned"
   # A record with no server line is playground's, as restore reads it.
   server=$(sed -n 's/^# server: //p' "$RESUME_DIR/$NAME.sh" | head -1)
@@ -1289,7 +1307,7 @@ try:
 except (ValueError, KeyError, TypeError):
     sys.exit(1)' "$NAME") || refuse "it cannot read the panes of the herdr server $server"
   count=$(grep -c . <<<"$panes" || true)
-  [ "$count" -gt 0 ] || refuse "no pane on the herdr server $server carries the label $NAME, so spawn.sh opened none it can close$unpinned"
+  [ "$count" -gt 0 ] || refuse "no pane on the herdr server $server carries the label $NAME, so spawn.sh opened none it can $MODE$unpinned"
   # With a session id, the labelled pane whose claude runs it: herdr's process-info names the claude's pid, and Claude Code's registry file for that pid names the session it runs, a resumed one's included.
   stays=0
   if [ -n "$WANT_SID" ]; then
@@ -1311,8 +1329,33 @@ except (OSError, ValueError, KeyError, TypeError, AttributeError):
     panes=${picked%$'\n'}
     stays=$((count - 1))
   else
-    [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned; name the session id of the one to close"
+    [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned; name the session id of the one to $MODE"
   fi
+}
+# A factory session reads a pane on a herdr server other than the default only here, since no-raw-spawn refuses a herdr call carrying HERDR_SOCKET_PATH: it finds the pane as close does and runs herdr's read alone there, on that server's own socket, writing nothing.
+if [ "$MODE" = read ]; then
+  NAME=${1:-read} WANT_SID=${2:-} unpinned=
+  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "read takes a session's name, and its session id to pick one of two panes under the name"
+  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
+  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
+  labelled_pane
+  hr pane read "$panes" --source recent-unwrapped --lines 200 || refuse "herdr could not read pane $panes on $server"
+  exit 0
+fi
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it; a pin a stopped start left unwritten, it writes before the close.
+if [ "$MODE" = close ]; then
+  NAME=${1:-close} WANT_SID=${2:-}
+  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name, and its session id to pick one of two panes under the name"
+  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
+  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
+  # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
+  unpinned=
+  if [ ! -e "$DATA/runtimes/$NAME" ]; then
+    unpinned=", and it has no runtime pin ($SHOWN/runtimes/$NAME)"
+  elif [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" != herdr ]; then
+    refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
+  fi
+  labelled_pane
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
@@ -1796,6 +1839,13 @@ if [ "$RUNTIME" = herdr ]; then
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"
   herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}"
 fi
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
+SANDBOX=
+[ "$ROLE" = probe ] && SANDBOX=sandbox-
+# --sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
+CLOSED=
+{ [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; } && CLOSED=1 SANDBOX=sandbox-closed-
+[ -z "$SANDBOX" ] || sandbox_ready
 if [ -n "$CHECK" ]; then
   echo "ok: $NAME can start"
   exit 0
@@ -1850,12 +1900,6 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings may turn on telemetry to an org's usage collector, which counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own.
-SANDBOX=
-[ "$ROLE" = probe ] && SANDBOX=sandbox-
-# --sandbox, or a resumed row that records it, takes the closed sandbox in a file of its own: a probe's, with loopback, the Keychain and the data folder's secret files closed too (scripts/README.md, spawn.sh).
-CLOSED=
-{ [ -n "$SANDBOX_ARG" ] || { [ "$MODE" = resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; }; } && CLOSED=1 SANDBOX=sandbox-closed-
 # A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
 MANAGER=
 case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac

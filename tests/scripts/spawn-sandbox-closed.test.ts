@@ -15,6 +15,7 @@ import {
   LSTART,
   launchAfterRm,
   launchOf,
+  placing,
   root,
   scratch,
   script,
@@ -253,6 +254,30 @@ describe("--sandbox starts a worker, a reviewer or a probe in the closed sandbox
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, closedFile(name))} `)
     expect(builtOf(r, closedFile(name)).sandbox).toEqual(closedOf(r.home, here))
     expect(r.roster).toContain("sandbox=on")
+  })
+
+  test("a resumed worker whose row records it is refused on Linux when bwrap cannot open the sandbox, before any pane opens", async () => {
+    const name = "worker-brave-otter"
+    const says = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted"
+    const r = await spawn(
+      ["resume", name, root, id],
+      [],
+      {
+        FAKE_BWRAP_RC: "1",
+        FAKE_BWRAP_SAYS: says,
+        LINUX_GETCONF: "1",
+        ROSTER_JSON: JSON.stringify({
+          agents: [{ kind: "worker", name, role: "worker", sandbox: "on", status: "working" }],
+        }),
+      },
+      undefined,
+      { name, backend: "claude" },
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      `spawn.sh refuses ${name}: on this machine bwrap cannot open the sandbox's network namespace (${says})`,
+    )
+    expect(placing(r)).toEqual([])
   })
 
   // GLM's start reads settings this checkout's resolver alone holds, so it runs here, in a folder its --in names, where spawn.sh makes no worktree.

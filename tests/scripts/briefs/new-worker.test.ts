@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 
+test("both worker templates spell the program word out, naming type for a lookup and a file for a numeric range", async () => {
+  for (const name of ["new-worker.md", "new-research-worker.md"]) {
+    const line = (await Bun.file(join(import.meta.dir, "../../../scripts/briefs", name)).text())
+      .split("\n")
+      .find((l) => l.startsWith("**Program names**"))
+    expect(line).toContain("never a variable or a substitution as the program")
+    expect(line).toContain("name it literally or test with `type`")
+    expect(line).toContain("in a file and pass the file")
+  }
+})
+
 test("the worker template opens the draft before waiting on CI, and cites a run by its id or link", async () => {
   const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
   const line =

@@ -67,7 +67,7 @@ export const groups: Group[] = [
     folders: ["outside clone", "outside clone with an env file", "scratch folder"],
     guards: ["no-outside-pr-code"],
     rows: ({ DATA, MAIN }) => {
-      const { core, installed, pyInstalled } = scripts(DATA, MAIN)
+      const { core, pyInstalled } = scripts(DATA, MAIN)
       return [
         [
           "an installed skill's python script by its path",

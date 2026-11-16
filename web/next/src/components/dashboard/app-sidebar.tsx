@@ -124,6 +124,7 @@ import {
   rowLabel,
   rowLines,
   rowText,
+  runnerNote,
   statusParts,
 } from "@/lib/agents"
 import { config } from "@/lib/config"
@@ -959,6 +960,9 @@ function SessionRowView({
   const checking = checksOpen(members.map(lightOf))
   const lines = rowLines(worker, agent, now, checking, waitsOn, light, label)
   const { first, prClass, prWords, second } = rowText(lines)
+  // an AI runner's row says what it last did on a second, muted line, so its work shows without opening it
+  const note =
+    worker.role === "runner" ? runnerNote(agent ?? { report: null, task: worker.task }, now) : null
   const dispatcher = worker.role === "dispatcher"
   // the row's link opens the first card in the group: the row's own first, else the first member's
   const holder = waiting.length ? { waiting, worker } : members.find((m) => m.waiting.length)
@@ -984,6 +988,7 @@ function SessionRowView({
     label ? null : worker.name,
     first,
     [second, drafted ? "Draft" : null, lines.eta].filter(Boolean).join(" · "),
+    note?.full,
     // a hosted session's permission mode, which its composer's picker changes
     worker.permissionMode ? `${MODE_LABELS[worker.permissionMode]} mode` : null,
     prWords,
@@ -1041,11 +1046,16 @@ function SessionRowView({
       ) : (
         <StatusIcon kind={agent?.kind} state={lines.shown} still={still} />
       )}
-      {/* one line, ZeroSDK's: its title, whose tooltip holds the rest, a line each, and never over the readings and icons after it, which name themselves */}
+      {/* one line, ZeroSDK's, and a runner's note under it: its title, whose tooltip holds the rest, a line each, and never over the readings and icons after it, which name themselves */}
       {/* the pull request's number takes its colour, said in words for screen readers and in the row's tooltip; the title keeps the text's */}
       <Hint content={info.join("\n")} description={null} side="right">
-        <span className="flex min-w-0 flex-1">
+        <span className={cn("min-w-0 flex-1", note ? "grid" : "flex")}>
           <RowFirst line={lines} prClass={prClass} prWords={prWords} />
+          {note && (
+            <span className="text-2xs text-muted-foreground truncate leading-3" data-part="note">
+              {note.line}
+            </span>
+          )}
         </span>
       </Hint>
       {trailing}
@@ -2263,7 +2273,7 @@ const isRosterAgent = (agent: Agent): boolean =>
   agent.role === "worker" &&
   !checkerOf(agent.name, agent.kind)
 
-// Sidebar-nav slot: your threads, then the other groups in the order you left them (MovableGroups, useGroupOrder), at first Yard's Channels and Direct messages (YardGroup, each while it has rows), then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), AI Runners, Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, Subagents, AI Runners and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Every group's label opens and closes it, kept across reloads (useGroupOpen), and a closed group still shows a session waiting on you or open in the view (keepsOther).
+// Sidebar-nav slot: your threads, then the other groups in the order you left them (MovableGroups, useGroupOrder), at first Yard's Channels and Direct messages (YardGroup, each while it has rows), then every live session but the dispatchers (the header's, DashboardDispatchers), grouped by role into Orchestrators, AI Runners (each with what it last did on a second line, runnerNote), Subagents (each reviewer and tester nested under its worker, a gone worker's under its muted roster row), Scripts (the ops jobs jobs.json does not pause, which have no session, collapsed until opened) and Other (each by status, as orderByStatus sets), each label with how many sessions it holds. Orchestrators, AI Runners, Subagents and Scripts always show, and Other follows while a probe or a session outside the factory's names is live; until the board is read they show the stored sidebar, muted, or nothing yet (useSidebarSource), so the first live frame replaces rows of the same count and order rather than moving any. Every group's label opens and closes it, kept across reloads (useGroupOpen), and a closed group still shows a session waiting on you or open in the view (keepsOther).
 export function DashboardNav({ account }: { account: string }) {
   const { allowed, board, selected } = useDashboard()
   const [order, setOrder] = useGroupOrder(account)

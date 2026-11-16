@@ -455,6 +455,7 @@ describe("checkoutOf", () => {
 describe("compose: a cluster", () => {
   const peerReading = {
     cores: 20,
+    disk: { freeBytes: 300 * GB, totalBytes: 994 * GB },
     load: [0.4, 0.3, 0.2] as [number, number, number],
     memory: { totalBytes: 128 * GB, usedBytes: 4 * GB },
     swap: { totalBytes: 16 * GB, usedBytes: 1 * GB },
@@ -482,6 +483,7 @@ describe("compose: a cluster", () => {
         name: "machine-a",
         reading: {
           cores: 15,
+          disk: { freeBytes: 785 * GB, totalBytes: 994 * GB },
           load: [11.7, 10.6, 9.1],
           memory: { totalBytes: 24 * GB, usedBytes: 17 * GB },
           swap: { totalBytes: 6 * GB, usedBytes: 4.9 * GB },

@@ -95,6 +95,14 @@ fake(
 [ "$1" = DARWIN_USER_TEMP_DIR ] && { echo ${userTemp}/; exit 0; }
 exec /usr/bin/getconf "$@"`,
 )
+// A sandboxed start reads this machine's sandbox before its pane opens: uname reads Linux under LINUX_GETCONF or FAKE_LINUX, and bwrap prints FAKE_BWRAP_SAYS on stderr and exits FAKE_BWRAP_RC (0 by default), so no case runs the machine's own sandbox.
+fake(
+  "uname",
+  `[ "$1" = -s ] && [ -n "$LINUX_GETCONF$FAKE_LINUX" ] && { echo Linux; exit 0; }
+exec /usr/bin/uname "$@"`,
+)
+fake("bwrap", `[ -z "$FAKE_BWRAP_SAYS" ] || echo "$FAKE_BWRAP_SAYS" >&2\nexit \${FAKE_BWRAP_RC:-0}`)
+fake("socat", "exit 0")
 // mktemp, but a session's Linux temp folder spawn.sh makes under /tmp lands in linuxTemp, so a test leaves nothing in the machine's /tmp.
 export const linuxTemp = join(scratch, "linux-tmp")
 mkdirSync(linuxTemp)
@@ -576,7 +584,9 @@ case "$1 \${2:-}" in
     [[ $l =~ $5 ]] || { echo '{"error":{"code":"timeout","message":"timed out waiting for output match"}}'; exit 1; }
     printf '{"result":{"matched_line":"%s"}}\\n' "$l" ;;
   "pane read")
-    n=$(( $(cat "$HOME/herdr.screen" 2>/dev/null || echo 1) - 1 ))
+    # a pane's own text, for spawn.sh read
+    [ -z "$FAKE_PANE_TEXT" ] || { printf '%s\\n' "$FAKE_PANE_TEXT"; exit 0; }
+    n=$(($(cat "$HOME/herdr.screen" 2>/dev/null || echo 1) - 1 ))
     IFS=, read -ra screens <<<"\${FAKE_SCREENS:-ready}"
     one= many=
     case "\${screens[$n]:-ready}" in
