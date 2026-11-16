@@ -153,13 +153,7 @@ import {
 } from "@/lib/dashboard"
 import { useDrafted } from "@/lib/drafts"
 import { inboxWaitOf, inboxWaiting, useInbox } from "@/lib/inbox"
-import {
-  dispatcherLabel,
-  isGlmModel,
-  modelName,
-  providerOf,
-  type Provider,
-} from "@/lib/model-label"
+import { dispatcherLabel, isGlmModel, modelName, providerOf } from "@/lib/model-label"
 import { needsYouAnchor, sessionWaiting, targetNeedsYou } from "@/lib/needs-you"
 import {
   isBroken,
@@ -191,7 +185,6 @@ import {
   updateHover,
   updateMessage,
   useSystem,
-  zaiReadings,
   type Health,
   type Reading,
   type ReadingKey,
@@ -473,22 +466,16 @@ function ReadingItem({ reading }: { reading: Reading }) {
 
 const USAGE_READINGS: readonly ReadingKey[] = ["week", "fiveHour"]
 
-// A provider's usage windows after its dispatcher's title, before its logo: the week, then the 5-hour window, each its icon and number in its level's colour, a stale one gray and dimmed (ReadingItem); their outlines with no numbers before a sample, after a failed read or once sampling has stopped. Their words are each one's tooltip and, once, the screen reader's. GLM's on a row that is not GLM's own lead with Z.ai's mark (logo). Expanded only, as the row's title is.
+// The Claude usage windows after its dispatcher's title, before its logo: the week, then the 5-hour window, each its icon and number in its level's colour, a stale one gray and dimmed (ReadingItem); their outlines with no numbers before a sample, after a failed read or once sampling has stopped. Their words are each one's tooltip and, once, the screen reader's. Expanded only, as the row's title is.
 export function DispatcherUsage({
-  logo = false,
   now,
-  provider = "anthropic",
   read: { error, report },
 }: {
-  logo?: boolean
   now: number
-  provider?: Provider
   read: SystemRead
 }) {
-  const glm = provider === "zai"
   const stale = report ? isStale(report.sampledAt, now) : false
-  const readings =
-    report && !stale ? (glm ? zaiReadings(report.zai, now) : systemReadings(report, now)) : []
+  const readings = report && !stale ? systemReadings(report, now) : []
   const known = USAGE_READINGS.map((key) => readings.find((r) => r.key === key))
   const shown = known.filter((r): r is Reading => r !== undefined)
   const words = shown.length
@@ -506,7 +493,6 @@ export function DispatcherUsage({
       data-usage
       className="text-2xs flex shrink-0 items-center gap-1.5 font-mono tabular-nums group-data-[collapsible=icon]:hidden [&_svg]:size-3!"
     >
-      {logo && <PROVIDER_ICONS.zai aria-hidden className="size-3 shrink-0" />}
       {known.map((reading, i) => {
         if (reading) return <ReadingItem key={reading.key} reading={reading} />
         const Icon = READING_ICONS[USAGE_READINGS[i]!].line
@@ -514,9 +500,7 @@ export function DispatcherUsage({
           <Icon key={USAGE_READINGS[i]} aria-hidden className="text-inactive size-3 shrink-0" />
         )
       })}
-      <span className="sr-only">
-        {glm ? "GLM" : "Claude"} usage: {words}
-      </span>
+      <span className="sr-only">Claude usage: {words}</span>
     </span>
   )
 }
@@ -526,14 +510,6 @@ type Slot = { worker: { model: string | null } | null }
 // Pure: which dispatcher slot carries the Claude usage windows: the first live one not on GLM (a reply not read yet counts as Claude's), else none.
 export const usageSlot = (slots: Slot[]): number =>
   slots.findIndex(({ worker }) => worker !== null && !isGlmModel(worker.model))
-
-// Pure: which dispatcher slot carries the GLM usage windows: the first live one on GLM, else, while a GLM reading is there, the second dispatcher's row when it does not carry Claude's (Not running, or live on Claude), else none. Never beside Claude's: in the 239px row the two sets cut its name to one letter (tester).
-export const glmSlot = (slots: Slot[], reading: boolean): number => {
-  const own = slots.findIndex(({ worker }) => worker !== null && isGlmModel(worker.model))
-  if (own !== -1 || !reading) return own
-  const claude = usageSlot(slots)
-  return slots.findIndex((_, i) => i > 0 && i !== claude)
-}
 
 // The machine read live through the System page's own query, so the header's readings, the dispatcher's usage and the page show one sample, with the live feed's state from the dashboard's socket.
 function useSystemRead() {
@@ -626,7 +602,6 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
     muted,
   )
   const usage = usageSlot(shown.slots)
-  const glm = glmSlot(shown.slots, Boolean(read.report?.zai))
   return (
     <SidebarMenu
       aria-busy={muted || undefined}
@@ -637,17 +612,7 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
       {shown.slots.map(({ name, worker }, i) => {
         const label = dispatcherRowLabel(worker, i === 0)
         const view = i === 0 ? "/dashboard" : undefined
-        const trailing =
-          i === usage ? (
-            <DispatcherUsage now={now} read={read} />
-          ) : i === glm ? (
-            <DispatcherUsage
-              logo={!worker || !isGlmModel(worker.model)}
-              now={now}
-              provider="zai"
-              read={read}
-            />
-          ) : undefined
+        const trailing = i === usage ? <DispatcherUsage now={now} read={read} /> : undefined
         // Alpha's plus, in its effort's place, starts a session from a template
         const action =
           i === 0 && !muted && !config.hosted ? (

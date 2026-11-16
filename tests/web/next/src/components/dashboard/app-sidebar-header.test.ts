@@ -9,13 +9,12 @@ import {
   NoDispatcherRow,
   SessionRow,
   DispatcherUsage,
-  glmSlot,
   SystemIcons,
   usageSlot,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { ROW_BOX } from "../../../../../../web/next/src/components/shell/row-box"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
-import { calm, FIVE, glm, NOW } from "../../lib/system.test"
+import { calm, FIVE, NOW } from "../../lib/system.test"
 import { tipsOf } from "../../tooltips"
 
 // React resolves from the web app's own packages, which this directory cannot see; the two calls the test makes are typed here rather than through a path into node_modules.
@@ -334,81 +333,6 @@ describe("DispatcherUsage", () => {
   })
 })
 
-// GLM usage shows as Claude usage does.
-describe("DispatcherUsage for GLM", () => {
-  const glmUsage = (read: Read, logo = false) =>
-    render(createElement(DispatcherUsage, { logo, now: NOW, provider: "zai", read }))
-  const values = (html: string) =>
-    [
-      ...html.matchAll(
-        /data-level="[^"]*"[^>]*><svg.*?<\/svg><span aria-hidden="true">([^<]*)<\/span>/g,
-      ),
-    ].map(([, v]) => v)
-  const zaiMark = 'viewBox="0 0 40 40"'
-
-  test("the week, then the 5-hour window, from the GLM credits, green, orange and red by the Claude windows' levels", () => {
-    expect(readingTints(glmUsage(fresh((r) => void (r.zai = glm(5, 41)))))).toEqual([
-      "text-success",
-      "text-success",
-    ])
-    const html = glmUsage(fresh((r) => void (r.zai = glm(75, 95))))
-    expect(readingTints(html)).toEqual(["text-caution", "text-destructive"])
-    expect(values(html)).toEqual(["75", "95"])
-    expect(srText(html)).toStartWith("GLM usage: GLM week 75% used")
-    for (const tip of tipsOf(html)) expect(tip).toContain("GLM")
-  })
-
-  test("a reading the job stopped writing shows its last shares gray and dimmed, saying stale", () => {
-    const html = glmUsage(fresh((r) => void (r.zai = glm(95, 95, 20 * 60_000))))
-    expect(readingTints(html)).toEqual(["text-inactive", "text-inactive"])
-    expect(values(html)).toEqual(["95", "95"])
-    const items = [...html.matchAll(/<span data-level=[^>]*>/g)].map(([tag]) => tag)
-    for (const item of items) expect(classesOf(item).has("opacity-60")).toBe(true)
-    expect(srText(html)).toContain("stale")
-  })
-
-  test("with no GLM reading, or once sampling stopped, two gray outlines with no numbers", () => {
-    for (const read of [fresh(), stopped]) {
-      const html = glmUsage(read)
-      const tags = [...html.matchAll(/<svg[^>]*>/g)].map(([tag]) => tag)
-      expect(tags).toHaveLength(2)
-      for (const tag of tags) expect(classesOf(tag).has("text-inactive")).toBe(true)
-    }
-    expect(srText(glmUsage(fresh()))).toBe("GLM usage: No usage windows read")
-  })
-
-  test("on a row not GLM's own, the GLM windows lead with Z.ai's mark; on GLM's own row its logo already says so", () => {
-    const read = fresh((r) => void (r.zai = glm(5, 41)))
-    expect(glmUsage(read, true)).toContain(zaiMark)
-    expect(glmUsage(read)).not.toContain(zaiMark)
-    expect(render(createElement(DispatcherUsage, { now: NOW, read }))).not.toContain(zaiMark)
-  })
-})
-
-describe("glmSlot", () => {
-  const slot = (model: string | null) => ({ worker: { model } })
-  test("the GLM windows sit on the first live GLM dispatcher, read or not", () => {
-    expect(glmSlot([slot("claude-opus-5-5"), slot("glm-5.3-flash")], false)).toBe(1)
-    expect(glmSlot([slot("glm-5.3-flash[1m]")], true)).toBe(0)
-  })
-
-  // tester review round 1: beside Claude's on one 239px row, the row's name was cut to one letter
-  test("with no GLM dispatcher live, on the second dispatcher's row while a GLM reading is there, never beside Claude's nor on the primary's", () => {
-    expect(glmSlot([slot("claude-opus-5-5"), { worker: null }], true)).toBe(1)
-    expect(glmSlot([slot("claude-opus-5-5"), { worker: null }], false)).toBe(-1)
-    expect(glmSlot([{ worker: null }, { worker: null }], true)).toBe(1)
-    expect(glmSlot([{ worker: null }, slot("claude-opus-5-5")], true)).toBe(-1)
-    expect(glmSlot([{ worker: null }], true)).toBe(-1)
-    expect(glmSlot([slot("claude-opus-5-5")], true)).toBe(-1)
-  })
-
-  // a lead's ruling: a second dispatcher live on Claude carries no Claude windows, which sit on the first's row
-  test("a second dispatcher live on Claude carries them, its row not the one with Claude's", () => {
-    expect(glmSlot([slot("claude-opus-5-5"), slot("claude-opus-5-5")], true)).toBe(1)
-    expect(usageSlot([slot("claude-opus-5-5"), slot("claude-opus-5-5")])).toBe(0)
-  })
-})
-
 describe("usageSlot", () => {
   const slot = (model: string | null) => ({ worker: { model } })
   test("the first live dispatcher not on GLM carries the Claude windows, a reply not read yet counting as Claude's", () => {
@@ -425,17 +349,15 @@ describe("usageSlot", () => {
 })
 
 describe("the dispatcher's row with none live", () => {
-  test("carries what it is given after its name, as the GLM windows on the second slot", () => {
-    const read = fresh((r) => void (r.zai = glm(5, 41)))
+  test("carries what it is given after its name, as the Claude windows", () => {
     const html = render(
       createElement(NoDispatcherRow, {
         href: null,
         label: "Second dispatcher",
-        trailing: createElement(DispatcherUsage, { logo: true, now: NOW, provider: "zai", read }),
+        trailing: createElement(DispatcherUsage, { now: NOW, read: fresh() }),
       }),
     )
-    expect(html).toContain('viewBox="0 0 40 40"')
-    expect(srText(html)).toContain("GLM usage: GLM week 5% used")
+    expect(srText(html)).toContain("Claude usage: ")
   })
 
   // a dispatcher slot is drawn as a placeholder row in a stored sidebar, so it keeps a row of the same height after, and nothing below it moves (verify cls: sidebar-content y 96 to 56)

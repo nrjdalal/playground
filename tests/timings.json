@@ -477,7 +477,6 @@
     "tests/scripts/hooks/no-env-dump.test.ts": 29,
     "tests/web/next/src/components/settings/extensions.test.ts": 29,
     "tests/web/next/src/lib/session-setting.test.ts": 29,
-    "tests/api/hono/src/lib/usage/zai.test.ts": 28,
     "tests/packages/scripts/src/ops-flow/flow.test.ts": 28,
     "tests/packages/scripts/src/playground/uninstall.test.ts": 28,
     "tests/scripts/hooks/no-ours-merge.test.ts": 28,

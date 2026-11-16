@@ -20,7 +20,6 @@ import { readRoster, type RosterAgent } from "@/lib/dashboard/roster"
 import { updateCheck, type Update } from "@/lib/dashboard/update"
 import { unstickProblem } from "@/lib/dashboard/workers"
 import { ownRegistered } from "@/lib/sessions/own"
-import { hasGlmAccount } from "@/lib/store/accounts"
 import {
   idleLineOf,
   orchestratorsOf,
@@ -49,7 +48,6 @@ import {
 } from "@/lib/system/parse"
 import { probe } from "@/lib/system/probe"
 import { type AccountUsage, readUsage, seenWindows, type Usage, withSeen } from "@/lib/usage/window"
-import { readZaiUsage, type ZaiUsage } from "@/lib/usage/zai"
 
 // The System panel's sampler: every 30s it reads the machine, joins the processes to the sessions that own them and keeps up to an hour of the totals in memory, writing nothing anywhere. It starts on the first read and stops 20 minutes after the last, so a verify run on a worker's test stack costs a few minutes of sampling rather than its life; any open dashboard page reads every 30s through the sidebar's System item and keeps it going.
 export const INTERVAL_MS = 30_000
@@ -132,8 +130,6 @@ export type SystemReport = {
   // How far this build is behind the branch its checkout follows, null when that cannot be read (the reason is in problems) or before the first check.
   update: Update | null
   usage: Usage | null
-  // The GLM plan's credit windows, which the sidebar shows on a dispatcher row of their own; null while usage.accounts holds no GLM row or no file was read.
-  zai: ZaiUsage | null
 }
 
 // Everything one sample read, before it is joined: a probe that failed leaves its part empty and says why in problems.
@@ -144,8 +140,6 @@ export type Readings = {
   cwds: Map<number, string>
   disk: { freeBytes: number; totalBytes: number } | null
   docker: { containers: Container[]; problem: string | null; vmPid: number | null }
-  // Whether usage.accounts holds a GLM row, without which the GLM windows are a file left behind and show nowhere.
-  glmAccount: boolean
   load: [number, number, number]
   problems: string[]
   procs: Proc[]
@@ -160,7 +154,6 @@ export type Readings = {
   usedBytes: number | null
   // Each live session's herdr workspace, from the dashboard's own live list when it has one, so a roster agent pairs with its session the way the dashboard pairs it.
   workspaces: Map<string, string>
-  zai: ZaiUsage | null
 }
 
 // What a sample carries to the next: each process's CPU time as of sampledAt (the last sample whose ps answered), when each stack was last busy, and the hour of totals.
@@ -342,7 +335,6 @@ export function compose(
     sampledAt: point.at,
     update: readings.update,
     usage: readings.usage,
-    zai: readings.glmAccount ? readings.zai : null,
   }
   // A sample whose ps failed read no process, so the CPU times of the last that did carry on, and the next one's shares span both intervals rather than charging each process its whole life.
   const read = procs.length > 0
@@ -408,7 +400,7 @@ export async function read(): Promise<Readings> {
         () => null,
       )
   const docker = Promise.allSettled([probe("containers"), probe("containerStats")])
-  const [account, accounts, sysctl, used, procs, cwds, sockets, registry, roster, usage, zai] =
+  const [account, accounts, sysctl, used, procs, cwds, sockets, registry, roster, usage] =
     await Promise.all([
       machine
         ? readLogin().then((login) => accountFor(login, machine.account ?? null))
@@ -433,7 +425,6 @@ export async function read(): Promise<Readings> {
       readRegistry(),
       readRoster().catch(() => null),
       readUsage().then((usage) => usage && withSeen(usage, seenWindows)),
-      readZaiUsage(),
     ])
   // The dashboard proves a herdr pane's session live by Claude's registry; without it, it takes the session each pane reports at its word, which can name one that has ended, so the fallback is named rather than silent.
   if (registry === null) {
@@ -460,7 +451,6 @@ export async function read(): Promise<Readings> {
             problem: stats.status === "rejected" ? problemOf("docker stats", stats.reason) : null,
             vmPid: await vmOf(procs),
           },
-    glmAccount: hasGlmAccount(),
     load: made?.load ?? (loadavg() as [number, number, number]),
     problems,
     procs,
@@ -478,7 +468,6 @@ export async function read(): Promise<Readings> {
         w.workspace ? [[w.sessionId, w.workspace.ref] as const] : [],
       ),
     ),
-    zai,
   }
 }
 

@@ -1,14 +1,6 @@
 "use client"
 
-import type {
-  AccountUsage,
-  Pressure,
-  SystemReport,
-  Usage,
-  UsageWindow,
-  ZaiUsage,
-  ZaiWindow,
-} from "@api/hono"
+import type { AccountUsage, Pressure, SystemReport, Usage, UsageWindow } from "@api/hono"
 import { useQuery } from "@tanstack/react-query"
 
 import { apiClient, unwrap } from "@/lib/api/client"
@@ -632,29 +624,6 @@ const joinedUsage = (key: "fiveHour" | "week", report: UsageReport, now: number)
 export function combinedUsage(report: UsageReport, now: number): Reading[] {
   if (report.accounts.length < 2) return singleUsage(report.usage, now)
   return [joinedUsage("week", report, now), joinedUsage("fiveHour", report, now)]
-}
-
-// Pure: the GLM plan's week and 5-hour window as the Claude windows read, each its credits' share judged by the same levels and pace, its name and words saying GLM; a file the job stopped writing shows each window's last share stale, gray, judging nothing.
-export function zaiReadings(zai: ZaiUsage | null, now: number): Reading[] {
-  if (!zai) return []
-  const seen = zai.stale ? { seenAt: zai.writtenAt } : {}
-  const share = (window: ZaiWindow | null): UsageWindow | null =>
-    window && { resetsAt: window.resetsAt, usedPercent: (window.used / window.cap) * 100, ...seen }
-  const usage = {
-    fiveHour: share(zai.fiveHour),
-    sevenDay: share(zai.week),
-    stale: zai.stale,
-    writtenAt: zai.writtenAt,
-  }
-  const named = (words: string) => `GLM ${words.charAt(0).toLowerCase()}${words.slice(1)}`
-  return singleUsage(usage, now).map((r) => ({
-    ...r,
-    name: named(r.name),
-    title: r.title
-      .split("; ")
-      .map((part) => (part.startsWith(r.name) ? named(part) : part))
-      .join("; "),
-  }))
 }
 
 // Pure: each window's room left on one line, as the System page and the Usage app show it over their per-account lines.

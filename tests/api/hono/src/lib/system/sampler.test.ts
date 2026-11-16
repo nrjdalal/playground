@@ -39,13 +39,6 @@ const proc = (pid: number, ppid: number, mb: number, cpuSeconds = 0): Proc => ({
 const checkouts = (cwd: string): string | null =>
   ["/r/wt/a", "/r/wt/run", "/r"].find((root) => cwd === root || cwd.startsWith(`${root}/`)) ?? null
 
-const ZAI = {
-  fiveHour: { cap: 100, resetsAt: null, used: 41 },
-  stale: false,
-  week: null,
-  writtenAt: "2026-10-06T07:58:00.000Z",
-}
-
 // worker-a (200) serves a stack from /r/wt/a; the runner the roster calls runner-dashboard, launched as plain dashboard (300), serves the live dashboard from /r/wt/run. Each stack's server burns the CPU seconds given so far.
 const readings = (cpu: { a: number; run: number }): Readings => ({
   account: { email: "merritt@example.com", name: "Merritt" },
@@ -65,7 +58,6 @@ const readings = (cpu: { a: number; run: number }): Readings => ({
     problem: null,
     vmPid: 4313,
   },
-  glmAccount: true,
   load: [11.7, 10.6, 9.1],
   problems: [],
   procs: [
@@ -101,7 +93,6 @@ const readings = (cpu: { a: number; run: number }): Readings => ({
   usage: null,
   usedBytes: 17 * GB,
   workspaces: new Map(),
-  zai: ZAI,
 })
 
 // Samples every INTERVAL_MS from T0, each stack burning the CPU seconds busy() gives for that sample.
@@ -156,17 +147,7 @@ describe("compose", () => {
     expect(report.capacity.line).toBe("Room for ~4 more workers, by CPU load")
     expect(report.capacity.idle).toEqual({ bytes: 0, line: null, ready: false, stacks: [] })
     expect(report.sampledAt).toBe("2026-10-06T08:00:00.000Z")
-    expect(report.zai).toEqual(ZAI)
-  })
-
-  test("with no GLM row in usage.accounts the report carries no GLM windows, though a file is left behind", () => {
-    const { report } = compose(
-      { ...readings({ a: 0, run: 0 }), glmAccount: false },
-      freshState(T0),
-      T0,
-      checkouts,
-    )
-    expect(report.zai).toBeNull()
+    expect(report).not.toHaveProperty("zai")
   })
 
   test("a worker's stack under 1% of a core for 15 minutes is idle and offered up; a runner's never is", () => {

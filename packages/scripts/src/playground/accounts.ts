@@ -5,7 +5,6 @@ import {
   type Account,
   accountKey,
   accountSettings,
-  accountsOf,
   checkSetting,
   hasSecret,
   keychainServiceOf,
@@ -59,38 +58,16 @@ const json = (path: string): unknown => {
 
 const percent = (value: unknown) => (typeof value === "number" ? `${Math.round(value)}%` : "?")
 
-// A Claude row's last reading from the login flip's state, a GLM row's from zai-usage.json, which follows the first GLM key alone.
-const usageOf = (data: string, row: Account, firstGlm: string | undefined): string => {
-  if (providerOf(row) === "claude") {
-    const flip = json(join(data, "ops", "usage", "login-flip.json")) as {
-      seen?: Record<string, { five?: unknown; week?: unknown }>
-    }
-    const seen = flip?.seen?.[accountKey(row)]
-    // a null five is an account with no 5-hour window
-    return seen
-      ? `5h ${seen.five === null ? "none" : percent(seen.five)}, week ${percent(seen.week)}`
-      : "no reading yet"
+// A Claude row's last reading from the login flip's state; a GLM row has none.
+const usageOf = (data: string, row: Account): string => {
+  const flip = json(join(data, "ops", "usage", "login-flip.json")) as {
+    seen?: Record<string, { five?: unknown; week?: unknown }>
   }
-  if (accountKey(row) !== firstGlm) return "no reading: the usage job reads the first GLM key"
-  const read = json(join(data, "zai-usage.json"))
-  const file = (read && typeof read === "object" ? read : null) as {
-    balance?: { empty?: unknown; seenAt?: unknown }
-    error?: unknown
-    errorAt?: unknown
-    windows?: Record<string, unknown>
-  } | null
-  // the job's two marks as the sidebar reads them: its error is no reading, and an empty balance spends both windows
-  if (file && "error" in file) return `no reading: the usage read failed at ${String(file.errorAt)}`
-  const spent = file?.balance?.empty === true
-  const windows = file?.windows
-  const share = (name: string) => {
-    const window = windows?.[name] as { cap?: unknown; used?: unknown } | undefined
-    if (typeof window?.used !== "number" || typeof window.cap !== "number" || window.cap <= 0)
-      return "?"
-    return percent(spent ? 100 : (window.used / window.cap) * 100)
-  }
-  const emptyNote = spent ? `, the balance empty since ${String(file?.balance?.seenAt)}` : ""
-  return windows ? `5h ${share("fiveHour")}, week ${share("week")}${emptyNote}` : "no reading yet"
+  const seen = flip?.seen?.[accountKey(row)]
+  // a null five is an account with no 5-hour window
+  return seen
+    ? `5h ${seen.five === null ? "none" : percent(seen.five)}, week ${percent(seen.week)}`
+    : "no reading yet"
 }
 
 export async function accountsCommand(words: string[], io: AccountsIo): Promise<number> {
@@ -109,13 +86,13 @@ export async function accountsCommand(words: string[], io: AccountsIo): Promise<
   if (verb === "list") {
     if (positional.length || Object.keys(options).length) throw new Usage("list takes no words")
     if (!rows.length) io.out("no accounts yet: playground accounts add adds one")
-    const firstGlm = accountsOf(rows, "glm")[0]?.label
     for (const row of rows) {
       const provider = providerOf(row)
       const key = accountKey(row)
       const label = provider === "claude" && row.label ? ` (${row.label})` : ""
       const kept = hasSecret(settings, provider, key) ? "kept" : "MISSING from the Keychain"
-      io.out(`${provider} ${key}${label}: ${kept}, ${usageOf(io.data, row, firstGlm)}`)
+      const reading = provider === "claude" ? `, ${usageOf(io.data, row)}` : ""
+      io.out(`${provider} ${key}${label}: ${kept}${reading}`)
     }
     return 0
   }

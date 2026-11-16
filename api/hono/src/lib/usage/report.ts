@@ -22,7 +22,6 @@ import {
   usagePath,
   type UsageWindow,
 } from "@/lib/usage/window"
-import { readZaiFailure, readZaiUsage, type ZaiUsage, zaiProblem } from "@/lib/usage/zai"
 
 // What the Usage app shows: the usage windows with a forecast, and every assistant call in the claude_* tables over the last 7 days as tokens and API-equivalent dollars, by agent, session, model and hour, then each merged PR's cost. Read-only. Each message counts once, from its last line (highest seq), as the importer's own totals do.
 
@@ -104,7 +103,6 @@ export type UsageReport = {
     stale: boolean
     writtenAt: string
   } | null
-  zai: ZaiUsage | null
 }
 
 export type PrCost = {
@@ -262,7 +260,7 @@ export function summarize(
   sessions: Map<string, SessionRow>,
   now: Date,
   links: RosterLinks = NO_LINKS,
-): Omit<UsageReport, "accounts" | "prs" | "prsPending" | "windows" | "zai"> {
+): Omit<UsageReport, "accounts" | "prs" | "prsPending" | "windows"> {
   const today = startOfToday(now)
   const weekStart = now.getTime() - WEEK_MS
   const slots = hourSlots(now)
@@ -657,28 +655,13 @@ export async function usageProblem(
 
 export async function usageReport(now = new Date()): Promise<UsageReport> {
   const weekStart = now.getTime() - WEEK_MS
-  const [
-    accounts,
-    usage,
-    zai,
-    zaiFailure,
-    { buckets, prBuckets, prSessions, sessions },
-    { roster },
-  ] = await Promise.all([
-    readAccounts(),
-    readUsage(),
-    readZaiUsage(),
-    readZaiFailure(),
-    weekReads("week"),
-    readRoster(),
-  ])
+  const [accounts, usage, { buckets, prBuckets, prSessions, sessions }, { roster }] =
+    await Promise.all([readAccounts(), readUsage(), weekReads("week"), readRoster()])
   const links = rosterLinks(roster)
   const summary = summarize(buckets, sessions, now, links)
   const problems = [...summary.problems]
   const usageLine = await usageProblem(usage)
   if (usageLine) problems.push(usageLine)
-  const zaiLine = zaiFailure ?? zaiProblem(zai)
-  if (zaiLine) problems.push(zaiLine)
   const cal = summary.calibration
   if (cal && cal.claudeCodeUsd > 0) {
     const gap = Math.abs(cal.usd - cal.claudeCodeUsd) / cal.claudeCodeUsd
@@ -708,6 +691,5 @@ export async function usageReport(now = new Date()): Promise<UsageReport> {
     prs,
     prsPending: merged.pending,
     windows: windowsOf(usage, now),
-    zai,
   }
 }

@@ -288,7 +288,6 @@ export type { Pressure } from "@/lib/system/parse"
 export type { SystemAgent, SystemPoint, SystemReport, SystemStack } from "@/lib/system/sampler"
 export type { Forecast, PrCost, Spend, UsageReport, WindowView } from "@/lib/usage/report"
 export type { AccountUsage, Usage, UsageWindow } from "@/lib/usage/window"
-export type { ZaiUsage, ZaiWindow } from "@/lib/usage/zai"
 export type { ErrorCode } from "@/lib/error"
 export type { EntryKind, SessionKind } from "@/lib/sessions/lines"
 

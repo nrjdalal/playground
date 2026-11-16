@@ -70,7 +70,7 @@
   naming the app's button or page where one exists and never a command (`SETUP` in `web/next/src/lib/setup.ts`, through `SetupEmpty`; `tests/web/next/src/lib/setup.test.ts` holds it to no command shape), never invented rows.
   The fixture (`api/hono/src/fixtures/dashboard.json`, or another file `PLAYGROUND_FIXTURE` names) holds herdr's `playground` server under `herdr`: its panes (each with its `agent_status`, its session and its transcript), their screens and pickers, and its workspaces; its Feed is the open calls in those transcripts with their stuck records in `session-state`,
   the Claude config folder (registry, transcripts, roster, an attachment, made-up skills (`/daily-notes` among them, so the composer sends a skill's command, and enough that the `/` menu scrolls, with one `user-invocable: false` it leaves out),
-  the planner's `bundles/plan.json`, the leads' `merge-queue.json`, `usage.json`, the five made-up accounts' `usage-<name>.json`, `zai-usage.json`,
+  the planner's `bundles/plan.json`, the leads' `merge-queue.json`, `usage.json`, the five made-up accounts' `usage-<name>.json`,
   a made-up extensions login whose `usage.accounts` lists one Claude and one GLM row (so Settings' Accounts shows rows and Add works; `writeFixture` makes each seeded settings scope a repository, since `scopesIn` reads only those),
   the ops jobs' heartbeats, ops-unstick's state holding the Planner on the usage limit alone, its writtenAt a year ahead so it never reads stale), git,
   pull requests and the Usage app's merged ones,

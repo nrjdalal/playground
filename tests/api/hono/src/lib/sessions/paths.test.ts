@@ -19,7 +19,6 @@ import { rosterPath } from "../../../../../../api/hono/src/lib/dashboard/roster"
 import { unstickPath } from "../../../../../../api/hono/src/lib/dashboard/unstick"
 import { claudeDir, dataDir, projectsDir } from "../../../../../../api/hono/src/lib/sessions/paths"
 import { usagePath } from "../../../../../../api/hono/src/lib/usage/window"
-import { zaiPath } from "../../../../../../api/hono/src/lib/usage/zai"
 import { imagesDir } from "../../../../../../api/hono/src/plugins/changelog/images"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
 import { liveReads } from "../../../../../live-reads"
@@ -63,7 +62,6 @@ const PATHS: Record<string, () => string> = {
   rosterPath,
   unstickPath,
   usagePath,
-  zaiPath,
 }
 
 // The env each path reads, cleared around each test so the machine's own never decides.
@@ -158,7 +156,6 @@ describe("dataDir and every path under it", () => {
         rosterPath: "lib/dashboard/roster",
         unstickPath: "lib/dashboard/unstick",
         usagePath: "lib/usage/window",
-        zaiPath: "lib/usage/zai",
       }
       const script = [
         "const { configDir } = await import(`${API}/lib/dashboard/fixture`)",

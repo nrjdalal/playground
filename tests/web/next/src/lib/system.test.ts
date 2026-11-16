@@ -30,7 +30,6 @@ import {
   usageLine,
   usageRows,
   weekPace,
-  zaiReadings,
 } from "../../../../../web/next/src/lib/system"
 
 type SystemReport = Parameters<typeof systemReadings>[0]
@@ -165,7 +164,6 @@ export const calm = (patch: (r: SystemReport) => void = () => {}): SystemReport 
       stale: false,
       writtenAt: new Date(NOW - 5000).toISOString(),
     },
-    zai: null,
   } as SystemReport
   patch(report)
   return report
@@ -433,60 +431,6 @@ export const FIVE = [
 
 const withAccounts = (accounts: SystemReport["accounts"]) =>
   calm((r) => void (r.accounts = accounts))
-
-// The GLM plan's credit windows as the API reads zai-usage.json, `used` out of 100 credits each, written `ago` before NOW, so past ten minutes they are stale.
-export const glm = (
-  week: number,
-  fiveHour: number,
-  ago = 60_000,
-): NonNullable<SystemReport["zai"]> => ({
-  fiveHour: { cap: 100, resetsAt: new Date(NOW + 2 * 3600_000).toISOString(), used: fiveHour },
-  stale: ago > 10 * 60_000,
-  week: { cap: 100, resetsAt: new Date(NOW + 6 * DAY).toISOString(), used: week },
-  writtenAt: new Date(NOW - ago).toISOString(),
-})
-
-// GLM usage shows as Claude usage does.
-describe("zaiReadings", () => {
-  test("the week, then the 5-hour window, each its credits' share judged by the Claude windows' levels", () => {
-    const [week, fiveHour] = zaiReadings(glm(5, 41), NOW)
-    expect([week?.key, fiveHour?.key]).toEqual(["week", "fiveHour"])
-    expect([week?.value, fiveHour?.value]).toEqual(["5", "41"])
-    expect([week?.level, fiveHour?.level]).toEqual(["green", "green"])
-    expect(zaiReadings(glm(75, 95), NOW).map((r) => r.level)).toEqual(["amber", "red"])
-    expect(zaiReadings(glm(95, 75), NOW).map((r) => r.level)).toEqual(["red", "amber"])
-  })
-
-  test("each names GLM, so it never reads as Claude's", () => {
-    const readings = zaiReadings(glm(5, 41), NOW)
-    expect(readings.map((r) => r.name)).toEqual(["GLM week", "GLM 5-hour window"])
-    for (const r of readings) expect(r.title).toStartWith(`${r.name} `)
-    expect(readings[1]?.title).toContain("read 1 min. ago")
-  })
-
-  test("the week is orange over its pace, as Claude's is", () => {
-    const [week] = zaiReadings(glm(20, 0), NOW)
-    expect(week?.level).toBe("amber")
-    expect(week?.title).toContain("; GLM week 20% used, over the 9% pace")
-  })
-
-  test("a file the job stopped writing reads stale: its last shares, gray, judging nothing", () => {
-    const readings = zaiReadings(glm(95, 95, 20 * 60_000), NOW)
-    expect(readings.map((r) => r.value)).toEqual(["95", "95"])
-    for (const r of readings) {
-      expect(r.stale).toBe(true)
-      expect(r.level).toBe("green")
-      expect(r.reasons).toEqual([])
-      expect(r.title).toContain("stale")
-      expect(r.title).toContain("last seen 20 min. ago")
-    }
-  })
-
-  test("a window the job could not read is left out, and no file reads nothing", () => {
-    expect(zaiReadings({ ...glm(5, 41), week: null }, NOW).map((r) => r.key)).toEqual(["fiveHour"])
-    expect(zaiReadings(null, NOW)).toEqual([])
-  })
-})
 
 // the owner on the Week tooltip's account lines: "sort be reset date?"
 describe("byWeekReset", () => {
@@ -903,7 +847,7 @@ describe("combinedUsage", () => {
     })
   })
 
-  test("GLM stays its own reading: only the Claude accounts' week and 5-hour windows are joined", () => {
+  test("only the accounts' week and 5-hour windows are joined, after the machine's readings", () => {
     const readings = systemReadings(withAccounts(FIVE), NOW)
     expect(readings.filter((r) => r.rows).map((r) => r.key)).toEqual(["week", "fiveHour"])
     expect(readings.map((r) => r.key)).toEqual([

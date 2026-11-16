@@ -1,15 +1,7 @@
 "use client"
 "use no memo"
 
-import type {
-  AccountUsage,
-  PrCost,
-  Spend,
-  UsageReport,
-  WindowView,
-  ZaiUsage,
-  ZaiWindow,
-} from "@api/hono"
+import type { AccountUsage, PrCost, Spend, UsageReport, WindowView } from "@api/hono"
 import { useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { useState } from "react"
@@ -211,31 +203,6 @@ function Accounts({ accounts, now }: { accounts: AccountUsage[]; now: Date }) {
   )
 }
 
-function ZaiLines({ now, zai }: { now: Date; zai: ZaiUsage | null }) {
-  if (!zai) {
-    return (
-      <p className="text-muted-foreground text-xs">
-        No GLM reading yet: the GLM usage job saves the credit windows every 5 minutes.
-      </p>
-    )
-  }
-  const line = (label: string, window: ZaiWindow | null) => (
-    <p key={label}>
-      {label}:{" "}
-      {window
-        ? `${window.used.toLocaleString("en-US")} of ${window.cap.toLocaleString("en-US")} credits (${Math.round((window.used / window.cap) * 100)}%), resets ${window.resetsAt ? relativeTime(window.resetsAt, now) : "an unknown time"}`
-        : "can't read"}
-    </p>
-  )
-  return (
-    <div className="text-muted-foreground text-xs">
-      {line("GLM 5-hour", zai.fiveHour)}
-      {line("GLM week", zai.week)}
-      <p>Read {relativeTime(zai.writtenAt, now)} from the ops-zai-usage job.</p>
-    </div>
-  )
-}
-
 function Windows({ now, report }: { now: Date; report: UsageReport }) {
   const { windows } = report
   const table = useStaticTable({
@@ -265,7 +232,6 @@ function Windows({ now, report }: { now: Date; report: UsageReport }) {
           No reading yet: the usage job writes the windows every 5 minutes.
         </p>
       )}
-      <ZaiLines now={now} zai={report.zai} />
     </Section>
   )
 }
