@@ -2109,9 +2109,10 @@ function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undef
     key,
     budget,
   )
-  const file = reading.first?.value ?? ""
+  if (!reading.first) return
+  const file = reading.first.value
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file))) return
-  if (key === "deno run" && reading.first && words.includes(reading.first)) return
+  if (key === "deno run" && words.includes(reading.first)) return
   return { ...reading, via: implicit ? name : key }
 }
 
