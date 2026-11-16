@@ -283,6 +283,12 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+- Lefthook's pre-push `test-skills` job runs it when the branch changed a file on its glob since it forked from the local `origin/canary`: every file a step names and the files those load first, the sandbox, a skill's `SKILL.md`, and the code under `scripts/` (`.js`, `.json`, `.py`, `.sh`, `.ts`).
+  The files loaded first are `packages/safe-delete`, test-sandbox's `clock-exempt.ts` and `verify/prebuild.ts`, `state.test.ts`'s `pr-merge/gates.ts`, and the ops jobs test's `render-set.ts` and `session-names.ts` with what they import.
+  A file one hop further in, such as what `verify/prebuild.ts` imports, is off the glob, and so is a file only a whole-tree step reads (links, em-dashes, kill by name, loopback Postgres, container volumes): a push changing only such a file meets its step in CI.
+  It runs through `packages/scripts/src/commit-slot.ts`, so parallel pushes from several worktrees take the commit slot, and it ran 102 s in the slot on 16 Nov (measured), so a push of docs or briefs alone skips it.
+  `tests/lefthook.test.ts` reads the `steps` list, so a step's new file fails there until the glob holds it.
+  A command that starts a database or stops a process outside the glob is still yours to check: run `bun run test:skills` by hand before that push.
 - Run the touched tests before every push, beside `test:skills`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.ts touched-tests`).
 
 ## bun run hooks:differential
