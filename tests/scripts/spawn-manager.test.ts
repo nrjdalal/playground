@@ -13,6 +13,7 @@ import {
 } from "node:fs"
 import { dirname, join } from "node:path"
 
+import { scratchEnv } from "../scratch-env"
 import { OLD } from "../session-names"
 import {
   bin,
@@ -617,7 +618,7 @@ describe("a launch file removes itself once its launch starts", () => {
     const file = join(r.home, ".playground", "launch", "worker-brave-otter.sh")
     // The harness PATH, so the launch's claude is the fake and nothing real starts.
     const run = Bun.spawn(["bash", file], {
-      env: { ...process.env, HOME: r.home, PATH: `${bin}:${process.env.PATH}` },
+      env: scratchEnv(r.home, { PATH: `${bin}:${process.env.PATH}` }),
       stderr: "ignore",
       stdout: "ignore",
     })
@@ -673,12 +674,10 @@ describe("a launch names the main checkout in PLAYGROUND_REPO", () => {
     chmodSync(join(shim, "claude"), 0o755)
     const file = join(r.home, ".playground", "launch", "worker-brave-otter.sh")
     const run = Bun.spawn(["bash", file], {
-      env: {
-        ...process.env,
-        HOME: r.home,
+      env: scratchEnv(r.home, {
         PLAYGROUND_REPO: "",
         PATH: `${shim}:${bin}:${process.env.PATH}`,
-      },
+      }),
       stderr: "ignore",
       stdout: "ignore",
     })

@@ -194,6 +194,12 @@ function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): vo
     if (v === "") delete entry[k]
     else entry[k] = v
   }
+  // Why a row ended, which spawn.sh resume reads before it brings a session back: a done row records done, and a row back at a live status drops its reason.
+  const status = pairs.find(([k]) => k === "status")?.[1]
+  if (status && !pairs.some(([k]) => k === "endReason")) {
+    if (STATUSES.live.includes(status)) delete entry.endReason
+    else if (status === "done") entry.endReason = "done"
+  }
 }
 
 // A session name is spawn.sh's word shape, lowercase words joined by hyphens: a shell loop once passed a whole sentence as a name and roster.ts made three agents of it.
@@ -272,6 +278,7 @@ const KNOWN_KEYS: readonly string[] = [
   "backlogNext",
   "backlogTaken",
   "branch",
+  "endReason",
   "eta",
   "hold",
   "item",
@@ -520,6 +527,7 @@ async function main(argv: string[]): Promise<void> {
       checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
     for (const k of [
       "pr",
+      "endReason",
       "item",
       "branch",
       "repo",
