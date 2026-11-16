@@ -29,5 +29,4 @@ Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `
 
 1. Load the playbook skill with the Skill tool, then code-review-loop. Done when both are in your context.
 2. Review the PR round by round as code-review-loop says, every step and its Done when. Done when code-review-loop's waiter ends with `CLOSED` and your clone is still in place for your lead's or Ops' cleanup, which removes worktrees one at a time by literal path.
-3. Remove your `~/.playground/scratch/<your name>/` and `scratchpad/<your name>/` each whole in one move when it is under the tripwire, otherwise leave it for the cleanup, never split (playbook's SESSIONS.md, End).
-   Then tell the session you report to by SendMessage that you are done, with your clone's path, so it closes your pane and the cleanup finds the clone. Done when each folder is gone or left whole, and the send succeeds and names that path.
+3. Tell the session you report to by SendMessage that you are done, with your clone's path, so the cleanup finds the clone; your end moves your `~/.playground/scratch/<your name>/` and `scratchpad/<your name>/` to the trash with it (playbook's SESSIONS.md, End). Done when the send succeeds and names that path.
