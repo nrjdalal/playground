@@ -19,7 +19,7 @@ import {
   getPickLine,
   itemTag,
   openItems,
-  postItem,
+  postOrEdit,
   readAnswer,
   resolveItem,
   settleItem,
@@ -266,7 +266,7 @@ if (command === "new" || command === "edit") {
   const result =
     command === "edit"
       ? await editItem(db, key as string, kept.ok ? kept.input : input, undefined, dataDir())
-      : await postItem(db, kept.ok ? kept.input : input, flags?.thread, undefined, dataDir())
+      : await postOrEdit(db, kept.ok ? kept.input : input, flags?.thread, undefined, dataDir())
   if (!result.ok)
     fail(
       command === "edit" && result.code === "NOT_FOUND" ? `no inbox item ${key}` : result.message,
@@ -274,7 +274,14 @@ if (command === "new" || command === "edit") {
   else {
     // the id alone on stdout, as a poster's `id=$(bun run ask new < f)` takes it; the tag the owner sees beside it on stderr
     if (command === "new") console.log(result.item.id)
-    console.error(`ask: ${command === "edit" ? "edited" : "posted"} ${itemTag(result.item.ref)}`)
+    const tag = itemTag(result.item.ref)
+    console.error(
+      "unchanged" in result && result.unchanged
+        ? `ask: unchanged ${tag}: your update with this title already says this`
+        : "edited" in result && result.edited
+          ? `ask: edited ${tag}, your update with this title, in place of a second card`
+          : `ask: ${command === "edit" ? "edited" : "posted"} ${tag}`,
+    )
     if ("reopened" in result && result.reopened)
       console.error(
         "ask: reopened it: the owner had marked it Done, and it is back in the list as unread",
