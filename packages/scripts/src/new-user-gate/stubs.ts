@@ -1,4 +1,4 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, curl is real with each URL logged, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, systemd (systemctl, loginctl), Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, curl is real with each URL logged, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
 
 import { join } from "node:path"
 
@@ -47,6 +47,7 @@ esac
 `,
   herdr: `${logged(box, "herdr")}exit 1\n`,
   launchctl: `${logged(box, "launchctl")}exit 1\n`,
+  loginctl: `${logged(box, "loginctl")}exit 1\n`,
   open: `${logged(box, "open")}exit 1\n`,
   osascript: `${logged(box, "osascript")}exit 1\n`,
   // the Keychain as a file in the box, one service, account and secret per line; only the subcommand is logged, never a secret
@@ -83,6 +84,8 @@ fi
 handle "$@"
 `,
   sudo: `${logged(box, "sudo")}exit 1\n`,
+  // on Linux the box's jobs render would otherwise reach the user's live manager and start or stop the machine's own ops jobs
+  systemctl: `${logged(box, "systemctl")}exit 1\n`,
 })
 
 // An ISO time as Python 3.9's fromisoformat reads it, with no fraction and no Z.
