@@ -265,7 +265,7 @@ gate_capacity() {
   fi
   # an --ssh start's load and memory gates read its target, through the System view's peer read
   target=
-  [ -z "$SSH_HOST" ] || target=$("$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/peer-gate.ts" "$SSH_HOST" "$SSH_KEY" 2>&1) || target="{\"problem\": \"peer-gate.ts failed\"}"
+  [ -z "$SSH_HOST" ] || target=$("$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/peer-gate.ts" "$SSH_HOST" "$SSH_KEY") || target="{\"problem\": \"peer-gate.ts failed\"}"
   verdict=$(
     python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" "$SSH_HOST" "$target" <<'PY'
 import datetime as dt

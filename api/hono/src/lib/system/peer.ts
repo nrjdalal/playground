@@ -1,7 +1,8 @@
 // The System view's fixed read of a peer, shared with spawn.sh's gate for an --ssh start (packages/scripts/src/spawn/peer-gate.ts), so both read a machine the same way; it imports nothing, so a script can import it by its relative path.
 export const peerArgv = (target: string, key?: string): string[] => [
   "ssh",
-  ...(key ? ["-i", key] : []),
+  // a key is the only identity tried, so an agent holding many keys never spends the server's MaxAuthTries before it
+  ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
   "-o",
   "BatchMode=yes",
   "-o",
