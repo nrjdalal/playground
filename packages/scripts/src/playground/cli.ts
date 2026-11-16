@@ -73,7 +73,7 @@ type ManagerVerb = NamedKind | "optimizer"
 const nameOf = (kind: ManagerVerb) => (kind === "optimizer" ? kind : getSessionNames().names[kind])
 // A held brief diff reaches its manager through the ops outbox's relay, since a script cannot SendMessage (ADR 0010); job.ts loads only when a diff is held, as its imports reach the ops jobs' whole tree.
 const sendBrief: Send = async (to, text) =>
-  (await import("../ops-job/job")).sendAs("ops-brief")(to, text)
+  (await import("../ops-job/job")).sendAs("brief")(to, text)
 
 // playground dispatcher, planner, builder, ops or optimizer, and the bare start's dispatcher step: 0 started, 3 already running, 1 refused with spawn.sh's reason.
 const manager = async (
