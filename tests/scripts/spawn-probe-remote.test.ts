@@ -386,6 +386,19 @@ describe("a sandboxed start reads its machine before any pane opens", () => {
     expect(call[7]).toStartWith('PATH="$HOME/.bun/bin:$PATH"; ')
   })
 
+  test("an --ssh probe's claude runs on the other machine, so this machine's folder trust is not asked", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, NO_CLAUDE_TRUST: "1" },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.err).not.toContain("folder trust question")
+    expect(r.code).toBe(0)
+  })
+
   test.each([
     ["socat found only in its ~/.bun/bin", { bun: ["socat"], tools: ["bwrap"] }],
     ["a bwrap that warns on stderr and exits 0", { bwrap: { rc: 0, says: "bwrap: a warning" } }],

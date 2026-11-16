@@ -144,12 +144,21 @@ describe("--account logs the session in as another Claude account", () => {
   test.each([
     ["another login", own("quilla@example.org")],
     ["no login", JSON.stringify({ oauthAccount: null })],
-    ["a config that does not read", "{"],
   ])("a config naming %s lets --account through", async (_, config) => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md", "--account", email], [], {
       CLAUDE_JSON: config,
     })
     expect(r.code).toBe(0)
+  })
+
+  // a config that does not read holds no yes to Claude Code's folder trust question either, so the start stops there, past the --account check
+  test("a config that does not read lets --account through to the folder trust refusal", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md", "--account", email], [], {
+      CLAUDE_JSON: "{",
+    })
+    expect(r.code).toBe(1)
+    expect(r.err).not.toContain("--account")
+    expect(r.err).toContain("folder trust question")
   })
 
   test("an account with no Keychain item is refused before herdr runs", async () => {

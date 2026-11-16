@@ -508,7 +508,7 @@ def sessions():
                 ids[names[-1]] = (os.path.basename(f)[:-6], os.path.getmtime(f), cwds[-1], glm)
     for a in roster.get("agents", []):
         n = a.get("name")
-        if a.get("status") in ("ended", "paused") or n in running or n not in ids:
+        if a.get("status") in ("done", "ended", "paused") or n in running or n not in ids:
             continue
         sid, _, cwd, glm = ids[n]
         # a resume takes --backend only while no pin stands: with one, the pin decides and a flag is refused
