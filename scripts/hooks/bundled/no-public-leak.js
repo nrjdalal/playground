@@ -11553,11 +11553,13 @@ function ownLinesPast(text, owner) {
   }).join(`
 `);
 }
+var EXAMPLE_ADDRESS = /@(?:[a-z\d-]+\.)*example\.(?:com|net|org)$/i;
+var holds = (kind, re, text) => kind === "emails" ? (text.match(re) ?? []).some((hit) => !EXAMPLE_ADDRESS.test(hit)) : text.search(re) !== -1;
 function finder(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
     const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
-    const found = kinds.find(([, re]) => said.search(re) !== -1);
+    const found = kinds.find(([kind, re]) => holds(kind, re, said));
     return found && SAID[found[0]];
   };
 }
