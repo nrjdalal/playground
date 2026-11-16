@@ -172,10 +172,25 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   })
 
   test("a base merge keeps a standing 5/5 a candidate, never a jump past the read (#1558)", async () => {
-    const step = (await skill()).match(/^2\. \*\*Place the push\*\*.*$/m)?.[0] ?? ""
+    const step =
+      (await skill()).match(/^2\. \*\*Check the merge, then place the push\.\*\*.*$/m)?.[0] ?? ""
     const merge = step.split("`BASE-MERGE`:")[1]?.split("`OWN: <files>`")[0] ?? ""
     expect(merge).toContain("a standing 5/5 is still a **candidate**")
     expect(merge).toContain("The last 5/5's fresh full read and check-types at the new head")
+  })
+
+  test("every round, round 1 included, checks the merge with canary before any full read (#2468)", async () => {
+    const step =
+      (await skill()).match(/^2\. \*\*Check the merge, then place the push\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain("Every round, round 1 included")
+    expect(step).toContain("state.ts merge <clone> <head> origin/canary <your session name>")
+    expect(step).toContain("ends the round as one blocking finding")
+    expect(step).toContain("with no spec read and no full read")
+    expect(step).toContain("`HEAD-RED: <tests>` line after it is the PR's own red")
+    expect(step).toContain("a canary-only red stays unseen there")
+    expect(await page()).toContain(
+      "A head that conflicts with canary, or goes red only on the merge",
+    )
   })
 })
 

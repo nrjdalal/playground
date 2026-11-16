@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
 export const VERDICT = /^##\s*ReviewBot\s*·\s*round\s+(\d+):\s*(\d)\/5\s+at\s+`?([0-9a-f]{7,40})/i
@@ -46,6 +46,21 @@ export const io = {
     return stdout
   },
   sleep: (s: number): Promise<void> => Bun.sleep(s * 1000),
+  // One run of test files in the clone through run-slot, green or not.
+  tests: (session: string, clone: string, files: string[]): boolean =>
+    Bun.spawnSync(
+      [
+        join(homedir(), ".playground", "ops", "run-slot.sh"),
+        session,
+        "--",
+        "bun",
+        `--cwd=${clone}`,
+        "run",
+        "test:file",
+        ...files,
+      ],
+      { stdout: "inherit", stderr: "inherit" },
+    ).exitCode === 0,
   time: (): number => Date.now() / 1000,
 }
 
@@ -845,7 +860,7 @@ const readBlobs = (
   return texts
 }
 
-export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
+export const touchedTests = (clone: string, base: string, head: string): string[] => {
   const changed = io
     .run("git", "-C", clone, "diff", "--name-only", "--no-renames", "-z", `${base}...${head}`)
     .split("\0")
@@ -904,7 +919,86 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
     if (changed.some((f) => TEMPLATE.test(f)))
       for (const f of grep(clone, head, "-E", [DIGEST_PIN])) picked.add(f)
   }
-  for (const f of [...picked].filter((f) => tests.has(f)).sort()) console.log(f)
+  return [...picked].filter((f) => tests.has(f)).sort()
+}
+
+export const cmdTouchedTests = (clone: string, base: string, head: string): void => {
+  for (const f of touchedTests(clone, base, head)) console.log(f)
+}
+
+const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
+
+// Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens.
+export const cmdMerge = (clone: string, head: string, base: string, session: string): void => {
+  const headSha = io.run("git", "-C", clone, "rev-parse", head).trim()
+  const baseSha = io.run("git", "-C", clone, "rev-parse", base).trim()
+  let tree: string
+  try {
+    tree = io.run(
+      "git",
+      "-C",
+      clone,
+      "merge-tree",
+      "--write-tree",
+      "--name-only",
+      "--no-messages",
+      headSha,
+      baseSha,
+    )
+  } catch (e) {
+    if (!(e instanceof Called) || !e.stdout.trim()) throw e
+    const files = e.stdout.trim().split("\n").slice(1)
+    console.log(`CONFLICT on ${baseSha.slice(0, 7)}: ${files.join(" ")}`)
+    process.exitCode = 1
+    return
+  }
+  const merge = io
+    .run(
+      "git",
+      "-C",
+      clone,
+      "commit-tree",
+      tree.trim(),
+      "-p",
+      headSha,
+      "-p",
+      baseSha,
+      "-m",
+      "merge check",
+    )
+    .trim()
+  const locks = io
+    .run("git", "-C", clone, "diff", "--name-only", headSha, merge)
+    .split("\n")
+    .filter((f) => LOCKS.test(f))
+  if (locks.length) {
+    console.log(`LOCK-CHANGED on ${baseSha.slice(0, 7)}: ${locks.join(" ")}; no tests ran`)
+    return
+  }
+  const tests = touchedTests(clone, baseSha, merge)
+  const red = (files: string[]): string[] =>
+    !files.length || io.tests(session, clone, files)
+      ? []
+      : files.length === 1
+        ? files
+        : files.filter((f) => !io.tests(session, clone, [f]))
+  let onMerge: string[]
+  try {
+    io.run("git", "-C", clone, "checkout", "-q", "--detach", merge)
+    onMerge = red(tests)
+  } finally {
+    io.run("git", "-C", clone, "checkout", "-q", "--detach", headSha)
+  }
+  const atHeadTree = new Set(
+    io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", headSha).split("\0"),
+  )
+  const atHead = red(onMerge.filter((f) => atHeadTree.has(f)))
+  const canaryOnly = onMerge.filter((f) => !atHead.includes(f))
+  if (canaryOnly.length) {
+    console.log(`CANARY-RED on ${baseSha.slice(0, 7)}: ${canaryOnly.join(" ")}`)
+    process.exitCode = 1
+  } else console.log(`CLEAN on ${baseSha.slice(0, 7)}: ${tests.length} touched tests`)
+  if (atHead.length) console.log(`HEAD-RED: ${atHead.join(" ")}`)
 }
 
 const splitResponse = (text: string): [Record<string, string>, string] => {
@@ -1020,6 +1114,7 @@ const COMMANDS: Record<
   fresh: { argc: 4, run: cmdFresh },
   pr: { argc: 2, run: cmdPr },
   scan: { argc: 1, run: cmdScan },
+  merge: { argc: 4, run: cmdMerge },
   "touched-tests": { argc: 3, run: cmdTouchedTests },
   wait: { argc: 3, run: cmdWait },
 }
@@ -1032,6 +1127,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, each red one run again at the head: CANARY-RED <tests> (exit 1) or CLEAN, then HEAD-RED <tests> for a red at both; the clone ends at <head>
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
 A verdict is a comment by this gh account whose first line is
