@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { boxEnv } from "../../../../../packages/scripts/src/box-env"
 import { trust, withTrust } from "../../../../../packages/scripts/src/playground/claude-trust"
 
 const SCRIPT = join(
@@ -76,7 +77,7 @@ describe("trust", () => {
   test("the script trusts the folder it is given in HOME's config", () => {
     const dir = home()
     const run = Bun.spawnSync(["bun", "--no-env-file", SCRIPT, FOLDER], {
-      env: { ...process.env, HOME: dir },
+      env: boxEnv(dir),
       stderr: "pipe",
       stdout: "pipe",
     })
