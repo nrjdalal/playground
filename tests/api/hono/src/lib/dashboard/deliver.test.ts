@@ -1007,11 +1007,12 @@ describe("deliver with attachments", () => {
   })
 })
 
-// deliver() types into a session's pane as if the owner typed it, so only the owner's own acts reach it, and nothing else speaks for the owner: the composer, the owner's answer to an inbox item or his comment through its Reply, and his answer to a card from WhatsApp, which ask whatsapp reads from ops-wa's own folder (ADR 0024). An ops job, a script or any other route sends through SendMessage instead.
+// deliver() types into a session's pane as if the owner typed it, so only the owner's own acts reach it, and nothing else speaks for the owner: the composer, the owner's answer to an inbox item or his comment through its Reply, his answer to a card from WhatsApp, which ask whatsapp reads from ops-wa's own folder (ADR 0024), and the owner's Approve answer, sent after an API restart cut its root run off (local.ts's endLostRoots, ADR 0026). An ops job, a script or any other route sends through SendMessage instead.
 const ROOT = join(import.meta.dir, "../../../../../..")
 const DELIVER = "api/hono/src/lib/dashboard/deliver.ts"
 const CALLERS = [
   "api/hono/src/bin/dashboard-ask.ts",
+  "api/hono/src/local.ts",
   "api/hono/src/routers/dashboard.ts",
   "api/hono/src/routers/inbox.ts",
 ]
@@ -1036,7 +1037,7 @@ const deliverCallers = (files: Record<string, string>): string[] =>
     .map(([path]) => path)
 
 describe("who calls deliver()", () => {
-  test("only the composer's route, the inbox's, its answer and its Reply, and ask whatsapp", async () => {
+  test("only the composer's route, the inbox's, its answer and its Reply, ask whatsapp, and the owner's Approve answer sent after an API restart cut its root run off", async () => {
     const listed = Bun.spawnSync(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
       {

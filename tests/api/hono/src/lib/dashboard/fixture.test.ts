@@ -800,6 +800,18 @@ describe("writeFixture", () => {
     expect(roster.find((agent) => agent.name === "q7w8f2-reviewer")?.worker).toBe("k3m9px-worker")
   })
 
+  test("the shipped fixture holds an idle worker whose open pull request conflicts, so its row reads Conflicts (#2457)", () => {
+    const { files, herdr, pulls } = shipped()
+    const pane = herdr.panes.find((p) =>
+      ((p.processes[0]?.argv ?? []) as string[]).includes("m5v8qd-worker"),
+    )
+    expect(pane?.agent_status).toBe("idle")
+    const roster = (files["playground/roster.json"] as { agents: { name: string; pr?: string }[] })
+      .agents
+    const url = roster.find((agent) => agent.name === "m5v8qd-worker")?.pr ?? ""
+    expect(pulls[url]).toMatchObject({ mergeable: "CONFLICTING", state: "OPEN" })
+  })
+
   test("the shipped fixture's 7 threads span 2 pages, one pinned and one archived, each message a line of its own session's transcript, their times moved with the rest", () => {
     const { threads = [], files } = shipped()
     expect(threads).toHaveLength(7)
@@ -1029,9 +1041,10 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.home).toBe(home)
     expect(dashboard()).toEqual(before)
 
-    // every read answered from the fixture, the id-named pair, the Codex worker and the --ssh probe live with the rest
-    expect(out.workers).toBe(23)
+    // every read answered from the fixture, the id-named pair, the Codex worker, the conflicting worker and the --ssh probe live with the rest
+    expect(out.workers).toBe(24)
     expect(out.names).toContain("c4dx7n-worker")
+    expect(out.names).toContain("m5v8qd-worker")
     expect(out.names).toContain("s8hk2v-probe")
     // the stale record, whose pid another process holds now, is no session
     expect(out.names).not.toContain("gluttony")

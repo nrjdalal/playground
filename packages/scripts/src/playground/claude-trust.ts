@@ -1,5 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
-// claude-trust.ts [folder]: records the owner's yes to Claude Code's folder trust question for folder (the main checkout by default) in ~/.claude.json, as projects[<folder>].hasTrustDialogAccepted, which Claude Code's own question writes, so a session in it or any worktree under it starts with no question. First run's Trust this folder runs it on the owner's click; a config that does not read as a JSON object is left as it is.
+// claude-trust.ts [folder]: records the owner's yes to Claude Code's folder trust question for folder (the main checkout by default) in ~/.claude.json, as projects[<folder>].hasTrustDialogAccepted, which Claude Code's own question writes, so a session in it or any worktree under it starts with no question. install.sh runs it on the checkout it cloned, before the dispatcher starts, and first run's Trust this folder on the owner's click; a config that does not read as a JSON object is left as it is.
 import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
@@ -35,12 +35,16 @@ export const withTrust = (text: string | null, folder: string): string | null =>
 export const trust = (home: string, folder: string): { code: number; line: string } => {
   const path = join(home, ".claude.json")
   const held = existsSync(path)
-  const next = withTrust(held ? readFileSync(path, "utf8") : null, folder)
+  const text = held ? readFileSync(path, "utf8") : null
+  const next = withTrust(text, folder)
   if (next === null)
     return {
       code: 1,
       line: `${path} does not read as Claude Code's config, so it is left as it is`,
     }
+  // a config that already holds the yes stays the same file, so a second install changes nothing
+  if (text !== null && JSON.parse(text).projects?.[folder]?.hasTrustDialogAccepted === true)
+    return { code: 0, line: `Claude Code already trusts ${folder}` }
   const tmp = `${path}.playground-${process.pid}`
   writeFileSync(tmp, next, { mode: 0o600 })
   chmodSync(tmp, held ? statSync(path).mode & 0o777 : 0o600)
