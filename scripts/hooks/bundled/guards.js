@@ -17453,6 +17453,7 @@ var FETCH_OPTIONS = new Set([
   "-t"
 ]);
 var QUIET = new Set(["-q", "--quiet"]);
+var STATE_READS = new Set(["checks", "delta", "fresh", "pr", "scan", "touched-tests", "wait"]);
 var SED_ADDRESS2 = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`;
 var SED_PRINT = new RegExp(`^${SED_ADDRESS2}(?:,${SED_ADDRESS2})?p$`);
 var SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/;
@@ -17573,7 +17574,7 @@ async function inspect14(command, directory, environment, lookup, own = []) {
     const path = real3(written);
     return under(path, extensions) && path.slice(extensions.length).toLowerCase().includes("/skills/") && lookup.tracked(path);
   };
-  const runsPrTests = (script, rest) => script !== undefined && real3(script).endsWith("/code-review-loop/scripts/state.ts") && rest[0] === "merge" && !rest.includes("--conflict-only");
+  const runsPrTests = (script, rest) => script !== undefined && real3(script).endsWith("/code-review-loop/scripts/state.ts") && !STATE_READS.has(rest[0] ?? "") && !(rest[0] === "merge" && rest.includes("--conflict-only"));
   const inMain = (folder) => {
     if (folder === undefined)
       return false;

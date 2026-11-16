@@ -147,6 +147,8 @@ const FETCH_OPTIONS = new Set([
   "-t",
 ])
 const QUIET = new Set(["-q", "--quiet"])
+// code-review-loop's state.ts commands that run nothing the PR holds, A to Z; merge passes only with --conflict-only (runsPrTests)
+const STATE_READS = new Set(["checks", "delta", "fresh", "pr", "scan", "touched-tests", "wait"])
 // sed's scripts that run and write nothing: `-n` printing a range of lines or patterns, or one substitution whose flags write no file
 const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
 const SED_PRINT = new RegExp(`^${SED_ADDRESS}(?:,${SED_ADDRESS})?p$`)
@@ -303,12 +305,12 @@ export async function inspect(
       lookup.tracked(path)
     )
   }
-  // code-review-loop's merge check runs the PR's tests in its clone through run-slot, a child this hook never sees, so read mode takes it only as --conflict-only, merge-tree alone.
+  // code-review-loop's state.ts runs only as a command STATE_READS names by its literal word, or merge with --conflict-only (merge-tree alone), since merge runs the PR's tests through run-slot, a child this hook never sees; a word the shell rewrites (a brace, $IFS) or one xargs adds matches none.
   const runsPrTests = (script: string | undefined, rest: string[]): boolean =>
     script !== undefined &&
     real(script).endsWith("/code-review-loop/scripts/state.ts") &&
-    rest[0] === "merge" &&
-    !rest.includes("--conflict-only")
+    !STATE_READS.has(rest[0] ?? "") &&
+    !(rest[0] === "merge" && rest.includes("--conflict-only"))
   // Whether a folder sits in the main checkout's own work tree: the first folder up from it that holds .git is the main checkout, so another clone or worktree inside it, a folder outside any, and an unknown one are not.
   const inMain = (folder: string | undefined): boolean => {
     if (folder === undefined) return false

@@ -217,6 +217,30 @@ test("an interrupt during the parallel pass ends the run with 128 plus its numbe
   expect(readdirSync(tmp).filter((name) => name.startsWith("test-sandbox-"))).toEqual([])
 }, 20_000)
 
+test("a serial file named with a flag runs alone: the parallel pass, left with the flag and no path, runs nothing", async () => {
+  const dir = mkdtempSync(join(DIR, "serial-flag-"))
+  const serialRan = join(dir, "serial-ran")
+  const otherRan = join(dir, "other-ran")
+  writeFileSync(
+    join(dir, "other.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("other", () => writeFileSync(${JSON.stringify(otherRan)}, ""))\n`,
+  )
+  mkdirSync(join(dir, "tests/api/hono/src/bin"), { recursive: true })
+  writeFileSync(
+    join(dir, "tests/api/hono/src/bin/dev.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("serial", () => writeFileSync(${JSON.stringify(serialRan)}, ""))\n`,
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "tests/api/hono/src/bin/dev.test.ts", "--only-failures"], {
+    cwd: dir,
+    stderr: "ignore",
+    stdout: "ignore",
+    timeout: 15_000,
+  })
+  expect(await run.exited).toBe(0)
+  expect(existsSync(serialRan)).toBe(true)
+  expect(existsSync(otherRan)).toBe(false)
+}, 20_000)
+
 test("its sandbox is a marked scratch folder, gone once the run ends (#545)", async () => {
   const tmp = join(DIR, "tmp-scratch")
   const seen = join(DIR, "scratch-seen")

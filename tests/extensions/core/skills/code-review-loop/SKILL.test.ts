@@ -191,6 +191,8 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(step).toContain("`state.ts merge --conflict-only <clone> <head> origin/canary`")
     expect(step).toContain("`BASE-RED on <c7>: <tests>` line is `canary`'s own red")
     expect(step).toContain("`BATCH-RED on <c7>: <tests>`")
+    expect(step).toContain("reads the red files from the run's junit report")
+    expect(step).toContain("`NO-REPORT on <c7>`")
     expect(await page()).toContain(
       "A head that conflicts with canary, or goes red only on the merge",
     )

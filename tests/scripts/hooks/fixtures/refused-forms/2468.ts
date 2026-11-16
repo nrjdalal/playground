@@ -16,6 +16,18 @@ export const groups: Group[] = [
           "state.ts merge with --conflict-only only as the clone's name",
           `${state} merge /s/--conflict-only abc1234 origin/canary r-reviewer`,
         ],
+        [
+          "state.ts merge as a brace the shell expands",
+          `${state} {merge,} /s/review-501 abc1234 origin/canary r-reviewer`,
+        ],
+        [
+          "state.ts merge split from its clone by $IFS",
+          `${state} merge\${IFS}/s/review-501 abc1234 origin/canary r-reviewer`,
+        ],
+        [
+          "state.ts given merge by xargs",
+          `echo merge /s/review-501 abc1234 origin/canary r-reviewer | xargs ${state}`,
+        ],
       ]
     },
   },
