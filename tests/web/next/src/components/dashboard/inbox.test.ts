@@ -7,7 +7,10 @@ import {
   type AskQuestion,
   type Choices,
   choicesOf,
+  INSTALL_TEXT,
   questionsOf,
+  ROOT_DIR,
+  ROOT_STEPS,
 } from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
@@ -2225,6 +2228,69 @@ describe("a clone card (PG-2205)", () => {
     } as unknown as InboxItem
     expect(opened(failed, "done")).toContain(
       "Clone failed (exit 1): made-up-me/playground-made-up-me is not on GitHub, so nothing was cloned",
+    )
+  })
+})
+
+describe("a root step card (PG-2433)", () => {
+  const scripts = [{ name: "bwrap-userns", sha256: "ab".repeat(32) }]
+  const install = {
+    ...decision,
+    id: "id-2433",
+    preview: { scripts, step: "install", type: "root", why: "No root step is installed yet" },
+    title: "Install the root steps on this machine?",
+  } as unknown as InboxItem
+  const step = {
+    ...install,
+    preview: { step: "bwrap-userns", type: "root", why: "Claude Code's sandbox cannot start" },
+    title: "Let Claude Code's sandbox start?",
+  } as unknown as InboxItem
+  const unescape = (html: string) =>
+    html
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&quot;", '"')
+      .replaceAll("&#x27;", "'")
+      .replaceAll("&amp;", "&")
+
+  test("an install card shows the program text pkexec runs byte for byte, with each script's name and sha256", () => {
+    const html = opened(install)
+    const shown = /<pre[^>]*>([\s\S]*?)<\/pre>/.exec(html)?.[1]
+    expect(unescape(shown ?? "")).toBe(INSTALL_TEXT)
+    expect(html).toContain("bwrap-userns")
+    expect(html).toContain("ab".repeat(32))
+    expect(html).toContain("asks for your password in its own window")
+    expect(html).toContain(">Install the root steps<")
+    expect(html).toContain(">Do not install them<")
+  })
+
+  test("a step card names the one installed script it runs as root, and what it does", () => {
+    const html = opened(step)
+    expect(html).toContain(`${ROOT_DIR}/bwrap-userns`)
+    expect(unescape(html)).toContain(ROOT_STEPS["bwrap-userns"])
+    expect(html).toContain(">Run bwrap-userns as root<")
+  })
+
+  test("once approved, reads the result, green or red by its exit code", () => {
+    const done = {
+      ...step,
+      answer: {
+        at: "2026-10-12T10:05:00.000Z",
+        choice: "approve",
+        rooted: { exitCode: 0, line: "bwrap may now make a user namespace" },
+      },
+      status: "approved",
+    } as unknown as InboxItem
+    expect(opened(done, "done")).toContain("Ran as root: bwrap may now make a user namespace")
+    const closed = {
+      ...done,
+      answer: {
+        ...done.answer,
+        rooted: { exitCode: 126, line: "you closed the password window, so nothing ran as root" },
+      },
+    } as unknown as InboxItem
+    expect(opened(closed, "done")).toContain(
+      "Root step failed (exit 126): you closed the password window, so nothing ran as root",
     )
   })
 })

@@ -109,8 +109,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 
 A reviewer's round sorts its findings into blocking, should-fix and nits; the worker's answer follows these rules, so a PR's rounds stay short and its nits land where they cost nothing.
 
-- A fix push carries only blocking and should-fix items, plus the `canary` merge the reviewer asks for (code-review-loop's step 8), and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
+- A fix push carries only blocking and should-fix items, plus a merge of `canary` (below), and a body-only fix is a `gh pr edit` with no push, so a push always moves the head for a reason the reviewer named.
   Tell your reviewer by `SendMessage` once a body-only fix lands, since its head waiter sees no body edit and it holds the verdict until you do (code-review-loop's last 5/5).
+- A fix push merges `canary` into the branch, and the touched tests (code-review-loop's **The touched tests**) run green on that merge before you ask for the next round, since every round opens with code-review-loop's merge check (its step 2), and a conflict or a test red only on the merge ends that round as one blocking finding with no full read.
 - A fix push that changes a figure, row count or table the body's Evidence measured refreshes the body in the same update, its Evidence naming the new head, so every round opens on a body that describes the head it scores.
 - When a scope ruling drops or changes an item, change the PR's title in the same update as its body (`gh pr edit <n> --title <title> --body-file <file>`), since the merge commit and the Changelog take the title: one PR merged under a title naming an item its ruling had dropped.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
