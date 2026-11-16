@@ -196,6 +196,7 @@ The Dashboard lists it by name, for any session to read; `herdr pane list` shows
 It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you (the picker by enabling its servers, when `~/.mcp.json` alone defines them) only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards;
 anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
 In the main checkout and its worktrees it answers no folder trust prompt: it refuses a Claude start there until Claude Code's config holds the owner's yes for the checkout, which first run's **Trust this folder** on Claude Code's card records.
+An `--ssh` probe skips that check, since its claude runs on the other machine and reads that machine's config.
 Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
