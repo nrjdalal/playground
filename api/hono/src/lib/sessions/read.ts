@@ -23,9 +23,9 @@ import {
 import { attachmentsDir } from "@/lib/dashboard/attachments"
 import { readsLive } from "@/lib/dashboard/fixture"
 import {
-  processStarts,
   type Registered,
   registeredSessions,
+  registeredStarts,
   sessionsDir,
 } from "@/lib/dashboard/peers"
 import { commandOf, type Entry, parseLine, typedOf } from "@/lib/dashboard/transcript"
@@ -66,7 +66,7 @@ const alive = (pid: number): boolean => {
   }
 }
 
-// Pure: the registered sessions running now, by the board's proof (isLiveRecord in lib/dashboard/workers.ts): the pid's process runs and, where the file gives procStart, started then, which a recycled pid's never did. starts is each running pid's start as ps reads it now, or null when ps could not be run, and then exists alone decides.
+// Pure: the registered sessions running now, by the board's proof (isLiveRecord in lib/dashboard/workers.ts): the pid's process runs and, where the file gives procStart, started then, which a recycled pid's never did. starts is each running pid's start now in the form its file records it (registeredStarts in lib/dashboard/peers.ts), or null when ps could not be run, and then exists alone decides.
 export function liveRegistered(
   sessions: Registered[],
   starts: Map<number, string> | null,
@@ -87,7 +87,7 @@ export function liveRegistered(
 // Claude Code writes ~/.claude/sessions/<pid>.json while a session runs and removes it when the session exits; a crash leaves it, and macOS hands its pid to the next process that starts. The .key files beside them are secrets and are never read. Subagents get no file of their own. A fixture stack's ps answers from its fixture's processes, never this machine's.
 export async function liveSessions(dir = sessionsDir()): Promise<Map<string, Live>> {
   const sessions = await registeredSessions(dir)
-  const starts = await processStarts(sessions.map((session) => session.pid))
+  const starts = await registeredStarts(sessions)
   return liveRegistered(sessions, starts, alive)
 }
 
