@@ -5,19 +5,28 @@ import { join } from "node:path"
 const ROOT = join(import.meta.dir, "..")
 
 const RULE =
-  "a test reaches a tool that changes the live machine only through the sandbox's fake or a stub of its own first on PATH (packages/scripts/src/sandbox.ts), so it names the tool bare, never by an absolute path, a portless CLI path or inside a shell string, each of which gets past the fake"
+  "a test reaches a tool that changes the live machine only through the sandbox's fake or a stub of its own first on PATH (packages/scripts/src/sandbox.ts), so it names the tool bare, never by an absolute path, portless's CLI path, a package runner, a proxy or service verb in an argv, or inside a shell string, each of which gets past the fake"
 
 const TOOL = "(?:herdr|launchctl|loginctl|systemctl)"
 
-// Each way past the PATH fakes: an absolute path to a tool, portless's own CLI or bin given a proxy start or stop or a service install, and a tool named inside a shell's -c string.
+const VERB = String.raw`(?:proxy["'\`,\s]+(?:start|stop)|service["'\`,\s]+install|clean)`
+
+// Each way past the PATH fakes: an absolute path to a tool; portless's own CLI or bin path, whatever its line's verb, since a const carries it to a later spawn; a package runner, which takes the checkout's node_modules/.bin before PATH; a proxy or service verb in an argv, whose program may be an imported CLI path; and a tool named inside a shell's -c string.
 const RULES: [string, RegExp][] = [
   [
     "an absolute path to a live tool",
     new RegExp(`(?:^|[\\s"'\`(=])/(?:usr/(?:local/)?|opt/homebrew/)?s?bin/${TOOL}\\b`),
   ],
+  ["portless's CLI or bin path", /portless\/dist\/cli\.js|\.bin\/portless\b/],
   [
-    "portless's CLI or bin with a proxy start or stop or a service install",
-    /(?:dist\/cli\.js|\.bin\/portless)\b.*\b(?:proxy["'`,\s]+(?:start|stop)|service["'`,\s]+install)\b/,
+    "a package runner running portless with a proxy, service or clean verb",
+    new RegExp(
+      String.raw`\b(?:bunx|npx|bun["'\`,\s]+x)["'\`,\s]+(?:-y["'\`,\s]+)?portless\b.*\b${VERB}\b`,
+    ),
+  ],
+  [
+    "a proxy start or stop or a service install in an argv",
+    /["'`]proxy["'`]\s*,\s*["'`](?:start|stop)["'`]|["'`]service["'`]\s*,\s*["'`]install["'`]/,
   ],
   [
     "a live tool inside a shell's -c string",
@@ -32,6 +41,20 @@ const KEPT: Record<string, Record<string, string>> = {
   "tests/api/hono/src/lib/dev/proxy.test.ts": {
     'expect(setup).toContain("`sudo node_modules/.bin/portless service install`")':
       "the setup note's text, never a spawn",
+  },
+  "tests/api/hono/src/lib/onboard/fix.test.ts": {
+    'const cli = join(import.meta.dir, "../../../../../../node_modules/portless/dist/cli.js")':
+      "the expected argv the stubbed osascript and pkexec record, never a spawn",
+  },
+  "tests/install.test.ts": {
+    "`  printf '#!/bin/sh\\\\necho \"turbo $*\" >> ${log}\\\\n' > node_modules/.bin/turbo; chmod +x node_modules/.bin/turbo; cp ${store}/portless node_modules/.bin/portless; exit 0; fi`,":
+      "the fake bun's install copies the test's own stub portless into its scratch clone",
+    'expect(asked[0]).toEndWith(`${join(dir, "node_modules/.bin/portless")} service install`)':
+      "the command the stubbed admin prompt records, never a spawn",
+  },
+  "tests/packages/scripts/src/health-beat/running.test.ts": {
+    '"  4100  4000 node /x/node_modules/.bin/portless --script dev:app",':
+      "a ps row the health beat parses, never a spawn",
   },
   "tests/packages/scripts/src/ops-herdr/herdr.test.ts": {
     'path: "/opt/homebrew/bin/herdr",': "a made-up herdr found on PATH, never spawned",
@@ -54,8 +77,8 @@ const KEPT: Record<string, Record<string, string>> = {
   },
 }
 
-// the hooks' tests feed each command to a guard as text alone (fixtures-are-data.test.ts), so none of their rows is a spawn
-const DATA = "tests/scripts/hooks/"
+// Each place whose rows are text fed to a checker, never a spawn: the hooks' tests feed each command to a guard (fixtures-are-data.test.ts), and test_kill_by_name.py feeds each row to its own problems_in
+const DATA = ["tests/scripts/hooks/", "tests/test_kill_by_name.py"]
 
 // Pure: each line of text that breaks a rule, with the rule's name
 const liveToolHits = (text: string) =>
@@ -77,32 +100,56 @@ test("the scan catches each way past the PATH fakes, and leaves a bare tool and 
     'Bun.spawnSync(["sh", "-c", "systemctl --user stop a.service"])',
     'Bun.spawnSync(["bash", "-lc", "loginctl enable-linger 1000"])',
     "execSync(`sh -c 'portless service install'`)",
+    'const cli = join(ROOT, "node_modules/portless/dist/cli.js")',
+    'Bun.spawnSync([cli, "proxy", "stop", "-p", "1355"], { env })',
+    'Bun.spawnSync(["bunx", "portless", "proxy", "stop", "-p", "1355"], { env })',
+    "execSync(`npx -y portless clean`)",
+    "subprocess.run(['bun', 'x', 'portless', 'proxy', 'start', '-p', '1355'])",
   ]
+  const path = "portless's CLI or bin path"
+  const runner = "a package runner running portless with a proxy, service or clean verb"
+  const argv = "a proxy start or stop or a service install in an argv"
   expect(fed.map((line) => liveToolHits(line).map((hit) => hit.name))).toEqual([
     ["an absolute path to a live tool"],
     ["an absolute path to a live tool"],
     ["an absolute path to a live tool"],
-    ["portless's CLI or bin with a proxy start or stop or a service install"],
-    ["portless's CLI or bin with a proxy start or stop or a service install"],
+    [path, argv],
+    [path, argv],
     ["a live tool inside a shell's -c string"],
     ["a live tool inside a shell's -c string"],
     ["a live tool inside a shell's -c string"],
+    [path],
+    [argv],
+    [runner, argv],
+    [runner],
+    [runner, argv],
   ])
   for (const line of [
     'Bun.spawnSync(["systemctl", "--user", "is-active", "a.service"], { env })',
     'writeFileSync(join(bin, "systemctl"), "#!/bin/sh\\necho \\"$*\\" >> said\\nexit 1\\n")',
-    'run([portless, "proxy", "stop", "-p", PROXY_PORT])',
+    'Bun.spawnSync(["bunx", "portless", "get", "playground"], { env })',
   ])
     expect(liveToolHits(line)).toEqual([])
 })
 
 test("no test reaches a live tool past the sandbox's fakes", async () => {
-  const files = Bun.spawnSync(["git", "-C", ROOT, "ls-files", "tests/**/*.ts"], {
-    stdout: "pipe",
-  })
+  const files = Bun.spawnSync(
+    ["git", "-C", ROOT, "ls-files", ":(glob)tests/**/*.ts", ":(glob)tests/**/*.py"],
+    {
+      stdout: "pipe",
+    },
+  )
     .stdout.toString()
     .split("\n")
-    .filter((file) => file && file !== "tests/live-tools-scan.test.ts" && !file.startsWith(DATA))
+    .filter(
+      (file) =>
+        file &&
+        file !== "tests/live-tools-scan.test.ts" &&
+        !DATA.some((data) => file.startsWith(data)),
+    )
+  // without :(glob), tests/**/*.ts needs a folder under tests/ and skips every file directly in it
+  expect(files).toContain("tests/install.test.ts")
+  expect(files).toContain("tests/test_ops_jobs.py")
   const found: string[] = []
   for (const file of files)
     for (const hit of liveToolHits(readFileSync(join(ROOT, file), "utf8")))
