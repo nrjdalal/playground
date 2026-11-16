@@ -1289,14 +1289,14 @@ describe("ThreadsGroup", () => {
       "Channels",
       "Direct messages",
       "Orchestrators",
-      "Subagents",
       "AI Runners",
+      "Subagents",
       "Scripts",
     ])
     expect(navGroups(false, []).map(({ label }) => label)).toEqual([
       "Orchestrators",
-      "Subagents",
       "AI Runners",
+      "Subagents",
       "Scripts",
     ])
   })

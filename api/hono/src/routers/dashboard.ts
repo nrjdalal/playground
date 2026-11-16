@@ -541,7 +541,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Every agent the roster lists or herdr runs, for the dashboard: its role, task, live state, last activity, last report to the dispatcher, branch and pull request, with the roster's backlog still waiting, in the order they go out",
+        "Every agent the roster lists or herdr runs, for the dashboard: its role, task, live state, last activity, last report (to the dispatcher, or a runner's to Ops too), branch and pull request, with the roster's backlog still waiting, in the order they go out",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await agentsBoard() }),

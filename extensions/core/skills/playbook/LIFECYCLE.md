@@ -38,7 +38,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
-- **Runners** belong to Ops.
+- **Runners** belong to Ops, and report to Ops by `SendMessage`: the dashboard's AI Runners row reads a runner's newest message to Ops or the dispatcher as what it last did.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.

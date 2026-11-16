@@ -27,6 +27,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/api/hono/src/lib/dashboard/delete-targets.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/dev/ca-trust.ts",
         "$TURBO_ROOT$/api/hono/src/lib/dev/live-dashboard.ts",
         "$TURBO_ROOT$/api/hono/src/lib/dev/proxy.ts",
         "$TURBO_ROOT$/api/hono/src/lib/dev/stop.ts",

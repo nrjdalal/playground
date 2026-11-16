@@ -2,16 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
-import {
-  FACTORY_SETTINGS,
-  launchAfterRm,
-  lw,
-  opened,
-  placing,
-  root,
-  spawn,
-  zai,
-} from "./spawn-fake"
+import { FACTORY_SETTINGS, launchAfterRm, lw, placing, root, spawn } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
