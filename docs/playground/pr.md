@@ -38,7 +38,7 @@ Abridged from [its file](../../extensions/core/skills/pr/SKILL.md):
 
 ## Links
 
-<tickets, issues it closes, docs, related PRs>
+<tickets, issues it closes, docs, related PRs; a ship-now PR not titled fix( adds a line opening Owner ask: with the owner's Inbox #i id, PG issue or quoted words>
 ```
 
 The first TL;DR bullet is load-bearing: the Changelog reads a merge's line from it, and the body gate in `bun run pr:merge` and merge-on-ready reads the body against the template it sits in.

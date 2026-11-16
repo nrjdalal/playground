@@ -435,7 +435,7 @@ export async function cleanWorktree(
     const item = { path, ...(pr ? { pr } : {}), reason, who: who ?? "", worktree: true }
     if (who && !(await roomFor(item, deps))) return carriedLine(item)
     let moved = await deps.rm(path, reason, pr, discard, who)
-    // rm's refusal of work not landed on canary names --discard, which a finished PR's worktree takes
+    // rm's refusal of work landed on neither canary nor a branch origin holds names --discard, which a finished PR's worktree takes
     if (!moved.ok && !discard && moved.out.includes("--discard removes it anyway"))
       if (await deps.finished(path, pr)) moved = await deps.rm(path, reason, pr, true, who)
     if (!moved.ok) return `kept ${path}: ${moved.out}`
@@ -467,15 +467,17 @@ export const cleanupHeld = async (
   rm: RmDeps,
 ): Promise<string | null> => {
   const { worktreeRefusal } = await import("../../../packages/safe-delete/src/index")
+  const own = await rm.prState(path, pr)
   return worktreeRefusal(
     path,
     { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
     {
       clones: rm.clones,
       discard: true,
-      freed: freedOf(await rm.prState(path, pr)),
+      freed: freedOf(own),
       live: STATUSES.live,
       merged: () => null,
+      ...(own && own !== "none" ? { ownPr: own.number } : {}),
       places: rm.places,
       ...(pr ? { pr } : {}),
       procs: [],

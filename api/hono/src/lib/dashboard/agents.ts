@@ -42,6 +42,8 @@ export type Pull = {
   // approvals still needed before it may merge: what its base branch's rules require, less the approvals it holds, while GitHub's review decision says one is required
   approvals: number
   ci: CiState
+  // it conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY), so GitHub starts no Actions run on it; UNKNOWN, while GitHub works it out, is no conflict
+  conflicts: boolean
   draft: boolean
   number: number
   // in a merge queue, or set to merge itself once it may
@@ -502,6 +504,7 @@ export function pullOf(node: unknown, poster?: string): Pull | null {
   return {
     approvals: state === "open" ? approvalsOf(node) : 0,
     ci: ciOf(str(rollup.state)),
+    conflicts: node.mergeable === "CONFLICTING" || node.mergeStateStatus === "DIRTY",
     draft: node.isDraft === true,
     number: node.number,
     queued: isRecord(node.mergeQueueEntry) || isRecord(node.autoMergeRequest),
@@ -519,7 +522,7 @@ export function pullOf(node: unknown, poster?: string): Pull | null {
 
 // One GraphQL read per PR: its title, state and last update, the head commit's check rollup, what its approvals and merge stand at, and only its last 30 comments, where a current ReviewBot score and TesterBot word sit, so a PR with a long thread costs no more than a short one.
 const PULL_FIELDS =
-  "fragment P on PullRequest { autoMergeRequest { enabledAt } baseRef { branchProtectionRule { requiredApprovingReviewCount } rules(first: 100) { nodes { parameters { ... on PullRequestParameters { requiredApprovingReviewCount } } } } } comments(last: 30) { nodes { author { login } body createdAt } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } headRefOid isDraft latestOpinionatedReviews(first: 20) { nodes { state } } mergeQueueEntry { state } number reviewDecision state title updatedAt url }"
+  "fragment P on PullRequest { autoMergeRequest { enabledAt } baseRef { branchProtectionRule { requiredApprovingReviewCount } rules(first: 100) { nodes { parameters { ... on PullRequestParameters { requiredApprovingReviewCount } } } } } comments(last: 30) { nodes { author { login } body createdAt } } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } headRefOid isDraft latestOpinionatedReviews(first: 20) { nodes { state } } mergeQueueEntry { state } mergeStateStatus mergeable number reviewDecision state title updatedAt url }"
 const BY_BRANCH = `${PULL_FIELDS} query($owner: String!, $name: String!, $branch: String!) { repository(owner: $owner, name: $name) { pullRequests(headRefName: $branch, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { ...P } } } viewer { login } }`
 const BY_NUMBER = `${PULL_FIELDS} query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { ...P } } viewer { login } }`
 
@@ -650,6 +653,8 @@ const storedPull = (value: unknown): Pull | null => {
   const ok: Record<keyof Pull, boolean> = {
     approvals: intOf(value.approvals) !== null,
     ci: oneOf(value.ci, ["failing", "none", "passing", "pending"]),
+    // an entry stored before the field came reads as no conflict, since a merged PR has none
+    conflicts: value.conflicts === undefined || typeof value.conflicts === "boolean",
     draft: typeof value.draft === "boolean",
     number: intOf(value.number) !== null,
     queued: typeof value.queued === "boolean",
@@ -663,7 +668,9 @@ const storedPull = (value: unknown): Pull | null => {
     url: typeof value.url === "string" && PR_URL_RE.test(value.url),
     verdict: value.verdict === null || typeof value.verdict === "string",
   }
-  return Object.values(ok).every(Boolean) ? (value as unknown as Pull) : null
+  return Object.values(ok).every(Boolean)
+    ? ({ ...value, conflicts: value.conflicts === true } as unknown as Pull)
+    : null
 }
 
 export const readMergedPulls = async (file: string): Promise<[string, Pull][]> => {

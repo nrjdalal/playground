@@ -19,6 +19,7 @@ import {
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
+import { liveBranch } from "./probe"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -81,6 +82,8 @@ export type RmDeps = {
   data: string
   defaultBranch: (at: string) => string | null
   home: string
+  // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
+  liveBranch: () => string
   main: string
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
@@ -242,6 +245,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   data: dataDir(),
   defaultBranch,
   home: homedir(),
+  liveBranch,
   main: mainCheckout(repo),
   merged,
   notify: (text) =>
@@ -376,6 +380,16 @@ export async function removePath(
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
   const own = args.worktree ? await deps.prState(args.path, args.pr) : undefined
   const freed = own === undefined ? undefined : freedOf(own)
+  let liveBranch: string | undefined
+  if (args.worktree)
+    try {
+      liveBranch = deps.liveBranch()
+    } catch (error) {
+      return {
+        line: `the live.branch setting cannot be read (${(error as Error).message}), so no worktree is removed`,
+        ok: false,
+      }
+    }
   const done = quarantine(
     args.path,
     {
@@ -391,8 +405,10 @@ export async function removePath(
             discard: args.discard,
             ...(freed ? { freed } : {}),
             live: STATUSES.live,
+            ...(liveBranch ? { liveBranch } : {}),
             merged: deps.merged,
             note,
+            ...(own && own !== "none" ? { ownPr: own.number } : {}),
             places: deps.places,
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),
