@@ -31,6 +31,8 @@ export type Context = {
 
 type Json = Record<string, unknown>
 
+// Under one 300-second sweep, so the pass after a conflict's first sighting tells it.
+export const CONFLICT_AFTER = 240
 export const HEADROOM = 85
 export const IDLE_DB_AFTER = 7200
 export const IDLE_DB_GAP = 900
@@ -319,6 +321,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
 }
 
 // A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A draft PR and a parked row wait by design, so neither raises a line; the runner check below reads the parked one.
+// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead, once per head; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -340,7 +343,7 @@ export async function lateReviewers(
   }
   if (!workers.size) return []
   const fields =
-    "state headRefOid isDraft comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+    "state headRefOid isDraft mergeable mergeStateStatus comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { checkSuites(first: 1, filterBy: { appId: 15368 }) { totalCount } statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
   const [owner, name] = repo.split("/")
   const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
@@ -353,6 +356,10 @@ export async function lateReviewers(
   const path = join(here(ctx), "reviewer-told.json")
   const told = (await readJson<Record<string, string>>(path, {})) ?? {}
   const keep: Record<string, string> = {}
+  type Conflict = { at: number; sha: string; told: boolean }
+  const conflictPath = join(here(ctx), "conflict-told.json")
+  const conflicts = (await readJson<Record<string, Conflict>>(conflictPath, {})) ?? {}
+  const conflicting: Record<string, Conflict> = {}
   const now = seconds(ctx)
   for (const [n, worker] of workers) {
     const pr = pulls?.[`p${n}`] as {
@@ -360,6 +367,8 @@ export async function lateReviewers(
       commits?: {
         nodes?: {
           commit?: {
+            // GitHub Actions' suites alone (app 15368): one is a workflow run at the head
+            checkSuites?: { totalCount?: number }
             statusCheckRollup?: {
               contexts?: { nodes?: { completedAt?: string; createdAt?: string }[] }
               state?: string
@@ -369,11 +378,32 @@ export async function lateReviewers(
       }
       headRefOid?: string
       isDraft?: boolean
+      mergeStateStatus?: string
+      mergeable?: string
       state?: string
     } | null
-    if (!pr || pr.state !== "OPEN" || !pr.headRefOid || pr.isDraft) continue
+    if (!pr || pr.state !== "OPEN" || !pr.headRefOid) continue
+    const commit = pr.commits?.nodes?.[0]?.commit
+    const seen = conflicts[n]?.sha === pr.headRefOid ? conflicts[n]! : null
+    // GitHub reads UNKNOWN while it works the answer out again, after the base moves: a conflict already seen at this head stands, telling nothing
+    const real = pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY"
+    const conflicted = real || (pr.mergeable === "UNKNOWN" && seen !== null)
+    if (conflicted && !commit?.checkSuites?.totalCount) {
+      const conflict = (conflicting[n] = seen ?? { at: now, sha: pr.headRefOid, told: false })
+      if (real && !conflict.told && now - conflict.at >= CONFLICT_AFTER) {
+        conflict.told = true
+        const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
+        for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
+          await ctx.run(notifyArgv(ctx, text), {
+            env: { ...process.env, NOTIFY_TO: to },
+            timeoutMs: 60_000,
+          })
+      }
+    }
+    // a conflicting head is not ready, even while other apps' checks read SUCCESS with no Actions run
+    if (pr.isDraft || conflicted) continue
     if (told[n] === pr.headRefOid) keep[n] = pr.headRefOid
-    const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup
+    const rollup = commit?.statusCheckRollup
     if (rollup?.state !== "SUCCESS") continue
     const readyAt = Math.max(
       0,
@@ -401,6 +431,7 @@ export async function lateReviewers(
     })
   }
   await writeAtomic(path, JSON.stringify(keep))
+  await writeAtomic(conflictPath, JSON.stringify(conflicting))
   return []
 }
 
@@ -662,7 +693,7 @@ export async function leakedTests(
   return removed
 }
 
-// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers, branches with no PR, stalled PRs and the usage forecast.
+// One read of runners, probes, the managers' asks, unclosed answers, the ops jobs, idle databases, the runner-box route, late reviewers and conflicting PRs, branches with no PR, stalled PRs and the usage forecast.
 export async function check(ctx: Context): Promise<string[]> {
   let roster: Json
   try {

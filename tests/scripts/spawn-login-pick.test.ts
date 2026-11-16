@@ -665,6 +665,41 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(r.err).toContain(fragment)
   })
 
+  // #2321: on a machine whose one login is parked, the refusal names the way out, each usage.accounts Claude row that is neither parked nor read here.
+  const onlyParked = (...rows: object[]) =>
+    JSON.stringify({
+      "usage.accounts": [
+        { email: "quilla@example.org", parkedUntil: until },
+        ...rows,
+        { label: "zai", provider: "glm" },
+      ],
+    })
+  test("a machine whose only login is parked names each other account it could sign in", async () => {
+    const r = await spawn(["runner", "runner-calm-heron", "b.md"], [], {
+      SETTINGS_JSON: onlyParked(
+        { email: "spare@example.com" },
+        { email: "held@example.com", parkedUntil: until },
+        { email: "blue@example.com" },
+      ),
+    })
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(
+      `the usage gate holds it: it is parked until ${until} (usage.accounts parkedUntil). usage.accounts also lists spare@example.com, blue@example.com, not parked and not signed in on this machine: sign one in with Add account in the Dashboard's Settings, then start it again`,
+    )
+  })
+
+  test("with no other account to sign in, the parked login's refusal stays as it was", async () => {
+    const r = await spawn(["runner", "runner-calm-heron", "b.md"], [], {
+      SETTINGS_JSON: onlyParked({ email: "held@example.com", parkedUntil: until }),
+    })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      `the usage gate holds it: it is parked until ${until} (usage.accounts parkedUntil)`,
+    )
+    expect(r.err).not.toContain("also lists")
+  })
+
   test("a login whose parkedUntil has passed is picked as before", async () => {
     const r = await spawn(
       ["runner", "runner-calm-heron", "b.md"],
