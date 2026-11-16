@@ -43,7 +43,6 @@ export const answerPayloadSchema = z.strictObject({
     })
     .optional(),
   owned: ranSchema.optional(),
-  rooted: ranSchema.optional(),
   picks: z
     .array(
       z.strictObject({
@@ -65,6 +64,7 @@ export const answerPayloadSchema = z.strictObject({
       }),
     )
     .optional(),
+  rooted: ranSchema.optional(),
   set: ranSchema.optional(),
   text: z.string().optional(),
   title: z.string(),

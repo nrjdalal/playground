@@ -5909,7 +5909,6 @@ var answerPayloadSchema = strictObject({
     letter: string2().length(1)
   }).optional(),
   owned: ranSchema.optional(),
-  rooted: ranSchema.optional(),
   picks: array(strictObject({
     index: number2().int().min(0).max(5),
     label: string2().min(1),
@@ -5923,6 +5922,7 @@ var answerPayloadSchema = strictObject({
     exitCode: number2().int().nullable(),
     line: string2().optional()
   })).optional(),
+  rooted: ranSchema.optional(),
   set: ranSchema.optional(),
   text: string2().optional(),
   title: string2(),

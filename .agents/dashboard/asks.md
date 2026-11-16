@@ -146,7 +146,7 @@
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
   `B · Hotfix main` for a lettered pick, `A. staging · C. soon` for a multi-question ask's one pick per question, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
-  A go's light stays blue while its poster carries it out (an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
+  A go's light stays blue while its poster carries it out (an accept, a clone, an apps change, a guard setting, an own account change or a root step the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
   until its poster closes it, even once typed into its session,
   since only the ack says it landed (#i115's earlier Delivered word read as landed when it was not).
   A `<taker>` is the session that took the answer: its poster, unless the poster has ended.
@@ -174,7 +174,7 @@
   A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
   A multi-question ask's payload names `picks` instead, one entry per question with its `question` and the same three fields (`picksOf`).
   His comment rides as `comment`, a changed draft's words as `text` (left out once they went with its files, below), a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
-  `cloned` (a clone), `listed` (an apps change), `set` (a guard setting), `owned` (an own account change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
+  `cloned` (a clone), `listed` (an apps change), `set` (a guard setting), `owned` (an own account change), `rooted` (a root step) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
   A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
@@ -348,7 +348,7 @@
   the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change, a root step) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
-  an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
+  an accept, a clone, an apps change, a guard setting, an own account change or a root step the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
   and once closed with no link it adds `No link: <why>`, but for a Draft, which reads, gray, `Draft not saved: <why>`.
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
@@ -484,7 +484,9 @@
   A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
   Approve takes `seen`, as a guard's does, and Edit is refused.
   It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
-  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window and `127` that no window could ask, and its poster is told.
+  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window, `127` that no window could ask and `143` that it stopped at 5 minutes,
+  and its poster is told.
+  An API restart cuts that run off, so the next Inbox read records an approved root card with no `rooted` 6 minutes on (`ROOT_LOST_MS`) as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`); a result that lands later takes its place.
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
   A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
 

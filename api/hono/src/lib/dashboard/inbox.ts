@@ -45,12 +45,18 @@ import { z } from "zod"
 
 import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
-import { installArgv, installedRefusal, repoScripts, stepArgv } from "../system/root"
+import {
+  installArgv,
+  installedRefusal,
+  repoScripts,
+  ROOT_TIMEOUT_MS,
+  stepArgv,
+} from "../system/root"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -2211,16 +2217,59 @@ function stepOf(
     return { key: "owned", run: async () => ownWrite(settingsData, preview, ref, actor) }
   }
   if (preview.type === "root") {
-    if (!root) return { refusal: "This dashboard runs nothing as root: it shows test data" }
+    if (!root)
+      return {
+        refusal: "This dashboard runs nothing as root: it shows test data, or runs off Linux",
+      }
     return { background: true, key: "rooted", run: () => rootRun(root, preview) }
   }
   return undefined
 }
 
-// pkexec's own codes: 126 when the owner closes its window, 127 when no window could ask (onboard/fix.ts's proxy step)
-const PKEXEC_EXITS: Record<number, string> = {
+// pkexec's own codes, 126 when the owner closes its window and 127 when no window could ask (onboard/fix.ts's proxy step), and 143, runArgv's kill at ROOT_TIMEOUT_MS
+const ROOT_EXITS: Record<number, string> = {
   126: "you closed the password window, so nothing ran as root",
   127: "your computer could not ask for your password, so nothing ran as root",
+  143: `it stopped after ${ROOT_TIMEOUT_MS / 60_000} minutes: the password window got no answer, or the step ran that long`,
+}
+
+// How long after its Approve a root card with no result was lost to an API restart: its run ends by ROOT_TIMEOUT_MS, and a minute more lets that result land.
+export const ROOT_LOST_MS = ROOT_TIMEOUT_MS + 60_000
+
+export const ROOT_LOST_LINE =
+  "the Dashboard restarted while it ran, so its result is unknown: check it before you approve it again"
+
+// Ends each approved root card whose run an API restart cut off, ROOT_LOST_MS on with no result, as a failed rooted that says so, then tells its poster as its own run would have; a result that lands later still takes its place.
+export async function endLostRoots(
+  db: Database,
+  now: Date,
+  telling?: Omit<Sending, "now">,
+): Promise<InboxItem[]> {
+  const cutoff = new Date(now.getTime() - ROOT_LOST_MS).toISOString()
+  const rooted: RunResult = { exitCode: 1, line: ROOT_LOST_LINE }
+  const rows = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`${inboxItem.answer} || (${JSON.stringify({ rooted })}::text)::jsonb`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(
+      and(
+        eq(inboxItem.kind, "decision"),
+        sql`${inboxItem.preview} ->> 'type' = 'root'`,
+        sql`${inboxItem.answer} ->> 'choice' = 'approve'`,
+        sql`${inboxItem.answer} -> 'rooted' is null`,
+        sql`(${inboxItem.answer} ->> 'at')::timestamptz <= ${cutoff}::timestamptz`,
+      ),
+    )
+    .returning()
+  const ended = rows.map(toItem)
+  if (!telling) return ended
+  const told: InboxItem[] = []
+  for (const item of ended)
+    told.push(await send(db, item, textsOf(item, item.answer as InboxAnswer), { ...telling, now }))
+  return told
 }
 
 // A root card's run: the install's fixed text with the card's frozen hashes, or a listed step's installed script once its install is root's own and current; a guard that refuses runs nothing.
@@ -2241,7 +2290,7 @@ export async function rootRun(
     return { exitCode: 1, line: error instanceof Error ? error.message : String(error) }
   }
   const ran = await run(argv)
-  const exit = PKEXEC_EXITS[ran.code]
+  const exit = ROOT_EXITS[ran.code]
   return exit ? { exitCode: ran.code, line: exit } : runResult(ran)
 }
 

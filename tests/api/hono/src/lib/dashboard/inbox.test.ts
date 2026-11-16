@@ -1562,6 +1562,15 @@ describe("a root step decision (PG-2433)", () => {
     })
     expect(calls).toEqual([stepArgv("bwrap-userns")])
   })
+
+  test("a run stopped at ROOT_TIMEOUT_MS reads in plain words, not an empty line", async () => {
+    const preview = inboxInputSchema.parse(decision(ROOT_STEP)).preview as InboxRoot
+    const killed = async () => ({ code: 143, err: "", out: "" })
+    expect(await rootRun(killed, preview, async () => undefined)).toEqual({
+      exitCode: 143,
+      line: "it stopped after 5 minutes: the password window got no answer, or the step ran that long",
+    })
+  })
 })
 
 describe("an apps decision (PG-658)", () => {
@@ -5884,11 +5893,60 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         ),
       ).toMatchObject({
         code: "VALIDATION_ERROR",
-        message: "This dashboard runs nothing as root: it shows test data",
+        message: "This dashboard runs nothing as root: it shows test data, or runs off Linux",
       })
       expect((await store.getItem(db, posted.id))?.status).toBe("open")
       await store.answerItem(db, posted.id, { action: "deny" }, { actor, root: run.root })
       expect(run.calls).toHaveLength(0)
+    })
+
+    test("a run an API restart cut off ends ROOT_LOST_MS on as failed, its poster told, and a late result still takes its place", async () => {
+      const posted = await post(decision(ROOT_INSTALL))
+      const at = new Date("2026-11-03T20:00:00.000Z")
+      const run = pkexec()
+      // the run never returns, as one this process lost to a restart
+      await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        { actor, now: at, root: run.root },
+      )
+      const sent: Delivery[] = []
+      const telling = {
+        actor,
+        deliver: async (delivery: Delivery) => {
+          sent.push(delivery)
+          return { at: "2026-11-03T20:07:00.000Z", ok: true as const, sessionId: "s1" }
+        },
+      }
+      const early = new Date(at.getTime() + store.ROOT_LOST_MS - 1000)
+      expect(await store.endLostRoots(db, early, telling)).toHaveLength(0)
+      expect((await store.getItem(db, posted.id))?.answer).not.toHaveProperty("rooted")
+      const late = new Date(at.getTime() + store.ROOT_LOST_MS)
+      const ended = await store.endLostRoots(db, late, telling)
+      expect(ended.map((item) => item.id)).toContain(posted.id)
+      const item = await store.getItem(db, posted.id)
+      expect(item?.answer).toMatchObject({
+        rooted: { exitCode: 1, line: store.ROOT_LOST_LINE },
+      })
+      expect(sent).toHaveLength(1)
+      expect(payloadOf(sent[0]!.text)).toMatchObject({
+        rooted: { exitCode: 1, line: store.ROOT_LOST_LINE },
+        type: "root",
+      })
+      // read again, it ends nothing twice
+      expect((await store.endLostRoots(db, late, telling)).map((one) => one.id)).not.toContain(
+        posted.id,
+      )
+      run.release()
+      for (let i = 0; i < 100; i++) {
+        const now = await store.getItem(db, posted.id)
+        if (now?.answer && "rooted" in now.answer && now.answer.rooted?.exitCode === 0) break
+        await Bun.sleep(20)
+      }
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        rooted: { exitCode: 0 },
+      })
     })
   })
 
