@@ -47,7 +47,7 @@ export type Command = {
   feedsShell?: boolean
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
-  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so no reader of that list reads it
+  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so a hook that reads the command list itself reads the line as it did without the glob reading
   glob?: Pick<Command, "detached" | "redirects" | "words">
   group?: boolean
   // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
