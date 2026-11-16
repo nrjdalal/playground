@@ -47,7 +47,7 @@ The account is listed once the sign-in names the email you gave; a sign-in for a
 A GLM key takes its label and your Z.ai API key.
 The token goes to this computer's secret store, the Keychain on a Mac and on Linux a file only you can read in Playground's data folder, and is never shown again, and **Remove**, the bin on each row, takes the account off the list and its token out of the store.
 
-From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the Keychain, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
+From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the secret store, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
 `playground accounts list` shows each with its usage and `playground accounts remove <email|label>` takes one off; no token or key is ever shown ([The playground command](/docs/cli#accounts-playground-accounts)).
 
 ### Harness
