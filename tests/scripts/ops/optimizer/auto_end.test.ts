@@ -1208,6 +1208,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       data,
       defaultBranch: () => null,
       home: data,
+      liveBranch: () => "live/dashboard",
       main,
       merged: () => null,
       notify: () => {},

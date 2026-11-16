@@ -113,6 +113,7 @@ const machine = () => {
     data,
     defaultBranch: () => null,
     home,
+    liveBranch: () => "live/dashboard",
     main,
     merged: () => false,
     notify: (text) => void told.push(text),
@@ -1366,6 +1367,53 @@ test.each([
     expect(existsSync(own)).toBe(true)
   },
 )
+
+// #2344: the live Dashboard's checkout sits clean at origin/main's head, which an origin branch holds, so only its branch keeps it, with the Dashboard stopped (no process, no roster row) too
+test("--worktree refuses the worktree on the live.branch branch, with the Dashboard stopped and under --discard, and refuses every worktree while the setting cannot be read", async () => {
+  const { deps, main, root } = ownPushed()
+  const desk = join(main, ".claude", "worktrees", "desk")
+  git(main, "worktree", "add", "-q", "-b", "live/dashboard", desk, "canary")
+  git(desk, "push", "-q", "origin", "live/dashboard")
+  const refusal = `playground: ${desk} is the live Dashboard's checkout (branch live/dashboard); it moves only by .agents/dashboard/live.md's roll`
+  for (const words of [
+    ["--worktree", desk],
+    ["--worktree", desk, "--discard"],
+  ])
+    expect(await rmTold(words, { ...deps, prState: async () => "none" })).toEqual({
+      code: 1,
+      err: [refusal],
+      out: [],
+    })
+  expect(existsSync(desk)).toBe(true)
+  const broken: RmDeps = {
+    ...deps,
+    liveBranch: () => {
+      throw new Error("policy.json does not parse")
+    },
+  }
+  expect(await rmTold(["--worktree", join(main, ".claude", "worktrees", "pg-1")], broken)).toEqual({
+    code: 1,
+    err: [
+      "playground: the live.branch setting cannot be read (policy.json does not parse), so no worktree is removed",
+    ],
+    out: [],
+  })
+  expect(existsSync(join(main, ".claude", "worktrees", "pg-1"))).toBe(true)
+  expect(root).not.toBe(main)
+})
+
+test("--worktree still refuses this checkout's own worktree an origin branch holds while a process works in it", async () => {
+  const { deps, own } = ownPushed()
+  const held = { command: "bun run dev", cwd: own, pid: 9, sockets: [] }
+  expect(
+    await rmTold(["--worktree", own], { ...deps, procs: () => [held], prState: openPr(own) }),
+  ).toEqual({
+    code: 1,
+    err: [`playground: ${own} is held by pid 9 (bun run dev) working in ${own}`],
+    out: [],
+  })
+  expect(existsSync(own)).toBe(true)
+})
 
 test("--worktree still refuses this checkout's own worktree an origin branch holds while it has uncommitted work, or while a live roster row names its branch", async () => {
   const { deps, discard, own } = ownPushed()

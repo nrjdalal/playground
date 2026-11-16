@@ -41,6 +41,8 @@ export type Holders = {
   discard: boolean
   freed?: { head: string; number: number; state: "CLOSED" | "MERGED" }
   live: string[]
+  // The live Dashboard's branch (the live.branch setting): the main checkout's worktree on it is never removed, --discard included.
+  liveBranch?: string
   merged: (sha: string, at: string) => boolean | null
   note?: (line: string) => void
   places: () => string[]
@@ -753,6 +755,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const head = git("rev-parse", "HEAD").out
   const own = repo === real(roots.main)
+  if (own && holders.liveBranch && branch === holders.liveBranch)
+    return `${at} is the live Dashboard's checkout (branch ${branch}); it moves only by .agents/dashboard/live.md's roll`
   const baseOf = () => (own ? "origin/canary" : defaultBase(git, holders, at))
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`

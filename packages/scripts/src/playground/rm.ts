@@ -19,6 +19,7 @@ import {
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
+import { liveBranch } from "./probe"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -81,6 +82,8 @@ export type RmDeps = {
   data: string
   defaultBranch: (at: string) => string | null
   home: string
+  // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
+  liveBranch: () => string
   main: string
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
@@ -242,6 +245,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   data: dataDir(),
   defaultBranch,
   home: homedir(),
+  liveBranch,
   main: mainCheckout(repo),
   merged,
   notify: (text) =>
@@ -342,6 +346,16 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const own =
     "worktree" in args && args.worktree ? await deps.prState(args.path, args.pr) : undefined
   const freed = own === undefined ? undefined : freedOf(own)
+  let liveBranch: string | undefined
+  if ("worktree" in args && args.worktree)
+    try {
+      liveBranch = deps.liveBranch()
+    } catch (error) {
+      console.error(
+        `playground: the live.branch setting cannot be read (${(error as Error).message}), so no worktree is removed`,
+      )
+      return 1
+    }
   const done =
     "restore" in args
       ? restore(args.restore, roots)
@@ -360,6 +374,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
                   discard: args.discard,
                   ...(freed ? { freed } : {}),
                   live: STATUSES.live,
+                  ...(liveBranch ? { liveBranch } : {}),
                   merged: deps.merged,
                   note: (line: string) => console.log(`playground: ${line}`),
                   places: deps.places,
