@@ -3,8 +3,7 @@ import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
-import { managerOf, type RosterKind } from "@packages/config/kinds"
-import { getSessionNames } from "@packages/config/kinds"
+import { getSessionNames, managerOf, type RosterKind } from "@packages/config/kinds"
 import { atHead, verdictsOf } from "@packages/config/verdicts"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"

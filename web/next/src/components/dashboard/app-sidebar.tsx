@@ -961,7 +961,8 @@ function SessionRowView({
   const lines = rowLines(worker, agent, now, checking, waitsOn, light, label)
   const { first, prClass, prWords, second } = rowText(lines)
   // an AI runner's row says what it last did on a second, muted line, so its work shows without opening it
-  const note = worker.role === "runner" ? runnerNote(agent, now) : null
+  const note =
+    worker.role === "runner" ? runnerNote(agent ?? { report: null, task: worker.task }, now) : null
   const dispatcher = worker.role === "dispatcher"
   // the row's link opens the first card in the group: the row's own first, else the first member's
   const holder = waiting.length ? { waiting, worker } : members.find((m) => m.waiting.length)
@@ -1045,21 +1046,17 @@ function SessionRowView({
       ) : (
         <StatusIcon kind={agent?.kind} state={lines.shown} still={still} />
       )}
-      {/* one line, ZeroSDK's: its title, whose tooltip holds the rest, a line each, and never over the readings and icons after it, which name themselves */}
+      {/* one line, ZeroSDK's, and a runner's note under it: its title, whose tooltip holds the rest, a line each, and never over the readings and icons after it, which name themselves */}
       {/* the pull request's number takes its colour, said in words for screen readers and in the row's tooltip; the title keeps the text's */}
       <Hint content={info.join("\n")} description={null} side="right">
-        {note ? (
-          <span className="grid min-w-0 flex-1">
-            <RowFirst line={lines} prClass={prClass} prWords={prWords} />
+        <span className={cn("min-w-0 flex-1", note ? "grid" : "flex")}>
+          <RowFirst line={lines} prClass={prClass} prWords={prWords} />
+          {note && (
             <span className="text-2xs text-muted-foreground truncate leading-3" data-part="note">
               {note.line}
             </span>
-          </span>
-        ) : (
-          <span className="flex min-w-0 flex-1">
-            <RowFirst line={lines} prClass={prClass} prWords={prWords} />
-          </span>
-        )}
+          )}
+        </span>
       </Hint>
       {trailing}
       <ModelIcons
