@@ -2152,19 +2152,11 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) on the line lets a glob match a name led by a dot, and so may a switch or an assignment whose name the hook cannot read: a shell option command, or a name assigned, exported or declared, holding a `$` or a backquote
+  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) spelled on the line lets a glob match a name led by a dot; a remote line not fully static counts as one too (`remoteDots`, set by remoteEnv)
   const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : ""
   const dotsOn =
     /dotglob|globdots|globignore/i.test(bare) ||
-    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare) ||
-    bare
-      .split(/[;&|\n]/)
-      .some(
-        (part) =>
-          /\b(?:declare|emulate|eval|export|local|readonly|set|setopt|shopt|typeset|unsetopt)\b[^$`]*[$`]/.test(
-            part,
-          ) || /(?:^|\s)[^\s=]*[$`][^\s=]*=/.test(part),
-      )
+    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2220,7 +2212,7 @@ async function inspect(
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
   const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
     const quotedGlob = literal && !word.glob
-    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${!!env.remote}\0${word.value}`
+    const key = `${remover}\0${quotedGlob}\0${env.cwd}\0${!!env.remote}\0${!!env.remoteDots}\0${word.value}`
     if (!judged.has(key)) judged.set(key, judge(word, env, remover, quotedGlob))
     return judged.get(key)
   }
@@ -2251,7 +2243,9 @@ async function inspect(
             : !env.remote ||
               remover ||
               climbs ||
-              reachNames(folder).some((name) => globMatches(segment, name, dotsOn)))
+              reachNames(folder).some((name) =>
+                globMatches(segment, name, dotsOn || !!env.remoteDots),
+              ))
         if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`
       }
@@ -2373,8 +2367,8 @@ async function inspect(
   const slotOf = new WeakMap<Command, Command>()
   let whole = false
   let rootLine = false
-  // the commands whose output an ssh's remote side reads as code, and ssh's own words with its remote line taken out, judged as any program's
-  let sshFed = new Set<Command>()
+  // the commands whose output an ssh's remote side reads as code, each with that ssh's remote line, and ssh's own words with its remote line taken out, judged as any program's
+  let sshFed = new Map<Command, string>()
   const sshOwn = new WeakSet<Command>()
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
@@ -2413,7 +2407,7 @@ async function inspect(
     // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
     // a command ssh's stdin reads as code was typed here, so its text is judged from the remote home too, as its local twin there would be
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, ""))
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", sshFed.get(cmd)))
       if (verdict) return verdict
     }
     const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed)
@@ -3182,10 +3176,12 @@ async function inspect(
     lexed.commands,
     alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
   )
-  sshFed = new Set(
-    [...codeFed(lexed.commands)]
-      .filter(([, { consumer }]) => !!sshCall(parse(consumer)))
-      .map(([producer]) => producer),
+  sshFed = new Map(
+    [...codeFed(lexed.commands)].flatMap(([producer, { consumer }]) => {
+      const call = sshCall(parse(consumer))
+      if (!call) return []
+      return [[producer, call.unread ? "$" : call.remote.map((w) => w.value).join(" ")] as const]
+    }),
   )
   if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)

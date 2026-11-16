@@ -119,6 +119,8 @@ export type Env = {
   process: Record<string, string | undefined>
   // Set on the line ssh runs on the remote side, read from the login's home (`remoteEnv`), where a hook may read a glob by the names it can match there rather than as any code it fails closed on
   remote?: boolean
+  // Set on a remote line that is not fully static, whose shell may turn dot matching on by a name the hook cannot read, so a glob there may match a dot-led name
+  remoteDots?: boolean
   vars: Map<string, Text>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
@@ -500,8 +502,12 @@ function sshStdin(cmd: Command, call: Ssh): StdinKind | undefined {
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
 }
 
-// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves
-export function remoteEnv(env: Env, line: string): Env {
+// A remote text that may set a glob option by a name the hook cannot read: an expansion, an eval or a source (EXPANDS), or, on the line a glob runs in, a program that starts a shell or an interpreter that can (DYNAMIC)
+const EXPANDS = /[$`]|(?:^|[\s;&|(){}'"/])(?:eval|source|\.)(?=$|[\s;&|(){}'"])/
+const DYNAMIC =
+  /(?:^|[\s;&|(){}'"/])(?:bash|bun|dash|deno|env|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|su|sudo|tclsh|watch|zsh)(?=$|[\s;&|(){}'"])/
+// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static, or a `reader` (the remote command a fed script runs under) that expands, may match dot-led names (`remoteDots`)
+export function remoteEnv(env: Env, line: string, reader = ""): Env {
   const home = env.process.HOME || undefined
   const { PWD: _pwd, ...known } = env.known
   return {
@@ -521,6 +527,12 @@ export function remoteEnv(env: Env, line: string): Env {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
+    remoteDots:
+      marked(line) ||
+      EXPANDS.test(line) ||
+      DYNAMIC.test(line) ||
+      marked(reader) ||
+      EXPANDS.test(reader),
     vars: new Map(),
   }
 }
@@ -2735,7 +2747,9 @@ export async function examine(
     primary.name === "ssh" && ["root", "shell"].includes(stdinShellOf(cmd, primary) ?? "")
   if (!remote && (!cmd.runsStdin || stdinScript(primary))) return
   for (const script of await scriptStdin(cmd, env)) {
-    const at = remote ? remoteEnv(env, known(script)) : subshell(env)
+    const call = remote ? sshCall(primary) : undefined
+    const line = call?.unread ? "$" : (call?.remote.map((w) => w.value).join(" ") ?? "")
+    const at = remote ? remoteEnv(env, known(script), line) : subshell(env)
     const verdict = await nested(cmd, env, () =>
       run(lexScript(known(script), at), at, visit, builtins),
     )

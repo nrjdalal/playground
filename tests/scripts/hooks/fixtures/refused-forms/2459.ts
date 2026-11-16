@@ -71,6 +71,7 @@ const extensionsControls = ({ DATA, HOME }: Paths): Row[] => [
     "Ops' peer-folder check fed from a file, its output piped to head",
     `ssh spark-9dfb bash -s < ${HOME}/peer-check.sh | head -80`,
   ],
+  ["a remote listing under $HOME with no glob in the home", "ssh box 'ls $HOME/notes'"],
   ["a RemoteCommand that writes nothing", "ssh -o RemoteCommand=uptime box"],
   ["a remote uptime after a port option past the host", "ssh box -p 22 uptime"],
 ]
@@ -255,6 +256,34 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
   [
     "a remote touch through a ? glob after a shopt of every positional parameter",
     `ssh box 'shopt -s "$@"; touch ?playground/extensions/y'`,
+  ],
+  [
+    "a remote touch through a ? glob in bash -O of a name built from a variable",
+    `ssh box 'x=dot; bash -O \${x}glob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in zsh -o of a name built from a variable",
+    `ssh box 'y=glob; zsh -o \${y}dots -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob under BASHOPTS set by a substitution",
+    `ssh box 'BASHOPTS=$(echo dot)glob bash -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in bash -O of a positional parameter",
+    `ssh box 'bash -O $1 -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob under env BASHOPTS=dotglob",
+    `ssh box "env BASHOPTS=dotglob bash -c 'touch ?playground/extensions/y'"`,
+  ],
+  [
+    "a remote touch through a ? glob after an eval",
+    `ssh box 'eval "$(cat opts)"; touch ?playground/extensions/y'`,
+  ],
+  [
+    "a touch through a ? glob fed to a remote bash -O of a positional parameter",
+    "ssh box 'bash -O $1 -s' <<< 'touch ?playground/extensions/y'",
   ],
   [
     "a fed file the line rewrites from the root before ssh reads it",

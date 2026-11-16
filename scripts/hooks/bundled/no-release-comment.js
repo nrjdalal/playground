@@ -467,7 +467,9 @@ function sshStdin(cmd, call) {
   const kinds = lex(call.remote.map((w) => w.value).join(" ")).commands.map((c) => stdinShell({ ...c, stdin: c.stdin ?? cmd }));
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
 }
-function remoteEnv(env, line) {
+var EXPANDS = /[$`]|(?:^|[\s;&|(){}'"/])(?:eval|source|\.)(?=$|[\s;&|(){}'"])/;
+var DYNAMIC = /(?:^|[\s;&|(){}'"/])(?:bash|bun|dash|deno|env|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|su|sudo|tclsh|watch|zsh)(?=$|[\s;&|(){}'"])/;
+function remoteEnv(env, line, reader = "") {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -487,6 +489,7 @@ function remoteEnv(env, line) {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
+    remoteDots: marked(line) || EXPANDS.test(line) || DYNAMIC.test(line) || marked(reader) || EXPANDS.test(reader),
     vars: new Map
   };
 }
@@ -2318,7 +2321,9 @@ async function examine(cmd, env, visit, builtins) {
   if (!remote && (!cmd.runsStdin || stdinScript(primary)))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const at = remote ? remoteEnv(env, known(script)) : subshell(env);
+    const call = remote ? sshCall(primary) : undefined;
+    const line = call?.unread ? "$" : call?.remote.map((w) => w.value).join(" ") ?? "";
+    const at = remote ? remoteEnv(env, known(script), line) : subshell(env);
     const verdict = await nested(cmd, env, () => run(lexScript(known(script), at), at, visit, builtins));
     if (verdict)
       return verdict;
