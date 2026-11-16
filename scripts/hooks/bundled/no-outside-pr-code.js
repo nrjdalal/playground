@@ -44,8 +44,8 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-outside-pr-code.ts
-import { existsSync as existsSync2, lstatSync as lstatSync2, mkdirSync, readFileSync as readFileSync2, realpathSync as realpathSync3 } from "fs";
-import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join5, resolve as resolve4 } from "path";
+import { existsSync as existsSync3, lstatSync as lstatSync2, mkdirSync, readFileSync as readFileSync3, realpathSync as realpathSync3 } from "fs";
+import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute4, join as join6, resolve as resolve4 } from "path";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
@@ -59,36 +59,51 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
   return resolve(named);
 };
 
-// scripts/hooks/codex.ts
-var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
-var patchPaths = (text) => text.split(`
-`).flatMap((line) => {
-  const trimmed = line.trim();
-  const header = HEADERS.find((h) => trimmed.startsWith(h));
-  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
-});
-
-// scripts/hooks/input.ts
-var DEADLINE = 13000;
-async function input(name, kind, deadline = DEADLINE) {
-  let timer;
-  const raw = await Promise.race([
-    Bun.stdin.text(),
-    new Promise((done) => {
-      timer = setTimeout(() => done(undefined), deadline - performance.now());
-    })
-  ]).finally(() => clearTimeout(timer));
-  if (raw !== undefined)
-    return raw;
-  if (kind === "recorder")
-    process.exit(0);
-  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
-  process.exit(2);
-}
-
-// scripts/hooks/no-main-checkout.ts
-import { existsSync, readdirSync as readdirSync2, readFileSync, realpathSync as realpathSync2 } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, normalize, resolve as resolve3, sep } from "path";
+// packages/settings/src/rendered.ts
+import { existsSync, readFileSync } from "fs";
+import { join as join2 } from "path";
+import { fileURLToPath } from "url";
+var CORE = "core";
+var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
+var extensionsDir = (data) => join2(data, "extensions");
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
+};
+var readRenderedSync = (data, file) => {
+  const dir = extensionsDir(data);
+  if (!existsSync(dir))
+    return {};
+  const parts = file.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    return { refusal: `${file} is not a path inside the extensions (${dir})` };
+  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+};
+var readPolicy = async (data, org) => readPolicySync(data, org);
+var readPolicySync = (data, org) => {
+  const read = readRenderedSync(data, "policy.json");
+  if (read.refusal)
+    return { refusal: read.refusal };
+  if (!read.path)
+    return { settings: { schemaVersion: 1, values: {} } };
+  let policy;
+  try {
+    policy = JSON.parse(readFileSync(read.path, "utf8"));
+  } catch {
+    return {
+      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
+    };
+  }
+  return {
+    settings: {
+      schemaVersion: 1,
+      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
+    }
+  };
+};
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -106,6 +121,14 @@ function cleanRegex(source) {
   const start = source.startsWith("^") ? 1 : 0;
   const end = source.endsWith("$") ? source.length - 1 : source.length;
   return source.slice(start, end);
+}
+function floatSafeRemainder(val, step) {
+  const ratio = val / step;
+  const roundedRatio = Math.round(ratio);
+  const tolerance = 4 * Number.EPSILON * Math.max(Math.abs(ratio), 1);
+  if (Math.abs(ratio - roundedRatio) < tolerance)
+    return 0;
+  return ratio - roundedRatio;
 }
 function assignProp(target, prop, value) {
   Object.defineProperty(target, prop, {
@@ -870,6 +893,136 @@ var _whenHasLength = (payload) => {
   const val = payload.value;
   return !nullish(val) && val.length !== undefined;
 };
+var numericOriginMap = {
+  number: "number",
+  bigint: "bigint",
+  object: "date"
+};
+var $ZodCheckLessThan = /* @__PURE__ */ $constructor("$ZodCheckLessThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value <= def.value : payload.value < def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_big",
+      maximum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  const origin = numericOriginMap[typeof def.value];
+  inst._zod.check = (payload) => {
+    if (def.inclusive ? payload.value >= def.value : payload.value > def.value) {
+      return;
+    }
+    payload.issues.push({
+      origin: numericOriginMap[typeof payload.value] ?? origin,
+      code: "too_small",
+      minimum: typeof def.value === "object" ? def.value.getTime() : def.value,
+      input: payload.value,
+      inclusive: def.inclusive,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  inst._zod.check = (payload) => {
+    if (typeof payload.value !== typeof def.value)
+      throw new Error("Cannot mix number and bigint in multiple_of check.");
+    const isMultiple = typeof payload.value === "bigint" ? def.value !== BigInt(0) && payload.value % def.value === BigInt(0) : floatSafeRemainder(payload.value, def.value) === 0;
+    if (isMultiple)
+      return;
+    payload.issues.push({
+      origin: typeof payload.value,
+      code: "not_multiple_of",
+      divisor: def.value,
+      input: payload.value,
+      inst,
+      continue: !def.abort
+    });
+  };
+});
+var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat", (inst, def) => {
+  $ZodCheck.init(inst, def);
+  def.format = def.format || "float64";
+  const isInt = def.format?.includes("int");
+  const origin = isInt ? "int" : "number";
+  const [minimum, maximum] = NUMBER_FORMAT_RANGES[def.format];
+  inst._zod.check = (payload) => {
+    const input = payload.value;
+    if (isInt) {
+      if (!Number.isInteger(input)) {
+        payload.issues.push({
+          expected: origin,
+          format: def.format,
+          code: "invalid_type",
+          continue: false,
+          input,
+          inst
+        });
+        return;
+      }
+      if (!Number.isSafeInteger(input)) {
+        if (input > 0) {
+          payload.issues.push({
+            input,
+            code: "too_big",
+            maximum: Number.MAX_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        } else {
+          payload.issues.push({
+            input,
+            code: "too_small",
+            minimum: Number.MIN_SAFE_INTEGER,
+            note: "Integers must be within the safe integer range.",
+            inst,
+            origin,
+            inclusive: true,
+            continue: !def.abort
+          });
+        }
+        return;
+      }
+    }
+    if (input < minimum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_small",
+        minimum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+    if (input > maximum) {
+      payload.issues.push({
+        origin: "number",
+        input,
+        code: "too_big",
+        maximum,
+        inclusive: true,
+        inst,
+        continue: !def.abort
+      });
+    }
+  };
+});
 var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
   var _a;
   $ZodCheck.init(inst, def);
@@ -1537,6 +1690,33 @@ var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
       continue: !def.abort
     });
   };
+});
+var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = number;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Number(payload.value);
+      } catch (_) {}
+    const input = payload.value;
+    if (typeof input === "number" && !Number.isNaN(input) && Number.isFinite(input)) {
+      return payload;
+    }
+    const received = typeof input === "number" ? Number.isNaN(input) ? "NaN" : !Number.isFinite(input) ? String(input) : undefined : undefined;
+    payload.issues.push({
+      expected: "number",
+      code: "invalid_type",
+      input,
+      inst,
+      ...received ? { received } : {}
+    });
+    return payload;
+  };
+});
+var $ZodNumberFormat = /* @__PURE__ */ $constructor("$ZodNumberFormat", (inst, def) => {
+  $ZodCheckNumberFormat.init(inst, def);
+  $ZodNumber.init(inst, def);
 });
 function capSize(inst, size) {
   const caps = sizeCaps(inst._zod.def.checks);
@@ -2877,6 +3057,57 @@ function _isoDuration(Class, params) {
     ...normalizeParams(params)
   });
 }
+function _number(Class, params) {
+  return new Class(snapshotChecks({ type: "number", checks: [], ...normalizeParams(params) }));
+}
+function _int(Class, params) {
+  return new Class({
+    type: "number",
+    check: "number_format",
+    abort: false,
+    format: "safeint",
+    ...normalizeParams(params)
+  });
+}
+function _lt(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _lte(value, params) {
+  return new $ZodCheckLessThan({
+    check: "less_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _gt(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: false
+  });
+}
+function _gte(value, params) {
+  return new $ZodCheckGreaterThan({
+    check: "greater_than",
+    ...normalizeParams(params),
+    value,
+    inclusive: true
+  });
+}
+function _multipleOf(value, params) {
+  return new $ZodCheckMultipleOf({
+    check: "multiple_of",
+    ...normalizeParams(params),
+    value
+  });
+}
 function _maxLength(maximum, params) {
   const ch = new $ZodCheckMaxLength({
     check: "max_length",
@@ -3667,6 +3898,48 @@ var stringProcessor = (schema, ctx, _json, _params) => {
     }
   }
 };
+var numberProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
+  json.type = isInt ? "integer" : "number";
+  const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
+  const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
+  const legacy = ctx.target === "draft-04" || ctx.target === "openapi-3.0";
+  if (exMin) {
+    if (legacy) {
+      json.minimum = exclusiveMinimum;
+      json.exclusiveMinimum = true;
+    } else {
+      json.exclusiveMinimum = exclusiveMinimum;
+    }
+  } else if (typeof minimum === "number") {
+    json.minimum = minimum;
+  }
+  if (exMax) {
+    if (legacy) {
+      json.maximum = exclusiveMaximum;
+      json.exclusiveMaximum = true;
+    } else {
+      json.exclusiveMaximum = exclusiveMaximum;
+    }
+  } else if (typeof maximum === "number") {
+    json.maximum = maximum;
+  }
+  if (multipleOf) {
+    const divisors = new Set;
+    for (const divisor of multipleOf) {
+      if (Number.isFinite(divisor) && divisor !== 0)
+        divisors.add(Math.abs(divisor));
+      else
+        handleUnrepresentable(schema, ctx, json, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
+    }
+    const [first, ...rest] = divisors;
+    if (first !== undefined)
+      json.multipleOf = first;
+    if (rest.length)
+      json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
+  }
+};
 var customProcessor = (schema, ctx, json, params) => {
   handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
 };
@@ -4396,6 +4669,82 @@ var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
   $ZodJWT.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+var ZodNumber = /* @__PURE__ */ $constructor("ZodNumber", (inst, def) => {
+  $ZodNumber.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => numberProcessor(inst, ctx, json, params);
+  inst.isFinite = true;
+}, /* @__PURE__ */ derived({
+  minValue: (inst) => {
+    const { minimum, exclusiveMinimum } = aggregateChecks(inst);
+    return Math.max(minimum ?? Number.NEGATIVE_INFINITY, exclusiveMinimum ?? Number.NEGATIVE_INFINITY);
+  },
+  maxValue: (inst) => {
+    const { maximum, exclusiveMaximum } = aggregateChecks(inst);
+    return Math.min(maximum ?? Number.POSITIVE_INFINITY, exclusiveMaximum ?? Number.POSITIVE_INFINITY);
+  },
+  isInt: (inst) => {
+    const { isInt, multipleOf } = aggregateChecks(inst);
+    return !!isInt || !!multipleOf?.some(Number.isSafeInteger);
+  },
+  format: (inst) => aggregateChecks(inst).format ?? null
+}, {
+  gt(value, params) {
+    return this.check(_gt(value, params));
+  },
+  gte(value, params) {
+    return this.check(_gte(value, params));
+  },
+  min(value, params) {
+    return this.check(_gte(value, params));
+  },
+  lt(value, params) {
+    return this.check(_lt(value, params));
+  },
+  lte(value, params) {
+    return this.check(_lte(value, params));
+  },
+  max(value, params) {
+    return this.check(_lte(value, params));
+  },
+  int(params) {
+    return this.check(int(params));
+  },
+  safe(params) {
+    return this.check(int(params));
+  },
+  positive(params) {
+    return this.check(_gt(0, params));
+  },
+  nonnegative(params) {
+    return this.check(_gte(0, params));
+  },
+  negative(params) {
+    return this.check(_lt(0, params));
+  },
+  nonpositive(params) {
+    return this.check(_lte(0, params));
+  },
+  multipleOf(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  step(value, params) {
+    return this.check(_multipleOf(value, params));
+  },
+  finite() {
+    return this;
+  }
+}));
+function number2(params) {
+  return _number(ZodNumber, params);
+}
+var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
+  $ZodNumberFormat.init(inst, def);
+  ZodNumber.init(inst, def);
+});
+function int(params) {
+  return _int(ZodNumberFormat, params);
+}
 var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
   _ensureDefaultMemoizer();
   $ZodArray.init(inst, def);
@@ -4642,9 +4991,6 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
   return _superRefine(fn, params);
 }
-// packages/settings/src/rendered.ts
-var CORE = "core";
-
 // packages/settings/src/settings.ts
 var KINDS = ["doc", "learning", "list", "rule", "script", "skill", "template"];
 var REVIEWED_KINDS = KINDS.filter((kind) => kind !== "list");
@@ -4675,6 +5021,99 @@ var extLinkSchema = string2().regex(/^(?:\*|[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0
 var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size === names.length, "an extension is in the order once");
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
+// packages/settings/src/rules.ts
+var percent = number2().int().min(1).max(100);
+var ruleSettings = defineSettings({
+  "battery.alert": {
+    default: 5,
+    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
+    schema: percent
+  },
+  "battery.ask": {
+    default: 10,
+    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
+    schema: percent
+  },
+  "clock.ownerZone": {
+    default: "UTC",
+    description: "The time zone, by its IANA name, a time shown to the owner reads in.",
+    schema: string2().refine((zone) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "an IANA time zone, such as UTC or America/New_York")
+  },
+  "context.window": {
+    default: 400000,
+    description: "The context window, in tokens, every session compacts itself in.",
+    schema: number2().int().positive()
+  },
+  "github.pollMinutes": {
+    default: 5,
+    description: "The fewest minutes between two polls of one pull request by a session.",
+    schema: number2().int().positive()
+  },
+  "glm.readOnlyLoad5": {
+    default: 15,
+    description: "The 5-minute load average above which a GLM session may not install, commit or push.",
+    schema: number2().positive()
+  },
+  "release.hours": {
+    default: 4,
+    description: "The hours of merging after which Ops ships canary to main, whatever the count.",
+    schema: number2().positive()
+  },
+  "release.merges": {
+    default: 3,
+    description: "The user-facing merges since the last ship at which Ops ships canary to main.",
+    schema: number2().int().positive()
+  },
+  "tickets.tracker": {
+    default: "the tracker",
+    description: "The issue tracker the tickets rule names, read inside its sentence, such as Linear.",
+    schema: string2().min(1)
+  },
+  "unstick.escalateMinutes": {
+    default: 5,
+    description: "The minutes a session stays stuck with no turn before ops-session-resume tells the primary dispatcher.",
+    schema: number2().int().positive()
+  }
+});
+
+// scripts/hooks/codex.ts
+var HEADERS = ["*** Add File: ", "*** Delete File: ", "*** Update File: ", "*** Move to: "];
+var patchPaths = (text) => text.split(`
+`).flatMap((line) => {
+  const trimmed = line.trim();
+  const header = HEADERS.find((h) => trimmed.startsWith(h));
+  return header && trimmed.length > header.length ? [trimmed.slice(header.length)] : [];
+});
+
+// scripts/hooks/input.ts
+var DEADLINE = 13000;
+async function input(name, kind, deadline = DEADLINE) {
+  let timer;
+  const raw = await Promise.race([
+    Bun.stdin.text(),
+    new Promise((done) => {
+      timer = setTimeout(() => done(undefined), deadline - performance.now());
+    })
+  ]).finally(() => clearTimeout(timer));
+  if (raw !== undefined)
+    return raw;
+  if (kind === "recorder")
+    process.exit(0);
+  console.error(`${name} hook: the call's input did not arrive by its deadline, about ${deadline / 1000} s, inside the runner's 15 s timeout, so the call is refused; report it to your lead.`);
+  process.exit(2);
+}
+
+// scripts/hooks/no-main-checkout.ts
+import { existsSync as existsSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, realpathSync as realpathSync2 } from "fs";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join5, normalize, resolve as resolve3, sep } from "path";
+
 // packages/settings/src/live.ts
 var liveSettings = defineSettings({
   "live.branch": {
@@ -4691,7 +5130,7 @@ var liveSettings = defineSettings({
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
@@ -4762,7 +5201,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -4777,10 +5216,10 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join2(dir, file)).json();
+      const entry = await Bun.file(join3(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
@@ -4791,7 +5230,7 @@ async function codexName(sessionId, environment = process.env) {
     return;
   let name;
   try {
-    const index = await Bun.file(join2(environment.CODEX_HOME, "session_index.jsonl")).text();
+    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
     for (const line of index.split(`
 `)) {
       try {
@@ -4804,7 +5243,7 @@ async function codexName(sessionId, environment = process.env) {
   return name;
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
+  const path = join3(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -5366,7 +5805,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -7401,7 +7840,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -7412,7 +7851,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -7421,7 +7860,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -7452,7 +7891,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7819,7 +8258,7 @@ var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout(dir) {
   try {
-    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync(join4(dir, ".git"), "utf8"))?.[1];
+    const gitdir = /^gitdir: (.+)$/m.exec(readFileSync2(join5(dir, ".git"), "utf8"))?.[1];
     const main = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(resolve3(dir, gitdir.trim()))?.[1];
     if (main)
       return main;
@@ -8124,8 +8563,7 @@ var DEVICES = new Set(["/dev/null", "/dev/stderr", "/dev/stdout"]);
 var UNIQ_VALUED = new Set(["--check-chars", "--skip-chars", "--skip-fields", "-f", "-s", "-w"]);
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !/^(?:\d+|-)$/.test(target?.value ?? "");
 var GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/;
-var RETRY_MINUTES = 5;
-var unread = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again on the first call ${RETRY_MINUTES} minutes or more after the failed read.`;
+var unread = (repo, n) => `GitHub did not answer for ${repo}#${n}, so the hook counts it as an outside author's PR until a read of it succeeds. It reads again on the first call once the github rule's poll interval (github.pollMinutes, 5 minutes by default) has passed since the failed read.`;
 var REASONS = {
   none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A row written before spawn.sh required a checker's --pr <pull url> has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>. An extension item's reviewer has no PR and stays in read mode: read each revision with playground ext show <scope> <kind> <key> --rev <sha> piped into jq (.content.files, .content.body), and say in the verdict that the item was read, not run.",
   outside: "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move a clone with no node_modules (a fresh one, never an installed one, whose git hooks would run) with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run."
@@ -8161,8 +8599,8 @@ function placed(written) {
     return;
   const path = resolve4(written);
   for (let at = path;; at = dirname3(at)) {
-    if (existsSync2(at))
-      return join5(real(at), path.slice(at.length));
+    if (existsSync3(at))
+      return join6(real(at), path.slice(at.length));
     if (dirname3(at) === at)
       return path;
   }
@@ -8215,8 +8653,8 @@ function gitAllows(words, folder, lookup, environment) {
 }
 async function inspect(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
-  const extensions = join5(lookup.main, "extensions");
-  const slot = join5(data, "ops", "run-slot.sh");
+  const extensions = join6(lookup.main, "extensions");
+  const slot = join6(data, "ops", "run-slot.sh");
   let allowed = true;
   let ownWrites = false;
   let reshapes = false;
@@ -8246,7 +8684,7 @@ async function inspect(command, directory, environment, lookup, own = []) {
   };
   const ownTarget = (text, here) => {
     const path = text && !text.glob ? pathOf(text, here) : undefined;
-    if (path === undefined || !existsSync2(dirname3(resolve4(path))) || !ownPath(text, here))
+    if (path === undefined || !existsSync3(dirname3(resolve4(path))) || !ownPath(text, here))
       return false;
     if (gitFolder(placed(path), lookup))
       return false;
@@ -8430,7 +8868,7 @@ async function check(raw, environment = process.env, lookup = live(environment))
   try {
     const name = await lookup.name(sessionId);
     const data = dataDirOf(environment);
-    const own = name ? [join5(data, "scratch", name), join5(data, "scratchpad", name)] : [];
+    const own = name ? [join6(data, "scratch", name), join6(data, "scratchpad", name)] : [];
     allowed = await inspect(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
@@ -8450,7 +8888,7 @@ async function output(argv) {
 var isPr = (read) => typeof read === "object" && read !== null && ["author", "owner", "ownerType"].every((key) => typeof read[key] === "string");
 var firstLine = (script) => {
   try {
-    return readFileSync2(script, "utf8").split(`
+    return readFileSync3(script, "utf8").split(`
 `, 1)[0];
   } catch {
     return;
@@ -8494,16 +8932,22 @@ function trackedIn(main, script) {
 }
 function live(environment) {
   const data = dataDirOf(environment);
-  const cache = join5(data, "hook-outside-pr");
-  const retry = RETRY_MINUTES * 60 * 1000;
+  const cache = join6(data, "hook-outside-pr");
+  const pollMs = async () => {
+    const read = await readPolicy(data).catch(() => {
+      return;
+    });
+    const settings = read?.settings ?? { schemaVersion: 1, values: {} };
+    return ruleSettings.get(settings, "github.pollMinutes") * 60000;
+  };
   return {
     author: async (repo, pr) => {
-      const file = join5(cache, `${repo.replace("/", "__")}__${pr}.json`);
+      const file = join6(cache, `${repo.replace("/", "__")}__${pr}.json`);
       try {
         const kept = await Bun.file(file).json();
         if (isPr(kept))
           return kept;
-        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < retry)
+        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < await pollMs())
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";
@@ -8518,7 +8962,7 @@ function live(environment) {
       } catch {}
       return isPr(read) ? read : undefined;
     },
-    holds: (folder, entry) => existsSync2(join5(folder, entry)),
+    holds: (folder, entry) => existsSync3(join6(folder, entry)),
     main: mainCheckout(process.cwd()),
     name: async (sessionId) => {
       if (typeof sessionId !== "string")
@@ -8534,7 +8978,7 @@ function live(environment) {
         const name = await registryName(sessionId, environment);
         if (!name)
           return [];
-        const roster = await Bun.file(join5(data, "roster.json")).json();
+        const roster = await Bun.file(join6(data, "roster.json")).json();
         const row = roster.agents?.find((agent) => agent?.name === name);
         const listed = Array.isArray(row?.prs) ? row.prs : [];
         return [...new Set([row?.pr, ...listed])].filter((url) => typeof url === "string");

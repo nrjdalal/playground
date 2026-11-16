@@ -12,6 +12,8 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, join } from "node:path"
 
+import { writeRoot } from "../../../packages/settings/src/folder"
+import { extensionsDir } from "../../../packages/settings/src/rendered"
 import {
   check,
   live,
@@ -923,7 +925,7 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
 
   test("a PR the hook cannot read names when it is read again, and no step that clears the kept failure", async () => {
     expect(await judge(call("bun test", OUTSIDE, "s-unread"))).toEndWith(
-      "It reads again on the first call 5 minutes or more after the failed read.",
+      "It reads again on the first call once the github rule's poll interval (github.pollMinutes, 5 minutes by default) has passed since the failed read.",
     )
   })
 
@@ -1060,29 +1062,51 @@ describe("no-outside-pr-code's live lookup", () => {
     expect(await live(environment).author("acme-owner/widgets", 509)).toBeUndefined()
   })
 
-  test("a failure older than the backoff reads the PR again, and keeps the answer", async () => {
-    const cache = join(scratch, "data", "hook-outside-pr")
-    const bin = join(scratch, "bin")
-    mkdirSync(cache, { recursive: true })
+  // bun finds a program on the PATH it started with, so each read runs in a child whose PATH leads with a stub gh that answers the owner's own PR
+  const readAfter = async (n: number, minutesAgo: number, pollMinutes?: number) => {
+    const data = join(scratch, `poll-${n}`)
+    const bin = join(data, "bin")
+    mkdirSync(join(data, "hook-outside-pr"), { recursive: true })
     mkdirSync(bin, { recursive: true })
-    const pr = { author: "acme-owner", owner: "acme-owner", ownerType: "User" }
-    await Bun.write(join(bin, "gh"), `#!/bin/sh\necho '${JSON.stringify(pr)}'\n`)
+    await Bun.write(join(bin, "gh"), `#!/bin/sh\necho '${JSON.stringify(OWN)}'\n`)
     chmodSync(join(bin, "gh"), 0o755)
-    const file = join(cache, "acme-owner__widgets__511.json")
-    await Bun.write(file, JSON.stringify({ failedAt: Date.now() - 10 * 60 * 1000 }))
-    // bun finds a program on the PATH it started with, so the lookup runs in a child whose PATH leads with the stub gh
+    if (pollMinutes !== undefined)
+      writeRoot(
+        extensionsDir(data),
+        new Map([
+          [
+            "policy.json",
+            JSON.stringify({
+              orgs: {},
+              schemaVersion: 1,
+              values: { "github.pollMinutes": pollMinutes },
+            }),
+          ],
+        ]),
+      )
+    const file = join(data, "hook-outside-pr", `acme-owner__widgets__${n}.json`)
+    await Bun.write(file, JSON.stringify({ failedAt: Date.now() - minutesAgo * 60_000 }))
     const hook = join(import.meta.dir, "../../../scripts/hooks/no-outside-pr-code.ts")
-    const script = join(scratch, "read-511.ts")
+    const script = join(data, "read.ts")
     await Bun.write(
       script,
-      `import { live } from ${JSON.stringify(hook)}\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", 511)))\n`,
+      `import { live } from ${JSON.stringify(hook)}\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", ${n})) ?? "none")\n`,
     )
     const child = Bun.spawnSync([process.execPath, script], {
-      cwd: scratch,
-      env: { ...environment, PATH: `${bin}:/usr/bin:/bin` },
+      cwd: data,
+      env: { ...environment, PATH: `${bin}:/usr/bin:/bin`, PLAYGROUND_DATA_DIR: data },
     })
-    expect(child.stdout.toString().trim()).toBe(JSON.stringify(pr))
-    expect(await Bun.file(file).json()).toEqual(pr)
+    return { kept: await Bun.file(file).json(), read: child.stdout.toString().trim() }
+  }
+  const OWN = { author: "acme-owner", owner: "acme-owner", ownerType: "User" }
+
+  test("a failure older than the github rule's poll interval, 5 minutes by default, reads the PR again and keeps the answer", async () => {
+    expect(await readAfter(511, 6)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
+  })
+
+  test("a failure younger than github.pollMinutes is kept, read from the policy", async () => {
+    expect((await readAfter(512, 10, 15)).read).toBe("none")
+    expect(await readAfter(513, 10, 8)).toEqual({ kept: OWN, read: JSON.stringify(OWN) })
   })
 
   // #1280: read mode runs a skill's script only while git in the main checkout reports it tracked and unchanged
