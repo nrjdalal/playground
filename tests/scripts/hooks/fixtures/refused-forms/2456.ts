@@ -62,6 +62,29 @@ export const groups: Group[] = [
       ["a cd to Claude Code's hook-only variable", `cd "$CLAUDE_PROJECT_DIR"${G}`],
       ["a cd to OLDPWD, which the shell keeps", `cd "$OLDPWD"${G}`],
       ["a cd to zsh's own path array", `cd "$path"${G}`],
+      ["a cd to PWD after a cd, which the shell keeps", `cd "$W" && cd "$PWD"${G}`],
+      ["a cd to a variable after an if's .", `if . ./f; then cd "$W"${G}; fi`],
+      ["a cd to a variable after a while's .", `while . ./f; do cd "$W"${G}; break; done`],
+      ["a cd to a variable after builtin .", `builtin . ./f; cd "$W"${G}`],
+      ["a cd to a variable after command .", `command . ./f; cd "$W"${G}`],
+      ["a cd to a variable after ! .", `! . ./f; cd "$W"${G}`],
+      ["a cd to a variable after time .", `time . ./f; cd "$W"${G}`],
+      ["a cd to a variable after a source split by quotes", `so''urce ./f; cd "$W"${G}`],
+      ["a cd to a variable after a source split by a backslash", `so\\urce ./f; cd "$W"${G}`],
+      [
+        "a cd to a variable zstyle -s sets by a name read from stdin",
+        `read n; zstyle :x y /x; zstyle -s :x y "$n"; cd "$W"${G}`,
+      ],
+      [
+        "a cd to a variable getln sets by a name read from stdin",
+        `read n; print -z /x; getln "$n"; cd "$W"${G}`,
+      ],
+      ["a cd to FPATH after read -A sets its tied fpath", `read -A fpath; cd "$FPATH"${G}`],
+      ["a cd to MANPATH after read -A sets its tied manpath", `read -A manpath; cd "$MANPATH"${G}`],
+      [
+        "a cd to MODULE_PATH after read -A sets its tied module_path",
+        `read -A module_path; cd "$MODULE_PATH"${G}`,
+      ],
     ],
   },
   {
@@ -79,6 +102,22 @@ export const groups: Group[] = [
         'W=$(cat f); git -C "$W" push origin PG-1-x',
       ],
       ["a push by -C a variable a prefix assignment sets", 'W=/x git -C "$W" push origin PG-1-x'],
+      [
+        "a push by -C a variable after an if's .",
+        'if . ./f; then git -C "$W" push origin PG-1-x; fi',
+      ],
+      [
+        "a push by -C a variable after builtin and a source split by quotes",
+        "builtin so''urce ./f; git -C \"$W\" push origin PG-1-x",
+      ],
+      [
+        "a push by -C a variable read sets by a name split by quotes",
+        "read PLAYGROUND_RE''PO; git -C \"$PLAYGROUND_REPO\" push origin PG-1-x",
+      ],
+      [
+        "a push by -C a variable declare sets by a name split by quotes",
+        "declare PLAYGROUND_RE''PO=/x; git -C \"$PLAYGROUND_REPO\" push origin PG-1-x",
+      ],
     ],
   },
 ]

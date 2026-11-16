@@ -3873,48 +3873,11 @@ export async function curlData(flags: Flag[], cmd: Command, env: Env): Promise<T
   return data
 }
 
-// An uppercase name, since zsh keeps its own lowercase parameters (path, cdpath, fpath, manpath, module_path, argv, status, pipestatus, reply, match) apart from the environment
-const STARTING_NAME = /^[A-Z_][A-Z0-9_]*$/
-// Names the shell sets or keeps itself, and Claude Code's, some of which it sets in a hook's environment alone (CLAUDE_PROJECT_DIR), so none reads from the starting environment
-const SHELL_KEPT = new Set([
-  "CDPATH",
-  "IFS",
-  "LINENO",
-  "MATCH",
-  "MBEGIN",
-  "MEND",
-  "OLDPWD",
-  "OPTARG",
-  "OPTIND",
-  "PATH",
-  "PPID",
-  "RANDOM",
-  "REPLY",
-  "SECONDS",
-  "SHLVL",
-  "ZDOTDIR",
-  "_",
-])
-const SHELL_KEPT_PREFIX = /^(?:BASH|CLAUDE|ZSH)/
-// A line that may set a name it never spells: eval, source or . (a file's text), an indirect name (${!n}, zsh's ${(P)n}), or a setter whose words hold an expansion (declare "$n=x", read "$n", printf -v "$n")
-const SETS_ANY =
-  /(?<![\w./-])(?:eval|source)(?![\w./-])|(?:^|[;&|(`{\n]|\b(?:do|else|then))\s*\.(?=\s)|\$\{!|\$\{\([^)]*P/
-const SETTER_EXPANDED =
-  /(?<![\w./-])(?:declare|export|float|getopts|integer|let|local|mapfile|read|readarray|readonly|typeset|unset|vared|zparseopts|(?:print|printf)\s[^;&|\n]*-\w*v|set\s+[-+]A)\s[^;&|\n]*[$`]/
-
-// Whether a line may set name: the name as a word anywhere but an expansion that reads it ($NAME, ${NAME}, ${NAME:?…}, ${NAME:-…}, ${NAME+…}), so `NAME=`, `export NAME`, `read NAME`, `for NAME in` and ${NAME:=…} each count
-function setsOnLine(command: string, name: string): boolean {
-  const reads = new RegExp(String.raw`\$(?:${name}(?!\w)|\{${name}(?:\}|:?[-?+]))`, "g")
-  return new RegExp(String.raw`(?<![\w$])${name}(?!\w)`).test(command.replace(reads, ""))
-}
-
 // HOME and TMPDIR resolve in paths, and PWD while the command never changes directory, unless the command assigns them itself.
-// With fromEnvironment, every other variable of the hook's environment, the session's starting one, resolves too, unless the line may set it or it is a name the shell keeps.
 export function knownVariables(
   command: string,
   environment: Record<string, string | undefined>,
   cwd: string | undefined,
-  fromEnvironment = false,
 ): Record<string, string> {
   const values: Record<string, string | undefined> = {
     HOME: environment.HOME,
@@ -3924,12 +3887,6 @@ export function knownVariables(
   const known: Record<string, string> = {}
   for (const [name, value] of Object.entries(values)) {
     if (value && !command.includes(`${name}=`)) known[name] = value
-  }
-  if (!fromEnvironment || SETS_ANY.test(command) || SETTER_EXPANDED.test(command)) return known
-  for (const [name, value] of Object.entries(environment)) {
-    if (!value || name in values || !STARTING_NAME.test(name)) continue
-    if (SHELL_KEPT.has(name) || SHELL_KEPT_PREFIX.test(name) || setsOnLine(command, name)) continue
-    known[name] = value
   }
   return known
 }

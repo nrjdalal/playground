@@ -9336,34 +9336,7 @@ async function readPath(path, env) {
     return unknown2("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown2(`${resolved}, which does not exist yet`);
 }
-var STARTING_NAME = /^[A-Z_][A-Z0-9_]*$/;
-var SHELL_KEPT = new Set([
-  "CDPATH",
-  "IFS",
-  "LINENO",
-  "MATCH",
-  "MBEGIN",
-  "MEND",
-  "OLDPWD",
-  "OPTARG",
-  "OPTIND",
-  "PATH",
-  "PPID",
-  "RANDOM",
-  "REPLY",
-  "SECONDS",
-  "SHLVL",
-  "ZDOTDIR",
-  "_"
-]);
-var SHELL_KEPT_PREFIX = /^(?:BASH|CLAUDE|ZSH)/;
-var SETS_ANY = /(?<![\w./-])(?:eval|source)(?![\w./-])|(?:^|[;&|(`{\n]|\b(?:do|else|then))\s*\.(?=\s)|\$\{!|\$\{\([^)]*P/;
-var SETTER_EXPANDED = /(?<![\w./-])(?:declare|export|float|getopts|integer|let|local|mapfile|read|readarray|readonly|typeset|unset|vared|zparseopts|(?:print|printf)\s[^;&|\n]*-\w*v|set\s+[-+]A)\s[^;&|\n]*[$`]/;
-function setsOnLine(command, name) {
-  const reads = new RegExp(String.raw`\$(?:${name}(?!\w)|\{${name}(?:\}|:?[-?+]))`, "g");
-  return new RegExp(String.raw`(?<![\w$])${name}(?!\w)`).test(command.replace(reads, ""));
-}
-function knownVariables(command, environment, cwd, fromEnvironment = false) {
+function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,
     PWD: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : cwd,
@@ -9373,15 +9346,6 @@ function knownVariables(command, environment, cwd, fromEnvironment = false) {
   for (const [name, value] of Object.entries(values)) {
     if (value && !command.includes(`${name}=`))
       known[name] = value;
-  }
-  if (!fromEnvironment || SETS_ANY.test(command) || SETTER_EXPANDED.test(command))
-    return known;
-  for (const [name, value] of Object.entries(environment)) {
-    if (!value || name in values || !STARTING_NAME.test(name))
-      continue;
-    if (SHELL_KEPT.has(name) || SHELL_KEPT_PREFIX.test(name) || setsOnLine(command, name))
-      continue;
-    known[name] = value;
   }
   return known;
 }
@@ -9808,24 +9772,23 @@ var testsAName = (args, expands) => args.some((w, k) => {
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
-function steadyNames(named, commands, past = false) {
+function setterCounts(named, commands, parses) {
   if (named.blind || named.counts.has("IFS"))
-    return () => NONE2;
+    return;
   const counts = new Map(named.counts);
-  const parses = commands.map((cmd) => parse3(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name) || marked(name))
-      return () => NONE2;
+      return;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
-      return () => NONE2;
+      return;
     if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
-      return () => NONE2;
+      return;
     if (name === "print" && flagged(/P/))
-      return () => NONE2;
+      return;
     if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
-      return () => NONE2;
+      return;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
@@ -9837,13 +9800,20 @@ function steadyNames(named, commands, past = false) {
       if (!word)
         continue;
       if (marked(word.value.split("=")[0]))
-        return () => NONE2;
+        return;
       if (word.quoted && word.value.includes("["))
-        return () => NONE2;
+        return;
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
+  return counts;
+}
+function steadyNames(named, commands, past = false) {
+  const parses = commands.map((cmd) => parse3(cmd));
+  const counts = setterCounts(named, commands, parses);
+  if (!counts)
+    return () => NONE2;
   const set = new Map;
   const pasts = new Map;
   let moves = false;
@@ -9921,6 +9891,23 @@ function steadyNames(named, commands, past = false) {
       past: (key) => (pasts.get(key) ?? here.at) < here.at
     };
   };
+}
+function startingVariables(command, environment, known) {
+  const commands = lex(command, known).commands;
+  const counts = setterCounts(namings2(command), commands, commands.map((cmd) => parse3(cmd)));
+  const starting = {};
+  if (!counts)
+    return starting;
+  for (const [key, value] of Object.entries(environment)) {
+    if (!value || key in known || !/^[A-Z_][A-Z0-9_]*$/.test(key) || counts.has(key))
+      continue;
+    if (SHELL_SETS.has(key) || SHELL_SETS_PREFIX.test(key) || TIED.has(key))
+      continue;
+    if (key === "IFS" || key === "ZDOTDIR" || key.startsWith("CLAUDE"))
+      continue;
+    starting[key] = value;
+  }
+  return starting;
 }
 var LITERAL = /^(?:[\w./:@%+,-]|'[^'\s]*'|"[^"$`\\\s]*")+$/;
 var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
@@ -12438,7 +12425,8 @@ async function inspect(raw, environment, unknown = false) {
     return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
   const named = namings2(command);
-  const known = knownVariables(command, environment, directory, true);
+  const own = knownVariables(command, environment, directory);
+  const known = { ...own, ...startingVariables(command, environment, own) };
   const steered = Object.keys(known).filter((key) => named.counts.has(key));
   if (unknown)
     for (const key of steered)

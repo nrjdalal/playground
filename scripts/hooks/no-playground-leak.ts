@@ -53,6 +53,7 @@ import {
   type Word,
   type Xargs,
 } from "./shell"
+import { startingVariables } from "./steady"
 
 type Environment = Record<string, string | undefined>
 // Where a write lands: on a surface the guard guards, off it, or somewhere the hook cannot tell; `byText` marks one only the network or the run could place (a GraphQL node id, a URL the run computes), which anyWrite judges by its text alone.
@@ -1805,10 +1806,12 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
     const command = input?.command
     if (typeof command !== "string" || !candidate(command)) return
     const directory = typeof cwd === "string" ? cwd : undefined
+    const own = knownVariables(command, environment, directory)
     const env: Env = {
       cwd: directory,
       files: new Map(),
-      known: knownVariables(command, environment, directory, true),
+      // a variable of the session's starting environment is read as its value, so `git -C "$PLAYGROUND_REPO" push` is placed by the clone it names
+      known: { ...own, ...startingVariables(command, environment, own) },
       process: environment,
       vars: new Map(),
     }

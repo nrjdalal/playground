@@ -112,10 +112,13 @@ git(SCRATCH, "init", "-q", "-b", "main", EXT_CLONE)
 git(SCRATCH, "init", "-q", "-b", "feature", EXT_BRANCH)
 for (const clone of [EXT_CLONE, EXT_BRANCH])
   git(clone, "remote", "add", "origin", "https://github.com/quillco/acme-skills.git")
-// The session's starting environment that no-extensions-write and the leak engine read variables from, for #2456's rows: PLAYGROUND_REPO and W a plain clone, ROOT_DIR the extensions root, EXT_DIR an extension clone, and the names never read from it
+// The session's starting environment that no-extensions-write and the leak engine read variables from, for #2456's rows: PLAYGROUND_REPO and W a plain clone, ROOT_DIR the extensions root, EXT_DIR an extension clone, and names never read from it (zsh's tied FPATH, MANPATH and MODULE_PATH among them)
 const STARTING = {
   CLAUDE_PROJECT_DIR: OTHER,
   EXT_DIR: EXT_CLONE,
+  FPATH: OTHER,
+  MANPATH: OTHER,
+  MODULE_PATH: OTHER,
   OLDPWD: OTHER,
   PLAYGROUND_REPO: OTHER,
   ROOT_DIR: ROOT,

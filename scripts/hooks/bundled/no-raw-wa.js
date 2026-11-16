@@ -3195,34 +3195,7 @@ async function readPath(path, env) {
     return unknown("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
-var STARTING_NAME = /^[A-Z_][A-Z0-9_]*$/;
-var SHELL_KEPT = new Set([
-  "CDPATH",
-  "IFS",
-  "LINENO",
-  "MATCH",
-  "MBEGIN",
-  "MEND",
-  "OLDPWD",
-  "OPTARG",
-  "OPTIND",
-  "PATH",
-  "PPID",
-  "RANDOM",
-  "REPLY",
-  "SECONDS",
-  "SHLVL",
-  "ZDOTDIR",
-  "_"
-]);
-var SHELL_KEPT_PREFIX = /^(?:BASH|CLAUDE|ZSH)/;
-var SETS_ANY = /(?<![\w./-])(?:eval|source)(?![\w./-])|(?:^|[;&|(`{\n]|\b(?:do|else|then))\s*\.(?=\s)|\$\{!|\$\{\([^)]*P/;
-var SETTER_EXPANDED = /(?<![\w./-])(?:declare|export|float|getopts|integer|let|local|mapfile|read|readarray|readonly|typeset|unset|vared|zparseopts|(?:print|printf)\s[^;&|\n]*-\w*v|set\s+[-+]A)\s[^;&|\n]*[$`]/;
-function setsOnLine(command, name) {
-  const reads = new RegExp(String.raw`\$(?:${name}(?!\w)|\{${name}(?:\}|:?[-?+]))`, "g");
-  return new RegExp(String.raw`(?<![\w$])${name}(?!\w)`).test(command.replace(reads, ""));
-}
-function knownVariables(command, environment, cwd, fromEnvironment = false) {
+function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,
     PWD: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : cwd,
@@ -3232,15 +3205,6 @@ function knownVariables(command, environment, cwd, fromEnvironment = false) {
   for (const [name, value] of Object.entries(values)) {
     if (value && !command.includes(`${name}=`))
       known[name] = value;
-  }
-  if (!fromEnvironment || SETS_ANY.test(command) || SETTER_EXPANDED.test(command))
-    return known;
-  for (const [name, value] of Object.entries(environment)) {
-    if (!value || name in values || !STARTING_NAME.test(name))
-      continue;
-    if (SHELL_KEPT.has(name) || SHELL_KEPT_PREFIX.test(name) || setsOnLine(command, name))
-      continue;
-    known[name] = value;
   }
   return known;
 }
