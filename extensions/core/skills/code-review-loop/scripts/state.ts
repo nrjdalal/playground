@@ -945,8 +945,13 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
 
 const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
 
-// Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens.
-export const cmdMerge = (clone: string, head: string, base: string, session: string): void => {
+// Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens. --conflict-only stops after merge-tree, running none of the PR's code, for an outside author's PR.
+export const cmdMerge = (...args: string[]): void => {
+  const conflictOnly = args.includes("--conflict-only")
+  const [clone = "", head = "", base = "", session = ""] = args.filter(
+    (a) => a !== "--conflict-only",
+  )
+  if (args.length !== 4) exitWith(USAGE)
   const headSha = io.run("git", "-C", clone, "rev-parse", head).trim()
   const baseSha = io.run("git", "-C", clone, "rev-parse", base).trim()
   let tree: string
@@ -967,6 +972,10 @@ export const cmdMerge = (clone: string, head: string, base: string, session: str
     const files = e.stdout.trim().split("\n").slice(1)
     console.log(`CONFLICT on ${baseSha.slice(0, 7)}: ${files.join(" ")}`)
     process.exitCode = 1
+    return
+  }
+  if (conflictOnly) {
+    console.log(`CLEAN on ${baseSha.slice(0, 7)}: no conflict; --conflict-only ran no tests`)
     return
   }
   const merge = io
@@ -993,12 +1002,25 @@ export const cmdMerge = (clone: string, head: string, base: string, session: str
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
-  const red = (files: string[]): string[] =>
-    !files.length || io.tests(session, clone, files)
-      ? []
-      : files.length === 1
-        ? files
-        : files.filter((f) => !io.tests(session, clone, [f]))
+  // A list's red files, narrowed by halves so one red in 157 costs about 16 runs; a red list no smaller part reproduces goes to `together`.
+  const together: string[] = []
+  const red = (files: string[], keep: boolean): string[] => {
+    if (!files.length || io.tests(session, clone, files)) return []
+    if (files.length === 1) return files
+    const half = Math.ceil(files.length / 2)
+    const found = [...red(files.slice(0, half), keep), ...red(files.slice(half), keep)]
+    if (!found.length && keep) together.push(...files)
+    return found
+  }
+  const treeOf = (sha: string): Set<string> =>
+    new Set(io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", sha).split("\0"))
+  const at = (sha: string, files: string[], keep = false): string[] => {
+    const tree = treeOf(sha)
+    const there = files.filter((f) => tree.has(f))
+    if (!there.length) return []
+    io.run("git", "-C", clone, "checkout", "-q", "--detach", sha)
+    return red(there, keep)
+  }
   let branch = ""
   try {
     branch = io.run("git", "-C", clone, "symbolic-ref", "-q", "--short", "HEAD").trim()
@@ -1010,23 +1032,29 @@ export const cmdMerge = (clone: string, head: string, base: string, session: str
     branch && io.run("git", "-C", clone, "rev-parse", branch).trim() === headSha
       ? [branch]
       : ["--detach", headSha]
+  // Each red on the merge runs again at the head (red there: the PR's own) and then at <base> (red there: canary's own), so CANARY-RED keeps only a red the merge alone makes.
   let onMerge: string[]
+  let atHead: string[]
+  let atBase: string[]
   try {
-    io.run("git", "-C", clone, "checkout", "-q", "--detach", merge)
-    onMerge = red(tests)
+    onMerge = at(merge, tests, true)
+    atHead = at(headSha, onMerge)
+    atBase = at(
+      baseSha,
+      onMerge.filter((f) => !atHead.includes(f)),
+    )
   } finally {
     io.run("git", "-C", clone, "checkout", "-q", ...back)
   }
-  const atHeadTree = new Set(
-    io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", headSha).split("\0"),
-  )
-  const atHead = red(onMerge.filter((f) => atHeadTree.has(f)))
-  const canaryOnly = onMerge.filter((f) => !atHead.includes(f))
+  const c7 = baseSha.slice(0, 7)
+  const canaryOnly = onMerge.filter((f) => !atHead.includes(f) && !atBase.includes(f))
   if (canaryOnly.length) {
-    console.log(`CANARY-RED on ${baseSha.slice(0, 7)}: ${canaryOnly.join(" ")}`)
+    console.log(`CANARY-RED on ${c7}: ${canaryOnly.join(" ")}`)
     process.exitCode = 1
-  } else console.log(`CLEAN on ${baseSha.slice(0, 7)}: ${tests.length} touched tests`)
+  } else if (!together.length) console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
+  if (together.length) console.log(`BATCH-RED on ${c7}: ${together.join(" ")}`)
   if (atHead.length) console.log(`HEAD-RED: ${atHead.join(" ")}`)
+  if (atBase.length) console.log(`BASE-RED on ${c7}: ${atBase.join(" ")}`)
 }
 
 const splitResponse = (text: string): [Record<string, string>, string] => {
@@ -1140,9 +1168,9 @@ const COMMANDS: Record<
   checks: { argc: 3, more: true, run: cmdChecks },
   delta: { argc: 4, run: cmdDelta },
   fresh: { argc: 4, run: cmdFresh },
+  merge: { argc: 3, more: true, run: cmdMerge },
   pr: { argc: 2, run: cmdPr },
   scan: { argc: 1, run: cmdScan },
-  merge: { argc: 4, run: cmdMerge },
   "touched-tests": { argc: 3, run: cmdTouchedTests },
   wait: { argc: 3, run: cmdWait },
 }
@@ -1155,7 +1183,8 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, each red one run again at the head: CANARY-RED <tests> (exit 1) or CLEAN, then HEAD-RED <tests> for a red at both; the clone ends at <head>
+  state.ts merge [--conflict-only] <clone> <head> <base> [<session>]
+                                                        the head's merge with <base>: CONFLICT <files> (exit 1); --conflict-only stops there, running no test; LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, each red narrowed by halves and run again at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red no single file makes, or CLEAN, then HEAD-RED (the PR's own) and BASE-RED (canary's own); the clone ends at <head>
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
 A verdict is a comment by this gh account whose first line is

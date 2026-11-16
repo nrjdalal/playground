@@ -1910,6 +1910,7 @@ const runMerge = (
   head: string,
   tests: (session: string, clone: string, files: string[]) => boolean = (_s, clone, files) =>
     files.every((f) => !readFileSync(join(clone, f), "utf8").includes("RED")),
+  args: string[] = [repo, head, "canary", "probe-worker"],
 ): { calls: string[][]; code: number | undefined; lines: string[] } => {
   const real = { ...state.io }
   const calls: string[][] = []
@@ -1925,7 +1926,7 @@ const runMerge = (
   const realCode = process.exitCode
   process.exitCode = 0
   try {
-    state.cmdMerge(repo, head, "canary", "probe-worker")
+    state.cmdMerge(...args)
     return { calls, code: process.exitCode, lines }
   } finally {
     console.log = realLog
@@ -1947,16 +1948,24 @@ test("12a merge: a conflict with canary names the conflicted files, exits 1 and 
   expect(git(repo, "rev-parse", "HEAD")).toBe(head)
 })
 
-test("12b merge: a touched test red on the merge and green at the head is a canary-only red (#2468)", () => {
+// red only where canary's test meets the PR's a = 2, as a test canary changed fails on the PR's code alone
+const redTogether = (_s: string, clone: string, files: string[]): boolean =>
+  !(
+    readFileSync(join(clone, "src/a.ts"), "utf8").includes("= 2") &&
+    files.some((f) => readFileSync(join(clone, f), "utf8").includes("expects a = 3"))
+  )
+
+test("12b merge: a touched test red on the merge, green at the head and at canary, is a canary-only red (#2468)", () => {
   const [repo, head] = mergeRepo(
     { "src/a.ts": "export const a = 2\n" },
-    { "tests/src/a.test.ts": "RED since canary\n" },
+    { "tests/src/a.test.ts": "expects a = 3\n" },
   )
   const canary = git(repo, "rev-parse", "--short=7", "canary")
-  const out = runMerge(repo, head)
+  const out = runMerge(repo, head, redTogether)
   expect(out.lines).toEqual([`CANARY-RED on ${canary}: tests/src/a.test.ts`])
   expect(out.code).toBe(1)
   expect(out.calls).toEqual([
+    ["probe-worker", "tests/src/a.test.ts"],
     ["probe-worker", "tests/src/a.test.ts"],
     ["probe-worker", "tests/src/a.test.ts"],
   ])
@@ -2025,8 +2034,113 @@ test("12g merge: a clone on a branch at the head goes back to that branch, not a
   expect(git(repo, "rev-parse", "HEAD")).toBe(head)
 })
 
-test("12f merge takes four arguments on its command line (#2468)", () => {
-  const out = runCli(["merge", "/nowhere", "HEAD", "canary"])
-  expect(out.code).toBe(1)
-  expect(out.stderr).toContain("state.ts merge <clone> <head> <base> <session>")
+test("12f merge takes four arguments on its command line, or three with --conflict-only (#2468)", () => {
+  for (const args of [
+    ["merge", "/nowhere", "HEAD", "canary"],
+    ["merge", "--conflict-only", "/nowhere", "HEAD", "canary", "r-reviewer"],
+  ]) {
+    const out = runCli(args)
+    expect(out.code).toBe(1)
+    expect(out.stderr).toContain(
+      "state.ts merge [--conflict-only] <clone> <head> <base> [<session>]",
+    )
+  }
+})
+
+test("12h merge: a red at canary itself is canary's own, on its own line, and the round goes on (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "tests/src/a.test.ts": "RED on canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([
+    `CLEAN on ${canary}: 1 touched tests`,
+    `BASE-RED on ${canary}: tests/src/a.test.ts`,
+  ])
+  expect(out.code).toBe(0)
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+const eight = Object.fromEntries(
+  Array.from({ length: 8 }, (_, i) => [
+    [`src/t${i + 1}.ts`, `export const t = ${i + 1}\n`],
+    [`tests/src/t${i + 1}.test.ts`, "green\n"],
+  ]).flat(),
+)
+
+test("12i merge: a red in a long list is narrowed by halves, not run file by file (#2468)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const red8 = (_s: string, clone: string, files: string[]): boolean =>
+    !(
+      files.includes("tests/src/t8.test.ts") &&
+      readFileSync(join(clone, "b.txt"), "utf8").includes("canary")
+    )
+  const out = runMerge(repo, head, red8)
+  expect(out.lines).toEqual([`CANARY-RED on ${canary}: tests/src/t8.test.ts`])
+  const t = (n: number) => `tests/src/t${n}.test.ts`
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8].map(t),
+    [1, 2, 3, 4].map(t),
+    [5, 6, 7, 8].map(t),
+    [5, 6].map(t),
+    [7, 8].map(t),
+    [t(7)],
+    [t(8)],
+    [t(8)],
+  ])
+})
+
+test("12j merge: a list red together whose parts are each green is named, never read as clean (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    {
+      "src/t1.ts": "1\n",
+      "src/t2.ts": "2\n",
+      "tests/src/t1.test.ts": "g\n",
+      "tests/src/t2.test.ts": "g\n",
+    },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, (_s, _c, files) => files.length < 2)
+  expect(out.lines).toEqual([`BATCH-RED on ${canary}: tests/src/t1.test.ts tests/src/t2.test.ts`])
+  expect(out.code).toBe(0)
+})
+
+test("12k merge --conflict-only reads merge-tree alone: no checkout, no test (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "tests/src/a.test.ts": "RED since canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const ran: string[][] = []
+  const realRun = state.io.run
+  state.io.run = (...args: string[]) => {
+    ran.push(args.slice(3, 4))
+    return realRun(...args)
+  }
+  let out: ReturnType<typeof runMerge>
+  try {
+    out = runMerge(repo, head, undefined, ["--conflict-only", repo, head, "canary"])
+  } finally {
+    state.io.run = realRun
+  }
+  expect(out.lines).toEqual([`CLEAN on ${canary}: no conflict; --conflict-only ran no tests`])
+  expect(out.calls).toEqual([])
+  expect(ran.flat()).toEqual(["rev-parse", "rev-parse", "merge-tree"])
+
+  const [clash, clashHead] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "src/a.ts": "export const a = 3\n" },
+  )
+  const clashCanary = git(clash, "rev-parse", "--short=7", "canary")
+  const conflict = runMerge(clash, clashHead, undefined, [
+    clash,
+    clashHead,
+    "canary",
+    "--conflict-only",
+  ])
+  expect(conflict.lines).toEqual([`CONFLICT on ${clashCanary}: src/a.ts`])
+  expect(conflict.code).toBe(1)
 })

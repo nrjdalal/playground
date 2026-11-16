@@ -673,6 +673,14 @@ describe("no-outside-pr-code's read mode writes only into its own folders", () =
       ],
       ["a tracked skill script edited in place", `node ${EDITED}`],
       [
+        "state.ts merge, which runs the PR's tests in its clone (#2468)",
+        `${CORE_STATE} merge /s/review-501 abc1234 origin/canary r-reviewer`,
+      ],
+      [
+        "node on state.ts merge without --conflict-only (#2468)",
+        `node ${STATE} merge /s/review-501 abc1234 origin/canary r-reviewer`,
+      ],
+      [
         "a skill script named through a variable the reader does not expand",
         '"$PLAYGROUND_REPO"/extensions/core/skills/code-review-loop/scripts/state.ts pr 501',
       ],
@@ -714,6 +722,10 @@ describe("no-outside-pr-code's read mode writes only into its own folders", () =
       ["sed's plain substitution on a file", `sed 's/a/b/' ${OUTSIDE}/a.ts`],
       ["node on a tracked skill's script", `node ${SKILLS}/triage/scripts/run.mjs`],
       ["a tracked skill's script by its path", `${CORE_STATE} pr 501`],
+      [
+        "state.ts merge --conflict-only, which runs merge-tree alone (#2468)",
+        `${CORE_STATE} merge --conflict-only /s/review-501 abc1234 origin/canary`,
+      ],
       [
         "the item review's ext show of a revision into jq",
         "playground ext show acme-owner skill triage --rev abc123 | jq .content.files",
