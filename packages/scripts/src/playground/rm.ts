@@ -377,6 +377,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
                   ...(liveBranch ? { liveBranch } : {}),
                   merged: deps.merged,
                   note: (line: string) => console.log(`playground: ${line}`),
+                  ...(own && own !== "none" ? { ownPr: own.number } : {}),
                   places: deps.places,
                   ...(args.pr ? { pr: args.pr } : {}),
                   procs: deps.procs(),

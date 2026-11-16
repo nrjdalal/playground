@@ -1402,6 +1402,44 @@ test("--worktree refuses the worktree on the live.branch branch, with the Dashbo
   expect(root).not.toBe(main)
 })
 
+// #2344: a worker on two open PRs names the second only in prs, and its tree is named by its issue, not that PR's number, so the row holds it by the worktree's own PR as GitHub names it by its branch; the second PR's reviewer holds it the same way
+test.each([
+  [
+    "a worker whose prs lists it beside its first PR",
+    {
+      branch: "PG-2307-other",
+      name: "abc123-worker",
+      pr: "https://github.com/o/r/pull/2408",
+      prs: ["https://github.com/o/r/pull/2408", "https://github.com/o/r/pull/2435"],
+      status: "working",
+    },
+  ],
+  [
+    "that PR's reviewer",
+    { name: "def456-reviewer", pr: "https://github.com/o/r/pull/2435", status: "working" },
+  ],
+])(
+  "--worktree refuses this checkout's own worktree an origin branch holds while its own open PR is on a live row: %s",
+  async (_, agent) => {
+    const { deps, own } = ownPushed()
+    writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [agent] }))
+    const second: RmDeps["prState"] = async () => ({
+      head: git(own, "rev-parse", "HEAD"),
+      number: 2435,
+      state: "OPEN",
+    })
+    expect(await rmTold(["--worktree", own], { ...deps, prState: second })).toEqual({
+      code: 1,
+      err: [`playground: ${own} is held by ${agent.name}, which the roster lists as working`],
+      out: [],
+    })
+    expect(existsSync(own)).toBe(true)
+    const told = await rmTold(["--worktree", own], { ...deps, prState: async () => "none" })
+    expect(told.code).toBe(0)
+    expect(existsSync(own)).toBe(false)
+  },
+)
+
 test("--worktree still refuses this checkout's own worktree an origin branch holds while a process works in it", async () => {
   const { deps, own } = ownPushed()
   const held = { command: "bun run dev", cwd: own, pid: 9, sockets: [] }
