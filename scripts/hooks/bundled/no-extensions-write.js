@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync4, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
+import { existsSync as existsSync4, readdirSync as readdirSync4, readFileSync as readFileSync4, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
 import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
@@ -6533,6 +6533,30 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(all, scoped = false) {
+  const out = new Set;
+  for (let k = 0;k < all.length; k++) {
+    if (!caseOpener(all[k]) && all[k].follows !== ";;")
+      continue;
+    const commands = scoped ? all.slice(k).filter((c) => c.scope === all[k].scope) : all.slice(k);
+    let end = 0;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(0, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 function optionValue(word, { flags, values }) {
   if (word.startsWith("--")) {
     const eq = word.indexOf("=");
@@ -6643,7 +6667,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -6661,6 +6685,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -6887,6 +6913,7 @@ var CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -7068,6 +7095,8 @@ function lex(src, known = {}) {
     for (const c of lx.commands)
       c.cdRedefined = true;
   braced(lx.commands);
+  for (const c of casePatterns(lx.commands, true))
+    c.casePattern = true;
   return { commands: lx.commands, scopes: lx.scopes };
 }
 var BRACED = new Set([
@@ -7452,7 +7481,9 @@ function plainAlternative(group, glued) {
 function subshellPrefix(lead) {
   let at = 0;
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time")
+      break;
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect")
       at++;
     else if (lead[at].value === "repeat" && at + 1 < lead.length)
       at += 2;
@@ -8396,6 +8427,7 @@ function loopClose(commands, k) {
     }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
+var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
   tick();
   orElse(cmd, env);
@@ -9065,6 +9097,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -9083,6 +9128,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;
@@ -10215,6 +10262,7 @@ var READERS = new Set([
   "[",
   "cat",
   "cmp",
+  "df",
   "diff",
   "grep",
   "head",
@@ -10415,30 +10463,43 @@ function lineTextsOf(commands) {
     ...cmd.inner ? lineTextsOf(cmd.inner()) : []
   ]);
 }
-function caseOpener(cmd) {
-  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
-  const before = cmd.words.slice(0, Math.max(at, 0));
-  const word = cmd.words[at + 2];
-  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
-}
-function casePatterns(commands) {
-  const out = new Set;
-  for (let k = 0;k < commands.length; k++) {
-    if (!caseOpener(commands[k]) && commands[k].follows !== ";;")
-      continue;
-    let end = k;
-    while (commands[end + 1]?.follows === "|")
-      end++;
-    const body = commands[end + 1];
-    const run = commands.slice(k, end + 1);
-    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
-      continue;
-    for (const c of run)
-      out.add(c);
-  }
-  return out;
-}
 var GLOB = /[*?[{(]/;
+function mayMatch(segment, name) {
+  let source = "";
+  for (let k = 0;k < segment.length; k++) {
+    const c = segment[k];
+    if (c === "\\")
+      source += (segment[++k] ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    else if ("#^~".includes(c))
+      return true;
+    else if ("({<".includes(c) || "*?+@!".includes(c) && segment[k + 1] === "(") {
+      source += ".*";
+      break;
+    } else if (c === "*")
+      source += ".*";
+    else if (c === "?")
+      source += ".";
+    else if (c === "[") {
+      let close = k + ("!^".includes(segment[k + 1]) ? 2 : 1);
+      if (segment[close] === "[")
+        return true;
+      for (close++;close < segment.length && segment[close] !== "]"; close++) {
+        if (segment[close] === "[")
+          return true;
+        if (segment[close] === "\\")
+          close++;
+      }
+      if (close >= segment.length)
+        source += "\\[";
+      else {
+        source += ".";
+        k = close;
+      }
+    } else
+      source += c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`, "is").test(name);
+}
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var TEXT_RUNS = new RegExp(`${RUNS.source}|^(?:AGENT_BROWSER_[A-Z0-9_]+|BROWSER|GH_[A-Z0-9_]+)$`);
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
@@ -11055,10 +11116,58 @@ function scoreAsOther(words, cmd, parsed, env) {
   const at = cmd.words.indexOf(all[all.length - words.length - 1]);
   return changes(at === -1 ? cmd.words : cmd.words.slice(0, at));
 }
+var SSH_FLAGS = "46AaCfGgKkMNnqsTtVvXxYy";
+var SSH_VALUES = "BbcDEeFIiJLlmOoPpQRSWw";
+function sshRemote({ args, first }) {
+  if (program(first?.value ?? "") !== "ssh")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--" || !value.startsWith("-") || value === "-") {
+      const at = value === "--" ? k + 1 : k;
+      const rest = args.slice(at + 1);
+      return args[at] && rest.length > 0 ? { host: args[at], line: rest.map((w) => w.value).join(" ") } : undefined;
+    }
+    for (let c = 1;c < value.length; c++) {
+      if (SSH_VALUES.includes(value[c])) {
+        if (c === value.length - 1)
+          k++;
+        break;
+      }
+      if (!SSH_FLAGS.includes(value[c]))
+        return;
+    }
+  }
+}
 var AWKS = new Set(["awk", "gawk", "mawk", "nawk"]);
-var AWK_RUNS = /system|[>@]/;
+var AWK_RUNS = /system|@/;
 var AWK_PATTERN = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.)*\//g;
-var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkPipe(program);
+var AWK_BRACKETED = /(^|[{};!(,~\n]|&&|\|\|)(\s*)\/(?:[^\\/"[\n]|\\.|\[\^?\]?(?:[^\]\\\n]|\\.)*\])*\//g;
+var awkRuns = (program) => AWK_RUNS.test(program.replace(AWK_PATTERN, "$1$2RE")) || awkRedirects(program.replace(AWK_BRACKETED, "$1$2RE")) || awkPipe(program);
+function awkRedirects(program) {
+  const text = program.replace(/"(?:[^"\\\n]|\\.)*"/g, "S").replace(/\\\n|(,|&&|\|\|)\s*\n/g, "$1 ");
+  if (!text.includes(">"))
+    return false;
+  if (/["/]/.test(text))
+    return true;
+  let depth = 0;
+  let printing = false;
+  for (let k = 0;k < text.length; k++) {
+    const c = text[k];
+    if (c === "(")
+      depth++;
+    else if (c === ")")
+      depth = Math.max(0, depth - 1);
+    else if (/[;{}\n]/.test(c)) {
+      depth = 0;
+      printing = false;
+    } else if (c === ">" && printing && depth === 0)
+      return true;
+    else if (/^printf?\b/.test(text.slice(k)) && !/[\w$]/.test(text[k - 1] ?? ""))
+      printing = true;
+  }
+  return false;
+}
 var AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/;
 var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
@@ -11804,7 +11913,7 @@ var texts = (word) => {
     out.push({ ...word, value: v.slice(2) });
   return out;
 };
-async function inspect(raw, environment, unknown = false) {
+async function inspect(raw, environment, rootNames, unknown = false) {
   const {
     cwd,
     tool_input: toolInput,
@@ -11883,7 +11992,9 @@ async function inspect(raw, environment, unknown = false) {
       if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env);
         const folder = dir && dirname4(dir);
-        if (folder && (inRoot(folder) || above(folder, true)))
+        const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0];
+        const reaches = !folder || resolve5(folder) !== sep2 || rootNames().some((entry) => mayMatch(segment, entry));
+        if (folder && (inRoot(folder) || above(folder, true)) && reaches)
           return `${text.value}, a glob in ${folder}`;
       }
     }
@@ -11991,6 +12102,11 @@ async function inspect(raw, environment, unknown = false) {
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
+    const remote = sshRemote(parsed);
+    if (remote && cmd.words.includes(remote.host)) {
+      const own = { ...cmd, words: cmd.words.slice(0, cmd.words.indexOf(remote.host) + 1) };
+      return await visit(own, parse3(own), env) ?? run(lex(remote.line, env.known), { ...env, vars: new Map }, visit, true);
+    }
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name);
       const { inline, operand } = shellCall ? shellOperand(parsed.args, parsed.name) : { inline: false, operand: parsed.args[0] };
@@ -12432,11 +12548,11 @@ async function inspect(raw, environment, unknown = false) {
   const verdict = await run(lexed, env, visit, true);
   if (verdict || unknown || steered.length === 0)
     return verdict;
-  return inspect(raw, environment, true);
+  return inspect(raw, environment, rootNames, true);
 }
-async function check(raw, environment = process.env, budget = 1e4) {
+async function check(raw, environment = process.env, budget = 1e4, rootNames = () => readdirSync4(sep2)) {
   try {
-    return await withDeadline(budget, async () => eachInput(raw, "no-extensions-write", (one) => inspect(one, environment)));
+    return await withDeadline(budget, async () => eachInput(raw, "no-extensions-write", (one) => inspect(one, environment, rootNames)));
   } catch (error) {
     if (error instanceof RangeError)
       return refuse(TOO_LONG);

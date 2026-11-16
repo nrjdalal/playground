@@ -2942,6 +2942,88 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     })
   })
 
+  describe("ask new edits a same-title update in place, never a second card (PG-2298)", () => {
+    const update = (title: string, text: string, from = "builder") => ({
+      from,
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title,
+    })
+    const again = async (input: object) => {
+      const result = await store.postOrEdit(db, input)
+      if (!result.ok) throw new Error(result.message)
+      return result
+    }
+
+    test("a second update with the same poster and title edits the first, its id and ref kept", async () => {
+      const first = await post(update("PG-2298 twin", "40%"))
+      const second = await again(update("PG-2298 twin", "80%"))
+      expect(second).toMatchObject({ edited: true, item: { id: first.id, ref: first.ref } })
+      expect((await store.getItem(db, first.id))?.preview).toMatchObject({ text: "80%" })
+    })
+
+    test("a twin the owner sent to Done comes back unread", async () => {
+      const first = await post(update("PG-2298 done twin", "40%"))
+      await store.dismissItems(db, [first.id])
+      const second = await again(update("PG-2298 done twin", "80%"))
+      expect(second).toMatchObject({
+        edited: true,
+        item: { answer: null, id: first.id, readAt: null },
+        reopened: true,
+      })
+    })
+
+    test("an unchanged repeat returns the twin as it is and writes nothing, on the list or on Done", async () => {
+      const open = await post(update("PG-2298 same twin", "40%"))
+      expect(await again(update("PG-2298 same twin", "40%"))).toMatchObject({
+        item: { id: open.id },
+        unchanged: true,
+      })
+      expect(await store.getItem(db, open.id)).toEqual(open)
+      await store.dismissItems(db, [open.id])
+      const done = await store.getItem(db, open.id)
+      expect(await again(update("PG-2298 same twin", "40%"))).toMatchObject({
+        item: { id: open.id },
+        unchanged: true,
+      })
+      expect(await store.getItem(db, open.id)).toEqual(done)
+    })
+
+    test("a dismissed or resolved twin, or one from another poster, leaves the new update a card of its own", async () => {
+      const dismissed = await post(update("PG-2298 dismissed twin", "40%"))
+      await store.answerItem(db, dismissed.id, { action: "dismiss" }, { actor })
+      const afterDismiss = await again(update("PG-2298 dismissed twin", "80%"))
+      expect(afterDismiss.item.id).not.toBe(dismissed.id)
+      expect(afterDismiss).not.toHaveProperty("edited")
+      const resolved = await post(update("PG-2298 resolved twin", "40%"))
+      await store.resolveItem(db, resolved.id, { by: "builder" })
+      expect((await again(update("PG-2298 resolved twin", "80%"))).item.id).not.toBe(resolved.id)
+      const mine = await post(update("PG-2298 other poster", "40%"))
+      expect((await again(update("PG-2298 other poster", "40%", "ops"))).item.id).not.toBe(mine.id)
+    })
+
+    test("a twin is matched in the thread the repeat names, and a thread no item has is still refused", async () => {
+      const { createThread } = await import("../../../../../../api/hono/src/lib/dashboard/threads")
+      const threadId = await createThread(db, "PG-2298 thread")
+      const filed = await store.postOrEdit(db, update("PG-2298 threaded twin", "40%"), threadId)
+      if (!filed.ok) throw new Error(filed.message)
+      const inThread = await store.postOrEdit(db, update("PG-2298 threaded twin", "80%"), threadId)
+      expect(inThread).toMatchObject({ edited: true, item: { id: filed.item.id } })
+      const unthreaded = await again(update("PG-2298 threaded twin", "80%"))
+      expect(unthreaded.item.id).not.toBe(filed.item.id)
+      expect(
+        await store.postOrEdit(db, update("PG-2298 threaded twin", "90%"), "no-such-thread"),
+      ).toMatchObject({ code: "NOT_FOUND", ok: false })
+    })
+
+    test("a decision with the same poster and title posts a second card, as before", async () => {
+      const first = await post({ ...decision(PREVIEWS.budget), title: "PG-2298 decision" })
+      const second = await again({ ...decision(PREVIEWS.budget), title: "PG-2298 decision" })
+      expect(second.item.id).not.toBe(first.id)
+      expect(second).not.toHaveProperty("edited")
+    })
+  })
+
   test("a chat reply keeps his words after the tag, so the card says what is being done", async () => {
     const posted = await post(decision(PREVIEWS.budget))
     const at = new Date("2026-10-07T12:00:00.000Z")

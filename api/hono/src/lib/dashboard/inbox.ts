@@ -1773,6 +1773,39 @@ export async function editItem(
   return { item: toItem(row), ok: true, ...(reopens && { reopened: true as const }) }
 }
 
+// bun run ask new: an update whose poster already has one by that title in the same thread, or none, that it can still edit (its twin) edits that card on editItem's path, or leaves it as it is when the words match, so a repeat never makes a second card; anything else posts. postItem stays one card a call, since Yard's pendingCard gives two pending posts in one channel one title (api/hono/src/lib/yard/inbound.ts:127).
+export async function postOrEdit(
+  db: Database,
+  input: unknown,
+  threadId?: string,
+  now = new Date(),
+  settingsData?: string,
+): Promise<
+  { edited?: true; item: InboxItem; ok: true; reopened?: true; unchanged?: true } | Refused
+> {
+  const parsed = inboxInputSchema.safeParse(input)
+  if (!parsed.success || parsed.data.kind !== "update")
+    return postItem(db, input, threadId, now, settingsData)
+  const rows = await db
+    .select()
+    .from(inboxItem)
+    .where(
+      and(
+        eq(inboxItem.kind, "update"),
+        eq(inboxItem.from, parsed.data.from),
+        eq(inboxItem.title, parsed.data.title),
+        threadId === undefined ? isNull(inboxItem.threadId) : eq(inboxItem.threadId, threadId),
+      ),
+    )
+    .orderBy(desc(inboxItem.createdAt))
+  const twin = rows.map(toItem).find((item) => !closed(item) || ownerDone(item))
+  if (!twin) return postItem(db, input, threadId, now, settingsData)
+  if (isDeepStrictEqual(wordsOf(parsed.data), wordsOf(twin)))
+    return { item: twin, ok: true, unchanged: true }
+  const edited = await editItem(db, twin.id, input, now, settingsData)
+  return edited.ok ? { ...edited, edited: true } : edited
+}
+
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
 export async function getItem(db: Database, key: string): Promise<InboxItem | null> {
   const ref = REF_RE.exec(key)?.[1]

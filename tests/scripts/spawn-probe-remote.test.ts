@@ -20,17 +20,53 @@ import {
 // Every case runs spawn.sh, which starts fake processes and waits on them.
 setDefaultTimeout(40_000)
 
-// A fake ssh ahead of spawn-fake's bin: it logs each call's words, keeps the copy's tar stream, and runs the -tt call's remote command in bash, as the other machine's shell would.
+// A fake ssh ahead of spawn-fake's bin: it runs spawn.sh's check of the other machine in bash with a scratch PATH of that machine's own (remote-bin) and logs it apart, failing it under FAKE_SSH_FAIL; it logs every other call's words, keeps the copy's tar stream, and runs the -tt call's remote command in bash, as the other machine's shell would.
 const sshBin = join(scratch, "ssh-bin")
 mkdirSync(sshBin, { recursive: true })
 writeFileSync(
   join(sshBin, "ssh"),
   `#!/bin/bash
+case " $* " in *hasCompletedOnboarding*)
+  printf '%s\\037' "$@" >> "$HOME/ssh.checks"; echo >> "$HOME/ssh.checks"
+  [ -z "$FAKE_SSH_FAIL" ] || { echo "ssh: connect to host spark-bravo port 22: Connection refused" >&2; exit 255; }
+  exec env -i HOME="$HOME" PATH="$HOME/remote-bin" /bin/bash -c "\${!#}" ;;
+esac
 printf '%s\\037' "$@" >> "$HOME/ssh.calls"; echo >> "$HOME/ssh.calls"
 case " $* " in *" -tt "*) exec bash -c "\${!#}" ;; *) cat > "$HOME/ssh.stdin" ;; esac
 `,
 )
 chmodSync(join(sshBin, "ssh"), 0o755)
+
+// The other machine, in the run's own home: Linux, with grep and head, the tools each case puts on its PATH or in its ~/.bun/bin, a bwrap answering as the case says, and a ~/.claude.json.
+type Far = {
+  bun?: string[]
+  bwrap?: { rc: number; says: string }
+  claude?: string | null
+  tools?: string[]
+}
+const ONBOARDED = '{\n  "hasCompletedOnboarding": true,\n  "numStartups": 3\n}\n'
+const tool = (dir: string, name: string, body: string) => {
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, name), `#!/bin/bash\n${body}\n`)
+  chmodSync(join(dir, name), 0o755)
+}
+const far =
+  ({ bun = [], bwrap, claude = ONBOARDED, tools = ["bwrap", "socat"] }: Far = {}) =>
+  (home: string) => {
+    key(home)
+    const remote = join(home, "remote-bin")
+    tool(remote, "uname", "echo Linux")
+    for (const name of ["grep", "head"]) tool(remote, name, `exec ${Bun.which(name)} "$@"`)
+    const answer = bwrap ? `echo '${bwrap.says}' >&2\nexit ${bwrap.rc}` : "exit 0"
+    for (const name of tools) tool(remote, name, name === "bwrap" ? answer : "exit 0")
+    for (const name of bun)
+      tool(join(home, ".bun", "bin"), name, name === "bwrap" ? answer : "exit 0")
+    if (claude !== null) writeFileSync(join(home, ".claude.json"), claude)
+  }
+const farPath = { PATH: `${sshBin}:${bin}:${process.env.PATH}` }
+const checks = (home: string) =>
+  existsSync(join(home, "ssh.checks")) ? readFileSync(join(home, "ssh.checks"), "utf8") : ""
+const APPARMOR = "bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted"
 const sshCalls = (home: string) =>
   readFileSync(join(home, "ssh.calls"), "utf8")
     .split("\n")
@@ -83,7 +119,14 @@ describe("--remote-control", () => {
 describe("--ssh runs the probe's claude on another machine", () => {
   test("the pane copies the settings and skills into one remote folder, then runs claude there under ssh -tt", async () => {
     const email = "spare@example.com"
-    const r = await spawn([...probe, ...ssh, "--account", email], [], {}, undefined, undefined, key)
+    const r = await spawn(
+      [...probe, ...ssh, "--account", email],
+      [],
+      farPath,
+      undefined,
+      undefined,
+      far(),
+    )
     expect(r.code).toBe(0)
     expect(r.roster).toContain("kind=probe")
     const launch = launchOf(r)
@@ -131,7 +174,14 @@ describe("--ssh runs the probe's claude on another machine", () => {
   })
 
   test("on Linux the remote folder takes the probe's own temp folder's name, which its settings' sandbox writes", async () => {
-    const r = await spawn(probe.concat(ssh), [], { LINUX_GETCONF: "1" }, undefined, undefined, key)
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, LINUX_GETCONF: "1" },
+      undefined,
+      undefined,
+      far(),
+    )
     expect(r.code).toBe(0)
     const own = launchOf(r).match(/^export TMPDIR=(\S+)$/m)?.[1] ?? ""
     expect(own).toMatch(/\/playground-probe-far\.[A-Za-z0-9]{6}$/)
@@ -144,7 +194,7 @@ describe("--ssh runs the probe's claude on another machine", () => {
   ])(
     "from macOS %s's sandbox writes the remote folder, in a settings file of its own",
     async (_, extra, file) => {
-      const r = await spawn([...probe, ...ssh, ...extra], [], {}, undefined, undefined, key)
+      const r = await spawn([...probe, ...ssh, ...extra], [], farPath, undefined, undefined, far())
       expect(r.code).toBe(0)
       const remote = launchOf(r).match(/mkdir -m 700 (\S+) /)?.[1] ?? ""
       const built = JSON.parse(readFileSync(lw(r.home, file), "utf8"))
@@ -166,11 +216,130 @@ describe("--ssh runs the probe's claude on another machine", () => {
     ["--ssh with no --key", ["--ssh", "u@h"], "--ssh needs --key"],
     ["--key with no --ssh", ["--key", "{home}/key"], "--key needs --ssh"],
   ])("refuses %s before any pane opens", async (_, words, says) => {
-    const r = await spawn([...probe, ...words], [], {}, undefined, undefined, key)
+    const r = await spawn([...probe, ...words], [], farPath, undefined, undefined, far())
     expect(r.code).toBe(2)
     expect(r.err).toContain(says)
     expect(placing(r)).toEqual([])
     expect(existsSync(lw(r.home, "launch", "probe-far.sh"))).toBe(false)
+  })
+})
+
+describe("a sandboxed start reads its machine before any pane opens", () => {
+  test("an --ssh probe reads the other machine with the launch's ssh options, under the launch's PATH", async () => {
+    const r = await spawn(probe.concat(ssh), [], farPath, undefined, undefined, far())
+    expect(r.code).toBe(0)
+    const call = checks(r.home).split("\x1f")
+    expect(call.slice(0, 7)).toEqual([
+      "-i",
+      join(r.home, "key"),
+      "-o",
+      "IdentitiesOnly=yes",
+      "-o",
+      "BatchMode=yes",
+      "pride@spark-bravo",
+    ])
+    expect(call[7]).toStartWith('PATH="$HOME/.bun/bin:$PATH"; ')
+  })
+
+  test.each([
+    ["socat found only in its ~/.bun/bin", { bun: ["socat"], tools: ["bwrap"] }],
+    ["a bwrap that warns on stderr and exits 0", { bwrap: { rc: 0, says: "bwrap: a warning" } }],
+  ])("an --ssh probe starts with %s", async (_, machine) => {
+    const r = await spawn(probe.concat(ssh), [], farPath, undefined, undefined, far(machine))
+    expect(r.code).toBe(0)
+    expect(placing(r)).not.toEqual([])
+  })
+
+  const onboarding = `~/.claude.json there lacks "hasCompletedOnboarding": true, so claude would wait on its first-run screens: start claude there once by hand`
+  test.each([
+    ["no ~/.claude.json", { claude: null }, onboarding],
+    ["a ~/.claude.json without the flag", { claude: '{"numStartups": 1}\n' }, onboarding],
+    ["the flag false", { claude: '{"hasCompletedOnboarding": false}\n' }, onboarding],
+    ["no socat", { tools: ["bwrap"] }, "socat is not on PATH, and claude's sandbox needs it"],
+    ["no bwrap", { tools: ["socat"] }, "bwrap is not on PATH, and claude's sandbox needs it"],
+    [
+      "a bwrap AppArmor stops",
+      { bwrap: { rc: 1, says: APPARMOR } },
+      `bwrap cannot open the sandbox's network namespace (${APPARMOR}): Ubuntu 24.04's kernel.apparmor_restrict_unprivileged_userns=1 refuses it unless an AppArmor profile lets bwrap use user namespaces`,
+    ],
+  ])(
+    "an --ssh probe is refused on %s, naming it, before any pane opens",
+    async (_, machine, says) => {
+      const r = await spawn(probe.concat(ssh), [], farPath, undefined, undefined, far(machine))
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(`spawn.sh refuses probe-far: on pride@spark-bravo ${says}`)
+      expect(r.err).toContain(
+        "so its claude would exit in its pane (failIfUnavailable); spawn.sh installs nothing",
+      )
+      expect(placing(r)).toEqual([])
+      expect(existsSync(lw(r.home, "launch", "probe-far.sh"))).toBe(false)
+    },
+  )
+
+  test("an --ssh probe names every missing piece in one refusal", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      farPath,
+      undefined,
+      undefined,
+      far({ claude: null, tools: ["bwrap"] }),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(`${onboarding}; socat is not on PATH`)
+  })
+
+  test("an --ssh probe whose ssh fails is refused with ssh's words", async () => {
+    const r = await spawn(
+      probe.concat(ssh),
+      [],
+      { ...farPath, FAKE_SSH_FAIL: "1" },
+      undefined,
+      undefined,
+      far(),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "spawn.sh refuses probe-far: it cannot read pride@spark-bravo over ssh (ssh: connect to host spark-bravo port 22: Connection refused)",
+    )
+    expect(placing(r)).toEqual([])
+  })
+
+  test("--check reads the other machine too", async () => {
+    const r = await spawn(
+      [...probe, ...ssh, "--check"],
+      [],
+      farPath,
+      undefined,
+      undefined,
+      far({ claude: null }),
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(onboarding)
+  })
+
+  test.each([
+    ["a probe", probe],
+    ["a --sandbox worker", ["worker", "worker-brave-otter", "b.md", "--sandbox"]],
+  ])(
+    "on Linux %s here is refused when bwrap cannot open the sandbox, before any pane opens",
+    async (_, args) => {
+      const r = await spawn(args, [], {
+        FAKE_BWRAP_RC: "1",
+        FAKE_BWRAP_SAYS: APPARMOR,
+        LINUX_GETCONF: "1",
+      })
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(
+        `on this machine bwrap cannot open the sandbox's network namespace (${APPARMOR})`,
+      )
+      expect(placing(r)).toEqual([])
+    },
+  )
+
+  test("on Linux a probe here whose bwrap warns on stderr and exits 0 starts", async () => {
+    const r = await spawn(probe, [], { FAKE_BWRAP_SAYS: "bwrap: a warning", LINUX_GETCONF: "1" })
+    expect(r.code).toBe(0)
   })
 })
 

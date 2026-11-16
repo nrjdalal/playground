@@ -20,6 +20,17 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(await page()).toContain("stays up after its 5/5")
   })
 
+  test("a PR its lead holds keeps no waiter until the lead's resume word, and a ship's freeze is no hold (#2343)", async () => {
+    const [step, done] = (
+      (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    ).split("**Done when**")
+    expect(step).toContain("stop its waiter with `TaskStop`")
+    expect(step).toContain("that lead's resume word")
+    expect(step).toContain("a ship's freeze")
+    expect(done ?? "").toContain("on a PR its lead holds, stopped until the lead's resume word")
+    expect(await page()).toContain("stops its waiter while its lead holds the PR")
+  })
+
   test("a moved canary touching the PR's files gets its touched tests run on a local merge", async () => {
     const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
     expect(last).toContain("on a local merge with `origin/canary`")
@@ -111,7 +122,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(text).not.toContain("/private/tmp")
     expect(text).toContain("`<main>` the main checkout, the absolute path")
     expect(text.split("1. **Recover.**")[1]?.split("\n")[0] ?? "").toContain(
-      "step 8's waiter alone starts from `<main>`",
+      "step 8's waiter starts from `<main>`",
     )
     expect(await page()).toContain("A waiter starts from the main checkout")
   })
@@ -250,7 +261,6 @@ describe("the Review label carries its score's color (PG-157)", () => {
 
 describe("a diff holding a long-lived connection is reviewed by a lifecycle table", () => {
   test("step 4 asks for the table in the PR's Evidence, one row per path, and scores blocking until it is there", async () => {
-    const step = await stepFour()
     const [line = "", done = ""] = await part("Lifecycle table")
     expect(line).toContain("a socket, a pub/sub subscriber, a retrying client")
     expect(line).toContain("in the PR's Evidence")
@@ -271,7 +281,6 @@ describe("a diff holding a long-lived connection is reviewed by a lifecycle tabl
 
 describe("a diff that loosens a guard is reviewed by a refusal table (PG-439)", () => {
   test("step 4 asks for a canary | head table from round 1, holds each canary refusal at the head, and its Done when checks it", async () => {
-    const step = await stepFour()
     const [line = "", done = ""] = await part("Refusal table")
     expect(line).toContain("ask from round 1 for a `canary | head` table of refusal rows")
     expect(line).toContain("`tests/scripts/hooks/fixtures/refused-forms/`")
@@ -345,6 +354,17 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(done ?? "").toContain("each file the PR moves text out of grepped over the whole repo")
     expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
     expect(await page()).toContain("greps the old file's name over the whole repo")
+  })
+
+  test("round 1 reads each hit the body keeps in context and checks its reason (#2411)", async () => {
+    const [step, done] = await part("Round 1 greps")
+    expect(step).toContain(
+      "When the body lists a hit as left as is on purpose, read that line in context and check its reason",
+    )
+    expect(done ?? "").toContain("each hit the body keeps read in context, its reason checked")
+    expect(await page()).toContain(
+      "reads each hit the PR body keeps, in context, checking its reason",
+    )
   })
 })
 

@@ -23,11 +23,12 @@ Its scope as your worker's lead ruled it, the bar you score against, and any har
 
 Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `rm` or `sh -c` wrapper, under the factory's **signal** and **slots** rules.
 
+**hold**: when your worker's lead tells you your PR is held, by its own line in the held list, stop your push waiter (`state.ts wait` or `checks`) by its own handle (`TaskStop`) and open no round while the hold stands, since a push the hold did not expect, from another machine, once opened a round on a held PR; on that lead's resume word, run `state.ts pr` and start the waiter code-review-loop's step 8 names, so a push made during the hold gets its round then. A ship's freeze is no hold: it holds the merge alone, so your waiter stays.
+
 **stop**: an urgent ticket gets the Mac, so on the Builder's stop set your round aside in your scratchpad, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; at the all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
 
 ## Steps
 
 1. Load the playbook skill with the Skill tool, then code-review-loop. Done when both are in your context.
 2. Review the PR round by round as code-review-loop says, every step and its Done when. Done when code-review-loop's waiter ends with `CLOSED` and your clone is still in place for your lead's or Ops' cleanup, which removes worktrees one at a time by literal path.
-3. Remove your `~/.playground/scratch/<your name>/` and `scratchpad/<your name>/` each whole in one move when it is under the tripwire, otherwise leave it for the cleanup, never split (playbook's SESSIONS.md, End).
-   Then tell the session you report to by SendMessage that you are done, with your clone's path, so it closes your pane and the cleanup finds the clone. Done when each folder is gone or left whole, and the send succeeds and names that path.
+3. Tell the session you report to by SendMessage that you are done, with your clone's path, so the cleanup finds the clone; your end moves your `~/.playground/scratch/<your name>/` and `scratchpad/<your name>/` to the trash with it (playbook's SESSIONS.md, End). Done when the send succeeds and names that path.

@@ -142,10 +142,10 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
   `no-raw-spawn` refuses every cmux call but its help or version, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or its pin.
-- The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md), which holds each whole, before you change it, its tests or its registration, and when it refuses a call you did not expect.
+- The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
   the rest are `after-compact`, `after-resume`, `guards`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extension-repo-write`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`,
-  `no-kill-by-name`, `no-live-sign-in`, `no-mac-web-build`, `no-main-checkout`, `no-off-palette-label`, `no-ours-merge`, `no-outside-pr-code`, `no-prompt-stop`, `no-protected-push`, `no-public-leak`, `no-raw-delete`, `no-raw-vercel`, `no-raw-wa`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
+  `no-hidden-program`, `no-kill-by-name`, `no-live-sign-in`, `no-mac-web-build`, `no-main-checkout`, `no-off-palette-label`, `no-ours-merge`, `no-outside-pr-code`, `no-prompt-stop`, `no-protected-push`, `no-public-leak`, `no-raw-delete`, `no-raw-vercel`, `no-raw-wa`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 
@@ -218,9 +218,9 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read,
    and fill the template above; the reviewer still judges everything.
-   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Later, Archive"`) and update each hit: one such grep once found what six rounds had found.
+   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members and update each hit: one such grep once found what six rounds had found.
    As part of that doc-sync pass, write each term as one regex over its spellings (possessive, plural, hyphenated), such as `card('s)? width`, then
-   run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -lE <term>` over the whole repo, code and help text too (a docs-only grep missed `plan.ts`'s), then fix each hit on the old meaning, since one PR took 7 rounds, one doc a round.
+   run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -lE <term>` over the whole repo, code and help text too, then fix each hit on the old meaning, since one PR took 7 rounds, one doc a round; name each kept hit, read in context, by line and reason in Evidence.
    After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
    and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since stale lines from a merge once cost two docs-only rounds; done when no line of the PR's docs describes a meaning those commits changed.
    When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base, since one PR's greps kept to one folder and missed 7 hits, which cost two rounds.

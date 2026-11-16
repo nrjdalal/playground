@@ -33,12 +33,12 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   It counts no live row's hold on a worktree sitting clean, detached, at a commit its base holds (`origin/canary`, or another repo's default branch), while a clone, link or process inside it still holds it.
   It takes only a folder directly under the main checkout's `.claude/worktrees/`, so a tree nested in another goes with its parent, which AGENTS.md's worktree rule prevents.
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
-  Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
+  Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead, and each end moves the session's worktrees and leftovers to the trash.
   A worker leaves its checkers to auto-end's beat and does not close them itself: a checker idle under 10 minutes after its worker ends stays open, and the first beat past 10 closes it.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first, and reassigns or closes a worker on a `Kept` line, whose last PR closed unmerged.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
   A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
-- **Runners** belong to Ops.
+- **Runners** belong to Ops, and report to Ops by `SendMessage`: the dashboard's AI Runners row reads a runner's newest message to Ops or the dispatcher as what it last did.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
@@ -119,8 +119,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   each exited `playground-<worktree>-db` or `-redis` container whose folder is gone, with `docker rm -fv`, dangling Docker images, the build cache, and the shared turbo cache `~/.cache/turbo/playground`'s files over 2 days old;
   every other container (the live dashboard's database, pglaunch's, a Vibeground copy, a running one, any other name) and every volume stays; a container over 1 GB (but the live dashboard's, pglaunch's and a Vibeground copy), an unused volume over 1 GB, the leftovers no rule can judge, and a container whose removal failed are each named as kept;
   one line to `ops/log/nightly-clean.log` with the free disk before and after and each step's measured change, one outbox line to ops naming each removal with its trash id, archive tag, container name or `git worktree remove` and each keep with why, while free disk shows on the System page; it asks no decision),
-  the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
-  its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
+  the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of 3 or more minutes with no check (2 missed beats) starting the count again, told or not, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
+  which after such a gap names the last down reading in place of a minutes count, its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
   a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending,
   or from `unstick.escalateMinutes` (5 by default, ops-session-resume's window) after the machine's last boot or wake when that is later (`sysctl -n kern.boottime kern.waketime`, on Linux `/proc/stat`'s `btime`, its boot alone, since Linux keeps no wake time there), so time the machine spent off or asleep never counts,
   and once it has waited 10 minutes with no relay cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session:

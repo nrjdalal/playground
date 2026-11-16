@@ -12,12 +12,11 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
-import { FREEZE_LAPSE_MS, heldPath } from "../../../../../packages/scripts/src/pr-merge/held"
+import { FREEZE_LAPSE_MS } from "../../../../../packages/scripts/src/pr-merge/held"
 import {
   gateOptions,
   isServerError,
   lockRootOf,
-  queuePath,
   realLockRoot,
   prMerge,
   takeLock,

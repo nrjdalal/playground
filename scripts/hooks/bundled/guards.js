@@ -354,6 +354,7 @@ function markers(words) {
   return out;
 }
 var ownFirst = (cmd, first) => !!first && first === cmd.words.find((w) => w.quoted || !RESERVED.has(w.value));
+var onlyReserved = (cmd) => cmd.words.length > 0 && cmd.words.every((w) => !w.quoted && RESERVED.has(w.value));
 var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
@@ -389,6 +390,30 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
+function caseOpener(cmd) {
+  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted);
+  const before = cmd.words.slice(0, Math.max(at, 0));
+  const word = cmd.words[at + 2];
+  return at !== -1 && (before.length === 0 || onlyReserved({ ...cmd, words: before })) && word?.value === "in" && !word.quoted;
+}
+function casePatterns(all, scoped = false) {
+  const out = new Set;
+  for (let k = 0;k < all.length; k++) {
+    if (!caseOpener(all[k]) && all[k].follows !== ";;")
+      continue;
+    const commands = scoped ? all.slice(k).filter((c) => c.scope === all[k].scope) : all.slice(k);
+    let end = 0;
+    while (commands[end + 1]?.follows === "|")
+      end++;
+    const body = commands[end + 1];
+    const run = commands.slice(0, end + 1);
+    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
+      continue;
+    for (const c of run)
+      out.add(c);
+  }
+  return out;
+}
 function optionValue(word, { flags, values }) {
   if (word.startsWith("--")) {
     const eq = word.indexOf("=");
@@ -499,7 +524,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -517,6 +542,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -743,6 +770,7 @@ var CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -928,6 +956,8 @@ function lex(src, known = {}) {
     for (const c of lx.commands)
       c.cdRedefined = true;
   braced(lx.commands);
+  for (const c of casePatterns(lx.commands, true))
+    c.casePattern = true;
   return { commands: lx.commands, scopes: lx.scopes };
 }
 var BRACED = new Set([
@@ -1312,7 +1342,9 @@ function plainAlternative(group, glued) {
 function subshellPrefix(lead) {
   let at = 0;
   while (at < lead.length && !lead[at].quoted)
-    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+    if (lead[at].value === "time" && lead[at - 1]?.value === "time")
+      break;
+    else if (lead[at].value === "time" || lead[at].value === "nocorrect")
       at++;
     else if (lead[at].value === "repeat" && at + 1 < lead.length)
       at += 2;
@@ -2302,6 +2334,47 @@ function loopClose(commands, k) {
     }
 }
 var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
+function plainProgram(first, env, changed = new Set) {
+  const source = first.source ?? first.value;
+  if (marked(first.value) && !/[$`]/.test(source))
+    return false;
+  let bare = "";
+  let quote = "";
+  for (let i = 0;i < source.length; i++) {
+    const c = source[i];
+    if (quote === "'") {
+      if (c === "'")
+        quote = "";
+    } else if (c === "\\")
+      i++;
+    else if (quote === "" && c === "'")
+      quote = "'";
+    else if (quote === "" && c === "$" && source[i + 1] === "'") {
+      const close = source.indexOf("'", i + 2);
+      if (close < 0 || source.slice(i + 2, close).includes("\\"))
+        return false;
+      i = close;
+    } else if (c === '"')
+      quote = quote === '"' ? "" : '"';
+    else if (c === "`")
+      return false;
+    else if (c === "$") {
+      const named = /^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)(?::[?-][^}$`]*)?\})/.exec(source.slice(i));
+      const name = named?.[1] ?? named?.[2];
+      if (!named || !name || !PLAIN_PREFIXES.has(name) || env.vars.has(name) || changed.has(name))
+        return false;
+      i += named[0].length - 1;
+      if (!source.slice(i + 1).replace(/^"/, "").startsWith("/"))
+        return false;
+    } else if (quote === "") {
+      if (c === "=" && i === 0 || c === "~" && i > 0)
+        return false;
+      bare += c;
+    }
+  }
+  return !/[*?(#^]|\[[^\]]*\]|\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare);
+}
+var PLAIN_PREFIXES = new Set(["HOME", "PLAYGROUND_REPO"]);
 async function examine(cmd, env, visit, builtins) {
   tick();
   orElse(cmd, env);
@@ -2973,6 +3046,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -2991,6 +3077,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;
@@ -10536,7 +10624,6 @@ var pathsSettings = defineSettings({
   }
 });
 // packages/settings/src/rules.ts
-var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
   "clock.ownerZone": {
     default: "UTC",
@@ -14111,6 +14198,7 @@ var READERS2 = new Set([
   "[",
   "cat",
   "cmp",
+  "df",
   "diff",
   "grep",
   "head",
@@ -16015,6 +16103,50 @@ async function refusal(raw, environment = process.env, load5 = currentLoad5()) {
 }
 if (false) {}
 
+// scripts/hooks/no-hidden-program.ts
+var changedIn = (command) => new Set([...PLAIN_PREFIXES].filter((name) => new RegExp(`(?:^|[\\s;&|(){}])${name}\\+=|\\$\\{${name}:{0,2}=`).test(command)));
+var NUMERIC_RANGE = /<\d*-\d*>/;
+var visitOf = (changed) => async (cmd, { first }, at) => {
+  const typed = first?.source ?? first?.value;
+  const primary = parse(cmd).first;
+  if (!first || cmd.casePattern || typed !== (primary?.source ?? primary?.value))
+    return;
+  if (plainProgram(first, at, changed))
+    return;
+  const held = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(typed ?? "")?.[1];
+  const value = held === undefined ? undefined : at.vars.get(held);
+  const rewrite = value && !value.unknown && !marked(value.value) && value.value.trim() ? ` Here, write \`${value.value}\` in place of \`${typed}\`.` : "";
+  const before = cmd.words.slice(0, cmd.words.indexOf(first));
+  const lookup = before.some((w) => !w.quoted && w.value === "command") && before.some((w) => !w.quoted && /^-[pvV]*[vV]/.test(w.value)) ? " To look a program up, name it literally, or test with `type`." : "";
+  return `no-hidden-program hook refuses a program name it cannot read as one plain name: \`${typed}\` is a pattern, a brace list, an escape, a leading = lookup or an expansion, and each guard reads a program by its name. Spell the program's name or path as plain text; a quoted or escaped name, ~, $HOME and $PLAYGROUND_REPO are fine.${rewrite}${lookup}`;
+};
+async function inspect8(raw, environment) {
+  const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
+  if (tool !== "Bash")
+    return;
+  const command = toolInput?.command;
+  if (typeof command !== "string")
+    return;
+  const directory = typeof cwd === "string" ? cwd : undefined;
+  const env = {
+    cwd: directory,
+    files: new Map,
+    known: knownVariables(command, environment, directory),
+    process: environment,
+    vars: new Map
+  };
+  if (NUMERIC_RANGE.test(command))
+    return "no-hidden-program hook refuses a call holding a zsh numeric range (`<->`, `<1-5>`), which zsh globs into a word where the shared reader reads a redirect, so the program that runs may not be the one the line spells. Spell the program's name or path as plain text, and put text holding a literal `<\u2026-\u2026>` in a file and pass the file (`git commit -F <file>`).";
+  return run2(lex(command, env.known), env, visitOf(changedIn(command)));
+}
+async function check12(raw, environment = process.env) {
+  try {
+    return await inspect8(raw, environment);
+  } catch (error) {
+    return `no-hidden-program hook could not read this call (${error}), so it refuses it. Split it into plain commands and run them again.`;
+  }
+}
+
 // scripts/hooks/no-kill-by-name.ts
 var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
@@ -16051,7 +16183,7 @@ var probingStop = (words) => {
   return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
-async function inspect8(raw) {
+async function inspect9(raw) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
@@ -16096,9 +16228,9 @@ async function inspect8(raw) {
   };
   return run2(lexed, { ...fresh(), visitShells: true }, visit);
 }
-async function check12(raw) {
+async function check13(raw) {
   try {
-    return await inspect8(raw);
+    return await inspect9(raw);
   } catch {
     return;
   }
@@ -16344,12 +16476,12 @@ function candidate3(command) {
 function createCall(subject) {
   return CREATE.test(subject) || /save_issue|create_?issue|issues?_?create/i.test(subject);
 }
-async function check13(raw, environment = process.env, now = new Date) {
+async function check14(raw, environment = process.env, now = new Date) {
   const role = await sessionRole(environment, sessionOf(raw));
   if (!role)
     return;
   try {
-    return await eachInput(raw, "no-linear-ticket", (one) => inspect9(one, { ...environment, PLAYGROUND_ROLE: role }, now));
+    return await eachInput(raw, "no-linear-ticket", (one) => inspect10(one, { ...environment, PLAYGROUND_ROLE: role }, now));
   } catch (error) {
     if (!createCall(subjectOf2(raw)))
       return;
@@ -16366,7 +16498,7 @@ function subjectOf2(raw) {
     return raw;
   }
 }
-async function inspect9(raw, environment, now) {
+async function inspect10(raw, environment, now) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -16447,7 +16579,7 @@ async function liveOf(environment) {
   return { hosts, ports };
 }
 var names3 = (text, host) => new RegExp(`(?<![\\w.-])${host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`).test(text);
-async function check14(raw, environment = process.env) {
+async function check15(raw, environment = process.env) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
     if (tool !== "Bash" || typeof toolInput?.command !== "string")
@@ -16736,7 +16868,7 @@ var BARE3 = (command) => command.replace(/[\\'"]/g, "");
 var BUILDS = /build|compose/;
 var candidate4 = (command) => command.includes("$'") || BUILDS.test(BARE3(command));
 var buildCall = (command) => /\bdocker/i.test(BARE3(command)) && BUILDS.test(BARE3(command));
-async function inspect10(raw, environment) {
+async function inspect11(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -16761,9 +16893,9 @@ async function inspect10(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit4);
 }
-async function check15(raw, environment = process.env) {
+async function check16(raw, environment = process.env) {
   try {
-    return await inspect10(raw, environment);
+    return await inspect11(raw, environment);
   } catch (error) {
     let command = raw;
     try {
@@ -16873,7 +17005,7 @@ function mcp3(input) {
   const text = color === undefined || color === "" ? undefined : typeof color === "string" ? { value: color } : { unknown: "a color that is not text", value: "" };
   return judge6(`label_write ${method}`, text, method === "create");
 }
-async function inspect11(raw) {
+async function inspect12(raw) {
   const {
     cwd,
     tool_input: toolInput,
@@ -16897,9 +17029,9 @@ async function inspect11(raw) {
   };
   return run2(lex(command, env.known), env, visit5);
 }
-async function check16(raw) {
+async function check17(raw) {
   try {
-    return await inspect11(raw);
+    return await inspect12(raw);
   } catch {
     return;
   }
@@ -17163,7 +17295,7 @@ var mergeCall = (command) => {
     return true;
   return /\bcommit\b/.test(bare) && /(?:^|[\s{,])-[^\s-]*n/.test(bare);
 };
-async function inspect12(raw, environment) {
+async function inspect13(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -17188,9 +17320,9 @@ async function inspect12(raw, environment) {
   };
   return run2(lex(command, env.known), env, visitor2(0));
 }
-async function check17(raw, environment = process.env) {
+async function check18(raw, environment = process.env) {
   try {
-    return await inspect12(raw, environment);
+    return await inspect13(raw, environment);
   } catch (error) {
     let command = raw;
     try {
@@ -17406,7 +17538,7 @@ function gitAllows(words, folder, lookup, environment) {
   const operands = rest[1] === "--detach" ? rest.slice(2) : rest.slice(1);
   return operands.length === 2 && operands.every(plain);
 }
-async function inspect13(command, directory, environment, lookup, own = []) {
+async function inspect14(command, directory, environment, lookup, own = []) {
   const data = dataDirOf(environment);
   const extensions = join19(lookup.main, "extensions");
   const slot = join19(data, "ops", "run-slot.sh");
@@ -17577,7 +17709,7 @@ async function readMode(sessionId, lookup) {
       return REASONS.outside;
   }
 }
-async function check18(raw, environment = process.env, lookup = live2(environment)) {
+async function check19(raw, environment = process.env, lookup = live2(environment)) {
   let input;
   try {
     input = JSON.parse(raw);
@@ -17624,18 +17756,21 @@ async function check18(raw, environment = process.env, lookup = live2(environmen
     const name = await lookup.name(sessionId);
     const data = dataDirOf(environment);
     const own = name ? [join19(data, "scratch", name), join19(data, "scratchpad", name)] : [];
-    allowed = await inspect13(command, directory, environment, lookup, own);
+    allowed = await inspect14(command, directory, environment, lookup, own);
   } catch {}
   if (allowed)
     return;
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
-  const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
+  const child = Bun.spawn(argv, { stderr: "pipe", stdout: "pipe" });
   const timer = setTimeout(() => child.kill(), 5000);
   try {
-    const text = await new Response(child.stdout).text();
-    return await child.exited === 0 ? text.trim() : undefined;
+    const [text, error] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ]);
+    return await child.exited === 0 ? { error, text: text.trim() } : { error };
   } finally {
     clearTimeout(timer);
   }
@@ -17706,7 +17841,9 @@ function live2(environment) {
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";
-      const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq]);
+      const argv = ["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq];
+      const once = await output(argv);
+      const text = once.text ?? (/HTTP 4\d\d/.test(once.error) ? undefined : (await Bun.sleep(1000).then(() => output(argv))).text);
       let read;
       try {
         read = text ? JSON.parse(text) : undefined;
@@ -17778,7 +17915,7 @@ var visit6 = async (_cmd, { args, name }) => {
   if (atRoot)
     return refuseAtRoot(name, atRoot.value);
 };
-async function inspect14(raw) {
+async function inspect15(raw) {
   const {
     cwd,
     tool_input: toolInput,
@@ -17799,9 +17936,9 @@ async function inspect14(raw) {
   };
   return run2(lex(command, env.known), env, visit6);
 }
-async function check19(raw) {
+async function check20(raw) {
   try {
-    return await inspect14(raw);
+    return await inspect15(raw);
   } catch {
     return;
   }
@@ -17956,7 +18093,7 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check20(raw, environment = process.env) {
+async function check21(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
@@ -17994,9 +18131,19 @@ var DATA = new Set([
 ]);
 var isData = (name) => DATA.has(name) || /^python[\d.]*$/.test(name);
 var scriptStaysText = (cmd, args, browserOnly) => browserOnly.has(cmd) && browserEval(args);
+var BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"]);
+var BROWSER_VALUES = new Set(["--args", "--session"]);
 var browserEval = (args) => {
-  const at = args[0]?.value === "--session" ? 2 : args[0]?.value.startsWith("--session=") ? 1 : 0;
-  return args[at]?.value === "eval";
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "eval")
+      return true;
+    const [name, attached] = value.split(/=(.*)/s);
+    const own = BROWSER_VALUES.has(name) ? attached ?? args[++k]?.value : undefined;
+    if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own)))
+      return false;
+  }
+  return false;
 };
 var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
@@ -18045,7 +18192,7 @@ var RUNS2 = {
 var QUEUES = new Set(["at", "batch"]);
 var unversioned = (name) => name.replace(/(?<=.)@[^@/]*$/, "");
 var ATTACHED2 = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s;
-var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v);
+var recursive3 = (v) => v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[dfiIPRrvWx]*[rR][dfiIPRrvWx]*$/.test(v);
 var spellsRecursive = (v) => v.split(/[\s,{}]+/).some((part) => part.startsWith("-") && recursive3(part));
 var hidden = (word) => unreadable(word) || !!word.glob && /[*?]|\[[^\]]*\]/.test(word.value);
 var prefixOf = (v, option, shortest) => v.length >= shortest && option.startsWith(v);
@@ -18111,7 +18258,7 @@ function judgeGit3(args) {
   if (sub?.value === "worktree" && words[0] === "remove" && force)
     return refuse13("git worktree remove --force", "it deletes a worktree's uncommitted work for good", WORKTREE);
 }
-async function inspect15(raw, environment) {
+async function inspect16(raw, environment) {
   const payload = JSON.parse(raw);
   const { cwd, session_id: session, tool_input: input, tool_name: tool } = payload;
   if (tool !== "Bash")
@@ -18134,6 +18281,8 @@ async function inspect15(raw, environment) {
   const browserOnly = new Set(lexed.commands.every((c) => c.words[0]?.source === "agent-browser") ? lexed.commands : []);
   const line = (text, at) => run2(lex(text, at.known), { ...at, vars: new Map(at.vars) }, visit);
   const visitAs = (reach) => async (cmd, parsed, at) => {
+    if (cmd.casePattern)
+      return;
     const { args, name } = parsed;
     const verdict = await judge(cmd, parsed, at, reach);
     if (verdict)
@@ -18256,9 +18405,9 @@ function commandOf2(raw) {
     return;
   }
 }
-async function check21(raw, environment = process.env) {
+async function check22(raw, environment = process.env) {
   try {
-    return await withDeadline(1e4, async () => inspect15(raw, environment));
+    return await withDeadline(1e4, async () => inspect16(raw, environment));
   } catch (error) {
     if (!DELETES.test(bare(commandOf2(raw) ?? raw)))
       return;
@@ -18523,7 +18672,7 @@ function commandOf3(raw) {
     return;
   }
 }
-async function inspect16(raw, environment) {
+async function inspect17(raw, environment) {
   const {
     cwd,
     tool_input: toolInput,
@@ -18545,9 +18694,9 @@ async function inspect16(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit7, true);
 }
-async function check22(raw, environment = process.env) {
+async function check23(raw, environment = process.env) {
   try {
-    return await inspect16(raw, environment);
+    return await inspect17(raw, environment);
   } catch (error) {
     const command = commandOf3(raw);
     if (!command || !spawnCall(command))
@@ -18881,7 +19030,7 @@ function chain(name, args, shell) {
     args = rest.slice(at + 1);
   }
 }
-async function check23(raw, environment = process.env) {
+async function check24(raw, environment = process.env) {
   const {
     cwd,
     tool_input: toolInput,
@@ -19085,7 +19234,7 @@ async function judgeBash(command, cwd, environment) {
   return run2(lex(command, env.known), env, visit, true);
 }
 var FILE_TOOLS5 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
-async function inspect17(raw, environment) {
+async function inspect18(raw, environment) {
   const {
     cwd,
     tool_input: input,
@@ -19115,9 +19264,9 @@ async function inspect17(raw, environment) {
       return refuse15(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check24(raw, environment = process.env) {
+async function check25(raw, environment = process.env) {
   try {
-    return await eachInput(raw, "no-raw-wa", (one) => inspect17(one, environment));
+    return await eachInput(raw, "no-raw-wa", (one) => inspect18(one, environment));
   } catch {
     return;
   }
@@ -19331,13 +19480,13 @@ function candidate7(command) {
   const bare = command.replace(/[\\'"]/g, "");
   return command.includes("$'") || GH3.test(bare) && MAYBE_COMMENT.test(bare);
 }
-async function check25(raw, environment = process.env, lists = join21(coreDir(), "lists")) {
+async function check26(raw, environment = process.env, lists = join21(coreDir(), "lists")) {
   const owners = await guardList("no-release-comment", "release-owners", isStrings, [], environment, join21(lists, "release-owners.json"));
   if (owners.refusal)
     return commentCall(subjectOf3(raw)) ? owners.refusal : undefined;
   guardedOwners = new Set((owners.list ?? []).map((owner) => owner.toLowerCase()));
   try {
-    return await inspect18(raw, environment);
+    return await inspect19(raw, environment);
   } catch (error) {
     if (!commentCall(subjectOf3(raw)))
       return;
@@ -19354,7 +19503,7 @@ function subjectOf3(raw) {
     return raw;
   }
 }
-async function inspect18(raw, environment) {
+async function inspect19(raw, environment) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -19677,7 +19826,7 @@ var shown3 = (word) => {
   return word.quoted ? `'${value.replaceAll("'", "'\\''")}'` : value;
 };
 var quotedDir = (dir) => /^[\w@%+=:,./~-]+$/.test(dir) ? dir : `'${dir.replaceAll("'", "'\\''")}'`;
-function inspect19(raw, environment, main) {
+function inspect20(raw, environment, main) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash")
     return;
@@ -19756,9 +19905,9 @@ function inspect19(raw, environment, main) {
   line = lexed.commands;
   return run2(lexed, env, visit);
 }
-async function check26(raw, environment = process.env, main = mainCheckout2(resolve15(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
+async function check27(raw, environment = process.env, main = mainCheckout2(resolve15(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
-    return await inspect19(raw, environment, main);
+    return await inspect20(raw, environment, main);
   } catch {
     return;
   }
@@ -19778,30 +19927,31 @@ var GUARDS = [
   { factory: true, name: "no-false-green", run: (raw, env) => check9(raw, env.SHELL ?? "zsh") },
   { factory: true, name: "no-glm-heavy-path", run: (raw, env) => refusal(raw, env) },
   { factory: false, name: "no-headless-login", run: (raw, env) => check10(raw, env) },
-  { factory: true, name: "no-kill-by-name", run: (raw) => check12(raw) },
-  { factory: false, name: "no-linear-ticket", run: (raw, env) => check13(raw, env) },
-  { factory: true, name: "no-live-sign-in", run: (raw, env) => check14(raw, env) },
-  { factory: true, name: "no-mac-web-build", run: (raw, env) => check15(raw, env) },
+  { factory: true, name: "no-hidden-program", run: (raw, env) => check12(raw, env) },
+  { factory: true, name: "no-kill-by-name", run: (raw) => check13(raw) },
+  { factory: false, name: "no-linear-ticket", run: (raw, env) => check14(raw, env) },
+  { factory: true, name: "no-live-sign-in", run: (raw, env) => check15(raw, env) },
+  { factory: true, name: "no-mac-web-build", run: (raw, env) => check16(raw, env) },
   { factory: true, name: "no-main-checkout", run: (raw, env) => check8(raw, env) },
-  { factory: false, name: "no-off-palette-label", run: (raw) => check16(raw) },
-  { factory: true, name: "no-ours-merge", run: (raw, env) => check17(raw, env) },
-  { factory: false, name: "no-outside-pr-code", run: (raw, env) => check18(raw, env) },
+  { factory: false, name: "no-off-palette-label", run: (raw) => check17(raw) },
+  { factory: true, name: "no-ours-merge", run: (raw, env) => check18(raw, env) },
+  { factory: false, name: "no-outside-pr-code", run: (raw, env) => check19(raw, env) },
   { factory: true, name: "no-playground-leak", run: (raw, env) => check6(raw, env) },
   { factory: true, name: "no-prepare-write", run: (raw, env) => check4(raw, env) },
-  { factory: true, name: "no-prompt-stop", run: (raw) => check19(raw) },
+  { factory: true, name: "no-prompt-stop", run: (raw) => check20(raw) },
   { factory: true, name: "no-protected-push", run: (raw, env) => check5(raw, env) },
-  { factory: true, name: "no-public-leak", run: (raw, env) => check20(raw, env) },
-  { factory: false, name: "no-raw-delete", run: (raw, env) => check21(raw, env) },
-  { factory: true, name: "no-raw-spawn", run: (raw, env) => check22(raw, env) },
-  { factory: true, name: "no-raw-vercel", run: (raw, env) => check23(raw, env) },
-  { factory: true, name: "no-raw-wa", run: (raw, env) => check24(raw, env) },
-  { factory: false, name: "no-release-comment", run: (raw, env) => check25(raw, env) },
+  { factory: true, name: "no-public-leak", run: (raw, env) => check21(raw, env) },
+  { factory: false, name: "no-raw-delete", run: (raw, env) => check22(raw, env) },
+  { factory: true, name: "no-raw-spawn", run: (raw, env) => check23(raw, env) },
+  { factory: true, name: "no-raw-vercel", run: (raw, env) => check24(raw, env) },
+  { factory: true, name: "no-raw-wa", run: (raw, env) => check25(raw, env) },
+  { factory: false, name: "no-release-comment", run: (raw, env) => check26(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => check3(raw, env) },
-  { factory: true, name: "no-unslotted-run", run: (raw, env) => check26(raw, env) }
+  { factory: true, name: "no-unslotted-run", run: (raw, env) => check27(raw, env) }
 ];
 var threw = (name, error) => `guards hook: ${name} threw (${error instanceof Error ? error.message : String(error)}), so the call is refused until it runs; report it to your lead.`;
 var late = (names) => `guards hook: ${names.join(", ")} did not answer by its deadline, about ${DEADLINE / 1000} s, inside the runner's 15 s timeout, so the call is refused; split it into smaller calls, or report it to your lead.`;
-async function check27(raw, environment = process.env, guards = GUARDS, wait = DEADLINE) {
+async function check28(raw, environment = process.env, guards = GUARDS, wait = DEADLINE) {
   let factory;
   const verdicts = [];
   const answered = new Set;
@@ -19828,7 +19978,7 @@ async function check27(raw, environment = process.env, guards = GUARDS, wait = D
 }
 async function hook(guards = GUARDS, deadline = DEADLINE) {
   const raw = await input("guards", "guard", deadline);
-  const reason = await check27(raw, process.env, guards, deadline - performance.now());
+  const reason = await check28(raw, process.env, guards, deadline - performance.now());
   if (!reason)
     return 0;
   console.error(reason);
@@ -19838,6 +19988,6 @@ if (import.meta.main)
   process.exit(await hook());
 export {
   GUARDS,
-  check27 as check,
+  check28 as check,
   hook
 };
