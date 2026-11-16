@@ -22,7 +22,7 @@ export type Guard =
   | "no-stash"
   | "no-unslotted-run"
 
-// "process …" folders sit in the home `~` expands to (the process's own), the rest in the test's scratch machine.
+// "process …" folders sit in the home `~` expands to (the process's own), "system …" folders are the machine's own /bin and /usr/bin, which hold the programs a glob there matches, and the rest sit in the test's scratch machine.
 export type Folder =
   | "bare home"
   | "checkout"
@@ -47,6 +47,8 @@ export type Folder =
   | "process tmp"
   | "process worktree"
   | "scratch folder"
+  | "system bin"
+  | "system usr bin"
   | "tmp"
   | "unknown folder"
   | "worktree"

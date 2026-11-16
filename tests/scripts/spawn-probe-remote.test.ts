@@ -104,6 +104,8 @@ describe("--ssh runs the probe's claude on another machine", () => {
     expect(calls[1]?.slice(0, -1)).toEqual([...opts, "-tt", "pride@spark-bravo"])
     const command = calls[1]?.at(-1) ?? ""
     expect(command).toStartWith(`cd ${root} && export TMPDIR=${remote} PLAYGROUND_REPO=`)
+    // ssh's command PATH is the system's alone, so the remote shell adds its own ~/.bun/bin, expanding $HOME there
+    expect(command).toContain(` PATH="$HOME/.bun/bin:$PATH" && (`)
     expect(command).toContain(
       `tk="$(security find-generic-password -s playground-claude-oauth -a ${email} -w)"`,
     )

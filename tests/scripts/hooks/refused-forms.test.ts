@@ -423,7 +423,11 @@ const guardsOf = (
       }),
   },
   "no-kill-by-name": {
-    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
+    folders: {
+      checkout: [CHECKOUT, HOME],
+      home: [HOME, HOME],
+      "system usr bin": ["/usr/bin", HOME],
+    },
     run: (raw) => c.killByName(raw),
   },
   "no-linear-ticket": {
@@ -495,6 +499,7 @@ const guardsOf = (
       "process data folder": [join(homedir(), ".playground"), homedir()],
       "process home": [homedir(), homedir()],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
+      "system bin": ["/bin", homedir()],
     },
     run: (raw) => c.rawDelete(raw),
   },
@@ -504,7 +509,12 @@ const guardsOf = (
     run: (raw) => c.releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
   },
   "no-stash": {
-    folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME], home: [HOME, HOME] },
+    folders: {
+      checkout: [CHECKOUT, HOME],
+      "data folder": [DATA, HOME],
+      home: [HOME, HOME],
+      "system usr bin": ["/usr/bin", HOME],
+    },
     run: (raw) => c.stash(raw, {}),
   },
   "no-unslotted-run": {
