@@ -34,6 +34,7 @@ import { fromFactory, opsLead } from "./role"
 import {
   BRACE,
   braceWords,
+  casePatterns,
   codeFed,
   type Command,
   type Env,
@@ -365,34 +366,6 @@ function lineTextsOf(commands: Command[]): string[] {
   ])
 }
 
-// A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
-function caseOpener(cmd: Command): boolean {
-  const at = cmd.words.findIndex((w) => w.value === "case" && !w.quoted)
-  const before = cmd.words.slice(0, Math.max(at, 0))
-  const word = cmd.words[at + 2]
-  return (
-    at !== -1 &&
-    (before.length === 0 || onlyReserved({ ...cmd, words: before })) &&
-    word?.value === "in" &&
-    !word.quoted
-  )
-}
-
-// The commands of a line that are a case statement's patterns, which the shell matches and never runs: the run of piped alternatives a ) ends, after the opener's `in` or a `;;`, with no redirect of its own
-function casePatterns(commands: Command[]): Set<Command> {
-  const out = new Set<Command>()
-  for (let k = 0; k < commands.length; k++) {
-    if (!caseOpener(commands[k]) && commands[k].follows !== ";;") continue
-    let end = k
-    while (commands[end + 1]?.follows === "|") end++
-    const body = commands[end + 1]
-    const run = commands.slice(k, end + 1)
-    if (body?.follows !== ")" || run.some((c) => c.redirects.length > 0 || c.scope !== body.scope))
-      continue
-    for (const c of run) out.add(c)
-  }
-  return out
-}
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
 const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/

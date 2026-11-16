@@ -175,8 +175,13 @@ describe("docker", () => {
 })
 
 describe("parsePeer", () => {
-  // what `cat /proc/loadavg /proc/meminfo /proc/stat` prints on a 4-core Linux machine, shortened
+  // what `df -kP ~; cat /proc/loadavg /proc/meminfo /proc/stat` prints on a 4-core Linux machine, shortened
+  const DF = [
+    "Filesystem     1024-blocks      Used Available Capacity Mounted on",
+    "/dev/nvme0n1p2  3936872448 299186688 3637685760       8% /",
+  ]
   const OUT = [
+    ...DF,
     "0.01 0.07 0.06 1/794 1112766",
     "MemTotal:       127598704 kB",
     "MemFree:        100000000 kB",
@@ -191,9 +196,10 @@ describe("parsePeer", () => {
     "intr 1 2 3",
   ].join("\n")
 
-  test("reads the load, memory in use as free counts it, swap and one core per cpuN line", () => {
+  test("reads the home's free and total size, the load, memory in use as free counts it, swap and one core per cpuN line", () => {
     expect(parsePeer(OUT)).toEqual({
       cores: 4,
+      disk: { freeBytes: 3637685760 * 1024, totalBytes: 3936872448 * 1024 },
       load: [0.01, 0.07, 0.06],
       memory: { totalBytes: 127598704 * 1024, usedBytes: (127598704 - 123169288) * 1024 },
       swap: { totalBytes: 16777212 * 1024, usedBytes: 0 },
@@ -206,5 +212,11 @@ describe("parsePeer", () => {
     expect(parsePeer(OUT.replace(/^cpu\d+ .*$/gm, ""))).toBeNull()
     expect(parsePeer(OUT.replace("0.01 0.07 0.06", "Permission denied"))).toBeNull()
     expect(parsePeer(OUT.replace(/^Swap.*$/gm, ""))?.swap).toBeNull()
+  })
+
+  test("a df that printed nothing leaves the disk out and keeps every other figure", () => {
+    const withoutDf = parsePeer(OUT.replace(DF.join("\n"), ""))
+    expect(withoutDf?.disk).toBeNull()
+    expect(withoutDf).toMatchObject({ cores: 4, load: [0.01, 0.07, 0.06] })
   })
 })
