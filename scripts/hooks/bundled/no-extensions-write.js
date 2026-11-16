@@ -7394,7 +7394,17 @@ function globOpens(cmd, src, at) {
   }
   return first === next && src[at + 1] !== ")" && !src.slice(at, balanced(src, at, "(", ")")).includes("/") && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
 }
-var subshellPrefix = (lead) => lead.every((w) => !w.quoted) && (lead.length === 1 ? lead[0].value === "time" || lead[0].value === "nocorrect" : lead.length === 2 && lead[0].value === "repeat");
+function subshellPrefix(lead) {
+  let at = 0;
+  while (at < lead.length && !lead[at].quoted)
+    if (lead[at].value === "time" || lead[at].value === "nocorrect")
+      at++;
+    else if (lead[at].value === "repeat" && at + 1 < lead.length)
+      at += 2;
+    else
+      break;
+  return at > 0 && at === lead.length;
+}
 var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
 var HEADERS2 = new Set(["case", "for", "foreach", "function", "select"]);
 function word(lx, opening = false) {

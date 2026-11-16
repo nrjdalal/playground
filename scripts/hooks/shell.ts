@@ -1198,7 +1198,7 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`, `nice $E (r|x)m`), as zsh reads one after a program word; a command of `time`, `nocorrect` or `repeat N` alone and a header's opener keep it a subshell, as does a group holding a `/`, which zsh refuses as a bad pattern, an empty `()` defines a function, and a paren in any other argument stays a subshell
+// Whether a paren after a wrapper opens a zsh glob word as its program word (`command (r|x)m`, `nice $E (r|x)m`), as zsh reads one after a program word; a command of `time`, `nocorrect` and `repeat N` leads alone and a header's opener keep it a subshell, as does a group holding a `/`, which zsh refuses as a bad pattern, an empty `()` defines a function, and a paren in any other argument stays a subshell
 function globOpens(cmd: Command, src: string, at: number): boolean {
   const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
   if (program < 0) return false
@@ -1220,12 +1220,15 @@ function globOpens(cmd: Command, src: string, at: number): boolean {
     !HEADERS.has(cmd.words[0]?.value ?? "")
   )
 }
-// zsh's own prefixes that run a subshell after them: `time (…)`, `nocorrect (…)`, `repeat N (…)`
-const subshellPrefix = (lead: Word[]): boolean =>
-  lead.every((w) => !w.quoted) &&
-  (lead.length === 1
-    ? lead[0].value === "time" || lead[0].value === "nocorrect"
-    : lead.length === 2 && lead[0].value === "repeat")
+// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell: `time (…)`, `nocorrect (…)`, `repeat N (…)`, `time repeat 1 (…)`; `time time (…)` globs in zsh, its second time the external program, and keeps this subshell reading, which judges the commands inside
+function subshellPrefix(lead: Word[]): boolean {
+  let at = 0
+  while (at < lead.length && !lead[at].quoted)
+    if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
+    else if (lead[at].value === "repeat" && at + 1 < lead.length) at += 2
+    else break
+  return at > 0 && at === lead.length
+}
 // Whether a word the reader read none of may expand to no word, before any value is known (mayVanish, read without the env)
 const maySkip = (w: Word): boolean =>
   !!w.source &&
