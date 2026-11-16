@@ -53,7 +53,8 @@ After a drop, the job starts ssh again within 2 seconds, waiting up to a minute 
 
 Sessions on one machine message each other directly, and a session on another machine, such as a probe started there over ssh, sends with `playground send <name> <text>` ([CLI](/docs/cli#message-a-session-on-another-machine-playground-send)).
 The `ops-peer-relay` job carries those lines across: it runs on one machine, holds one ssh connection to each machine `PLAYGROUND_PEERS` names in the Dashboard's `.env`, the same setting the System page reads, with the key `PLAYGROUND_PEER_KEY` names (`~/.ssh/playground_spark` by default), and copies each new line both ways, once each.
-On the other machine it runs a small script from that machine's own Playground checkout, at the same path, so nothing is installed there, and that checkout must be at a release that has the script, or the job says so.
+On the other machine it runs a small script from that machine's own Playground checkout, at the same path, so nothing is installed there, and that checkout must be at a release that has the script, or the job says so; it also says when the other machine stays silent or ends before the script answers.
+Lines carry from the job's first connection on, so a line written before it stays where it was written.
 After a drop it starts ssh again within 2 seconds, waiting up to a minute between tries, tells Ops once, and a line written meanwhile still arrives once, keeping the time it was sent.
 
 ## Restore now

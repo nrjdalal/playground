@@ -191,11 +191,12 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     await until(first.isUp)
     const before = line("before the drop")
     write(here, before)
-    await until(() => rows(there).length === 1)
+    const sent = Buffer.byteLength(`${JSON.stringify(before)}\n`)
+    await until(() => rows(there).length === 1 && cursorOf(here).local === sent)
     first.stop()
     await first.done
     const { local, remote } = cursorOf(here)
-    expect(local).toBe(Buffer.byteLength(`${JSON.stringify(before)}\n`))
+    expect(local).toBe(sent)
 
     const whileDownHere = line("while down, from here")
     const whileDownThere = line("while down, from there", "2026-11-16T19:50:00Z", "probe-a")
@@ -297,12 +298,13 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
       write(here, kept)
       expect(await first.done).toContain(why)
       expect(cursorOf(here).local).toBe(0)
+      const sent = Buffer.byteLength(`${JSON.stringify(kept)}\n`)
       const second = hold(here, agentFar(there))
-      await until(() => rows(there).length === 1)
+      await until(() => rows(there).length === 1 && cursorOf(here).local === sent)
       second.stop()
       await second.done
       expect(rows(there)).toEqual([{ ...kept, relayedAt: expect.any(String) }])
-      expect(cursorOf(here).local).toBe(Buffer.byteLength(`${JSON.stringify(kept)}\n`))
+      expect(cursorOf(here).local).toBe(sent)
     },
   )
 })
