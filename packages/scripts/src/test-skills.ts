@@ -17,7 +17,7 @@ const py = (file: string, ...withs: string[]) => [
 ]
 
 const steps: [string, string[]][] = [
-  ["skill frontmatter", py("test_skill_frontmatter.py")],
+  ["skill frontmatter", ["bun", "run", "test:file", "tests/skill-frontmatter.test.ts"]],
   ["skills-ref validate", ["bun", "packages/scripts/src/skills-ref/cli.ts"]],
   ["links", py("test_links.py")],
   ["setup check", py("test_setup_check.py")],
