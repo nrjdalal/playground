@@ -77,6 +77,7 @@ On Linux, portless's proxy serves the Dashboard under its own certificate, `ca.p
 ## Alpha does not start
 
 - **`Claude Code would stop on its folder trust question in <folder>`** when Alpha or another session starts: Claude Code asks once whether you trust Playground's folder, and you have not said yes yet.
+  The install script says yes for the folder it cloned, so this shows for another folder, or when the install could not write Claude Code's config and said why under Left for you.
   Click **Trust this folder** on Claude Code's card, in first run's Harness step or under Harness in Settings, then start it again.
 - **`it is parked until <time> (usage.accounts parkedUntil). usage.accounts also lists <accounts>`** when a session starts: the one Claude account signed in on this computer is parked, and the accounts named are not signed in here.
   Sign one in with **Add account** in the Dashboard's Settings, then start it again.
