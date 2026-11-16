@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { orphanReapers } from "./run-slot-fake"
+
 // the child `bun test` run's file, whose flagged tests hang and stop the fixtures this file reads evidence about
 const runSlotChildrenFixture = join(import.meta.dir, "run-slot-children-fixture.test.ts")
 
@@ -54,6 +56,23 @@ test("a fixture hung past its test's timeout ends with its file: runner and comm
   ).toBe(true)
   for (const pid of read.aCommand)
     expect(await gone(pid, true), `the hung fixture's command ${pid} still runs`).toBe(true)
+})
+
+// #2350: on Linux under systemd --user an orphan goes to that subreaper, not pid 1, so endChildren's orphan guard read every one as another's and left the fixture's loop running.
+test("an orphan of this run is adopted by one of orphanReapers()", async () => {
+  const p = Bun.spawn(["bash", "-c", "sleep 30 >/dev/null 2>&1 & echo $!"], { stdout: "pipe" })
+  const orphan = Number((await new Response(p.stdout).text()).trim())
+  await p.exited
+  try {
+    const ppid = Number(
+      Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(orphan)])
+        .stdout.toString()
+        .trim(),
+    )
+    expect(orphanReapers().has(ppid)).toBe(true)
+  } finally {
+    process.kill(orphan, "SIGKILL")
+  }
 })
 
 test("a fixture's loop that traps TERM, orphaned by its own stop, ends in the file's afterAll", async () => {

@@ -78,6 +78,19 @@ type RunSlotOptions<
   ops?: string
 }
 const children: { p: { exited: Promise<number>; pid: number }; ops?: string; at: number }[] = []
+// Who adopts an orphan of this run: pid 1, or on Linux the nearest subreaper above it (systemd --user under a desktop session, #2350), which is always one of this process's ancestors.
+export const orphanReapers = (): Set<number> => {
+  const reapers = new Set([1])
+  for (let pid = process.ppid; pid > 1 && !reapers.has(pid);) {
+    reapers.add(pid)
+    pid = Number(
+      Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)])
+        .stdout.toString()
+        .trim(),
+    )
+  }
+  return reapers
+}
 // Starts `argv` recorded, so endChildren can end it; `ops` is the machine's ops folder, whose *.child files name the command's group once the run starts.
 export const runSlot = <
   const In extends Bun.SpawnOptions.Writable = "ignore",
@@ -112,6 +125,7 @@ export const endChildren = async () => {
     }
   }
   const live: { p: { exited: Promise<number> }; pid: number; groups: number[] }[] = []
+  const reapers = orphanReapers()
   for (const child of children.splice(0)) {
     const done = await exited(child.p)
     const groups: number[] = []
@@ -141,7 +155,8 @@ export const endChildren = async () => {
           Date.now() -
           (Number(days) * 86_400 + rest.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000
         const runsIt = started <= written + 1_000
-        if (done ? Number(ppid) === 1 && runsIt : Number(ppid) === child.p.pid) groups.push(command)
+        if (done ? reapers.has(Number(ppid)) && runsIt : Number(ppid) === child.p.pid)
+          groups.push(command)
       }
     if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
   }
