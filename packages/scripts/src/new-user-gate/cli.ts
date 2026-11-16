@@ -1,7 +1,15 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
 // Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 
@@ -271,24 +279,36 @@ const install = async (box: string, home: string, path: string): Promise<string>
 }
 
 // Adds a Claude account through the Dashboard's own Add, on the stand-ins: setup-token is the repo's made-up one and the Keychain a file in the box; null once the file holds the token, else why not. A commit with no PLAYGROUND_PROFILE_URL would send the made-up token to Claude's profile read, so the gate adds none there.
+// The made-up account the gate adds through the Dashboard's Add a Claude account.
+const GATE_ACCOUNT = "gate@example.com"
+
+// Whether Add account kept account's token where this host's security keeps it: the stand-in's Keychain file on a Mac, and on Linux Playground's own security's file under the box's data folder, secrets/keychain/<service>/<account> with its dots encoded too (fileOf in security/cli.ts).
+export const accountKept = (box: string, home: string, account: string): boolean => {
+  const keychain = join(box, "keychain")
+  if (existsSync(keychain) && readFileSync(keychain, "utf8").includes(account)) return true
+  const store = join(home, ".playground", "secrets", "keychain")
+  const file = encodeURIComponent(account).replaceAll(".", "%2E")
+  return (
+    existsSync(store) &&
+    readdirSync(store).some((service) => existsSync(join(store, service, file)))
+  )
+}
+
 const addAccount = (browser: Browser, box: string, home: string): string | null => {
   const setup = join(home, "playground", "api", "hono", "src", "lib", "accounts", "claude-setup.ts")
   if (!existsSync(setup) || !readFileSync(setup, "utf8").includes("PLAYGROUND_PROFILE_URL"))
     return "Alpha waits on a Claude account, which this commit cannot add without a profile read off the Mac (it predates PLAYGROUND_PROFILE_URL)"
   browser.cmd("find", "role", "button", "click", "--name", "Add a Claude account")
-  browser.cmd("find", "label", "Email of the account to add", "fill", "gate@example.com")
+  browser.cmd("find", "label", "Email of the account to add", "fill", GATE_ACCOUNT)
   browser.cmd("find", "role", "button", "click", "--name", "Open sign-in")
   browser.cmd("wait", "3000")
   browser.cmd("find", "label", "Code", "fill", "gate-code")
   browser.cmd("find", "role", "button", "click", "--name", "Add account")
-  const keychain = join(box, "keychain")
-  const kept =
-    Bun.spawnSync([
-      "sh",
-      "-c",
-      `for i in $(seq 1 30); do grep -q gate@example.com "${keychain}" 2>/dev/null && exit 0; sleep 1; done; exit 1`,
-    ]).exitCode === 0
-  return kept ? null : "Add account kept no token in the stand-in Keychain within 30s"
+  for (let i = 0; i < 30; i++) {
+    if (accountKept(box, home, GATE_ACCOUNT)) return null
+    Bun.sleepSync(1000)
+  }
+  return "Add account kept no token where this host's security keeps it within 30s"
 }
 
 // The shot a step ends on, taken once the page settles: a settle or screenshot that fails is named in the shot's place, so the step's verdict stays its own check's.
