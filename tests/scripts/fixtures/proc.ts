@@ -8,10 +8,10 @@ export type Proc = {
   boot?: number
   // the cpu<n> lines in /proc/stat
   cores?: number
-  // the first whole disk's MB (of 1,048,576 bytes) read and written between the two /proc/diskstats reads
-  diskMB?: number
   // the first whole disk's reads and writes completed between the two /proc/diskstats reads
   diskIos?: number
+  // the first whole disk's MB (of 1,048,576 bytes) read and written between the two /proc/diskstats reads
+  diskMB?: number
   // MemAvailable's share of MemTotal, in percent
   free?: number
   // PSI's full avg10 for memory, in percent

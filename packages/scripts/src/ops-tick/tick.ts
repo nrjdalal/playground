@@ -901,9 +901,6 @@ export const escalateMs = async (data: string): Promise<number> => {
   return ruleSettings.get(settings, "unstick.escalateMinutes") * 60_000
 }
 
-// The machine's latest boot or wake from sleep (readUpSince: macOS's sysctl, else Linux's /proc/stat btime), 0 when unread: no beat runs while the machine is off or asleep, so a wait from before it is not the relay's or the sweep's.
-const upSince = (ctx: Context): Promise<number> => readUpSince(ctx.run)
-
 // The hold Ops sets when it slows or pauses its sweep on purpose, a usage squeeze or maintenance: ops/sweep-hold-until holds a future ISO time with its zone, and while one stands the watch keeps quiet and clears its state, so it judges unheld time only and a lift never alerts for the held window; a missing, empty, past or unreadable time leaves the watch on.
 const sweepHold = async (ctx: Context): Promise<boolean> => {
   const held = (
@@ -933,7 +930,7 @@ const queueWaiterLine = async (ctx: Context, to: string, text: string) => {
   )
 }
 
-// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, or from ops-session-resume's escalation window after the machine's last boot or wake (upSince) when that is later, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line into the managers' waiter queue for ops (queueWaiterLine, since the stalled relay or sweep that the stop names delivers every other channel), then one for the dispatcher once the escalation window has passed with Ops yet to pick it up, or at once while Ops itself is down (opsLive); it posts nothing to the Inbox, and resolves an Inbox alert an earlier watch left open on its first cycle. The state in tick/relay-watch.json keeps each stop to one line per route, clearing once the cursor moves or nothing waits.
+// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, or from ops-session-resume's escalation window after the machine's last boot or wake (readUpSince, since no beat runs while it is off or asleep) when that is later, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, the stop goes to the session that can act on it, the way unstick routes a stuck session: one line into the managers' waiter queue for ops (queueWaiterLine, since the stalled relay or sweep that the stop names delivers every other channel), then one for the dispatcher once the escalation window has passed with Ops yet to pick it up, or at once while Ops itself is down (opsLive); it posts nothing to the Inbox, and resolves an Inbox alert an earlier watch left open on its first cycle. The state in tick/relay-watch.json keeps each stop to one line per route, clearing once the cursor moves or nothing waits.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
@@ -965,7 +962,7 @@ const relayWatch = async (ctx: Context) => {
   }
   const relay = await hasRelay(ctx)
   const escalate = await escalateMs(join(ctx.ops, ".."))
-  const from = Math.max(since, (await upSince(ctx)) + escalate)
+  const from = Math.max(since, (await readUpSince(ctx.run)) + escalate)
   if (ctx.now.getTime() - from < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
   const line = relayDown(relay, moved)
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
