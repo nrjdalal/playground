@@ -196,7 +196,7 @@ With no `--runtime`, every start and resume opens in herdr, from any terminal, a
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
 each row read again once its resume finds the session gone and just before its launch, so a session `spawn.sh close` ends while a run goes on stays down,
 each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
-in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run),
+in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, an exec line that does not parse or that it does not run, or a probe's record carrying `--ssh` or `--remote-control`, which restore leaves down),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
 The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's, so the managers are back before the workers, then the rest.
 A skip line takes `kind_of_name` alone and a run line takes `kind_of`, since a full `kind_of` on every skip line (608 on the live log) adds about 20 s.
@@ -245,3 +245,20 @@ It pushes with `git push origin HEAD:<branch>`, since `-u` writes the shut `.git
 It fits a worker with no stack: inside it nothing listens on loopback or reaches a stack, so a tester, which drives one, stays off it, and spawn.sh refuses it for every other role and mode.
 Its roster row records `sandbox=on`, which a resume and `spawn.sh restore` keep, and a start without the flag under the same name clears.
 A start from inside it leaves the `--account` and GLM key check to the new pane's shell, which runs outside the sandbox and stops on a missing item before claude runs.
+
+## --remote-control and --ssh
+
+Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>`, anywhere among its words; spawn.sh refuses each in every other mode, a probe's column and a resume included, naming the flag and the mode, since a session that does real work stays where its gate, guards and restore read it.
+
+- `--remote-control <name>` starts the probe's claude with Claude Code's `--remote-control <name>`, "Start an interactive session with Remote Control enabled (optionally named)" (`claude --help`, 2.1.325); the name is lowercase words joined by hyphens.
+- `--ssh <user@host> --key <file>` runs the probe's claude on that machine, each flag needing the other.
+  Before any gate or pane, spawn.sh refuses a host that is not a plain `user@host` (so none reads as an ssh option) and a key that is not an absolute path to a readable file.
+  The pane opens here, on this machine's herdr, and its launch runs two ssh calls, each `ssh -i <key> -o IdentitiesOnly=yes -o BatchMode=yes`, so a key that fails or an unknown host key stops it rather than prompting:
+  the first pipes a tar of the launch's settings file and skill plugin into a new folder there, the probe's temp folder (on Linux this machine's own one's name, else a new name under `/tmp`), which `mkdir -m 700` refuses to reuse;
+  the second, `ssh -tt`, runs the launch there, `--settings` and `--plugin-dir` pointing into that folder, in the same checkout path, so that machine holds the checkout, claude and the secret store at this one's paths.
+  With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
+- The probe keeps a probe's roster row, kind `probe`, written here.
+  The capacity gate reads this machine alone, since the pane and its ssh run here.
+  `spawn.sh close <name>` closes the pane, and the hangup ends the remote claude.
+  Its resume record carries the flags, so `spawn.sh restore` leaves it down, naming why, and a resume refuses it; start it again instead.
+  The live-name check reads this machine's sessions alone, so it misses a name live on the other one.

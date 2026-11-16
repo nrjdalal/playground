@@ -128,6 +128,14 @@ describe("--ssh runs the probe's claude on another machine", () => {
     )
   })
 
+  test("on Linux the remote folder takes the probe's own temp folder's name, which its settings' sandbox writes", async () => {
+    const r = await spawn(probe.concat(ssh), [], { LINUX_GETCONF: "1" }, undefined, undefined, key)
+    expect(r.code).toBe(0)
+    const own = launchOf(r).match(/^export TMPDIR=(\S+)$/m)?.[1] ?? ""
+    expect(own).toMatch(/\/playground-probe-far\.[A-Za-z0-9]{6}$/)
+    expect(launchOf(r)).toContain(`'mkdir -m 700 ${own} && tar -xf - -C ${own}'`)
+  })
+
   test.each([
     ["an option for a host", ["--ssh", "-oProxyCommand=x@h", "--key", "{home}/key"], "--ssh"],
     ["a host with no user", ["--ssh", "spark-bravo", "--key", "{home}/key"], "--ssh"],
