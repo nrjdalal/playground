@@ -74,12 +74,13 @@ export const groups: Group[] = [
         `cat < =(/bin/rm ${NEVER_MADE})`,
       ],
       [
-        "a plain rm inside a zsh process substitution after another",
-        `diff =(ls) =(/bin/rm ${NEVER_MADE})`,
-      ],
-      [
         "a plain rm inside a zsh process substitution, in a subshell",
         `(cat =(/bin/rm ${NEVER_MADE}))`,
+      ],
+      // refused at canary and kept as a pin
+      [
+        "a plain rm inside a zsh process substitution after another",
+        `diff =(ls) =(/bin/rm ${NEVER_MADE})`,
       ],
       // side-by-side zsh groups that can spell rm, refused at canary and kept as pins
       [
