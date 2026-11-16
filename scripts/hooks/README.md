@@ -628,7 +628,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, `usage.keychainService` and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `github.pollMinutes`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, `usage.keychainService` and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
   and of every ops job's `jobs.<name>`,
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
@@ -1152,7 +1152,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - A reviewer or tester reads an outside author's PR and leaves its code unrun, since its tests, scripts and installs would run that author's code on this machine.
   `scripts/hooks/no-outside-pr-code.ts` puts a session role.ts places as a `reviewer` or `tester` in read mode, its sub-agents included (they carry its session id, `PLAYGROUND_ROLE` and hooks), while its roster row serves an outside PR or names none.
   It finds the row by the session's registry name, the same read role.ts makes, and takes its PRs from the row's `pr` and the pull URLs in its `prs`.
-  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`); a PR it cannot read counts as outside, that failure is kept for an hour, and the reason names the PR and its kept file, whose removal makes the next call read it again.
+  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`).
+  A PR it cannot read counts as outside, and the failure is kept for the **github** rule's poll interval, `github.pollMinutes` (5 minutes by default), read from the policy at each kept failure, so the first call after that interval reads the PR again; the reason names the PR and when it is read again.
   An org repo's PRs are its colleagues', so a checker of those, or of the owner's own PRs, runs them as before.
   A row with no PR, or only an issue's URL, is read mode too, and its reason names the one-line fix its worker or lead runs, `bun scripts/roster.ts set <name> pr=<pull url>`, since a row written before `spawn.sh` required a checker's `--pr <pull url>` can name none.
   The reason names an item reviewer's read too, whose row names no PR by design: `playground ext show <scope> <kind> <key> --rev <sha>` piped into `jq`.

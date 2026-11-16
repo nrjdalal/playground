@@ -5,6 +5,7 @@ export const GUARD_SETTING_KEYS = [
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "github.pollMinutes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
