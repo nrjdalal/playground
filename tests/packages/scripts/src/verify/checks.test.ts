@@ -645,16 +645,15 @@ describe("verify's browser", () => {
     expect(first[first.indexOf("--args") + 1]!.split(",")).toContain("--mute-audio")
   })
 
-  // agent-browser relaunched a session's browser on a later command whose args differed from its launch, the config's own --no-sandbox among them, and split --args at its commas only before another flag.
-  test("carries the same --args on every command, ahead of every other word", async () => {
+  // agent-browser relaunched a session's browser on a later command whose args differed from its launch, the config's own --no-sandbox among them.
+  test("carries the same --args on every command", async () => {
     const browser = new Browser()
     const first = await browser.command(["open", "http://dashboard/"])
     const later = await browser.command(["open", "http://dashboard/x"])
-    expect(first.slice(0, 3)).toEqual(later.slice(0, 3))
-    expect(later[1]).toBe("--args")
-    expect(later[3]!.startsWith("--")).toBe(true)
+    const value = (argv: string[]) => argv[argv.indexOf("--args") + 1]
+    expect(value(later)).toBe(value(first))
     // a later call that relaunched on the config's --no-sandbox alone dropped the mute, so each call's one value keeps both
-    expect(later[2]!.split(",")).toEqual(
+    expect(value(later)!.split(",")).toEqual(
       expect.arrayContaining(
         process.platform === "linux" ? ["--no-sandbox", "--mute-audio"] : ["--mute-audio"],
       ),

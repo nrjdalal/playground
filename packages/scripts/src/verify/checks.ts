@@ -273,14 +273,11 @@ export const spkiOf = (pem: string): string =>
     .update(new X509Certificate(pem).publicKey.export({ format: "der", type: "spki" }))
     .digest("base64")
 
-// The one --args value of a session's first command, since agent-browser keeps only the last --args and it replaces the args of its own config (~/.agent-browser/config.json, which `playground doctor`'s test browser line checks). On Linux it carries --no-sandbox, since AppArmor blocks Chromium's sandbox, and a pin of portless's CA key, since Chromium there did not trust that CA even from ~/.pki/nssdb (ERR_CERT_AUTHORITY_INVALID, measured 16 Nov); a pin trusts that one key and no other certificate error. The mute goes everywhere, since headless Chrome plays sound.
-export const launchArgs = (platform: NodeJS.Platform, caPem: string | null): string =>
+// The one --args value every command of a session carries, since agent-browser keeps only the last --args and it replaces the args of its own config (~/.agent-browser/config.json, which `playground doctor`'s test browser line checks). On Linux it carries --no-sandbox, since AppArmor blocks Chromium's sandbox, and a pin of portless's CA key, since Chromium there did not trust that CA even from ~/.pki/nssdb (ERR_CERT_AUTHORITY_INVALID, measured 16 Nov); the pin ignores certificate errors only on a chain signed by that key. The mute goes everywhere, since headless Chrome plays sound.
+export const launchArgs = (platform: NodeJS.Platform, pem: string | null): string =>
   [
     ...(platform === "linux"
-      ? [
-          "--no-sandbox",
-          ...(caPem ? [`--ignore-certificate-errors-spki-list=${spkiOf(caPem)}`] : []),
-        ]
+      ? ["--no-sandbox", ...(pem ? [`--ignore-certificate-errors-spki-list=${spkiOf(pem)}`] : [])]
       : []),
     "--mute-audio",
   ].join(",")
@@ -306,7 +303,6 @@ export class Browser {
     const first = this.initScripts !== null
     const scripts = first ? [await visitScriptPath(), ...(this.initScripts ?? [])] : []
     this.initScripts = null
-    // agent-browser splits --args at its commas only before another flag, so it leads
     return [
       "agent-browser",
       "--args",
