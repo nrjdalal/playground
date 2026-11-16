@@ -1943,8 +1943,8 @@ describe("the supervisor's owner idle", () => {
       ["bash", "-c", `quiet_for() { echo 999999; }\n${owner}\ntouch "$ASKS/a.json"\nowner_idle`],
       { env: { ...process.env, ASKS: asks }, stdout: "pipe" },
     )
-    const idle = Number((await new Response(proc.stdout).text()).trim())
-    expect(idle).toBeGreaterThanOrEqual(0)
-    expect(idle).toBeLessThan(60)
+    const idle = (await new Response(proc.stdout).text()).trim()
+    expect(idle).toMatch(/^\d+$/)
+    expect(Number(idle)).toBeLessThan(60)
   })
 })
