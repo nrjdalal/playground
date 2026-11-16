@@ -1231,7 +1231,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -3010,7 +3010,34 @@ async function ghApi(args, cmd, env, xargs) {
   const sent = fields.length + inputs.length > 0;
   return { endpoint, fields, inputs, method: method ?? (sent ? "POST" : "GET") };
 }
-function knownVariables(command, environment, cwd) {
+var STARTING_NAME = /^[A-Z_][A-Z0-9_]*$/;
+var SHELL_KEPT = new Set([
+  "CDPATH",
+  "IFS",
+  "LINENO",
+  "MATCH",
+  "MBEGIN",
+  "MEND",
+  "OLDPWD",
+  "OPTARG",
+  "OPTIND",
+  "PATH",
+  "PPID",
+  "RANDOM",
+  "REPLY",
+  "SECONDS",
+  "SHLVL",
+  "ZDOTDIR",
+  "_"
+]);
+var SHELL_KEPT_PREFIX = /^(?:BASH|CLAUDE|ZSH)/;
+var SETS_ANY = /(?<![\w./-])(?:eval|source)(?![\w./-])|(?:^|[;&|(`{\n]|\b(?:do|else|then))\s*\.(?=\s)|\$\{!|\$\{\([^)]*P/;
+var SETTER_EXPANDED = /(?<![\w./-])(?:declare|export|float|getopts|integer|let|local|mapfile|read|readarray|readonly|typeset|unset|vared|zparseopts|(?:print|printf)\s[^;&|\n]*-\w*v|set\s+[-+]A)\s[^;&|\n]*[$`]/;
+function setsOnLine(command, name) {
+  const reads = new RegExp(String.raw`\$(?:${name}(?!\w)|\{${name}(?:\}|:?[-?+]))`, "g");
+  return new RegExp(String.raw`(?<![\w$])${name}(?!\w)`).test(command.replace(reads, ""));
+}
+function knownVariables(command, environment, cwd, fromEnvironment = false) {
   const values = {
     HOME: environment.HOME,
     PWD: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : cwd,
@@ -3020,6 +3047,15 @@ function knownVariables(command, environment, cwd) {
   for (const [name, value] of Object.entries(values)) {
     if (value && !command.includes(`${name}=`))
       known[name] = value;
+  }
+  if (!fromEnvironment || SETS_ANY.test(command) || SETTER_EXPANDED.test(command))
+    return known;
+  for (const [name, value] of Object.entries(environment)) {
+    if (!value || name in values || !STARTING_NAME.test(name))
+      continue;
+    if (SHELL_KEPT.has(name) || SHELL_KEPT_PREFIX.test(name) || setsOnLine(command, name))
+      continue;
+    known[name] = value;
   }
   return known;
 }

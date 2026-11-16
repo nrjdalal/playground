@@ -112,6 +112,16 @@ git(SCRATCH, "init", "-q", "-b", "main", EXT_CLONE)
 git(SCRATCH, "init", "-q", "-b", "feature", EXT_BRANCH)
 for (const clone of [EXT_CLONE, EXT_BRANCH])
   git(clone, "remote", "add", "origin", "https://github.com/quillco/acme-skills.git")
+// The session's starting environment that no-extensions-write and the leak engine read variables from, for #2456's rows: PLAYGROUND_REPO and W a plain clone, ROOT_DIR the extensions root, EXT_DIR an extension clone, and the names never read from it
+const STARTING = {
+  CLAUDE_PROJECT_DIR: OTHER,
+  EXT_DIR: EXT_CLONE,
+  OLDPWD: OTHER,
+  PLAYGROUND_REPO: OTHER,
+  ROOT_DIR: ROOT,
+  W: OTHER,
+  path: OTHER,
+}
 // Another repository and two worktrees it lists, whose .git file and admin gitdir point at each other, for #1653's rows: one outside the main checkout and one under its .claude/worktrees.
 const FOREIGN = join(SCRATCH, "foreign")
 git(SCRATCH, "init", "-q", "-b", "canary", FOREIGN)
@@ -384,6 +394,7 @@ const guardsOf = (
     },
     run: (raw, home) =>
       c.extensionRepoWrite(raw, {
+        ...STARTING,
         HOME: home,
         PLAYGROUND_DATA_DIR: SYNCED,
         PLAYGROUND_ROLE: "worker",
@@ -403,7 +414,7 @@ const guardsOf = (
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
       tmp: ["/tmp", HOME],
     },
-    run: (raw, home) => c.extensionsWrite(raw, { HOME: home }),
+    run: (raw, home) => c.extensionsWrite(raw, { ...STARTING, HOME: home }),
   },
   "no-glm-heavy-path": {
     folders: { "glm org repo": [GLM_ORG_REPO, HOME], "glm repo": [GLM_REPO, HOME] },

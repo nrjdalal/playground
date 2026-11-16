@@ -1808,7 +1808,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
     const env: Env = {
       cwd: directory,
       files: new Map(),
-      known: knownVariables(command, environment, directory),
+      known: knownVariables(command, environment, directory, true),
       process: environment,
       vars: new Map(),
     }

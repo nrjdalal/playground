@@ -2948,7 +2948,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     )
   }
   const named = namings(command)
-  const known = knownVariables(command, environment, directory)
+  // the session's starting environment resolves too, so `cd "${PLAYGROUND_REPO:?}"` and `-C "$W"` are judged by where they land
+  const known = knownVariables(command, environment, directory, true)
   const steered = Object.keys(known).filter((key) => named.counts.has(key))
   if (unknown) for (const key of steered) delete known[key]
   const lexed = lex(command, known)
