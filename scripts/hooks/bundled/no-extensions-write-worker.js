@@ -6693,9 +6693,15 @@ function sshStdin(cmd, call) {
   const kinds = lex(call.remote.map((w) => w.value).join(" ")).commands.map((c) => stdinShell({ ...c, stdin: c.stdin ?? cmd }));
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
 }
-var EXPANDS = /[$`]|(?:^|[\s;&|(){}'"/])(?:eval|source|\.)(?=$|[\s;&|(){}'"])/;
-var DYNAMIC = /(?:^|[\s;&|(){}'"/])(?:bash|bun|dash|deno|env|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|su|sudo|tclsh|watch|zsh)(?=$|[\s;&|(){}'"])/;
-function remoteEnv(env, line, reader = "") {
+var DYNAMIC = /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/;
+function staticLine(line) {
+  const joined = line.replace(/\\\n/g, "");
+  if (marked(joined) || /[$`]/.test(joined))
+    return false;
+  const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
+  return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename2(w.value).toLowerCase()));
+}
+function remoteEnv(env, line, fed = false) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -6715,7 +6721,7 @@ function remoteEnv(env, line, reader = "") {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: marked(line) || EXPANDS.test(line) || DYNAMIC.test(line) || marked(reader) || EXPANDS.test(reader),
+    remoteDots: fed || !staticLine(line),
     vars: new Map
   };
 }
@@ -8557,9 +8563,7 @@ async function examine(cmd, env, visit, builtins) {
   if (!remote && (!cmd.runsStdin || stdinScript(primary)))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const call = remote ? sshCall(primary) : undefined;
-    const line = call?.unread ? "$" : call?.remote.map((w) => w.value).join(" ") ?? "";
-    const at = remote ? remoteEnv(env, known(script), line) : subshell(env);
+    const at = remote ? remoteEnv(env, known(script), true) : subshell(env);
     const verdict = await nested(cmd, env, () => run(lexScript(known(script), at), at, visit, builtins));
     if (verdict)
       return verdict;
@@ -9825,7 +9829,7 @@ var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var TESTS = new Set(["[", "[[", "test"]);
 var PLAIN_NAME = /^[A-Za-z_]\w*$/;
-var EXPANDS2 = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
+var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
 var BINARY = new Set([
   "!=",
   "-a",
@@ -9851,7 +9855,7 @@ var testsAName = (args, expands) => args.some((w, k) => {
     return next !== undefined && !PLAIN_NAME.test(next.source ?? "");
   if (!expands)
     return false;
-  if (EXPANDS2.test(w.source ?? "$"))
+  if (EXPANDS.test(w.source ?? "$"))
     return true;
   if (!marked(w.value))
     return false;
@@ -11837,8 +11841,9 @@ function sshSpared(cmd, files) {
   const text = sshText(cmd, files);
   return text !== undefined && !rooted(lex(text).commands);
 }
+var sshInput = (cmd) => cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"));
 function sshText(cmd, files) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"));
+  const input = sshInput(cmd);
   if (input?.body)
     return input.body.unknown || marked(input.body.value) ? undefined : input.body.value;
   const path = input?.op === "<" ? input.target?.value : undefined;
@@ -12066,7 +12071,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     reachSeen.set(at, names);
     return names;
   };
-  const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : "";
+  const bare = typeof input.command === "string" ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "") : "";
   const dotsOn = /dotglob|globdots|globignore/i.test(bare) || /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare);
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
@@ -12210,7 +12215,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const slotOf = new WeakMap;
   let whole = false;
   let rootLine = false;
-  let sshFed = new Map;
+  let sshFed = new Set;
   const sshOwn = new WeakSet;
   let patterns = new Set;
   let bodies = new WeakMap;
@@ -12237,11 +12242,14 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     if (patterns.has(cmd))
       return;
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", sshFed.get(cmd)));
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true));
       if (verdict)
         return verdict;
     }
     const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed);
+    const fedText = ssh && stdinShell(cmd) ? sshInput(cmd)?.body : undefined;
+    if (fedText && (fedText.unknown || marked(fedText.value)))
+      return refuse("an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally");
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))
         return refuse(`an ssh -o of ${shown(local)}, a value the hook cannot read, which may name a command ssh runs on this machine through a shell; write the option literally`);
@@ -12694,12 +12702,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   };
   const alone = !!only && plain(only) && rest.every((cmd) => plain(cmd) && fedBy(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")));
   rootLine = rooted(lexed.commands, alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
-  sshFed = new Map([...codeFed(lexed.commands)].flatMap(([producer, { consumer }]) => {
-    const call = sshCall(parse3(consumer));
-    if (!call)
-      return [];
-    return [[producer, call.unread ? "$" : call.remote.map((w) => w.value).join(" ")]];
-  }));
+  sshFed = new Set([...codeFed(lexed.commands)].filter(([, { consumer }]) => !!sshCall(parse3(consumer))).map(([producer]) => producer));
   if (evaluatedParts(command).some((part) => touches(part, env)))
     return refuse(EVALUATES_ROOT);
   whole = rootLine || wholeLine(lexed.commands, env);

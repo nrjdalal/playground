@@ -503,11 +503,20 @@ function sshStdin(cmd: Command, call: Ssh): StdinKind | undefined {
 }
 
 // A remote text that may set a glob option by a name the hook cannot read: an expansion, an eval or a source (EXPANDS), or, on the line a glob runs in, a program that starts a shell or an interpreter that can (DYNAMIC)
-const EXPANDS = /[$`]|(?:^|[\s;&|(){}'"/])(?:eval|source|\.)(?=$|[\s;&|(){}'"])/
+// A remote line that may set a glob option by a name the hook cannot read: one holding a `$` or a backquote, or a word, as the lexer reads it and by its basename, naming eval, a source, or a program that starts a shell or an interpreter that can (DYNAMIC); its backslash-newline pairs are joined first, as the shell joins them
 const DYNAMIC =
-  /(?:^|[\s;&|(){}'"/])(?:bash|bun|dash|deno|env|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|su|sudo|tclsh|watch|zsh)(?=$|[\s;&|(){}'"])/
-// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static, or a `reader` (the remote command a fed script runs under) that expands, may match dot-led names (`remoteDots`)
-export function remoteEnv(env: Env, line: string, reader = ""): Env {
+  /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/
+function staticLine(line: string): boolean {
+  const joined = line.replace(/\\\n/g, "")
+  if (marked(joined) || /[$`]/.test(joined)) return false
+  const words = (cmds: Command[]): Word[] =>
+    cmds.flatMap((c) => [...c.words, ...(c.inner ? words(c.inner()) : [])])
+  return !words(lex(joined).commands).some(
+    (w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()),
+  )
+}
+// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static (staticLine), or a script the remote side reads from stdin (`fed`), may match dot-led names (`remoteDots`)
+export function remoteEnv(env: Env, line: string, fed = false): Env {
   const home = env.process.HOME || undefined
   const { PWD: _pwd, ...known } = env.known
   return {
@@ -527,12 +536,7 @@ export function remoteEnv(env: Env, line: string, reader = ""): Env {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots:
-      marked(line) ||
-      EXPANDS.test(line) ||
-      DYNAMIC.test(line) ||
-      marked(reader) ||
-      EXPANDS.test(reader),
+    remoteDots: fed || !staticLine(line),
     vars: new Map(),
   }
 }
@@ -2747,9 +2751,7 @@ export async function examine(
     primary.name === "ssh" && ["root", "shell"].includes(stdinShellOf(cmd, primary) ?? "")
   if (!remote && (!cmd.runsStdin || stdinScript(primary))) return
   for (const script of await scriptStdin(cmd, env)) {
-    const call = remote ? sshCall(primary) : undefined
-    const line = call?.unread ? "$" : (call?.remote.map((w) => w.value).join(" ") ?? "")
-    const at = remote ? remoteEnv(env, known(script), line) : subshell(env)
+    const at = remote ? remoteEnv(env, known(script), true) : subshell(env)
     const verdict = await nested(cmd, env, () =>
       run(lexScript(known(script), at), at, visit, builtins),
     )

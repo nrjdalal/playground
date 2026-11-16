@@ -286,6 +286,42 @@ const extensionsRefused = ({ HOME, ROOT }: Paths): Row[] => [
     "ssh box 'bash -O $1 -s' <<< 'touch ?playground/extensions/y'",
   ],
   [
+    "a remote touch through a ? glob after GLOBIGNORE split by a line continuation",
+    "ssh box 'GLOBIGNOR\\\nE=x; touch ?playground/extensions/y'",
+  ],
+  [
+    "a touch through a ? glob after GLOBIGNORE split by a line continuation in a heredoc",
+    "ssh box bash -s <<'EOF'\nGLOBIGNOR\\\nE=x\ntouch ?playground/extensions/y\nEOF",
+  ],
+  [
+    "a printf-built dotglob piped into a quoted bash in a remote line",
+    `ssh box "printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | b''ash"`,
+  ],
+  [
+    "a printf-built dotglob piped into a backslashed bash in a remote line",
+    `ssh box "printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | \\\\bash"`,
+  ],
+  [
+    "a printf-built dotglob piped into a quoted bash by its path in a remote line",
+    `ssh box "printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | /bin/b''ash"`,
+  ],
+  [
+    "a printf-built dotglob piped to a remote bash",
+    `printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | ssh box bash`,
+  ],
+  [
+    "a printf-built dotglob piped to ssh with no remote command",
+    `printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | ssh box`,
+  ],
+  [
+    "a printf-built dotglob in a here-string fed to a remote bash",
+    `ssh box bash -s <<< "$(printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '')"`,
+  ],
+  [
+    "a printf-built write in a here-string fed to a remote bash",
+    `ssh box bash -s <<< "$(printf 'touch .playground/extensions/y')"`,
+  ],
+  [
     "a fed file the line rewrites from the root before ssh reads it",
     `cat ${ROOT}/policy.json > ${HOME}/peer-check.sh; ssh h bash -s < ${HOME}/peer-check.sh`,
   ],

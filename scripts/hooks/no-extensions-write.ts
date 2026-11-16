@@ -1874,11 +1874,14 @@ function sshSpared(cmd: Command, files: Files | undefined): boolean {
   return text !== undefined && !rooted(lex(text).commands)
 }
 
+// The last redirect onto an ssh's stdin, whose text the remote side reads
+const sshInput = (cmd: Command) =>
+  cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
 // Whether sshText may read a fed file: only on a line of one command, from `from` (the tool's folder on a line that moves no folder) for a relative path
 type Files = { from?: string }
 // The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or, when `files` allows, a file named by a literal path, absolute or from its `from`, read when it is a regular file within 1 MiB; undefined for any other
 function sshText(cmd: Command, files: Files | undefined): string | undefined {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
+  const input = sshInput(cmd)
   if (input?.body)
     return input.body.unknown || marked(input.body.value) ? undefined : input.body.value
   const path = input?.op === "<" ? input.target?.value : undefined
@@ -2152,8 +2155,11 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes or backslashes inside, or zsh's -4) spelled on the line lets a glob match a name led by a dot; a remote line not fully static counts as one too (`remoteDots`, set by remoteEnv)
-  const bare = typeof input.command === "string" ? input.command.replace(/['"\\_]/g, "") : ""
+  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes, backslashes or a backslash-newline inside, or zsh's -4) spelled on the line lets a glob match a name led by a dot; a remote line not fully static counts as one too (`remoteDots`, set by remoteEnv)
+  const bare =
+    typeof input.command === "string"
+      ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
+      : ""
   const dotsOn =
     /dotglob|globdots|globignore/i.test(bare) ||
     /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
@@ -2367,8 +2373,8 @@ async function inspect(
   const slotOf = new WeakMap<Command, Command>()
   let whole = false
   let rootLine = false
-  // the commands whose output an ssh's remote side reads as code, each with that ssh's remote line, and ssh's own words with its remote line taken out, judged as any program's
-  let sshFed = new Map<Command, string>()
+  // the commands whose output an ssh's remote side reads as code, and ssh's own words with its remote line taken out, judged as any program's
+  let sshFed = new Set<Command>()
   const sshOwn = new WeakSet<Command>()
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
@@ -2407,10 +2413,16 @@ async function inspect(
     // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
     // a command ssh's stdin reads as code was typed here, so its text is judged from the remote home too, as its local twin there would be
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", sshFed.get(cmd)))
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true))
       if (verdict) return verdict
     }
     const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed)
+    // a here-string or heredoc the remote shell runs as its script, holding a part the hook cannot read (`<<< "$(printf …)"`), is a script it cannot judge
+    const fedText = ssh && stdinShell(cmd) ? sshInput(cmd)?.body : undefined
+    if (fedText && (fedText.unknown || marked(fedText.value)))
+      return refuse(
+        "an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally",
+      )
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))
         return refuse(
@@ -3176,12 +3188,10 @@ async function inspect(
     lexed.commands,
     alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
   )
-  sshFed = new Map(
-    [...codeFed(lexed.commands)].flatMap(([producer, { consumer }]) => {
-      const call = sshCall(parse(consumer))
-      if (!call) return []
-      return [[producer, call.unread ? "$" : call.remote.map((w) => w.value).join(" ")] as const]
-    }),
+  sshFed = new Set(
+    [...codeFed(lexed.commands)]
+      .filter(([, { consumer }]) => !!sshCall(parse(consumer)))
+      .map(([producer]) => producer),
   )
   if (evaluatedParts(command).some((part) => touches(part, env))) return refuse(EVALUATES_ROOT)
   whole = rootLine || wholeLine(lexed.commands, env)

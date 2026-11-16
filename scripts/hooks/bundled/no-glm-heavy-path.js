@@ -5800,9 +5800,15 @@ function sshStdin(cmd, call) {
   const kinds = lex(call.remote.map((w) => w.value).join(" ")).commands.map((c) => stdinShell({ ...c, stdin: c.stdin ?? cmd }));
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
 }
-var EXPANDS = /[$`]|(?:^|[\s;&|(){}'"/])(?:eval|source|\.)(?=$|[\s;&|(){}'"])/;
-var DYNAMIC = /(?:^|[\s;&|(){}'"/])(?:bash|bun|dash|deno|env|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|su|sudo|tclsh|watch|zsh)(?=$|[\s;&|(){}'"])/;
-function remoteEnv(env, line, reader = "") {
+var DYNAMIC = /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/;
+function staticLine(line) {
+  const joined = line.replace(/\\\n/g, "");
+  if (marked(joined) || /[$`]/.test(joined))
+    return false;
+  const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
+  return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()));
+}
+function remoteEnv(env, line, fed = false) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -5822,7 +5828,7 @@ function remoteEnv(env, line, reader = "") {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: marked(line) || EXPANDS.test(line) || DYNAMIC.test(line) || marked(reader) || EXPANDS.test(reader),
+    remoteDots: fed || !staticLine(line),
     vars: new Map
   };
 }
@@ -7667,9 +7673,7 @@ async function examine(cmd, env, visit, builtins) {
   if (!remote && (!cmd.runsStdin || stdinScript(primary)))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const call = remote ? sshCall(primary) : undefined;
-    const line = call?.unread ? "$" : call?.remote.map((w) => w.value).join(" ") ?? "";
-    const at = remote ? remoteEnv(env, known(script), line) : subshell(env);
+    const at = remote ? remoteEnv(env, known(script), true) : subshell(env);
     const verdict = await nested(cmd, env, () => run2(lexScript(known(script), at), at, visit, builtins));
     if (verdict)
       return verdict;
@@ -8957,7 +8961,7 @@ var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var TESTS = new Set(["[", "[[", "test"]);
 var PLAIN_NAME = /^[A-Za-z_]\w*$/;
-var EXPANDS2 = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
+var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
 var BINARY = new Set([
   "!=",
   "-a",
@@ -8983,7 +8987,7 @@ var testsAName = (args, expands) => args.some((w, k) => {
     return next !== undefined && !PLAIN_NAME.test(next.source ?? "");
   if (!expands)
     return false;
-  if (EXPANDS2.test(w.source ?? "$"))
+  if (EXPANDS.test(w.source ?? "$"))
     return true;
   if (!marked(w.value))
     return false;
