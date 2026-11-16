@@ -111,7 +111,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(text).not.toContain("/private/tmp")
     expect(text).toContain("`<main>` the main checkout, the absolute path")
     expect(text.split("1. **Recover.**")[1]?.split("\n")[0] ?? "").toContain(
-      "step 8's waiter alone starts from `<main>`",
+      "step 8's waiter starts from `<main>`",
     )
     expect(await page()).toContain("A waiter starts from the main checkout")
   })

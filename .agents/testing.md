@@ -115,6 +115,7 @@ A test that lists items keeps to the items it made, filtering the list by their 
 `Bun.spawn` and `spawnSync` find a bare program name the same way, so a stub `gh` the test prepends to `process.env.PATH` is never found (measured): run the code under test in a child bun whose `env.PATH` leads with the stub (`readAfter` in `tests/scripts/hooks/no-outside-pr-code.test.ts`).
 A PATH shim for a bash script under test goes on its PATH before the script starts and acts once the test arms it (the `python3` and `stat` shims in `tests/scripts/ops/run-slot-look-marks.test.ts`), since bash keeps the path of each command it has run, so a shim written once the script has run that command is never called.
 A test of a slow route runs past 12s on a real `Bun.serve`, since Bun.serve's default `idleTimeout` of 10s drops a quiet request at about 12s, not 10 (an 11s run stayed green with the route's `server.timeout(request, 0)` taken out, a 15s one went red with `ECONNRESET` at 12.1s, measured 12 Nov; `tests/api/hono/src/lib/dashboard/restore.test.ts`).
+A test that needs a path outside the repo names a made-up file under its own temp folder (`join(dir, "outside.txt")`), never `/etc/passwd`, since GitGuardian, which checks every pull request, reads that path in a diff as a leaked password and fails its check.
 
 ## End-to-end tests
 
