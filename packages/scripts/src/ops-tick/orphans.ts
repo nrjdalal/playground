@@ -40,10 +40,10 @@ const DEPENDENCY = /(^|\/)node_modules(\/|$)/
 const SCRIPT = /\.(?:c?js|mjs|py|sh|tsx?)$/
 // The innermost test-sandbox-* folder a working folder sits under (sandbox.ts's makeScratch folder), which its run removes as it ends.
 const SANDBOX = /^(.*\/test-sandbox-[^/]+)(?:\/|$)/
-// The session a sandbox's run belongs to: on Linux each session's temp folder, which spawn.sh makes as /tmp/playground-<name>.<random>, holds the sandboxes its runs make; macOS's per-user temp folder names none.
-const SESSION = /\/playground-([^/]+)\.[^./]+\/test-sandbox-[^/]+$/
+// The session a sandbox's run belongs to: on Linux each session's temp folder, which spawn.sh makes as /tmp/playground-<name>.<random>, holds the sandboxes its runs make, a sandbox nested in one of them included, so the outermost such folder names it; macOS's per-user temp folder names none.
+const SESSION = /\/playground-([^/]+)\.[^./]+\/test-sandbox-/
 
-// Pure but for exists: each process whose parent is in reapers and whose command names a script file of this repo inside a worktree folder of worktrees, never one under node_modules, with every worktree its command names gone; a worktree is read by its whole folder name, so foo never stands for foo-2. Else one whose working folder sits under a test sandbox that is gone, so a live run's child is left alone, and whose session, when the sandbox's folder names one, has ended, so a live session's daemon its own test run left is kept too.
+// Pure but for exists: each process whose parent is in reapers and whose command names a script file of this repo inside a worktree folder of worktrees, never one under node_modules, with every worktree its command names gone; a worktree is read by its whole folder name, so foo never stands for foo-2. Else one whose working folder sits under a test sandbox that is gone, so a live run's child is left alone, and whose session, when the sandbox's path names one, has ended, so a live session's daemon its own test run left is kept too.
 export const orphansOf = (
   procs: Proc[],
   worktrees: string,

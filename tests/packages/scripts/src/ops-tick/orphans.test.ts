@@ -187,7 +187,8 @@ describe("orphansOf", () => {
       worktrees,
       existsSync,
       PID1,
-      noneEnded,
+      // the session this test's own temp folder may sit under reads ended, so the sandbox alone decides
+      () => true,
     )
     expect(found.map((o) => o.pid)).toEqual([750, 753])
   })
@@ -205,34 +206,33 @@ describe("orphansOf", () => {
   })
 
   // #2402: the 16 Nov shape: TERM-trapping run-slot loops from an ended reviewer's test sandboxes, under its session temp folder, which still exists
-  test("selects a sandbox orphan under a session's temp folder only once that session's roster row reads ended", () => {
-    const temp = (name: string) => join(root, `playground-${name}.deAm5P`)
-    mkdirSync(temp("42fmjw-reviewer"), { recursive: true })
-    mkdirSync(temp("ab12cd-worker"), { recursive: true })
-    const cwd = (name: string) => join(temp(name), "test-sandbox-Xy12z", "t", "run-slot-1")
-    const at = (pid: number, name: string) =>
-      Object.assign(procsOf(row(pid, 1500, "bash -c while :; do sleep 0.2; done"))[0]!, {
-        cwd: cwd(name),
-      })
+  // the paths are made up and every sandbox reads gone, since this test's own temp folder sits under its session's and would name that session first
+  test("selects a sandbox orphan under a session's temp folder only once that session's roster row reads ended, a nested sandbox's too", () => {
+    const temp = (name: string) => `/tmp/playground-${name}.deAm5P`
+    const direct = (name: string) => `${temp(name)}/test-sandbox-Xy12z`
+    const nested = (name: string) => `${direct(name)}/t/test-sandbox-In1/t`
+    const at = (pid: number, cwd: string) =>
+      Object.assign(procsOf(row(pid, 1500, "bash -c while :; do sleep 0.2; done"))[0]!, { cwd })
     const ended = (name: string) => name === "42fmjw-reviewer"
     const found = orphansOf(
       [
-        at(770, "42fmjw-reviewer"),
+        at(770, `${direct("42fmjw-reviewer")}/t/run-slot-1 (deleted)`),
         // a live session's daemon, double-forked so the user manager adopted it, whose test run removed its sandbox: kept while that session's row reads live
-        at(771, "ab12cd-worker"),
+        at(771, `${direct("ab12cd-worker")}/t/run-slot-1`),
         // a session with no roster row
-        at(772, "zz99zz-probe"),
+        at(772, `${direct("zz99zz-probe")}/t/run-slot-1`),
+        // a test run's own test run, whose sandbox sits in its outer run's t folder: the outer session folder names the session
+        at(773, `${nested("42fmjw-reviewer")}/x`),
+        at(774, `${nested("ab12cd-worker")}/x`),
       ],
       worktrees,
-      existsSync,
+      () => false,
       LINUX,
       ended,
     )
-    expect(found).toEqual([
-      expect.objectContaining({
-        pid: 770,
-        sandbox: join(temp("42fmjw-reviewer"), "test-sandbox-Xy12z"),
-      }),
+    expect(found.map((o) => [o.pid, "sandbox" in o && o.sandbox])).toEqual([
+      [770, direct("42fmjw-reviewer")],
+      [773, `${direct("42fmjw-reviewer")}/t/test-sandbox-In1`],
     ])
   })
 

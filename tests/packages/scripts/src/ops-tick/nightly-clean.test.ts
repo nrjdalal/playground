@@ -1433,7 +1433,8 @@ describe("one night's run against a fixture data folder", () => {
   // #2177: a test's child left with parent pid 1 runs a relative script, so only its working folder, read from lsof for the parent-pid-1 rows alone, names the removed sandbox it ran in
   test("a test's child under a removed sandbox is ended by its pid, its working folder read from lsof for the parent-pid-1 rows alone", async () => {
     const { ctx, deps, ops, runs } = night()
-    const sandbox = join(ops, "T", "test-sandbox-ended1")
+    // a made-up path, since this test's own temp folder sits under its session's, which the roster here never lists
+    const sandbox = "/tmp/orphans-fixture.T/test-sandbox-ended1"
     const listed = [
       "60001     1    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
       "60002 59000    02:00:00 bun --no-env-file scripts/hooks/guards.ts",
@@ -1479,7 +1480,8 @@ describe("one night's run against a fixture data folder", () => {
       "61004  1500  9-00:00:00 /home/u/.local/bin/herdr server",
       `61005  1500  9-00:00:00 bash ${main}/scripts/ops/ops-dashboard/run.sh`,
     ].join("\n")
-    const cwd = (name: string) => `${ops}/playground-${name}.deAm5P/test-sandbox-Ab1/t/run-slot-x`
+    // made-up session folders, outside this test's own temp folder, which sits under its session's
+    const cwd = (name: string) => `/tmp/playground-${name}.qZ9xW1/test-sandbox-Ab1/t/run-slot-x`
     const fake = ctx.run
     const folders: [number, string][] = [
       [process.pid, main],
