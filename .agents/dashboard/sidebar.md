@@ -62,7 +62,7 @@
   The week's adds Renews from usage.json's `rotation` (`renewRows()`): `ends <day>` from an ending plan's `endsAt`, or `ends`, and `renews <day>` from a renewing one's `renewsOn`, or `renews ?`.
   The screen reader hears the same rows as words.
   They sit on the first live dispatcher not on GLM (`usageSlot`, `isGlmModel` in `web/next/src/lib/model-label.ts`; a reply not read yet counts as Claude's).
-  A GLM dispatcher's row shows no usage windows, since the GLM plan's credits are not read.
+  A GLM dispatcher's row shows no usage windows, since the dashboard reads no GLM credits.
   The footer holds the music player alone (`MusicPlayer` in `web/next/src/components/dashboard/music-player.tsx`, the owner's #i959), and the Dashboard's user menu is the last square of the aside toolbar on a wide screen, the sidebar's Menu after it on a phone,
   in view while the rest of the bar waits for the socket's first frame so a dashboard that never connects still opens the sidebar (`MENU_TAB`), and below the owner rung, where no bar draws, the shell's floating Menu stays (`SidebarFloatingTrigger always`; on a phone the Menu joins the bar; `AsideUserMenu` in `components/dashboard/owner-menu.tsx`, after a separator),
   opening its items upward, centred on the square, Auto-hide tab bar first on a wide screen (asks.md); the sidebar has no Documentation link:
