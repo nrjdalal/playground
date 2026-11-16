@@ -1,6 +1,6 @@
 import { type Group, NEVER_MADE, type Row } from "./_shared"
 
-// #2397: a program a package runner runs (npx, npm exec, pnpm exec and dlx, bunx, bun x and bun run, yarn dlx and exec, deno run, corepack, mise exec, volta run), its shell string included, and one a wrapper the shared reader did not list runs (chrt, flock, ionice, setsid, taskset); rows are data, as refused-forms.ts says.
+// #2397: a program a package runner runs (npx, npm exec, pnpm exec and dlx, bunx, bun x, bun run and bun exec, yarn dlx and exec, yarn's exec in a workspace scope, deno run, deno x and a bare deno's npm: package, corepack, mise exec, volta run), its shell string included, and one a wrapper the shared reader did not list runs (chrt, flock, ionice, setsid, taskset); rows are data, as refused-forms.ts says.
 const kills = (): Row[] => [
   ["a kill by name in npx's shell string", "npx -c 'pkill node'"],
   ["a kill by name in npm exec's shell string", "npm exec -c 'pkill node'"],
@@ -54,6 +54,48 @@ const kills = (): Row[] => [
   ["a kill by name corepack's pnpm at a version runs", "corepack pnpm@9 exec pkill node"],
   ["a kill by name npx runs behind env", "env npx pkill node"],
   ["a kill by name npx runs through npx", "npx -y npx pkill node"],
+  ["a kill by name in bun exec's Bun Shell script", "bun exec 'pkill node'"],
+  ["a kill by name in bun exec's script after bun's own option", "bun --silent exec 'pkill node'"],
+  ["a kill by name in bun exec's words, joined as one script", "bun exec pkill node"],
+  [
+    "a portless stop with no port a bare deno runs as an npm package",
+    "deno -A npm:portless proxy stop",
+  ],
+  ["a portless stop with no port deno x runs as an npm package", "deno x npm:portless proxy stop"],
+  ["a kill by name deno x runs after its own option", "deno x -A npm:pkill node"],
+  ["a kill by name in pnpm exec's shell mode, a cluster after -r", "pnpm exec -rc 'pkill node'"],
+  ["a kill by name in pnpm exec's shell mode, a cluster before -r", "pnpm exec -cr 'pkill node'"],
+  ["a kill by name in pnpm exec's shell mode, a cluster after -y", "pnpm exec -yc 'pkill node'"],
+  ["a kill by name in pnpm exec's shell mode, a cluster before -y", "pnpm exec -cy 'pkill node'"],
+  ["a kill by name in pnpm's shell mode, a cluster before exec", "pnpm -rc exec 'pkill node'"],
+  ["a kill by name in pnpm's shell mode, a -y cluster before exec", "pnpm -yc exec 'pkill node'"],
+  ["a kill by name in pnpm exec's shell mode, a cluster under -r", "pnpm -r exec -yc 'pkill node'"],
+  ["a kill by name in pnpm dlx's shell mode, a cluster", "pnpm dlx -yc 'pkill node'"],
+  ["a kill by name in pnpx's shell mode, a cluster", "pnpx -yc 'pkill node'"],
+  [
+    "a kill by name in pnpm exec's shell mode, its value attached",
+    "pnpm exec --shell-mode=true 'pkill node'",
+  ],
+  ["a kill by name in bun exec's script, double quoted", 'bun exec "pkill node"'],
+  ["a kill by name in bun exec's script after bun's filter", "bun --filter app exec 'pkill node'"],
+  [
+    "a kill by name in bun exec's script after its own filter",
+    "bun exec --filter app 'pkill node'",
+  ],
+  ["a kill by name in bun exec's script after bun's folder", "bun --cwd=app exec 'pkill node'"],
+  ["a kill by name yarn exec runs in one workspace", "yarn workspace app exec pkill node"],
+  [
+    "a kill by name yarn exec runs in every workspace",
+    "yarn workspaces foreach -A exec pkill node",
+  ],
+  [
+    "a kill by name yarn exec runs in every workspace at once",
+    "yarn workspaces foreach --all --parallel exec pkill node",
+  ],
+  [
+    "a kill by name yarn exec runs in the workspaces a pattern names",
+    "yarn workspaces foreach -j 2 --include 'a*' exec pkill node",
+  ],
   ["a kill by name ionice runs", "ionice -c 3 pkill node"],
   ["a kill by name taskset runs with a cpu list", "taskset -c 1 pkill node"],
   ["a kill by name taskset runs with a mask", "taskset 1 pkill node"],
@@ -81,10 +123,22 @@ const killControls = (): Row[] => [
   ["volta run running node", "volta run node -v"],
   ["corepack running pnpm install", "corepack pnpm install"],
   ["deno run running a file", "deno run -A main.ts"],
+  ["a bare deno running a file", "deno -A main.ts"],
+  ["deno x running portless get", "deno x -A npm:portless get"],
+  ["bun exec running echo", "bun exec 'echo hi'"],
   ["bun run running a script", "bun run test"],
   ["bun run running a script in a folder", "bun run --cwd web/next build"],
   ["pnpm running a script", "pnpm build"],
   ["pnpm removing a package", "pnpm rm lodash"],
+  ["npm x running tsc", "npm x tsc"],
+  ["pnpm dlx running a starter", "pnpm dlx create-vite app"],
+  ["pnpx running a starter", "pnpx create-vite app"],
+  ["pnpm exec's shell mode in a cluster running a listing", "pnpm exec -rc 'ls -la'"],
+  ["bun x running tsc", "bun x tsc --noEmit"],
+  ["yarn exec running a listing", "yarn exec 'ls -la'"],
+  ["yarn exec running tsc in one workspace", "yarn workspace app exec tsc"],
+  ["yarn exec running tsc in every workspace", "yarn workspaces foreach -A exec tsc"],
+  ["mise x running node after a tool", "mise x node@20 -- node -v"],
   ["flock running echo", "flock /tmp/l echo hi"],
   ["ionice running echo", "ionice -c 3 echo hi"],
   ["taskset running echo", "taskset -c 0 echo hi"],
@@ -101,6 +155,7 @@ const globs = (): Row[] => [
   ["a program npx runs that a glob spells", "npx /usr/bin/pk?ll node"],
   ["a program pnpm exec runs that a variable holds", "pnpm exec $TOOL x"],
   ["a program in npx's shell string that a glob spells", "npx -c '/usr/bin/pk?ll node'"],
+  ["a program in bun exec's script that a glob spells", "bun exec '/usr/bin/pk?ll node'"],
 ]
 
 const globControls = (): Row[] => [
