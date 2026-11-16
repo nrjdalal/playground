@@ -80,7 +80,7 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
-  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --force --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
   return target.worker && target.worker !== to
     ? [
         { text, to },
@@ -523,21 +523,24 @@ export const cleanupLive =
     return lines
   }
 
+// Pure: the roster write that ends a row, its endReason the flag that ended it (the why's first word, a merge's "merged"), so spawn.sh resume brings it back only with --force.
+export const reportArgv = (name: string, text: string): string[] => [
+  process.execPath,
+  join(REPO, "scripts", "roster.ts"),
+  "report",
+  name,
+  text,
+  `endReason=${/^ended automatically: ([a-z][a-z-]*)/.exec(text)?.[1] ?? "merged"}`,
+  "status=ended",
+]
+
 export const liveDeps = (projectsDir: string): EndDeps => ({
   cleanup: cleanupLive(projectsDir),
   close: async (name) => {
     const { code, out } = await runIn(["bash", join(REPO, "scripts", "spawn.sh"), "close", name])
     return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
   },
-  report: async (name, text) =>
-    void (await runIn([
-      process.execPath,
-      join(REPO, "scripts", "roster.ts"),
-      "report",
-      name,
-      text,
-      "status=ended",
-    ])),
+  report: async (name, text) => void (await runIn(reportArgv(name, text))),
   resumeDir: join(dataDir(), "resume"),
   unsaved: async (target) => unsavedLive(target, projectsDir, (await cleanupDeps()) ?? undefined),
 })
