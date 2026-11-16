@@ -11,6 +11,7 @@ import {
 } from "../../../../api/hono/src/lib/dev/proxy"
 import { readPolicyFile } from "../../../settings/src/rendered"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "../ops-herdr/pin"
+import { userSystemctl } from "../user-systemctl"
 import { checkHerdr } from "./herdr-pin"
 import { type Link, linksInto } from "./links"
 
@@ -296,7 +297,7 @@ export const jobLoaded =
   (platform: NodeJS.Platform) =>
   (label: string): boolean =>
     platform === "linux"
-      ? exitsZero(["systemctl", "--user", "is-active", "--quiet", `${label}.service`])
+      ? exitsZero(userSystemctl(["is-active", "--quiet", `${label}.service`]))
       : exitsZero(["launchctl", "print", `gui/${process.getuid!()}/${label}`])
 
 const tools = (): Check[] =>
@@ -309,6 +310,28 @@ const tools = (): Check[] =>
     ((process.env.TEST_SANDBOX_HOME && process.env.INSTALL_OS?.toLowerCase()) as NodeJS.Platform) ||
       process.platform,
   )
+
+// Pure: on Linux, whether linger is on for the user (loginctl's Linger, "yes", "no" or null when it does not read), which keeps the ops jobs systemd runs going with no one logged in; optional, since they run while the user is logged in and the jobs pass turns it on itself.
+export const lingerCheck = (linger: string | null, uid: number): Check =>
+  check(
+    "linger",
+    false,
+    linger === "yes",
+    `loginctl enable-linger ${uid}`,
+    "keeps the ops jobs running with no one logged in",
+  )
+
+const readLinger = (uid: number): string | null => {
+  try {
+    const shown = Bun.spawnSync(
+      ["loginctl", "show-user", String(uid), "--property=Linger", "--value"],
+      { stderr: "ignore" },
+    )
+    return shown.exitCode === 0 ? shown.stdout.toString().trim() : null
+  } catch {
+    return null
+  }
+}
 
 // The jobs launchd, or on Linux systemd, should hold, from the job registry on a machine whose extensions hold policy.json, else from jobs.json.
 export const launchdChecks = async (
@@ -323,7 +346,7 @@ export const launchdChecks = async (
   return jobChecks(existsSync(jobs) ? readFileSync(jobs, "utf8") : null, loaded, platform)
 }
 
-// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, the jobs launchd, or on Linux systemd, should hold, and the tunnel's state while its job is on.
+// The whole doctor: the tools, the data folder, the pinned herdr, the links into the checkout, the release it is at, on macOS portless's proxy service, the jobs launchd, or on Linux systemd, should hold, on Linux linger, and the tunnel's state while its job is on.
 export const doctor = async (repo: string, home: string, data: string): Promise<Check[]> => [
   ...tools(),
   dataCheck(data, existsSync),
@@ -339,6 +362,9 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
     : []),
   ...(process.platform === "darwin" || process.platform === "linux"
     ? await launchdChecks(data, jobLoaded(process.platform))
+    : []),
+  ...(process.platform === "linux"
+    ? [lingerCheck(readLinger(process.getuid!()), process.getuid!())]
     : []),
   ...tunnelOfData(data),
 ]

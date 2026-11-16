@@ -491,11 +491,17 @@ test("the command line's render runs the Dashboard's job from the Dashboard's ch
   expect(rendered.find((job) => job.name === "ops-sweep")!.cwd).toBe(CHECKOUT)
 })
 
-// #2203: on Linux the same render installs each launchd job as a systemd user unit, in a HOME of the test's own whose ~/.config/systemd/user is the folder systemd reads, every systemctl --user call recorded: is-active answers whether a unit runs, enable --now starts one, stop ends one (each refusing while refusals given remain), or ends the render as systemd ends a unit that stops itself (killed).
+// #2203: on Linux the same render installs each launchd job as a systemd user unit, in a HOME of the test's own whose ~/.config/systemd/user is the folder systemd reads, every systemctl --user call recorded: is-active answers whether a unit runs, enable --now starts one, stop ends one (each refusing while refusals given remain), or ends the render as systemd ends a unit that stops itself (killed); loginctl answers the user's linger (on by default) and its enable-linger exits as lingerExit says, each call recorded too.
 const unitRun = async (
   name: string,
   values: Record<string, unknown>,
-  systemd: { active?: string[]; killed?: boolean; refusals?: number } = {},
+  systemd: {
+    active?: string[]
+    killed?: boolean
+    linger?: string
+    lingerExit?: number
+    refusals?: number
+  } = {},
 ) => {
   const data = storeWith(name, values)
   const home = join(scratch, name, "home")
@@ -504,7 +510,13 @@ const unitRun = async (
   const calls: string[][] = []
   const active = new Set(systemd.active ?? [])
   let refusals = systemd.refusals ?? 0
+  const logins: string[][] = []
   const install = {
+    loginctl: async (args: string[]) => {
+      logins.push(args)
+      if (args[0] === "show-user") return { code: 0, out: `${systemd.linger ?? "yes"}\n` }
+      return { code: systemd.lingerExit ?? 0, out: systemd.lingerExit ? "Access denied" : "" }
+    },
     systemctl: async (args: string[]) => {
       calls.push(args)
       const unit = args.at(-1)!
@@ -518,6 +530,7 @@ const unitRun = async (
       if (args[0] === "stop") active.delete(unit)
       return { code: 0, out: "" }
     },
+    uid: 1000,
     units,
   }
   // the logs go into the test's own data folder, which the install makes each log's folder in
@@ -539,7 +552,7 @@ const unitRun = async (
     return { code: exit, err: err.join("\n"), out: out.join("\n") }
   }
   const changes = () => calls.filter((args) => args[0] !== "is-active")
-  return { calls, changes, data, render, units }
+  return { calls, changes, data, logins, render, units }
 }
 
 test("on Linux a launchd job turned on is written as a user unit and enabled once, and one already there and active stays as it stands", async () => {
@@ -635,6 +648,33 @@ test("on Linux an enable systemctl refuses is named on stderr, exits 1, and is t
   ])
 })
 
+// #2314: linger keeps the units running with no one logged in, so a pass that starts one turns it on once, never asking for a password, and names on stderr what it did or what refused it, leaving the pass's exit alone
+test("on Linux a pass that starts a unit turns linger on once and says so, and a refused linger is named without failing the pass", async () => {
+  const two = {
+    "jobs.opsHerdr": { ...tick, heartbeat: "ops-herdr", launchd: "com.playground.ops-herdr" },
+    "jobs.opsTick": tick,
+  }
+  const off = await unitRun("linger-off", two, { linger: "no" })
+  expect(await off.render()).toMatchObject({ code: 0, err: "jobs: turned on linger for user 1000" })
+  expect(off.logins).toEqual([
+    ["show-user", "1000", "--property=Linger", "--value"],
+    ["--no-ask-password", "enable-linger", "1000"],
+  ])
+  const refused = await unitRun(
+    "linger-refused",
+    { "jobs.opsTick": tick },
+    { linger: "no", lingerExit: 1 },
+  )
+  expect(await refused.render()).toMatchObject({
+    code: 0,
+    err: "jobs: refused enable-linger of user 1000, exit 1: Access denied",
+    out: "jobs: rendered jobs.json, +com.playground.ops-tick",
+  })
+  const on = await unitRun("linger-on", { "jobs.opsTick": tick })
+  expect(await on.render()).toMatchObject({ code: 0, err: "" })
+  expect(on.logins).toEqual([["show-user", "1000", "--property=Linger", "--value"]])
+})
+
 // The command line picks systemctl --user on Linux, through a fake systemctl first on PATH that records each call and finds no unit active.
 test("on Linux the command line's render installs through systemctl --user, making the unit and its log's folder", async () => {
   const data = storeWith("cli-linux", { "jobs.opsTick": tick })
@@ -646,6 +686,10 @@ test("on Linux the command line's render installs through systemctl --user, maki
     `#!/bin/sh\necho "$*" >> "${said}"\n[ "$2" = is-active ] && exit 3\nexit 0\n`,
     { mode: 0o755 },
   )
+  // a fake loginctl too, so the real one never turns linger on for whoever runs the suite
+  writeFileSync(join(bin, "loginctl"), `#!/bin/sh\necho "loginctl $*" >> "${said}"\necho yes\n`, {
+    mode: 0o755,
+  })
   const units = join(scratch, "cli-linux", "home", ".config", "systemd", "user")
   const err: string[] = []
   const code = await jobsExit(
@@ -659,6 +703,7 @@ test("on Linux the command line's render installs through systemctl --user, maki
   const lines = readFileSync(said, "utf8").trim().split("\n")
   expect(lines).toContain("--user is-active --quiet com.playground.ops-tick.service")
   expect(lines.filter((line) => !line.startsWith("--user is-active "))).toEqual([
+    `loginctl show-user ${process.getuid!()} --property=Linger --value`,
     "--user enable --now com.playground.ops-tick.service",
   ])
   expect(readFileSync(join(units, "com.playground.ops-tick.service"), "utf8")).toContain(

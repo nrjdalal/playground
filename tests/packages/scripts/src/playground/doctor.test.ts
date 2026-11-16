@@ -18,6 +18,7 @@ import {
   jobChecks,
   launchdChecks,
   line,
+  lingerCheck,
   linkChecks,
   missing,
   proxyCheck,
@@ -270,6 +271,16 @@ describe("jobLoaded", () => {
       "--user is-active --quiet com.x.ops-tick.service\n--user is-active --quiet com.x.ops-off.service\n",
     )
   })
+})
+
+// #2314: the linger row names the command that turns it on for this uid, and stays optional, so doctor still passes while it is off
+test("lingerCheck is ok on yes, and otherwise optional, naming loginctl enable-linger for the uid", () => {
+  expect(lingerCheck("yes", 1000).status).toBe("ok")
+  for (const linger of ["no", null]) {
+    const row = lingerCheck(linger, 1000)
+    expect(row.status).toBe("optional")
+    expect(row.detail).toContain("loginctl enable-linger 1000")
+  }
 })
 
 // A Linux with no systemd: the probe reads the job as down, so doctor prints its MISSING line rather than crashing.
