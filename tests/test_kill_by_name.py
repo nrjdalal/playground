@@ -14,6 +14,8 @@ background task. So no text file in the repo (scripts, tests, skills, docs) may:
   that later reaches kill
 - walk processes with psutil, or call os.kill or process.kill in a file that runs pgrep,
   pidof or `lsof -t` to find pids
+- stop a portless proxy without its port (`portless proxy stop` with no `-p <port>`), which
+  probes 443, 80 and 1355 and stops whichever proxy answers, the live one included
 
 Reading pids (`pgrep -f x` to check something runs) stays allowed. Markdown prose is read
 as prose: a line holding `kill-check: names only` is skipped, and backticks are inline code,
@@ -23,7 +25,8 @@ strings and comments blanked, so a "do" or "done" in them does not end it; its k
 with only comments blanked, so `sh -c "kill $p"` counts. CHANGELOG.md is skipped: it records
 commit subjects. The no-kill-by-name hook, its test and the refused-forms fixture are
 skipped too, since they hold the commands it refuses as data. So is guards.js, the bundle
-that holds the hook beside every other Bash guard.
+that holds the hook beside every other Bash guard, and the vendored portless skill, copied
+byte for byte from upstream.
 
 Run: python3 tests/test_kill_by_name.py
 """
@@ -38,6 +41,8 @@ SKIP = {
     "CHANGELOG.md",
     "scripts/hooks/bundled/guards.js",
     "scripts/hooks/no-kill-by-name.ts",
+    # vendored byte for byte from portless, so its own bare `portless proxy stop` stays as upstream wrote it
+    "skills/zerostarter/portless/SKILL.md",
     "tests/scripts/hooks/no-kill-by-name.test.ts",
 }
 # The refused-forms fixture's folder, one file a source, skipped whole.
@@ -69,6 +74,11 @@ SEARCH_ARGV_MD = re.compile(rf"""['"](?:pgrep|pidof)\b|['"]{LSOF_PIDS}""")
 KILL_CALL = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"`]kill\b""")
 KILL_CALL_MD = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"]kill\b""")
 FENCE = re.compile(r"^\s*(```|~~~)")
+# a portless proxy stop names its port, as -p or --port and a word, or portless probes 443, 80 and 1355 and stops whichever proxy answers
+PROXY_STOP = re.compile(
+    r"""\bportless\s+proxy\s+stop\b(?![^\n]*\s(?:-p|--port)\s+[^\s-])"""
+    r"""|['"]proxy['"],\s*['"]stop['"](?![^\n]*['"](?:-p|--port)['"])"""
+)
 
 
 def blank(text, strings=True):
@@ -175,6 +185,8 @@ def problems_in(rel, text):
             found.append(f"{rel}:{n}: kills whatever holds a port, which may be another stack or the shared proxy")
         elif PIPED.search(line) or substituted.search(line):
             found.append(f"{rel}:{n}: kills the pids a search by name or pattern found")
+        elif PROXY_STOP.search(line):
+            found.append(f"{rel}:{n}: stops a portless proxy with no port, which stops whichever proxy answers on 443, 80 or 1355")
     # strings and comments are blanked to find where a loop ends; only comments, to find a kill, since `sh -c "kill $p"` kills
     blanked = blank(code)
     uncommented = blank(code, strings=False)
@@ -288,6 +300,11 @@ def self_test():
         ("doc.md", "1. `PIDS=$(pgrep -f turbo)`\n2. `for p in $PIDS; do kill $p; done`"),
         ("doc.md", '- `mapfile -t p < <(pgrep -f turbo)`\n- `kill "${p[@]}"`'),
         ("doc.md", "- Stop it:\n\n      for p in $(pgrep -f turbo); do kill $p; done\n"),
+        ("run.sh", "bunx portless proxy stop"),
+        ("run.sh", "portless proxy stop -p"),
+        ("run.sh", "portless proxy stop --port=14155"),
+        ("doc.md", "Stop it with `bunx portless proxy stop`."),
+        ("run.ts", 'run([portless, "proxy", "stop"], { env })'),
     ]
     good = [
         ("run.sh", 'kill -TERM "$PID"'),
@@ -318,6 +335,11 @@ def self_test():
         ("doc.md", "A loop starts `for p in $(pgrep -f x)`.\n\nLater, `do` this, then `kill` that, and `done`."),
         ("doc.md", "1. `PIDS=$(pgrep -f turbo)` lists them.\n2. `kill $CHILD` stops your own."),
         ("run.sh", "for x in $(pgrep -f a); do echo $x; done\nThe killer docs are done."),
+        ("run.sh", "bunx portless proxy stop -p 14155"),
+        ("run.sh", "portless proxy stop --port 14155"),
+        ("doc.md", "Stop it with `bunx portless proxy stop -p <number>`."),
+        ("run.ts", 'run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })'),
+        ("doc.md", "A bare `portless proxy stop` probes 443. <!-- kill-check: names only -->"),
     ]
     wrong = [f"not flagged: {line!r}" for rel, line in bad if not problems_in(rel, line)]
     wrong += [f"flagged: {line!r}" for rel, line in good if problems_in(rel, line)]

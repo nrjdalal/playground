@@ -46,7 +46,7 @@ Your sessions run in herdr, which `playground` starts, and `playground view` ope
 
 - **`Port <number> is already in use`** in the log: another program holds the port every local Playground address goes through.
   Run `lsof -ti tcp:<number>`, with the number from that line, to see which process holds it.
-  If it is an older Playground proxy, stop it with `bunx portless proxy stop`; that stops every Playground stack on this Mac until it starts again.
+  If it is an older Playground proxy, stop it with `bunx portless proxy stop -p <number>`, the same number; that stops every Playground stack on this Mac until it starts again.
 - **`portless's proxy is not running on port 443, which needs your Mac's password, so it runs on 1355`** when you run `bun run dev`: this Mac has no Playground proxy on 443 yet, so the Dashboard's address carries `:1355` for now.
   In Settings' **Things to fix**, **Set up the web address** sets it up on 443 and asks for your Mac's password in its own window; the Dashboard keeps running on 1355 and moves to 443 the next time it starts.
   When the line goes on to say your browser warns that the certificate is not trusted, the 1355 address uses a certificate your Mac does not trust yet: accept the warning once on the Dashboard's address and once on its API's (`api.` in front), then click **Set up the web address**; the next start on 443 shows no warning.
