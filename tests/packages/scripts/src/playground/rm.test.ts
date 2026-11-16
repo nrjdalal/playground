@@ -1370,7 +1370,7 @@ test.each([
 )
 
 // #2344: the live Dashboard's checkout sits clean at origin/main's head, which an origin branch holds, so only its branch keeps it, with the Dashboard stopped (no process, no roster row) too
-test("--worktree refuses the worktree on the live.branch branch, with the Dashboard stopped and under --discard, and refuses every worktree while the setting cannot be read", async () => {
+test("--worktree refuses the worktree on the live.branch branch, with the Dashboard stopped and under --discard, and refuses every worktree while the setting cannot be read, auto-end's removePath included", async () => {
   const { deps, main, root } = ownPushed()
   const desk = join(main, ".claude", "worktrees", "desk")
   git(main, "worktree", "add", "-q", "-b", "live/dashboard", desk, "canary")
@@ -1399,7 +1399,19 @@ test("--worktree refuses the worktree on the live.branch branch, with the Dashbo
     ],
     out: [],
   })
-  expect(existsSync(join(main, ".claude", "worktrees", "pg-1"))).toBe(true)
+  const pg1 = join(main, ".claude", "worktrees", "pg-1")
+  expect(
+    await removePath(
+      { discard: true, path: pg1, reason: "ended", worktree: true },
+      "abc123-worker",
+      broken,
+      () => {},
+    ),
+  ).toEqual({
+    line: "the live.branch setting cannot be read (policy.json does not parse), so no worktree is removed",
+    ok: false,
+  })
+  expect(existsSync(pg1)).toBe(true)
   expect(root).not.toBe(main)
 })
 
