@@ -42,10 +42,15 @@ Then, in a separate foreground call, wait for it and check it:
 # Resolve this worktree's URLs (branch-prefixed); the proxy needs a moment, so retry
 for i in $(seq 1 60); do WEB=$(bunx portless get playground 2>/dev/null); [ -n "$WEB" ] && break; sleep 1; done
 API=$(bunx portless get api.playground)
-curl -sf --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
-curl -sS "$API/api/health"                        # {"data":{"db":"ok","dashboard":"fixture","message":"ok",...}}
-curl -sS -o /dev/null -w "%{http_code}" "$WEB/"   # 200
+# portless's CA from the folder portlessDir() names, as probe.ts reads it, since curl on Linux trusts it from no store
+PDIR=$(bun --no-env-file -e 'console.log((await import("./api/hono/src/lib/dev/proxy.ts")).portlessDir())')
+CA=(); [ -f "$PDIR/ca.pem" ] && CA=(--cacert "$PDIR/ca.pem")
+curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
+curl -sS "${CA[@]}" "$API/api/health"                        # {"data":{"db":"ok","dashboard":"fixture","message":"ok",...}}
+curl -sS "${CA[@]}" -o /dev/null -w "%{http_code}" "$WEB/"   # 200
 ```
+
+`CA` stays empty when that folder holds no `ca.pem`; on Linux, a health curl without it fails with curl's error 60, a self-signed chain (measured on the 1355 proxy, 16 Nov). Pass `"${CA[@]}"` to every curl below that reaches an https stack.
 
 Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `200`. To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `bunx portless list` shows every active route.
 
@@ -67,7 +72,8 @@ Then start it again as in **Start**: `bun run dev --ui stream > /tmp/playground-
 
 ```bash
 API=$(bunx portless get api.playground)
-curl -sf --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
+# PDIR and CA as in Start
+curl -sf "${CA[@]}" --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
 ```
 
 This worktree's apps re-register with the proxy on restart. In a linked worktree, every start but a `--serve` one renames the web's dev cache, `web/next/.next/dev`, to `dev-aside-<time>` beside it (`setNextDevAside()` in `api/hono/src/lib/dev/launch.ts`, printing `dev: the web's dev cache moved aside to <path>`), so the first page compiles cold. A restart over the kept cache reloaded every page every few seconds and never drew the sidebar's groups. `bun run clean`, `next build`'s clean step or the worktree's removal takes the asides, and a rename that fails refuses the start. The main checkout and a person's own clone keep their cache. Done when the previously-NOT_FOUND route responds.
