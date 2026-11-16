@@ -15905,11 +15905,28 @@ var BY_NAME = new Set(["killall", "pkill"]);
 var KILLS = ["fuser", "kill", "killall", "pkill"];
 var SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"]);
 var READS_ONLY2 = new Set(["--help", "--version", "-V", "-h"]);
+var RUNNERS5 = new Set(["bunx", "npx", "pnpx"]);
 var WAY_OUT = "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file).";
 var refuse9 = (what, beside = "") => `no-kill-by-name hook refuses ${what}: a name, pattern or port matches the live dashboard and every worker's stack, not only your own process. ${WAY_OUT}${beside}`;
 var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
+};
+var portlessArgs = (name, args) => {
+  if (name === "portless")
+    return args;
+  const from = RUNNERS5.has(name) ? 0 : name === "bun" && args[0]?.value === "x" ? 1 : -1;
+  if (from < 0)
+    return;
+  const at = args.findIndex((a, i) => i >= from && !a.value.startsWith("-"));
+  return at >= 0 && program(args[at].value) === "portless" ? args.slice(at + 1) : undefined;
+};
+var probingStop = (args) => {
+  if (args[0]?.value !== "proxy" || args[1]?.value !== "stop")
+    return false;
+  const values = args.map((a) => a.value);
+  const flag = values.includes("--port") ? values.indexOf("--port") : values.indexOf("-p");
+  return flag < 0 || !/^\d+$/.test(values[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
 async function inspect8(raw) {
@@ -15918,7 +15935,8 @@ async function inspect8(raw) {
     return;
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "");
-  if (!/\b(?:fuser|kill|killall|pkill)\b/.test(bare) && !/(?:\$\{?\w+\}?){2,}/.test(bare) && !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) && !globSpells(bare, KILLS))
+  const namesKill = /\b(?:fuser|kill|killall|pkill)\b/.test(bare) || /(?:\$\{?\w+\}?){2,}/.test(bare) || /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) || globSpells(bare, KILLS);
+  if (!namesKill && !/\bportless\b/.test(bare))
     return;
   const lexed = lex(toolInput.command);
   const fresh = () => ({ files: new Map, known: {}, process: {}, vars: new Map });
@@ -15940,8 +15958,11 @@ async function inspect8(raw) {
       return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
     }
     const { args, first, name, xargs } = parsed;
-    if (parsed.unread)
+    if (parsed.unread && namesKill)
       return refuse9("a command built from a value it cannot read, in a call that names a kill", " Write the program and its words out in the call.");
+    const stop = portlessArgs(name, args);
+    if (stop && probingStop(stop))
+      return refuse9("a portless proxy stop with no port", " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with -p <its port>.");
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args))
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
@@ -17858,7 +17879,7 @@ var STARTERS = new Set(["screen", "tmux"]);
 var RM = new Set(["grm", "rm"]);
 var DEL = new Set(["del", "del-cli"]);
 var DELETER_PROGRAMS = new Set([...DEL, "rimraf"]);
-var RUNNERS5 = new Map([
+var RUNNERS6 = new Map([
   ["bun", ["x"]],
   ["bunx", []],
   ["npm", ["exec", "x"]],
@@ -17883,7 +17904,7 @@ var JUDGED = new Set([
   "rsync"
 ]);
 function packageOf(name, args) {
-  const subs = RUNNERS5.get(name);
+  const subs = RUNNERS6.get(name);
   if (!subs)
     return;
   const words = args.filter((a) => !a.value.startsWith("-"));
@@ -18643,9 +18664,9 @@ function judgeApi2(rest, flags, built) {
 }
 var STEP_FILE = /(?:^|\/)packages\/scripts\/src\/ship\/yard\.ts$/;
 var STEP_HELP = new Set(["--help", "-h"]);
-var RUNNERS6 = new Set(["npm", "pnpm", "yarn"]);
+var RUNNERS7 = new Set(["npm", "pnpm", "yarn"]);
 function yardStep(name, args, shell) {
-  if (RUNNERS6.has(name))
+  if (RUNNERS7.has(name))
     return args.some((a) => a.value === "ship:yard");
   if (name !== "bun")
     return false;
@@ -19365,7 +19386,7 @@ Fix the message by the gh-commit skill's Commit step, then commit again.`;
 }
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
-var RUNNERS7 = new Set(["bunx", "npx"]);
+var RUNNERS8 = new Set(["bunx", "npx"]);
 var TEST_TAKES = new Set([
   "--conditions",
   "--console-depth",
@@ -19459,7 +19480,7 @@ function heavy2(name, args, env) {
       what: `turbo run ${task}`
     } : undefined;
   }
-  if (RUNNERS7.has(name)) {
+  if (RUNNERS8.has(name)) {
     const words = args.filter((a, k) => !a.value.startsWith("-") && !RUNNER_TAKES.has(args[k - 1]?.value ?? ""));
     const values = words.map((w) => w.value);
     const base = name === "bunx" ? bunCall([X, ...args], env).chained : env.cwd;

@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). A kill given a literal pid, $! or a pid file's contents passes, as does every search alone and `ps -p <pid>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port too, which stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
 
 import { input } from "./input"
 import { fromFactory } from "./role"
@@ -24,6 +24,8 @@ const BY_NAME = new Set(["killall", "pkill"])
 const KILLS = ["fuser", "kill", "killall", "pkill"]
 const SEARCHES = new Set(["fuser", "lsof", "pgrep", "pidof", "ps"])
 const READS_ONLY = new Set(["--help", "--version", "-V", "-h"])
+// The programs that run a package's binary by its first word that is no flag: bunx portless, npx -y portless
+const RUNNERS = new Set(["bunx", "npx", "pnpx"])
 
 const WAY_OUT =
   "Stop a background task with TaskStop, a dev stack with bun run dev:stop in its worktree, and a process you spawned with kill <pid> on the pid you hold ($! or its pid file)."
@@ -40,6 +42,23 @@ const readsOnly = (cmd: Command, first: Word | undefined, args: Word[]) => {
     ) ||
     (args.length > 0 && args.every((a) => READS_ONLY.has(a.value)))
   )
+}
+
+// The words after portless when the command runs it: by its name or a path to it, a runner's first word that is no flag, or bun x's
+const portlessArgs = (name: string, args: Word[]): Word[] | undefined => {
+  if (name === "portless") return args
+  const from = RUNNERS.has(name) ? 0 : name === "bun" && args[0]?.value === "x" ? 1 : -1
+  if (from < 0) return undefined
+  const at = args.findIndex((a, i) => i >= from && !a.value.startsWith("-"))
+  return at >= 0 && program(args[at]!.value) === "portless" ? args.slice(at + 1) : undefined
+}
+
+// portless 0.15.11 reads a stop's port as cli.js:7048 does, the word after the first --port, else after the first -p; with none it probes 443, 80 and 1355 and stops whichever proxy answers (cli.js:2121)
+const probingStop = (args: Word[]) => {
+  if (args[0]?.value !== "proxy" || args[1]?.value !== "stop") return false
+  const values = args.map((a) => a.value)
+  const flag = values.includes("--port") ? values.indexOf("--port") : values.indexOf("-p")
+  return flag < 0 || !/^\d+$/.test(values[flag + 1] ?? "")
 }
 
 // ps given a pid (-p, -q, --pid, --quick-pid) checks that one process, which is the way out's own liveness check
@@ -62,13 +81,12 @@ async function inspect(raw: string) {
         .join(" ")
     : ""
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
-  if (
-    !/\b(?:fuser|kill|killall|pkill)\b/.test(bare) &&
-    !/(?:\$\{?\w+\}?){2,}/.test(bare) &&
-    !/\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) &&
-    !globSpells(bare, KILLS)
-  )
-    return
+  const namesKill =
+    /\b(?:fuser|kill|killall|pkill)\b/.test(bare) ||
+    /(?:\$\{?\w+\}?){2,}/.test(bare) ||
+    /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) ||
+    globSpells(bare, KILLS)
+  if (!namesKill && !/\bportless\b/.test(bare)) return
   const lexed = lex(toolInput.command)
   const fresh = () => ({ files: new Map(), known: {}, process: {}, vars: new Map() })
   // the whole call is read for a search first, since a loop's `done < <(pgrep …)` is read after the kill it feeds
@@ -98,10 +116,16 @@ async function inspect(raw: string) {
     }
     const { args, first, name, xargs } = parsed
     // a command the shell builds from a value the reader cannot read may be any kill, in a call whose text names one
-    if (parsed.unread)
+    if (parsed.unread && namesKill)
       return refuse(
         "a command built from a value it cannot read, in a call that names a kill",
         " Write the program and its words out in the call.",
+      )
+    const stop = portlessArgs(name, args)
+    if (stop && probingStop(stop))
+      return refuse(
+        "a portless proxy stop with no port",
+        " portless then probes 443, 80 and 1355 and stops whichever proxy answers, the live one every worktree routes through: stop your own proxy with -p <its port>.",
       )
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
