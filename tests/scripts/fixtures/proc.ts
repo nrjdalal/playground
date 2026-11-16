@@ -97,7 +97,7 @@ export const laterText = (
   vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + step * swapins}\npswpout 116968\n`,
 })
 
-// A folder of /proc text for `proc`, with each name in `omit` left out, and its sys folder standing for /sys's block links (omit "sys" to leave it out). `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat, then diskstats) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
+// A folder of /proc text for `proc`, with each name in `omit` left out, and its sys folder standing for /sys's block links (omit "sys" to leave it out). `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat with diskstats) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
 export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] = []): string => {
   const dir = mkdtempSync(join(tmpdir(), "proc-"))
   const write = (path: string, text: string) => {

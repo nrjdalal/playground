@@ -61,7 +61,7 @@ describe("on Linux the lanes read /proc", () => {
   })
 })
 
-// The lanes line's disk0 on Linux: the first whole disk in /proc/diskstats by /sys/class/block (no partition file, not under devices/virtual), its reads and writes over the gauges' third one-second wait; the fixture lists loop0 and nvme0n1p1 ahead of nvme0n1, each busier, so taking either logs other figures.
+// The lanes line's disk0 on Linux: the first whole disk in /proc/diskstats by /sys/class/block (no partition file, not under devices/virtual), its reads and writes over the swap-ins' one-second wait, so the fixture moves diskstats in with vmstat; it lists loop0 and nvme0n1p1 ahead of nvme0n1, each busier, so taking either logs other figures.
 describe("on Linux the lanes line logs the first whole disk's rate from /proc/diskstats", () => {
   const lanes = async (omit: string[] = []) => {
     const m = machine({
@@ -69,8 +69,7 @@ describe("on Linux the lanes line logs the first whole disk's rate from /proc/di
       load5: 2,
       proc: procDir({ diskIos: 240, diskMB: 7, free: 80, idle: 80 }, omit, [
         ["stat"],
-        ["vmstat"],
-        ["diskstats"],
+        ["vmstat", "diskstats"],
       ]),
     })
     expect(await m.runs("worker-x")).toBe(true)
@@ -84,6 +83,7 @@ describe("on Linux the lanes line logs the first whole disk's rate from /proc/di
   test.each([
     ["/proc/diskstats", "diskstats"],
     ["/sys/class/block", "sys"],
+    ["/proc/vmstat, whose one-second wait is the disk's window", "vmstat"],
   ])("with no %s it logs -", async (_, omit) => {
     expect(await lanes([omit])).toMatch(/ lanes worker-x \d+ .* disk0_tps=- disk0_mbs=-$/m)
   })

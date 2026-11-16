@@ -67,7 +67,7 @@ describe("on Linux the capacity gate reads /proc", () => {
     const r = await spawn(
       worker,
       [],
-      linux({ free: 62, swapins: 150 }, [], [["stat"], ["vmstat"], ["diskstats"], ["vmstat"]]),
+      linux({ free: 62, swapins: 150 }, [], [["stat"], ["vmstat"], ["vmstat"]]),
     )
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
