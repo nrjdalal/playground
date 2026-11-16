@@ -346,6 +346,17 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
     expect(await page()).toContain("greps the old file's name over the whole repo")
   })
+
+  test("round 1 reads each hit the body keeps in context and checks its reason (#2411)", async () => {
+    const [step, done] = await part("Round 1 greps")
+    expect(step).toContain(
+      "When the body lists a hit as left as is on purpose, read that line in context and check its reason",
+    )
+    expect(done ?? "").toContain("each hit the body keeps read in context, its reason checked")
+    expect(await page()).toContain(
+      "reads each hit the PR body keeps, in context, checking its reason",
+    )
+  })
 })
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
