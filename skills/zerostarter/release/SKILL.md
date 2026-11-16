@@ -90,7 +90,7 @@ d. **Update.** Run the update, then `playground doctor`, still contained:
 The rehearsal's result goes into the ship PR's body beside the new-user gate's line, as `Invitee rehearsal at <sha>: PASS` on a line of its own, `<sha>` the full `$CANARY`; a candidate that changes no update path writes `Invitee rehearsal at <sha>: not needed` there, since step 3's `ship:merge` reads one of the two.
 
 **Clear.** Clear the scratch folder with `bun run ship:rehearsal clear <scratch>` once step 3's `ship:merge` has merged, since the ship PR's body cites its before and after files and a held ship reruns from it; a ship that fails or stops clears it as its freeze ends.
-The clear removes the whole folder, about 3.3 GB, past `playground rm`'s 2 GB cap, and keeps any folder without the marker, outside your temp folder or not named `ops-r` (`packages/scripts/src/ship/rehearsal.ts`); nightly-clean removes a marked one left over a day, so a rehearsal that dies frees its disk by the next night.
+The clear removes the whole folder, about 130,000 entries, past `playground rm`'s cap of 5,000 files or 2 GB, and keeps any folder without the marker, outside your temp folder or not named `ops-r` (`packages/scripts/src/ship/rehearsal.ts`); nightly-clean removes a marked one left over a day, so a rehearsal that dies frees its disk by the next night.
 Done when `ship:rehearsal clear` printed `removed <scratch>`.
 
 ## 2. Open the ship PR

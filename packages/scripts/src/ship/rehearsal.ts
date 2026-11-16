@@ -1,4 +1,4 @@
-// ship:rehearsal new|clear <dir>: the invitee rehearsal's scratch folder, made by makeScratch in the caller's temp folder and removed whole by removeScratch, past the trash's 2 GB cap, since a rehearsal's folder measures about 3.3 GB.
+// ship:rehearsal new|clear <dir>: the invitee rehearsal's scratch folder, made by makeScratch in the caller's temp folder and removed whole by removeScratch, past the trash's cap of 5,000 files or 2 GB, since a rehearsal's folder holds about 130,000 entries.
 import { tmpdir } from "node:os"
 import { basename } from "node:path"
 

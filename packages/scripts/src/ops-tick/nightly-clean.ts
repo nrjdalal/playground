@@ -294,7 +294,7 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-// Each folder ship:rehearsal made in a temp folder that has stood over a day, removed whole, so a rehearsal that died before its clear frees its 3 GB by the next night; the line saying how many and their size, and each removed path.
+// Each folder ship:rehearsal made in a temp folder that has stood over a day, removed whole, so a rehearsal that died before its clear frees its disk by the next night; the line saying how many and their size, and each removed path.
 export function pruneRehearsals(temps: string[], now: Date): { gone: string[]; line: string } {
   const removed = temps.flatMap((tmp) => removeStale(REHEARSAL_PREFIX, tmp, 86_400_000, now))
   const bytes = removed.reduce((sum, r) => sum + r.bytes, 0)
