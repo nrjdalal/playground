@@ -34,13 +34,13 @@ export const script = join(root, "scripts", "spawn.sh")
 export const scratch = mkdtempSync(join(tmpdir(), "spawn-sh-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// A copy of spawn.sh's main checkout, found as spawn.sh finds its own: git's common folder's parent, else the folder above the script's.
+// A copy of spawn.sh's main checkout, found as spawn.sh finds its own: git's common folder's parent, else the folder above the script's, each link followed before its .. as `cd -P` does.
 const mainOf = (script: string): string => {
-  let repo = resolve(dirname(script), "..")
+  let repo: string
   try {
-    repo = realpathSync(repo)
+    repo = realpathSync.native(`${dirname(script)}/..`)
   } catch {
-    return repo
+    return resolve(dirname(script), "..")
   }
   const common = Bun.spawnSync([
     "git",
