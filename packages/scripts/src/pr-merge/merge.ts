@@ -67,7 +67,7 @@ export type Local = {
 // Sends Ops the ship-now line for a merged PR that carries the `ship-now` label.
 export type ShipNow = (line: string) => Promise<unknown>
 
-// The line Ops reads to ship at once (the release rule's ship-now); the release skill keys on its text.
+// The line Ops reads to ship outside the beat (the release rule's ship-now); the release skill keys on its text.
 export const shipNowLine = (n: number, sha: string): string =>
   `#${n} carries ship-now and merged at ${sha}: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds ${sha}.`
 
