@@ -1741,6 +1741,7 @@ test("pre-push runs test:skills through the commit slot when the branch changed 
       "extensions/core/skills/playbook/SKILL.md",
       // what a step's entry file loads first: the sandbox's scratch folders, test-sandbox's helpers, state.test.ts's gates and the ops jobs test's renderers
       "packages/config/src/kinds.ts",
+      "packages/env/src/data-dir.ts",
       "packages/safe-delete/src/index.ts",
       "packages/scripts/src/clock-exempt.ts",
       "packages/scripts/src/pr-merge/gates.ts",
