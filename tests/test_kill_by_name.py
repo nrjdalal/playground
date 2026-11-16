@@ -75,9 +75,9 @@ SEARCH_ARGV_MD = re.compile(rf"""['"](?:pgrep|pidof)\b|['"]{LSOF_PIDS}""")
 KILL_CALL = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"`]kill\b""")
 KILL_CALL_MD = re.compile(r"""\b(?:os\.kill(?:pg)?|process\.kill|syscall\.Kill)\(|['"]kill\b""")
 FENCE = re.compile(r"^\s*(```|~~~)")
-# a portless proxy stop names its port in its own command, as -p or --port and a word, past any global flag (--lan, --script dev); else portless probes 443, 80 and 1355 and stops whichever proxy answers, and clean stops it with no port to give
+# a portless proxy stop names its port in its own command, as -p or --port and a word, past a package version (portless@0.15.11) and any global flag (--lan, --script dev); else portless probes 443, 80 and 1355 and stops whichever proxy answers, and clean stops it with no port to give
 PROXY_STOP = re.compile(
-    r"""\bportless(?:\s+--[\w-]+(?:\s+[^\s-]\S*)?)*?\s+(?:proxy\s+stop\b(?![^\n;&|`)'"]*\s(?:-p|--port)\s+[^\s-])|clean\b(?!\s+(?:--help|-h)\b))"""
+    r"""\bportless(?:@[^\s@/]+)?(?:\s+--[\w-]+(?:\s+[^\s-]\S*)?)*?\s+(?:proxy\s+stop\b(?![^\n;&|`)'"]*\s(?:-p|--port)\s+[^\s-])|clean\b(?!\s+(?:--help|-h)\b))"""
     r"""|['"]proxy['"],\s*['"]stop['"](?![^\]\n]*['"](?:-p|--port)['"])"""
     r"""|\bportless['"]?,\s*['"]clean['"]"""
 )
@@ -313,6 +313,8 @@ def self_test():
         ("doc.md", "Stop it with `bunx portless proxy stop`, then start it with `portless proxy start -p 1355`."),
         ("run.ts", 'run(["portless", "proxy", "stop"]); run(["x", "-p"])'),
         ("run.ts", 'run([portless, "clean"])'),
+        ("run.sh", "npx portless@0.15.11 proxy stop"),
+        ("run.sh", "bunx portless@latest clean"),
     ]
     good = [
         ("run.sh", 'kill -TERM "$PID"'),
@@ -351,6 +353,8 @@ def self_test():
         ("run.sh", "portless --lan proxy stop -p 14155"),
         ("run.sh", "portless clean --help"),
         ("doc.md", "Read `portless --help`, then `portless proxy start -p 1355`."),
+        ("run.sh", "pnpm add portless@0.15.11"),
+        ("run.sh", "npx portless@0.15.11 proxy stop -p 14155"),
     ]
     wrong = [f"not flagged: {line!r}" for rel, line in bad if not problems_in(rel, line)]
     wrong += [f"flagged: {line!r}" for rel, line in good if problems_in(rel, line)]

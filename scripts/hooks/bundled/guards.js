@@ -16028,7 +16028,10 @@ var readsOnly = (cmd, first, args) => {
   const before = cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0);
   return before.some((w, i) => program(w.value) === "command" && /^-[vV]$/.test(before[i + 1]?.value ?? "")) || args.length > 0 && args.every((a) => READS_ONLY2.has(a.value));
 };
-var isPortless = (word) => program(word) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(word);
+var isPortless = (word) => {
+  const name = word.replace(/(?<=.)@[^@/]*$/, "");
+  return program(name) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(name);
+};
 var portlessRuns = (name, args) => {
   const values = args.map((a) => a.value);
   if (isPortless(name))

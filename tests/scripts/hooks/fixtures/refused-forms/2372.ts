@@ -37,6 +37,12 @@ const held = (): Row[] => [
     "node node_modules/portless/dist/cli.js proxy stop",
   ],
   ["a proxy stop by bun on a path to portless", "bun node_modules/.bin/portless proxy stop"],
+  // round 2: a package name with its version or tag names the same portless
+  ["a proxy stop by npx on a versioned name", "npx portless@0.15.11 proxy stop"],
+  ["a proxy stop by bunx on a tagged name", "bunx portless@latest proxy stop"],
+  ["a clean by npx -y on a versioned name", "npx -y portless@0.15.11 clean"],
+  ["a proxy stop by pnpm dlx on a tagged name", "pnpm dlx portless@latest proxy stop"],
+  ["a proxy stop by bun x on a versioned name", "bun x portless@0.15.11 proxy stop"],
 ]
 
 const controls = (): Row[] => [
@@ -54,6 +60,8 @@ const controls = (): Row[] => [
   ],
   ["a clean's help, which portless answers and exits", "portless clean --help"],
   ["portless added as a package", "bun add portless"],
+  ["portless added at a version", "pnpm add portless@0.15.11"],
+  ["a proxy stop on a versioned name on its own port", "npx portless@0.15.11 proxy stop -p 14155"],
 ]
 
 export const groups: Group[] = [

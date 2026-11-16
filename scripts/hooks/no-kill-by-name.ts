@@ -47,8 +47,11 @@ const readsOnly = (cmd: Command, first: Word | undefined, args: Word[]) => {
   )
 }
 
-const isPortless = (word: string) =>
-  program(word) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(word)
+// portless by its name, a path to it or its dist/cli.js, a package name's trailing @<version or tag> read past (npx portless@0.15.11)
+const isPortless = (word: string) => {
+  const name = word.replace(/(?<=.)@[^@/]*$/, "")
+  return program(name) === "portless" || /(?:^|\/)portless\/dist\/cli\.js$/.test(name)
+}
 
 // The words after each word that may run portless: the program itself, or any word of a launcher's, so npx -p portless portless yields both readings and either may be the stop
 const portlessRuns = (name: string, args: Word[]): string[][] => {
