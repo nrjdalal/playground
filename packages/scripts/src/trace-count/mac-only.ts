@@ -22,14 +22,19 @@ const SHELL_HEAD = String.raw`(?<=(?:^|[;&|{\x60!]|\$\(|\b(?:command|do|elif|els
 const SHELL_CALL = new RegExp(
   `${SHELL_HEAD}(?:${PROGRAMS.map((words) => words.join(String.raw`\s+`)).join("|")})(?=\\s|$|[;&)])`,
 )
-// An argv's head: the program's name as a whole quoted string, first in an array or a call's first argument (`["vm_stat"`, `Bun.which("osascript"`).
+// An argv's head: the program's name as a whole quoted string, first in an array or a call's first argument, its words on one line or split over several (`["vm_stat"`, `Bun.which("osascript"`); find-generic-password alone heads the argv a wrapper of security takes.
+const ARGV_HEADS = [...PROGRAMS, ["find-generic-password"]]
 const ARGV_CALL = new RegExp(
-  `(?<=[[(]\\s*)(?:${PROGRAMS.map((words) => words.map((word) => `["'\x60]${word}["'\x60]`).join(String.raw`\s*,\s*`)).join("|")})`,
+  `[[(]\\s*(?:${ARGV_HEADS.map((words) => words.map((word) => `["'\x60]${word}["'\x60]`).join(String.raw`\s*,\s*`)).join("|")})`,
+  "g",
 )
 
 const CODE = /\.(?:[cm]?[jt]sx?|py|sh)$/
 const SHELL = /\.sh$/
 const COMMENT = /^\s*(?:\/\/|\/?\*|#)/
+// A line's code, its trailing comment cut (`#` in a shell or Python file, `//` elsewhere, each after a space), so a comment that names Linux tests nothing.
+const codeOf = (line: string, hash: boolean): string =>
+  line.replace(hash ? /(?:^|\s)#.*$/ : /(?:^|\s)\/\/.*$/, "")
 // A test of the platform: a shell's uname or OSTYPE, Node's or Python's platform, or a branch named for macOS or Linux (`Darwin)`, `darwin:`, `linux ?`).
 const PLATFORM = /\buname\b|\bOSTYPE\b|\bplatform\b|\bdarwin\b|\blinux\b/i
 // A line that leaves its block, so an earlier platform test there takes Linux another way (`[ "$OS" = Darwin ] || return 1`).
@@ -37,13 +42,13 @@ const LEAVES = /\b(?:continue|exit|return|throw)\b/
 
 const indent = (line: string): number => line.length - line.trimStart().length
 
-// Whether a Linux branch covers line i: its own line or an enclosing block's opening line tests the platform, or an earlier line of one of those blocks tests it and leaves; a top-level line's earlier lines are never read, so one test at a file's top guards nothing below it.
-const guarded = (lines: string[], i: number): boolean => {
-  if (PLATFORM.test(lines[i]!)) return true
-  let depth = indent(lines[i]!)
+// Whether a Linux branch covers line i of a file's code lines: its own line or an enclosing block's opening line tests the platform, or an earlier line of one of those blocks tests it and leaves; a top-level line's earlier lines are never read, so one test at a file's top guards nothing below it.
+const guarded = (code: string[], i: number): boolean => {
+  if (PLATFORM.test(code[i]!)) return true
+  let depth = indent(code[i]!)
   for (let j = i - 1; j >= 0 && depth > 0; j--) {
-    const line = lines[j]!
-    if (!line.trim() || COMMENT.test(line)) continue
+    const line = code[j]!
+    if (!line.trim()) continue
     const at = indent(line)
     if (at < depth) {
       if (PLATFORM.test(line)) return true
@@ -59,18 +64,22 @@ const isCode = ({ path, text }: File): boolean =>
   !path.startsWith("tests/") &&
   path !== "packages/scripts/src/trace-count/mac-only.ts"
 
-// The 0-based lines of a file that hold a counted call: a call at a command or argv head, on a line that is no comment, with no Linux branch in front of it.
+// The 0-based lines of a file that hold a counted call, ascending: a call at a command's head, or an argv's at the line of its opening bracket, in a line's code, with no Linux branch in front of it.
 export const macOnlyLines = (file: File): number[] => {
   if (!isCode(file)) return []
   const shell = SHELL.test(file.path) || /^#!.*\b(?:ba|z)?sh\b/.test(file.text)
+  const hash = shell || file.path.endsWith(".py")
   const lines = file.text.split("\n")
-  return lines.flatMap((line, i) =>
-    !COMMENT.test(line) &&
-    ((shell && SHELL_CALL.test(line)) || ARGV_CALL.test(line)) &&
-    !guarded(lines, i)
-      ? [i]
-      : [],
-  )
+  const code = lines.map((line) => (COMMENT.test(line) ? "" : codeOf(line, hash)))
+  const starts: number[] = []
+  lines.reduce((at, line) => (starts.push(at), at + line.length + 1), 0)
+  const lineOf = (at: number) => starts.findLastIndex((start) => start <= at)
+  const argv = [...file.text.matchAll(ARGV_CALL)].flatMap((match) => {
+    const i = lineOf(match.index)
+    return match.index - starts[i]! < code[i]!.length ? [i] : []
+  })
+  const heads = code.flatMap((line, i) => (shell && SHELL_CALL.test(line) ? [i] : []))
+  return [...new Set([...heads, ...argv])].filter((i) => !guarded(code, i)).sort((a, b) => a - b)
 }
 
 // Each counted call as path:line: macOnly, the changed files' alone when they hold one, as located names the other kinds.

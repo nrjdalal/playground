@@ -47,6 +47,32 @@ describe("macOnly", () => {
     expect(macOnlyLines(code)).toEqual([0, 1, 2, 3, 4])
   })
 
+  test("counts an argv split over lines at its opening bracket's line, and a wrapper's find-generic-password", () => {
+    const split = at(
+      "packages/a.ts",
+      "const answer = await ctx.run([",
+      '  "sysctl",',
+      '  "-n",',
+      "  name,",
+      "])",
+    )
+    expect(macOnlyLines(split)).toEqual([0])
+    const wrapped = at(
+      "packages/b.ts",
+      'const out = security(["find-generic-password", "-s", service, "-w"])',
+    )
+    expect(macOnlyLines(wrapped)).toEqual([0])
+  })
+
+  test("a trailing comment that names Linux guards nothing", () => {
+    const files = [
+      at("scripts/a.sh", "osascript -e beep # fails on linux"),
+      at("packages/a.ts", 'run(["vm_stat"]) // no linux path yet'),
+      at("scripts/b.py", 'run(["pmset", "-g"])  # darwin only'),
+    ]
+    expect(files.map((file) => macOnlyLines(file))).toEqual([[0], [0], [0]])
+  })
+
   test("a call behind a Linux branch does not count", () => {
     const files = [
       at("packages/a.ts", 'const cmd = process.platform === "linux" ? ["free"] : ["vm_stat"]'),
