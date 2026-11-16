@@ -1211,14 +1211,51 @@ test("10 touched-tests: the four rules on a scratch repository, printed one path
     ),
   ).toBe(true)
   expect([...new Set(listed)].sort()).toEqual(listed)
-  expect(listed.length).toBe(6)
+  expect(listed.length).toBe(7)
   expect(listed).not.toContain("tests/unrelated.test.ts")
-  expect(listed).not.toContain("tests/test_scan.py")
+  expect(listed).toContain("tests/test_scan.py")
   git(repo, "rm", "-q", "tests/changed.test.ts", "tests/web/next/src/lib/outbox.test.ts")
   git(repo, "commit", "-qm", "drop two tests")
   const after = touched(repo).listed
   expect(after.includes("tests/changed.test.ts")).toBe(false)
   expect(after.includes("tests/web/next/src/lib/outbox.test.ts")).toBe(false)
+})
+
+test("10 touched-tests: a Python test that walks the whole repo is listed whenever the diff adds text", () => {
+  const files = {
+    "docs/a.md": "x\n",
+    "logo.png": "\0x\n",
+    "src/b/m.py": "x\n",
+    "tests/test_guard.py": 'files = subprocess.run(["git", "ls-files"]).stdout\n',
+    "tests/test_named.py": 'for p in pathlib.Path("src/b").rglob("*.py"):\n    pass\n',
+    "tests/test_plain.py": "assert True\n",
+    "tests/test_skip.py":
+      'SKIP = {"src/b"}\nfor root, dirs, names in os.walk(ROOT):\n    dirs[:] = [d for d in dirs if d not in SKIP]\n',
+    "tests/test_walk.py":
+      "ROOT = os.path.dirname(os.path.dirname(__file__))\nfor root, dirs, names in os.walk(ROOT):\n    pass\n",
+  }
+  const repo = scratch()
+  scratchRepo(repo, files)
+  writeFiles(repo, { "logo.png": "\0y\n" })
+  git(repo, "commit", "-qam", "an image alone")
+  const image = touched(repo)
+  expect(image.code, image.stderr).toBe(0)
+  expect(image.listed).toEqual([])
+  writeFiles(repo, { "docs/a.md": "y\n" })
+  git(repo, "commit", "-qam", "a line of text")
+  const walkers = [
+    "tests/test_guard.py",
+    "tests/test_named.py",
+    "tests/test_skip.py",
+    "tests/test_walk.py",
+  ]
+  expect(touched(repo).listed).toEqual(walkers)
+  // a Python repo lists the same, a walk that names a path to skip included, since the folder rule lists it only for a change under that path
+  const py = scratch()
+  scratchRepo(py, { ...files, "pyproject.toml": "" })
+  writeFiles(py, { "docs/a.md": "y\n" })
+  git(py, "commit", "-qam", "a line of text")
+  expect(touched(py).listed).toEqual(walkers)
 })
 
 test("10 touched-tests: scan words inside fixture strings read as no scanner", () => {

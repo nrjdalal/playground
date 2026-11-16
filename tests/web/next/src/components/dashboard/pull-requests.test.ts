@@ -23,6 +23,7 @@ const queued: PullSection = {
         {
           approvals: 0,
           ci: "none",
+          conflicts: false,
           draft: false,
           etaMerge: null,
           number: 50,
