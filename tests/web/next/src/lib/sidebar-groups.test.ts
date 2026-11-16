@@ -98,8 +98,8 @@ describe("the sidebar's groups, in the order you dragged them into", () => {
     expect(orderAfterReload(store)).toEqual([
       "Direct messages",
       "Orchestrators",
-      "Subagents",
       "AI Runners",
+      "Subagents",
       "Scripts",
       "Other",
       "Channels",
@@ -112,7 +112,23 @@ describe("the sidebar's groups, in the order you dragged them into", () => {
       "Orchestrators",
       "Channels",
       "Direct messages",
+      "AI Runners",
       "Subagents",
+      "Other",
+    ])
+  })
+
+  // #2429: AI Runners moved up the default order, and an order you saved by dragging keeps its place for every group it names, so one that leaves AI Runners out takes it after them
+  test("AI Runners sits right under Orchestrators by default, and after the groups an order you saved names", () => {
+    expect(groupOrder(null).indexOf("AI Runners")).toBe(
+      groupOrder(null).indexOf("Orchestrators") + 1,
+    )
+    expect(groupOrder(JSON.stringify(["Orchestrators", "Subagents", "Scripts"]))).toEqual([
+      "Orchestrators",
+      "Subagents",
+      "Scripts",
+      "Channels",
+      "Direct messages",
       "AI Runners",
       "Other",
     ])
@@ -126,8 +142,8 @@ describe("the sidebar's groups, in the order you dragged them into", () => {
       "Channels",
       "Direct messages",
       "Orchestrators",
-      "Subagents",
       "AI Runners",
+      "Subagents",
       "Other",
     ])
   })
@@ -136,21 +152,21 @@ describe("the sidebar's groups, in the order you dragged them into", () => {
     const order = groupOrder(null)
     // Channels, Direct messages and Other show no rows, so the sidebar draws the other four
     const shown = order.filter((group) => !["Channels", "Direct messages", "Other"].includes(group))
-    // Move up on Orchestrators, the first shown, has nowhere to go, and on Subagents passes Orchestrators alone
+    // Move up on Orchestrators, the first shown, has nowhere to go, and on AI Runners passes Orchestrators alone
     expect(moveGroup(order, shown, 1, 0)).toEqual([
       "Channels",
       "Direct messages",
-      "Subagents",
-      "Orchestrators",
       "AI Runners",
+      "Orchestrators",
+      "Subagents",
       "Scripts",
       "Other",
     ])
     expect(moveGroup(order, shown, 0, shown.length - 1)).toEqual([
       "Channels",
       "Direct messages",
-      "Subagents",
       "AI Runners",
+      "Subagents",
       "Scripts",
       "Orchestrators",
       "Other",

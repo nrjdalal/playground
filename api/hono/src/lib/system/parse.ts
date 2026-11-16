@@ -190,18 +190,20 @@ export function parseContainerStats(out: string): Map<string, number> {
 // One machine's size and load, the figures the System panel sums across machines; usedBytes is null when this machine's memory read failed.
 export type MachineReading = {
   cores: number
+  disk: { freeBytes: number; totalBytes: number } | null
   load: [number, number, number]
   memory: { totalBytes: number; usedBytes: number | null }
   swap: { totalBytes: number; usedBytes: number } | null
 }
 
-// A peer's `cat /proc/loadavg /proc/meminfo /proc/stat`: loadavg's first line, MemTotal less MemAvailable as free counts it, SwapTotal less SwapFree, and one cpuN line per core; null when the load, the memory or the cores do not read, so a peer is never summed as zeros.
+// A peer's `df -kP ~; cat /proc/loadavg /proc/meminfo /proc/stat`: df's Available and 1024-blocks for its home, null when df printed none, loadavg's line, MemTotal less MemAvailable as free counts it, SwapTotal less SwapFree, and one cpuN line per core; null when the load, the memory or the cores do not read, so a peer is never summed as zeros.
 export function parsePeer(out: string): MachineReading | null {
   const kb = (key: string): number | null => {
     const m = new RegExp(`^${key}:\\s+(\\d+) kB`, "m").exec(out)
     return m ? Number(m[1]) * 1024 : null
   }
-  const load = (out.trimStart().split("\n")[0] ?? "").trim().split(/\s+/).slice(0, 3).map(Number)
+  const load = (/^(\S+ \S+ \S+) \d+\/\d+ \d+$/m.exec(out)?.[1] ?? "").split(" ").map(Number)
+  const df = /^Filesystem\s+1024-blocks.*\n.*?\s(\d+)\s+\d+\s+(\d+)\s+\d+%\s/m.exec(out)
   const cores = out.match(/^cpu\d+ /gm)?.length ?? 0
   const total = kb("MemTotal")
   const available = kb("MemAvailable")
@@ -211,6 +213,7 @@ export function parsePeer(out: string): MachineReading | null {
   if (total === null || available === null) return null
   return {
     cores,
+    disk: df ? { freeBytes: Number(df[2]) * 1024, totalBytes: Number(df[1]) * 1024 } : null,
     load: load as [number, number, number],
     memory: { totalBytes: total, usedBytes: Math.max(0, total - available) },
     swap:

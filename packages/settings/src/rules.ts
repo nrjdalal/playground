@@ -3,8 +3,6 @@ import { z } from "zod"
 // By relative path, as settings.ts imports, since the rules hook imports this file from outside the package.
 import { defineSettings } from "./settings"
 
-const percent = z.number().int().min(1).max(100)
-
 // The values the standing rules name through their {key} slots, defaulting to what the code that holds each rule reads today; a piece that moves that code onto a key reads the one defined here.
 export const ruleSettings = defineSettings({
   "clock.ownerZone": {

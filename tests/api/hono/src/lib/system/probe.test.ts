@@ -55,7 +55,7 @@ describe("commandOf", () => {
     expect(() => commandOf("socketHolder", "/a\nb")).toThrow("cannot take")
   })
 
-  test("a peer is read by one fixed ssh argv that never prompts and only cats /proc, its target user@host alone", () => {
+  test("a peer is read by one fixed ssh argv that never prompts and only reads its home's df and cats /proc, df first so a failing df never fails the read, its target user@host alone", () => {
     expect(commandOf("peer", "you@10.0.0.2")).toEqual([
       "ssh",
       "-o",
@@ -63,6 +63,10 @@ describe("commandOf", () => {
       "-o",
       "ConnectTimeout=3",
       "you@10.0.0.2",
+      "df",
+      "-kP",
+      "~",
+      ";",
       "cat",
       "/proc/loadavg",
       "/proc/meminfo",

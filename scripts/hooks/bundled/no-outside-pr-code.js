@@ -5022,7 +5022,6 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/rules.ts
-var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
   "clock.ownerZone": {
     default: "UTC",

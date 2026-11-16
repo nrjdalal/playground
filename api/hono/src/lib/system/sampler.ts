@@ -311,6 +311,7 @@ export function compose(
   // With peers, the machines the System page sums: this one first, then each peer, one that did not read keeping since when it has not.
   const local: MachineReading = {
     cores: readings.cores,
+    disk: readings.disk,
     load: readings.load.map(round) as [number, number, number],
     memory: { totalBytes: readings.totalBytes, usedBytes: readings.usedBytes },
     swap,

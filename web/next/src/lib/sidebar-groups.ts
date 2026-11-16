@@ -88,8 +88,8 @@ export const ORDERED_GROUPS = [
   "Channels",
   "Direct messages",
   "Orchestrators",
-  "Subagents",
   "AI Runners",
+  "Subagents",
   "Scripts",
   "Other",
 ] as const satisfies readonly NavGroup[]
