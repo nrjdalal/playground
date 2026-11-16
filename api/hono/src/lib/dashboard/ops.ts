@@ -7,7 +7,7 @@ import { z } from "zod"
 import { processStarts } from "@/lib/dashboard/peers"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The ops jobs Ops runs as scripts in its own terminals, with no Claude session behind them: each writes a heartbeat, ops/<job>.json under Claude Code's config folder, every beat (atomically, through ops/beat.py), and the dashboard only reads it. The board lists the jobs so what keeps the app running shows even with no runner session up: every ops-*.json there is a job, so a new one shows with no change here, the ops-report job (ops-report.json) among them, and so is every job jobs.json lists, whatever its prefix; report.json, alerts.log and any other file no row names are not.
+// The ops jobs Ops runs as scripts in its own terminals, with no Claude session behind them: each writes a heartbeat, ops/<job>.json under Claude Code's config folder, every beat (atomically, through ops/beat.py), and the dashboard only reads it. The board lists the jobs so what keeps the app running shows even with no runner session up: every ops-*.json there is a job, so a new one shows with no change here, the ops-report job (ops-report.json) among them, and so is every job jobs.json lists, whatever its prefix; report.json, alerts.log and any other file no row names are not, nor is a RETIRED job, whose files outlive it.
 const HEARTBEAT_FILES = "ops-*.json"
 // A job's name, with or without the ops- prefix, since an org's job may take any name of this shape; it holds no dot or slash, so its <name>.json heartbeat stays in the folder.
 const JOB_NAME = /^[a-z][\w-]*$/

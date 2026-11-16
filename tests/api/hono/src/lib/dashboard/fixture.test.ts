@@ -1058,7 +1058,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.merged).toEqual([[97, 2]])
     expect(out.mergedProblems).toEqual([])
     // the ops jobs, whose heartbeats and pids a live stack reads from the config folder and ps
-    // 20 scripts: 12 running (nightly-digest, an org's job without the ops- prefix, among them), ops-wa waiting on its pairing code, ops-report and ops-sweep failing, and 5 paused with no heartbeat, so the Scripts label counts the 15 it lists
+    // 19 scripts: 11 running (nightly-digest, an org's job without the ops- prefix, among them), ops-wa waiting on its pairing code, ops-report and ops-sweep failing, and 5 paused with no heartbeat, so the Scripts label counts the 14 it lists
     expect(out.ops).toEqual([
       ["nightly-digest", "running"],
       ["ops-changelog", "running"],
