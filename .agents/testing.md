@@ -18,7 +18,7 @@ Its pid view of its own leaves a test no live process to find or signal, so port
 It mounts an empty folder over each live one that exists: `/run/user/<uid>`, `~/.claude`, `~/.config/herdr`, `~/.portless` and the data folder, `~/.playground` with the factory's herdr sockets.
 It binds `~/.ssh` read-only, and binds over `/usr/bin/pkexec` and `/usr/bin/sudo` a stand-in that exits 99 naming the sandbox.
 The host network stays, since the Docker tests reach their containers on 127.0.0.1, so a test still reaches a live server by its port, and a live container by its name through the Docker socket.
-A Linux run with no `bwrap`, or one AppArmor refuses a user namespace, fails at its start naming both causes, and CI's test jobs install the bubblewrap package first.
+A Linux run with no `bwrap`, or one AppArmor refuses a user namespace, fails at its start naming both causes.
 A test that reads the real home on Linux takes it from the passwd entry (`getent passwd`), since `os.userInfo().homedir` follows the sandbox's HOME (`tests/sandbox.test.ts`).
 A test names each such tool bare, and `tests/live-tools-scan.test.ts`, over every `.ts` and `.py` test, fails on one named by an absolute path, on portless's CLI or bin path on any line, on a package runner (`bunx`, `npx`, `bun x`) given a proxy, service or `clean` verb, on a proxy start or stop or a service install in an argv, or inside a shell's `-c` string.
 The scratch HOME's `.gitconfig` refuses git's network transports (`git`, `http`, `https`, `ssh`), so a remote a test names by its GitHub URL reaches no network and no credential helper: a test's remote is a local bare repo, a test that fakes ssh allows it in its own repo's config (`protocol.ssh.allow`), and a step that must fetch,
