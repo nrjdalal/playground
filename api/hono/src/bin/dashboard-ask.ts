@@ -1,4 +1,5 @@
 import "@/bin/ask-from-clone"
+import "@/bin/needs-database"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
