@@ -18,6 +18,7 @@ import { join } from "node:path"
 
 import type { SpawnOptions, Subprocess } from "bun"
 
+import { orphanReapers } from "../../../packages/scripts/src/orphan-reapers"
 import { slowChild } from "../../slow-child"
 import { FAKE_SLEEP } from "../fixtures/proc"
 
@@ -112,6 +113,7 @@ export const endChildren = async () => {
     }
   }
   const live: { p: { exited: Promise<number> }; pid: number; groups: number[] }[] = []
+  const reapers = orphanReapers()
   for (const child of children.splice(0)) {
     const done = await exited(child.p)
     const groups: number[] = []
@@ -141,7 +143,8 @@ export const endChildren = async () => {
           Date.now() -
           (Number(days) * 86_400 + rest.split(":").reduce((s, n) => s * 60 + Number(n), 0)) * 1_000
         const runsIt = started <= written + 1_000
-        if (done ? Number(ppid) === 1 && runsIt : Number(ppid) === child.p.pid) groups.push(command)
+        if (done ? reapers.has(Number(ppid)) && runsIt : Number(ppid) === child.p.pid)
+          groups.push(command)
       }
     if (!done || groups.length > 0) live.push({ p: child.p, pid: child.p.pid, groups })
   }
