@@ -209,7 +209,7 @@ const portlessCheck = async (
   return okRow("portless", need, "ready")
 }
 
-// Linux's browsers, which trust portless's CA only from their own stores (ca-trust.ts): MISSING while a Firefox profile does not, with the ca-trust fix, or with no certutil to read it; optional while a Chromium-family browser is on PATH, whose own import no file shows, so the row names it.
+// Linux's browsers, which trust portless's CA only from their own stores (ca-trust.ts): MISSING while a Firefox profile does not, with the ca-trust fix; optional with no certutil to read it, which the app cannot install, so first run never waits on a tool for a browser the owner may not use; optional while a Chromium-family browser is on PATH, whose own import no file shows, so the row names it.
 const certificateCheck = async (reader: Reader, env: Env): Promise<Check | null> => {
   const ca = join(portlessDir(env), "ca.pem")
   if (env.PORTLESS === "0" || !reader.exists(ca)) return null
@@ -224,7 +224,7 @@ const certificateCheck = async (reader: Reader, env: Env): Promise<Check | null>
   ): Check => ({ action, detail, name: "Certificate", need, note, status })
   if (read.untrusted.length > 0 && !read.certutil)
     return row(
-      "MISSING",
+      "optional",
       "certutil not found",
       `Firefox cannot be set to trust the local web proxy's certificate until your distro's NSS tools are installed (libnss3-tools on Debian and Ubuntu, nss-tools on Fedora). Install them, then trust it here.${chromium}`,
     )

@@ -224,7 +224,7 @@ export const browserCheck = (
   )
 }
 
-// On Linux, the browsers' trust of portless's CA, as first run's Certificate row reads it (ca-trust.ts): MISSING with its steps while a Firefox profile does not trust it, and optional naming a Chromium-family browser's own import, which no file shows.
+// On Linux, the browsers' trust of portless's CA, as first run's Certificate row reads it (ca-trust.ts) save one case: MISSING with its steps while a Firefox profile does not trust it, certutil missing included, which first run reads as optional so it can finish, and optional naming a Chromium-family browser's own import, which no file shows.
 export const certificateCheck = (read: CaTrust, ca: string, repo: string): Check => {
   const name = "browser certificate"
   const chromium = read.chromium.length > 0 ? chromiumSteps(read.chromium, ca) : ""

@@ -448,9 +448,9 @@ describe("the Certificate row on Linux", () => {
     })
   })
 
-  test("with no certutil it is MISSING with the NSS tools named and no fix, since the app installs nothing", async () => {
+  test("with no certutil it is optional with the NSS tools named and no fix, since the app installs nothing and first run has nothing to click", async () => {
     const row = await linux([], false)
-    expect(row).toMatchObject({ action: null, detail: "certutil not found", status: "MISSING" })
+    expect(row).toMatchObject({ action: null, detail: "certutil not found", status: "optional" })
     expect(row!.note).toContain("libnss3-tools")
   })
 

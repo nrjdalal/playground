@@ -70,6 +70,18 @@ describe("firefoxProfiles", () => {
     expect(firefoxProfiles(dir)).toEqual([join(dir, SNAP), join(dir, DEB)])
     expect(firefoxProfiles(home({}))).toEqual([])
   })
+
+  test("finds Firefox 147's XDG root and flatpak's two roots too", () => {
+    const XDG = ".config/mozilla/firefox/new.default-release"
+    const FLATPAK = ".var/app/org.mozilla.firefox/.mozilla/firefox/old.default"
+    const FLATPAK_XDG = ".var/app/org.mozilla.firefox/config/mozilla/firefox/new.default"
+    const dir = home({ [FLATPAK]: true, [FLATPAK_XDG]: true, [XDG]: true })
+    expect(firefoxProfiles(dir)).toEqual([
+      join(dir, XDG),
+      join(dir, FLATPAK),
+      join(dir, FLATPAK_XDG),
+    ])
+  })
 })
 
 describe("readCaTrust", () => {

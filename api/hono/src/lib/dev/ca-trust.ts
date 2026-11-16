@@ -34,11 +34,14 @@ export type CaTrust = {
   untrusted: string[]
 }
 
-// Each Firefox profile that has its certificate store yet: snap's under ~/snap/firefox/common, a deb or tarball Firefox's under ~/.mozilla.
+// Each Firefox profile that has its certificate store yet: snap's under ~/snap/firefox/common, a deb or tarball Firefox's under ~/.mozilla, Firefox 147's and later's under ~/.config, and flatpak's under ~/.var/app in either layout.
 export const firefoxProfiles = (home: string): string[] =>
   [
     join(home, "snap", "firefox", "common", ".mozilla", "firefox"),
     join(home, ".mozilla", "firefox"),
+    join(home, ".config", "mozilla", "firefox"),
+    join(home, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox"),
+    join(home, ".var", "app", "org.mozilla.firefox", "config", "mozilla", "firefox"),
   ].flatMap((root) => {
     try {
       return readdirSync(root)
