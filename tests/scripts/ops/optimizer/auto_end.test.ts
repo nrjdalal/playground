@@ -1154,7 +1154,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
 
   test("a clean worktree rm refuses for work not on canary goes through --discard once its PR merged or closed, and stays while it is open", async () => {
     const { main, wt } = machine()
-    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway`
+    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): playground rm --worktree ${wt} --discard removes it anyway`
     for (const finished of [false, true]) {
       const moved: string[] = []
       const { deps } = fakes(main, [], undefined, {
@@ -1251,6 +1251,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       data,
       defaultBranch: () => null,
       home: data,
+      liveBranch: () => "live/dashboard",
       main,
       merged: () => null,
       notify: () => {},
@@ -1296,6 +1297,43 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       `kept ${over.wt}: ${over.wt} is held by abc123-worker, which the roster lists as working, and its commits past merged PR #1's head stay: ${overShort("HEAD")}`,
     )
     expect(existsSync(over.wt)).toBe(true)
+  })
+
+  // #2344: a live row holds a worktree by the worktree's own PR, as removePath's does, so the cleanup's held check keeps it before dev:stop runs in it
+  test("a live row listing the worktree's own open PR keeps it at the held check, with no dev:stop", async () => {
+    const { main, root, wt } = machine()
+    recorded(wt)
+    writeFileSync(
+      join(root, "roster.json"),
+      JSON.stringify({
+        agents: [
+          { name: "def456-reviewer", pr: "https://github.com/o/r/pull/2435", status: "working" },
+        ],
+      }),
+    )
+    const head = Bun.spawnSync(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.toString().trim()
+    const rm: RmDeps = {
+      clones: () => [],
+      data: root,
+      defaultBranch: () => null,
+      home: root,
+      liveBranch: () => "live/dashboard",
+      main,
+      merged: () => null,
+      notify: () => {},
+      places: () => [],
+      prState: async () => ({ head, number: 2435, state: "OPEN" }),
+      procs: () => [],
+      session: async () => "t",
+    }
+    const { calls, deps } = fakes(main, [], undefined, {
+      held: (path, pr) => cleanupHeld(path, pr, rm),
+    })
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(
+      `kept ${wt}: ${wt} is held by def456-reviewer, which the roster lists as working`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(wt)).toBe(true)
   })
 
   test("the container names are the worktree's own, whole, and never the live dashboard's or first run's", () => {

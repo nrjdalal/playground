@@ -341,6 +341,7 @@ describe("pull requests", () => {
     expect(pullOf(node())).toEqual({
       approvals: 0,
       ci: "passing",
+      conflicts: false,
       draft: true,
       number: 33,
       queued: false,
@@ -362,6 +363,15 @@ describe("pull requests", () => {
       pullOf(node({ commits: { nodes: [{ commit: { statusCheckRollup: null } }] } }))?.ci,
     ).toBe("none")
     expect(pullOf(node({ state: "MERGED" }))?.state).toBe("merged")
+    // #2457: CONFLICTING or DIRTY conflicts with its base; UNKNOWN, GitHub still working it out, does not
+    expect(pullOf(node({ mergeable: "CONFLICTING" }))?.conflicts).toBe(true)
+    expect(pullOf(node({ mergeStateStatus: "DIRTY" }))?.conflicts).toBe(true)
+    expect(pullOf(node({ mergeable: "UNKNOWN", mergeStateStatus: "UNKNOWN" }))?.conflicts).toBe(
+      false,
+    )
+    expect(pullOf(node({ mergeable: "MERGEABLE", mergeStateStatus: "CLEAN" }))?.conflicts).toBe(
+      false,
+    )
     expect(pullOf(null)).toBeNull()
     expect(pullOf({ number: 1 })).toBeNull()
   })

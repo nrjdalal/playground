@@ -9,7 +9,7 @@ import type { LockStore } from "@packages/redis"
 import { endMergedLive } from "../../../../scripts/ops/optimizer/auto_end"
 import { sendAs } from "../ops-job/job"
 import { factoryRepoOf } from "../playground/setting"
-import { bareTokens, templatePlaceholders } from "./body"
+import { bareTokens, ownerAsk, templatePlaceholders } from "./body"
 import {
   BASE,
   gatesOf,
@@ -64,12 +64,24 @@ export type Local = {
   typesBudgetMs?: number
 }
 
-// Sends Ops the ship-now line for a merged PR that carries the `ship-now` label.
+// Sends Ops the ship-now line for a merged PR that carries the `ship-now` label and that shipNowLine ships.
 export type ShipNow = (line: string) => Promise<unknown>
 
-// The line Ops reads to ship outside the beat (the release rule's ship-now); the release skill keys on its text.
-export const shipNowLine = (n: number, sha: string): string =>
-  `#${n} carries ship-now and merged at ${sha}: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds ${sha}.`
+// Pure: the release rule's ship-now for a merged PR: a fix( title, or a Links line naming the owner's ask (ownerAsk), ships with the line Ops reads, which the release skill keys on; any other answers with the rule's line and no ship.
+export const shipNowLine = (
+  n: number,
+  sha: string,
+  pr: { body?: string; title?: string },
+): { line: string; ship: boolean } =>
+  /^fix\(/.test(pr.title ?? "") || ownerAsk(pr.body ?? "")
+    ? {
+        line: `#${n} carries ship-now and merged at ${sha}: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds ${sha}.`,
+        ship: true,
+      }
+    : {
+        line: `#${n} carries ship-now but starts no ship: its title opens no fix( and its Links holds no line opening "Owner ask:" with an Inbox #i id, a PG issue or the owner's quoted words (extensions/core/rules/release.md).`,
+        ship: false,
+      }
 
 // The live send, for the pr:merge and pr:train commands alone: one line to the ops lead through the ops relay.
 export const liveShipNow: ShipNow = (line) => sendAs("ops-ship")("ops", line)
@@ -249,7 +261,7 @@ export async function factsOf(
       "-R",
       repo,
       "--json",
-      "author,baseRefName,body,headRefName,headRefOid,isDraft,labels,state,statusCheckRollup",
+      "author,baseRefName,body,headRefName,headRefOid,isDraft,labels,state,statusCheckRollup,title",
     ]),
   ) as {
     author: { login: string } | null
@@ -261,6 +273,7 @@ export async function factsOf(
     labels?: { name: string }[] | null
     state: string
     statusCheckRollup: Check[] | null
+    title?: string
   }
   const [files, comments, ahead, held] = await Promise.all([
     filesOf(run, repo, n),
@@ -315,6 +328,7 @@ export async function factsOf(
     parents,
     placeholders,
     state: view.state,
+    title: view.title,
     unfound,
   }
 }
@@ -522,6 +536,7 @@ export async function prMerge(
   let outcome: Outcome
   let head = ""
   let labels: string[] = []
+  let pr: { body?: string; title?: string } = {}
   try {
     const lock = await takeLock(lockRoot, n, { store })
     if ("holder" in lock) return { gates: [], holder: lock.holder, kind: "locked" }
@@ -529,6 +544,7 @@ export async function prMerge(
       const facts = await factsOf(run, name, n, git)
       head = facts.head
       labels = facts.labels ?? []
+      pr = { body: facts.body, title: facts.title }
       outcome = await mergeAt(run, name, n, facts, options, {
         budgetMs: local.typesBudgetMs,
         git,
@@ -551,8 +567,10 @@ export async function prMerge(
       local.ended ?? (cli ? liveEnded : undefined),
     )
     const shipNow = local.shipNow ?? (cli ? liveShipNow : undefined)
-    if (shipNow && labels.includes("ship-now")) {
-      await shipNow(shipNowLine(n, outcome.sha)).catch((err: unknown) =>
+    const ship = labels.includes("ship-now") ? shipNowLine(n, outcome.sha, pr) : null
+    if (ship && !ship.ship) console.error(ship.line)
+    if (shipNow && ship?.ship) {
+      await shipNow(ship.line).catch((err: unknown) =>
         console.error(
           `telling ops to ship #${n} failed: ${err instanceof Error ? err.message : err}`,
         ),

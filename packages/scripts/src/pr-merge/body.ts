@@ -53,15 +53,23 @@ export function tldrLabel(body: string): string | null {
   return null
 }
 
-// Pure: the text of a body's Evidence section, up to its next ## heading, each read as templateBody reads them.
-function evidenceOf(body: string): string {
+// Pure: the text of a body's section by its lowercased heading, up to its next ## heading, each read as templateBody reads them.
+function sectionOf(body: string, name: string): string {
   const lines = body.split(/\r?\n/)
   const headings = headingsOf(lines)
-  const at = headings.indexOf("evidence")
+  const at = headings.indexOf(name)
   if (at === -1) return ""
   const end = headings.findIndex((heading, i) => i > at && heading !== "")
   return lines.slice(at + 1, end === -1 ? undefined : end).join("\n")
 }
+
+const evidenceOf = (body: string): string => sectionOf(body, "evidence")
+
+// Pure: whether a body's Links holds a line opening `Owner ask:`, as a bullet or in bold, that names the owner's ask: an Inbox #i id, a PG issue or the owner's quoted words (the release rule's ship-now).
+export const ownerAsk = (body: string): boolean =>
+  /^\s*(?:[-*+]\s+)?(?:\*\*|__)?Owner ask:(?:\*\*|__)?\s*(?:#i\d+|PG-\d+|"[^"]+"|“[^”]+”)/im.test(
+    sectionOf(body, "links"),
+  )
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
