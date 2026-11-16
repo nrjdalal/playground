@@ -2464,7 +2464,7 @@ export async function examine(
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
-  // a group word globOpens opened (`nice (pkill -f x)`) is also judged as the subshell its paren reads as outside that place, its commands run as a script, so the glob reading only adds refusals
+  // a group word globOpens opened (`nice (rm x)`) is also judged as the subshell its paren reads as outside that place, its commands run as a script, so the glob reading only adds refusals
   for (const group of cmd.words.filter((w) => w.source?.startsWith("("))) {
     const src = group.source as string
     const inside = src.slice(1, balanced(src, 0, "(", ")") - 1)

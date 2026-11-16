@@ -51,7 +51,7 @@ A glob it cannot match (a relative one under a folder the reader cannot read, a 
 The reader lexes the commands inside a process substitution (`procSub`), `<(…)` and `>(…)` and zsh's `=(…)` at a word's start or an array's element, zsh's `=(…)` as an assignment's value (`x==(…)`, `typeset x==(…)`) or an array's indexed or keyed value (`a=([1]==(…))`, `h=([k]==(…))`),
 and `<(…)` or `=(…)` as a redirect's file, so every hook judges them as it judges any other command.
 A paren where a wrapper's program word goes, past any word that may expand to no word, opens a zsh glob word, as zsh reads one after a program word, so a group-spelled program (`command (r|x)m`, `nice $E (r|x)m`, `command (r|x y)m`) is globbed in the shell's folder like any program word (`globOpens`).
-The commands inside such a glob word's paren are judged too, as a subshell's (`nice (pkill -f x)`), so the glob reading only adds refusals.
+The commands inside such a glob word's paren are judged too, as a subshell's (`nice (rm x)`), so the glob reading only adds refusals.
 The paren stays a subshell after a command made only of unquoted `time`, `nocorrect` and `repeat` leads, each `repeat` with its count (`time (…)`, `time repeat 1 (…)`), as zsh runs one there.
 It stays a subshell in a `case`, `for`, `foreach`, `function` or `select` header, around a literal `/`, which zsh refuses as a bad pattern, and in any other argument; an empty `()` defines a function.
 Three group spellings stay as known limits, tracked as their own follow-up issue: a `/` inside an expansion in the group, which zsh drops with the expansion and still globs;
