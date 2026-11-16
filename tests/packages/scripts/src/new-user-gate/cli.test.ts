@@ -15,14 +15,18 @@ import { basename, join } from "node:path"
 import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   BOX_LOAD_MULT,
+  boxPath,
   Browser,
   capacityRefusals,
   clean,
   databaseCheck,
   dropBox,
+  hostTools,
   installCheck,
+  installEnv,
   leftForYou,
   makeBox,
+  plantLogin,
   readAfter,
   report,
   resultLine,
@@ -35,7 +39,7 @@ import {
   usageWords,
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
-import { stubs } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
 describe("the new-user gate's reads", () => {
@@ -275,6 +279,65 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     ).toBe(
       "PASS 1. curl | bash exits 0\nINCONCLUSIVE 2. Alpha routes: spawn.sh's capacity gate refused a start (load gate: …)\n1 of 2 passed, 1 inconclusive",
     )
+  })
+})
+
+describe("the box on this host's OS (#2374)", () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-host-")))
+  afterAll(() => rmSync(parent, { force: true, recursive: true }))
+
+  test("install.sh reads the host's OS from uname, so on Linux it takes its Linux branch, not brew", () => {
+    expect(
+      installEnv(join(parent, "box"), join(parent, "box", "h"), "/usr/bin"),
+    ).not.toHaveProperty("INSTALL_OS")
+  })
+
+  test("the made-up stored login reads through Linux's security, which takes Claude's login from ~/.claude/.credentials.json", () => {
+    const box = join(parent, "login")
+    const home = join(box, "h")
+    mkdirSync(home, { recursive: true })
+    const user = process.env.USER ?? "gate"
+    plantLogin(box, home, usageReading(user, Date.now()))
+    const shim = join(import.meta.dir, "../../../../../packages/scripts/src/security/cli.ts")
+    const read = Bun.spawnSync(
+      [
+        process.execPath,
+        "--no-env-file",
+        shim,
+        "find-generic-password",
+        "-a",
+        user,
+        "-s",
+        "Claude Code-credentials",
+        "-w",
+      ],
+      { env: { HOME: home, PATH: process.env.PATH ?? "", PLAYGROUND_DATA_DIR: join(box, "data") } },
+    )
+    expect(read.exitCode).toBe(0)
+    expect(JSON.parse(read.stdout.toString()).claudeAiOauth.accessToken).toBe("made-up")
+  })
+
+  test("install.sh's own uv step on Linux finds this host's uv on the box's PATH, so calls.log holds no curl", () => {
+    const box = join(parent, "uv")
+    mkdirSync(join(box, "stubs"), { recursive: true })
+    for (const [name, text] of Object.entries(stubs(box, "", "/bin/false"))) {
+      writeFileSync(join(box, "stubs", name), text)
+      chmodSync(join(box, "stubs", name), 0o755)
+    }
+    const uv = join(parent, "host-uv")
+    writeFileSync(uv, "#!/bin/sh\necho uv 0.0.0\n")
+    chmodSync(uv, 0o755)
+    const install = readFileSync(join(import.meta.dir, "../../../../../install.sh"), "utf8")
+    const has = install.match(/^has\(\) \{.*\}$/m)?.[0]
+    const step = install.match(/^install_tool\(\) \{\n[\s\S]*?\n\}$/m)?.[0]
+    const ran = Bun.spawnSync(["bash", "-c", `${has}\n${step}\nOS=Linux\ninstall_tool uv`], {
+      env: { HOME: join(box, "h"), PATH: boxPath(box, hostTools(box, uv)) },
+    })
+    const calls = existsSync(join(box, "calls.log"))
+      ? readFileSync(join(box, "calls.log"), "utf8")
+      : ""
+    expect({ calls, code: ran.exitCode }).toEqual({ calls: "", code: 0 })
+    expect(realpathSync(join(box, "tools", "uv"))).toBe(uv)
   })
 })
 
