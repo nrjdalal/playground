@@ -40,14 +40,13 @@ describe("macOnly", () => {
       "packages/a.ts",
       'Bun.spawnSync(["memory_pressure", "-Q"])',
       'const top = ["top", "-l", "1"]',
-      'const args = ["security", "find-generic-password", "-s", "x"]',
       'run(["open", "-a", "Docker"])',
       'Bun.which("launchctl")',
     )
-    expect(macOnlyLines(code)).toEqual([0, 1, 2, 3, 4])
+    expect(macOnlyLines(code)).toEqual([0, 1, 2, 3])
   })
 
-  test("counts an argv split over lines at its opening bracket's line, and a wrapper's find-generic-password", () => {
+  test("counts an argv split over lines at its opening bracket's line", () => {
     const split = at(
       "packages/a.ts",
       "const answer = await ctx.run([",
@@ -57,11 +56,28 @@ describe("macOnly", () => {
       "])",
     )
     expect(macOnlyLines(split)).toEqual([0])
-    const wrapped = at(
-      "packages/b.ts",
-      'const out = security(["find-generic-password", "-s", service, "-w"])',
+  })
+
+  test("a find-generic-password call does not count, since the Linux stand-in for security serves it", () => {
+    const files = [
+      at(
+        "packages/a.ts",
+        'const found = await run(["security", "find-generic-password", "-s", s, "-a", a, "-w"])',
+      ),
+      at("packages/b.ts", 'const out = security(["find-generic-password", "-s", service, "-w"])'),
+      at("scripts/c.sh", 'tk="$(security find-generic-password -s "$S" -a "$A" -w)" || exit 1'),
+    ]
+    expect(count(files).macOnly).toBe(0)
+  })
+
+  test("a parameter named platform is no platform test", () => {
+    const file = at(
+      "packages/a.ts",
+      "const read = (platform: NodeJS.Platform) => {",
+      '  return run(["vm_stat"])',
+      "}",
     )
-    expect(macOnlyLines(wrapped)).toEqual([0])
+    expect(macOnlyLines(file)).toEqual([1])
   })
 
   test("a trailing comment that names Linux guards nothing", () => {
