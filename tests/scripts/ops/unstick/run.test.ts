@@ -2128,3 +2128,32 @@ describe("the memory files alert and the memory trial (#1484)", () => {
     expect(found.map((f) => f.name)).toEqual(["worker-off"])
   })
 })
+
+// On Linux the live dashboard's 1355 proxy keeps its TLS marker, routes and CA in ~/.portless/fallback, so its URL and its health read come from the folder portlessDir() names (#2418).
+describe("the live dashboard's db reading", () => {
+  test("asks portless get in the folder portlessDir() names, and curl trusts that folder's CA", async () => {
+    const config = scratch()
+    const dashboard = join(config, "dashboard")
+    const pdir = join(config, "portless", "fallback")
+    const bin = join(config, "bin")
+    const log = join(config, "calls.log")
+    for (const dir of [dashboard, pdir, bin]) mkdirSync(dir, { recursive: true })
+    writeFileSync(join(pdir, "ca.pem"), "ca\n")
+    const stub = (name: string, body: string) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`)
+      chmodSync(join(bin, name), 0o755)
+    }
+    stub(
+      "bun",
+      `case "$*" in *setting.ts*) echo live-branch;; *portlessDir*) echo '${pdir}';; *) exit 1;; esac`,
+    )
+    stub("git", `printf 'worktree ${dashboard}\\nHEAD 0\\nbranch refs/heads/live-branch\\n'`)
+    stub("bunx", `echo "bunx $*|\${PORTLESS_STATE_DIR:-}" >> '${log}'; echo http://127.0.0.1:9`)
+    stub("curl", `echo "curl $*" >> '${log}'; echo '{"data":{"db":"ok"}}'`)
+    const env = { PATH: `${bin}:${process.env.PATH}`, PLAYGROUND_REPO: config }
+    expect(await callWith(env, config, "dashboard_db")).toBe("ok")
+    expect(readFileSync(log, "utf8")).toBe(
+      `bunx portless get api.playground|${pdir}\ncurl -s -m 5 --cacert ${pdir}/ca.pem http://127.0.0.1:9/api/health\n`,
+    )
+  })
+})

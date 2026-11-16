@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
 
-import { withPortlessCa } from "../portless-ca"
+import { portlessDir, withPortlessCa } from "../portless-ca"
 import { asideBar, asideDrift } from "./aside-bar"
 import { changelogEntry } from "./changelog-entry"
 import {
@@ -265,8 +265,12 @@ if (check === "screenshots" && !label) {
   process.exit(1)
 }
 
+// portless get in the folder portlessDir() picks, so the URL names the 1355 fallback's https while only it serves, never an idle ~/.portless's http.
 const portless = (name: string): string => {
-  const proc = Bun.spawnSync(["bunx", "portless", "get", name], { stderr: "ignore" })
+  const proc = Bun.spawnSync(["bunx", "portless", "get", name], {
+    env: { ...process.env, PORTLESS_STATE_DIR: portlessDir() },
+    stderr: "ignore",
+  })
   const url = proc.stdout.toString().trim()
   if (proc.exitCode !== 0 || !url) {
     console.error(
