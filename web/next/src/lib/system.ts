@@ -148,7 +148,7 @@ export type ReadingKey = "cpu" | "disk" | "fiveHour" | "memory" | "swap" | "week
 
 export type ReadingLevels = { below?: true; critical: number; unit: string; warn: number }
 
-// Memory has no row: its colour is macOS's memory pressure (memoryLevel), since the share used sits high on a Mac that is fine.
+// Memory has no row: its colour is the memory pressure (memoryLevel; macOS's level, on Linux PSI's), since the share used sits high on a Mac that is fine.
 export type LevelKey = Exclude<ReadingKey, "memory">
 
 // The one table of levels the System readings and systemHealth both read, so the sidebar and the Dashboard cannot disagree. Each reading is orange over its warning level and red over its critical one; a reading marked below is worse the lower it goes. CPU is the 5-minute load a core, disk the GB free, the rest a share used. Swap's levels sit high, since macOS grows swap as it needs it and a Mac at work sits past 85% (a permanently red mark is noise).
@@ -260,7 +260,7 @@ const reading = (
   }
 }
 
-// Pure: memory's level from macOS's memory pressure, as the System page reads it: normal green, warn orange, critical red, whatever the share used. Unknown pressure judges nothing.
+// Pure: memory's level from the memory pressure (macOS's level, on Linux PSI's), as the System page reads it: normal green, warn orange, critical red, whatever the share used. Unknown pressure judges nothing.
 export function memoryLevel(
   pressure: Pressure | null,
   used: number | null,

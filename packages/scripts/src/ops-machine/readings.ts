@@ -96,10 +96,21 @@ export type SysctlName = keyof typeof SYSCTLS
 // The Linux file that stands for a sysctl name, for a line that names what did not read.
 export const procSource = (name: SysctlName) => SYSCTLS[name].source
 
+// The /proc text that stands for a sysctl name, in sysctl's shape, else null; for a reader that runs no sysctl on Linux.
+export const procReading = (name: SysctlName): string | null => SYSCTLS[name].linux()
+
 // Pure but for /proc: sysctl's answer for name when it exits 0 with a reading, else the /proc text in its shape, else null.
 export const sysctlOf = (name: SysctlName, answer: Answer): string | null => {
   const out = answer.out.trim()
-  return answer.code === 0 && SYSCTLS[name].reads(out) ? out : SYSCTLS[name].linux()
+  return answer.code === 0 && SYSCTLS[name].reads(out) ? out : procReading(name)
+}
+
+// Linux's memory in use as procps's free counts it, MemTotal less MemAvailable from /proc/meminfo, in bytes; null when either does not read.
+export const procUsedBytes = (): number | null => {
+  const text = proc("meminfo") ?? ""
+  const total = meminfo(text, "MemTotal")
+  const available = meminfo(text, "MemAvailable")
+  return total !== null && available !== null ? Math.max(0, total - available) * 1024 : null
 }
 
 export const readSysctl = async (run: Run, name: SysctlName): Promise<string | null> =>

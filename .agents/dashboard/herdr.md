@@ -48,7 +48,9 @@
   A Codex record is live on the read that found its `codex` process in its pane, since it has no registry file to prove it by; every other agent's is never live.
   A pid alone proves nothing, since macOS hands a freed pid to the next process that starts (an ended `greed` once read as a red Waiting on you).
   Claude's registry file at that pid (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, read once per refresh by `readRegistry()` in `peers.ts`, which every registry reader builds on) is written while a session runs and removed at a clean exit, but a crash leaves it.
-  So the record is live when that file names its session id and its `procStart` equals the pid's start now (`processStarts()`, the probe's `ps -o pid=,lstart=` under `LC_ALL=C TZ=UTC`); a `procStart` in any other shape is dropped, so a change to how Claude writes it leaves the session id to decide rather than reading every session as ended.
+  So the record is live when that file names its session id and its `procStart` equals the pid's start now, read in the form Claude wrote it (`registeredStarts()` in `peers.ts`, by `api/hono/src/lib/sessions/proc-start.ts`).
+  On macOS that form is the `ps -o lstart=` string, from the probe's `ps -o pid=,lstart=` under `LC_ALL=C TZ=UTC`; on Linux it is clock ticks since boot, digits alone, from field 22 of `/proc/<pid>/stat`.
+  A `procStart` in any other shape is dropped, so a change to how Claude writes it leaves the session id to decide rather than reading every session as ended; `playground status` and spawn.sh's live-name check read a start by the same rule.
   A file that does not read whole (Claude rewrites it in place) leaves the record's own word for that pid, and so does a session whose transcript is under another Claude config's projects folder, whose registry is not this one.
   A registry that cannot be read at all falls back to the record's own word, and the System panel names that fallback in `problems`; when ps cannot be run, the file's session id alone decides.
   Every board reads herdr's servers, the registry and the transcripts afresh, so a prompt shows and an ended session leaves on the next board.
@@ -57,6 +59,7 @@
 - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, which the dashboard's start-time read (`starts`) shares: `COMMANDS` holds each one's fixed argv (`sysctl`, `vm_stat`, `ps`, `lsof`, `docker ps`, `docker stats --no-stream`, `docker context inspect`), all reads run without a shell, and `commandOf()` lets a probe take only a whole-number uid,
   a non-empty list of whole-number pids or an absolute socket path.
   `memory_pressure` stays off the list (its `-l` simulates pressure, and `kern.memorystatus_level` is the free share it prints), and `sysctl` is never handed a `name=value`.
+  On Linux the memory readings are file reads of `/proc` (`memory.ts`, dashboard.md's System report), so `sysctl` and `vm_stat` run on macOS alone.
   `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside those it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.
   There are six exceptions.
   The first is the update check the System report carries (`api/hono/src/lib/dashboard/update.ts`), whose `git fetch` of the one branch the checkout follows is not a read, so it and the `git rev-list`, `git log` and `git rev-parse` reads beside it stay out of `COMMANDS`: it runs git with no shell, a fixed argv and no argument from a request.

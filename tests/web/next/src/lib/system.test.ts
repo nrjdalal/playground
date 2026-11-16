@@ -155,6 +155,7 @@ export const calm = (patch: (r: SystemReport) => void = () => {}): SystemReport 
       totalBytes: 48 * GB,
       usedBytes: 28.8 * GB,
     },
+    platform: "darwin",
     problems: [],
     pulls: null,
     sampledAt: new Date(NOW - 10_000).toISOString(),
@@ -282,7 +283,7 @@ describe("systemReadings", () => {
     expect(readings.every((r) => r.reasons.length === 0)).toBe(true)
   })
 
-  test("memory takes its colour from macOS's memory pressure alone: normal green, warn orange, critical red, whatever its share or free memory", () => {
+  test("memory takes its colour from the memory pressure alone: normal green, warn orange, critical red, whatever its share or free memory", () => {
     const memory = (patch: (r: SystemReport) => void) =>
       systemReadings(calm(patch), NOW).find((r) => r.key === "memory")!
     const full = memory((r) => {

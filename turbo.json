@@ -32,6 +32,7 @@
         "$TURBO_ROOT$/api/hono/src/lib/dev/stop.ts",
         "$TURBO_ROOT$/api/hono/src/lib/keychain-items.ts",
         "$TURBO_ROOT$/api/hono/src/lib/keychain.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/sessions/proc-start.ts",
         "$TURBO_ROOT$/api/hono/src/lib/usage/prices.ts",
         "$TURBO_ROOT$/api/hono/src/lib/yard/client.ts",
         "$TURBO_ROOT$/api/hono/src/lib/yard/keychain.ts",

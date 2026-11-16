@@ -53,6 +53,7 @@
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@packages/scripts": "workspace:*",
         "@types/bun": "catalog:",
         "@types/node": "catalog:",
         "@types/ws": "catalog:",

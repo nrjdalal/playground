@@ -94,3 +94,29 @@ if [ -n "$PLAYGROUND_PROC" ]; then
 fi
 exec /bin/sleep "$@"
 `
+
+// /proc/<pid>/stat as the kernel prints it for a process started `ticks` clock ticks after boot (field 22), its command holding a space and a ")", as a command may, so a reader must count the fields past the last ")".
+export const pidStat = (pid: number, ticks: string): string =>
+  `${pid} (claude) x) S 1 ${pid} ${pid} 0 -1 4194304 107 0 0 0 0 0 0 0 20 0 1 0 ${ticks} 19529728 380 18446744073709551615 0 0 0\n`
+
+// A folder of /proc text holding each pid's stat, its process started at the ticks given.
+export const pidsDir = (starts: Record<number, string>): string => {
+  const dir = mkdtempSync(join(tmpdir(), "proc-"))
+  for (const [pid, ticks] of Object.entries(starts)) {
+    mkdirSync(join(dir, pid), { recursive: true })
+    writeFileSync(join(dir, pid, "stat"), pidStat(Number(pid), ticks))
+  }
+  return dir
+}
+
+// read's answer with PLAYGROUND_PROC at dir, which a reader takes under the test sandbox's marker, then PLAYGROUND_PROC put back.
+export async function withProc<T>(dir: string, read: () => T | Promise<T>): Promise<T> {
+  const saved = process.env.PLAYGROUND_PROC
+  process.env.PLAYGROUND_PROC = dir
+  try {
+    return await read()
+  } finally {
+    if (saved === undefined) delete process.env.PLAYGROUND_PROC
+    else process.env.PLAYGROUND_PROC = saved
+  }
+}

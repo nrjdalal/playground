@@ -277,6 +277,8 @@ export const fixtureSchema = z.object({
     cores: z.number().int().positive(),
     disk: z.object({ freeBytes: z.number(), totalBytes: z.number() }),
     load: z.tuple([z.number(), z.number(), z.number()]),
+    // The made-up machine's operating system as Node names it, `darwin` when unset.
+    platform: z.enum(["darwin", "linux"]).optional(),
     // Each System panel probe's stdout, by its name in probe.ts's COMMANDS.
     probes: z.record(z.string(), z.string()),
     totalBytes: z.number(),

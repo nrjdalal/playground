@@ -10,8 +10,10 @@ import {
   homeDataDir,
   liveBranch,
   linesSince,
+  liveSessions,
   webUp,
 } from "../../../../../packages/scripts/src/playground/probe"
+import { pidsDir, withProc } from "../../../../scripts/fixtures/proc"
 
 const dir = mkdtempSync(join(tmpdir(), "dispatcher-probe-"))
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
@@ -251,5 +253,30 @@ describe("liveBranch before a first setting", () => {
     mkdirSync(join(data, "extensions"), { recursive: true })
     writeFileSync(join(data, "extensions", "policy.json"), "{")
     withData(data, () => expect(() => liveBranch()).toThrow("does not parse"))
+  })
+})
+
+// Claude Code on Linux records procStart as its process's start in clock ticks since boot, field 22 of /proc/<pid>/stat, where macOS records ps's lstart.
+describe("liveSessions on Linux", () => {
+  test("a record whose procStart is clock ticks is live while /proc gives its pid that start, and gone once the pid started at another", async () => {
+    const config = join(dir, "linux-config")
+    mkdirSync(join(config, "sessions"), { recursive: true })
+    writeFileSync(
+      join(config, "sessions", `${process.pid}.json`),
+      JSON.stringify({ name: "dispatcher", pid: process.pid, procStart: "1801742" }),
+    )
+    const saved = process.env.CLAUDE_CONFIG_DIR
+    process.env.CLAUDE_CONFIG_DIR = config
+    try {
+      const names = (ticks: string) =>
+        withProc(pidsDir({ [process.pid]: ticks }), () =>
+          liveSessions((name) => name === "dispatcher").map((d) => d.name),
+        )
+      expect(await names("1801742")).toEqual(["dispatcher"])
+      expect(await names("2900000")).toEqual([])
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = saved
+    }
   })
 })

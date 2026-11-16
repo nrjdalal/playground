@@ -297,7 +297,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A remote it cannot read leaves every local commit in the scan.
   Every read in one hook call shares one 6 s budget (`withLiveBudget`, held in `AsyncLocalStorage` as `withDeadline` holds its deadline, so a long-lived process never shares it), and each remote is read once a call, so a chain of scans on a hung remote ends inside the guards' 13 s deadline; once the budget is spent, a scan reads every local commit.
   A live branch whose tip this repo lacks stands in by its own remote-tracking ref until a fetch, so a first push after `canary` moves reads only its own commits; the residual is a commit that branch dropped in a force-push this repo has not fetched, which stays out.
-  The guards import the file by its relative source path, since `@packages/safe-delete`'s index reads `@packages/config`'s built kinds (`role.ts`); `unpushed` there reads through the same `liveHeads`.
+  The guards import the file by its relative source path, since `@packages/safe-delete`'s index imports `@packages/config` by its package name and a guard imports no workspace package (`role.ts`); `unpushed` there reads through the same `liveHeads`.
   A test's remote is a local bare repo, since the test sandbox's git reaches no network ([.agents/testing.md](../../.agents/testing.md#the-sandbox)), placed as a GitHub one through an `insteadOf` rule where the guard places it by the raw URL.
 
 ## after-compact
