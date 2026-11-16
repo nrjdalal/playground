@@ -14,7 +14,7 @@ The root `package.json` globs workspaces as `api/*`, `packages/*`, `web/*`. A sh
 ## Pick the shape
 
 - **Library** (`env`, `db`, `auth`, `config`): tsdown-built to `dist/` and imported by other workspaces through an `exports` map. Use it when code is consumed at runtime.
-- **Build-only script** (`scripts`): never bundled, never imported at runtime. Its `.ts` files run via `bun src/<x>.ts`, either during another package's build (`@packages/auth`'s `build` runs `bun ../scripts/src/generate-env.ts auth` first) or on demand from a root script (`bun run auth:schema` runs `auth-schema.ts`). Use it for build-time codegen, for regenerators of committed source, and for every new build, CI, or repo tooling script, as `AGENTS.md` requires.
+- **Build-only script** (`scripts`): never bundled, never imported at runtime, but for the one module a server's bundle inlines (Build-only script shape, below). Its `.ts` files run via `bun src/<x>.ts`, either during another package's build (`@packages/auth`'s `build` runs `bun ../scripts/src/generate-env.ts auth` first) or on demand from a root script (`bun run auth:schema` runs `auth-schema.ts`). Use it for build-time codegen, for regenerators of committed source, and for every new build, CI, or repo tooling script, as `AGENTS.md` requires.
 
 ## Common skeleton (both shapes)
 
