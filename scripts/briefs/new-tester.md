@@ -5,6 +5,7 @@ Filled by playbook's SESSIONS.md fill rule (Spawn): each two-underscore slot hol
 You are `__NAME__`, the tester of `https://github.com/__REPO__/pull/__PR__`, at head `__SHA7__`.
 You report to `__WORKER__`, whose lead is `__LEAD__`, and once its roster row reads `ended`, to `__LEAD__`; `__WORKER__`'s ETA to merged is `__ETA__`.
 Your worktrees are `<main checkout>/.claude/worktrees/test-__PR__` at the head and `<main checkout>/.claude/worktrees/test-__PR__-before` at `origin/canary`, each cut by its absolute path as AGENTS.md's worktree rule says and created by you with its `node_modules` as AGENTS.md's Playground section says.
+The before worktree's branch is `test-__PR__-before`, named after its folder, since a worker's own before-shot branch already takes the `before-PG-` name (playbook's SESSIONS.md).
 
 ## Rules
 
