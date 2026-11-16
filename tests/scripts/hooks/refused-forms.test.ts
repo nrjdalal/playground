@@ -61,6 +61,26 @@ const DATA = join(HOME, ".playground")
 const ROOT = join(DATA, "extensions")
 const SCOPE = join(ROOT, "login")
 const OTHER = join(SCRATCH, "other")
+// One fixed listing of / that no-extensions-write judges a glob in / against, a Linux machine's, so a row reads the same on a Mac, whose / holds Applications, Library and Users
+const ROOT_NAMES = [
+  "bin",
+  "boot",
+  "dev",
+  "etc",
+  "home",
+  "lib",
+  "mnt",
+  "opt",
+  "proc",
+  "root",
+  "run",
+  "sbin",
+  "srv",
+  "sys",
+  "tmp",
+  "usr",
+  "var",
+]
 const PATHS: Paths = {
   BARE: join(SCRATCH, "bare"),
   CLI_DIR: join(CHECKOUT, "packages", "scripts", "src", "playground"),
@@ -417,7 +437,8 @@ const guardsOf = (
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
       tmp: ["/tmp", HOME],
     },
-    run: (raw, home) => c.extensionsWrite(raw, { ...STARTING, HOME: home }),
+    run: (raw, home) =>
+      c.extensionsWrite(raw, { ...STARTING, HOME: home }, undefined, () => ROOT_NAMES),
   },
   "no-glm-heavy-path": {
     folders: { "glm org repo": [GLM_ORG_REPO, HOME], "glm repo": [GLM_REPO, HOME] },
@@ -777,7 +798,12 @@ const codexInput = ({ input, tool }: Shape, cwd: string) =>
     tool_name: tool,
   })
 const CODEX_CASES = CASES.flatMap((c) =>
-  codexShapes(c.call).map((shape) => ({ ...c, codex: shape, key: `${c.key} | ${shape.shape}` })),
+  codexShapes(c.call).map((shape) => ({
+    ...c,
+    base: c.key,
+    codex: shape,
+    key: `${c.key} | ${shape.shape}`,
+  })),
 )
 
 describe("every refused form stays refused in its Codex shape", () => {
@@ -786,7 +812,8 @@ describe("every refused form stays refused in its Codex shape", () => {
     async (_, c) => {
       const at = GUARDS[c.guard].folders[c.folder] as [string, string]
       const reason = await GUARDS[c.guard].run(codexInput(c.codex, at[0]), at[1])
-      if (allowed(c)) expect(reason).toBeUndefined()
+      // a case the allow list names in one folder runs there in every shape
+      if (allowed(c) || ALLOWED.includes(c.base)) expect(reason).toBeUndefined()
       else expect(reason).toContain(`${c.guard} hook `)
     },
     60_000,
@@ -1091,6 +1118,10 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2104 a recursive git rm with a git folder alone after a cd to a variable | -r",
       "#2104 a recursive git rm with a git folder and a work tree after a cd to a variable | -r",
       "#2104 a recursive git rm with a work tree alone after a cd to a variable | -r",
+      // df's -h prints sizes for people, never a folder
+      "#2320 a disk check of another machine's homes over ssh | -h",
+      "#2320 a disk check of the folder that holds the homes | -h",
+      "#2320 a disk check over ssh after its own options | -h",
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",
       "#356 many variables ahead of a write | -rf",

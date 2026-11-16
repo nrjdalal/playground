@@ -88,6 +88,52 @@ test("gh in the sandbox is its fake: gh repo create exits non-zero and names the
   }
 })
 
+// a test run on Linux once reached the user's live systemd manager through a real render and stopped four running ops jobs, so every tool that changes the live machine is a fake first on PATH
+test.each(["herdr", "launchctl", "loginctl", "portless", "systemctl"])(
+  "%s in the sandbox is its fake: it exits non-zero and names the sandbox, so no test reaches the live machine",
+  (tool) => {
+    const { env, scratch } = sandbox()
+    try {
+      // resolved before it runs, so a sandbox without the fake fails here and never calls the real tool
+      expect(Bun.which(tool, { PATH: env.PATH })).toBe(join(scratch, "bin", tool))
+      const run = Bun.spawnSync([tool, "--user", "stop", "com.playground.ops-tick.service"], {
+        env,
+      })
+      expect(run.exitCode).toBe(99)
+      expect(run.stderr.toString()).toContain(`the test sandbox stopped a real ${tool} call`)
+    } finally {
+      rmSync(scratch, { force: true, recursive: true })
+    }
+  },
+)
+
+// a parent shell that names the live proxy's folder, the user's bus or a herdr server (one ~/.zshrc set PORTLESS_STATE_DIR) never hands it to a test, which reads folders in its scratch alone
+test("the sandbox's portless, runtime and herdr folders are in its scratch, whatever the parent sets", () => {
+  const live = {
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+    HERDR_CONFIG_PATH: "/live/herdr/config.toml",
+    HERDR_SOCKET_PATH: "/live/herdr/playground.sock",
+    PORTLESS_STATE_DIR: "/live/.portless",
+    XDG_RUNTIME_DIR: "/run/user/1000",
+  }
+  const saved = Object.fromEntries(Object.keys(live).map((key) => [key, process.env[key]]))
+  Object.assign(process.env, live)
+  const { env, scratch } = sandbox()
+  for (const [key, value] of Object.entries(saved))
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  try {
+    expect(env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined()
+    expect(env.HERDR_CONFIG_PATH).toBe(join(scratch, "herdr", "config.toml"))
+    expect(env.HERDR_SOCKET_PATH).toBe(join(scratch, "herdr", "herdr.sock"))
+    expect(env.PORTLESS_STATE_DIR).toBe(join(scratch, "portless"))
+    expect(env.XDG_RUNTIME_DIR).toBe(join(scratch, "run"))
+    expect(existsSync(env.XDG_RUNTIME_DIR!)).toBe(true)
+  } finally {
+    rmSync(scratch, { force: true, recursive: true })
+  }
+})
+
 test("a test's own fake gh ahead of the sandbox's answers instead", () => {
   const { env, scratch } = sandbox()
   try {

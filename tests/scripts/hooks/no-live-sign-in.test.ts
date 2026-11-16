@@ -68,6 +68,8 @@ describe("every other call runs", () => {
     'curl -sS "${CA[@]}" -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"',
     // the dev skill's Agent login, its URLs asked in the folder portlessDir() names (#2418)
     'WEB=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get playground); API=$(PORTLESS_STATE_DIR="$PDIR" bunx portless get api.playground); curl -sS "${CA[@]}" -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"',
+    // the dev skill's Agent login, portless's folder written as the literal path portlessDir() printed (#2320)
+    'WEB=$(PORTLESS_STATE_DIR=/home/me/.portless/fallback bunx portless get playground); API=$(PORTLESS_STATE_DIR=/home/me/.portless/fallback bunx portless get api.playground); curl -sS --cacert /home/me/.portless/fallback/ca.pem -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"',
     "curl -X POST http://127.0.0.1:4201/api/v1/onboard/sign-in",
     "curl -X POST https://pg-1.playground.localhost:4101/api/agents/sign-in-as",
     "curl https://api.playground.localhost/api/health",
