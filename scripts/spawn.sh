@@ -1412,6 +1412,9 @@ case "$MODE" in
     [ $# -ge 2 ] && [ $# -le 3 ] || usage
     [ -z "$TITLE_ARG" ] || usage "--title is for a worker's or a checker's start, not a resume"
     NAME=$1 DIR=$2 SESSION=${3:-$1} BRIEF=$RESUME_BRIEF
+    # A probe started with --ssh or --remote-control comes back only as a new probe start, since a resume would run it here without them and write its record afresh.
+    grep -qE '^exec .* --(ssh|remote-control) ' "$RESUME_DIR/$NAME.sh" 2>/dev/null &&
+      refuse "it started as a probe with --ssh or --remote-control, which a resume would drop: start it again with spawn.sh probe"
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
@@ -1821,6 +1824,11 @@ fi
 # An --ssh probe's temp folder on the other machine, which its settings and skills are copied into: this one's own name on Linux, else a new name under /tmp.
 REMOTE=
 [ -z "$SSH_HOST" ] || REMOTE=${LINUX_TEMP:-$(mktemp -u "/tmp/playground-$NAME.XXXXXX")}
+# Its sandbox writes that folder, the TMPDIR it runs with there, in a settings file of its own, since the shared one holds this machine's temp folder.
+if [ -n "$REMOTE" ] && [ "$REMOTE" != "$TEMP" ]; then
+  TEMP=$REMOTE
+  [[ $BUILT == *-"$NAME".json ]] || BUILT="${BUILT%.json}-$NAME.json"
+fi
 python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$TEMP" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
 src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]

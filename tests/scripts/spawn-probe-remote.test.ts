@@ -137,6 +137,22 @@ describe("--ssh runs the probe's claude on another machine", () => {
   })
 
   test.each([
+    ["a probe", [], "factory-settings-sandbox-400k-probe-far.json"],
+    ["a closed probe", ["--sandbox"], "factory-settings-sandbox-closed-400k-probe-far.json"],
+  ])(
+    "from macOS %s's sandbox writes the remote folder, in a settings file of its own",
+    async (_, extra, file) => {
+      const r = await spawn([...probe, ...ssh, ...extra], [], {}, undefined, undefined, key)
+      expect(r.code).toBe(0)
+      const remote = launchOf(r).match(/mkdir -m 700 (\S+) /)?.[1] ?? ""
+      const built = JSON.parse(readFileSync(lw(r.home, file), "utf8"))
+      expect(built.sandbox.filesystem.allowWrite).toContain(remote)
+      expect(launchOf(r)).toContain(`--settings ${remote}/${file} `)
+      expect(existsSync(lw(r.home, file.replace("-probe-far", "")))).toBe(false)
+    },
+  )
+
+  test.each([
     ["an option for a host", ["--ssh", "-oProxyCommand=x@h", "--key", "{home}/key"], "--ssh"],
     ["a host with no user", ["--ssh", "spark-bravo", "--key", "{home}/key"], "--ssh"],
     ["a host with a space", ["--ssh", "a b@h", "--key", "{home}/key"], "--ssh"],
@@ -155,7 +171,32 @@ describe("--ssh runs the probe's claude on another machine", () => {
   })
 })
 
-describe("restore leaves a remote probe down", () => {
+describe("restore and resume leave a remote probe down", () => {
+  test.each([["--ssh u@h --key /k"], ["--remote-control rc-a"]])(
+    "a resume of a probe whose record carries %s is refused, its record kept",
+    async (extra) => {
+      const sid = "eeeeeeee-0000-4000-8000-0000000000e1"
+      const record = `#!/bin/bash\n# server: playground\nexec /x/scripts/spawn.sh resume probe-far ${root} ${sid} ${extra}\n`
+      const r = await spawn(
+        ["resume", "probe-far", root, sid],
+        [],
+        {},
+        undefined,
+        { name: "probe-far", backend: "claude" },
+        (home) => {
+          mkdirSync(lw(home, "resume"), { recursive: true })
+          writeFileSync(lw(home, "resume", "probe-far.sh"), record)
+        },
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(
+        "spawn.sh refuses probe-far: it started as a probe with --ssh or --remote-control, which a resume would drop: start it again with spawn.sh probe",
+      )
+      expect(placing(r)).toEqual([])
+      expect(readFileSync(lw(r.home, "resume", "probe-far.sh"), "utf8")).toBe(record)
+    },
+  )
+
   test("a record carrying --ssh or --remote-control is skipped with its reason", async () => {
     const sid = "eeeeeeee-0000-4000-8000-0000000000e1"
     const r = await spawn(["restore"], [], {}, undefined, undefined, (home) => {
