@@ -21,12 +21,12 @@ const git = async (repo: string, ...args: string[]): Promise<string> => {
   return out
 }
 
-// The newest commit in HEAD's history whose template is this copy byte for byte, by its blob id, so a copy written from any committed version reads as unedited; none when it is not one.
-const writtenFrom = async (repo: string, template: string, copy: string) => {
+// The newest commit in HEAD's or old's history whose template is this copy byte for byte, by its blob id, so a copy written from any committed version reads as unedited, one from past HEAD too when --to moved back; none when it is not one.
+const writtenFrom = async (repo: string, template: string, copy: string, old: string) => {
   const blob = (await git(repo, "hash-object", copy)).trim()
   let commit = ""
   for (const line of (
-    await git(repo, "log", "--format=%H", "--raw", "--no-abbrev", "HEAD", "--", template)
+    await git(repo, "log", "--format=%H", "--raw", "--no-abbrev", "HEAD", old, "--", template)
   ).split("\n")) {
     if (/^[0-9a-f]{40}$/.test(line)) commit = line
     else if (line.startsWith(":") && line.split(/\s+/)[3] === blob) return commit
@@ -63,7 +63,7 @@ export const refreshBriefs = async (o: {
     const template = `scripts/briefs/${kind}.md`
     const text = await git(o.repo, "show", `HEAD:${template}`)
     if ((await Bun.file(copy).text()) === text) return
-    const from = await writtenFrom(o.repo, template, copy)
+    const from = await writtenFrom(o.repo, template, copy, o.old)
     const diff = await git(o.repo, "diff", from ?? o.old, "HEAD", "--", template)
     if (from) {
       await writeAtomic(copy, text)
