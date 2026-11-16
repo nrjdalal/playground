@@ -11,6 +11,8 @@ const controls = (): Row[] => [
   ["an assignment whose value opens with an =", "x==y"],
   ["an assignment of a listing's zsh process substitution", "x==(ls)"],
   ["an array whose element is a listing's zsh process substitution", "z=(=(ls) b)"],
+  ["an array whose indexed value is a listing's zsh process substitution", "a=([1]==(ls))"],
+  ["a test that compares with a zsh pattern", "[[ $x ==(a|b) ]]"],
 ]
 
 // each expansion is rmm, rmx, rxm or rxx, never rm
@@ -159,6 +161,22 @@ export const groups: Group[] = [
       [
         "a plain rm by a path a brace sequence spells inside a zsh process substitution as a local's value",
         `local q==(/bin/r{m..m} ${NEVER_MADE})`,
+      ],
+      [
+        "a plain rm inside a zsh process substitution as an associative array's keyed value",
+        `typeset -A h; h=([k]==(/bin/rm ${NEVER_MADE}))`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells inside a zsh process substitution as an associative array's keyed value",
+        `typeset -A h; h=([k]==(/bin/r{m..m} ${NEVER_MADE}))`,
+      ],
+      [
+        "a plain rm by a path a brace sequence spells inside a zsh process substitution as an array's indexed value",
+        `a=([1]==(/bin/r{m..m} ${NEVER_MADE}))`,
+      ],
+      [
+        "a plain rm inside a zsh process substitution as an array's indexed value, after a header line",
+        `#!/bin/sh\na=([1]==(/bin/rm ${NEVER_MADE}))`,
       ],
       [
         "a plain rm by a path a brace sequence spells inside a zsh process substitution as an assignment's value before a command",
@@ -316,6 +334,14 @@ export const groups: Group[] = [
         "a kill by name a zsh alternation spells inside a zsh process substitution as a typeset's value",
         "typeset y==(pk(i|x)ll -f watcher)",
       ],
+      [
+        "a kill by name a zsh alternation spells inside a zsh process substitution as an associative array's keyed value",
+        "typeset -A h; h=([k]==(pk(i|x)ll -f watcher))",
+      ],
+      [
+        "a kill by name inside a zsh process substitution as an array's indexed value",
+        "a=([1]==(pkill -f watcher))",
+      ],
       // read as a redirect's file since the change before, kept as pins
       [
         "a kill by name a zsh alternation spells inside a zsh process substitution read as a redirect's file, glued to the redirect",
@@ -388,6 +414,14 @@ export const groups: Group[] = [
       [
         "a stash pop inside a zsh process substitution as an export's value",
         "export y==(git stash pop)",
+      ],
+      [
+        "a stash pop inside a zsh process substitution as an associative array's keyed value",
+        "typeset -A h; h=([k]==(git stash pop))",
+      ],
+      [
+        "a stash pop at a path a zsh alternation matches inside a zsh process substitution as an array's indexed value",
+        "a=([1]==(/usr/bin/g(i|x)t stash pop))",
       ],
       // read as a redirect's file since the change before, kept as pins
       [
