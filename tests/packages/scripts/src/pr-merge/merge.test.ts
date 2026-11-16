@@ -19,6 +19,7 @@ import {
   lockRootOf,
   realLockRoot,
   prMerge,
+  shipNowLine,
   takeLock,
   unfoundTokens,
   type Run,
@@ -132,6 +133,7 @@ function stub({
   merges = [ok("")],
   parents = {},
   stateAfter = ["MERGED"],
+  title = "feat(PG-112): x",
   viewBody,
 }: {
   aheadBy?: string
@@ -146,6 +148,7 @@ function stub({
   merges?: RunResult[]
   parents?: Record<number, RunResult>
   stateAfter?: string[]
+  title?: string
   viewBody?: string
 } = {}) {
   const calls: string[][] = []
@@ -169,6 +172,7 @@ function stub({
           labels: labels.map((name) => ({ name })),
           state: "OPEN",
           statusCheckRollup: checks,
+          title,
         }),
       )
     }
@@ -286,28 +290,43 @@ describe("prMerge", () => {
   })
 
   // a fix for a bug live on the factory's own machine waited for the usual ship beat, so a ship-now label tells Ops to ship once it merges.
-  test("a ship-now PR's merge sends Ops one ship line; an unlabelled merge and a refusal send none", async () => {
+  test("a ship-now fix's merge and a ship-now feat's naming the owner's ask each send Ops one ship line; an unlabelled merge, a feat naming no owner ask and a refusal send none", async () => {
     const sent: string[] = []
     const shipNow = async (line: string) => void sent.push(line)
-    const labelled = stub({ labels: ["bug", "ship-now"] })
+    const labelled = stub({ labels: ["bug", "ship-now"], title: "fix(PG-112): x" })
     expect(await prMerge(112, { repo: REPO }, labelled.run, { ...local(), shipNow })).toMatchObject(
       { kind: "merged" },
     )
     expect(sent).toEqual([
       "#112 carries ship-now and merged at abc1234def: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds abc1234def.",
     ])
-    const plain = stub({ labels: ["bug"] })
+    const plain = stub({ labels: ["bug"], title: "fix(PG-112): x" })
     expect(await prMerge(112, { repo: REPO }, plain.run, { ...local(), shipNow })).toMatchObject({
       kind: "merged",
     })
-    const refused = stub({ aheadBy: "1", labels: ["ship-now"] })
+    const unasked = stub({ labels: ["ship-now"], title: "feat(PG-112): x" })
+    expect(await prMerge(112, { repo: REPO }, unasked.run, { ...local(), shipNow })).toMatchObject({
+      kind: "merged",
+    })
+    expect(sent).toHaveLength(1)
+    const asked = stub({
+      labels: ["ship-now"],
+      title: "feat(PG-112): x",
+      viewBody: `${SKILL_BODY.replace("**After:** one.", "**After:** one. `AGENTS.md` checked.")}\n- Owner ask: #i1`,
+    })
+    expect(await prMerge(112, { repo: REPO }, asked.run, { ...local(), shipNow })).toMatchObject({
+      kind: "merged",
+    })
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toStartWith("#112 carries ship-now and merged at abc1234def: ship canary now")
+    const refused = stub({ aheadBy: "1", labels: ["ship-now"], title: "fix(PG-112): x" })
     const refusal = await prMerge(112, { repo: REPO }, refused.run, {
       ...local({ tree: null }),
       shipNow,
     })
     expect(refusal.kind).toBe("refused")
-    expect(sent).toHaveLength(1)
-    const failing = stub({ labels: ["ship-now"] })
+    expect(sent).toHaveLength(2)
+    const failing = stub({ labels: ["ship-now"], title: "fix(PG-112): x" })
     const outcome = await prMerge(112, { repo: REPO }, failing.run, {
       ...local(),
       shipNow: async () => {
@@ -893,6 +912,41 @@ describe("the merge lock in Redis", () => {
     if ("release" in lock) await lock.release()
     expect(redis.keys.size).toBe(0)
     expect(existsSync(join(at, "merge.lock"))).toBe(false)
+  })
+})
+
+// a feat for an ask the owner waits to see live rightly carried ship-now, so a ship takes a fix( title or a Links line naming the owner's ask (PG-2469).
+describe("shipNowLine", () => {
+  const links = (...lines: string[]) =>
+    `## TL;DR\n\nIt ships.\n\n## Links\n\n- Closes #2469\n${lines.join("\n")}`
+  const SHIP =
+    "#7 carries ship-now and merged at abc1234: ship canary now by the release skill, unless a ship you are already running pinned a canary that holds abc1234."
+
+  test.each([
+    ["a fix( title", "fix(PG-7): x", links()],
+    ["a feat naming an Inbox id", "feat(PG-7): x", links("- Owner ask: #i162")],
+    ["a feat naming a PG issue", "feat(PG-7): x", links("- **Owner ask:** PG-2437")],
+    ["a feat quoting the owner", "feat(PG-7): x", links('- Owner ask: "show it live tonight"')],
+    [
+      "a feat quoting the owner in curly quotes",
+      "feat(PG-7): x",
+      links("Owner ask: “show it live”"),
+    ],
+  ])("%s ships", (_, title, body) => {
+    expect(shipNowLine(7, "abc1234", { body, title })).toEqual({ line: SHIP, ship: true })
+  })
+
+  test.each([
+    ["a feat whose Links names none", "feat(PG-7): x", links()],
+    ["a feat with no body", "feat(PG-7): x", undefined],
+    ["an Owner ask: line outside Links", "feat(PG-7): x", `Owner ask: #i162\n\n${links()}`],
+    ["an Owner ask: line naming nothing", "feat(PG-7): x", links("- Owner ask: soon")],
+    ["a title that only opens with fix", "fixture(PG-7): x", links()],
+  ])("%s answers with the rule's line and no ship", (_, title, body) => {
+    const answer = shipNowLine(7, "abc1234", { body, title })
+    expect(answer.ship).toBe(false)
+    expect(answer.line).toContain("extensions/core/rules/release.md")
+    expect(answer.line).toContain("Owner ask:")
   })
 })
 

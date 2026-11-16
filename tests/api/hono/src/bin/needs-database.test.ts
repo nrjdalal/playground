@@ -20,11 +20,13 @@ const run = (bin: string, ...args: string[]) => {
   })
 }
 
-for (const [bin, args] of [
-  ["dashboard-ask.ts", ["open"]],
-  ["dashboard-thread.ts", ["list"]],
+for (const [bin, args, issue] of [
+  ["dashboard-ask.ts", ["open"], 2318],
+  ["dashboard-ingest.ts", ["status"], 2460],
+  ["dashboard-thread.ts", ["list"], 2318],
+  ["dashboard-upload.ts", ["i1"], 2460],
 ] as const)
-  test(`${bin} with an empty POSTGRES_URL says there is no database yet, in one line with no stack, and exits 1 (#2318)`, () => {
+  test(`${bin} with an empty POSTGRES_URL says there is no database yet, in one line with no stack, and exits 1 (#${issue})`, () => {
     const done = run(bin, ...args)
     expect(done.stderr.toString()).toBe(
       "No database yet: finish first-run setup on the Dashboard, then run this again.\n",
