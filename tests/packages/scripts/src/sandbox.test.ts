@@ -7,13 +7,14 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
-import { ROOT_TOOLS, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
+import { rootFiles, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
 
 // Builds the sandbox while the parent reads Asia/Kolkata, as the Mac does, and returns the zone a Python child reports with that env plus the given overrides
 const childZone = (overrides: Record<string, string> = {}) => {
@@ -182,7 +183,7 @@ test("on Linux wrap runs argv under bwrap in a pid view, over each live folder t
       "--ro-bind",
       join(home, ".ssh"),
       join(home, ".ssh"),
-      ...ROOT_TOOLS.filter((tool) => existsSync(tool)).flatMap((tool) => ["--ro-bind", "/r", tool]),
+      ...rootFiles().flatMap((file) => ["--ro-bind", "/r", file]),
       "setsid",
       "--wait",
       "bun",
@@ -190,6 +191,20 @@ test("on Linux wrap runs argv under bwrap in a pid view, over each live folder t
     ])
   } finally {
     rmSync(home, { force: true, recursive: true })
+  }
+})
+
+// bwrap cannot bind over a symlink, which GitHub's runner image makes /usr/bin/sudo, so every shard failed to start
+test("each root tool is bound at its own file, a link's target once, and a missing one not at all", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sandbox-root-"))
+  try {
+    writeFileSync(join(dir, "real"), "")
+    symlinkSync(join(dir, "real"), join(dir, "sudo"))
+    expect(rootFiles([join(dir, "sudo"), join(dir, "real"), join(dir, "pkexec")])).toEqual([
+      realpathSync(join(dir, "real")),
+    ])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
   }
 })
 

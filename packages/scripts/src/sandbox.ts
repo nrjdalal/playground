@@ -1,5 +1,5 @@
 // The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude, gh, herdr, launchctl, loginctl, portless and systemctl first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential), close a live herdr pane, start or stop a live ops job or the live proxy, or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. PORTLESS_STATE_DIR, XDG_RUNTIME_DIR, HERDR_CONFIG_PATH and HERDR_SOCKET_PATH name folders in the scratch, so a call that gets past a fake still finds no user bus or herdr server and writes none of portless's live state, though a real stop of portless's proxy still finds a proxy by its port; tests/live-tools-scan.test.ts fails on such a call in a test, and on Linux wrap (below) runs each child in a pid view of its own, which leaves it no live pid to signal. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs a tool's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as a herdr session, the user's DBUS_SESSION_BUS_ADDRESS or the data folder, never reaches a test, nor does a git hook's GIT_DIR or GIT_INDEX_FILE, which would turn a test's scratch git init or commit onto the real repository. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
 
@@ -108,6 +108,11 @@ export const hidden = (home: string, uid: number, env: Record<string, string | u
 // The root tools a test could call by full path, where a fake first on PATH cannot reach
 export const ROOT_TOOLS = ["/usr/bin/pkexec", "/usr/bin/sudo"]
 
+// Each root tool's own file, since bwrap cannot bind over a symlink and GitHub's runner image links /usr/bin/sudo to the binary it picks; a call by the link's path then reaches the stand-in too
+export const rootFiles = (tools = ROOT_TOOLS) => [
+  ...new Set(tools.filter((tool) => existsSync(tool)).map((tool) => realpathSync(tool))),
+]
+
 // On Linux each child runs under bwrap in a pid view of its own, so no test can signal a live process (portless's stop finds the live proxy's pid by its port and signals it), with an empty folder over each live one, the root stand-in over each root tool and ~/.ssh read-only; the host network stays, since the Docker tests reach their containers on 127.0.0.1, only a path that exists is mounted over, since bwrap would make a missing one on the real disk, and argv leads a process group of its own, as on macOS, since a group whose leader is bwrap outside the view reads as group 0 there (the dev launcher's record then names none); macOS runs argv as it is
 export const wrap = (
   argv: string[],
@@ -134,11 +139,7 @@ export const wrap = (
     "--die-with-parent",
     ...over.flatMap((dir) => ["--tmpfs", dir]),
     ...(existsSync(ssh) ? ["--ro-bind", ssh, ssh] : []),
-    ...ROOT_TOOLS.filter((tool) => existsSync(tool)).flatMap((tool) => [
-      "--ro-bind",
-      refused,
-      tool,
-    ]),
+    ...rootFiles().flatMap((file) => ["--ro-bind", refused, file]),
     "setsid",
     "--wait",
     ...argv,
