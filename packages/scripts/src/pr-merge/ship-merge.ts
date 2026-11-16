@@ -7,7 +7,7 @@ import { readSessionNames } from "@packages/settings"
 import { ciGate, REQUIRED_CHECKS, type Check } from "./gates"
 import { freezeLine, freezeStatus, heldPath } from "./held"
 import { gh, repoOf, runGh, type Run } from "./merge"
-import { gateLine, REHEARSAL_RESULTS, rehearsalLine, waiverLine } from "./ship-lines"
+import { gateLine, REHEARSAL_RESULTS, rehearsalLine, WAIVER_LABEL, waiverLine } from "./ship-lines"
 
 // An Inbox item as playground ask get prints it: the fields a waiver reads.
 export type InboxItem = {
@@ -45,9 +45,6 @@ export type ShipFacts = {
 // An Inbox id as playground ask get takes it, a uuid or #iN, so a waiver line passes no flag to it.
 const INBOX_ID = /^(#i\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
-// Words that skip the new-user check: the check named, and a skip or a waive.
-const waives = (words: string) => /\bnew-user\b/i.test(words) && /\b(skip|waive)/i.test(words)
-
 const bodyLines = (body: string) => new Set(body.split(/\r?\n/).map((line) => line.trim()))
 
 // Pure: the Inbox id the body's waiver line for this head names, else null.
@@ -60,7 +57,7 @@ export function waiverId(body: string, head: string): string | null {
   return null
 }
 
-// Pure: why the decision a waiver names does not skip this ship's gate: the dispatcher's decision, the owner's Approve (only the owner's own answer sets approved, .agents/dashboard/asks.md), on a row that skips the new-user check, for this version.
+// Pure: why the decision a waiver names does not skip this ship's gate: the dispatcher's decision, the owner's Approve (only the owner's own answer sets approved, .agents/dashboard/asks.md), on the row labelled WAIVER_LABEL, for this version.
 function waiverRefusals(
   id: string,
   item: InboxItem | string | null,
@@ -85,14 +82,14 @@ function waiverRefusals(
     refusals.push(`${at} is a multi-question ask: a waiver takes a single-question decision`)
   else if (choice !== "approve")
     refusals.push(`${at} was approved by ${choice}, whose own words name no row`)
-  // A row its poster wrote, read as the Inbox reads the owner's pick; a default label ("Approve") says nothing, so the title or text speaks for it.
-  else if (type === "ask" && (options || approve)) {
+  // The row the owner's Approve picked, read as the Inbox reads it; a decision whose rows its poster did not write has no waiver row.
+  else if (type !== "ask" || !(options || approve))
+    refusals.push(`${at} has no "${WAIVER_LABEL}" row: its poster wrote none`)
+  else {
     const label = rowOfAnswer({ approve, options, type }, { choice, option })?.label ?? ""
-    if (!waives(label))
-      refusals.push(
-        `${at} approved option ${option ?? 0} "${label}", which names no new-user waiver`,
-      )
-  } else if (!waives(words)) refusals.push(`${at} names no new-user waiver in its title or text`)
+    if (label.trim() !== WAIVER_LABEL)
+      refusals.push(`${at} approved option ${option ?? 0} "${label}", not "${WAIVER_LABEL}"`)
+  }
   return refusals
 }
 

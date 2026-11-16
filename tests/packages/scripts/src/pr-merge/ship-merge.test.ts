@@ -13,6 +13,7 @@ import type { Run, RunResult } from "../../../../../packages/scripts/src/pr-merg
 import {
   gateLine,
   rehearsalLine,
+  WAIVER_LABEL,
   waiverLine,
 } from "../../../../../packages/scripts/src/pr-merge/ship-lines"
 import {
@@ -194,53 +195,63 @@ describe("shipRefusals takes a new-user gate waived by an approved Inbox decisio
     ])
   })
 
-  test("an Approve on a row that does not skip the new-user check refuses, as does an Edit", () => {
+  test("the waiver row is #i17's option 0, word for word", () => {
+    expect(WAIVER_LABEL).toBe("Ship everything now, skip the new-user check this once")
+    const padded = { ...decision().preview, options: [{ label: ` ${WAIVER_LABEL} ` }] }
+    expect(waiver({ preview: padded })).toEqual([])
+  })
+
+  test("an Approve on any other row refuses, a negation or a near wording included, as does an Edit", () => {
+    const not = (option: number, label: string) =>
+      `gate: Inbox ${ID} approved option ${option} "${label}", not "${WAIVER_LABEL}"`
     expect(waiver({ answer: { choice: "approve", option: 1 } })).toEqual([
-      `gate: Inbox ${ID} approved option 1 "Copy only this fix to main now, outside the usual ship", which names no new-user waiver`,
+      not(1, "Copy only this fix to main now, outside the usual ship"),
     ])
-    const wait = { label: "Wait until the new-user check passes" }
-    const rows = { ...decision().preview, options: [wait, { label: "Ship now, skip the check" }] }
-    expect(waiver({ preview: rows })).toEqual([
-      `gate: Inbox ${ID} approved option 0 "Wait until the new-user check passes", which names no new-user waiver`,
-    ])
+    for (const label of [
+      "Do not skip the new-user check",
+      "Wait until the new-user check passes",
+      "Ship everything now, skip the new-user check",
+    ]) {
+      const preview = { ...decision().preview, options: [{ label }, { label: WAIVER_LABEL }] }
+      expect(waiver({ preview })).toEqual([not(0, label)])
+    }
     expect(waiver({ answer: { choice: "edit", editedText: "ship it" } })).toEqual([
       `gate: Inbox ${ID} was approved by edit, whose own words name no row`,
     ])
   })
 
   test("a one-row ask approved with no option reads its row, as the Inbox does", () => {
-    const one = [{ label: "Ship v0.0.84 now, skip the new-user check" }]
-    const preview = { ...decision().preview, options: one }
+    const preview = { ...decision().preview, options: [{ label: WAIVER_LABEL }] }
     expect(waiver({ answer: { choice: "approve" }, preview })).toEqual([])
   })
 
-  test("an ask's approve label is its row: it must skip the new-user check, whatever the text says", () => {
+  test("an ask's approve label is its row, whatever the text says", () => {
     const text = "The new-user check failed on v0.0.84; skip it?"
     const held = { approve: "Hold the ship and fix it first", text, type: "ask" }
     expect(waiver({ answer: { choice: "approve" }, preview: held })).toEqual([
-      `gate: Inbox ${ID} approved option 0 "Hold the ship and fix it first", which names no new-user waiver`,
+      `gate: Inbox ${ID} approved option 0 "Hold the ship and fix it first", not "${WAIVER_LABEL}"`,
     ])
-    const skip = { ...held, approve: "Ship now, waive the new-user check" }
+    const skip = { ...held, approve: WAIVER_LABEL }
     expect(waiver({ answer: { choice: "approve" }, preview: skip })).toEqual([])
   })
 
   test("a multi-question ask refuses: a waiver takes a single-question decision", () => {
-    const questions = [{ options: [{ label: "Skip the new-user check" }], question: "Ship?" }]
+    const questions = [{ options: [{ label: WAIVER_LABEL }], question: "Ship?" }]
     const preview = { questions, text: "Ship v0.0.84?", type: "ask" }
     expect(waiver({ answer: { choice: "approve", options: [0, 0] }, preview })).toEqual([
       `gate: Inbox ${ID} is a multi-question ask: a waiver takes a single-question decision`,
     ])
   })
 
-  test("a decision with no row of its poster's needs the title or text to skip the new-user check", () => {
-    const plain = {
-      answer: { choice: "approve" },
-      preview: { text: "Ship v0.0.84 now.", type: "ask" },
-    }
-    const none = `gate: Inbox ${ID} names no new-user waiver in its title or text`
-    expect(waiver(plain)).toEqual([none])
-    expect(waiver({ ...plain, title: "Wait for the new-user check on v0.0.84?" })).toEqual([none])
-    expect(waiver({ ...plain, title: "Skip the new-user check for v0.0.84?" })).toEqual([])
+  test("a decision with no row its poster wrote refuses, whatever its title or text says", () => {
+    const none = `gate: Inbox ${ID} has no "${WAIVER_LABEL}" row: its poster wrote none`
+    const plain = { answer: { choice: "approve" }, title: `${WAIVER_LABEL}: v0.0.84` }
+    expect(waiver({ ...plain, preview: { text: "Ship v0.0.84 now.", type: "ask" } })).toEqual([
+      none,
+    ])
+    expect(waiver({ ...plain, preview: { text: "Ship v0.0.84 now.", type: "ship" } })).toEqual([
+      none,
+    ])
   })
 })
 
