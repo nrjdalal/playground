@@ -54,7 +54,7 @@ export type PrFacts = {
   head: string
   // Why held-prs.json holds the PR, or null when it is not held.
   held: string | null
-  // The PR's label names; a `ship-now` one sends Ops the ship-now line once it merges (shipNowLine); absent only in a test.
+  // The PR's label names; a `ship-now` one sends Ops the ship-now line once it merges, where shipNowLine ships it; absent only in a test.
   labels?: string[]
   // The lines canary added that a merge of canary into the PR dropped from git's own merge and the squash still lacks, or why they could not be read (lostLines).
   lost: Lost
@@ -66,6 +66,8 @@ export type PrFacts = {
   // The pr template's own placeholders, read at the head, which the body gate refuses in the body's prose; left out in a test, which skips that check.
   placeholders?: string[]
   state: string
+  // The PR's title, whose fix( opening ships a ship-now PR (shipNowLine); absent only in a test.
+  title?: string
   // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
   unfound?: string[]
 }

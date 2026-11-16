@@ -3,35 +3,19 @@ import { peerSchema } from "@packages/config/org"
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
 import { org } from "@/lib/org"
 import { settledWithin } from "@/lib/settle"
+import { peerArgv } from "@/lib/system/peer"
 
 // A kill at a timeout is bounded: SIGTERM first, then this grace, then SIGKILL, and the pipes stop being waited on a moment later.
 const KILL_GRACE_MS = 3000
 
-// The System panel reads the machine through these commands alone, each a fixed argv run without a shell, and so does the dashboard when it reads when a session's process started. Every one only reports (memory_pressure is left out, since its -l simulates pressure; sysctl is never handed a name=value; a peer's ssh runs one fixed df of its home and cat of /proc, never prompting), so nothing the panel runs can change a machine. Nothing else under lib/system starts a process.
+// The System panel reads the machine through these commands alone, each a fixed argv run without a local shell (a peer's ssh hands the peer's login shell its fixed reads), and so does the dashboard when it reads when a session's process started. Every one only reports (memory_pressure is left out, since its -l simulates pressure; sysctl is never handed a name=value; a peer's ssh runs one fixed df of its home and cat of /proc, never prompting), so nothing the panel runs can change a machine. Nothing else under lib/system starts a process.
 export const COMMANDS = {
   containerStats: () => ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
   containers: () => ["docker", "ps", "--format", "{{json .}}"],
   cwds: (uid: number) => ["lsof", "-nPw", "-a", "-u", String(uid), "-d", "cwd", "-Fpn"],
   dockerHost: () => ["docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"],
   memory: () => ["vm_stat"],
-  peer: (target: string) => [
-    "ssh",
-    ...(org.cluster.key ? ["-i", org.cluster.key] : []),
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "ConnectTimeout=3",
-    target,
-    // df runs first, so the exit is cat's: a df that fails leaves out the peer's disk, never the peer
-    "df",
-    "-kP",
-    "~",
-    ";",
-    "cat",
-    "/proc/loadavg",
-    "/proc/meminfo",
-    "/proc/stat",
-  ],
+  peer: (target: string) => peerArgv(target, org.cluster.key),
   processes: () => ["ps", "-axo", "pid=,ppid=,rss=,time="],
   socketHolder: (path: string) => ["lsof", "-nPw", "-Fp", path],
   starts: (pids: readonly number[]) => ["ps", "-o", "pid=,lstart=", "-p", pids.join(",")],

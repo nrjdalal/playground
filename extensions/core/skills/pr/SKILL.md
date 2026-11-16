@@ -37,7 +37,7 @@ Use this template for writing the PR body:
 
 ## Links
 
-<tickets, issues it closes, docs, related PRs>
+<tickets, issues it closes, docs, related PRs; a ship-now PR not titled fix( adds a line opening Owner ask: with the owner's Inbox #i id, PG issue or quoted words>
 ```
 
 ## Sections
