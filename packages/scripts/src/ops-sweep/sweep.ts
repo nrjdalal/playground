@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
 import { verdictOf } from "@packages/config/verdicts"
-import { accountKey, accountSettings, accountsOf, readPolicy } from "@packages/settings"
+import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { leadName } from "../ops-session-resume/resume"
@@ -249,13 +249,13 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
-// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh.
+// The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's or a RETIRED one's, whose heartbeat file outlives it.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
-  let disabled = new Set<string>()
+  const disabled = new Set<string>(RETIRED)
   try {
     const jobs = JSON.parse(await Bun.file(join(ctx.ops, "jobs.json")).text()).jobs as Json[]
-    disabled = new Set(jobs.filter((j) => j.disabled).map((j) => String(j.name)))
+    for (const job of jobs) if (job.disabled) disabled.add(String(job.name))
   } catch {}
   const out = ([["dashboard", "dashboard/supervisor.sh"]] as const)
     .filter(([job, mark]) => !cmds.includes(mark) && !disabled.has(`ops-${job}`))

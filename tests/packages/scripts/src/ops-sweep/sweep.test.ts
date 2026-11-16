@@ -30,6 +30,7 @@ import {
   runsForDelete,
   stalledPrs,
 } from "../../../../../packages/scripts/src/ops-sweep/sweep"
+import { RETIRED } from "../../../../../packages/settings/src/jobs"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 
 const dirs: string[] = []
@@ -967,6 +968,19 @@ describe("opsDown", () => {
       "ops-failing:ops-bad",
       "ops-stale:ops-old",
     ])
+  })
+
+  test("reads no stale beat for a retired job, even with no jobs.json row for it (#2339)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    write(join(ops, "jobs.json"), { jobs: [] })
+    for (const job of RETIRED)
+      write(join(ops, `${job}.json`), {
+        cycleSeconds: 60,
+        job,
+        lastBeatAt: new Date(NOW - 9999 * 1000).toISOString(),
+        lastResult: "ok",
+      })
+    expect(await opsDown(ctx)).toEqual([])
   })
 })
 
