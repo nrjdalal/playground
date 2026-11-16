@@ -64,6 +64,8 @@ describe("every other call runs", () => {
   test.each([
     'curl -X POST -H "Origin: https://pg-1.playground.localhost" https://pg-1.api.playground.localhost/api/agents/sign-in-as',
     'WEB=$(bunx portless get playground); API=$(bunx portless get api.playground); curl -sS -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"',
+    // the dev skill's Agent login, with portless's CA from the folder portlessDir() names
+    'curl -sS "${CA[@]}" -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"',
     "curl -X POST http://127.0.0.1:4201/api/v1/onboard/sign-in",
     "curl -X POST https://pg-1.playground.localhost:4101/api/agents/sign-in-as",
     "curl https://api.playground.localhost/api/health",

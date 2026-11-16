@@ -420,6 +420,22 @@ describe("the runner host", () => {
     expect(r.err).toContain("worker-x holds run-slot")
   })
 
+  // PG-2368: the box gets no PLAYGROUND_REPO, so test:file there could not refuse a relative path from the factory's main checkout
+  test("a test:file from the factory's main checkout stays here, and one from another checkout goes to the box", async () => {
+    const run = box(0)
+    const here = await run(["bun", "run", "test:file", "tests/x.test.ts"], {
+      PLAYGROUND_REPO: run.root,
+    })
+    expect(here.box).toBe("")
+    expect(here.mac).toBe("run test:file tests/x.test.ts\n")
+    const elsewhere = join(run.root, "elsewhere")
+    mkdirSync(elsewhere)
+    const other = await run(["bun", "run", "test:file", "tests/x.test.ts"], {
+      PLAYGROUND_REPO: elsewhere,
+    })
+    expect(other.box).toBe(`exec ${other.root} -- bun run test:file tests/x.test.ts\n`)
+  })
+
   // builder, 19 Oct: a Mac rerun of a red seen only on the box
   test("RUN_SLOT_HERE in run-slot's environment keeps a test here", async () => {
     const r = await box(0)(["bun", "test"], { RUN_SLOT_HERE: "1" })

@@ -19,14 +19,15 @@ set -euo pipefail
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, read again once its resume finds the session gone so a session closed mid-run stays down, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with, for a reviewer or tester --pr with the PRs its roster row serves, and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time; the first dispatcher's record runs first, then every other manager's, then the rest, a resume a gate's falling reading or focus holds prints as waiting (restore_waits), and a restore whose only misses wait exits 0, since a later restore brings them back
-#   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; a session whose start stopped before its runtime pin closes too while its record stands and one pane carries its label, the pin written first; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close
+#   spawn.sh close     <name> [session-id]              closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; a session whose start stopped before its runtime pin closes too while its record stands and one pane carries its label, the pin written first; it refuses any other pane and your own, and ends its roster row just before the pane closes, putting its status back when herdr refuses the close; with a session id, it closes the one labelled pane whose claude runs that session, so one of two panes under the name closes, the row and its close time left to the other while it stands
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate while the other gates still hold it (playbook's SPAWN.md, Capacity gate)
 #   --remote-control <name>  with probe alone, anywhere among its words: the probe's claude starts with Claude Code's --remote-control <name>, a name of lowercase words joined by hyphens; restore leaves a probe started with it down
-#   --ssh <user@host> --key <file>  with probe alone, anywhere among its words, each needing the other: the probe's claude runs on that machine under ssh -tt from its pane here, a plain user@host and an absolute path to a readable key file, both checked before any pane opens; the pane first copies the launch's settings file and skill plugin into one new folder on that machine, the probe's temp folder, which the remote claude reads them from, and the other machine's own shell reads an --account token from its own store; the gate reads this machine, the roster row and spawn.sh close stay as a probe's, and restore leaves it down
+#   --ssh <user@host> --key <file>  with probe alone, anywhere among its words, each needing the other: the probe's claude runs on that machine under ssh -tt from its pane here, a plain user@host and an absolute path to a readable key file, both checked before any pane opens; the pane first copies the launch's settings file and skill plugin into one new folder on that machine, the probe's temp folder, which the remote claude reads them from, and the other machine's own shell runs the launch with its own $HOME/.bun/bin put on PATH and reads an --account token from its own store; the gate reads this machine, the roster row and spawn.sh close stay as a probe's, and restore leaves it down
+#   --force            with resume alone, anywhere among its words: brings back a session whose roster row reads done, or ended with an endReason (an auto-end's), which a resume refuses without it, naming the reason; a row a plain close ended carries none, so a close then a resume needs no --force
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -922,7 +923,7 @@ PY
   esac
 }
 
-# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only, --remote-control, --sandbox, --ssh and --key may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only, --remote-control, --sandbox, --ssh, --key and --force may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -964,6 +965,7 @@ RUNTIME=
 REMOTE_CONTROL=
 SSH_HOST=
 SSH_KEY=
+FORCE=
 words=()
 while [ $# -gt 0 ]; do
   if [ "$1" = --account ]; then
@@ -1043,6 +1045,9 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --sandbox ]; then
     SANDBOX_ARG=1
     shift
+  elif [ "$1" = --force ]; then
+    FORCE=1
+    shift
   elif [ "$1" = --remote-control ]; then
     [ $# -ge 2 ] && [ -z "$REMOTE_CONTROL" ] && word "$2" || usage "--remote-control takes a name of lowercase words joined by hyphens, once"
     REMOTE_CONTROL=$2
@@ -1107,6 +1112,7 @@ MODE=${1:-}
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
 [ -z "$READS_ONLY" ] || [ "$MODE" = worker ] || usage "--reads-only is for a worker, not ${MODE:-no mode}"
+[ -z "$FORCE" ] || [ "$MODE" = resume ] || usage "--force is for a resume, not ${MODE:-no mode}"
 SANDBOX_ONLY="--sandbox is for a worker's, a reviewer's or a probe's start"
 [ -z "$SANDBOX_ARG" ] || [[ $MODE =~ ^(worker|column|probe)$ ]] || usage "$SANDBOX_ONLY, not a ${MODE:-session}'s"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
@@ -1196,10 +1202,13 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and words[2:4] == ["resume", name]
         and len(extras) % 2 == 0
         and sorted(set(keys)) == sorted(keys)
-        and set(keys) <= {"--account", "--effort", "--model"}
+        and set(keys) <= {"--account", "--effort", "--model", "--pr"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
-        print("run\t" + "\t".join(words[3:] + (["--pr", served[name]] if served.get(name) else [])))
+        # a checker's record names the PRs it served at its start, and its roster row the ones it serves now, which win
+        pairs = [(k, v) for k, v in zip(extras[::2], extras[1::2]) if not (k == "--pr" and served.get(name))]
+        pairs += [("--pr", served[name])] if served.get(name) else []
+        print("run\t" + "\t".join(words[3:6] + [w for pair in pairs for w in pair]))
     else:
         skip(name, "its exec line is not a resume restore runs")
 PY
@@ -1252,9 +1261,10 @@ PY
 fi
 # A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row just before the pane closes (putting its status back when herdr refuses the close), so a restore that finds the session gone reads ended, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it; a pin a stopped start left unwritten, it writes before the close.
 if [ "$MODE" = close ]; then
-  NAME=${1:-close}
-  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
+  NAME=${1:-close} WANT_SID=${2:-}
+  [ $# -ge 1 ] && [ $# -le 2 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$MEMORY_OFF$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name, and its session id to pick one of two panes under the name"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
+  [ -z "$WANT_SID" ] || [[ $WANT_SID =~ ^[0-9a-f-]{36}$ ]] || refuse "$WANT_SID is not a session id"
   # A start stopped after herdr ran the session but before its pin landed leaves its record and its pane, so an absent pin passes on to them, and their refusals name it.
   unpinned=
   if [ ! -e "$DATA/runtimes/$NAME" ]; then
@@ -1277,7 +1287,29 @@ except (ValueError, KeyError, TypeError):
     sys.exit(1)' "$NAME") || refuse "it cannot read the panes of the herdr server $server"
   count=$(grep -c . <<<"$panes" || true)
   [ "$count" -gt 0 ] || refuse "no pane on the herdr server $server carries the label $NAME, so spawn.sh opened none it can close$unpinned"
-  [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned"
+  # With a session id, the labelled pane whose claude runs it: herdr's process-info names the claude's pid, and Claude Code's registry file for that pid names the session it runs, a resumed one's included.
+  stays=0
+  if [ -n "$WANT_SID" ]; then
+    picked=
+    for pane in $panes; do
+      ran=$(hr pane process-info --pane "$pane" 2>/dev/null | python3 -I -c 'import json, os, sys
+try:
+    for proc in json.load(sys.stdin)["result"]["process_info"]["foreground_processes"]:
+        if os.path.basename(str((proc.get("argv") or [""])[0])) == "claude":
+            with open(os.path.join(sys.argv[1], str(int(proc["pid"])) + ".json")) as f:
+                print(json.load(f).get("sessionId", ""))
+            break
+except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    pass' "$REGISTRY") || ran=
+      [ "$ran" != "$WANT_SID" ] || picked+="$pane"$'\n'
+    done
+    [ -n "$picked" ] || refuse "no pane on the herdr server $server carrying the label $NAME runs session $WANT_SID"
+    [ "$(grep -c . <<<"$picked")" -eq 1 ] || refuse "two panes on the herdr server $server carrying the label $NAME run session $WANT_SID"
+    panes=${picked%$'\n'}
+    stays=$((count - 1))
+  else
+    [ "$count" -eq 1 ] || refuse "$count panes on the herdr server $server carry the label $NAME, so it cannot tell which one spawn.sh opened$unpinned; name the session id of the one to close"
+  fi
   # herdr sets HERDR_PANE_ID and HERDR_SESSION in every pane, and a pane id is unique on its own server alone.
   [ "$panes" != "${HERDR_PANE_ID:-}" ] || [ "${HERDR_SESSION:-$server}" != "$server" ] ||
     refuse "pane $panes is your own; a session ends itself with /exit"
@@ -1288,8 +1320,13 @@ except (ValueError, KeyError, TypeError):
   was=$(roster_field "$NAME" status)
   back=("status=$was")
   [ "$was" != parked ] || back+=("hold=$(roster_field "$NAME" hold)")
-  ended=1
-  rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
+  # A pane under the name that stays runs the session the row and its close time belong to, so a close by id leaves both alone.
+  ended=1 rostered=
+  if [ "$stays" -gt 0 ]; then
+    was=
+  else
+    rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null) || ended=
+  fi
   if ! said=$(hr pane close "$panes" 2>&1 >/dev/null | tr -s '\n' ' '); then
     said=${said% }
     if [ -n "$ended" ] && [ -n "$was" ] && ! rostered=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" "${back[@]}" 2>&1 >/dev/null); then
@@ -1300,7 +1337,7 @@ except (ValueError, KeyError, TypeError):
   fi
   echo "closed $NAME (pane $panes on $server)"
   # The close keeps its time and the row's status before it ended it, for a just-closed resume's pass (JUST_CLOSED, below).
-  { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
+  [ "$stays" -gt 0 ] || { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
   if [ -z "$ended" ]; then
     [ -n "$rostered" ] && echo "roster.ts says: $rostered" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
@@ -1415,6 +1452,13 @@ case "$MODE" in
     # A probe started with --ssh or --remote-control comes back only as a new probe start, since a resume would run it here without them and write its record afresh.
     grep -qE '^exec .* --(ssh|remote-control) ' "$RESUME_DIR/$NAME.sh" 2>/dev/null &&
       refuse "it started as a probe with --ssh or --remote-control, which a resume would drop: start it again with spawn.sh probe"
+    # A row marked done, or ended with an endReason (an auto-end's), stays down unless --force, since an account move's resume once brought back a tester whose PR had merged; a plain close records no reason, so a close then a resume passes, and restore's own resume reads the row below.
+    if [ -z "$FORCE" ] && [ -z "${SPAWN_RESTORING:-}" ]; then
+      row_status=$(roster_field "$NAME" status) end_reason=$(roster_field "$NAME" endReason)
+      if [ "$row_status" = done ] || { [ "$row_status" = ended ] && [ -n "$end_reason" ]; }; then
+        refuse "its roster row reads $row_status (endReason ${end_reason:-none}), so it stays down: add --force to bring it back on purpose"
+      fi
+    fi
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
@@ -1800,6 +1844,18 @@ if [ -n "$SANDBOX_ARG" ] && [ -z "$IN_DIR" ] && [[ $ROLE =~ ^(worker|reviewer)$ 
   if [ ! -e "$TREE" ]; then
     # The worktree starts at the commit the session works from, its PR's head for a reviewer of this checkout's PR and origin's canary for any other, fetched here, so its first checkout changes no file: the sandbox shuts .claude/ and skills/zerostarter/, which .claude/skills links to, so a checkout that changes either fails inside it (SPAWN.md, --sandbox).
     at=$(git -C "$MAIN" ls-remote origin "$ref" 2>/dev/null) && at=${at%%[[:space:]]*} || at=
+    # GitHub makes a PR's pull ref a little after the PR opens, so while it has none the PR's branch stands in, taken only at the head GitHub names for the PR, as pr:merge's fetchHead does
+    if [ -z "$at" ] && [[ $ref == refs/pull/* ]] && [ -n "$origin" ]; then
+      pull_n=${ref#refs/pull/}
+      head_of=$(gh pr view "${pull_n%/head}" -R "$origin" --json headRefName,headRefOid --jq '.headRefName + " " + .headRefOid' 2>/dev/null) || head_of=
+      if [ -n "$head_of" ]; then
+        head_branch=${head_of% *} head_oid=${head_of##* }
+        head_tip=$(git -C "$MAIN" ls-remote origin "refs/heads/$head_branch" 2>/dev/null) && head_tip=${head_tip%%[[:space:]]*} || head_tip=
+        head_seen=${head_tip:0:7}
+        [ "$head_tip" = "$head_oid" ] || refuse "$ref is missing, and its branch $head_branch is at ${head_seen:-nothing}, not the head ${head_oid:0:7}, so $NAME has no commit to start its worktree at"
+        ref=refs/heads/$head_branch at=$head_tip
+      fi
+    fi
     [ -n "$at" ] || refuse "git ls-remote origin $ref read no commit, so $NAME has no commit to start its worktree at"
     git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || git -C "$MAIN" fetch -q --no-write-fetch-head origin "$ref" 2>/dev/null
     git -C "$MAIN" cat-file -e "$at^{commit}" 2>/dev/null || refuse "git fetch origin $ref did not bring $at, so $NAME has no commit to start its worktree at"
@@ -2000,11 +2056,11 @@ PY
 fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
-# An --ssh probe's pane copies the settings file and the skill plugin into its new remote folder, which mkdir refuses to reuse, then runs the launch there under ssh -tt, whose hangup ends the remote claude when spawn.sh close closes the pane; the other machine's shell reads the command, an --account token's lookup included, as this pane's would.
+# An --ssh probe's pane copies the settings file and the skill plugin into its new remote folder, which mkdir refuses to reuse, then runs the launch there under ssh -tt, whose hangup ends the remote claude when spawn.sh close closes the pane; the other machine's shell reads the command, an --account token's lookup included, as this pane's would, with its own $HOME/.bun/bin put on PATH there, since ssh's command PATH is the system's alone.
 if [ -n "$SSH_HOST" ]; then
   SSH_OPTS="-i $(printf %q "$SSH_KEY") -o IdentitiesOnly=yes -o BatchMode=yes"
   COPY="tar -cf - -C $(printf %q "$(dirname "$SETTINGS")") $(printf %q "$(basename "$SETTINGS")") -C $(printf %q "$(dirname "$PLUGIN")") $(printf %q "$(basename "$PLUGIN")")"
-  ON_REMOTE="cd $(printf %q "$OWN") && export TMPDIR=$(printf %q "$REMOTE") PLAYGROUND_REPO=$(printf %q "$MAIN") && $COMMAND"
+  ON_REMOTE="cd $(printf %q "$OWN") && export TMPDIR=$(printf %q "$REMOTE") PLAYGROUND_REPO=$(printf %q "$MAIN") PATH=\"\$HOME/.bun/bin:\$PATH\" && $COMMAND"
   COMMAND="$COPY | ssh $SSH_OPTS $SSH_HOST 'mkdir -m 700 $REMOTE && tar -xf - -C $REMOTE' || exit 1"$'\n'"exec ssh $SSH_OPTS -tt $SSH_HOST $(printf %q "$ON_REMOTE")"
 fi
 
@@ -2152,9 +2208,9 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
-  [ "$(roster_field "$NAME" status)" = ended ] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
-  # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close or auto-end ended, or one marked done, reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [[ $(roster_field "$NAME" status) =~ ^(done|ended)$ ]] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
+  # A checker's --pr replaces an ended or done row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
     IFS=, read -ra prs_named <<<"$PR_ARG"
@@ -2164,7 +2220,7 @@ write_row() {
         break
       fi
     done
-    if [ "$(roster_field "$NAME" status)" = ended ]; then
+    if [[ $(roster_field "$NAME" status) =~ ^(done|ended)$ ]]; then
       set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
     else
       set -- "$@" "prs+=$PR_ARG"
@@ -2346,6 +2402,8 @@ PY
   # A probe's own flags ride its record, so restore leaves it down and a resume refuses it rather than bringing it back on this machine.
   [ -n "$REMOTE_CONTROL" ] && record+="--remote-control $REMOTE_CONTROL "
   [ -n "$SSH_HOST" ] && record+="--ssh $SSH_HOST --key $(printf %q "$SSH_KEY") "
+  # A checker's start and resume each name its PRs, so its record names them too and resumes as written.
+  [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -n "$PR_ARG" ] && record+="--pr $(printf %q "$PR_ARG") "
   account_line=
   [ -n "$ACCOUNT" ] && account_line="# account: $ACCOUNT"$'\n'
   (umask 077 && printf '#!/bin/bash\n# spawn.sh writes this at every herdr start and resume; spawn.sh restore reads its exec line and the server it ran on.\n# server: %s\n%s%s\n' "$HERDR_SESSION_NAME" "$account_line" "${record% }" > "$RESUME_DIR/$NAME.sh" && chmod 700 "$RESUME_DIR/$NAME.sh") ||

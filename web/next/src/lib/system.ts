@@ -12,7 +12,7 @@ import type {
 import { useQuery } from "@tanstack/react-query"
 
 import { apiClient, unwrap } from "@/lib/api/client"
-import { relativeTime } from "@/lib/time"
+import { messageTime, relativeTime } from "@/lib/time"
 
 export const SYSTEM_QUERY_KEY = ["dashboard", "system"] as const
 
@@ -66,6 +66,80 @@ export const PRESSURE_LABELS: Record<Pressure, string> = {
   critical: "Critical",
   normal: "Normal",
   warn: "Warn",
+}
+
+type Machine = SystemReport["machines"][number]
+type MachineReading = NonNullable<Machine["reading"]>
+
+// One System figure summed over the cluster: its value, the marker it carries while a machine does not read, its hover split by machine as a + b, and, where it differs from one machine's, its detail.
+export type ClusterFigure = { detail?: string; hover: string; marker: string | null; value: string }
+
+const tenth = (n: number): number => Math.round(n * 10) / 10
+
+const sumOf = (parts: (number | null)[]): number | null =>
+  parts.some((n) => n === null) ? null : parts.reduce<number>((a, b) => a + (b ?? 0), 0)
+
+const usedOf = (size: { totalBytes: number; usedBytes: number | null } | null): string =>
+  size ? `${sizeLabel(size.usedBytes)} of ${sizeLabel(size.totalBytes)}` : "-"
+
+// Pure: the memory, CPU load and swap figures summed over every machine that read, each hover naming each machine's part (`machine-a 3.1 on 10 + machine-b 2.4 on 10 cores`); a machine that did not read is never a zero: its figures carry the marker `1 of 2 machines`, and the hover its reason and since when. Null with one machine, so a stack with no peers shows its own figures as before.
+export function clusterOf(
+  machines: Machine[],
+  pressure: Pressure | null,
+  now: Date,
+): Record<"cpu" | "memory" | "swap", ClusterFigure> | null {
+  if (machines.length < 2) return null
+  const up = machines.flatMap((m) => (m.reading ? [{ name: m.name, reading: m.reading }] : []))
+  const down = machines.flatMap((m) => (m.down ? [{ name: m.name, ...m.down }] : []))
+  const marker = down.length > 0 ? `${up.length} of ${machines.length} machines` : null
+  const why = down.map(
+    (m) => `${m.name} unreachable since ${messageTime(m.since, now)}: ${m.reason}`,
+  )
+  const figure = (
+    value: string,
+    split: (r: MachineReading) => string,
+    unit = "",
+    detail?: string,
+  ): ClusterFigure => ({
+    ...(detail === undefined ? {} : { detail }),
+    hover: [up.map((m) => `${m.name} ${split(m.reading)}`).join(" + ") + unit, ...why].join("\n"),
+    marker,
+    value,
+  })
+  const readings = up.map((m) => m.reading)
+  const cores = readings.reduce((sum, r) => sum + r.cores, 0)
+  const loads = [0, 1, 2].map((i) => tenth(readings.reduce((sum, r) => sum + r.load[i]!, 0)))
+  const memory = {
+    totalBytes: readings.reduce((sum, r) => sum + r.memory.totalBytes, 0),
+    usedBytes: sumOf(readings.map((r) => r.memory.usedBytes)),
+  }
+  const swaps = readings.flatMap((r) => (r.swap ? [r.swap] : []))
+  const swap =
+    swaps.length === 0
+      ? null
+      : {
+          totalBytes: swaps.reduce((sum, s) => sum + s.totalBytes, 0),
+          usedBytes: swaps.reduce((sum, s) => sum + s.usedBytes, 0),
+        }
+  const free =
+    memory.usedBytes === null || memory.totalBytes === 0
+      ? "Free share unknown"
+      : `${Math.round(100 - (memory.usedBytes * 100) / memory.totalBytes)}% free`
+  return {
+    cpu: figure(
+      `${loads[0]} on ${cores} cores`,
+      (r) => `${tenth(r.load[0])} on ${r.cores}`,
+      " cores",
+      `1, 5 and 15 min.: ${loads.join(" / ")}`,
+    ),
+    memory: figure(
+      usedOf(memory),
+      (r) => usedOf(r.memory),
+      "",
+      `${free} · pressure ${pressure ? PRESSURE_LABELS[pressure] : "unknown"} here`,
+    ),
+    swap: figure(usedOf(swap), (r) => usedOf(r.swap)),
+  }
 }
 
 // The API samples every 30s, so a report older than this means sampling has stopped and its numbers are no longer the machine's.

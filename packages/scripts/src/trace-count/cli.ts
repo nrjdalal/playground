@@ -26,7 +26,8 @@ import { inScope, swapTree } from "./swap"
 
 const USAGE = `Usage: bun run trace-count [--write | --report | --swap | --lists [--since <base> [--branch <name>]]]
 
-Counts each kind of private trace over the tree and fails when any count is over
+Counts each kind of private trace, and each Mac-only call with no Linux branch in
+front of it (macOnly), over the tree and fails when any count is over
 packages/scripts/src/trace-count/counts.json, less each hit kept.json keeps on purpose.
 --write lowers each count to the tree's.
 --report lists each file holding a list value, with its hits per kind and "swap" on the

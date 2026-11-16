@@ -19,7 +19,7 @@ Read the section for the mode you start and for each flag you pass, and the sect
   "${PLAYGROUND_REPO:?}/scripts/spawn.sh" column <reviewer|tester|probe> <name> <reports-to> <the newest member's herdr pane id> <brief> --account <email>
   ```
 
-  A reviewer or tester adds `--pr <pull url>`, the pull request it serves, or `--pr <scope>/<kind>/<key>`, the extension item it scores, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
+  A reviewer or tester adds `--pr <pull url>`, the pull request it serves, or `--pr <scope>/<kind>/<key>`, the extension item it scores, which its resume record keeps, so open the PR as a draft before its checkers ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the refusal and the row it writes).
 
 - **A manager** opens the same way as a column in the `Managers` workspace, to the right of the newest manager, named once: `column <name> <pane> <brief>`.
   A name whose roster kind, else its name (an `<id>-<kind>`, a `sessions.names` name or a `sessions.aliases` one), is builder, ops or planner opens as a lead reporting to the first dispatcher (a new name gets its kind first, `scripts/roster.ts set <name> kind=builder task=<what it does>`, which writes a `starting` entry that `managerOf` keeps behind the live one until it answers);
@@ -115,6 +115,8 @@ Until phase 3 of the harness layer (the `plan-harness-layer` doc) lifts it, in t
 After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM and, for a reviewer or tester, `--pr` with the PRs its roster row serves, its `pr` first;
 `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
 Without it, the first prompt has the session act on the `after-resume` hook's instruction (the **context** rule's re-arm and re-send, and a killed commit's edit put back), so a session idle at the restart still takes a turn, and names whom it reports to now, from its roster row ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the order).
+A resume leaves a finished session down: it refuses a name whose roster row reads `done`, or `ended` with an `endReason` (auto-end writes the check that ended it, [ROSTER.md](ROSTER.md)), naming the status and reason, and `--force`, anywhere among its words, brings it back on purpose, as auto-end's own resume line for a reviewer does.
+A plain `spawn.sh close` writes no reason, so a close then a resume (an account move) needs no `--force`.
 After a resume, restart any dev stack you served, then re-arm your watches: run CronList before CronCreate, since a resume keeps the session's crons and drops only its background tasks.
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
@@ -130,6 +132,7 @@ The kind comes from the mode (`worker` for a worker, `runner` for a runner, the 
 ## Live name and permissions
 
 spawn.sh refuses a name a live session already holds (a `claude -p` run, whose registry file reads `entrypoint` `sdk-cli`, holds none), naming that session's pid, since Claude Code would start the new one under a generated name while the roster still pointed at the old one: a respawn under the same name spawns only once the old session has closed (after a `spawn.sh restore`).
+It refuses so in every mode, a manager's `manager <name>` start included, before any pane opens or any record is written, so the live session's resume record stays as it was.
 It launches every session with `--dangerously-skip-permissions`, the factory's bypass mode, so it never rests on the machine's own settings (a session in another mode holds every cross-session message for approval);
 the machine's `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR`'s when that is set) should also set `"permissions": { "defaultMode": "bypassPermissions" }` and `"skipDangerousModePermissionPrompt": true`, so a session started any other way lands there too with no prompt to stop on, which setup's check reports as `bypass mode`.
 On a Mac whose inscope exports a workspace's own `CLAUDE_CONFIG_DIR` (its `inscope.zsh` names it, or `INSCOPE_CCD` is set), it launches with `env -u CLAUDE_CONFIG_DIR -u INSCOPE_CCD`, where a session would otherwise start with no login, and reads the live sessions and the roster under `~/.claude`; elsewhere it leaves the environment as it is.
@@ -195,7 +198,7 @@ Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<n
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
 After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
 each row read again once its resume finds the session gone and just before its launch, so a session `spawn.sh close` ends while a run goes on stays down,
-each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves,
+each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with, an `--effort` other than high and, for a reviewer or tester, `--pr` with the PRs its roster row serves, else the `--pr` its record names,
 in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, an exec line that does not parse or that it does not run, or a probe's record carrying `--ssh` or `--remote-control`, which restore leaves down),
 `waiting <name>: <reason>` (a gate holding it over a reading that falls, or focus standing for another session) or `not restored <name>: <reason>` (any other refusal, a gate that cannot read its input or reads a bad setting included).
 The first dispatcher's record runs first, past every gate, so the owner's dispatcher is back before any other resume takes the gate's room, then every other manager's, so the managers are back before the workers, then the rest.
@@ -236,6 +239,7 @@ A resumed session, a checker included, runs in the worktree or clone it ran in: 
 That is a probe's sandbox that also closes loopback, Keychain reads (on Linux, Claude Code's login file), and reads and writes of the data folder's secret files to its shell commands, holds outbound hosts to GitHub's and the npm registry, and commits unsigned (scripts/README.md, spawn.sh).
 A session works in the worktree it starts in, since Claude Code's own sandbox rule (2.1.323) reads "The repository's `.git/worktrees` is read-only in the sandbox, apart from this session's own worktrees", so `git worktree add` inside it fails and no allow in the settings file opens it.
 So a fresh worker or reviewer start with no `--in` runs in a detached worktree spawn.sh makes before launch, outside the sandbox, at the commit it works from, fetched from origin: a reviewer of the checkout's own PR in `.claude/worktrees/review-<n>` at the PR's head, the clone code-review-loop reuses, and any other in `.claude/worktrees/<name>` at origin's `canary`;
+while GitHub has not made the PR's pull ref yet, the reviewer's starts at the PR's branch, refused unless that branch sits at the head GitHub names;
 a probe starts where it does today.
 Claude Code's sandbox also keeps the session's own `.claude/` read-only, and with it `skills/zerostarter/`, which `.claude/skills` links to (measured in a closed review): a checkout or merge that changes a file there fails on `unable to unlink old '<path>': Operation not permitted` and leaves it stale, and a later checkout over it aborts on local changes.
 So the worktree starts at the commit its session works from, and `--sandbox` fits a start whose PR touches neither folder and merges no `canary` that does.
@@ -256,6 +260,7 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   The pane opens here, on this machine's herdr, and its launch runs two ssh calls, each `ssh -i <key> -o IdentitiesOnly=yes -o BatchMode=yes`, so a key that fails or an unknown host key stops it rather than prompting:
   the first pipes a tar of the launch's settings file and skill plugin into a new folder there, the probe's temp folder (on Linux this machine's own one's name, else a new name under `/tmp`), which `mkdir -m 700` refuses to reuse;
   the second, `ssh -tt`, runs the launch there, `--settings` and `--plugin-dir` pointing into that folder, in the same checkout path, so that machine holds the checkout, claude and the secret store at this one's paths.
+  The remote command also puts that machine's own `$HOME/.bun/bin` on PATH, expanded by its shell, since ssh hands a command the system PATH alone: bun and the `security` link to the secret store, both in `~/.bun/bin`, are found there with no shell-file line.
   Its settings file is one of its own, `factory-settings-sandbox-400k-<name>.json` (`-closed-` with `--sandbox`), whose sandbox writes that folder, its TMPDIR there.
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
 - The probe keeps a probe's roster row, kind `probe`, written here.
