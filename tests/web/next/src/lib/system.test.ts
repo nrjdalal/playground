@@ -1206,7 +1206,7 @@ describe("accountLine", () => {
 describe("clusterOf", () => {
   type Machine = SystemReport["machines"][number]
   const at = new Date(NOW)
-  const spark = (name: string, used: number, load: number, swapUsed: number): Machine => ({
+  const machine = (name: string, used: number, load: number, swapUsed: number): Machine => ({
     down: null,
     name,
     reading: {
@@ -1216,29 +1216,29 @@ describe("clusterOf", () => {
       swap: { totalBytes: 16 * GB, usedBytes: swapUsed * GB },
     },
   })
-  const two = [spark("spark-a566", 12, 3.1, 1), spark("spark-9dfb", 4, 0.4, 0)]
+  const two = [machine("machine-a", 12, 3.1, 1), machine("machine-b", 4, 0.4, 0)]
 
   test("one machine, or none named, is no cluster, so the page shows its own figures as before", () => {
     expect(clusterOf([], "normal", at)).toBeNull()
-    expect(clusterOf([spark("spark-a566", 12, 3.1, 1)], "normal", at)).toBeNull()
+    expect(clusterOf([machine("machine-a", 12, 3.1, 1)], "normal", at)).toBeNull()
   })
 
   test("each figure is the sum over both machines, its hover the split as a + b with each part named", () => {
     const cluster = clusterOf(two, "normal", at)!
     expect(cluster.cpu).toEqual({
       detail: "1, 5 and 15 min.: 3.5 / 3.5 / 3.5",
-      hover: "spark-a566 3.1 on 20 + spark-9dfb 0.4 on 20 cores",
+      hover: "machine-a 3.1 on 20 + machine-b 0.4 on 20 cores",
       marker: null,
       value: "3.5 on 40 cores",
     })
     expect(cluster.memory).toEqual({
       detail: "94% free · pressure Normal here",
-      hover: "spark-a566 12.0 GB of 128.0 GB + spark-9dfb 4.0 GB of 128.0 GB",
+      hover: "machine-a 12.0 GB of 128.0 GB + machine-b 4.0 GB of 128.0 GB",
       marker: null,
       value: "16.0 GB of 256.0 GB",
     })
     expect(cluster.swap).toEqual({
-      hover: "spark-a566 1.0 GB of 16.0 GB + spark-9dfb 0 MB of 16.0 GB",
+      hover: "machine-a 1.0 GB of 16.0 GB + machine-b 0 MB of 16.0 GB",
       marker: null,
       value: "1.0 GB of 32.0 GB",
     })
@@ -1248,7 +1248,7 @@ describe("clusterOf", () => {
     const since = new Date(NOW - 5 * 60_000).toISOString()
     const down: Machine = {
       down: { reason: "ssh you@10.0.0.2 ran past 5s", since },
-      name: "spark-9dfb",
+      name: "machine-b",
       reading: null,
     }
     const cluster = clusterOf([two[0]!, down], "normal", at)!
@@ -1258,8 +1258,8 @@ describe("clusterOf", () => {
       value: "12.0 GB of 128.0 GB",
     })
     expect(cluster.cpu.hover).toBe(
-      `spark-a566 3.1 on 20 cores\nspark-9dfb unreachable since ${messageTime(since, at)}: ssh you@10.0.0.2 ran past 5s`,
+      `machine-a 3.1 on 20 cores\nmachine-b unreachable since ${messageTime(since, at)}: ssh you@10.0.0.2 ran past 5s`,
     )
-    expect(cluster.swap.hover.split("\n")[1]).toStartWith("spark-9dfb unreachable since ")
+    expect(cluster.swap.hover.split("\n")[1]).toStartWith("machine-b unreachable since ")
   })
 })

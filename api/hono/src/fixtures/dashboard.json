@@ -3186,7 +3186,7 @@
               "outcome": "Fixture line: an empty table says so in one muted line instead of a large picture.",
               "priority": "P2",
               "difficulty": 2,
-              "estimateHours": 1,
+              "estimateHours": 1.0,
               "estimateRange": "1.0-1.4h",
               "visible": true,
               "dependsOn": [],
@@ -5374,6 +5374,10 @@
       "command": "claude -n dispatcher",
       "start": "Thu Jan  1 08:00:00 2026"
     },
+    "900017": {
+      "command": "claude -n dispatcher-2",
+      "start": "Thu Jan  1 08:05:00 2026"
+    },
     "900002": {
       "command": "claude -n builder",
       "start": "Thu Jan  1 08:00:00 2026"
@@ -5418,9 +5422,9 @@
       "command": "claude -n planner",
       "start": "Thu Jan  1 08:00:00 2026"
     },
-    "900013": {
-      "command": "claude -n worker-bright-lark",
-      "start": "Thu Jan  1 07:30:00 2026"
+    "900053": {
+      "command": "claude -n assistant",
+      "start": "Thu Jan  1 08:00:00 2026"
     },
     "900014": {
       "command": "claude -n r6t2dv-tester",
@@ -5434,24 +5438,20 @@
       "command": "claude -n worker-glm-flash",
       "start": "Thu Jan  1 08:00:00 2026"
     },
-    "900017": {
-      "command": "claude -n dispatcher-2",
-      "start": "Thu Jan  1 08:05:00 2026"
-    },
-    "900018": {
-      "command": "claude -n runner-quiet-lamp",
-      "start": "Thu Jan  1 08:00:00 2026"
-    },
-    "900019": {
-      "command": "claude -n runner-calm-dial",
-      "start": "Thu Jan  1 08:00:00 2026"
-    },
     "900021": {
       "command": "claude -n k3m9px-worker",
       "start": "Thu Jan  1 08:00:00 2026"
     },
     "900022": {
       "command": "claude -n q7w8f2-reviewer",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900013": {
+      "command": "claude -n worker-bright-lark",
+      "start": "Thu Jan  1 07:30:00 2026"
+    },
+    "900060": {
+      "command": "bun --no-env-file packages/scripts/src/ops-wa/cli.ts --data /fixture/playground",
       "start": "Thu Jan  1 08:00:00 2026"
     },
     "900030": {
@@ -5502,8 +5502,12 @@
       "command": "python3 ops/loop.py ops-usage",
       "start": "Thu Jan  1 08:00:00 2026"
     },
-    "900053": {
-      "command": "claude -n assistant",
+    "900019": {
+      "command": "claude -n runner-calm-dial",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900018": {
+      "command": "claude -n runner-quiet-lamp",
       "start": "Thu Jan  1 08:00:00 2026"
     },
     "900054": {
@@ -5513,10 +5517,6 @@
     "900055": {
       "command": "python3 ops/loop.py nightly-digest",
       "start": "Thu Jan  1 06:00:00 2026"
-    },
-    "900060": {
-      "command": "bun --no-env-file packages/scripts/src/ops-wa/cli.ts --data /fixture/playground",
-      "start": "Thu Jan  1 08:00:00 2026"
     }
   },
   "pulls": {

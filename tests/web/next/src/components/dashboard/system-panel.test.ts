@@ -79,17 +79,17 @@ describe("readingsOf", () => {
     }
     const peer = { ...local, load: [0.4, 0.3, 0.2] as [number, number, number] }
     const shown = rows([
-      { down: null, name: "spark-a566", reading: local },
-      { down: null, name: "spark-9dfb", reading: peer },
+      { down: null, name: "machine-a", reading: local },
+      { down: null, name: "machine-b", reading: peer },
     ])
     expect(shown.map((r) => [r.id, r.value, r.hover])).toEqual([
       [
         "memory",
         "24.0 GB of 256.0 GB",
-        "spark-a566 12.0 GB of 128.0 GB + spark-9dfb 12.0 GB of 128.0 GB",
+        "machine-a 12.0 GB of 128.0 GB + machine-b 12.0 GB of 128.0 GB",
       ],
-      ["cpu", "3.5 on 40 cores", "spark-a566 3.1 on 20 + spark-9dfb 0.4 on 20 cores"],
-      ["swap", "2.0 GB of 32.0 GB", "spark-a566 1.0 GB of 16.0 GB + spark-9dfb 1.0 GB of 16.0 GB"],
+      ["cpu", "3.5 on 40 cores", "machine-a 3.1 on 20 + machine-b 0.4 on 20 cores"],
+      ["swap", "2.0 GB of 32.0 GB", "machine-a 1.0 GB of 16.0 GB + machine-b 1.0 GB of 16.0 GB"],
       ["disk", "700.0 GB", undefined],
       ["docker", "-", undefined],
     ])
