@@ -71,12 +71,20 @@ const DATA = new Set([
   "sed",
 ])
 const isData = (name: string) => DATA.has(name) || /^python[\d.]*$/.test(name)
-// agent-browser's eval runs its script as JavaScript in the page, so its words stay text, as one of the call's own commands on a call made of bare agent-browser commands alone, its --session name alone allowed before eval
+// agent-browser's eval runs its script as JavaScript in the page, so its words stay text, as one of the call's own commands on a call made of bare agent-browser commands alone, with only these of its options before eval: --session's name, --args' launch flags holding no blank, which the spaced-word rule never reads, and the flags --ignore-https-errors and --json
 const scriptStaysText = (cmd: Command, args: Word[], browserOnly: Set<Command>) =>
   browserOnly.has(cmd) && browserEval(args)
+const BROWSER_FLAGS = new Set(["--ignore-https-errors", "--json"])
+const BROWSER_VALUES = new Set(["--args", "--session"])
 const browserEval = (args: Word[]) => {
-  const at = args[0]?.value === "--session" ? 2 : args[0]?.value.startsWith("--session=") ? 1 : 0
-  return args[at]?.value === "eval"
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "eval") return true
+    const [name, attached] = value.split(/=(.*)/s)
+    const own = BROWSER_VALUES.has(name) ? (attached ?? args[++k]?.value) : undefined
+    if (!BROWSER_FLAGS.has(value) && (own === undefined || /\s/.test(own))) return false
+  }
+  return false
 }
 // Programs that run the command their arguments name, read here at each word that does not start with a dash.
 const STARTERS = new Set(["screen", "tmux"])
@@ -141,9 +149,11 @@ const unversioned = (name: string) => name.replace(/(?<=.)@[^@/]*$/, "")
 // fd's exec option, alone or last in a cluster of short flags that take no value (`-HX`), with any value attached (`--exec=rm`, `-x=rm`, `-Hxrm`).
 const ATTACHED = /^(?:--exec(?:-batch)?=|-[01FHILVaghilpqsu]*[xX]=?)(.*)$/s
 
-// rm's recursive option: -r or -R in a cluster, or --recursive by any prefix GNU rm takes (`--rec`).
+// rm's recursive option: -r or -R in a cluster of rm's own letters, GNU's and macOS's together, or --recursive by any prefix GNU rm takes (`--rec`); rm refuses a cluster holding any other letter and deletes nothing, so `-fingerprint` and `-servername` are no -r.
 const recursive = (v: string): boolean =>
-  v.startsWith("--") ? v.length >= 3 && "--recursive".startsWith(v) : /^-[A-Za-z]*[rR]/.test(v)
+  v.startsWith("--")
+    ? v.length >= 3 && "--recursive".startsWith(v)
+    : /^-[dfiIPRrvWx]*[rR][dfiIPRrvWx]*$/.test(v)
 
 // A recursive option anywhere in a text, as a brace's members spell one (`{rm,-rf,x}`).
 const spellsRecursive = (v: string): boolean =>
@@ -277,6 +287,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   const visitAs =
     (reach: Reach): Visit =>
     async (cmd, parsed, at) => {
+      // a case pattern is matched, never run, so its words are no program; a substitution in it is its own command
+      if (cmd.casePattern) return
       const { args, name } = parsed
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict

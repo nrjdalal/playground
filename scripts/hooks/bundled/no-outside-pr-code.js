@@ -5516,7 +5516,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (name === "su")
       return suCommand(args) ? undefined : "root";
-    if (!SHELLS.has(name))
+    if (!SHELLS.has(name) || noExec(args, name))
       return;
     if (fed)
       return "shell";
@@ -5534,6 +5534,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
+  if (before.some((w, k) => !w.quoted && program(w.value) === "command" && /^-p?[vV]/.test(before[k + 1]?.value ?? "")))
+    return;
   const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   const wrappers = [];
   for (const w of before) {
@@ -5760,6 +5762,7 @@ var CURL_TAKES = new Set([
   "--cookie",
   "-c",
   "--cookie-jar",
+  "--cacert",
   "-D",
   "--dump-header",
   "-e",
@@ -7915,6 +7918,19 @@ function isFolder(path) {
 }
 var SHELL_TAKES = new Set(["-o", "+o", "--init-file", "--rcfile"]);
 var BASH_TAKES = new Set([...SHELL_TAKES, "-O", "+O"]);
+function noExec(args, shell) {
+  const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
+  let set = false;
+  for (const { value } of args) {
+    if (/^[-+][A-Za-z]*[oO]/.test(value) || value.startsWith("--") && value !== "--")
+      return false;
+    if (takes.has(value) || !/^[-+][A-Za-z]+$/.test(value))
+      break;
+    if (value.includes("n"))
+      set = value.startsWith("-");
+  }
+  return set;
+}
 function shellOperand(args, shell) {
   const takes = shell === "bash" || shell === "sh" ? BASH_TAKES : SHELL_TAKES;
   let inline = false;
@@ -7933,6 +7949,8 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   const slot = shellSlot(args, name);
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
+  if (noExec(args, name))
+    return;
   const { inline, operand } = shellOperand(args, name);
   if (operand && inline) {
     let script = operand.value;
@@ -8994,11 +9012,14 @@ async function check(raw, environment = process.env, lookup = live(environment))
   return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and a skill's scripts the main checkout tracks unchanged, and writes a file only into a folder already in its own scratch or scratchpad (make the folder in one call, then write in the next), outside any git folder: ${why}`;
 }
 async function output(argv) {
-  const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" });
+  const child = Bun.spawn(argv, { stderr: "pipe", stdout: "pipe" });
   const timer = setTimeout(() => child.kill(), 5000);
   try {
-    const text = await new Response(child.stdout).text();
-    return await child.exited === 0 ? text.trim() : undefined;
+    const [text, error] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ]);
+    return await child.exited === 0 ? { error, text: text.trim() } : { error };
   } finally {
     clearTimeout(timer);
   }
@@ -9069,7 +9090,9 @@ function live(environment) {
           return;
       } catch {}
       const jq = "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}";
-      const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq]);
+      const argv = ["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq];
+      const once = await output(argv);
+      const text = once.text ?? (/HTTP 4\d\d/.test(once.error) ? undefined : (await Bun.sleep(1000).then(() => output(argv))).text);
       let read;
       try {
         read = text ? JSON.parse(text) : undefined;

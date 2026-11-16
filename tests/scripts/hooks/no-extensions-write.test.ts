@@ -1665,7 +1665,7 @@ describe("a quoted argument is read as a command line only where a program runs 
 
   // #1599: a refusal of a command that shows no write routes to the lead as a likely false positive, while one that writes keeps the owner's route
   test("a refusal of a command that shows no write asks for a false-positive report", async () => {
-    const reason = await at("lsof -nP | awk 'NR>1 {print $2}'", homedir())
+    const reason = await at("lsof -nP | awk 'NR>1 {print $2/1}'", homedir())
     expect(reason).toContain(
       "If this command writes nothing, report it to your lead as a false positive.",
     )
@@ -3501,6 +3501,16 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
       "an in-place sed of an absolute file after a cd to a variable",
       `cd "$X"; sed -i s/a/b/ /tmp/p.json`,
     ],
+  ])(
+    "GNU sed's script after a bare -i: %s is allowed on Linux and refused on macOS",
+    async (_, command) => {
+      expect(await as("linux", () => bash(command))).toBeUndefined()
+      expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+    },
+  )
+
+  // #2320: macOS read each script as a glob in /, and a glob there whose first segment matches no name of / reaches no root
+  test.each([
     [
       "an in-place sed of a file through a variable the line holds",
       `F=${WORK}/f; bun x.ts; sed -i '/x (a)/d' "$F"`,
@@ -3510,10 +3520,10 @@ describe("on Linux a bare cp, ln, mv, install and sed read as GNU's builds (PG-2
       `sed -i '/item 5 (a, after item 4)/d; /item 5 note: carry it/d' ${WORK}/queue.md; echo "$(date -u +%FT%TZ) x" >> ${WORK}/notes.md`,
     ],
   ])(
-    "GNU sed's script after a bare -i: %s is allowed on Linux and refused on macOS",
+    "GNU sed's script after a bare -i: %s is allowed on Linux and on macOS",
     async (_, command) => {
       expect(await as("linux", () => bash(command))).toBeUndefined()
-      expect(await as("darwin", () => bash(command))).toContain("no-extensions-write hook refuses")
+      expect(await as("darwin", () => bash(command))).toBeUndefined()
     },
   )
 
@@ -3931,4 +3941,50 @@ describe("hook text that reaches a hook by another path", () => {
       await bash("git rm old.txt && cp hook-sources/plain.sh .git/hooks/pre-commit"),
     ).toContain("on a line whose other text holds")
   })
+})
+
+// #2320: a glob in / reaches the root only through a name / holds that it may match, read from the listing check() is handed, so no verdict depends on what a machine's / holds
+describe("a glob in / is judged by the names / holds", () => {
+  const listed = (command: string, names: string[]) =>
+    check(
+      JSON.stringify({
+        cwd: HOME,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      ENV,
+      undefined,
+      () => names,
+    )
+
+  test("the same glob runs beside no name it may match and is refused beside one", async () => {
+    expect(await listed("cp a /e?c/x", ["bin", "home", "usr"])).toBeUndefined()
+    expect(await listed("cp a /e?c/x", ["bin", "etc", "home"])).toContain("a glob in /")
+  })
+
+  test.each([
+    "cp a /h*/x",
+    "cp a /?ome/x",
+    "cp a /HOM?/x",
+    "cp a /[h]ome/x",
+    "cp a /[!x]ome/x",
+    "cp a '/[]h]ome/x'",
+    "cp a '/[[:alpha:]]ome/x'",
+    "cp a '/(x|h)ome/x'",
+    "cp a '/@(home)/x'",
+    "cp a '/+(home)/x'",
+    "cp a '/{x,h}ome/x'",
+    "cp a '/*~x/x'",
+    "cp a '/x#*/x'",
+  ])("%s, which may match home, is refused", async (command) => {
+    expect(await listed(command, ["home"])).toContain("no-extensions-write hook refuses")
+  })
+
+  test.each(["cp a '/__[A-Z]+__/x'", "cp a '/[a-z]+@x*/x'", "cp a /x*y/x"])(
+    "%s, which matches no name, runs",
+    async (command) => {
+      expect(await listed(command, ["home"])).toBeUndefined()
+    },
+  )
 })
