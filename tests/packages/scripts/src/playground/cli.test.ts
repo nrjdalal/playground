@@ -56,7 +56,7 @@ describe("bare dispatcher", () => {
     const repo = join(root, "repo")
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
-    for (const file of ["portless-ca.ts", "swap-bundles.ts"])
+    for (const file of ["portless-ca.ts", "swap-bundles.ts", "write-atomic.ts"])
       cpSync(join(dirname(CLI), "..", file), join(src, file))
     for (const file of ["live-dashboard.ts", "proxy.ts"])
       cpSync(

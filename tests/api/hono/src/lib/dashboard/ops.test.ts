@@ -283,6 +283,19 @@ describe("readOps", () => {
   test("a folder that is not there holds no jobs", async () => {
     expect(await opsJobs(join(dir, "missing"))).toEqual([])
   })
+
+  test("a retired job shows no row, though its heartbeat file and its jobs.json row stay (#2313)", async () => {
+    const own = mkdtempSync(join(tmpdir(), "dashboard-ops-retired-"))
+    writeFileSync(
+      join(own, "jobs.json"),
+      JSON.stringify({ jobs: [{ disabled: true, heartbeat: "ops-awake", name: "ops-awake" }] }),
+    )
+    writeFileSync(join(own, "ops-awake.json"), beat({ job: "ops-awake", pid: process.pid }))
+    writeFileSync(join(own, "ops-report.json"), beat({ job: "ops-report", pid: process.pid }))
+    const rows = await readOps(own, NOW)
+    rmSync(own, { force: true, recursive: true })
+    expect(rows.map((row) => row.job)).toEqual(["ops-report"])
+  })
 })
 
 // The sidebar's runners read when they run (every 5 min, every day at 5:00 AM) under a plain name that never repeats a word.

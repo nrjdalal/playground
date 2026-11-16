@@ -25,6 +25,8 @@ set -euo pipefail
 #   --priority         with any mode but restore or close, anywhere among its words: the start passes the gates playbook's SPAWN.md, Capacity gate, names for a priority start, its roster row marked priority=1 so it counts against no later start, while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, a session's own window that playground priority on opens, or priority-start.json, a job's own starts), and focus's refusal while any does; it is refused while none does.
 #   --sandbox          with worker, probe or a reviewer's or probe's column alone, anywhere among its words: the session runs its shell commands in the closed sandbox, a probe's sandbox that also closes loopback, Keychain reads and the data folder's secret files, holds outbound hosts to the ones a worker's loop needs, and a worker or reviewer with no --in starts in a detached worktree made for it (review-<n> for this checkout's PR n, else <name>), whose folder, git entry and the main checkout's FETCH_HEAD, objects, refs and logs it writes, canary's, main's and live.branch's refs left shut; its roster row records sandbox=on, which a resume keeps and a start without it clears
 #   --reads-only       with worker alone, anywhere among its words: the worker only reads (research, a fetch, an investigation) and runs nothing through run-slot, which its brief bars, so its start passes the slots gate while the other gates still hold it (playbook's SPAWN.md, Capacity gate)
+#   --remote-control <name>  with probe alone, anywhere among its words: the probe's claude starts with Claude Code's --remote-control <name>, a name of lowercase words joined by hyphens; restore leaves a probe started with it down
+#   --ssh <user@host> --key <file>  with probe alone, anywhere among its words, each needing the other: the probe's claude runs on that machine under ssh -tt from its pane here, a plain user@host and an absolute path to a readable key file, both checked before any pane opens; the pane first copies the launch's settings file and skill plugin into one new folder on that machine, the probe's temp folder, which the remote claude reads them from, and the other machine's own shell reads an --account token from its own store; the gate reads this machine, the roster row and spawn.sh close stay as a probe's, and restore leaves it down
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -920,7 +922,7 @@ PY
   esac
 }
 
-# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only and --sandbox may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --harness, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check, --priority, --reads-only, --remote-control, --sandbox, --ssh and --key may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -959,6 +961,9 @@ SANDBOX_ARG=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
+REMOTE_CONTROL=
+SSH_HOST=
+SSH_KEY=
 words=()
 while [ $# -gt 0 ]; do
   if [ "$1" = --account ]; then
@@ -1038,6 +1043,19 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --sandbox ]; then
     SANDBOX_ARG=1
     shift
+  elif [ "$1" = --remote-control ]; then
+    [ $# -ge 2 ] && [ -z "$REMOTE_CONTROL" ] && word "$2" || usage "--remote-control takes a name of lowercase words joined by hyphens, once"
+    REMOTE_CONTROL=$2
+    shift 2
+  elif [ "$1" = --ssh ]; then
+    # a plain user@host, which never starts with -, so ssh never reads it as an option
+    [ $# -ge 2 ] && [ -z "$SSH_HOST" ] && [[ $2 =~ ^[a-z_][a-z0-9_-]*@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || usage "--ssh takes a plain user@host, once"
+    SSH_HOST=$2
+    shift 2
+  elif [ "$1" = --key ]; then
+    [ $# -ge 2 ] && [ -z "$SSH_KEY" ] && [[ $2 == /* ]] || usage "--key takes an absolute path to a key file, once"
+    SSH_KEY=$2
+    shift 2
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
     case "$2" in --*) usage "--brief needs a value; \"$2\" starts with --" ;; esac
@@ -1093,6 +1111,13 @@ SANDBOX_ONLY="--sandbox is for a worker's, a reviewer's or a probe's start"
 [ -z "$SANDBOX_ARG" ] || [[ $MODE =~ ^(worker|column|probe)$ ]] || usage "$SANDBOX_ONLY, not a ${MODE:-session}'s"
 [ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
+# A probe alone runs on another machine or with Remote Control, so a session that does real work stays here, where its gate, its guards and restore read it.
+for flag in remote-control:"$REMOTE_CONTROL" ssh:"$SSH_HOST" key:"$SSH_KEY"; do
+  [ -z "${flag#*:}" ] || [ "$MODE" = probe ] || usage "--${flag%%:*} is for a probe's start (spawn.sh probe), not a ${MODE:-session}'s"
+done
+[ -z "$SSH_HOST" ] || [ -n "$SSH_KEY" ] || usage "--ssh needs --key <file>"
+[ -z "$SSH_KEY" ] || [ -n "$SSH_HOST" ] || usage "--key needs --ssh <user@host>"
+[ -z "$SSH_KEY" ] || { [ -f "$SSH_KEY" ] && [ -r "$SSH_KEY" ]; } || usage "--key names no readable file at $SSH_KEY"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
   NAME=restore
@@ -1162,6 +1187,9 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         continue
     extras = words[6:]
     keys = extras[::2]
+    if {"--ssh", "--remote-control"} & set(keys):
+        skip(name, "it started with --ssh or --remote-control, a probe's start alone, so restore leaves it down")
+        continue
     if (
         len(words) >= 6
         and words[1].endswith("/scripts/spawn.sh")
@@ -1384,6 +1412,9 @@ case "$MODE" in
     [ $# -ge 2 ] && [ $# -le 3 ] || usage
     [ -z "$TITLE_ARG" ] || usage "--title is for a worker's or a checker's start, not a resume"
     NAME=$1 DIR=$2 SESSION=${3:-$1} BRIEF=$RESUME_BRIEF
+    # A probe started with --ssh or --remote-control comes back only as a new probe start, since a resume would run it here without them and write its record afresh.
+    grep -qE '^exec .* --(ssh|remote-control) ' "$RESUME_DIR/$NAME.sh" 2>/dev/null &&
+      refuse "it started as a probe with --ssh or --remote-control, which a resume would drop: start it again with spawn.sh probe"
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
@@ -1790,6 +1821,14 @@ if [ -z "$TEMP" ]; then
   TEMP=$LINUX_TEMP
   [ -n "$SANDBOX" ] && [ "$BUILT" = "$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k.json" ] && BUILT="$DATA/factory-settings-$TAG$MANAGER$SANDBOX$((WINDOW / 1000))k-$NAME.json"
 fi
+# An --ssh probe's temp folder on the other machine, which its settings and skills are copied into: this one's own name on Linux, else a new name under /tmp.
+REMOTE=
+[ -z "$SSH_HOST" ] || REMOTE=${LINUX_TEMP:-$(mktemp -u "/tmp/playground-$NAME.XXXXXX")}
+# Its sandbox writes that folder, the TMPDIR it runs with there, in a settings file of its own, since the shared one holds this machine's temp folder.
+if [ -n "$REMOTE" ] && [ "$REMOTE" != "$TEMP" ]; then
+  TEMP=$REMOTE
+  [[ $BUILT == *-"$NAME".json ]] || BUILT="${BUILT%.json}-$NAME.json"
+fi
 python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$TEMP" "$OWN" "$MEMORY_DIR" "$MANAGER" "$CLOSED" "$LIVE" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
 src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory, manager, closed, live = sys.argv[1:15]
@@ -1862,12 +1901,17 @@ with open(tmp, "w") as f:
 os.replace(tmp, dst)
 PY
 SETTINGS=$BUILT
+SETTINGS_AT=$SETTINGS
+[ -z "$REMOTE" ] || SETTINGS_AT="$REMOTE/$(basename "$SETTINGS")"
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
-FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
+FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS_AT --dangerously-skip-permissions"
+[ -z "$REMOTE_CONTROL" ] || FLAGS+=" --remote-control $REMOTE_CONTROL"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, less each skill whose SKILL.md its checkout's .claude/skills already holds byte for byte, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
 SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
-FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
+PLUGIN_AT=$PLUGIN
+[ -z "$REMOTE" ] || PLUGIN_AT="$REMOTE/$(basename "$PLUGIN")"
+FLAGS+=" --plugin-dir $(printf %q "$PLUGIN_AT")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."
 # Two GLM workers searched ToolSearch for Read, Bash and Skill, found none since it lists only deferred tools, and stopped as if they had none.
 [ "$BACKEND" = glm ] && READ="$READ Skill, Read, Bash, Edit and Write are already loaded; ToolSearch lists only deferred tools."
@@ -1956,6 +2000,13 @@ PY
 fi
 # The pane's shell runs this text, so the whole launch goes in a subshell: a failed Keychain read's exit ends only that, the message stays on the pane, and tk dies with it.
 COMMAND="($COMMAND)"
+# An --ssh probe's pane copies the settings file and the skill plugin into its new remote folder, which mkdir refuses to reuse, then runs the launch there under ssh -tt, whose hangup ends the remote claude when spawn.sh close closes the pane; the other machine's shell reads the command, an --account token's lookup included, as this pane's would.
+if [ -n "$SSH_HOST" ]; then
+  SSH_OPTS="-i $(printf %q "$SSH_KEY") -o IdentitiesOnly=yes -o BatchMode=yes"
+  COPY="tar -cf - -C $(printf %q "$(dirname "$SETTINGS")") $(printf %q "$(basename "$SETTINGS")") -C $(printf %q "$(dirname "$PLUGIN")") $(printf %q "$(basename "$PLUGIN")")"
+  ON_REMOTE="cd $(printf %q "$OWN") && export TMPDIR=$(printf %q "$REMOTE") PLAYGROUND_REPO=$(printf %q "$MAIN") && $COMMAND"
+  COMMAND="$COPY | ssh $SSH_OPTS $SSH_HOST 'mkdir -m 700 $REMOTE && tar -xf - -C $REMOTE' || exit 1"$'\n'"exec ssh $SSH_OPTS -tt $SSH_HOST $(printf %q "$ON_REMOTE")"
+fi
 
 # macOS types at most MAX_CANON 1024 bytes into a pane, and a GLM worker's launch line crosses it (1,025 bytes, measured), so the tail never arrives and the pane waits at >. The same text runs from a file instead: the typed line names the file alone, and the file, read by the pane's own shell, holds the Keychain lookup, never a token. Its first line removes the file, so no past launch outlives its pane to be rerun past this script's refusals.
 LAUNCH_DIR="$DATA/launch"
@@ -2292,6 +2343,9 @@ PY
   [ -n "$OWN_LOGIN" ] && record+="--account $OWN_LOGIN "
   [ -n "$CLAUDE_MODEL" ] && record+="--model $CLAUDE_MODEL "
   [ -n "$EFFORT" ] && [ "$EFFORT" != high ] && record+="--effort $EFFORT "
+  # A probe's own flags ride its record, so restore leaves it down and a resume refuses it rather than bringing it back on this machine.
+  [ -n "$REMOTE_CONTROL" ] && record+="--remote-control $REMOTE_CONTROL "
+  [ -n "$SSH_HOST" ] && record+="--ssh $SSH_HOST --key $(printf %q "$SSH_KEY") "
   account_line=
   [ -n "$ACCOUNT" ] && account_line="# account: $ACCOUNT"$'\n'
   (umask 077 && printf '#!/bin/bash\n# spawn.sh writes this at every herdr start and resume; spawn.sh restore reads its exec line and the server it ran on.\n# server: %s\n%s%s\n' "$HERDR_SESSION_NAME" "$account_line" "${record% }" > "$RESUME_DIR/$NAME.sh" && chmod 700 "$RESUME_DIR/$NAME.sh") ||

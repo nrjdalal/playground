@@ -42,7 +42,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -54,6 +54,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A launchd job still unhealthy 3 passes in a row is told to ops once, and told again only after a healthy pass, since launchd alone brings it back.
   On Linux each launchd job runs as the systemd user unit `<label>.service` in `~/.config/systemd/user` instead, enabled with `systemctl --user enable --now` while `is-active` finds it down.
   Turned off, it is disabled, trashed through the `jobs-units` carve-out (`com.playground.*.service` alone), reloaded out of systemd, then stopped; lingering (`loginctl enable-linger`, the machine's sudo bootstrap) keeps it past logout.
+  A job Playground no longer ships stays on `RETIRED` in `packages/settings/src/jobs.ts`, so the jobs render turns its old `jobs.json` row off and its teardown stops it on every install, its stored `jobs.<camelName>` row reads with no refusal, and the board shows no row for it.
   ops-dashboard runs the dashboard checkout's own `scripts/ops/dashboard/`, swapping onto it in the same pid at each start and after a roll that changes it (`.agents/dashboard/live.md`).
   ops-merge-train is merge-on-ready, a job and never a worker: every 60 seconds it reads the open PRs' heads and checks, and on any change runs `bun run pr:train ready`, which merges the first PR in queue order whose every gate passes; its beat's `lastResult` is `ok` or the command that failed and why.
   ops-unstick (`scripts/ops/unstick/run.py`) watches for stuck sessions, by the **unstick** rule.
@@ -150,10 +151,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   ops-zai-usage is `bun run ops:zai-usage`: every 5 minutes it reads Z.ai's quota endpoint, retrying for about 2 minutes a fetch that never reached Z.ai (DNS or the network just after boot),
   writes `zai-usage.json`, the readings the GLM spawn gate reads, with `balance` marked empty for an hour after a session-state record's `balance` failure (the quota endpoint never reports the balance) and `error` over the last windows on a failed read, and beats its own heartbeat;
   `--once` runs one read and writes only `zai-usage.json`, no beat.
-  Five jobs took over what runners held as background tasks, each `bun <checkout>/packages/scripts/src/<job>/cli.ts` with its script named by absolute path, so `up.py` keys it by its folder:
-  ops-awake holds `caffeinate -s -i` by default, the system awake on AC power and on battery with the display free to sleep and lock (#i19); the repo job alone reads `ops-awake.json` in its data folder, so a machine whose file sets `"lidSleep": true` runs `caffeinate -i` after a restart, to sleep with its lid shut, while a launchd `awake/run.sh` keeps its own flags and reads no setting.
-  Add ops-awake to `jobs.json` only on a Mac with no launchd `com.playground.ops-awake`, since both would post the same battery alerts; the repo job runs the battery check each minute (`ops-awake/battery.ts`), as a launchd `awake/run.sh` runs its own where it is installed, and the repo job's check alone pauses the heavy runs at the red mark through `run-slot.battery` (the **battery** rule).
-  ops-awake and ops-machine write only under the data folder their `--data` names, which the jobs render passes; run with no `--data` from any checkout but the live dashboard's, each exits 2 before it writes.
+  These jobs took over what runners held as background tasks, each `bun <checkout>/packages/scripts/src/<job>/cli.ts` with its script named by absolute path, so `up.py` keys it by its folder:
+  ops-machine writes only under the data folder its `--data` names, which the jobs render passes; run with no `--data` from any checkout but the live dashboard's, it exits 2 before it writes.
   ops-changelog (`bun run changelog sync`, `4-59/5 * * * *`, skipped quietly while a `bun run changelog seed` runs) runs from the live dashboard's checkout, the one holding the database's `.env`, as its runner's cron did:
   skipped with a line to ops while load5 (the third field of `sysctl -n vm.loadavg`, on Linux `/proc/loadavg`) passes 12, memory pressure reads critical (on Linux PSI's level, SPAWN.md's gate 2), or either does not read, never overlapping, its output appended to `dashboard-changelog.log` in the data folder, and a failure sent to ops with its last 5 lines.
   ops-channel-watch is the factory channel's watch: a quick pass every 3 minutes and a full one, which also relays edits, at minutes 7 and 37, each new post sent to the dispatcher as one outbox line; each pass runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`, so the token reaches only that process.
@@ -220,7 +219,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
   Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 
-A Mac restart clears `/private/tmp`, so every scratchpad is lost.
+A restart clears `/tmp`, the system's temp folder that holds Claude Code's scratchpads, on macOS and Linux alike, so every scratchpad is lost.
 Anything a session needs across a restart goes under `~/.playground/scratchpad/<name>/`, which the restart leaves alone.
 After a restart, a PR body is pulled back with `gh pr view <n> --json body -q .body` before it is edited, so a stale local copy never overwrites the live one.
 
