@@ -45,6 +45,8 @@ export type Command = {
   feedsShell?: boolean
   // the operator that ended the command before it in its scope (`;`, `&&`, `||`, `|`, `&`, `)` or `;;`), none for a scope's first
   follows?: string
+  // Set on a wrapper whose program word is a paren globOpens opens: the words and redirects zsh's glob reading gives the command, which run() judges at the wrapper's turn beside the subshell reading the command list keeps, so no reader of that list reads it
+  glob?: Pick<Command, "detached" | "redirects" | "words">
   group?: boolean
   // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
   held?: boolean
@@ -972,6 +974,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
+  // each group command whose paren globOpens also reads as zsh's glob word, with that reading's command
+  const twins = new Map<Command, Twin>()
+  // the twin a word or a redirect starting at `from` joins, once the walk is past the glob word's end
+  const past = (from: number): Twin | undefined => {
+    const twin = twins.get(cmd)
+    return twin && from >= twin.from ? twin : undefined
+  }
   const opens: number[] = []
   // How many bodies the walk is inside, how many of them a loop runs, and the operator that joined the last command to this one, so a command the shell may not run is marked unsure and one it runs only on the command before it succeeding is marked chained.
   let depth = 0
@@ -986,6 +995,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
+    const twin = twins.get(done)
     const pipe = op === "|" || op === "|&"
     const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
     if (brace(done, "}")) {
@@ -1062,8 +1072,14 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         opens.push(lx.commands.length)
       }
       lx.commands.push(done)
+      if (twin && lx.i >= twin.from) {
+        const { of, redirects, words } = twin
+        of.glob = { detached: of.detached || done.detached, redirects, words }
+      }
     }
     cmd = fresh()
+    // a paren inside the glob word (`(r|x)(m|y)`) ends a group command there, so its twin waits for the next
+    if (twin && lx.i < twin.from) twins.set(cmd, twin)
     cmd.follows = op
     if (pipe) {
       cmd.stdin = done
@@ -1087,6 +1103,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       end(")")
       if (nested) return
     } else if (c === "(") {
+      const twin = globOpens(cmd, src, lx.i) ? globTwin(lx, cmd) : undefined
       lx.i++
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
@@ -1096,9 +1113,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       cmd.group = true
       const members = topLevel(lx.commands.slice(from), scope)
       cmd.inner = () => members
+      if (twin) twins.set(cmd, twin)
     } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
+      const from = lx.i
       cmd.words.push(procSub(lx))
+      past(from)?.words.push(cmd.words[cmd.words.length - 1])
     } else if (redirect) {
+      const from = lx.i
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
       const [, fd] = redirect
@@ -1116,6 +1137,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         })
       } else if (op === "<<<") entry.body = { ...target, value: `${target.value}\n` }
       cmd.redirects.push(entry)
+      past(from)?.redirects.push(entry)
     } else if (c === ";" || c === "&" || c === "|") {
       const two = src.slice(lx.i, lx.i + 2)
       const op = ["&&", ";;", "|&", "||"].includes(two) ? two : c
@@ -1125,6 +1147,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const from = lx.i
       cmd.words.push(word(lx))
       if (lx.i === from) lx.i++
+      else past(from)?.words.push(cmd.words[cmd.words.length - 1])
     }
   }
   heredocs(lx, pending, nested)
@@ -1196,14 +1219,97 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-function word(lx: Lexer): Word {
+// Whether a paren opens a zsh glob word where a wrapper's program word goes (`command (r|x)m`), as zsh reads one after a program word; README's shared reader section lists where it reads as a subshell alone
+function globOpens(cmd: Command, src: string, at: number): boolean {
+  const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
+  if (program < 0) return false
+  const lead = cmd.words.slice(program)
+  const next: Word = { quoted: false, value: "(" }
+  let words = [...cmd.words, next]
+  let { first } = parse({ ...cmd, words })
+  // a word that may expand to no word leaves the next one the program, as emptyProgram reads it
+  while (first && first !== next && words.includes(first) && maySkip(first)) {
+    const dropped = first
+    words = words.filter((w) => w !== dropped)
+    ;({ first } = parse({ ...cmd, words }))
+  }
+  const close = balanced(src, at, "(", ")", false, true)
+  const group = src.slice(at, close)
+  return (
+    first === next &&
+    src[at + 1] !== ")" &&
+    !group.includes("/") &&
+    plainAlternative(group, close < src.length && !/[\s;&|<>)]/.test(src[close])) &&
+    !subshellPrefix(lead) &&
+    !HEADERS.has(cmd.words[0]?.value ?? "")
+  )
+}
+// Whether a group holds an alternative with no unquoted blank or command separator, the one kind that can spell a program's name, an empty one only with text glued after the group (`(|x y)rm`); a paren whose every alternative holds one (`nice (ls -la)`, `nice (pkill;x)`, `nice (a || b)`) keeps its subshell reading alone
+function plainAlternative(group: string, glued: boolean): boolean {
+  let depth = 0
+  let plain = true
+  let empty = true
+  for (let i = 1; i < group.length - 1; i++) {
+    const c = group[i]
+    if (c === "|" && depth === 0) {
+      if (plain && (glued || !empty)) return true
+      plain = true
+      empty = true
+      continue
+    }
+    empty = false
+    if (c === "\\") i++
+    else if (c === "'") {
+      const end = group.indexOf("'", i + 1)
+      i = end === -1 ? group.length : end
+    } else if (c === '"') {
+      i++
+      while (i < group.length && group[i] !== '"') i += group[i] === "\\" ? 2 : 1
+    } else if (c === "(") depth++
+    else if (c === ")") depth--
+    else if (/[\s;&]/.test(c)) plain = false
+  }
+  return plain && (glued || !empty)
+}
+// Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`)
+function subshellPrefix(lead: Word[]): boolean {
+  let at = 0
+  while (at < lead.length && !lead[at].quoted)
+    if (lead[at].value === "time" || lead[at].value === "nocorrect") at++
+    else if (lead[at].value === "repeat" && at + 1 < lead.length) at += 2
+    else break
+  return at > 0 && at === lead.length
+}
+// Whether a word the reader read none of may expand to no word, before any value is known (mayVanish, read without the env)
+const maySkip = (w: Word): boolean =>
+  !!w.source &&
+  /^\u0000+$/.test(w.value) &&
+  (/^\u0000+$/.test(w.source) || vanishingParts(w.source))
+const HEADERS = new Set(["case", "for", "foreach", "function", "select"])
+
+// The command a paren globOpens opens reads as under zsh's glob reading: its words past its reserved ones, the glob word, and each word and redirect the walk reads from `from`, the glob word's end, on; the glob word is read on a copy of the lexer, so its substitutions' commands come from the subshell reading alone
+type Twin = { from: number; of: Command; redirects: Redirect[]; words: Word[] }
+function globTwin(lx: Lexer, of: Command): Twin {
+  const copy: Lexer = { ...lx, commands: [], scopes: [...lx.scopes] }
+  const glob = word(copy, true)
+  const program = of.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
+  return {
+    from: copy.i,
+    of,
+    redirects: [...of.redirects],
+    words: [...of.words.slice(program), glob],
+  }
+}
+
+function word(lx: Lexer, opening = false): Word {
   const { src } = lx
   const start = lx.i
   const out: Word = { quoted: false, value: "" }
   let bare = ""
   while (
     lx.i < src.length &&
-    (!BREAK.has(src[lx.i]) || (src[lx.i] === "(" && lx.i > start && src[lx.i + 1] !== ")"))
+    (!BREAK.has(src[lx.i]) ||
+      (src[lx.i] === "(" && (lx.i > start || opening) && src[lx.i + 1] !== ")"))
   ) {
     tick()
     const c = src[lx.i]
@@ -1218,7 +1324,7 @@ function word(lx: Lexer): Word {
       lx.i--
       merge(out, procSub(lx))
     } else if (c === "(") {
-      const end = balanced(src, lx.i, "(", ")")
+      const end = balanced(src, lx.i, "(", ")", false, opening)
       out.value += src.slice(lx.i, end)
       bare += src.slice(lx.i, end)
       inner(lx, src.slice(lx.i + 1, end - 1))
@@ -1378,7 +1484,15 @@ function inner(lx: Lexer, src: string): void {
   }
 }
 
-function balanced(src: string, from: number, open: string, close: string, plain = false): number {
+// `doubles` skips double-quoted text too, its backslashes escaping, as a zsh glob word's group reads it
+function balanced(
+  src: string,
+  from: number,
+  open: string,
+  close: string,
+  plain = false,
+  doubles = false,
+): number {
   let depth = 0
   for (let i = from; i < src.length; i++) {
     tick()
@@ -1387,6 +1501,9 @@ function balanced(src: string, from: number, open: string, close: string, plain 
     else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1)
       i = end === -1 ? src.length : end
+    } else if (c === '"' && doubles) {
+      i++
+      while (i < src.length && src[i] !== '"') i += src[i] === "\\" ? 2 : 1
     } else if (c === open) depth++
     else if (c === close && --depth === 0) return i + 1
   }
@@ -1791,7 +1908,9 @@ async function runAll(
   for (const [k, cmd] of lexed.commands.entries()) {
     const at = envOf(cmd.scope)
     if (cmd.repeated && !lexed.commands[k - 1]?.repeated) repass(lexed.commands.slice(k), envs)
-    const verdict = await examine(cmd, at, visit, builtins)
+    const verdict =
+      (await examine(cmd, at, visit, builtins)) ??
+      (cmd.glob && (await examine({ ...cmd, ...cmd.glob, glob: undefined }, at, visit, builtins)))
     if (verdict) return verdict
     unbind.get(cmd)?.()
     bind(lexed.commands, k, at, unbind)
@@ -2216,10 +2335,8 @@ export function globSpells(text: string, names: string[]): boolean {
 
 // A call's text, then each word holding a brace list or a zsh group again as the words it makes, its backslash-newlines joined, its backslashes dropped and, once the words are made, its quotes (braceWords, groupWords, which keeps a quoted part's parens as text, a closing group with no | dropped as zsh's qualifiers), so a guard's first look for a program's name sees `pk{i,x}ll`, `p"k"{i,x}ll` and `pk(i|x)ll` as the name they spell; a brace sequence is spelled as a glob beside its word (sequenceSpelling) and a list or group past the cap as any text (anyText), which globSpells matches, and a spelled word whose last path part keeps no literal character as ANY_NAME too; each token is read again cut before each `$(` and at a pipe before a paren, each part without a leading paren, `$(` or quote, beside its typed form
 export function spelledText(text: string): string {
-  const spelled = text
-    .replace(/\\\n/g, "")
-    .replace(/\\/g, "")
-    .split(/[\s;&<>`]+/)
+  const plain = text.replace(/\\\n/g, "").replace(/\\/g, "")
+  const spelled = [...plain.split(/[\s;&<>`]+/), ...blankGroups(plain)]
     .flatMap((token) => {
       // a subshell's, a substitution's or a zsh `=(…)` process substitution's opening paren (an assignment's value or an array's element too), a script's opening quote, or a pipe before a subshell, glued to the program word after it; the line split already cuts `<(` and `>(` at their `<` and `>`
       const parts = token
@@ -2243,6 +2360,20 @@ export function spelledText(text: string): string {
     )
   return spelled.length > 0 ? `${text} ${spelled.join(" ")}` : text
 }
+
+// Each zsh group holding a blank (`(r|x y)m`), with the word's parts glued to it, which the line split cuts apart, so spelledText spells it too
+function blankGroups(text: string): string[] {
+  const out: string[] = []
+  for (const { 0: group, index } of text.matchAll(/\([^()\s]*\s[^()]*\)/g)) {
+    let from = index
+    while (from > 0 && !BETWEEN.test(text[from - 1])) from--
+    let to = index + group.length
+    while (to < text.length && !BETWEEN.test(text[to])) to++
+    out.push(text.slice(from, to))
+  }
+  return out
+}
+const BETWEEN = /[\s;&<>`]/
 
 // A brace sequence (`{a..c}`, `{1..9..2}`), which braceWords leaves as written
 const SEQUENCE = /\{(-?\d+|[^{},.\s])\.\.(-?\d+|[^{},.\s])(?:\.\.-?\d+)?\}/g
@@ -2375,6 +2506,7 @@ export async function examine(
     heldGlob(cmd, primary.first, env),
     ...[...split, ...prior].map((v) => globRun(v, parse(v).first, env, true)),
     ...(brace ? [globRun(brace, parse(brace).first, env)] : []),
+    ...vanished.map((v) => globRun(v, parse(v).first, env)),
   ]
   const resolving = [
     ...split,
@@ -2726,15 +2858,12 @@ function binds({ words }: Command): string[] {
 
 // Whether a word may expand to no word: the reader read none of it, and it is VANISHING_PART alone with every variable it names one the line never set (a binder sets one, `binds`), set to nothing or blanks alone, or one a builtin may have changed (`change`), or an unread part of a word a script the line built carries (`eval $X …`, `bash -c "$X …"`), which keeps no source of its own
 const mayVanish = (w: Word, env: Env): boolean =>
-  !!w.source &&
-  /^\u0000+$/.test(w.value) &&
-  (/^\u0000+$/.test(w.source) ||
-    (vanishingParts(w.source) &&
-      [...w.source.matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
-        const set = env.vars.get(name)
-        // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
-        return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
-      })))
+  maySkip(w) &&
+  [...(w.source ?? "").matchAll(/\$\{?[=~^]*!?(\w+)/g)].every(([, name]) => {
+    const set = env.vars.get(name)
+    // a value of blanks alone splits to no word under bash's default IFS and any IFS holding them
+    return !set || !!set.vanishes || (!set.unknown && /^[ \t\n]*$/.test(set.value))
+  })
 
 // The empty reading of a command: each program word that may expand to no word (mayVanish) dropped, until one that stays leads, so the word after it is judged as the program (`$X git commit`, `nice $X git commit`, `$X $Y git commit`); none when the program word stays. It is judged beside the typed reading, so a verdict only moves to refused.
 function emptyProgram(cmd: Command, env: Env): Command[] {
