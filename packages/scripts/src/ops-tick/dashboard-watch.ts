@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { apiUp, dashboardCheckout, dashboardUrls } from "../playground/probe"
 import { writeAtomic } from "../write-atomic"
+import { CYCLE_SECONDS } from "./cycle"
 import type { Context } from "./tick"
 
 // A live dashboard roll measured 15s down and a failed restart cycle about 2.5 minutes, so 5 minutes in a row is an outage no restart is fixing.
@@ -23,10 +24,20 @@ const banner = async (ctx: Context, text: string) => {
   if (sent.code !== 0) throw new Error(`notify.sh: ${sent.out.trim().slice(0, 200)}`)
 }
 
+// An ISO time as a person reads it in a banner, to the minute: 2026-11-16 06:47 UTC.
+const utcMinute = (iso: string): string => `${iso.slice(0, 16).replace("T", " ")} UTC`
+
 const minutesSince = (ctx: Context, since: string): number =>
   Math.floor((ctx.now.getTime() - Date.parse(since)) / 60_000)
 
-// Each minute: the run of failures is kept in tick/dashboard-watch.json, one banner goes out once the dashboard has failed DASHBOARD_DOWN_MINUTES in a row, and one more when it answers again; an answer, or a gap of over 2 minutes with no check, ends the run quietly before then.
+// A run whose last down reading is over two of ops-tick's cycles old (one cycle and a missed one) was not seen by this run: ops-tick or the machine stopped in between.
+const stale = (ctx: Context, state: DashboardWatch): boolean =>
+  Number.isNaN(Date.parse(state.downSince)) ||
+  Math.floor(
+    (ctx.now.getTime() - Date.parse(state.lastDownAt ?? state.downSince)) / (CYCLE_SECONDS * 1000),
+  ) > 2
+
+// Each cycle: the run of failures is kept in tick/dashboard-watch.json, one banner goes out once the dashboard has failed DASHBOARD_DOWN_MINUTES in a row, and one more when it answers again; an answer, or a stale run (stale), ends the run before then, quietly unless it was told, when the answer names the last down reading in place of a count no one saw.
 export const dashboardWatch = async (ctx: Context, up = dashboardUp) => {
   const statePath = join(ctx.ops, "tick", "dashboard-watch.json")
   const state = (await Bun.file(statePath)
@@ -37,18 +48,15 @@ export const dashboardWatch = async (ctx: Context, up = dashboardUp) => {
     if (state.told)
       await banner(
         ctx,
-        `The Dashboard answers again, after ${minutesSince(ctx, state.downSince)} minutes down`,
+        stale(ctx, state)
+          ? `The Dashboard answers again; its last down reading was at ${utcMinute(state.lastDownAt ?? state.downSince)}, and ops-tick read nothing between`
+          : `The Dashboard answers again, after ${minutesSince(ctx, state.downSince)} minutes down`,
       )
     await unlink(statePath)
     return
   }
   const now = ctx.now.toISOString()
-  const run: DashboardWatch =
-    !state ||
-    Number.isNaN(Date.parse(state.downSince)) ||
-    (!state.told && minutesSince(ctx, state.lastDownAt ?? state.downSince) > 2)
-      ? { downSince: now }
-      : state
+  const run: DashboardWatch = !state || stale(ctx, state) ? { downSince: now } : state
   const down = minutesSince(ctx, run.downSince)
   if (!run.told && down >= DASHBOARD_DOWN_MINUTES) {
     await banner(ctx, `The Dashboard has not answered for ${down} minutes`)

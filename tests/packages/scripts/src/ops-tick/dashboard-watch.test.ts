@@ -47,7 +47,7 @@ test(`one banner once the Dashboard has failed ${DASHBOARD_DOWN_MINUTES} minutes
   expect(banners).toEqual([])
   await minute(ops, DASHBOARD_DOWN_MINUTES, false, banners)
   expect(banners).toEqual([`The Dashboard has not answered for ${DASHBOARD_DOWN_MINUTES} minutes`])
-  for (let m = DASHBOARD_DOWN_MINUTES + 1; m < 60; m++) await minute(ops, m, false, banners)
+  for (let m = DASHBOARD_DOWN_MINUTES + 1; m < 107; m++) await minute(ops, m, false, banners)
   expect(banners).toHaveLength(1)
   await minute(ops, 107, true, banners)
   expect(banners.at(-1)).toBe("The Dashboard answers again, after 107 minutes down")
@@ -72,6 +72,49 @@ test("a gap with no check, as the Mac asleep or ops-tick down, starts the run of
   expect(banners).toEqual([])
   await minute(ops, 60 + DASHBOARD_DOWN_MINUTES, false, banners)
   expect(banners).toEqual([`The Dashboard has not answered for ${DASHBOARD_DOWN_MINUTES} minutes`])
+})
+
+// PG-2417: ops-tick stopped for a test run from 16:31 to 16:38Z, and its first minute back sent "answers again, after 597 minutes down" from the run it told at 06:47Z.
+const toldThenStopped = async (ops: string, banners: string[]) => {
+  for (let m = 0; m <= DASHBOARD_DOWN_MINUTES; m++) await minute(ops, m, false, banners)
+  expect(banners).toEqual([`The Dashboard has not answered for ${DASHBOARD_DOWN_MINUTES} minutes`])
+}
+
+test("a told run gone stale while ops-tick was stopped answers with its last down reading, never a count of minutes it did not see", async () => {
+  const ops = scratch()
+  const banners: string[] = []
+  await toldThenStopped(ops, banners)
+  await minute(ops, DASHBOARD_DOWN_MINUTES + 8, true, banners)
+  expect(banners.at(-1)).toBe(
+    "The Dashboard answers again; its last down reading was at 2026-10-20 10:53 UTC, and ops-tick read nothing between",
+  )
+  await minute(ops, DASHBOARD_DOWN_MINUTES + 9, true, banners)
+  expect(banners).toHaveLength(2)
+})
+
+test("a run gone stale before it was told ends quietly on an answer", async () => {
+  const ops = scratch()
+  const banners: string[] = []
+  for (let m = 0; m < 3; m++) await minute(ops, m, false, banners)
+  await minute(ops, 10, true, banners)
+  expect(banners).toEqual([])
+})
+
+test("a told run gone stale starts a fresh run on a down reading, told again only after its own minutes down", async () => {
+  const ops = scratch()
+  const banners: string[] = []
+  await toldThenStopped(ops, banners)
+  const back = DASHBOARD_DOWN_MINUTES + 8
+  for (let m = back; m < back + DASHBOARD_DOWN_MINUTES; m++) await minute(ops, m, false, banners)
+  expect(banners).toHaveLength(1)
+  await minute(ops, back + DASHBOARD_DOWN_MINUTES, false, banners)
+  expect(banners.at(-1)).toBe(
+    `The Dashboard has not answered for ${DASHBOARD_DOWN_MINUTES} minutes`,
+  )
+  await minute(ops, back + DASHBOARD_DOWN_MINUTES + 1, true, banners)
+  expect(banners.at(-1)).toBe(
+    `The Dashboard answers again, after ${DASHBOARD_DOWN_MINUTES + 1} minutes down`,
+  )
 })
 
 test("a line notify.sh fails to queue is sent again the next minute", async () => {
