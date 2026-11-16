@@ -23,6 +23,12 @@ afterAll(() => rmSync(root, { force: true, recursive: true }))
 const row = (pid: number, ppid: number, command: string, age = "02:13:07") =>
   `${String(pid).padStart(5)} ${String(ppid).padStart(5)} ${age.padStart(11)} ${command}`
 
+// who adopts an orphan: pid 1 alone, as on macOS, or with the user's systemd --user (pid 1500), as on a Linux desktop
+const PID1 = new Set([1])
+const LINUX = new Set([1, 1500])
+// no session's roster row reads ended
+const noneEnded = () => false
+
 describe("procsOf", () => {
   test("reads each row's pid, parent, age and whole command, spaces kept", () => {
     expect(
@@ -58,10 +64,10 @@ describe("cwdsOf", () => {
 
 describe("orphansOf", () => {
   const select = (rows: string[]) =>
-    orphansOf(procsOf(rows.join("\n")), worktrees, existsSync).map((o) => o.pid)
+    orphansOf(procsOf(rows.join("\n")), worktrees, existsSync, PID1, noneEnded).map((o) => o.pid)
 
   // the 7 Nov shape: a run-slot waiter a test fixture started from a review clone, left with parent pid 1 after the clone was removed
-  test("selects a script of a worktree that is gone, once its parent is pid 1", () => {
+  test("selects a script of a worktree that is gone, once its parent is pid 1, a reaper given", () => {
     expect(
       select([row(58523, 1, `bash ${gone}/scripts/ops/run-slot.sh worker-a -- sleep 5`)]),
     ).toEqual([58523])
@@ -70,6 +76,8 @@ describe("orphansOf", () => {
         procsOf(row(63802, 1, `bun ${gone}/packages/scripts/src/x.ts`)),
         worktrees,
         existsSync,
+        PID1,
+        noneEnded,
       ),
     ).toEqual([
       {
@@ -178,8 +186,54 @@ describe("orphansOf", () => {
       ],
       worktrees,
       existsSync,
+      PID1,
+      // the session this test's own temp folder may sit under reads ended, so the sandbox alone decides
+      () => true,
     )
     expect(found.map((o) => o.pid)).toEqual([750, 753])
+  })
+
+  // #2402: on Linux an orphan goes to the user's systemd --user, so a pick by parent pid 1 alone found none
+  test("selects an orphan whose parent is a reaper given, the user manager included, and no other parent", () => {
+    const script = `bash ${gone}/scripts/ops/run-slot.sh w -- sleep 5`
+    const rows = [row(760, 1500, script), row(761, 1600, script), row(762, 1, script)]
+    expect(
+      orphansOf(procsOf(rows.join("\n")), worktrees, existsSync, LINUX, noneEnded).map(
+        (o) => o.pid,
+      ),
+    ).toEqual([760, 762])
+    expect(select(rows)).toEqual([762])
+  })
+
+  // #2402: the 16 Nov shape: TERM-trapping run-slot loops from an ended reviewer's test sandboxes, under its session temp folder, which still exists
+  // the paths are made up and every sandbox reads gone, since this test's own temp folder sits under its session's and would name that session first
+  test("selects a sandbox orphan under a session's temp folder only once that session's roster row reads ended, a nested sandbox's too", () => {
+    const temp = (name: string) => `/tmp/playground-${name}.deAm5P`
+    const direct = (name: string) => `${temp(name)}/test-sandbox-Xy12z`
+    const nested = (name: string) => `${direct(name)}/t/test-sandbox-In1/t`
+    const at = (pid: number, cwd: string) =>
+      Object.assign(procsOf(row(pid, 1500, "bash -c while :; do sleep 0.2; done"))[0]!, { cwd })
+    const ended = (name: string) => name === "42fmjw-reviewer"
+    const found = orphansOf(
+      [
+        at(770, `${direct("42fmjw-reviewer")}/t/run-slot-1 (deleted)`),
+        // a live session's daemon, double-forked so the user manager adopted it, whose test run removed its sandbox: kept while that session's row reads live
+        at(771, `${direct("ab12cd-worker")}/t/run-slot-1`),
+        // a session with no roster row
+        at(772, `${direct("zz99zz-probe")}/t/run-slot-1`),
+        // a test run's own test run, whose sandbox sits in its outer run's t folder: the outer session folder names the session
+        at(773, `${nested("42fmjw-reviewer")}/x`),
+        at(774, `${nested("ab12cd-worker")}/x`),
+      ],
+      worktrees,
+      () => false,
+      LINUX,
+      ended,
+    )
+    expect(found.map((o) => [o.pid, "sandbox" in o && o.sandbox])).toEqual([
+      [770, direct("42fmjw-reviewer")],
+      [773, `${direct("42fmjw-reviewer")}/t/test-sandbox-In1`],
+    ])
   })
 
   test("never selects a process that names no worktree of this checkout", () => {
@@ -196,7 +250,7 @@ describe("orphansOf", () => {
 })
 
 describe("endOrphans", () => {
-  // processes this test spawns itself, each listed by a fake ps row with parent pid 1 and a gone worktree's script, so the real kill reaches only them
+  // processes this test spawns itself, each listed by a fake ps row whose parent is the user manager and with a gone worktree's script, so the real kill reaches only them
   const spawnOwn = (script: string) =>
     Bun.spawn(["bun", "-e", script], { stdio: ["ignore", "ignore", "ignore"] })
   const alive = (pid: number) => {
@@ -224,7 +278,7 @@ describe("endOrphans", () => {
           code: 0,
           out: [...own]
             .filter(([pid]) => alive(pid))
-            .map(([pid, c]) => row(pid, 1, c))
+            .map(([pid, c]) => row(pid, 1500, c))
             .join("\n"),
         }
       if (argv[0] === "kill" && own.has(Number(argv[2]))) {
@@ -234,7 +288,7 @@ describe("endOrphans", () => {
       throw new Error(`not this test's: ${argv.join(" ")}`)
     }
     try {
-      const found = orphansOf(procsOf((await run(PS)).out), worktrees, existsSync)
+      const found = orphansOf(procsOf((await run(PS)).out), worktrees, existsSync, LINUX, noneEnded)
       expect(found.map((o) => o.pid).sort()).toEqual([calm.pid, stubborn.pid].sort())
       const waits: number[] = []
       const said = await endOrphans(found, run, async (ms) => {
@@ -268,7 +322,13 @@ describe("endOrphans", () => {
       if (argv.join(" ") === PS.join(" ")) return { code: 0, out: row(424242, 1, "/usr/bin/other") }
       return { code: 0, out: "" }
     }
-    const found = orphansOf(procsOf(row(424242, 1, `bun ${gone}/x.ts`)), worktrees, existsSync)
+    const found = orphansOf(
+      procsOf(row(424242, 1, `bun ${gone}/x.ts`)),
+      worktrees,
+      existsSync,
+      PID1,
+      noneEnded,
+    )
     const said = await endOrphans(found, run, async () => {})
     expect(runs.filter((r) => r[0] === "kill").map((r) => r[1])).toEqual(["-TERM"])
     expect(said.ended).toEqual([
@@ -281,7 +341,13 @@ describe("endOrphans", () => {
       argv[0] === "kill"
         ? { code: 1, out: "kill: 424243: Operation not permitted" }
         : { code: 0, out: row(424243, 1, `bun ${gone}/x.ts`) }
-    const found = orphansOf(procsOf(row(424243, 1, `bun ${gone}/x.ts`)), worktrees, existsSync)
+    const found = orphansOf(
+      procsOf(row(424243, 1, `bun ${gone}/x.ts`)),
+      worktrees,
+      existsSync,
+      PID1,
+      noneEnded,
+    )
     expect(await endOrphans(found, run, async () => {})).toEqual({
       ended: [],
       kept: [
