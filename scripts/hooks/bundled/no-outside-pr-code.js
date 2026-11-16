@@ -5024,16 +5024,6 @@ var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 // packages/settings/src/rules.ts
 var percent = number2().int().min(1).max(100);
 var ruleSettings = defineSettings({
-  "battery.alert": {
-    default: 5,
-    description: "The battery percent, while the charge falls on battery or on a charger losing to the load, at which the battery check posts its red alert and the heavy runs wait in run-slot.",
-    schema: percent
-  },
-  "battery.ask": {
-    default: 10,
-    description: "The battery percent, while the Mac discharges on battery, at which the battery check posts its orange ask.",
-    schema: percent
-  },
   "clock.ownerZone": {
     default: "UTC",
     description: "The time zone, by its IANA name, a time shown to the owner reads in.",
