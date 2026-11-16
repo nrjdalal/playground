@@ -11,6 +11,7 @@ import {
   stateNow,
   type SessionState,
 } from "@packages/config/session-state"
+import { type SshLaunch, sshLaunchOf, sshProcessOf } from "@packages/config/ssh-probe"
 import { dataDirOf } from "@packages/env/data-dir"
 import { readPin } from "@packages/settings"
 import { z } from "zod"
@@ -442,15 +443,26 @@ const runsCodex = (argv: string[]) => {
   return /(^|\/)codex$/.test(program ?? "")
 }
 
-// The session a pane holds, its agent and the process that runs it, or null. A Codex session writes no Claude registry file, so its pane holds it when the pane's label has a Codex launch record (codexLaunches) and a codex process runs in its foreground.
+// The session a pane holds, its agent and the process that runs it, or null. A Codex session writes no Claude registry file, so its pane holds it when the pane's label has a Codex launch record (codexLaunches) and a codex process runs in its foreground; an --ssh probe's claude runs on another machine, so its pane holds it, remote, while it runs the ssh its launch record names (sshProcessOf).
 function paneSession(
+  server: string,
   pane: Pane,
   registry: Registry,
   codex: CodexLaunches,
-): { agent: "claude" | "codex"; proc: Pane["processes"][number]; sessionId: string } | null {
+  ssh: SshLaunches,
+): {
+  agent: "claude" | "codex"
+  proc: Pane["processes"][number]
+  remote?: true
+  sessionId: string
+} | null {
   const thread = pane.label ? codex.get(pane.label) : undefined
   const codexProc = thread ? pane.processes.find((p) => runsCodex(p.argv ?? [])) : undefined
   if (thread && codexProc) return { agent: "codex", proc: codexProc, sessionId: thread }
+  const launch = pane.label ? ssh.get(pane.label) : undefined
+  const sshProc = launch ? sshProcessOf(launch, server, pane) : undefined
+  if (launch && sshProc)
+    return { agent: "claude", proc: sshProc, remote: true, sessionId: launch.sessionId }
   const registered = pane.processes.find((p) => registry?.get(p.pid))
   const registeredId = registered && registry?.get(registered.pid)?.sessionId
   if (registered)
@@ -467,13 +479,14 @@ export function herdrRecords(
   registry: Registry,
   now: string,
   codex: CodexLaunches = new Map(),
+  ssh: SshLaunches = new Map(),
 ): Json[] {
   const changes = new Map<string, Change>()
   const records = reads.flatMap((read) =>
     read.panes.flatMap((pane) => {
-      const held = paneSession(pane, registry, codex)
+      const held = paneSession(read.server, pane, registry, codex, ssh)
       if (!held) return []
-      const { agent, proc, sessionId } = held
+      const { agent, proc, remote, sessionId } = held
       const key = `${read.server}:${pane.terminal_id}:${sessionId}`
       const known = state.changed.get(key)
       // a read more than SEEN_SLACK_MS after the last can hide a change and back (a picker answered, then a permission raised), so its state began at some time unknown, as on a fresh process
@@ -494,12 +507,13 @@ export function herdrRecords(
           launch_arguments: proc.argv ?? [],
           launch_backed: true,
           pid: proc.pid,
+          ...(remote && { remote }),
           session_id: sessionId,
           started_at: null,
           stored_pid_exists: true,
           surface_id: herdrSurface(read.server, pane.pane_id),
           transcript_path:
-            agent === "claude" && cwd ? transcriptPath(claudeDir(), cwd, sessionId) : "",
+            agent === "claude" && cwd && !remote ? transcriptPath(claudeDir(), cwd, sessionId) : "",
           updated_at: at,
           workspace_id: herdrSurface(read.server, pane.workspace_id),
         },
@@ -535,6 +549,25 @@ export function codexLaunches(data = dataDir()): CodexLaunches {
       const words = exec?.match(/ resume (\S+) .* ([0-9a-f-]{36})$/)
       if (words?.[1] === name && words[2]) out.set(name, words[2])
     } catch {}
+  }
+  return out
+}
+
+// The --ssh probes among the names given (each pane's label), by name: each one whose resume record starts it with --ssh, with the server and session that record names (sshLaunchOf).
+export type SshLaunches = Map<string, SshLaunch>
+
+export function sshLaunches(names: Iterable<string>, data = dataDir()): SshLaunches {
+  const out: SshLaunches = new Map()
+  for (const name of new Set(names)) {
+    if (!/^[\w-]+$/.test(name)) continue
+    let record = ""
+    try {
+      record = readFileSync(join(data, "resume", `${name}.sh`), "utf8")
+    } catch {
+      continue
+    }
+    const launch = sshLaunchOf(record)
+    if (launch?.name === name) out.set(name, launch)
   }
   return out
 }
