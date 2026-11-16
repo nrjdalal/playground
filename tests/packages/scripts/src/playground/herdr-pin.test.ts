@@ -10,6 +10,7 @@ import {
   releaseUrl,
   runHerdrPin,
 } from "../../../../../packages/scripts/src/playground/herdr-pin"
+import { scratchEnv } from "../../../../scratch-env"
 
 const PIN = join(import.meta.dir, "../../../../../packages/scripts/src/playground/herdr-pin.ts")
 const scratch = mkdtempSync(join(tmpdir(), "playground-herdr-pin-"))
@@ -206,7 +207,7 @@ describe("the Linux x64 pin, read on any machine", () => {
 // HOME moves the pinned path, so each run gets its own; the copy sits at its data folder's bin/herdr
 const run = (home: string, ...args: string[]) =>
   Bun.spawnSync([process.execPath, "--no-env-file", PIN, ...args], {
-    env: { ...process.env, HOME: home },
+    env: scratchEnv(home),
   })
 const pinnedAt = (home: string) => join(home, ".playground", "bin", "herdr")
 

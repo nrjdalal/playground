@@ -5696,13 +5696,21 @@
       "freeBytes": 210000000000,
       "totalBytes": 994000000000
     },
+    "hostname": "machine-a",
     "load": [3.1, 3.4, 3.6],
+    "peers": [
+      {
+        "name": "machine-b",
+        "target": "you@10.0.0.2"
+      }
+    ],
     "probes": {
       "containerStats": "{\"ID\":\"f1x7ure0db01\",\"MemUsage\":\"48.2MiB / 7.6GiB\",\"Name\":\"playground-board-colours-db\"}\n",
       "containers": "{\"ID\":\"f1x7ure0db01\",\"Names\":\"playground-board-colours-db\",\"Ports\":\"127.0.0.1:54321->5432/tcp\"}\n",
       "cwds": "p900001\nfcwd\nn/fixture/playground\np900002\nfcwd\nn/fixture/playground\np900003\nfcwd\nn/fixture/playground\np900004\nfcwd\nn/fixture/playground/.claude/worktrees/sidebar-spacing\np900005\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours\np900006\nfcwd\nn/fixture/playground/.claude/worktrees/composer-paste\np900007\nfcwd\nn/fixture/playground/.claude/worktrees/canary\np900008\nfcwd\nn/fixture/playground/.claude/worktrees/review-lust\np900009\nfcwd\nn/fixture/playground/.claude/worktrees/test-lust\np900010\nfcwd\nn/fixture/scratch\np900011\nfcwd\nn/fixture/playground/.claude/worktrees/old-ghost\np900012\nfcwd\nn/fixture/playground\np900050\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours\np900051\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours/api/hono\np900052\nfcwd\nn/fixture/playground/.claude/worktrees/board-colours/web/next\n",
       "dockerHost": "\"unix:///fixture/orbstack/docker.sock\"\n",
       "memory": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               61000.\nPages active:                            700000.\nAnonymous pages:                         880000.\nPages purgeable:                          24000.\nPages wired down:                        190000.\nPages occupied by compressor:            140000.\n",
+      "peer you@10.0.0.2": "2.40 2.10 1.90 2/612 48211\nMemTotal:       33554432 kB\nMemFree:        20971520 kB\nMemAvailable:   25165824 kB\nSwapTotal:      8388608 kB\nSwapFree:       7340032 kB\ncpu  19950 0 34980 79890930 2690 0 2950 0 0 0\ncpu0 1995 0 3498 7989093 269 0 295 0 0 0\ncpu1 1995 0 3498 7989093 269 0 295 0 0 0\ncpu2 1995 0 3498 7989093 269 0 295 0 0 0\ncpu3 1995 0 3498 7989093 269 0 295 0 0 0\ncpu4 1995 0 3498 7989093 269 0 295 0 0 0\ncpu5 1995 0 3498 7989093 269 0 295 0 0 0\ncpu6 1995 0 3498 7989093 269 0 295 0 0 0\ncpu7 1995 0 3498 7989093 269 0 295 0 0 0\ncpu8 1995 0 3498 7989093 269 0 295 0 0 0\ncpu9 1995 0 3498 7989093 269 0 295 0 0 0\n",
       "processes": "900100 1 40000 12:00.00\n900001 900100 390000 11:12.34\n900002 900100 400000 12:12.34\n900003 900100 410000 13:12.34\n900004 900100 420000 14:12.34\n900005 900100 430000 15:12.34\n900006 900100 440000 16:12.34\n900007 900100 450000 17:12.34\n900008 900100 460000 18:12.34\n900009 900100 470000 19:12.34\n900010 900100 480000 20:12.34\n900011 900100 490000 21:12.34\n900012 900100 380000 10:12.34\n900021 900100 490000 21:12.34\n900022 900100 500000 22:12.34\n900050 900005 60000 0:40.00\n900051 900050 210000 3:10.00\n900052 900050 640000 9:30.00\n900020 1 90000 1:00.00\n900090 1 1800000 40:00.00\n",
       "socketHolder": "p900090\n",
       "sockets": "p900051\nf20\nn127.0.0.1:4101\nf21\nn127.0.0.1:60001->127.0.0.1:54321\np900052\nf22\nn127.0.0.1:3101\n",
