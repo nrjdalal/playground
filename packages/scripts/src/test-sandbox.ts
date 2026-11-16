@@ -1,13 +1,13 @@
 // The suite's runner: runs `bun test` in sandbox.ts's sandbox, so no test can start a real session or read the real config by accident (a self-removal test once started two). The env is set before bun starts, since os.homedir() and the spawn PATH lookup read the boot environment, not a later mutation. The folder goes when the run does.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { availableParallelism, constants } from "node:os"
-import { join, relative } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
 import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
-import { prebuildTests } from "./verify/prebuild"
+import { isMainCheckout, prebuildTests } from "./verify/prebuild"
 
 const TIMINGS = "tests/timings.json"
 
@@ -116,6 +116,17 @@ const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") 
 const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
 if (missing.length > 0) {
   console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
+  dropScratch()
+  process.exit(1)
+}
+// a background task starts in the factory's main checkout, which follows main, so a relative path there names main's copy and would read green on code the branch never changed; which worktree it meant cannot be told, so the run stops
+const relativeHere = isMainCheckout(process.cwd(), process.env.PLAYGROUND_REPO)
+  ? args.filter((arg) => !arg.startsWith("-") && !isAbsolute(arg))
+  : []
+if (relativeHere.length > 0) {
+  console.error(
+    `test-sandbox: ${relativeHere.join(", ")} is relative and this run is in the factory's main checkout, which follows main, so it would test main's copy; run it from your worktree: bun run --cwd <your worktree> test:file ${args.join(" ")}`,
+  )
   dropScratch()
   process.exit(1)
 }

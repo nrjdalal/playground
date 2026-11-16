@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -429,3 +429,48 @@ test.each([
   },
   20_000,
 )
+
+// a background task starts in the factory's main checkout, which follows main, so a relative path there names main's copy of the file, not the worker's branch
+describe("a relative path in the factory's main checkout", () => {
+  const main = join(DIR, "main-checkout")
+  const ran = join(DIR, "main-ran")
+  mkdirSync(join(main, "tests"), { recursive: true })
+  writeFileSync(
+    join(main, "tests", "here.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("here", () => writeFileSync(${JSON.stringify(ran)}, ""))\n`,
+  )
+  const runIn = async (repo: string, arg: string) => {
+    rmSync(ran, { force: true })
+    const run = Bun.spawn(["bun", SCRIPT, arg], {
+      cwd: main,
+      env: { ...process.env, PLAYGROUND_REPO: repo },
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    return { code, ran: existsSync(ran), stderr }
+  }
+
+  test("refuses before any test runs, naming the path and the --cwd form", async () => {
+    const { code, ran, stderr } = await runIn(main, "tests/here.test.ts")
+    expect(code).toBe(1)
+    expect(ran).toBe(false)
+    expect(stderr).toContain("tests/here.test.ts")
+    expect(stderr).toContain("bun run --cwd <your worktree> test:file tests/here.test.ts")
+  }, 20_000)
+
+  test.each([
+    ["an absolute path there", "main", join(main, "tests", "here.test.ts")],
+    ["a relative path in any other folder", "other", "tests/here.test.ts"],
+  ])(
+    "%s runs as before",
+    async (_, repo, arg) => {
+      const { code, ran, stderr } = await runIn(repo === "main" ? main : join(DIR, "other"), arg)
+      expect(code).toBe(0)
+      expect(ran).toBe(true)
+      expect(stderr).toContain("1 pass")
+    },
+    20_000,
+  )
+})
