@@ -16,6 +16,7 @@ import {
   endOne,
   reportArgv,
   finishedOf,
+  reasonOf,
   sweep,
   type Target,
   unsavedLive,
@@ -901,6 +902,44 @@ describe("unsavedLive: the worktrees a session used, read for unsaved work", () 
 })
 
 // PG-919: a merge cleans what each closed session used
+describe("reasonOf: the line a kept worktree names, from playground rm's or dev:stop's output (#2407)", () => {
+  const crash = [
+    "12 |   const moved = quarantine(path)",
+    "                 ^",
+    "error: ENOENT: no such file or directory, lstat '/made/up/trash'",
+    "      at quarantine (/made/up/index.ts:500:12)",
+    "",
+    "Bun v1.4.4 (Linux arm64)",
+    "",
+  ].join("\n")
+
+  test.each([
+    [
+      "a Bun crash names its error line, not the version footer",
+      crash,
+      "error: ENOENT: no such file or directory, lstat '/made/up/trash'",
+    ],
+    [
+      "a refusal names its own last line",
+      "checking /made/up/wt\nplayground: refused: it holds work no remote has",
+      "playground: refused: it holds work no remote has",
+    ],
+    [
+      "dev:stop's own line wins over the footer",
+      "starting\ndev:stop: no stack is recorded in /made/up/wt\nBun v1.4.4 (Linux x64)",
+      "dev:stop: no stack is recorded in /made/up/wt",
+    ],
+    [
+      "a footer alone after a plain line names that line",
+      "something failed\nBun v1.4.4 (Linux arm64)\n",
+      "something failed",
+    ],
+    ["no output at all names none", "", ""],
+  ])("%s", (_, out, line) => {
+    expect(reasonOf(out)).toBe(line)
+  })
+})
+
 describe("cleanWorktree: each worktree a closed session used, removed with its containers and branch once its work is saved", () => {
   const ENV = {
     ...process.env,

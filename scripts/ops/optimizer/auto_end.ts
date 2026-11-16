@@ -453,6 +453,20 @@ export const cleanupHeld = async (
   )
 }
 
+// Bun's version footer, the last line a crash under Bun prints, which names no error.
+const BUN_FOOTER = /^Bun v\d+\.\d+\.\d+\S* \(.+\)$/
+
+// Pure: the line a kept worktree names from a command's output: dev:stop's own line, else Bun's error: line, else the last line that is neither blank nor Bun's footer, since a kept line once read only "Bun v1.4.4 (Linux arm64)".
+export const reasonOf = (out: string): string => {
+  const lines = out.split("\n").map((line) => line.trim())
+  return (
+    lines.find((line) => line.startsWith("dev:stop:")) ??
+    lines.find((line) => line.startsWith("error: ")) ??
+    lines.findLast((line) => line && !BUN_FOOTER.test(line)) ??
+    ""
+  )
+}
+
 // This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm's PR state, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
 export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -475,8 +489,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
     },
     devStop: async (dir) => {
       const { code, out } = await runIn(["bun", "run", "--cwd", dir, "dev:stop"])
-      const lines = out.split("\n")
-      return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
+      return { ok: code === 0, out: reasonOf(out) }
     },
     finished: async (path, pr) => finishedOf(await rm.prState(path, pr)),
     git,
@@ -490,7 +503,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       const argv = [process.execPath, "--no-env-file", cli, "rm", "--worktree", path]
       const flags = [...(discard ? ["--discard"] : []), ...(pr ? ["--pr", pr] : [])]
       const { code, out } = await runIn([...argv, ...flags, "--reason", reason])
-      return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
+      return { ok: code === 0, out: reasonOf(out) }
     },
   }
 }
