@@ -687,6 +687,18 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
     expect((await sweeps([answer(), answer()], CONFLICT_AFTER - 1)).told).toEqual([])
   })
 
+  test("an UNKNOWN read at the same head, as GitHub works it out again after the base moves, keeps the told mark and tells nothing", async () => {
+    const unknown = answer({ mergeStateStatus: "UNKNOWN", mergeable: "UNKNOWN" })
+    const { counts, state } = await sweeps([answer(), answer(), unknown, answer(), answer()])
+    expect(counts).toEqual([0, 2, 2, 2, 2])
+    expect(state["145"]).toMatchObject({
+      sha: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      told: true,
+    })
+    // an UNKNOWN read before the clock runs out neither tells nor restarts it
+    expect((await sweeps([answer(), unknown, answer()])).counts).toEqual([0, 0, 2])
+  })
+
   test("keeps only PRs conflicting now, so a fixed conflict that comes back at the same head tells again", async () => {
     const clean = answer({ mergeStateStatus: "CLEAN", mergeable: "MERGEABLE" })
     const { counts, state } = await sweeps([answer(), answer(), clean, answer(), answer()])

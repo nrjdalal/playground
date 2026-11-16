@@ -321,7 +321,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
 }
 
 // A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A draft PR and a parked row wait by design, so neither raises a line; the runner check below reads the parked one.
-// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead, once per head; conflict-told.json keeps only the PRs conflicting now, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
+// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead, once per head; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -384,11 +384,13 @@ export async function lateReviewers(
     } | null
     if (!pr || pr.state !== "OPEN" || !pr.headRefOid) continue
     const commit = pr.commits?.nodes?.[0]?.commit
-    const conflicted = pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY"
+    const seen = conflicts[n]?.sha === pr.headRefOid ? conflicts[n]! : null
+    // GitHub reads UNKNOWN while it works the answer out again, after the base moves: a conflict already seen at this head stands, telling nothing
+    const real = pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY"
+    const conflicted = real || (pr.mergeable === "UNKNOWN" && seen !== null)
     if (conflicted && !commit?.checkSuites?.totalCount) {
-      const seen = conflicts[n]?.sha === pr.headRefOid ? conflicts[n]! : null
       const conflict = (conflicting[n] = seen ?? { at: now, sha: pr.headRefOid, told: false })
-      if (!conflict.told && now - conflict.at >= CONFLICT_AFTER) {
+      if (real && !conflict.told && now - conflict.at >= CONFLICT_AFTER) {
         conflict.told = true
         const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
         for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
