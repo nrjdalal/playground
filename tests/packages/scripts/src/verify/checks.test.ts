@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -13,6 +13,7 @@ import {
   fixtureDirOf,
   fixtureOnly,
   health,
+  launchArgs,
   problems,
   READY,
   resolveExpectation,
@@ -22,6 +23,7 @@ import {
   SIDEBAR_READY,
   signInWaitArgs,
   SIGNIN_WAIT_MS,
+  spkiOf,
   systemResults,
   THEMES,
   versionMatches,
@@ -639,8 +641,46 @@ describe("verify's browser", () => {
   test("launches muted", async () => {
     const browser = new Browser()
     const first = await browser.command(["open", "http://dashboard/"])
-    expect(first[first.indexOf("--args") + 1]).toBe("--mute-audio")
-    expect(await browser.command(["open", "http://dashboard/x"])).not.toContain("--mute-audio")
+    expect(first.filter((arg) => arg === "--args")).toHaveLength(1)
+    expect(first[first.indexOf("--args") + 1]!.split(",")).toContain("--mute-audio")
+  })
+
+  // agent-browser relaunched a session's browser on a later command whose args differed from its launch, the config's own --no-sandbox among them, and split --args at its commas only before another flag.
+  test("carries the same --args on every command, ahead of every other word", async () => {
+    const browser = new Browser()
+    const first = await browser.command(["open", "http://dashboard/"])
+    const later = await browser.command(["open", "http://dashboard/x"])
+    expect(first.slice(0, 3)).toEqual(later.slice(0, 3))
+    expect(later[1]).toBe("--args")
+    expect(later[3]!.startsWith("--")).toBe(true)
+  })
+
+  // #2385: verify's own --args replaced agent-browser's config, so on Linux Chromium lost --no-sandbox and died, and it refused portless's https stack as ERR_CERT_AUTHORITY_INVALID.
+  test("on Linux alone, launches without the sandbox and trusts portless's CA key, never every certificate error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "verify-spki-"))
+    try {
+      const ca = join(dir, "ca.pem")
+      const made = Bun.spawnSync(
+        ["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256"]
+          .concat(["-nodes", "-days", "1", "-subj", "/CN=test CA", "-keyout", join(dir, "k.pem")])
+          .concat(["-out", ca]),
+        { stderr: "pipe" },
+      )
+      expect(made.exitCode).toBe(0)
+      const pub = Bun.spawnSync(["openssl", "x509", "-pubkey", "-noout", "-in", ca]).stdout
+      const der = Bun.spawnSync(["openssl", "pkey", "-pubin", "-outform", "der"], { stdin: pub })
+      const spki = new Bun.CryptoHasher("sha256").update(der.stdout).digest("base64")
+      const pem = readFileSync(ca, "utf8")
+      expect(spkiOf(pem)).toBe(spki)
+      expect(launchArgs("linux", pem)).toBe(
+        `--no-sandbox,--ignore-certificate-errors-spki-list=${spki},--mute-audio`,
+      )
+      expect(launchArgs("linux", null)).toBe("--no-sandbox,--mute-audio")
+      expect(launchArgs("darwin", pem)).toBe("--mute-audio")
+      expect(launchArgs("linux", pem)).not.toContain("--ignore-certificate-errors,")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 })
 
