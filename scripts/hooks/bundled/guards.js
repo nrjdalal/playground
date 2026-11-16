@@ -14113,6 +14113,7 @@ var GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "github.pollMinutes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",

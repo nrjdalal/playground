@@ -1085,12 +1085,12 @@ describe("no-outside-pr-code's live lookup", () => {
         ]),
       )
     const file = join(data, "hook-outside-pr", `acme-owner__widgets__${n}.json`)
-    await Bun.write(file, JSON.stringify({ failedAt: Date.now() - minutesAgo * 60_000 }))
     const hook = join(import.meta.dir, "../../../scripts/hooks/no-outside-pr-code.ts")
     const script = join(data, "read.ts")
+    // the child keeps the failure by its own clock, since a clock-ahead run shifts this process's and not the child's
     await Bun.write(
       script,
-      `import { live } from ${JSON.stringify(hook)}\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", ${n})) ?? "none")\n`,
+      `import { live } from ${JSON.stringify(hook)}\nawait Bun.write(${JSON.stringify(file)}, JSON.stringify({ failedAt: Date.now() - ${minutesAgo * 60_000} }))\nconsole.log(JSON.stringify(await live(process.env).author("acme-owner/widgets", ${n})) ?? "none")\n`,
     )
     const child = Bun.spawnSync([process.execPath, script], {
       cwd: data,
