@@ -1475,7 +1475,8 @@ ordered_waiters() {
     [ -n "$t" ] || continue
     pid=${t#*-}; pid=${pid%%-*}
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
-    if [ "$name" != "$t" ]; then mt=$(stat "${ST[0]}" "${ST[1]}" "$QUEUE/$t" 2>/dev/null); name=$t; fi
+    # ST's format prints "<mtime> <path>", so the time alone is kept, since the path read as arithmetic ended the walk under set -u (issue 2508)
+    if [ "$name" != "$t" ]; then mt=$(stat "${ST[0]}" "${ST[1]}" "$QUEUE/$t" 2>/dev/null); mt=${mt%% *}; name=$t; fi
     [ -n "$mt" ] || continue
     m=$mt
     rank="" ask=""
