@@ -23,6 +23,26 @@ const controls = (): Row[] => [
   ["a wrapper running a group word that spells echo after an unset name", "nice $E (e|x)cho hi"],
   ["an escaped time running a group word that spells echo", "\\time (e|x)cho hi"],
   ["time before a wrapper running a group word that spells echo", "time command (e|x)cho hi"],
+  ["a subshell after time and repeat", "time repeat 1 (echo sub)"],
+  ["a subshell after repeat and time", "repeat 1 time (echo sub)"],
+  ["a subshell after two repeats", "repeat 1 repeat 1 (echo sub)"],
+  ["a coprocess's timed subshell", "coproc time (echo sub)"],
+  ["a timed subshell in a brace group", "{ time (echo sub) }"],
+  ["a paren after two times, read as a subshell", "time time (echo sub)"],
+]
+
+// zsh keeps a subshell after a stack of time, nocorrect and repeat N leads; zsh globs the paren after `time time`, since the second time is the external program, and the subshell reading, which judges the commands inside, is the safe direction there
+const stacked = (body: string, what: string): Row[] => [
+  [`a subshell after time and repeat running ${what}`, `time repeat 1 (${body})`],
+  [`a subshell after repeat and time running ${what}`, `repeat 1 time (${body})`],
+  [`a subshell after two repeats running ${what}`, `repeat 1 repeat 1 (${body})`],
+  [
+    `a subshell after time and repeat running ${what}, after a header line`,
+    `#!/bin/sh\ntime repeat 1 (${body})`,
+  ],
+  [`a coprocess's timed subshell running ${what}`, `coproc time (${body})`],
+  [`a timed subshell in a brace group running ${what}`, `{ time (${body}) }`],
+  [`a paren after two times running ${what}`, `time time (${body})`],
 ]
 
 const deleteControls = (): Row[] => [
@@ -129,6 +149,7 @@ export const groups: Group[] = [
         "command running a plain rm by a path a zsh group matches",
         `command /bin/(r|x)m ${NEVER_MADE}`,
       ],
+      ...stacked(`/bin/rm ${NEVER_MADE}`, "a plain rm"),
       ...controls(),
       ...deleteControls(),
     ],
@@ -178,6 +199,7 @@ export const groups: Group[] = [
         "nice running a kill by name one zsh group spells after an unset name",
         "nice $E (p|x)kill -f watcher",
       ],
+      ...stacked("pkill -f watcher", "a kill by name"),
       ...controls(),
       ...killControls(),
     ],
@@ -220,6 +242,7 @@ export const groups: Group[] = [
         "nice running a stash pop one zsh group spells after an unset name",
         "nice $E (g|x)it stash pop",
       ],
+      ...stacked("git stash pop", "a stash pop"),
       ...controls(),
       ...stashControls(),
     ],
