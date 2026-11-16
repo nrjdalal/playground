@@ -7129,6 +7129,11 @@ function walk(lx, scope, nested, inherit) {
   const pending = [];
   const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
   let cmd = fresh();
+  const twins = new Map;
+  const past = (from) => {
+    const twin = twins.get(cmd);
+    return twin && from >= twin.from ? twin : undefined;
+  };
   const opens = [];
   let depth = 0;
   let loops = 0;
@@ -7138,6 +7143,7 @@ function walk(lx, scope, nested, inherit) {
   const heads = [];
   const end = (op) => {
     const done = cmd;
+    const twin = twins.get(done);
     const pipe = op === "|" || op === "|&";
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
@@ -7217,8 +7223,14 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
       }
       lx.commands.push(done);
+      if (twin && lx.i >= twin.from) {
+        const { of, redirects, words } = twin;
+        lx.commands.push({ ...of, detached: of.detached || done.detached, redirects, words });
+      }
     }
     cmd = fresh();
+    if (twin && lx.i < twin.from)
+      twins.set(cmd, twin);
     cmd.follows = op;
     if (pipe) {
       cmd.stdin = done;
@@ -7248,9 +7260,8 @@ function walk(lx, scope, nested, inherit) {
       end(")");
       if (nested)
         return;
-    } else if (c === "(" && globOpens(cmd, src, lx.i)) {
-      cmd.words.push(word(lx, true));
     } else if (c === "(") {
+      const twin = globOpens(cmd, src, lx.i) ? globTwin(lx, cmd) : undefined;
       lx.i++;
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined;
       end(";");
@@ -7260,9 +7271,14 @@ function walk(lx, scope, nested, inherit) {
       cmd.group = true;
       const members = topLevel(lx.commands.slice(from), scope);
       cmd.inner = () => members;
+      if (twin)
+        twins.set(cmd, twin);
     } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
+      const from = lx.i;
       cmd.words.push(procSub(lx));
+      past(from)?.words.push(cmd.words[cmd.words.length - 1]);
     } else if (redirect) {
+      const from = lx.i;
       lx.i += redirect[0].length;
       while (src[lx.i] === " " || src[lx.i] === "\t")
         lx.i++;
@@ -7281,6 +7297,7 @@ function walk(lx, scope, nested, inherit) {
         entry.body = { ...target, value: `${target.value}
 ` };
       cmd.redirects.push(entry);
+      past(from)?.redirects.push(entry);
     } else if (c === ";" || c === "&" || c === "|") {
       const two = src.slice(lx.i, lx.i + 2);
       const op = ["&&", ";;", "|&", "||"].includes(two) ? two : c;
@@ -7291,6 +7308,8 @@ function walk(lx, scope, nested, inherit) {
       cmd.words.push(word(lx));
       if (lx.i === from)
         lx.i++;
+      else
+        past(from)?.words.push(cmd.words[cmd.words.length - 1]);
     }
   }
   heredocs(lx, pending, nested);
@@ -7371,7 +7390,41 @@ function globOpens(cmd, src, at) {
     words = words.filter((w) => w !== dropped);
     ({ first } = parse3({ ...cmd, words }));
   }
-  return first === next && src[at + 1] !== ")" && !src.slice(at, balanced(src, at, "(", ")")).includes("/") && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
+  const close = balanced(src, at, "(", ")", false, true);
+  const group = src.slice(at, close);
+  return first === next && src[at + 1] !== ")" && !group.includes("/") && plainAlternative(group, close < src.length && !/[\s;&|<>)]/.test(src[close])) && !subshellPrefix(lead) && !HEADERS2.has(cmd.words[0]?.value ?? "");
+}
+function plainAlternative(group, glued) {
+  let depth = 0;
+  let plain = true;
+  let empty = true;
+  for (let i = 1;i < group.length - 1; i++) {
+    const c = group[i];
+    if (c === "|" && depth === 0) {
+      if (plain && (glued || !empty))
+        return true;
+      plain = true;
+      empty = true;
+      continue;
+    }
+    empty = false;
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      const end = group.indexOf("'", i + 1);
+      i = end === -1 ? group.length : end;
+    } else if (c === '"') {
+      i++;
+      while (i < group.length && group[i] !== '"')
+        i += group[i] === "\\" ? 2 : 1;
+    } else if (c === "(")
+      depth++;
+    else if (c === ")")
+      depth--;
+    else if (/[\s;&]/.test(c))
+      plain = false;
+  }
+  return plain && (glued || !empty);
 }
 function subshellPrefix(lead) {
   let at = 0;
@@ -7386,6 +7439,17 @@ function subshellPrefix(lead) {
 }
 var maySkip = (w) => !!w.source && /^\u0000+$/.test(w.value) && (/^\u0000+$/.test(w.source) || vanishingParts(w.source));
 var HEADERS2 = new Set(["case", "for", "foreach", "function", "select"]);
+function globTwin(lx, of) {
+  const copy = { ...lx, commands: [], scopes: [...lx.scopes] };
+  const glob = word(copy, true);
+  const program = of.words.findIndex((w) => w.quoted || !MARKERS.has(w.value));
+  return {
+    from: copy.i,
+    of,
+    redirects: [...of.redirects],
+    words: [...of.words.slice(program), glob]
+  };
+}
 function word(lx, opening = false) {
   const { src } = lx;
   const start = lx.i;
@@ -7401,7 +7465,7 @@ function word(lx, opening = false) {
       lx.i--;
       merge2(out, procSub(lx));
     } else if (c === "(") {
-      const end = balanced(src, lx.i, "(", ")");
+      const end = balanced(src, lx.i, "(", ")", false, opening);
       out.value += src.slice(lx.i, end);
       bare += src.slice(lx.i, end);
       inner(lx, src.slice(lx.i + 1, end - 1));
@@ -7554,7 +7618,7 @@ function inner(lx, src) {
       sub.i++;
   }
 }
-function balanced(src, from, open, close, plain = false) {
+function balanced(src, from, open, close, plain = false, doubles = false) {
   let depth = 0;
   for (let i = from;i < src.length; i++) {
     tick();
@@ -7564,6 +7628,10 @@ function balanced(src, from, open, close, plain = false) {
     else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1);
       i = end === -1 ? src.length : end;
+    } else if (c === '"' && doubles) {
+      i++;
+      while (i < src.length && src[i] !== '"')
+        i += src[i] === "\\" ? 2 : 1;
     } else if (c === open)
       depth++;
     else if (c === close && --depth === 0)
@@ -8363,13 +8431,6 @@ async function examine(cmd, env, visit, builtins) {
     const parsed = parse3(variant);
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
-  }
-  for (const group of cmd.words.filter((w) => w.source?.startsWith("("))) {
-    const src = group.source;
-    const inside = src.slice(1, balanced(src, 0, "(", ")") - 1);
-    const verdict = await nested(cmd, env, () => run(lexScript(known({ value: inside }), env), subshell(env), visit, builtins));
-    if (verdict)
-      return verdict;
   }
   if (!cmd.runsStdin || stdinScript(primary))
     return;

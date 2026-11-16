@@ -972,6 +972,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   const pending: Pending[] = []
   const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
   let cmd = fresh()
+  // each group command whose paren globOpens also reads as zsh's glob word, with that reading's command
+  const twins = new Map<Command, Twin>()
+  // the twin a word or a redirect starting at `from` joins, once the walk is past the glob word's end
+  const past = (from: number): Twin | undefined => {
+    const twin = twins.get(cmd)
+    return twin && from >= twin.from ? twin : undefined
+  }
   const opens: number[] = []
   // How many bodies the walk is inside, how many of them a loop runs, and the operator that joined the last command to this one, so a command the shell may not run is marked unsure and one it runs only on the command before it succeeding is marked chained.
   let depth = 0
@@ -986,6 +993,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
+    const twin = twins.get(done)
     const pipe = op === "|" || op === "|&"
     const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
     if (brace(done, "}")) {
@@ -1062,8 +1070,14 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         opens.push(lx.commands.length)
       }
       lx.commands.push(done)
+      if (twin && lx.i >= twin.from) {
+        const { of, redirects, words } = twin
+        lx.commands.push({ ...of, detached: of.detached || done.detached, redirects, words })
+      }
     }
     cmd = fresh()
+    // a paren inside the glob word (`(r|x)(m|y)`) ends a group command there, so its twin waits for the next
+    if (twin && lx.i < twin.from) twins.set(cmd, twin)
     cmd.follows = op
     if (pipe) {
       cmd.stdin = done
@@ -1086,9 +1100,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       lx.i++
       end(")")
       if (nested) return
-    } else if (c === "(" && globOpens(cmd, src, lx.i)) {
-      cmd.words.push(word(lx, true))
     } else if (c === "(") {
+      const twin = globOpens(cmd, src, lx.i) ? globTwin(lx, cmd) : undefined
       lx.i++
       const piped = cmd.words.length === 0 && cmd.redirects.length === 0 ? cmd.stdin : undefined
       end(";")
@@ -1098,9 +1111,13 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       cmd.group = true
       const members = topLevel(lx.commands.slice(from), scope)
       cmd.inner = () => members
+      if (twin) twins.set(cmd, twin)
     } else if ((c === "<" || c === ">" || c === "=") && src[lx.i + 1] === "(") {
+      const from = lx.i
       cmd.words.push(procSub(lx))
+      past(from)?.words.push(cmd.words[cmd.words.length - 1])
     } else if (redirect) {
+      const from = lx.i
       lx.i += redirect[0].length
       while (src[lx.i] === " " || src[lx.i] === "\t") lx.i++
       const [, fd] = redirect
@@ -1118,6 +1135,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         })
       } else if (op === "<<<") entry.body = { ...target, value: `${target.value}\n` }
       cmd.redirects.push(entry)
+      past(from)?.redirects.push(entry)
     } else if (c === ";" || c === "&" || c === "|") {
       const two = src.slice(lx.i, lx.i + 2)
       const op = ["&&", ";;", "|&", "||"].includes(two) ? two : c
@@ -1127,6 +1145,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const from = lx.i
       cmd.words.push(word(lx))
       if (lx.i === from) lx.i++
+      else past(from)?.words.push(cmd.words[cmd.words.length - 1])
     }
   }
   heredocs(lx, pending, nested)
@@ -1198,7 +1217,7 @@ function expandHeredoc(body: string): Text {
     : { value }
 }
 
-// Whether a paren opens a zsh glob word where a wrapper's program word goes (`command (r|x)m`), as zsh reads one after a program word; README's shared reader section lists where it stays a subshell
+// Whether a paren opens a zsh glob word where a wrapper's program word goes (`command (r|x)m`), as zsh reads one after a program word; README's shared reader section lists where it reads as a subshell alone
 function globOpens(cmd: Command, src: string, at: number): boolean {
   const program = cmd.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
   if (program < 0) return false
@@ -1212,13 +1231,43 @@ function globOpens(cmd: Command, src: string, at: number): boolean {
     words = words.filter((w) => w !== dropped)
     ;({ first } = parse({ ...cmd, words }))
   }
+  const close = balanced(src, at, "(", ")", false, true)
+  const group = src.slice(at, close)
   return (
     first === next &&
     src[at + 1] !== ")" &&
-    !src.slice(at, balanced(src, at, "(", ")")).includes("/") &&
+    !group.includes("/") &&
+    plainAlternative(group, close < src.length && !/[\s;&|<>)]/.test(src[close])) &&
     !subshellPrefix(lead) &&
     !HEADERS.has(cmd.words[0]?.value ?? "")
   )
+}
+// Whether a group holds an alternative with no unquoted blank or command separator, the one kind that can spell a program's name, an empty one only with text glued after the group (`(|x y)rm`); a paren whose every alternative holds one (`nice (ls -la)`, `nice (pkill;x)`, `nice (a || b)`) keeps its subshell reading alone
+function plainAlternative(group: string, glued: boolean): boolean {
+  let depth = 0
+  let plain = true
+  let empty = true
+  for (let i = 1; i < group.length - 1; i++) {
+    const c = group[i]
+    if (c === "|" && depth === 0) {
+      if (plain && (glued || !empty)) return true
+      plain = true
+      empty = true
+      continue
+    }
+    empty = false
+    if (c === "\\") i++
+    else if (c === "'") {
+      const end = group.indexOf("'", i + 1)
+      i = end === -1 ? group.length : end
+    } else if (c === '"') {
+      i++
+      while (i < group.length && group[i] !== '"') i += group[i] === "\\" ? 2 : 1
+    } else if (c === "(") depth++
+    else if (c === ")") depth--
+    else if (/[\s;&]/.test(c)) plain = false
+  }
+  return plain && (glued || !empty)
 }
 // Whether the words before a paren are a stack of zsh's own prefixes, after which it runs a subshell (`time repeat 1 (…)`)
 function subshellPrefix(lead: Word[]): boolean {
@@ -1235,6 +1284,20 @@ const maySkip = (w: Word): boolean =>
   /^\u0000+$/.test(w.value) &&
   (/^\u0000+$/.test(w.source) || vanishingParts(w.source))
 const HEADERS = new Set(["case", "for", "foreach", "function", "select"])
+
+// The command a paren globOpens opens reads as under zsh's glob reading: its words past its reserved ones, the glob word, and each word and redirect the walk reads from `from`, the glob word's end, on; the glob word is read on a copy of the lexer, so its substitutions' commands come from the subshell reading alone
+type Twin = { from: number; of: Command; redirects: Redirect[]; words: Word[] }
+function globTwin(lx: Lexer, of: Command): Twin {
+  const copy: Lexer = { ...lx, commands: [], scopes: [...lx.scopes] }
+  const glob = word(copy, true)
+  const program = of.words.findIndex((w) => w.quoted || !MARKERS.has(w.value))
+  return {
+    from: copy.i,
+    of,
+    redirects: [...of.redirects],
+    words: [...of.words.slice(program), glob],
+  }
+}
 
 function word(lx: Lexer, opening = false): Word {
   const { src } = lx
@@ -1259,7 +1322,7 @@ function word(lx: Lexer, opening = false): Word {
       lx.i--
       merge(out, procSub(lx))
     } else if (c === "(") {
-      const end = balanced(src, lx.i, "(", ")")
+      const end = balanced(src, lx.i, "(", ")", false, opening)
       out.value += src.slice(lx.i, end)
       bare += src.slice(lx.i, end)
       inner(lx, src.slice(lx.i + 1, end - 1))
@@ -1419,7 +1482,15 @@ function inner(lx: Lexer, src: string): void {
   }
 }
 
-function balanced(src: string, from: number, open: string, close: string, plain = false): number {
+// `doubles` skips double-quoted text too, its backslashes escaping, as a zsh glob word's group reads it
+function balanced(
+  src: string,
+  from: number,
+  open: string,
+  close: string,
+  plain = false,
+  doubles = false,
+): number {
   let depth = 0
   for (let i = from; i < src.length; i++) {
     tick()
@@ -1428,6 +1499,9 @@ function balanced(src: string, from: number, open: string, close: string, plain 
     else if (c === "'" && !plain) {
       const end = src.indexOf("'", i + 1)
       i = end === -1 ? src.length : end
+    } else if (c === '"' && doubles) {
+      i++
+      while (i < src.length && src[i] !== '"') i += src[i] === "\\" ? 2 : 1
     } else if (c === open) depth++
     else if (c === close && --depth === 0) return i + 1
   }
@@ -2463,15 +2537,6 @@ export async function examine(
     const parsed = parse(variant)
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
-  }
-  // a group word globOpens opened (`nice (rm x)`) is also judged as the subshell its paren reads as outside that place, its commands run as a script, so the glob reading only adds refusals
-  for (const group of cmd.words.filter((w) => w.source?.startsWith("("))) {
-    const src = group.source as string
-    const inside = src.slice(1, balanced(src, 0, "(", ")") - 1)
-    const verdict = await nested(cmd, env, () =>
-      run(lexScript(known({ value: inside }), env), subshell(env), visit, builtins),
-    )
-    if (verdict) return verdict
   }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
