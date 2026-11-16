@@ -1550,14 +1550,14 @@ cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
 oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
 # the lines a waiter behind the head watches: who the oldest waiter names next, and the lead's pick and focus, which name a session whatever its place
 next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l 2>/dev/null < "$f"; NSIG="$NSIG|$l"; done; windows_sig; NSIG="$NSIG$WSIG"; }
-# each standing priority window by name with its session and since lines, builtins alone, so opening, lifting or rewriting one wakes every waiter and costs no process while none stands
+# each standing priority window by name with every line of it, builtins alone, so opening, lifting or rewriting one wakes every waiter and costs no process while none stands
 windows_sig() {
   local f l
   WSIG=
   for f in "$PDATA"/priority-*.json; do
     [ -e "$f" ] || continue
     WSIG="$WSIG|$f"
-    while IFS= read -r l || [ -n "$l" ]; do case "$l" in *'"session"'* | *'"since"'*) WSIG="$WSIG=$l" ;; esac; done 2>/dev/null < "$f"
+    while IFS= read -r l || [ -n "$l" ]; do WSIG="$WSIG=$l"; done 2>/dev/null < "$f"
   done
 }
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
@@ -1690,22 +1690,25 @@ session_waiting() {
   done
   return 1
 }
-WIN_SESSION='^[[:space:]]*"session":[[:space:]]*"([a-z0-9]+(-[a-z0-9]+)*)",?$'
-WIN_SINCE='^[[:space:]]*"since":[[:space:]]*"([0-9][0-9TZ:.-]*)",?$'
-# the session of the oldest window, by its since, whose session has a run waiting: a window is a session's own only as priority.ts's readWindow rules it, its
-# session naming its file and not start, so a job's priority-start.json and an org's own priority file name none, and a file with no since, or with no opening
-# or closing brace line (cut off mid-write), names none; a window whose session has ended holds nothing, and ops-tick's priority-lapse beat lifts it
+WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)",?$'
+# the session of the oldest window, by its since, whose session has a run waiting, read only from a file shaped as playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: its `{` and `}` lines, every other line one of by, reason, session and since with a string value, all four there, the session naming its file and not start
 window_holder() {
-  local f l s since open close best= bs=
+  local f l s since by why open close bad best= bs=
   for f in "$PDATA"/priority-*.json; do
     [ -f "$f" ] || continue
-    s= since= open= close=
+    s= since= by= why= open= close= bad=
     while IFS= read -r l || [ -n "$l" ]; do
-      case "$l" in '{') open=1 ;; '}') close=1 ;; esac
-      [[ $l =~ $WIN_SESSION ]] && s=${BASH_REMATCH[1]}
-      [[ $l =~ $WIN_SINCE ]] && since=${BASH_REMATCH[1]}
+      case "$l" in
+        '{') open=1 ;;
+        '}') close=1 ;;
+        *)
+          [[ $l =~ $WIN_LINE ]] || { bad=1; break; }
+          case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
+          ;;
+      esac
     done 2>/dev/null < "$f"
-    [ -n "$open" ] && [ -n "$close" ] && [ -n "$since" ] && [ -n "$s" ] && [ "$s" != start ] && [ "${f##*/}" = "priority-$s.json" ] || continue
+    [ -z "$bad" ] && [ -n "$open" ] && [ -n "$close" ] && [ -n "$by" ] && [ -n "$why" ] && [[ $s =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [[ $since =~ ^[0-9][0-9TZ:.-]*$ ]] || continue
+    [ "$s" != start ] && [ "${f##*/}" = "priority-$s.json" ] || continue
     [ -z "$bs" ] || [[ $since < $bs ]] || continue
     session_waiting "$s" && best=$s bs=$since
   done

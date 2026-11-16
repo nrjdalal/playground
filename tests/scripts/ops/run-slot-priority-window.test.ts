@@ -94,6 +94,41 @@ describe("a priority window's session", () => {
     ).toEqual(["worker-o", "worker-p", "worker-q"])
   })
 
+  // round 1 of the review: a file whose braces were whole but whose middle broke held the pick, which off and the lapse cannot lift, since readWindow refuses it
+  test("nor a file with whole braces and a broken line, or a hand-written one with no by", async () => {
+    expect(
+      await order(
+        (m) => {
+          const data = m.env().PLAYGROUND_DATA_DIR
+          mkdirSync(data, { recursive: true })
+          writeFileSync(
+            join(data, "priority-worker-p.json"),
+            '{\n  "by": ,\n  "reason": "x",\n  "session": "worker-p",\n  "since": "2026-11-16T20:00:00.000Z"\n}\n',
+          )
+          writeFileSync(
+            join(data, "priority-worker-q.json"),
+            `${JSON.stringify({ reason: "x", session: "worker-q", since: "2026-11-16T20:00:00.000Z" }, null, 2)}\n`,
+          )
+        },
+        ["worker-p", "worker-q"],
+      ),
+    ).toEqual(["worker-o", "worker-p", "worker-q"])
+  })
+
+  // the shape on writes, a reason holding an escaped quote and a backslash, still names its session
+  test("while a window whose reason holds an escaped quote still names its session", async () => {
+    expect(
+      await order((m) => {
+        const data = m.env().PLAYGROUND_DATA_DIR
+        mkdirSync(data, { recursive: true })
+        writeFileSync(
+          join(data, "priority-worker-p.json"),
+          `${JSON.stringify({ by: "dispatcher", reason: 'a "quoted" word \\ and a backslash', session: "worker-p", since: "2026-11-16T20:00:00.000Z" }, null, 2)}\n`,
+        )
+      }),
+    ).toEqual(["worker-p", "worker-o"])
+  })
+
   test("goes oldest window first, past an older window whose session has no run waiting", async () => {
     expect(
       await order(
