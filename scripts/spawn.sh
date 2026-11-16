@@ -2196,9 +2196,9 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
-  [ "$(roster_field "$NAME" status)" = ended ] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
-  # A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close or auto-end ended, or one marked done, reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [[ $(roster_field "$NAME" status) =~ ^(done|ended)$ ]] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
+  # A checker's --pr replaces an ended or done row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
     IFS=, read -ra prs_named <<<"$PR_ARG"
@@ -2208,7 +2208,7 @@ write_row() {
         break
       fi
     done
-    if [ "$(roster_field "$NAME" status)" = ended ]; then
+    if [[ $(roster_field "$NAME" status) =~ ^(done|ended)$ ]]; then
       set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
     else
       set -- "$@" "prs+=$PR_ARG"

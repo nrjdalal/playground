@@ -38,14 +38,11 @@ describe("a resume leaves a finished session down unless --force", () => {
     expect(placing(r)).toEqual([])
   })
 
-  test("--force brings an auto-ended row back, set to starting", async () => {
-    const r = await spawn(
-      [...resume, "--force"],
-      [],
-      rowed({ endReason: "worker-prs-done", status: "ended" }),
-      undefined,
-      pin,
-    )
+  test.each([
+    ["an auto-ended row", { endReason: "worker-prs-done", status: "ended" }],
+    ["a done row", { endReason: "done", status: "done" }],
+  ])("--force brings %s back, set to starting", async (_, row) => {
+    const r = await spawn([...resume, "--force"], [], rowed(row), undefined, pin)
     expect(r.code).toBe(0)
     expect(r.roster).toContain("status=starting")
   })
