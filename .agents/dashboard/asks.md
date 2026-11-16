@@ -329,7 +329,7 @@
   What that read found goes in the item's `thread`, a line for each message that leads up to the reply.
   A draft, and a `slack`, `ship` or `ticket` decision, also names where it will land, upfront, not after the send: `link`, the https URL of the Slack thread, channel or DM it posts in (a DM's conversation found or opened first, read-only where it already exists), the canary compare or the pull request,
   or the Linear team or project; or, with no place yet (a brand-new DM nobody can open), `noLink`, one line saying why.
-  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `clone`, `delete`, `grant`, `guard`, `own`, `reveal`, `schema` and `secret` take neither.
+  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `clone`, `delete`, `grant`, `guard`, `own`, `reveal`, `root`, `schema` and `secret` take neither.
   A draft that asks or nudges a named person goes to that person's DM, never a public comment: its `to` names the DM and its `link` is that DM conversation, never a thread reply or a PR comment; a channel ask, such as the one in an org's review channel, stays in its channel.
   Its card's place line, above its title, shows the link by name (Open thread for a draft or a Slack link, `owner/repo#N`, `owner/repo compare`, a Linear ID) or `No link: <why>` (`upfrontLink` in `web/next/src/lib/inbox.ts`), until the poster's ack links where it landed.
   An `ask`'s or an update's optional `scope` names whose work it is, unlike a `guard`'s or an `own`'s `scope`, the settings scope its write lands in.
@@ -345,7 +345,7 @@
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `playground ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
   A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `playground ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
-  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
+  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change, a root step) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
   an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
@@ -398,7 +398,7 @@
   ```
 
 - An `accept` decision asks the owner to accept an extension proposal no 5 has accepted (`web/next/content/docs/extensions.mdx`'s Review), since a 5 from another session accepts it itself (`judgeItem` in `packages/settings/src/items.ts`) with no card.
-  It is one of the six decisions whose Approve the Dashboard carries out itself, with a `clone`, an `apps` change, a `grant`, a `guard` setting and an `own` account change (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
+  It is one of the seven decisions whose Approve the Dashboard carries out itself, with a `clone`, an `apps` change, a `grant`, a `guard` setting, an `own` account change and a `root` step (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
   Its `scope`, `kind` and `key` name the proposal in the store's own patterns, none able to start as a flag; its `rev` (7 to 40 hex) is the proposal's head the poster read, so a proposal written since is refused with a 409 (`acceptSchema` in `api/hono/src/lib/dashboard/inbox.ts`); `why` says why to accept it.
   A set the owner reads as one change is one card: `more` lists 1 to 20 further proposals, each with its own `scope`, `kind`, `key` and `rev` by the same rules, accepted after the first in the order written, so a proposal that needs another lands after it.
   Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why, or with `more` one numbered line a proposal, in order, and an Approve of `Accept the <kind> <key> and N more`; Edit is refused, so the words approved are the words posted.
@@ -473,6 +473,25 @@
   {"from": "dispatcher", "title": "Let agent-desktop see the screen?",
    "preview": {"type": "grant", "permission": "screen-recording",
                "why": "The simulator check takes a screenshot"}}
+  EOF
+  ```
+
+- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule); `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs), and `why` (`rootSchema`).
+  Every listed step is one fixed script in `api/hono/src/lib/system/root/`, and the card takes no argument, path or command: every other key is refused, so no text from a card reaches root.
+  An `install` card is posted with no `scripts`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it (`rootScripts`), and refuse a poster's own list that differs, or any list on a step card, so the card shows the very bytes its Approve installs.
+  Its card shows `INSTALL_TEXT` (`packages/config/src/inbox.ts`) whole beside each script's hash, and Approve runs `pkexec --disable-internal-agent /bin/sh -c <INSTALL_TEXT> sh <this checkout's root/ folder> <each hash>` (`installArgv`, `api/hono/src/lib/system/root.ts`):
+  the text refuses a hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against its hash, and moves them into `/usr/local/lib/playground/root/` (root, 0755), or refuses with nothing moved, so a source changed after approval never installs.
+  A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
+  Approve takes `seen`, as a guard's does, and Edit is refused.
+  It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
+  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window and `127` that no window could ask, and its poster is told.
+  The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
+  A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "ops", "title": "Install the root steps on this machine?",
+   "preview": {"type": "root", "step": "install", "why": "No root step is installed here yet"}}
   EOF
   ```
 
