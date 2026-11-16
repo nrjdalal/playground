@@ -178,7 +178,7 @@
     A window the file holds ends its words in the sidebar's hover with one account and the System page's usage line with `read <when>`, how long ago the file was written (`writtenAt`), so each reading says how old it is.
     The Usage app with fewer than two accounts reads the file alone.
   - `accounts`: one usage reading per account, each labelled by the `account` it names (`readAccounts()` in `api/hono/src/lib/dashboard/account.ts`, `readAccountUsages()` in `window.ts`), so no account's name lives in code or copy.
-    Each `usage-<name>.json` beside `usage.json` comes from `scripts/ops/usage/account-watch.py`, or from `run.py` for the stored login (`write_stored`), and `usage.json` counts under the account it names too.
+    Each `usage-<name>.json` beside `usage.json` comes from `scripts/ops/usage/account-watch.py`, which ops-tick's `other-logins` beat runs every 30 minutes, or from `run.py` for the stored login (`write_stored`), and `usage.json` counts under the account it names too.
     So does each account in `usage.json`'s `accounts` map (`accounts_reading()` in `run.py`: its week share and reset, and no 5-hour reading), so an account the job reads with no file of its own still lists;
     an entry stays fresh while its week is full and not yet reset, or while its `limitedUntil` is ahead (`run.py`'s `fresh()` serves both that long), and otherwise reads stale past 30 minutes, the age `FRESH_FOR` keeps a reading to, or once `usage.json` does.
     Of two readings of one account, the later written stays (a fresh `usage.json` of the main login beats an older `usage-<name>.json` of it), but a map entry beats a file only when the file is stale, since a file holds the 5-hour window the map lacks.
