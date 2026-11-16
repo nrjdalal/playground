@@ -5922,6 +5922,7 @@ var answerPayloadSchema = strictObject({
     exitCode: number2().int().nullable(),
     line: string2().optional()
   })).optional(),
+  rooted: ranSchema.optional(),
   set: ranSchema.optional(),
   text: string2().optional(),
   title: string2(),
@@ -5930,6 +5931,44 @@ var answerPayloadSchema = strictObject({
   verb: _enum(ANSWER_VERBS)
 });
 var CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z";
+var ROOT_STEPS = {
+  "bwrap-userns": "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace"
+};
+var ROOT_NAMES = Object.keys(ROOT_STEPS);
+var ROOT_BASE = "/usr/local/lib/playground";
+var ROOT_DIR = `${ROOT_BASE}/root`;
+var REFUSE_HASH = 'echo "refused: a hash is not 64 lowercase hex" >&2; exit 1';
+var INSTALL_TEXT = [
+  "set -eu",
+  "umask 022",
+  `base=${ROOT_BASE}`,
+  "src=$1",
+  "shift",
+  'case $src in /*) ;; *) echo "refused: the scripts folder is not an absolute path" >&2; exit 1 ;; esac',
+  `[ $# -eq ${ROOT_NAMES.length} ] || { echo "refused: ${ROOT_NAMES.length} hashes are needed, one for each script" >&2; exit 1; }`,
+  'for h in "$@"; do',
+  `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
+  "done",
+  'mkdir -p "$base/root"',
+  'chown root:root "$base" "$base/root"',
+  'chmod 0755 "$base" "$base/root"',
+  'stage=$(mktemp -d "$base/.stage.XXXXXX")',
+  `trap 'rm -f "$stage"/*; rmdir "$stage"' EXIT`,
+  `for name in ${ROOT_NAMES.join(" ")}; do`,
+  '  cp "$src/$name" "$stage/$name"',
+  '  sum=$(sha256sum "$stage/$name")',
+  '  [ "${sum%% *}" = "$1" ] || { echo "refused: $name changed since you approved it" >&2; exit 1; }',
+  "  shift",
+  "done",
+  `for name in ${ROOT_NAMES.join(" ")}; do`,
+  '  chown root:root "$stage/$name"',
+  '  chmod 0755 "$stage/$name"',
+  '  mv -f "$stage/$name" "$base/root/$name"',
+  "done",
+  `echo "installed ${ROOT_NAMES.join(", ")} in $base/root"`
+].join(`
+`);
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [

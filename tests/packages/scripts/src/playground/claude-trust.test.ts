@@ -65,6 +65,18 @@ describe("trust", () => {
     })
   })
 
+  // install.sh runs it on every run, and a second run changes nothing
+  test("leaves a config that already trusts the folder as it is, the same file and bytes", () => {
+    const dir = home()
+    const config = join(dir, ".claude.json")
+    const text = JSON.stringify({ projects: { [FOLDER]: { hasTrustDialogAccepted: true } } })
+    writeFileSync(config, text)
+    const inode = statSync(config).ino
+    expect(trust(dir, FOLDER)).toEqual({ code: 0, line: `Claude Code already trusts ${FOLDER}` })
+    expect(statSync(config).ino).toBe(inode)
+    expect(readFileSync(config, "utf8")).toBe(text)
+  })
+
   test("leaves a config that does not read as it is and says so", () => {
     const dir = home()
     writeFileSync(join(dir, ".claude.json"), "{")

@@ -339,6 +339,9 @@ export async function spawn(
     writeFileSync(join(acme, name), raw ?? JSON.stringify(good))
   }
   file("usage.json", env.USAGE_JSON, usage())
+  // --account spare@example.com's own reading, which the ops tick's other-logins beat writes; unset leaves it off, as on a machine that has not read that login.
+  if (env.SPARE_USAGE_JSON !== undefined)
+    writeFileSync(join(acme, "usage-spare.json"), env.SPARE_USAGE_JSON)
   file("zai-usage.json", env.ZAI_USAGE_JSON, zai(1400, 7000))
   file(join("ops", "ops-zai-usage.json"), env.ZAI_HEARTBEAT_JSON, beat())
   if (env.CAPACITY_JSONL !== undefined)

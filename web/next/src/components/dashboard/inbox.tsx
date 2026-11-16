@@ -1,7 +1,14 @@
 "use client"
 
 import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hono"
-import { type AskQuestion, type Choices, questionsOf } from "@packages/config/inbox"
+import {
+  type AskQuestion,
+  type Choices,
+  INSTALL_TEXT,
+  questionsOf,
+  ROOT_DIR,
+  ROOT_STEPS,
+} from "@packages/config/inbox"
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
@@ -24,6 +31,7 @@ import {
   RiInboxLine,
   RiInboxUnarchiveLine,
   RiKey2Line,
+  RiLockPasswordLine,
   RiMoneyDollarCircleLine,
   RiProgress4Line,
   RiPuzzleLine,
@@ -201,6 +209,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   guard: RiShieldCheckLine,
   own: RiUserStarLine,
   reveal: RiKey2Line,
+  root: RiLockPasswordLine,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -810,6 +819,38 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             {preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"}, where
             you turn it on for the app that runs {agentLabel(item.from)}, and{" "}
             {agentLabel(item.from)} checks it again.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "root":
+      // an install shows the very program text pkexec runs and each script's hash it checks, so the owner approves the exact bytes
+      return preview.step === "install" ? (
+        <>
+          <p>
+            On Approve, your computer asks for your password in its own window, then runs this
+            program as root. It copies each script below into{" "}
+            <code className="font-mono">{ROOT_DIR}</code> only if its sha256 matches.
+          </p>
+          <ul className="list-disc pl-5">
+            {preview.scripts?.map((script) => (
+              <li key={script.name}>
+                <code className="font-mono">{script.name}</code>:{" "}
+                <code className="font-mono break-all">{script.sha256}</code>
+              </li>
+            ))}
+          </ul>
+          <pre className={`${QUOTE} font-mono text-xs`}>{INSTALL_TEXT}</pre>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      ) : (
+        <>
+          <p>
+            On Approve, your computer asks for your password in its own window, then runs{" "}
+            <code className="font-mono break-all">
+              {ROOT_DIR}/{preview.step}
+            </code>{" "}
+            as root. {ROOT_STEPS[preview.step]}.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
