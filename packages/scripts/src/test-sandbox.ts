@@ -112,21 +112,21 @@ const args = process.argv.slice(2)
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
-// bun reads a path it cannot find as a name filter that matches nothing, so the run would pass on the other files: a test path names a file or the run stops
-const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
-if (missing.length > 0) {
-  console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
-  dropScratch()
-  process.exit(1)
-}
-// a background task starts in the factory's main checkout, which follows main, so a relative path there names main's copy and would read green on code the branch never changed; which worktree it meant cannot be told, so the run stops
+// a background task starts in the factory's main checkout, which follows main, so a relative path or a filter there names main's copy and would read green on code the branch never changed; which worktree it meant cannot be told, so the run stops, before the missing-file check, which a test file new on the branch would hit there
 const relativeHere = isMainCheckout(process.cwd(), process.env.PLAYGROUND_REPO)
   ? args.filter((arg) => !arg.startsWith("-") && !isAbsolute(arg))
   : []
 if (relativeHere.length > 0) {
   console.error(
-    `test-sandbox: ${relativeHere.join(", ")} is relative and this run is in the factory's main checkout, which follows main, so it would test main's copy; run it from your worktree: bun run --cwd <your worktree> test:file ${args.join(" ")}`,
+    `test-sandbox: ${relativeHere.join(", ")} is relative or a filter, and this run is in the factory's main checkout, which follows main, so it would test main's copy; run it from your worktree: bun run --cwd <your worktree> test:file ${args.join(" ")}`,
   )
+  dropScratch()
+  process.exit(1)
+}
+// bun reads a path it cannot find as a name filter that matches nothing, so the run would pass on the other files: a test path names a file or the run stops
+const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
+if (missing.length > 0) {
+  console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
   dropScratch()
   process.exit(1)
 }

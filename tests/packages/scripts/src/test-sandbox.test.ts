@@ -452,21 +452,31 @@ describe("a relative path in the factory's main checkout", () => {
     return { code, ran: existsSync(ran), stderr }
   }
 
-  test("refuses before any test runs, naming the path and the --cwd form", async () => {
-    const { code, ran, stderr } = await runIn(main, "tests/here.test.ts")
-    expect(code).toBe(1)
-    expect(ran).toBe(false)
-    expect(stderr).toContain("tests/here.test.ts")
-    expect(stderr).toContain("bun run --cwd <your worktree> test:file tests/here.test.ts")
-  }, 20_000)
+  // a test file new on the branch is absent from the main checkout, so it gets the same --cwd form, not the missing-file one
+  test.each([
+    ["a file there", "tests/here.test.ts"],
+    ["a test file new on the branch, absent there", "tests/new-on-branch.test.ts"],
+  ])(
+    "refuses %s before any test runs, naming the path and the --cwd form",
+    async (_, arg) => {
+      const { code, ran, stderr } = await runIn(main, arg)
+      expect(code).toBe(1)
+      expect(ran).toBe(false)
+      expect(stderr).not.toContain("no test file")
+      expect(stderr).toContain(`bun run --cwd <your worktree> test:file ${arg}`)
+    },
+    20_000,
+  )
 
   test.each([
-    ["an absolute path there", "main", join(main, "tests", "here.test.ts")],
-    ["a relative path in any other folder", "other", "tests/here.test.ts"],
+    ["an absolute path in the main checkout", "main", join(main, "tests", "here.test.ts")],
+    ["a relative path where PLAYGROUND_REPO names another checkout", "other", "tests/here.test.ts"],
   ])(
     "%s runs as before",
     async (_, repo, arg) => {
-      const { code, ran, stderr } = await runIn(repo === "main" ? main : join(DIR, "other"), arg)
+      const other = join(DIR, "other-checkout")
+      mkdirSync(other, { recursive: true })
+      const { code, ran, stderr } = await runIn(repo === "main" ? main : other, arg)
       expect(code).toBe(0)
       expect(ran).toBe(true)
       expect(stderr).toContain("1 pass")
