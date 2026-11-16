@@ -6,6 +6,7 @@ import {
   RiCheckboxCircleLine,
   RiErrorWarningLine,
   RiEyeFill,
+  RiGitMergeLine,
   RiGlobalFill,
   RiGroupLine,
   RiHammerFill,
@@ -42,6 +43,7 @@ export type ShownState =
   | "no-progress"
   | "fixing"
   | "working"
+  | "conflicts"
   | "waiting"
   | "approval"
   | "approvals"
@@ -89,6 +91,7 @@ const ICONS: Record<ShownState, StatusIconSpec> = {
   "no-progress": { Icon: RiTimeLine, label: "No progress", spins: false, tone: "destructive" },
   fixing: { Icon: RiLoader4Line, label: "Fixing", spins: true, tone: "caution" },
   working: { Icon: RiLoader4Line, label: LIGHT_LABELS.working, spins: true, tone: "info" },
+  conflicts: { Icon: RiGitMergeLine, label: "Conflicts", spins: false, tone: "destructive" },
   waiting: { Icon: RiSearchEyeLine, label: "Waiting", spins: false, tone: "caution" },
   approval: { Icon: RiUserLine, label: "Waiting on approvals", spins: false, tone: "caution" },
   approvals: { Icon: RiGroupLine, label: "Waiting on approvals", spins: false, tone: "caution" },
@@ -184,7 +187,7 @@ export type LightFacts = {
   waits?: Wait[]
 }
 
-// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle (State unknown for a session whose state no record tells, a Codex one). A reviewer or tester idle after its verdict at the head is done.
+// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Conflicts (idle on an open pull request that conflicts with its base, which GitHub runs no CI on, so it never waits on its checks), Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle (State unknown for a session whose state no record tells, a Codex one). A reviewer or tester idle after its verdict at the head is done.
 export function lightOf(facts: LightFacts): ShownState {
   const { light, pr = null } = facts
   if (light === "needs-you") return facts.usageLimit ? "usage-limit" : "stuck"
@@ -199,6 +202,7 @@ export function lightOf(facts: LightFacts): ShownState {
     if (open && (pr.ci === "failing" || (review !== null && review !== "5/5"))) return "fixing"
     return "working"
   }
+  if (pr?.state === "open" && pr.conflicts) return "conflicts"
   if (facts.waits?.length) return "waiting"
   if (facts.checked) return "done"
   if (pr?.state === "open") {
