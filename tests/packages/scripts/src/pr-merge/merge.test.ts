@@ -290,7 +290,7 @@ describe("prMerge", () => {
   })
 
   // a fix for a bug live on the factory's own machine waited for the usual ship beat, so a ship-now label tells Ops to ship once it merges.
-  test("a ship-now PR's merge sends Ops one ship line; an unlabelled merge, a feat naming no owner ask and a refusal send none", async () => {
+  test("a ship-now fix's merge and a ship-now feat's naming the owner's ask each send Ops one ship line; an unlabelled merge, a feat naming no owner ask and a refusal send none", async () => {
     const sent: string[] = []
     const shipNow = async (line: string) => void sent.push(line)
     const labelled = stub({ labels: ["bug", "ship-now"], title: "fix(PG-112): x" })
@@ -308,13 +308,24 @@ describe("prMerge", () => {
     expect(await prMerge(112, { repo: REPO }, unasked.run, { ...local(), shipNow })).toMatchObject({
       kind: "merged",
     })
+    expect(sent).toHaveLength(1)
+    const asked = stub({
+      labels: ["ship-now"],
+      title: "feat(PG-112): x",
+      viewBody: `${SKILL_BODY.replace("**After:** one.", "**After:** one. `AGENTS.md` checked.")}\n- Owner ask: #i1`,
+    })
+    expect(await prMerge(112, { repo: REPO }, asked.run, { ...local(), shipNow })).toMatchObject({
+      kind: "merged",
+    })
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toStartWith("#112 carries ship-now and merged at abc1234def: ship canary now")
     const refused = stub({ aheadBy: "1", labels: ["ship-now"], title: "fix(PG-112): x" })
     const refusal = await prMerge(112, { repo: REPO }, refused.run, {
       ...local({ tree: null }),
       shipNow,
     })
     expect(refusal.kind).toBe("refused")
-    expect(sent).toHaveLength(1)
+    expect(sent).toHaveLength(2)
     const failing = stub({ labels: ["ship-now"], title: "fix(PG-112): x" })
     const outcome = await prMerge(112, { repo: REPO }, failing.run, {
       ...local(),
