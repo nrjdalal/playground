@@ -12,7 +12,7 @@ Sign-in      | 0   | Waits on the channel      | 3:00 am
 ```
 ````
 
-- **One line per step:** `name | percent | what's going on | ETA`, four fields split by `|`. The percent is 0 to 100, a `%` after it optional. The ETA is a time in the owner's zone, am/pm: the time the step landed once it is at 100, else its ETA. Pad the fields or leave them bare: the card trims them.
+- **One line per step:** `name | percent | what's going on | ETA`, four fields split by `|`, so the words hold no `|` of their own. Keep each name to about 14 characters, since the card cuts a longer one to its 6rem name column at every width, and a phone opens no hover to show the rest. The percent is 0 to 100, a `%` after it optional. The ETA is a time in the owner's zone, am/pm: the time the step landed once it is at 100, else its ETA. Pad the fields or leave them bare: the card trims them.
 - **The card draws it:** each step as two lines, its name, a bar that fills the card's width on a phone and a wide screen alike, and its percent, then its words with the ETA at the right (asks.md's card paragraph). A width limit binds no line of it, so `ASK_CODE_COLUMNS` is no guide here.
 - **The note under it** names how far the job is in steps done of the total, as `1 of 3 steps done`.
 - `playground ask new` and `ask edit` refuse a block whose line holds other than 4 fields or a percent outside 0 to 100, naming the line, so fix that line and post again.
