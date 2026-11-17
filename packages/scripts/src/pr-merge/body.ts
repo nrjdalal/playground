@@ -124,7 +124,7 @@ const tokensIn = (prose: string): string[] => [...new Set(prose.match(BARE_TOKEN
 // Pure: each bare all-caps token with an underscore in a body's prose (SUITE_LINE), once, the shape a fill token left unfilled takes.
 export const bareTokens = (body: string): string[] => tokensIn(proseOf(body))
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence holding an A/B line, its prose holding no unfilled placeholder (the template's own, or a bare all-caps token in unfound, which no file at the head holds outside the gate's own folders), and its Evidence naming each changed doc in files (.agents/shipping.md).
 export function bodyRefusal(
   body: string,
   files: string[] = [],
@@ -150,5 +150,5 @@ export function bodyRefusal(
   }
   const unnamed = unnamedDocs(body, files)
   if (unnamed.length === 0) return null
-  return `its body's Evidence leaves out ${unnamed.length === 1 ? "a changed doc" : `${unnamed.length} changed docs`}: ${unnamed.join(", ")}; name each by its full path with its check (AGENTS.md, Shipping a Playground PR, step 1)`
+  return `its body's Evidence leaves out ${unnamed.length === 1 ? "a changed doc" : `${unnamed.length} changed docs`}: ${unnamed.join(", ")}; name each by its full path with its check (.agents/shipping.md)`
 }

@@ -357,8 +357,8 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(await page()).toContain("greps the whole repo, code and command help text included")
   })
 
-  test("AGENTS.md's pre-review pass runs the same grep before round 1", async () => {
-    const agents = await Bun.file(join(root, "AGENTS.md")).text()
+  test("the pre-review pass in .agents/shipping.md runs the same grep before round 1", async () => {
+    const agents = await Bun.file(join(root, ".agents/shipping.md")).text()
     const line = agents.split("\n").find((l) => l.includes("changed-term grep")) ?? ""
     expect(line).toContain("`git grep -lE <term>` over the whole repo, code and help text too")
     expect(line).toContain("each term whose meaning the diff changes")
@@ -372,7 +372,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
     expect(step).toContain(moved)
     expect(step).toContain("rounds 4 and 5")
     expect(done ?? "").toContain("each file the PR moves text out of grepped over the whole repo")
-    expect(await Bun.file(join(root, "AGENTS.md")).text()).toContain(moved)
+    expect(await Bun.file(join(root, ".agents/shipping.md")).text()).toContain(moved)
     expect(await page()).toContain("greps the old file's name over the whole repo")
   })
 

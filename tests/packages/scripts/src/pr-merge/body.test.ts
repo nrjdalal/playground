@@ -97,7 +97,7 @@ describe("bodyRefusal", () => {
   })
 })
 
-// PG-693: AGENTS.md's Shipping step 1 asks the Evidence to name each touched doc, and the gate now reads it
+// PG-693: .agents/shipping.md asks the Evidence to name each touched doc, and the gate now reads it
 describe("bodyRefusal, given the PR's changed files", () => {
   const named = (line: string) =>
     SKILL_BODY.replace(
