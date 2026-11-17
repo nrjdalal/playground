@@ -44,14 +44,14 @@ type Result = [name: string, ok: boolean, fail?: string]
 
 // Every step runs in sandbox.ts's sandbox, which keeps uv's Pythons and cache the real home's; Docker's config stays the real home's too, read before the swap, so a run downloads nothing twice
 export const runSteps = async (list: [string, string[]][]) => {
-  const { env: box, scratch } = sandbox()
+  const { env: box, scratch, wrap } = sandbox()
   const env = { ...box, DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(homedir(), ".docker") }
   const results: Result[] = []
   try {
     for (const [name, cmd] of list) {
       console.log(`\n== ${name}`)
       // stdout is piped, so a Python step streams only unbuffered
-      const step = Bun.spawn(cmd, {
+      const step = Bun.spawn(wrap(cmd), {
         env: { ...env, PYTHONUNBUFFERED: "1" },
         stdout: "pipe",
         stderr: "inherit",

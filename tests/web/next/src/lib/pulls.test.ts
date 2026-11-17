@@ -17,6 +17,8 @@ const pull = (number: number, fields: Partial<Pull> = {}): Pull => ({
   ci: "passing",
   conflicts: false,
   draft: false,
+  gates: null,
+  head: "",
   number,
   queued: false,
   reviewed: false,

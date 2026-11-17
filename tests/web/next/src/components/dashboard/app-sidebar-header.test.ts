@@ -15,6 +15,7 @@ import {
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { ROW_BOX } from "../../../../../../web/next/src/components/shell/row-box"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
+import MODEL_ICONS from "../../../../../../web/next/src/lib/model-icons.json"
 import { calm, FIVE, glm, NOW } from "../../lib/system.test"
 import { tipsOf } from "../../tooltips"
 
@@ -333,6 +334,9 @@ describe("DispatcherUsage", () => {
   })
 })
 
+// Z.ai's vendored logo, as the GLM windows lead with it.
+const zaiMark = MODEL_ICONS.makers.find((maker) => maker.id === "zai")!.icon!.data
+
 // GLM usage shows as Claude usage does.
 describe("DispatcherUsage for GLM", () => {
   const glmUsage = (read: Read, logo = false) =>
@@ -343,7 +347,6 @@ describe("DispatcherUsage for GLM", () => {
         /data-level="[^"]*"[^>]*><svg.*?<\/svg><span aria-hidden="true">([^<]*)<\/span>/g,
       ),
     ].map(([, v]) => v)
-  const zaiMark = 'viewBox="0 0 40 40"'
 
   test("the week, then the 5-hour window, from the GLM credits, green, orange and red by the Claude windows' levels", () => {
     expect(readingTints(glmUsage(fresh((r) => void (r.zai = glm(5, 41)))))).toEqual([
@@ -433,7 +436,7 @@ describe("the dispatcher's row with none live", () => {
         trailing: createElement(DispatcherUsage, { logo: true, now: NOW, provider: "zai", read }),
       }),
     )
-    expect(html).toContain('viewBox="0 0 40 40"')
+    expect(html).toContain(zaiMark)
     expect(srText(html)).toContain("GLM usage: GLM week 5% used")
   })
 
