@@ -29,8 +29,8 @@ const THINKING: Record<string, string> = {
     "thinking capped at 8192 tokens; CLAUDE_CODE_MODEL_CAPABILITIES=local=-adaptive_thinking MAX_THINKING_TOKENS=8192 ",
   xhigh: "thinking uncapped; ",
 }
-const env_ = (effort = "high") =>
-  `: effort ${effort}, ${THINKING[effort]}ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local ENABLE_TOOL_SEARCH=true `
+const env_ = (effort = "high", context = 122880) =>
+  `: effort ${effort}, ${THINKING[effort]}ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context} ENABLE_TOOL_SEARCH=true `
 const command = launchAfterRm
 const pinOf = (r: Spawned, name: string) =>
   readFileSync(lw(r.home, "backends", name), "utf8").toString()
@@ -304,6 +304,22 @@ describe("--backend local runs the session on the local model through Claude Cod
     expect(r.err).toContain(says)
     expect(placing(r)).toEqual([])
     expect(r.roster).toBeUndefined()
+  })
+})
+
+describe("the local launch declares the model server's own window, so the session compacts inside it", () => {
+  const card = (extra: string) => ({
+    FAKE_LOCAL_MODELS: `{"object":"list","data":[{"id":"other","max_model_len":32768},{"id":"local"${extra}}]}`,
+  })
+  test.each([
+    ["the served card's max_model_len, less 8192 for the reply", ',"max_model_len":262144', 253952],
+    ["120000 for a card with no max_model_len", "", 120000],
+    ["120000 for a max_model_len that is no number", ',"max_model_len":"131072"', 120000],
+    ["120000 for a max_model_len the reply's room would empty", ',"max_model_len":16384', 120000],
+  ])("PG-2592 %s", async (_, extra, context) => {
+    const r = await local(["worker", "worker-a", "b.md", "--backend", "local"], card(extra))
+    expect(r.code, r.err).toBe(0)
+    expect(command(r)).toStartWith(`(${env_("high", context)}env PLAYGROUND_ROLE=`)
   })
 })
 
