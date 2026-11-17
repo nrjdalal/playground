@@ -6429,7 +6429,7 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["claude", "glm", "local"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";

@@ -14,6 +14,8 @@ const DIR = mkdtempSync(join(tmpdir(), "glm-heavy-"))
 const REPO = join(DIR, "repo")
 const REMOTE = join(DIR, "remote.git")
 const GLM = { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" }
+// spawn.sh's local launch, on this machine's model server, which the glm rule fences as it fences GLM
+const LOCAL = { ANTHROPIC_BASE_URL: "http://127.0.0.1:8000" }
 
 // nothing from this machine's git settings: git exports GIT_DIR into hooks, and a global hooksPath or signing would reach outside the scratch repo
 const GIT_ENV: Record<string, string> = {
@@ -817,10 +819,15 @@ describe("which sessions it acts for", () => {
       join(CONFIG, "sessions", "104.json"),
       JSON.stringify({ name: "worker-harness-claude-pin", sessionId: "s-harness-claude" }),
     )
+    await Bun.write(
+      join(CONFIG, "sessions", "105.json"),
+      JSON.stringify({ name: "worker-local-pin", sessionId: "s-local" }),
+    )
     await pin("worker-glm-pin", "glm")
     await pin("worker-claude-pin", "claude")
     await pin("worker-harness-glm-pin", "claude-code glm")
     await pin("worker-harness-claude-pin", "claude-code claude")
+    await pin("worker-local-pin", "claude-code local")
   })
 
   test.each([
@@ -830,6 +837,25 @@ describe("which sessions it acts for", () => {
     { label: "a claude-code glm pin", env, session: "s-harness-glm", want: true },
     { label: "a claude-code claude pin", env, session: "s-harness-claude", want: false },
     { label: "no pin and no base URL", env, session: "s-none", want: false },
+    { label: "a claude-code local pin", env, session: "s-local", want: true },
+    {
+      label: "the local model's base URL",
+      env: { ...env, ...LOCAL },
+      session: "s-none",
+      want: true,
+    },
+    {
+      label: "the local model's base URL by localhost",
+      env: { ...env, ANTHROPIC_BASE_URL: "http://localhost:8000/" },
+      session: "s-none",
+      want: true,
+    },
+    {
+      label: "a base URL on another local port",
+      env: { ...env, ANTHROPIC_BASE_URL: "http://127.0.0.1:8001" },
+      session: "s-none",
+      want: false,
+    },
     {
       label: "a base URL that only holds z.ai in its path",
       env: { ...env, ANTHROPIC_BASE_URL: "https://example.com/api.z.ai" },
@@ -867,6 +893,8 @@ describe("which sessions it acts for", () => {
     expect(refused.code).toBe(2)
     expect(refused.err).toContain("web/next/src/y.ts")
     expect(hook(GLM, "s-none").code).toBe(2)
+    expect(hook(env_, "s-local").code).toBe(2)
+    expect(hook(LOCAL, "s-none").code).toBe(2)
     // a session outside the factory (no role, a name the registry does not hold) passes, as the owner's own do
     expect(hook({ ...GLM, PLAYGROUND_ROLE: "" }, "s-none")).toEqual({ code: 0, err: "" })
     git(REPO, "reset", "-q", "HEAD", "web/next/src/y.ts")
@@ -882,6 +910,7 @@ describe("a GLM session's org tools", () => {
   )
   const ORG = join(DIR, "org-repo")
   const ON_GLM = { ...GLM, PLAYGROUND_DATA_DIR: DATA }
+  const ON_LOCAL = { ...LOCAL, PLAYGROUND_DATA_DIR: DATA }
   const ON_CLAUDE = { PLAYGROUND_DATA_DIR: DATA }
   beforeAll(() => {
     git(DIR, "init", "-q", ORG)
@@ -895,10 +924,12 @@ describe("a GLM session's org tools", () => {
       tool_input: toolInput,
       tool_name: name,
     })
-  const both = async (raw: string) => ({
-    claude: await refusal(raw, ON_CLAUDE, CALM),
-    glm: await refusal(raw, ON_GLM, CALM),
-  })
+  // every call takes the same verdict on the local model as on GLM
+  const both = async (raw: string) => {
+    const glm = await refusal(raw, ON_GLM, CALM)
+    expect(await refusal(raw, ON_LOCAL, CALM)).toBe(glm)
+    return { claude: await refusal(raw, ON_CLAUDE, CALM), glm }
+  }
 
   test.each([
     { $label: "a headless claude run", command: "claude -p hi", names: "headless Claude run" },
@@ -1189,6 +1220,7 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
   const BROKEN = join(DIR, "read-broken-repo")
   const LOOSE = join(DIR, "read-loose")
   const ON_GLM = { ...GLM, PLAYGROUND_DATA_DIR: DATA }
+  const ON_LOCAL = { ...LOCAL, PLAYGROUND_DATA_DIR: DATA }
   const ON_CLAUDE = { PLAYGROUND_DATA_DIR: DATA }
   beforeAll(() => {
     git(DIR, "init", "-q", ORG)
@@ -1204,10 +1236,12 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       tool_input: toolInput,
       tool_name: name,
     })
-  const both = async (raw: string) => ({
-    claude: await refusal(raw, ON_CLAUDE, CALM),
-    glm: await refusal(raw, ON_GLM, CALM),
-  })
+  // every call takes the same verdict on the local model as on GLM
+  const both = async (raw: string) => {
+    const glm = await refusal(raw, ON_GLM, CALM)
+    expect(await refusal(raw, ON_LOCAL, CALM)).toBe(glm)
+    return { claude: await refusal(raw, ON_CLAUDE, CALM), glm }
+  }
 
   test("each read tool and a shell read of an org's checkout are refused on GLM, naming the org and the glm rule, and pass on Claude", async () => {
     for (const raw of [
