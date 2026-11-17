@@ -182,12 +182,12 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         deliver,
         dispatcher: DISPATCHER,
         // a stack showing test data opens nothing on this Mac's screen
-        grant: readsLive() ? runArgv : undefined,
+        grant: readsLive() ? (argv) => runArgv(argv) : undefined,
         reveal: readFromKeychain(),
         // a stack showing test data runs nothing as root, and pkexec's window is Linux's
         root:
           readsLive() && process.platform === "linux"
-            ? (argv) => runArgv(argv, ROOT_TIMEOUT_MS)
+            ? (argv, input) => runArgv(argv, ROOT_TIMEOUT_MS, input)
             : undefined,
         settingsData: dataDir(),
         upload: slackUpload(),

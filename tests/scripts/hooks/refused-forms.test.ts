@@ -113,6 +113,9 @@ writeFileSync(PATHS.LIST, '["Slack"]\n')
 writeFileSync(join(ROOT, "policy.json"), "{}\n")
 writeFileSync(join(SCOPE, "lists", "release-owners.json"), "[]\n")
 writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
+// a script ssh feeds a remote shell: a listing of the data folder, and its twin writing under the root
+writeFileSync(join(HOME, "peer-check.sh"), `ls ${DATA}\n`)
+writeFileSync(join(HOME, "peer-write.sh"), `touch ${ROOT}/x\n`)
 symlinkSync(ROOT, PATHS.LINK)
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
@@ -1037,6 +1040,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env --chdir='s folder | env --chdir, no folder",
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's attached folder | env -C, no folder",
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's folder | env -C, no folder",
+      // each row's --cwd names a folder the scratch checkout lacks, so no spelling of it finds one
+      "#2397 a kill by name in bun exec's script after bun's folder | bun --cwd, no folder",
+      "#2397 bun run running a script in a folder | bun --cwd, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])

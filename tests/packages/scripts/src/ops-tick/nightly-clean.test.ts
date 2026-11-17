@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-import { restore } from "../../../../../packages/safe-delete/src"
+import { makeScratch, restore } from "../../../../../packages/safe-delete/src"
 import {
   bytesOf,
   discardable,
@@ -23,6 +23,7 @@ import {
   type NightDeps,
   type Pr,
   type Prs,
+  pruneRehearsals,
   pruneTurbo,
   readPrs,
   rootsOf,
@@ -30,6 +31,7 @@ import {
   staleContainers,
   staleVolumes,
   staleWorktrees,
+  tempFolders,
   trashIdOf,
   trashSince,
   workIn,
@@ -456,6 +458,62 @@ describe("the turbo cache", () => {
   })
 })
 
+describe("the rehearsal backstop", () => {
+  const now = new Date("2026-11-17T03:00:00Z")
+  const hours = (n: number) => new Date(now.getTime() - n * 3_600_000)
+  const aged = (dir: string, h: number) => {
+    utimesSync(dir, hours(h), hours(h))
+    return dir
+  }
+
+  test("a marked ops-r folder over a day old goes; a younger one, an unmarked one and another prefix stay", () => {
+    const a = join(scratch(), "a")
+    const b = join(scratch(), "b")
+    mkdirSync(a)
+    mkdirSync(b)
+    const old = makeScratch("ops-r", a)
+    writeFileSync(join(old, "cache.bin"), "x".repeat(2 * 1_048_576))
+    aged(old, 25)
+    const otherTemp = aged(makeScratch("ops-r", b), 30)
+    const young = aged(makeScratch("ops-r", a), 1)
+    mkdirSync(join(a, "ops-r130b"))
+    const unmarked = aged(join(a, "ops-r130b"), 25)
+    const rehearse = aged(makeScratch("rehearse", a), 25)
+    const sandbox = aged(makeScratch("test-sandbox-", a), 25)
+    const pruned = pruneRehearsals([a, b], now)
+    expect(pruned.gone.sort()).toEqual([old, otherTemp].sort())
+    expect(pruned.line).toBe("removed 2 (0.0 GB)")
+    for (const dir of [old, otherTemp]) expect(existsSync(dir)).toBe(false)
+    for (const dir of [young, unmarked, rehearse, sandbox]) expect(existsSync(dir)).toBe(true)
+  })
+
+  test("a temp folder that is gone removes nothing and throws nothing", () => {
+    expect(pruneRehearsals([join(scratch(), "none")], now)).toEqual({
+      gone: [],
+      line: "removed 0 (0.0 GB)",
+    })
+  })
+
+  // round 1 of the review: the Linux read of each session's /tmp/playground-<name>.<suffix>, which spawn.sh makes per launch; macOS reads getconf's one folder instead
+  test.skipIf(process.platform === "darwin")(
+    "on Linux the temp folders are each playground-<name>.<suffix> folder in tmp, and nothing else",
+    () => {
+      const tmp = scratch()
+      for (const dir of [
+        "playground-5tr36f-worker.SGfErz",
+        "playground-ops.XpWpMU",
+        "playground-x",
+        "other.abc",
+      ])
+        mkdirSync(join(tmp, dir))
+      writeFileSync(join(tmp, "playground-file.abc"), "")
+      expect(tempFolders(tmp).sort()).toEqual(
+        [join(tmp, "playground-5tr36f-worker.SGfErz"), join(tmp, "playground-ops.XpWpMU")].sort(),
+      )
+    },
+  )
+})
+
 describe("one night's run against a fixture data folder", () => {
   const ID = "11111111-2222-3333-4444-555555555555"
   const OLD = "99999999-2222-3333-4444-555555555555"
@@ -547,6 +605,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep: async () => {},
+      temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
@@ -592,6 +651,22 @@ describe("one night's run against a fixture data folder", () => {
     }
     expect(line).not.toContain("playground-dashboard-db")
     expect(line).not.toContain("playground-lost-db")
+  })
+
+  test("a rehearsal folder over a day old is removed and named in the log and to ops", async () => {
+    const { ctx, deps, ops, sent } = night(leftovers())
+    const temp = join(scratch(), "temp")
+    mkdirSync(temp)
+    const old = makeScratch("ops-r", temp)
+    const day = new Date(ctx.now.getTime() - 25 * 3_600_000)
+    utimesSync(old, day, day)
+    deps.temps = () => [temp]
+    await nightlyClean(deps)(ctx)
+    expect(existsSync(old)).toBe(false)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "rehearsals: removed 1 (0.0 GB)",
+    )
+    expect(sent.find((s) => s.to === "ops")?.text ?? "").toContain(`rehearsal ${old}`)
   })
 
   test("a container removal that fails is named as kept", async () => {
@@ -758,6 +833,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
@@ -847,6 +923,7 @@ describe("one night's run against a fixture data folder", () => {
         waits.push(ms)
         t += ms
       },
+      temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
@@ -934,6 +1011,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
@@ -1026,6 +1104,7 @@ describe("one night's run against a fixture data folder", () => {
       }),
       roots: async () => [],
       sleep,
+      temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
     }
@@ -1646,6 +1725,7 @@ describe("other repos' worktrees", () => {
       live: async () => [],
       roots: async () => [code, orgs],
       sleep: async () => {},
+      temps: () => [],
       trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
     } as NightDeps
@@ -1932,6 +2012,7 @@ const goneNight = (agents: object[], live: string[]) => {
     prs: async () => prsOf({}),
     roots: async () => [],
     sleep: async () => {},
+    temps: () => [],
     trashRoots: () => roots,
     turbo: join(root, "turbo"),
   } as NightDeps

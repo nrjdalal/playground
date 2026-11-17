@@ -278,6 +278,7 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   The prompt names the brief's copy there, `<folder>/<brief's file name>`, since this machine's data folder is not on that one.
   Its settings file is one of its own, `factory-settings-sandbox-400k-<name>.json` (`-closed-` with `--sandbox`), whose sandbox writes that folder, its TMPDIR there.
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
+  Its prompt's report line names `playground send <reports-to> <text>` and a background `playground alerts-wait <name>` in place of SendMessage, which reaches no other machine ([SESSIONS.md](SESSIONS.md#message-a-session)); a probe started here keeps SendMessage.
 - The probe keeps a probe's roster row, kind `probe`, written here.
   Its load and memory gates read that machine ([Capacity gate](#capacity-gate)), and the other gates read this one, where its roster row and usage live.
   Before the pane opens, one more `ssh` with the same options reads that machine under the launch's PATH, its `~/.bun/bin` first:
@@ -286,4 +287,4 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   Its resume record carries the flags, so `spawn.sh restore` leaves it down, naming why, and `spawn.sh resume` refuses it while that record stands, since a resume would run it here without them; start it again instead.
   The live-name check reads this machine's sessions alone, so it misses a name live on the other one.
   Ops' sweep counts it live while any pane labelled with its name, on its resume record's server, still runs `ssh` (`sshLive` in `packages/scripts/src/ops-sweep/sweep.ts`): past 15 minutes it raises `probe-over-15m`, and once no such pane runs `ssh`, `probe-gone-unended`.
-  The Dashboard's live list reads this machine's sessions alone, so it shows the probe as gone.
+  The Dashboard's live list counts it live by the same rule (`packages/config/src/ssh-probe.ts`), as a remote row with no transcript, which it neither types into nor restarts.

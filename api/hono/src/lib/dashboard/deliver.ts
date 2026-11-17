@@ -565,6 +565,12 @@ async function target(to: string, read: () => Promise<Live>): Promise<Refusal | 
       `${worker.name} is waiting on a picker or a prompt. Answer that first: typing now would answer it instead.`,
     )
   }
+  if (worker.remote) {
+    return refused(
+      "NOT_FOUND",
+      `${worker.name} runs on another machine over ssh, so its transcript is not here to confirm a message; nothing was typed.`,
+    )
+  }
   const surface = live.surfaces.get(worker.sessionId)
   if (!surface) return refused("NOT_FOUND", `${worker.name} has no terminal to type into.`)
   return { surface, worker }

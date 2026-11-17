@@ -34,7 +34,7 @@ STALL = 600
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 ONCE = "--once" in sys.argv
 sys.path.insert(0, CODE)
-from beat import beat, checkout, setting  # noqa: E402
+from beat import beat, checkout, gh_down, setting  # noqa: E402
 
 CHECKOUT = checkout()
 
@@ -410,7 +410,7 @@ def stall(live, state):
     except (OSError, ValueError):
         q = []
     prs = [str(i.get("pr")) for i in q if i.get("pr")]
-    if not prs:
+    if not prs or gh_down():
         return None
     r = subprocess.run(["gh", "pr", "list", "--repo", setting("factory.repo"), "--state", "open", "--json", "number", "--jq", ".[].number"], capture_output=True, text=True, timeout=60)
     open_prs = [p for p in prs if p in r.stdout.split()]

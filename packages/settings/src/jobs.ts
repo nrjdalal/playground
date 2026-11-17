@@ -127,6 +127,17 @@ export const JOBS: Record<string, Job> = {
       schedule: { every: 60 },
     },
   ),
+  // It runs from the Dashboard's checkout, whose .env names the peers (PLAYGROUND_PEERS) the System page reads.
+  "ops-peer-relay": terminal(
+    "ops-peer-relay",
+    `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`,
+    {
+      cwd: "{dashboard}",
+      description:
+        "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
+      schedule: { always: true },
+    },
+  ),
   // launchd holds it and it runs from the Dashboard's checkout, so a main checkout wiped with its herdr config and scripts still has its restore.
   "ops-restore": {
     ...launchd("ops-restore", {

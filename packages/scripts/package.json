@@ -7,6 +7,7 @@
   },
   "type": "module",
   "exports": {
+    "./gh-read": "./src/gh-read.ts",
     "./ops-machine/readings": "./src/ops-machine/readings.ts",
     "./orphan-reapers": "./src/orphan-reapers.ts"
   },
@@ -25,6 +26,7 @@
     "@types/node": "catalog:",
     "@viz-js/viz": "catalog:",
     "baileys": "catalog:",
+    "dotenv": "catalog:",
     "fontkit": "catalog:",
     "globby": "catalog:",
     "nanoid": "catalog:",

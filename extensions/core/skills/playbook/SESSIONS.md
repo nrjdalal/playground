@@ -77,6 +77,9 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    It also says that after a merge of canary that moves a path a test fixture uses, the worker points the fixture's reader at a missing path, confirms each fixture-reading case goes red, then restores the reader with `git checkout --`, since a reader that fails open passes a fixture at the old path.
    It also says that a worker that merges `canary` or its stack's parent into its PR keeps the merge commit a plain merge, holding its conflict resolutions alone, and lands each edit after it as a commit of its own, since code-review-loop scores an edit inside a merge as blocking, and that a stacked child takes its parent's final head, by DISPATCH.md's bundles.
    It also says that a stacked child retargeted to `canary` after its parent merges pushes a merge of `canary` before it asks for review, since on 2 Nov GitHub kept one retargeted PR CONFLICTING with no CI run while a local `git merge-tree` was clean, and only a push made it recompute.
+   It also says that a worker still holding a staged merge of `canary` when its lead says a fix has landed there runs `git merge --abort`, merges the fresh `canary` and resolves its conflicts again, then runs `bun install` through run-slot before it commits the merge,
+   since git takes no merge while one is staged and the merge commit's pre-commit build reads the `node_modules` the merged `bun.lock` installs,
+   and on 16 Nov a worktree's pre-commit build ran its old `node_modules` (a Next.js under an advisory canary had already moved past) until the install.
    A lead's instruction or a reviewer's brief leaves any raise of a ratchet, or bend of a check whose own rule says it never rises, to that rule's owner, asked on the PR or directly, before the code relies on it, and lists one as agreed only with the owner's words quoted (23 Oct: a raise a brief listed as agreed reached 5/5, and the code owner blocked it).
    A worker started `--in` another repository takes that folder's MCP tools, so its brief names the capability it needs (search Slack, read Datadog logs) and has the worker find the tool with its own `ToolSearch` (21 Oct: a brief named a Slack tool by the factory's own server, and the worker found it under its folder's server).
    A worker briefs its checker by filling a template: it copies `~/.playground/handoffs/new-reviewer.md`, or `new-tester.md` for a Playground PR, to a file in its own scratchpad, `~/.playground/scratchpad/<session name>/`,
@@ -92,7 +95,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Fill it from the lead's ruling and the PR body's scope, and where the lead ruled nothing beyond the ticket, say so.
    Unlike the other slots, the `__SPEC__` fill replaces the backticked token together with its backticks, since the spec runs to paragraphs that inline code would break; the template keeps the backticks only so the slots test, which wants every slot backticked, stays green.
    Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, and spawn.sh starts the reviewer, since it refuses a brief still holding the `__SPEC__` token, naming it.
-   The tester template carries no such slot, since a tester drives the diff's surfaces for CI and posts PASS or FAIL, not a score against the scope.
+   The tester template carries no such slot, since a tester drives the diff's surfaces and posts PASS or FAIL, the `tester` gate on a `web/next/` diff, not a score against the scope.
    A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its pane (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
@@ -115,7 +118,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 - A fix push that changes a figure, row count or table the body's Evidence measured refreshes the body in the same update, its Evidence naming the new head, so every round opens on a body that describes the head it scores.
 - When a scope ruling drops or changes an item, change the PR's title in the same update as its body (`gh pr edit <n> --title <title> --body-file <file>`), since the merge commit and the Changelog take the title: one PR merged under a title naming an item its ruling had dropped.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
-- A head at 5/5 with green checks merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
+- A head at 5/5 with green checks, and its tester's PASS on a `web/next/` diff, merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
 - Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
 - Apply a patch copied from a GitHub comment with `git apply --recount <file>`, since a comment's patch often carries stale hunk counts.
 - A lead hands a reviewer's patch on by the reviewer's own path, its verdict comment or the file it saved, never as a copy the lead writes out again, since a rewritten copy lost the leading space of its blank context lines and failed `git apply --check`.
@@ -166,6 +169,12 @@ When the failed send went by name to a session `ListAgents` lists, that one re-s
 The after-resume re-send ([SPAWN.md](SPAWN.md#resume)) takes the same `re-send` marker.
 Before you report that a session is acting on your message, read its session-state record as Check a session reads it: a record still holding `stuck` or `usage-limit` holds the message unread.
 Done when the send, or its one re-send, returns success.
+
+`SendMessage` reaches the sessions of its own machine alone.
+A session on the other machine, a probe started over `spawn.sh --ssh`, takes `playground send <name> <text>` both ways: it queues `{at, from, id, text, to}` in the outbox's `ops-peer.jsonl`, which Ops' ops-peer-relay job copies to the other machine ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends)).
+The session it names reads it through its own `playground alerts-wait <its name>` ([Keep the sweep running](#keep-the-sweep-running)) as `[ops-peer] <at> <from>: <text>`, so each side keeps its waiter running while the other lives.
+On the machine the job runs on, Ops' drain also sends an `ops-peer` line to a session in that machine's registry, the backstop for one with no waiter, and leaves every other one in its file.
+Done when the send prints `queued <id> for <name>`.
 
 ## A headless run
 
@@ -232,8 +241,9 @@ playground alerts-wait <your name>
 
 Its line leads with its queue's `[ops-<job>]` tag, as the relay's copy does.
 Run it with Bash `run_in_background`; when it exits it has printed one line: start it again at once, then act on the line, a stuck session's alert, a job's line such as a heads-up, or a late sweep's, whose line Ops answers by running its sweep or resuming the relay, and the dispatcher by resolving the stop, posting to the owner's Inbox only if it cannot.
-A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
-A worker a probe reports to keeps no waiter, and its probe's alert comes by the relay alone.
+A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each, a line copied from the other machine counted from its `relayedAt`, its arrival, so one sent while the link was down still prints;
+while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
+A worker a probe on its own machine reports to keeps no waiter, and its probe's alert comes by the relay alone; a probe on the other machine reports by `playground send`, so its spawner keeps a waiter while it lives ([Message a session](#message-a-session)).
 Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
 Done when the task is running; the relay sends the same line later, so drop that copy.
 
