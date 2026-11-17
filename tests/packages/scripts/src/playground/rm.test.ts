@@ -119,6 +119,7 @@ const machine = () => {
     merged: () => false,
     notify: (text) => void told.push(text),
     places: () => [],
+    prMerged: () => null,
     prState: async () => null,
     session: async () => "j6rjgy-worker",
   }
@@ -1316,6 +1317,40 @@ const ownPushed = () => {
   const discard = `playground rm --worktree ${own} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   return { ...m, discard, own }
 }
+
+// #2498: #2484's review clone stayed "held by gkbbch-worker" after #2484 merged, since the worker's row still named it as its pr; a row's hold by a PR that reads merged no longer counts, as SESSIONS.md's End says, while one on an open PR still keeps the clone
+test("--worktree takes a review clone a live row holds only by a PR that has merged, and keeps it while that PR is open", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-2484")
+  git(main, "worktree", "add", "-q", "--detach", clone, git(own, "rev-parse", "HEAD"))
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        {
+          branch: "PG-2475-other",
+          name: "gkbbch-worker",
+          pr: "https://github.com/o/r/pull/2484",
+          status: "working",
+        },
+      ],
+    }),
+  )
+  const asked: number[] = []
+  const open: RmDeps = { ...deps, prMerged: (_, n) => (asked.push(n), false) }
+  expect(await rmTold(["--worktree", clone], open)).toEqual({
+    code: 1,
+    err: [`playground: ${clone} is held by gkbbch-worker, which the roster lists as working`],
+    out: [],
+  })
+  expect(asked).toEqual([2484])
+  expect((await rmTold(["--worktree", clone], { ...deps, prMerged: () => null })).code).toBe(1)
+  const merged: RmDeps = { ...deps, prMerged: (_, n) => n === 2484 }
+  const told = await rmTold(["--worktree", clone], merged)
+  expect(told.err).toEqual([])
+  expect(told.code).toBe(0)
+  expect(existsSync(clone)).toBe(false)
+})
 
 test.each([
   ["an open PR", openPr],

@@ -49,6 +49,8 @@ export type Holders = {
   ownPr?: number
   places: () => string[]
   pr?: string
+  // Whether a PR a live row names reads MERGED, asked only for a number that matches the worktree (null when it cannot be read): a merged PR's hold no longer counts, as SESSIONS.md's End says, since its worker or checker is only finishing up.
+  prMerged?: (n: number) => boolean | null
   procs: Proc[] | null
   roster: string
 }
@@ -797,12 +799,13 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr); --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr), but not by one that reads merged (prMerged); --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
     const prs = rowPullRequests(agent)
       .filter((u) => !(liftable && u === holders.pr))
       .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
       .filter((n) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+      .filter((n) => holders.prMerged?.(Number(n)) !== true)
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more

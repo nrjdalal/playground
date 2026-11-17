@@ -88,6 +88,8 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
+  // Whether PR n of the worktree's repo reads MERGED, from gh in it, null when gh cannot answer.
+  prMerged: (path: string, n: number) => boolean | null
   prState: (path: string, pr?: string) => Promise<Pr | "none" | null>
   procs: () => Proc[] | null
   session: () => Promise<string>
@@ -208,6 +210,27 @@ export const prStateOf = (
     : null
 }
 
+// Whether PR n reads MERGED, from gh in the worktree, so it reads the worktree's own repo; null when gh cannot answer.
+const prMerged = (path: string, n: number): boolean | null => {
+  try {
+    const run = Bun.spawnSync(
+      ["gh", "pr", "view", String(n), "--json", "state", "--jq", ".state"],
+      {
+        cwd: path,
+        stderr: "ignore",
+        stdout: "pipe",
+      },
+    )
+    return run.exitCode === 0 ? run.stdout.toString().trim() === "MERGED" : null
+  } catch {
+    return null
+  }
+}
+
+// The worktree's own PR number as a holder field, from rm's prState answer, none when it names no PR.
+export const ownPrOf = (own: Pr | "none" | null | undefined): { ownPr?: number } =>
+  own && own !== "none" ? { ownPr: own.number } : {}
+
 // A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
 const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> => {
   const gh = (args: string[]) => {
@@ -255,6 +278,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   places: linkPlaces,
+  prMerged,
   prState,
   procs: processes,
   session: sessionName,
@@ -380,10 +404,10 @@ export async function removePath(
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
   const own = args.worktree ? await deps.prState(args.path, args.pr) : undefined
   const freed = own === undefined ? undefined : freedOf(own)
-  let liveBranch: string | undefined
+  let dashboardBranch: string | undefined
   if (args.worktree)
     try {
-      liveBranch = deps.liveBranch()
+      dashboardBranch = deps.liveBranch()
     } catch (error) {
       return {
         line: `the live.branch setting cannot be read (${(error as Error).message}), so no worktree is removed`,
@@ -405,11 +429,12 @@ export async function removePath(
             discard: args.discard,
             ...(freed ? { freed } : {}),
             live: STATUSES.live,
-            ...(liveBranch ? { liveBranch } : {}),
+            ...(dashboardBranch ? { liveBranch: dashboardBranch } : {}),
             merged: deps.merged,
             note,
-            ...(own && own !== "none" ? { ownPr: own.number } : {}),
+            ...ownPrOf(own),
             places: deps.places,
+            prMerged: (n: number) => deps.prMerged(args.path, n),
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),
             roster: join(deps.data, "roster.json"),
