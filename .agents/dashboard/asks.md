@@ -480,11 +480,16 @@
   EOF
   ```
 
-- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule); `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs), and `why` (`rootSchema`).
+- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule); `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs, and `chromium-ca`, the browser policy below),
+  and `why` (`rootSchema`).
+  Each entry holds what the step does and how to undo it, and its card shows both.
   Every listed step is one fixed script in `api/hono/src/lib/system/root/`, and the card takes no argument, path or command: every other key is refused, so no text from a card reaches root.
-  An `install` card is posted with no `scripts`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it (`rootScripts`), and refuse a poster's own list that differs, or any list on a step card, so the card shows the very bytes its Approve installs.
+  An `install` card is posted with no `scripts` and no `ca`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it, and `ca`, the sha256 of the DER inside the Dashboard's CA (`caFile()`, `ca.pem` in portless's folder) when it has one (`caPin`, `rootScripts`).
+  They refuse a poster's own list or `ca` that differs, and either one on a step card, so the card shows the very bytes its Approve installs; an install card with no `ca` says the browser step refuses until a later one carries it.
   Its card shows `INSTALL_TEXT` (`packages/config/src/inbox.ts`) whole beside each script's hash, and Approve runs `pkexec --disable-internal-agent /bin/sh -c <INSTALL_TEXT> sh <this checkout's root/ folder> <each hash>` (`installArgv`, `api/hono/src/lib/system/root.ts`):
   the text refuses a hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against its hash, and moves them into `/usr/local/lib/playground/root/` (root, 0755), or refuses with nothing moved, so a source changed after approval never installs.
+  With a `ca`, the argv adds the CA's path, read from this machine at Approve and never from the card, and the card's hash: the text reads at most 16 KB of that file once (`CA_MAX_BYTES`), refuses a file over it or holding other than one certificate before openssl reads it,
+  turns that copy into DER with `openssl x509` and keeps it at `/usr/local/lib/playground/data/portless-ca.der` (`ROOT_CA`, root, 0644) only if its sha256 matches the card's, or refuses with nothing moved.
   A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
   Approve takes `seen`, as a guard's does, and Edit is refused.
   It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
@@ -493,6 +498,11 @@
   and its poster is told.
   The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
+  `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
+  The constraint means even a swapped CA vouches for `*.localhost` alone.
+  It refuses when no DER is kept, and when another file in either folder already sets the same policy, naming that file, since two files setting it conflict.
+  A new CA means a new install card, then the step again: until then every `.localhost` page in those browsers fails with `ERR_CERT_AUTHORITY_INVALID`.
+  Helium takes the policy at its next start, and may show Managed by your organization in its menu.
   A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
 
   ```bash

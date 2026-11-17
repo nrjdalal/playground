@@ -5,7 +5,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -13,6 +15,7 @@ import { join } from "node:path"
 
 import { runArgv } from "../../../../../../api/hono/src/lib/dashboard/run-argv"
 import {
+  caPin,
   installArgv,
   installedRefusal,
   PKEXEC,
@@ -22,8 +25,10 @@ import {
   stepArgv,
 } from "../../../../../../api/hono/src/lib/system/root"
 import {
+  CA_MAX_BYTES,
   INSTALL_TEXT,
   ROOT_BASE,
+  ROOT_CA,
   ROOT_DIR,
   ROOT_NAMES,
 } from "../../../../../../packages/config/src/inbox"
@@ -68,9 +73,10 @@ describe("the install's argv (PG-2433)", () => {
   })
 
   test("refuses a hash that holds a quote or $(", async () => {
-    const [script] = await repoScripts()
+    const scripts = await repoScripts()
     for (const bad of [`${"a".repeat(63)}'`, `$(id)${"a".repeat(59)}`, "A".repeat(64), ""]) {
-      expect(() => installArgv([{ ...script!, sha256: bad }])).toThrow(
+      const last = { ...scripts.at(-1)!, sha256: bad }
+      expect(() => installArgv([...scripts.slice(0, -1), last])).toThrow(
         "hash is not 64 lowercase hex",
       )
     }
@@ -194,5 +200,200 @@ describe("runArgv's timeout (PG-2433)", () => {
     const ran = await runArgv(["sleep", "5"], 200)
     expect(ran.code).toBe(143)
     expect(Date.now() - started).toBeLessThan(3000)
+  })
+})
+
+// A throwaway CA made by openssl in a scratch folder, its DER the bytes a pin hashes.
+let cas = 0
+const makeCa = (dir: string) => {
+  const id = cas++
+  const path = join(dir, `ca-${id}.pem`)
+  const made = Bun.spawnSync([
+    "openssl",
+    "req",
+    "-x509",
+    "-newkey",
+    "ec",
+    "-pkeyopt",
+    "ec_paramgen_curve:prime256v1",
+    "-nodes",
+    "-keyout",
+    join(dir, `ca-${id}.key`),
+    "-out",
+    path,
+    "-subj",
+    "/CN=root step test CA",
+    "-days",
+    "1",
+  ])
+  expect(made.exitCode).toBe(0)
+  const der = Bun.spawnSync(["openssl", "x509", "-in", path, "-outform", "DER"]).stdout
+  return {
+    der: Buffer.from(der),
+    path,
+    pin: new Bun.CryptoHasher("sha256").update(der).digest("hex"),
+  }
+}
+
+describe("the Dashboard's CA in an install (PG-2458)", () => {
+  let n = 0
+  const setUp = async () => {
+    const root = join(scratch, `ca-install-${n++}`)
+    const src = join(root, "src")
+    mkdirSync(src, { recursive: true })
+    for (const name of ROOT_NAMES) await Bun.write(join(src, name), `#!/bin/sh\necho ${name}\n`)
+    const text = `chown() { :; }\n${INSTALL_TEXT.replace(`base=${ROOT_BASE}`, `base=${join(root, "base")}`)}`
+    const good = ROOT_NAMES.map((name) => hash(`#!/bin/sh\necho ${name}\n`))
+    const run = (...args: string[]) =>
+      runArgv(["/bin/sh", "-c", text, "sh", src, ...good, ...args], 10_000)
+    return { base: join(root, "base"), ca: makeCa(root), root, run }
+  }
+  const nothingMoved = (base: string) => {
+    expect(existsSync(join(base, "data", "portless-ca.der"))).toBe(false)
+    expect(existsSync(join(base, "root", ROOT_NAMES[0]))).toBe(false)
+    expect(readdirSync(base).filter((f) => f.startsWith(".stage"))).toEqual([])
+  }
+
+  test("pins a CA by its DER's sha256, the fingerprint a browser shows", async () => {
+    const { ca } = await setUp()
+    expect(await caPin(ca.path)).toBe(ca.pin)
+    expect(ROOT_CA).toBe(`${ROOT_BASE}/data/portless-ca.der`)
+  })
+
+  test("keeps the CA's DER as root's own when it matches the approved hash", async () => {
+    const { base, ca, run } = await setUp()
+    const ran = await run(ca.path, ca.pin)
+    expect(ran.code).toBe(0)
+    expect(ran.out).toContain(`kept the Dashboard's CA in ${base}/data/portless-ca.der`)
+    const kept = join(base, "data", "portless-ca.der")
+    expect(readFileSync(kept).equals(ca.der)).toBe(true)
+    expect(statSync(kept).mode & 0o777).toBe(0o644)
+  })
+
+  test("refuses a CA changed after approval, moving nothing", async () => {
+    const { base, ca, root, run } = await setUp()
+    const other = makeCa(root)
+    await Bun.write(ca.path, Bun.file(other.path))
+    const ran = await run(ca.path, ca.pin)
+    expect(ran).toMatchObject({
+      code: 1,
+      err: "refused: the Dashboard's CA changed since you approved it",
+    })
+    nothingMoved(base)
+  })
+
+  test("refuses a file holding two certificates, and one over 16 KB, before openssl reads it", async () => {
+    const { base, ca, root, run } = await setUp()
+    const two = join(root, "two.pem")
+    await Bun.write(
+      two,
+      `${await Bun.file(ca.path).text()}${await Bun.file(makeCa(root).path).text()}`,
+    )
+    expect(await run(two, ca.pin)).toMatchObject({
+      code: 1,
+      err: "refused: the CA file holds other than one certificate",
+    })
+    const big = join(root, "big.pem")
+    await Bun.write(big, `${await Bun.file(ca.path).text()}${"#".repeat(CA_MAX_BYTES)}`)
+    expect(await run(big, ca.pin)).toMatchObject({
+      code: 1,
+      err: "refused: the CA file is over 16 KB",
+    })
+    nothingMoved(base)
+    expect(await caPin(two)).toBeUndefined()
+    expect(await caPin(big)).toBeUndefined()
+    expect(await caPin(join(root, "none.pem"))).toBeUndefined()
+  })
+
+  test("refuses a relative CA path and a hash that holds a quote or $(", async () => {
+    const { base, ca, run } = await setUp()
+    expect((await run("ca.pem", ca.pin)).err).toBe("refused: the CA's path is not absolute")
+    for (const bad of [`${"a".repeat(63)}'`, `$(touch ${base}-pwned)`]) {
+      expect((await run(ca.path, bad)).err).toBe("refused: a hash is not 64 lowercase hex")
+    }
+    expect(existsSync(`${base}-pwned`)).toBe(false)
+    expect((await run(ca.path)).err).toContain("hashes are needed")
+  })
+
+  test("the argv carries the CA's path and hash last, and refuses either malformed", async () => {
+    const scripts = await repoScripts()
+    const argv = installArgv(scripts, undefined, {
+      path: "/home/someone/ca.pem",
+      sha256: "b".repeat(64),
+    })
+    expect(argv.slice(-2)).toEqual(["/home/someone/ca.pem", "b".repeat(64)])
+    expect(argv[4]).toBe(INSTALL_TEXT)
+    expect(() =>
+      installArgv(scripts, undefined, { path: "ca.pem", sha256: "b".repeat(64) }),
+    ).toThrow("The CA's path is not absolute")
+    expect(() =>
+      installArgv(scripts, undefined, { path: "/ca.pem", sha256: `$(id)${"b".repeat(59)}` }),
+    ).toThrow("The CA's hash is not 64 lowercase hex")
+  })
+})
+
+// The chromium-ca script itself, run by sh as this user: its fixed paths swapped for scratch ones and chown for a no-op, so nothing reaches /etc or /usr.
+describe("the chromium-ca step (PG-2458)", () => {
+  const source = readFileSync(join(SCRIPTS_DIR, "chromium-ca"), "utf8")
+  const FOLDERS = ["/etc/chromium/policies/managed", "/etc/opt/chrome_for_testing/policies/managed"]
+  let n = 0
+  const setUp = () => {
+    const root = join(scratch, `chromium-${n++}`)
+    mkdirSync(root, { recursive: true })
+    const der = join(root, "portless-ca.der")
+    const dirs = FOLDERS.map((folder) => join(root, folder))
+    let text = source.replace(ROOT_CA, der)
+    for (const [i, folder] of FOLDERS.entries()) text = text.replace(folder, dirs[i]!)
+    expect(text).not.toMatch(/[" ]\/etc\//)
+    const run = () => runArgv(["/bin/sh", "-c", `chown() { :; }\n${text}`], 10_000)
+    return { ca: makeCa(root), der, dirs, run }
+  }
+
+  test("reads the CA the install kept", () => {
+    expect(source).toContain(`der=${ROOT_CA}\n`)
+    for (const folder of FOLDERS) expect(source).toContain(folder)
+  })
+
+  test("writes each policy, mode 644, trusting the kept CA for localhost names alone", async () => {
+    const { ca, der, dirs, run } = setUp()
+    await Bun.write(der, ca.der)
+    const ran = await run()
+    expect(ran.code).toBe(0)
+    for (const dir of dirs) {
+      const file = join(dir, "portless-ca.json")
+      expect(statSync(file).mode & 0o777).toBe(0o644)
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
+        CACertificatesWithConstraints: [
+          {
+            certificate: ca.der.toString("base64"),
+            constraints: { permitted_dns_names: ["localhost"] },
+          },
+        ],
+      })
+      expect(readdirSync(dir)).toEqual(["portless-ca.json"])
+    }
+    // run again, it rewrites its own file rather than refuse it
+    expect((await run()).code).toBe(0)
+  })
+
+  test("refuses with no CA kept, writing nothing", async () => {
+    const { dirs, run } = setUp()
+    const ran = await run()
+    expect(ran.code).toBe(1)
+    expect(ran.err).toContain("no Dashboard CA is installed: approve a new install card")
+    for (const dir of dirs) expect(existsSync(dir)).toBe(false)
+  })
+
+  test("refuses when another file in a policy folder already sets the key, naming it", async () => {
+    const { ca, der, dirs, run } = setUp()
+    await Bun.write(der, ca.der)
+    const other = join(dirs[1]!, "corp.json")
+    await Bun.write(other, '{"CACertificatesWithConstraints":[]}')
+    const ran = await run()
+    expect(ran).toMatchObject({
+      code: 1,
+      err: `refused: ${other} already sets CACertificatesWithConstraints, and two files setting it conflict`,
+    })
+    expect(existsSync(join(dirs[0]!, "portless-ca.json"))).toBe(false)
   })
 })
