@@ -11,6 +11,9 @@ export type Backend = Harness["backends"][number]
 // The model a template names for GLM, which spawn.sh's --backend glm runs on models.glm.
 export const GLM_MODEL = "glm"
 
+// The model a template names for the local model, which spawn.sh's --backend local runs on this machine's loopback.
+export const LOCAL_MODEL = "local"
+
 // A session's backend pin as spawn.sh writes it under backends/<name>: its harness, then its backend.
 export const pinText = (harness: HarnessId, backend: Backend) => `${harness} ${backend}`
 

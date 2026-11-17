@@ -87,6 +87,18 @@ describe("sessions.templates", () => {
     expect(sessionTemplates.safeParse([{ ...glm!, effort: "low" }]).success).toBe(false)
   })
 
+  test("a local template takes an effort, but no account and no planning kind, as spawn.sh's --backend local does", () => {
+    const [assistant] = defaults()
+    const local = { ...assistant!, model: "local" }
+    expect(templateBackend(local)).toBe("local")
+    expect(sessionTemplates.safeParse([{ ...local, effort: "low" }]).success).toBe(true)
+    expect(sessionTemplates.safeParse([{ ...local, account: "someone@example.com" }]).success).toBe(
+      false,
+    )
+    for (const kind of ["dispatcher", "planner"] as const)
+      expect(sessionTemplates.safeParse([{ ...local, kind }]).success).toBe(false)
+  })
+
   test("the Orchestrator is the seatless orchestrator kind, and the second dispatchers take their own brief", () => {
     const byId = new Map(defaults().map((t) => [t.id, t]))
     expect(byId.get("orchestrator")).toMatchObject({
