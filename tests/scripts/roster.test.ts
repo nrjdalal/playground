@@ -372,6 +372,36 @@ describe("set", () => {
       })
     })
 
+    // the help said a live worker= alone moved such a checker, which assign refuses on a row still holding its old pr (PG-2523)
+    test("the help's checker line is the rule assign holds: a row holding a pr takes worker= and pr= together", async () => {
+      expect(USAGE).toContain(
+        "a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request",
+      )
+      const config = configWith([gone, live, checker])
+      const alone = await run(config, [
+        "assign",
+        "k3v9q2-reviewer",
+        "Reviewer of b4n8tz-worker",
+        "Review #3",
+        "worker=b4n8tz-worker",
+      ])
+      expect(alone.code).toBe(1)
+      expect(alone.roster?.agents).toEqual([gone, live, checker])
+      const both = await run(config, [
+        "assign",
+        "k3v9q2-reviewer",
+        "Reviewer of b4n8tz-worker",
+        "Review #3",
+        "worker=b4n8tz-worker",
+        "pr=3",
+      ])
+      expect(both.code).toBe(0)
+      expect(agentOf(both.roster, "k3v9q2-reviewer")).toMatchObject({
+        pr: pull(3),
+        worker: "b4n8tz-worker",
+      })
+    })
+
     test("prs+= with a live worker passes, as spawn.sh's first write of a new checker gives it", async () => {
       const r = await run(configWith([live]), [
         "set",

@@ -1195,9 +1195,12 @@ describe("worktreeRefusal", () => {
     expect(refusal(proc(44, "agent-browser --session s2 open http://x", wt))).toContain(
       "agent-browser --session s2 close",
     )
-    expect(refusal(proc(45, daemon, wt))).toContain(
-      "agent-browser session default, which agent-browser --session default close frees",
+    // a bare daemon with no --session and no .sock shows no name, so the line names none and has the reader close their own
+    const bare = refusal(proc(45, daemon, wt))
+    expect(bare).toBe(
+      `${wt} is held by pid 45 (${daemon}) working in ${wt}: an agent-browser session whose name it does not show, so close your own by its name: agent-browser --session <your-name> close`,
     )
+    expect(bare).not.toContain("default")
   })
 
   test("refuses a worktree another worktree's node_modules links into, naming the link", () => {

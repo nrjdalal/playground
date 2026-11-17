@@ -239,7 +239,7 @@ After a drop, or a try Yard leaves unanswered for 30 seconds, this Mac connects 
 
 `/dashboard/system`, opened by the system icons, shows a status table of every agent, then Next up (the work queued for the next free agent, fixes first, then what you asked for), then Needs you (what waits on your answer), then System (the room this machine has for more sessions), then Paused (the background jobs paused on purpose, when there are any).
 
-With other machines named in `PLAYGROUND_PEERS` (a comma list of `name=user@host`, read over ssh with the key `PLAYGROUND_PEER_KEY` names), System sums memory, CPU load, swap and disk free across them all, and hovering a figure shows each machine's part, such as `machine-a 3.1 on 20 + machine-b 0.4 on 20 cores`.
+With other machines named in `PLAYGROUND_PEERS` (a comma list of `name=user@host`, each name once in any case, read over ssh with the key `PLAYGROUND_PEER_KEY` names), System sums memory, CPU load, swap and disk free across them all, and hovering a figure shows each machine's part, such as `machine-a 3.1 on 20 + machine-b 0.4 on 20 cores`.
 `playground update` also moves each of those machines' Playground copy to the commit it reached, over the same ssh and key ([CLI](/docs/cli)).
 A machine that does not answer is left out of the sums and marks each figure `1 of 2 machines`, and the hover says why and since when.
 The sidebar's icons sum the same way, each hover naming every machine, and a warning names the machine that set it.
