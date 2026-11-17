@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { logoOf } from "../../../../../web/next/src/components/dashboard/model-logo"
 import { StatusIcon } from "../../../../../web/next/src/components/dashboard/worker-light"
 import MODEL_ICONS from "../../../../../web/next/src/lib/model-icons.json"
 import {
@@ -368,10 +369,10 @@ describe("PROVIDER_ICONS", () => {
     }
   })
 
-  test("Ornith draws its Hugging Face avatar whole, clipped round", () => {
-    expect(vendored("ornith").mono).toBe(false)
-    const logo = html(providerIcon("ornith"), { className: "size-4" })
-    expect(logo).toContain(`href="${vendored("ornith").data}"`)
+  test("an avatar draws whole, clipped round", () => {
+    const data = "data:image/png;base64,AAAA"
+    const logo = html(logoOf({ data, mono: false }), { className: "size-4" })
+    expect(logo).toContain(`href="${data}"`)
     expect(logo).toContain("<clipPath")
     expect(logo).not.toContain("<mask")
   })
@@ -379,6 +380,8 @@ describe("PROVIDER_ICONS", () => {
   test("a maker with no vendored icon, or none known, draws the one fallback icon", () => {
     expect(providerIcon(null)).toBe(FALLBACK_PROVIDER_ICON)
     expect(providerIcon("no-such-maker")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("ornith")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("constructor")).toBe(FALLBACK_PROVIDER_ICON)
     expect(FALLBACK_PROVIDER_ICON).toBe(icons.RiRobot2Line!)
     for (const { icon, id } of MODEL_ICONS.makers)
       expect(PROVIDER_ICONS[id] === undefined).toBe(icon === null)

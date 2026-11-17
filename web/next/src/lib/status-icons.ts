@@ -152,7 +152,8 @@ export const FALLBACK_PROVIDER_ICON: RemixiconComponentType = RiRobot2Line
 
 // A provider's icon, else the one fallback.
 export const providerIcon = (provider: Provider | null): RemixiconComponentType =>
-  (provider && PROVIDER_ICONS[provider]) || FALLBACK_PROVIDER_ICON
+  (provider && Object.hasOwn(PROVIDER_ICONS, provider) && PROVIDER_ICONS[provider]) ||
+  FALLBACK_PROVIDER_ICON
 
 // A session busy with no new transcript line for this long is hung (a stuck command, a frozen Docker, a network call that never returns).
 export const NO_PROGRESS_MS = 30 * 60_000

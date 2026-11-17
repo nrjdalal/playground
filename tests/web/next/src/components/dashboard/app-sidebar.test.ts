@@ -493,12 +493,12 @@ describe("SessionRow", () => {
     ])
     expect(shownText(html)).toBe("Message dispatcher from the dashboard")
     expect(shape(html)).toEqual(stock)
-    // a GLM model draws Z.ai's logo, an Ornith one its Hugging Face avatar, a maker with no icon the fallback, and a row with no model or effort draws neither
+    // a GLM model draws Z.ai's logo, a maker with no icon (Ornith, until its avatar is fetched on the machine) or none known the fallback, and a row with no model or effort draws neither
     const glm = row("worker-greed", "worker", [], { model: "glm-5.3-flash" })
     expect(glm).toContain(logoOf("zai"))
     expect(tipsOf(glm)).toContain("GLM 5.3 Flash")
     const ornith = row("worker-greed", "worker", [], { model: "Ornith-1.5-122B-NVFP4" })
-    expect(ornith).toContain(logoOf("ornith"))
+    expect(ornith).toContain(pathOf(RiRobot2Line))
     expect(tipsOf(ornith)).toContain("Ornith-1.5-122B-NVFP4")
     const unknown = row("worker-greed", "worker", [], { model: "gpt-9" })
     expect(unknown).toContain(pathOf(RiRobot2Line))
