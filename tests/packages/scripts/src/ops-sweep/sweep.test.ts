@@ -1248,6 +1248,38 @@ describe("opsDown", () => {
     expect(await opsDown(ctx)).toEqual(["ops-failing:ops-peer-relay"])
   })
 
+  test("treats a steady up:, waiting:, or idle: beat as healthy and a failed beat as failing (PG-2637)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const beat = (file: string, lastResult: string) =>
+      write(join(ops, `${file}.json`), {
+        cycleSeconds: 60,
+        job: file,
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    beat("ops-tunnel", "up: 127.0.0.1:18000")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-tunnel", "waiting: nothing to read yet")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-peer-relay", "idle: PLAYGROUND_PEERS names no peer")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-tunnel", "failed: x")
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-tunnel"])
+  })
+
+  test("reads ops-tick's failing up: beat as failing, since up: is steady only for the tunnel (PG-2637)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const beat = (lastResult: string) =>
+      write(join(ops, "ops-tick.json"), {
+        cycleSeconds: 60,
+        job: "ops-tick",
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    beat("up: spawn.sh exited 1")
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-tick"])
+  })
+
   test.each([
     [
       "stale",
