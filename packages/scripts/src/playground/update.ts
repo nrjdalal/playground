@@ -2,6 +2,7 @@
 import { basename, join } from "node:path"
 
 import { swapBundles, unswapBundles } from "../swap-bundles"
+import { giveBackSlot } from "./give-back"
 import { BUNDLED_ROOT, CORE_SKILLS } from "./orgs"
 import { unlinked } from "./unlinked"
 
@@ -245,7 +246,14 @@ export const runUpdate = async (
       log(`playground update: peer sync failed: ${error.message}`),
     )
   }
-  if (!to) return roll()
+  if (!to) {
+    // the roll only waits on the supervisor, whose own steps queue in run-slot, so the lane this update holds goes back to the queue first
+    if (giveBackSlot())
+      log(
+        "playground update: gave its run slot back for the Dashboard roll, whose own steps queue in run-slot",
+      )
+    return roll()
+  }
   log(
     `playground update: at ${to}; the Dashboard rolls on its own, and playground update moves on to origin/main`,
   )
