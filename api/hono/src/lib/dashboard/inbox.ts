@@ -338,6 +338,8 @@ const rootSchema = z.strictObject({
   ca: z
     .strictObject({ sha256: z.string().regex(HEX64, "Must be a sha256 in 64 lowercase hex") })
     .optional(),
+  // a machine org.cluster names, whose steps run over ssh (system/peer-root.ts); none for this one
+  machine: peerSchema.shape.name.optional(),
   scripts: z
     .array(
       z.strictObject({
@@ -347,8 +349,6 @@ const rootSchema = z.strictObject({
     )
     .max(ROOT_NAMES.length)
     .optional(),
-  // a machine org.cluster names, whose steps run over ssh (system/peer-root.ts); none for this one
-  machine: peerSchema.shape.name.optional(),
   step: z.enum(["install", ...ROOT_NAMES]),
   type: z.literal("root"),
   why: words,
@@ -1641,8 +1641,16 @@ const rootScripts = async (
   if (input.kind !== "decision" || input.preview.type !== "root") return input
   const { preview } = input
   const refuse = (message: string): Refused => ({ code: "VALIDATION_ERROR", message, ok: false })
-  if (preview.machine && !org.cluster.peers.some((peer) => peer.name === preview.machine))
-    return refuse(`${preview.machine} is not a machine this Dashboard reaches`)
+  if (preview.machine) {
+    if (!org.cluster.peers.some((peer) => peer.name === preview.machine))
+      return refuse(`${preview.machine} is not a machine this Dashboard reaches`)
+    // its install reads the password from this item, so a name no item can take is refused here, not at Approve
+    try {
+      peerSecret(preview.machine)
+    } catch (error) {
+      return refuse(error instanceof Error ? error.message : String(error))
+    }
+  }
   if (preview.step !== "install")
     return preview.scripts || preview.ca
       ? refuse("A root step's card lists no scripts and no CA")
@@ -2320,14 +2328,58 @@ const PEER_SEAMS: PeerSeams = {
   secret: (service) => keychainItem(service),
 }
 
+// Deletes a peer's password item, then reads it again, so the line says only what is true.
+async function forgetPassword(
+  stored: ReturnType<PeerSeams["secret"]>,
+  service: string,
+): Promise<{ gone: boolean; line: string }> {
+  await stored.remove().catch(() => undefined)
+  const gone = (await stored.read().catch(() => null)) === null
+  return {
+    gone,
+    line: gone ? `deleted ${service}` : `could not delete ${service}: remove it by hand`,
+  }
+}
+
 export const ROOT_LOST_LINE =
   "the Dashboard restarted while it ran, so its result is unknown: check it before you approve it again"
+
+// A peer install a restart cut off never reached its own delete, so its password may still be kept: delete it now, and say so on the card.
+async function forgetLostPassword(
+  db: Database,
+  item: InboxItem,
+  secret: PeerSeams["secret"],
+  now: Date,
+): Promise<InboxItem> {
+  const preview = item.preview as InboxPreview
+  if (preview.type !== "root" || !preview.machine || preview.step !== "install") return item
+  let service: string
+  try {
+    service = peerSecret(preview.machine)
+  } catch {
+    return item
+  }
+  const forgot = await forgetPassword(secret(service), service)
+  const rooted: RunResult = { exitCode: 1, line: `${ROOT_LOST_LINE}; ${forgot.line}` }
+  console.log(`inbox: ${preview.machine}'s install was cut off by a restart; ${forgot.line}`)
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`${inboxItem.answer} || (${JSON.stringify({ rooted })}::text)::jsonb`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(eq(inboxItem.id, item.id))
+    .returning()
+  return row ? toItem(row) : item
+}
 
 // Run once at API start: ends each approved root card with no result answered before this process started, as a failed rooted that says so, then tells its poster as its own run would have; only the process that claimed a card runs it, so a restart lost each one.
 export async function endLostRoots(
   db: Database,
   now: Date,
   telling?: Omit<Sending, "now">,
+  secret: PeerSeams["secret"] = PEER_SEAMS.secret,
 ): Promise<InboxItem[]> {
   const cutoff = now.toISOString()
   const rooted: RunResult = { exitCode: 1, line: ROOT_LOST_LINE }
@@ -2348,7 +2400,8 @@ export async function endLostRoots(
       ),
     )
     .returning()
-  const ended = rows.map(toItem)
+  const ended: InboxItem[] = []
+  for (const item of rows.map(toItem)) ended.push(await forgetLostPassword(db, item, secret, now))
   if (!telling) return ended
   const told: InboxItem[] = []
   // each card on its own, so a send that throws (a database write) leaves the other posters told
@@ -2462,15 +2515,14 @@ async function peerRootRun(
     }
   } catch (error) {
     ran = fail(error instanceof Error ? cut(error.message) : "the install could not start")
-  } finally {
-    await item.remove().catch(() => undefined)
   }
-  const gone = (await item.read().catch(() => null)) === null
-  const deleted = gone ? `deleted ${service}` : `could not delete ${service}: remove it by hand`
-  console.log(`inbox: ${machine}'s install ${ran.exitCode === 0 ? "ran" : "failed"}; ${deleted}`)
+  const forgot = await forgetPassword(item, service)
+  console.log(
+    `inbox: ${machine}'s install ${ran.exitCode === 0 ? "ran" : "failed"}; ${forgot.line}`,
+  )
   return {
-    exitCode: gone ? ran.exitCode : ran.exitCode || 1,
-    line: [ran.line, deleted].filter(Boolean).join("; "),
+    exitCode: forgot.gone ? ran.exitCode : ran.exitCode || 1,
+    line: [ran.line, forgot.line].filter(Boolean).join("; "),
   }
 }
 

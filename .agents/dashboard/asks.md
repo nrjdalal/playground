@@ -492,7 +492,7 @@
   With a `ca`, the argv adds the CA's path, read from this machine at Approve and never from the card, and the card's hash: the text reads at most 16 KB of that file once (`CA_MAX_BYTES`), refuses a file over it or holding other than one certificate before openssl reads it,
   turns that copy into DER with `openssl x509` and keeps it at `/usr/local/lib/playground/data/portless-ca.der` (`ROOT_CA`, root, 0644) only if its sha256 matches the card's, or refuses with nothing moved.
   A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
-  A card with `machine`, a name from org.ts's cluster (`PLAYGROUND_PEERS`) and never a host, runs on that machine over ssh instead (`api/hono/src/lib/system/peer-root.ts`, [ADR 0027](../adr/0027-a-peer-runs-its-listed-root-steps-with-no-password.md)); a name the cluster does not hold is refused at post.
+  A card with `machine`, a name from org.ts's cluster (`PLAYGROUND_PEERS`) and never a host, runs on that machine over ssh instead (`api/hono/src/lib/system/peer-root.ts`, [ADR 0027](../adr/0027-a-peer-runs-its-listed-root-steps-with-no-password.md)); a name the cluster does not hold, or one no secret store item can take (`peerSecret`), is refused at post.
   Its install keeps no CA. It reads the machine's admin password from `playground-<machine>-sudo`, the item a `secret` card with a keychain sink writes, refusing with nothing run when it is not there.
   It copies the scripts to `~/.cache/playground-root/` there as the ssh user, then runs `ssh … sudo -k -S -p '' /bin/sh -c <PEER_INSTALL_TEXT> sh <stage> <each hash>` with the password on stdin alone (`peerInstallArgv`).
   It deletes the item on every path, the result line ending `deleted <item>`, and cuts the value out of every line it keeps.
@@ -504,6 +504,7 @@
   `127` that no window could ask and `143` that the window got no answer in 5 minutes,
   and its poster is told.
   The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
+  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
   `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
   The constraint means even a swapped CA vouches for `*.localhost` alone.

@@ -6156,6 +6156,29 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         })
     })
 
+    test("a cluster machine whose name no secret store item can take is refused at post, not at Approve (PG-2434)", async () => {
+      const { org } = await import("../../../../../../api/hono/src/lib/org")
+      const peers = org.cluster.peers as { name: string; target: string }[]
+      peers.push(
+        { name: "spark.lab", target: "me@spark-lab" },
+        { name: "spark-test", target: "me@spark-test" },
+      )
+      try {
+        for (const preview of [ROOT_INSTALL, ROOT_STEP])
+          expect(
+            await store.postItem(db, decision({ ...preview, machine: "spark.lab" })),
+          ).toMatchObject({
+            code: "VALIDATION_ERROR",
+            message: "spark.lab has no name a secret store item can take",
+          })
+        const posted = await post(decision({ ...ROOT_INSTALL, machine: "spark-test" }))
+        expect(posted.preview).toMatchObject({ machine: "spark-test", step: "install" })
+        expect(posted.preview).not.toHaveProperty("ca")
+      } finally {
+        peers.splice(-2, 2)
+      }
+    })
+
     test("an install card pins this machine's CA, refuses another, and its Approve passes the CA's path with the pin (PG-2458)", async () => {
       const state = mkdtempSync(join(tmpdir(), "inbox-ca-"))
       const made = Bun.spawnSync([
@@ -6292,6 +6315,45 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         posted.id,
       )
       expect(sent).toHaveLength(1)
+    })
+
+    test("a peer install a restart cut off has its password deleted at the next start, and its card says so (PG-2434)", async () => {
+      const service = "playground-spark-test-sudo"
+      for (const [at, deletes, line] of [
+        [new Date("2026-11-05T20:00:00.000Z"), true, `deleted ${service}`],
+        [
+          new Date("2026-11-06T20:00:00.000Z"),
+          false,
+          `could not delete ${service}: remove it by hand`,
+        ],
+      ] as const) {
+        const posted = await post(decision(ROOT_INSTALL))
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", seen: posted.updatedAt },
+          { actor, now: at, root: () => new Promise(() => {}) },
+        )
+        // the card as a peer install, written past postItem's checks, so its run is the one the restart cut off
+        const writer = new SQL(url, { max: 1 })
+        await writer`update inbox_item set preview = jsonb_set(preview, '{machine}', '"spark-test"') where id = ${posted.id}`
+        await writer.close()
+        const kept = new Map([[service, "pw-left-behind"]])
+        const removed: string[] = []
+        const secret = (name: string) => ({
+          read: async () => kept.get(name) ?? null,
+          remove: async () => {
+            removed.push(name)
+            if (deletes) kept.delete(name)
+          },
+        })
+        const ended = await store.endLostRoots(db, new Date(at.getTime() + 1), undefined, secret)
+        const rooted = { exitCode: 1, line: `${store.ROOT_LOST_LINE}; ${line}` }
+        expect(ended.find((item) => item.id === posted.id)?.answer).toMatchObject({ rooted })
+        expect((await store.getItem(db, posted.id))?.answer).toMatchObject({ rooted })
+        expect(removed).toEqual([service])
+        expect(kept.has(service)).toBe(!deletes)
+      }
     })
 
     test("the API ends lost root runs once at its start on a stack that reads this machine, and the Inbox's read writes nothing", async () => {
