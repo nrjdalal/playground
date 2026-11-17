@@ -2222,7 +2222,7 @@ test("12o redIn reads bun's own junit report: a failed testcase's file is failed
 })
 
 // bun's junit report leaves out a file that throws as it loads and a file that defines no test, as run-slot-children-fixture.test.ts does without RUN_SLOT_FIXTURE_HANG, so a left-out file runs once alone to tell them apart (PG-2609)
-test("12q merge: a test file the report leaves out that runs green alone, as an env-gated file with no test does, is not red beside a real red", () => {
+test("12q merge: a test file the report leaves out that runs green alone and writes no report, as an env-gated file with no test does, is not red beside a real red", () => {
   const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   const out = runMerge(
@@ -2231,10 +2231,12 @@ test("12q merge: a test file the report leaves out that runs green alone, as an 
     (_c, files) => files.filter((f) => f === t(3)),
     undefined,
     (files, red) =>
-      junit(
-        files.filter((f) => f !== t(5)),
-        red,
-      ),
+      files.length === 1
+        ? undefined
+        : junit(
+            files.filter((f) => f !== t(5)),
+            red,
+          ),
   )
   expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`, `HEAD-RED: ${t(3)}`])
   expect(out.calls.map((c) => c.slice(1))).toContainEqual([t(5)])

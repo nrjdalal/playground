@@ -1054,7 +1054,7 @@ export const cmdMerge = (...args: string[]): void => {
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
-  // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test); a red run whose report names none counts every file it ran as red, and says where.
+  // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test, or runs in the test sandbox's serial pass, which writes none); a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
   const readReport = (): string | undefined => {
