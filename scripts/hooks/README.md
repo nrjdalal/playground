@@ -145,6 +145,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A hook leaves in the reverse order: its registration in one ship and its script in a later one, since a worktree branched before the first still registers the hook in its `.claude/settings.json`, and its wrapper refuses every call the hook guards once the main checkout lacks the script.
   Its bundle goes with its registration, since `bun run hooks:bundle` builds only the guards `scripts/factory-settings.json` registers, and the wrapper runs the script in the bundle's place.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
+  In a checkout with no `origin` at all, the runner host's run clone, it prints a SKIP line naming why and exits 0, and under `CI` it fails there, since CI's checkout has its origin.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
   and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
   A timeout lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
@@ -879,6 +880,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name names `glm` (`glm`, or `claude-code glm` since the harness split); a Claude session commits those paths as before.
+  A local session (`spawn.sh --backend local`) counts as on GLM too, so every refusal here holds for it: its `ANTHROPIC_BASE_URL` points at `127.0.0.1:8000` (or `localhost:8000`), or its pin names `claude-code local`.
   It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host or input it cannot read, a call it cannot parse inside a guarded checkout,
   a read path it cannot read or a recursive read past its walk (each below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.

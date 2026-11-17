@@ -110,6 +110,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
   test.each([
     { label: "no --backend and no --account", extra: [] as string[] },
     { label: "--backend claude and no --account", extra: ["--backend", "claude"] },
+    { label: "--backend local", extra: ["--backend", "local"] },
   ])(`${OLD.dispatcher}-2 with $label is refused before herdr runs`, async ({ extra }) => {
     const r = await spawn(
       ["manager", `${OLD.dispatcher}-2`, `brief-${OLD.dispatcher}-2.md`, ...extra],
@@ -118,7 +119,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
     expect(r.code).toBe(1)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain(
-      `${OLD.dispatcher}-2, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account`,
+      `${OLD.dispatcher}-2, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account: on this machine's own login it would run out with the first, and --backend local takes no dispatcher, since a dispatcher plans`,
     )
   })
 
