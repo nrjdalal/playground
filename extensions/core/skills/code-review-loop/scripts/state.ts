@@ -1111,7 +1111,7 @@ export const cmdMerge = (...args: string[]): void => {
   } else if (!together.length) console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
   if (together.length)
     console.log(
-      `BATCH-RED on ${c7}: ${together.join(" ")} (the merge of ${headSha.slice(0, 7)} with ${c7}); open or link one issue for each by code-review-loop's step 2, never a second rerun`,
+      `BATCH-RED on ${c7}: ${together.join(" ")} (merged with head ${headSha.slice(0, 7)}); open or link one issue for each by code-review-loop's step 2, never a second rerun`,
     )
   if (atHead.length) console.log(`HEAD-RED: ${atHead.join(" ")}`)
   if (atBase.length) console.log(`BASE-RED on ${c7}: ${atBase.join(" ")}`)
@@ -1247,7 +1247,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
