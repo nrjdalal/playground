@@ -3528,7 +3528,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const posted = await post(decision(PREVIEWS.ship))
       const writer = new SQL(url, { max: 1 })
       try {
-        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::text::jsonb where id = ${posted.id}`
       } finally {
         await writer.close()
       }
@@ -3545,7 +3545,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       await store.answerItem(db, posted.id, { action: "deny" }, { actor })
       const writer = new SQL(url, { max: 1 })
       try {
-        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::text::jsonb where id = ${posted.id}`
       } finally {
         await writer.close()
       }
@@ -7261,7 +7261,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ] as const) {
         // written past postItem's checks, as a row changed after it was posted
         const writer = new SQL(url, { max: 1 })
-        await writer`update inbox_item set preview = ${JSON.stringify(preview)}::jsonb where id = ${item.id}`
+        await writer`update inbox_item set preview = ${JSON.stringify(preview)}::text::jsonb where id = ${item.id}`
         await writer.close()
         expect(await approveWith(item.id, clone, data), item.id).toMatchObject({
           code: "VALIDATION_ERROR",
