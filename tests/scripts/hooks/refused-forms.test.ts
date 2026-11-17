@@ -113,6 +113,9 @@ writeFileSync(PATHS.LIST, '["Slack"]\n')
 writeFileSync(join(ROOT, "policy.json"), "{}\n")
 writeFileSync(join(SCOPE, "lists", "release-owners.json"), "[]\n")
 writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
+// a script ssh feeds a remote shell: a listing of the data folder, and its twin writing under the root
+writeFileSync(join(HOME, "peer-check.sh"), `ls ${DATA}\n`)
+writeFileSync(join(HOME, "peer-write.sh"), `touch ${ROOT}/x\n`)
 symlinkSync(ROOT, PATHS.LINK)
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
