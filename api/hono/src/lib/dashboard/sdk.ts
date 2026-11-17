@@ -12,6 +12,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
 import { PERMISSION_MODE_LABELS } from "@packages/config/console"
+import { SDK_PROBE } from "@packages/config/kinds"
 import type { LocalModel } from "@packages/config/org"
 import type { ActivityActor, ActivityEvent } from "@packages/db"
 import { env } from "@packages/env/api-hono"
@@ -47,7 +48,7 @@ import { SESSION_FILE } from "@/lib/sessions/own"
 import { dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 // The dashboard's second way to reach a session, beside herdr's: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
-export const SDK_PROBE = "probe-sdk"
+export { SDK_PROBE }
 
 export { SESSION_FILE }
 

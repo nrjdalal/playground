@@ -3,10 +3,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { UNSET_REPOS } from "../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../packages/scripts/src/trace-count/kinds"
 import { currentDir } from "../../../packages/settings/src/rendered"
 import { storeMarker } from "../../../scripts/hooks/lists"
 import { check } from "../../../scripts/hooks/no-public-leak"
+import { originCheckout } from "../../machine"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -22,12 +23,16 @@ const TERMS = {
 let scratch = ""
 let stored = ""
 let stranger = ""
+// the checkout the guard reads its origin from, a scratch one with a made-up GitHub origin
+let checkout = ""
+const ORIGIN = "acme/made-up-origin"
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), "no-public-leak-"))
   stored = join(scratch, "stored")
   stranger = join(scratch, "stranger")
   await mkdir(stranger, { recursive: true })
+  checkout = originCheckout(join(scratch, "checkout"), ORIGIN)
   storeWith(
     stored,
     { "no-public-leak.json": JSON.stringify(TERMS) },
@@ -47,11 +52,11 @@ const bash = (command: string) =>
     tool_input: { command },
     tool_name: "Bash",
   })
-const run = (raw: string, data = stored) => check(raw, env(data))
+const run = (raw: string, data = stored) => check(raw, env(data), checkout)
 
 const R = "--repo quillco/playground"
 // The checkout's origin, the one repository the guard keeps while factory.publicRepo is unset.
-const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
+const UNSET_R = `--repo ${ORIGIN}`
 
 // A made-up owner, Quilla (@qmarsh), whose names owner.names lists, and an outside contributor, Ostra Vell (@ovell).
 const OWNER_TERMS = {
@@ -406,7 +411,7 @@ describe("what it lets through", () => {
       { "no-public-leak.json": JSON.stringify(TERMS) },
       { "factory.publicRepo": "" },
     )
-    expect(UNSET_REPOS.public).toHaveLength(1)
+    expect(reposOf({ schemaVersion: 1, values: {} }, checkout).public).toEqual([ORIGIN])
     expect(
       await run(
         bash(`gh pr comment 1 --repo quillco/made-up-yard --body "Quilla Marsh asked"`),
