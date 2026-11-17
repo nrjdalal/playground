@@ -55,7 +55,7 @@ export const trustCa = async (
         : "Firefox already trusts portless's CA in every profile.",
     )
   if (read.policy.length > 0)
-    lines.push(`${read.policy.join(", ")} trust portless's CA through the browser policy.`)
+    lines.push(`${read.policy.join(", ")} trusts portless's CA through the browser policy.`)
   if (read.chromium.length > 0) lines.push(chromiumSteps(read.chromium, ca))
   if (lines.length === 0) lines.push("No Firefox profile or Chromium-family browser was found.")
   return { code: 0, lines }

@@ -540,7 +540,7 @@ describe("certificateCheck", () => {
 
   test("ok naming the browsers the chromium-ca policy covers (PG-2458)", () => {
     expect(certificateCheck(read({ firefox: [], policy: ["helium"] }), CA, "/repo")).toEqual({
-      detail: `helium trust ${CA} through the browser policy`,
+      detail: `helium trusts ${CA} through the browser policy`,
       name: "browser certificate",
       status: "ok",
     })

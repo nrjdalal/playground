@@ -18,13 +18,13 @@ export const CHROMIUM = [
   "vivaldi",
 ]
 
-// The managed policy the chromium-ca root step writes (api/hono/src/lib/system/root/chromium-ca) in the folder Chromium and Helium read, world-readable, and the browsers on PATH that read it.
+// The managed policy the chromium-ca root step writes (api/hono/src/lib/system/root/chromium-ca) in the folder Helium reads, world-readable, and the browser on PATH that reads it; Ubuntu's chromium is the snap, which reads /etc/chromium-browser/policies instead.
 export const CA_POLICY = "/etc/chromium/policies/managed/portless-ca.json"
-const READS_CA_POLICY = ["chromium", "chromium-browser", "helium"]
+const READS_CA_POLICY = ["helium"]
 
 // In a Chromium-family browser's own words: its certificate manager's import, and the page info button that drops a Proceed made before it (IDS_PAGE_INFO_RESET_INVALID_CERTIFICATE_DECISIONS_BUTTON, "Turn on warnings").
 export const chromiumSteps = (browsers: string[], ca: string): string =>
-  `In ${browsers.join(", ")}, open chrome://certificate-manager, then Local certificates, Custom, Installed by you, Trusted certificates, and Import ${ca}. Restart the browser. If the address still reads Not secure, click it and choose Turn on warnings, which drops a Proceed you clicked before.${browsers.some((cmd) => READS_CA_POLICY.includes(cmd)) ? " Helium and Chromium can trust it instead through the chromium-ca root step, which you approve in the Inbox." : ""}`
+  `In ${browsers.join(", ")}, open chrome://certificate-manager, then Local certificates, Custom, Installed by you, Trusted certificates, and Import ${ca}. Restart the browser. If the address still reads Not secure, click it and choose Turn on warnings, which drops a Proceed you clicked before.${browsers.some((cmd) => READS_CA_POLICY.includes(cmd)) ? " Helium can trust it instead through the chromium-ca root step, which you approve in the Inbox." : ""}`
 
 export type CaProbe = {
   has: (cmd: string) => boolean

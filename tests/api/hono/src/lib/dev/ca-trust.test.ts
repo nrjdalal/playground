@@ -161,14 +161,14 @@ describe("readCaTrust", () => {
     return path
   }
 
-  test("a policy holding the CA's key covers the browsers that read Chromium's policy folder, and no other (PG-2458)", async () => {
-    const on = probe(["helium", "chromium", "google-chrome"], {})
+  test("a policy holding the CA's key covers Helium alone, since Ubuntu's chromium snap reads another folder (PG-2458)", async () => {
+    const on = probe(["helium", "chromium", "chromium-browser", "google-chrome"], {})
     expect(await readCaTrust(CA, home({}), on, policy(RESIGNED))).toMatchObject({
-      chromium: ["google-chrome"],
-      policy: ["chromium", "helium"],
+      chromium: ["chromium", "chromium-browser", "google-chrome"],
+      policy: ["helium"],
     })
     expect(await readCaTrust(CA, home({}), on, policy(OTHER))).toMatchObject({
-      chromium: ["chromium", "google-chrome", "helium"],
+      chromium: ["chromium", "chromium-browser", "google-chrome", "helium"],
       policy: [],
     })
     expect(await readCaTrust(CA, home({}), on, join(state, "none.json"))).toMatchObject({

@@ -244,7 +244,7 @@ export const certificateCheck = (read: CaTrust, ca: string, repo: string): Check
     "",
     [
       read.firefox.length > 0 && `Firefox trusts ${ca}`,
-      read.policy.length > 0 && `${read.policy.join(", ")} trust ${ca} through the browser policy`,
+      read.policy.length > 0 && `${read.policy.join(", ")} trusts ${ca} through the browser policy`,
     ]
       .filter(Boolean)
       .join("; ") || "no browser found",
