@@ -1,9 +1,6 @@
-import { LOCAL_SERVED, MAKER_NAME } from "@packages/config/console"
+import { LOCAL_SERVED, LOCAL_URL, MAKER_NAME } from "@packages/config/console"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
-
-// The local model server a --backend local session runs on (scripts/spawn.sh's LOCAL_URL), on this machine's loopback.
-export const LOCAL_URL = "http://127.0.0.1:8000"
 
 // How long the server has to list its models, so a board never waits on a server that is down.
 const READ_MS = 1_000

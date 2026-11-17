@@ -2014,7 +2014,7 @@ slot_open() {
   # run-slot.single (builder, 9 Oct: heavy suites one at a time) closes slots 2 and 3 to new holders while it exists
   # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs), which shut lanes leave run-slot-2 open to as well (retro 22: two 5/5 PRs sat about 55 min while the train raced the queue for run-slot alone)
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
-  # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
+  # machine allows) it opens on memory: on macOS a free share of 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lifted; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
@@ -2326,9 +2326,10 @@ gauges_lock() {
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
-# sets FREE and LEVEL, the free share and the pressure level: macOS's (memstat), else Linux's (proc_mem), each empty when neither reads
-mem_read() { FREE=$(memstat level); LEVEL=$(memstat vm_pressure_level); [ -n "$FREE$LEVEL" ] || proc_mem; }
-# memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
+# sets FREE and LEVEL, the free share and the pressure level: macOS's (memstat), else Linux's (proc_mem) with MEM_OS=linux, each empty when neither reads
+mem_read() { MEM_OS=macos FREE=$(memstat level); LEVEL=$(memstat vm_pressure_level); [ -n "$FREE$LEVEL" ] || { MEM_OS=linux; proc_mem; }; }
+# memory room for a second suite: the pressure level normal (1; 2 is warn, 4 critical), on macOS its memorystatus free share at 40% or more too, which counts compressible pages, while Linux
+# judges by PSI and swap-ins alone, since MemAvailable leaves out what a resident model holds (issue 2660: a local model of about 60 GB held it at 33% with PSI at 0), and swap-ins under SWAPINS_MAX a
 # second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1
 # with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
@@ -2347,7 +2348,7 @@ mem_ok() {
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
     busy) told busy "$BUSY_TOLD"; return 1 ;;
   esac
-  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
+  { [ "$MEM_OS" = linux ] || [ "$free" -ge 40 ]; } && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
 }
 
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the

@@ -810,7 +810,12 @@ function MemberRow({
         <Hint content={info.join("\n")} description={null} side="right">
           <span className="min-w-0 flex-1 truncate">{rowLabel(lines) ?? first}</span>
         </Hint>
-        <ModelIcons effort={worker.effort} localModel={worker.localModel} model={worker.model} />
+        <ModelIcons
+          effort={worker.effort}
+          localModel={worker.localModel}
+          localModels={worker.localModels}
+          model={worker.model}
+        />
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   )
@@ -834,18 +839,20 @@ function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
   localModel,
+  localModels,
   model,
   toggles = false,
 }: {
   effort: string | null
   effortHidden?: string
   localModel?: string
+  localModels?: { id: string }[]
   model: string | null
   toggles?: boolean
 }) {
   const name = rowModelName({ localModel, model })
   const Logo = useMakerIcon(rowProvider({ localModel, model }), initialsOf(name))
-  const Effort = showsEffort({ model }) ? effortIcon(effort) : null
+  const Effort = showsEffort({ localModels, model }) ? effortIcon(effort) : null
   return (
     <>
       {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
@@ -1071,6 +1078,7 @@ function SessionRowView({
         effort={worker.effort}
         effortHidden={action ? PLUS_EFFORT_HIDDEN : undefined}
         localModel={worker.localModel}
+        localModels={worker.localModels}
         model={worker.model}
         toggles={expandable || Boolean(action)}
       />
