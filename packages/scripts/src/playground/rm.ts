@@ -1,15 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
+import { managerOf } from "@packages/config/kinds"
 import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
+  deleteWeights,
   isAgentBrowser,
+  isWeights,
   linkPlaces,
   listTrash,
   type Proc,
   quarantine,
+  removeReplay,
+  replayPlace,
   restore,
   type Roots,
   type WorktreeGit,
@@ -18,17 +23,26 @@ import {
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
+import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
+import {
+  CARD_ID,
+  type CardPick,
+  type CardState,
+  readCard,
+  savedPicks,
+} from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--card <id>] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
   | {
+      card?: string
       discard: boolean
       path: string
       pr?: string
@@ -36,7 +50,7 @@ export type RmArgs =
       worktree: boolean
     }
 
-// playground rm's words: one path, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path with an optional --card, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
@@ -45,9 +59,12 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let worktree = false
   let discard = false
   let pr: string | undefined
+  let card: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
+    else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
+      card = words[++i]!
     else if (word === "--discard" && !discard) discard = true
     else if (word === "--pr" && words[i + 1] !== undefined && pr === undefined) pr = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
@@ -56,9 +73,13 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined || (discard && !worktree) || (pr !== undefined && !worktree)
+  return path === undefined ||
+    (discard && !worktree) ||
+    (pr !== undefined && !worktree) ||
+    (card !== undefined && worktree)
     ? { error: RM_USAGE }
     : {
+        ...(card === undefined ? {} : { card }),
         discard,
         path,
         ...(pr === undefined ? {} : { pr }),
@@ -81,12 +102,16 @@ export const freedOf = (
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
 export type RmDeps = {
+  // Each Remove the owner picked on a nightly-clean card, read from the Inbox by its id, or why it did not read; absent where no Inbox is read, which refuses every --card.
+  approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
   defaultBranch: (at: string) => string | null
   home: string
   // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
   liveBranch: () => string
+  // this machine's short name, the one a card's question names
+  machine?: string
   main: string
   merged: (sha: string, at: string) => boolean | null
   // The head of the PR at url once it reads MERGED, from gh in the worktree, else null.
@@ -279,6 +304,32 @@ export const rmDeps = (repo: string): RmDeps => ({
   prState,
   procs: processes,
   session: sessionName,
+  // the card's picks, counted only on the card as nightly-clean saved it in its state file
+  approvals: async (id) => {
+    const item = await readCard(async (args) => {
+      const read = Bun.spawnSync(
+        ["bun", "run", "--silent", "--cwd", mainCheckout(repo), "ask", ...args],
+        {
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      )
+      return { code: read.exitCode, out: `${read.stdout}${read.stderr}` }
+    }, id)
+    if (typeof item === "string") return item
+    try {
+      const roster = JSON.parse(readFileSync(join(dataDir(), "roster.json"), "utf8")) as {
+        agents?: unknown
+      }
+      const state = JSON.parse(
+        readFileSync(join(dataDir(), "ops", "tick", "nightly-clean.json"), "utf8"),
+      ) as { card?: CardState }
+      return savedPicks(item, managerOf(roster.agents, "ops"), state.card, id)
+    } catch (error) {
+      return (error as Error).message
+    }
+  },
+  machine: hostname().split(".")[0]!,
 })
 
 const gitIn = (cwd: string, ...args: string[]) => {
@@ -377,6 +428,35 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     )
     return 0
   }
+  const folders = (await readRecord(deps.data).catch(() => ({ entries: [] }))).entries
+    .filter((e) => e.kind === "folder")
+    .map((e) => e.path)
+  if (args.card !== undefined) {
+    if (!CARD_ID.test(args.card)) {
+      console.error(`playground: ${args.card} is not an Inbox card id`)
+      return 2
+    }
+    return removeApproved(args, args.card, folders, roots, deps)
+  }
+  if (
+    args.worktree &&
+    !worktreeRepo(args.path, roots) &&
+    replayPlace(args.path, deps.home, folders)
+  ) {
+    if (args.discard || args.pr !== undefined) {
+      console.error(
+        `playground: ${args.path} is a replay worktree, which takes neither --discard nor --pr: its work is written to ${args.path}.diff first`,
+      )
+      return 2
+    }
+    const done = removeReplay(args.path, { folders, procs: deps.procs() }, roots)
+    if ("refused" in done) {
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    console.log(`Removed the replay worktree ${args.path}; its work is kept in ${done.diff}`)
+    return 0
+  }
   const moved = await removePath(args, await deps.session(), deps, (line) =>
     console.log(`playground: ${line}`),
   )
@@ -385,6 +465,55 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   console.log(moved.line)
+  return 0
+}
+
+// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
+async function removeApproved(
+  args: { path: string; reason: string },
+  card: string,
+  folders: string[],
+  roots: Roots,
+  deps: RmDeps,
+): Promise<number> {
+  const picks = deps.approvals ? await deps.approvals(card) : "no Inbox is read here"
+  if (typeof picks === "string") {
+    console.error(`playground: card ${card} did not read: ${picks}`)
+    return 1
+  }
+  const pick = picks.find((p) => p.path === args.path && p.machine === deps.machine)
+  if (!pick) {
+    console.error(
+      `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${deps.machine ?? "this machine"}, so it stays`,
+    )
+    return 1
+  }
+  const approved = { bytes: pick.bytes, card }
+  const session = await deps.session()
+  let line: string
+  if (isWeights(args.path, deps.home, folders)) {
+    const done = deleteWeights(
+      args.path,
+      { approved, folders, reason: args.reason, session },
+      roots,
+    )
+    if ("refused" in done) {
+      if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    line = `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+  } else {
+    const done = quarantine(args.path, { approved, reason: args.reason, session }, roots)
+    if ("refused" in done) {
+      if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    line = `Moved to the trash as ${done.id} (${done.files} files), as card ${card} approved; playground rm --restore ${done.id} brings it back`
+  }
+  const dropped = await dropPaths(deps.data, [args.path]).catch(() => [])
+  console.log(dropped.length ? `${line}; its machine record entry is dropped` : line)
   return 0
 }
 
