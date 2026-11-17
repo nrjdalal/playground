@@ -1960,6 +1960,8 @@ const edits = (cmd: Command, parsed: Parsed, env: Env) =>
 
 // Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const IMPLICIT_SHELL = new Set(["exec", "execSync"])
+// The words that may stand before an exec that still opens its descriptors in the shell itself: zsh's builtin and bash's command
+const EXEC_FRONT = new Set(["builtin", "command"])
 const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
 // `shell`, a quoted key's quotes included, and the `: false` after it when that is its whole value, ended by a comma or a closing bracket.
 const SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g
@@ -2589,7 +2591,9 @@ async function inspect(
         if (named) return named
       }
     }
-    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+    // an exec with no command, quoted or escaped as the shell still runs it, or behind zsh's builtin or bash's command, opens its descriptors for the rest of the line
+    const execWords = cmd.words.map((w) => w.value)
+    if (execWords.at(-1) === "exec" && execWords.slice(0, -1).every((v) => EXEC_FRONT.has(v)))
       execFds = fdFiles(cmd.redirects, execFds)
     const teeTool = program(name)
     const hookWrite =
