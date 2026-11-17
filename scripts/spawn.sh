@@ -853,9 +853,9 @@ try:
             week_pct = None
         readings["week"] = week_pct
     elif backend == "local":
-        # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes (local-cap.ts read it before the gate)
-        cap, cap_from = local_cap.split("\t", 1)
-        cap = int(cap)
+        # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes, and the speed each keeps, which the keep beat reads from /metrics (local-cap.ts read both before the gate)
+        gate = json.loads(local_cap)
+        cap, cap_from, speed = gate["cap"], gate["from"], gate["speed"]
         rows = roster_rows()
         if rows is None:
             refuse("usage", f"it cannot read {roster_path} (does not read), so it cannot count the local sessions")
@@ -871,6 +871,17 @@ try:
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("usage", f"{len(live)} live local sessions ({', '.join(live)}), and the local model here serves {cap} at once ({cap_from}). Wait for one to end, close a session that is done, or start it on --backend glm or claude.")
+        elif speed:
+            # a window with no samples admits on the cap alone; the speed term reads only beside live local sessions, whose share of the server it is
+            n, tps, ttft = len(live), speed["decodeTps"], speed["ttftMean"]
+            readings.update(local_speed=speed)
+            later = "Wait for the next keep beat, close a session that is done, or start it on --backend glm or claude."
+            if speed["waiting"] > 0:
+                refuse("usage", f"the local model here has {speed['waiting']} requests waiting, so one more session would queue behind them. {later}")
+            if n and tps is not None and tps * n / (n + 1) < gate["minTps"]:
+                refuse("usage", f"each of the {n} live local sessions decodes {tps:.1f} tokens a second, so one more would leave about {tps * n / (n + 1):.1f}, under the speed floor of {gate['minTps']} (localModels.minTps). {later}")
+            if ttft is not None and ttft >= gate["maxFirstTokenSeconds"]:
+                refuse("usage", f"the local model here takes {ttft:.1f} s on average to a first token, at or over the first-token floor of {gate['maxFirstTokenSeconds']} s (localModels.maxFirstTokenSeconds). {later}")
     else:
         if pace_skip:
             readings["pace"] = pace_skip

@@ -782,7 +782,8 @@ describe("waitOutcome", () => {
     beat: DashboardBeat | null = RUNNING,
     api = false,
     failure: string | null = null,
-  ) => waitOutcome({ api, beat, failure, now }, { shownAt: 0, startedAt: 0 })
+    upHolds = false,
+  ) => waitOutcome({ api, beat, failure, now, upHolds }, { shownAt: 0, startedAt: 0 })
 
   test("ends at once when the API answers", () => {
     expect(at(42_000, RUNNING, true)).toEqual({
@@ -798,6 +799,16 @@ describe("waitOutcome", () => {
       ok: false,
     })
     expect(at(80_000, null)).toMatchObject({ ok: false })
+  })
+
+  test("keeps the wait going past a missing beat while up.py holds the job, and names the supervisor down only after the grace", () => {
+    // up.py has not had time to refresh the beat, so a hold keeps the wait going, not a "supervisor is not running"
+    expect(at(80_000, { ...RUNNING, running: false }, false, null)).toEqual({
+      done: "ops-dashboard's supervisor is not running, so the Dashboard will not come up (waited 1m 20s); see ops/dashboard/supervisor.log, then run playground again",
+      ok: false,
+    })
+    expect(at(80_000, { ...RUNNING, running: false }, false, null, true)).not.toHaveProperty("done")
+    expect(at(80_000, null, false, null, true)).not.toHaveProperty("done")
   })
 
   test("ends when ops-dashboard's heartbeat is older than three of its cycles, naming its age", () => {

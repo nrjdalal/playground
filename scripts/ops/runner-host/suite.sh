@@ -1,5 +1,5 @@
 #!/bin/bash
-# suite.sh <run>: runs local CI's steps on the runner host, so a suite takes no slot on the caller's machine (dispatcher, 18 Oct). ci.sh uploads a
+# suite.sh <run> <mode> <need>: runs local CI's steps on the runner host, so a suite takes no slot on the caller's machine (dispatcher, 18 Oct). ci.sh uploads a
 # `git archive` to <ci>/<run>.tar, <ci> being the folder this copy sits in (the box user's ~/.cache/playground-ci, ci.sh's BOX_CI_DIR), and starts this as that user,
 # never root, in a systemd user unit of its own, so a dropped ssh never ends the run; it unpacks the archive into <ci>/.claude/worktrees/<run>
 # and runs every step beside a Postgres container of its own on loopback, with nothing that reads the keyring (Secret Service). The box gets
@@ -11,6 +11,9 @@ RUN=${1:-}
 MODE=${2:-suite}
 [ "$MODE" = suite ] || [ "$MODE" = exec ] || [ "$MODE" = web ] || [ "$MODE" = stop ] || { echo "suite.sh: the mode is suite, exec, web or stop" >&2; exit 2; }
 [[ "$RUN" =~ ^[0-9a-f]{12}-[0-9a-z]{6}$ ]] || { echo "suite.sh: <run> is <tree id's first 12>-<6 letters>" >&2; exit 2; }
+# the MemAvailable a run needs to take a slot, which ci.sh, where the model server's floor and each run's peak are defined, passes as the floor past the run's peak
+NEED_KB=${3:-}
+[ "$MODE" = stop ] || [[ "$NEED_KB" =~ ^[0-9]+$ ]] || { echo "suite.sh: <need> is the MemAvailable in KiB the run needs, which ci.sh passes; copy ci.sh and suite.sh from canary together" >&2; exit 2; }
 CI=$(cd "$(dirname "$0")" && pwd)
 # the run's files are <ci>/<run>.*, and its tree sits under .claude/worktrees/, as a Mac worktree does, since some tests read their
 # own checkout's path (dashboardSource's rule 4)
@@ -46,10 +49,6 @@ install -d -m 0700 "$CI" "$CI/.claude" "$CI/.claude/worktrees"
 # first served: only the oldest live waiter tries a slot, since a bare retry let short runs starve a suite (22 min, 19 Oct)
 SLOTS=$(cat "$CI/slots" 2> /dev/null || echo 2)
 [[ "$SLOTS" =~ ^[1-9][0-9]?$ ]] || SLOTS=2
-# a run takes a slot only while the box's MemAvailable keeps the model server's 15 GiB floor past the run's own peak, which ci.sh's reach() reads before it uploads: a suite's or a web build's 4.5 GiB (measured on the old runner box, 24 Oct), an exec's 2 GiB (estimated)
-FLOOR_KB=$((15 * 1024 * 1024))
-SUITE_PEAK_KB=$((4608 * 1024))
-EXEC_PEAK_KB=$((2048 * 1024))
 Q=$CI/queue
 install -d -m 0755 "$Q"
 TICKET=$Q/$(date +%s%N)-$RUN
@@ -79,12 +78,11 @@ release() {
   LOCKS=()
   LANE=
 }
-# whether the box's free memory covers this run's peak and keeps the floor
+# whether the box's free memory covers the run's need, the floor past its peak, which ci.sh's reach() read before it uploaded
 room() {
-  local kb peak=$EXEC_PEAK_KB
-  [ "$TAKE" = exec ] || peak=$SUITE_PEAK_KB
+  local kb
   kb=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2> /dev/null)
-  [ "${kb:-0}" -ge $((FLOOR_KB + peak)) ]
+  [ "${kb:-0}" -ge "$NEED_KB" ]
 }
 take() {
   local i fd other how=(-n)
@@ -164,6 +162,7 @@ if PATH="$HOME/.local/bin:/usr/bin:/bin" command -v node > /dev/null; then rm -f
 # the subshell closes the slot locks before the steps start, so a daemon a step leaves behind cannot keep a slot once this run ends
 (
   release
+  # every line of this file outside the env -i below runs in the unit's own environment, its session bus included, so it stays free of credentials: no gh, credential helper, docker login or token
   # past the box's slowest parallel pass (1830s measured, 27 Oct) and under the suite step's timeout 2400, so a stall ends naming its files
   # no step reaches the keyring's Secret Service, whose locked daemon linger kept alive jammed the factory's calls on spark-a566: the bus is disabled, not just unset, since a bus library finds /run/user/<uid>/bus by itself, and docker, git and gh read configs of the run's own
   exec env -i CI_RUN="$RUN" HOME="$HOME" PATH="$CI/bin:$HOME/.bun/bin:$HOME/.local/bin:/usr/bin:/bin" DBUS_SESSION_BUS_ADDRESS=disabled: DOCKER_CONFIG="$CI/docker" GH_CONFIG_DIR="$CI/gh" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 TEST_PARALLEL_DEADLINE_MS=2100000 RUN="$RUN" DIR="$DIR" F="$F" MODE="$MODE" bash -s

@@ -128,6 +128,24 @@ except SystemExit as e:
 print(json.dumps({"code": code, "started": started}))
 `
 
+// Loads up.py and runs main() with one job, every job down, its start recorded within GRACE, its heartbeat pid dead and no heartbeat.startedAt, but boot_time is BOOT, so the grace ends only when the machine booted after the recorded start.
+const STARTED_AFTER_BOOT = `${LOAD}import os
+started = []
+up.healthy = lambda job: (False, "no heartbeat")
+up.ptable.table = lambda: {4101: None}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (0, "")
+up.start = lambda job: started.append(job["name"]) or True
+up.herdr = lambda: ("/x/herdr", "")
+up.boot_time = lambda: int(os.environ.get("BOOT") or 0)
+sys.argv = ["up.py"]
+try:
+    up.main()
+except SystemExit:
+    pass
+print(json.dumps({"started": started}))
+`
+
 const exitOf = (jobs: object[], ...args: string[]) => {
   const config = mkdtempSync(join(scratch, "exit-"))
   mkdirSync(join(dataOf(config), "ops"), { recursive: true })
@@ -334,6 +352,50 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-y")
   // ops-w has no holder to stop, so a start would run a second copy beside its heartbeat pid
   expect(log).not.toContain("ops-w")
+})
+
+// a start recorded within GRACE, its heartbeat pid dead and no heartbeat.startedAt, but the machine booted after the recorded start, so ops-up ends the grace and starts the job in that pass.
+test("a job recorded within GRACE starts when the machine booted after its recorded start", () => {
+  const config = mkdtempSync(join(scratch, "grace-boot-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = {
+    command: "bash /x/ops-dashboard.sh",
+    heartbeat: "ops-dashboard",
+    name: "ops-dashboard",
+    runtime: "herdr",
+    stop: "dashboard",
+  }
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
+  const now = Math.floor(Date.now() / 1000)
+  writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-dashboard": now - 30 }))
+  // a dead heartbeat pid and no heartbeat.startedAt, so only the boot ends the grace
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 4101,
+      lastBeatAt: new Date((now - 60) * 1000).toISOString(),
+      lastResult: "ok",
+      cycleSeconds: 60,
+    }),
+  )
+  const child = Bun.spawnSync(["python3", "-I", "-c", STARTED_AFTER_BOOT, upPy], {
+    env: {
+      BOOT: String(now - 20),
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  // the harness prints a line per start before its JSON summary, so read the last line
+  expect(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!).started).toEqual([
+    "ops-dashboard",
+  ])
 })
 
 // Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
@@ -948,4 +1010,68 @@ test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute
     expect(r.out).toBe("")
     expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (d)")
   }
+})
+
+// #2613: on a Mac the host start comes from sysctl's `{ sec = N, usec = U }` line, so boot_time parses N out of it instead of falling through to 0 or the Linux /proc/stat read.
+const BOOTSYSCTL = `${LOAD}import subprocess
+class _R:
+    returncode = 0
+    stdout = """{ sec = 1700000000, usec = 500 } Tue Nov 14 10:00:00 2026"""
+subprocess.run = lambda *a, **k: _R()
+print(up.boot_time())
+`
+
+test("boot_time reads the macOS boot epoch out of sysctl's sec value", () => {
+  const child = Bun.spawnSync(["python3", "-I", "-c", BOOTSYSCTL, upPy], {
+    env: {
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(1700000000)
+})
+
+// #2613: a heartbeat startedAt is a UTC (Z) stamp, so beat_started must read it as its UTC epoch, not a zone-bent one that is off under DST.
+test("beat_started reads a summer heartbeat start as its UTC epoch", () => {
+  const config = mkdtempSync(join(scratch, "beat-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 4101,
+      lastBeatAt: "2026-07-01T10:00:00Z",
+      startedAt: "2026-07-01T10:00:00Z",
+    }),
+  )
+  const expected = Math.floor(Date.parse("2026-07-01T10:00:00Z") / 1000)
+  const child = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}print(up.beat_started({"heartbeat": "ops-dashboard"}))\n`,
+      upPy,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: SYS_PATH,
+        // a zone that observes DST in summer, so the old mktime/time.timezone read is one hour early
+        TZ: "America/New_York",
+        ...SYSTEMD_ENV,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(expected)
 })
