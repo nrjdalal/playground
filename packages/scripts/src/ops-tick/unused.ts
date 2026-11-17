@@ -58,7 +58,7 @@ export const sizeOf = (path: string, seen = new Set<string>()): number => {
   return list(path).reduce((sum, name) => sum + sizeOf(join(path, name), seen), 0)
 }
 
-// Each file under a folder whose name marks model weights, read through no symlink.
+// Each weights file (.gguf, .safetensors) under dir, past .git, node_modules and the skip folders, read through no symlink.
 const weightFiles = (dir: string, skip: string[]): string[] =>
   list(dir).flatMap((name) => {
     const path = join(dir, name)
@@ -88,9 +88,8 @@ const modelTexts = async (models: string): Promise<string> => {
 }
 
 // Weights no model folder names: each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit) or in a recorded folder outside the data folder and the home's dot folders.
-const weights = async (home: string, folders: string[], data: string): Promise<string[]> => {
+const weights = (home: string, folders: string[], data: string, named: string): string[] => {
   const models = join(home, "models")
-  const named = await modelTexts(models)
   const hub = join(models, "hf", "hub")
   const repos = list(hub)
     .filter((name) => name.startsWith("models--"))
@@ -209,7 +208,7 @@ export async function measureUnused(places: Places): Promise<Unused[]> {
     ...(await images(places, named)).map((i) => of("image", i.path, i.bytes)),
     ...rehearsals(places.data).map((path) => of("rehearsal", path)),
     ...runs(places.home, places.now).map((path) => of("run", path)),
-    ...(await weights(places.home, folders, places.data)).map((path) => of("weights", path)),
+    ...weights(places.home, folders, places.data, named).map((path) => of("weights", path)),
   ].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
 }
 
