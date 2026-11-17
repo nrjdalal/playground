@@ -480,7 +480,8 @@
   EOF
   ```
 
-- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule); `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs, and `chromium-ca`, the browser policy below),
+- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule), or on a peer, whose password a secret card carries (below);
+  `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs, and `chromium-ca`, the browser policy below),
   and `why` (`rootSchema`).
   Each entry holds what the step does and how to undo it, and its card shows both.
   Every listed step is one fixed script in `api/hono/src/lib/system/root/`, and the card takes no argument, path or command: every other key is refused, so no text from a card reaches root.
@@ -509,7 +510,6 @@
   It refuses when no DER is kept, and when another file in either folder already sets the same policy, naming that file, since two files setting it conflict.
   A new CA means a new install card, then the step again: until then every `.localhost` page in those browsers fails with `ERR_CERT_AUTHORITY_INVALID`.
   Helium takes the policy at its next start, and may show Managed by your organization in its menu.
-  A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
 
   ```bash
   bun run ask new <<'EOF'
