@@ -7,6 +7,7 @@ import {
   procUsedBytes,
   readIdle,
   readSysctl,
+  readBootTime,
   readUpSince,
   type SysctlName,
   sysctlOf,
@@ -131,6 +132,18 @@ describe("the machine's latest boot or wake", () => {
     onLinux(procDir({ boot: 1_799_999_999 }))
     const mac = async () => ({ code: 0, out: kern(1_763_000_000) + kern(1_763_050_000) })
     expect(await readUpSince(mac)).toBe(1_763_050_000_000)
+  })
+
+  test("the boot alone asks macOS for kern.boottime, never a wake, and is btime on Linux", async () => {
+    onLinux(procDir({ boot: 1_763_000_000 }))
+    const asked: string[][] = []
+    const mac = async (argv: string[]) => {
+      asked.push(argv)
+      return { code: 0, out: kern(1_763_010_000) }
+    }
+    expect(await readBootTime(mac)).toBe(1_763_010_000_000)
+    expect(asked).toEqual([["sysctl", "-n", "kern.boottime"]])
+    expect(await readBootTime(LINUX_SYSCTL)).toBe(1_763_000_000_000)
   })
 })
 
