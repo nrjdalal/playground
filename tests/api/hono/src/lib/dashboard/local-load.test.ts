@@ -64,6 +64,20 @@ describe("runStart", () => {
     expect(result.line).toBe("playground model use ran too long and was stopped")
     expect(Date.now() - begun).toBeLessThan(10_000)
   })
+
+  test("a start stopped by another signal before its timeout names that signal", async () => {
+    const result = await runStart(bun("process.kill(process.pid, 'SIGKILL')"), "/", 10_000)
+    expect(result.code).not.toBe(0)
+    expect(result.line).toBe("playground model use was stopped by SIGKILL")
+  })
+
+  test("it runs in the cwd it is given", async () => {
+    expect(process.cwd()).not.toBe("/")
+    expect(await runStart(bun("console.log(process.cwd())"), "/", 10_000)).toEqual({
+      code: 0,
+      line: "/",
+    })
+  })
 })
 
 describe("startModel", () => {

@@ -4,6 +4,7 @@ import { MODEL_NAME } from "@packages/scripts/local-model/model"
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
 
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
+import { runArgv } from "@/lib/dashboard/run-argv"
 import { dataDir } from "@/lib/sessions/paths"
 
 // How long one `playground model use` may run: it waits for the server it starts to answer /health, so its timeout sits past the 15 minutes a load is given.
@@ -37,23 +38,17 @@ export async function startModel(
   return runStart(loadArgv(model, root), root, timeoutMs)
 }
 
-// Runs one start's argv in cwd with no shell, killed by its own handle past timeoutMs: its exit code and the last line it printed, stdout's on success and stderr's on a failure, or that it ran too long.
+// Runs one start's argv in cwd through runArgv, killed past timeoutMs: its exit code and the last line it printed, stdout's on success and stderr's on a failure, or the signal that stopped it, named as a timeout only once timeoutMs has passed.
 export async function runStart(argv: string[], cwd: string, timeoutMs: number): Promise<Started> {
-  const proc = Bun.spawn(argv, {
-    cwd,
-    env: process.env,
-    killSignal: "SIGTERM",
-    stderr: "pipe",
-    stdin: "ignore",
-    stdout: "pipe",
-    timeout: timeoutMs,
-  })
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  if (proc.signalCode)
-    return { code: code || 1, line: "playground model use ran too long and was stopped" }
-  return { code, line: lastLine(code === 0 ? out : err || out) }
+  const begun = Date.now()
+  const run = await runArgv(argv, timeoutMs, undefined, cwd)
+  if (run.signal)
+    return {
+      code: run.code || 1,
+      line:
+        Date.now() - begun >= timeoutMs
+          ? "playground model use ran too long and was stopped"
+          : `playground model use was stopped by ${run.signal}`,
+    }
+  return { code: run.code, line: lastLine(run.code === 0 ? run.out : run.err || run.out) }
 }
