@@ -36,7 +36,7 @@ export class Called extends Error {
   }
 }
 
-// The seam the tests swap: run() is one gh or git call's stdout, sleep() waits, time() reads the clock in seconds.
+// The seam the tests swap: run() is one gh or git call's stdout, gh skipped while ghDown names why, sleep() waits, time() reads the clock in seconds.
 // io.tests's command: RUN_SLOT_HERE=1 keeps the run on this machine, since run-slot sends a test:file run to the runner box by default, whose junit report never comes back, so every red would read as NO-REPORT.
 export const testsArgv = (
   session: string,
@@ -58,8 +58,28 @@ export const testsArgv = (
   ...files,
 ]
 
+// GH_STALE_MS in packages/scripts/src/gh-read.ts, in seconds, which a test holds equal; a skill's script imports nothing outside its folder, so ghDown's rule is kept here too.
+export const GH_STALE_SECONDS = 120
+
+// Why gh fails, from ops-tick's gh sign-in probe (ops/tick/gh-auth.json in the data folder) while its result reads failed and is under GH_STALE_SECONDS old, else null, so a waiter skips gh rather than flood a broken one.
+export const ghDown = (
+  data = process.env.PLAYGROUND_DATA_DIR || join(homedir(), ".playground"),
+  now = Date.now(),
+): string | null => {
+  try {
+    const last = JSON.parse(readFileSync(join(data, "ops", "tick", "gh-auth.json"), "utf8"))
+    return last.ok === false && now - Date.parse(String(last.at)) <= GH_STALE_SECONDS * 1000
+      ? last.reason || "gh fails"
+      : null
+  } catch {
+    return null
+  }
+}
+
 export const io = {
   run: (...args: string[]): string => {
+    const down = args[0] === "gh" ? ghDown() : null
+    if (down) throw new Called(args, "", `gh unreachable: ${down}`)
     const out = Bun.spawnSync(args, { stdout: "pipe", stderr: "pipe" })
     const stdout = out.stdout.toString()
     const stderr = out.stderr.toString()

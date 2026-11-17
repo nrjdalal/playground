@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import * as state from "../../../../../../extensions/core/skills/code-review-loop/scripts/state"
+import { GH_STALE_MS } from "../../../../../../packages/scripts/src/gh-read"
 import { REQUIRED_CHECKS } from "../../../../../../packages/scripts/src/pr-merge/gates"
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
@@ -2252,4 +2253,32 @@ test("12k merge --conflict-only reads merge-tree alone: no checkout, no test (#2
   ])
   expect(conflict.lines).toEqual([`CONFLICT on ${clashCanary}: src/a.ts`])
   expect(conflict.code).toBe(1)
+})
+
+// wait and checks poll GitHub every 5 minutes for each reviewer, so they skip gh while ops-tick's gh sign-in probe reads failed
+test("io.run skips gh while the gh sign-in probe's fresh result reads failed, and only then", () => {
+  const data = mkdtempSync(join(tmpdir(), "state-gh-down-"))
+  dirs.push(data)
+  mkdirSync(join(data, "ops", "tick"), { recursive: true })
+  const result = (ok: boolean, at = new Date()) =>
+    writeFileSync(
+      join(data, "ops", "tick", "gh-auth.json"),
+      JSON.stringify({ at: at.toISOString(), ok, reason: "gh token invalid" }),
+    )
+  result(false)
+  expect(state.ghDown(data)).toBe("gh token invalid")
+  const saved = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    expect(() => state.io.run("gh", "api", "user")).toThrow("gh unreachable: gh token invalid")
+    expect(state.io.run("git", "--version")).toStartWith("git version")
+  } finally {
+    if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = saved
+  }
+  result(false, new Date(Date.now() - state.GH_STALE_SECONDS * 1000 - 1_000))
+  expect(state.ghDown(data)).toBeNull()
+  result(true)
+  expect(state.ghDown(data)).toBeNull()
+  expect(state.GH_STALE_SECONDS * 1000).toBe(GH_STALE_MS)
 })
