@@ -15,6 +15,7 @@ import {
   ROOT_NAMES,
   rowOfAnswer,
 } from "@packages/config/inbox"
+import { type Peer, peerSchema } from "@packages/config/org"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
@@ -44,7 +45,18 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from 
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
+import { keychainItem } from "../keychain"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
+import { org } from "../org"
+import {
+  peerCopyArgv,
+  peerInstallArgv,
+  peerInstalledRefusal,
+  peerOf,
+  peerReadArgv,
+  peerSecret,
+  peerStepArgv,
+} from "../system/peer-root"
 import {
   caFile,
   caPin,
@@ -326,6 +338,8 @@ const rootSchema = z.strictObject({
   ca: z
     .strictObject({ sha256: z.string().regex(HEX64, "Must be a sha256 in 64 lowercase hex") })
     .optional(),
+  // a machine org.cluster names, whose steps run over ssh (system/peer-root.ts); none for this one
+  machine: peerSchema.shape.name.optional(),
   scripts: z
     .array(
       z.strictObject({
@@ -343,7 +357,10 @@ const rootSchema = z.strictObject({
 export type InboxRoot = z.infer<typeof rootSchema>
 
 // Runs an argv with no shell and returns its exit code and output; run-argv.ts holds the real one, and a test passes its own.
-export type ArgvRun = (argv: string[]) => Promise<{ code: number; err: string; out: string }>
+export type ArgvRun = (
+  argv: string[],
+  input?: string,
+) => Promise<{ code: number; err: string; out: string }>
 
 // An app's name as the owner's list holds it: a letter or digit of any script first, then letters, digits, spaces and . _ & ' ( ) + -, so none starts as a flag or names a path.
 const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._&'()+-]*$/u
@@ -1624,6 +1641,16 @@ const rootScripts = async (
   if (input.kind !== "decision" || input.preview.type !== "root") return input
   const { preview } = input
   const refuse = (message: string): Refused => ({ code: "VALIDATION_ERROR", message, ok: false })
+  if (preview.machine) {
+    if (!org.cluster.peers.some((peer) => peer.name === preview.machine))
+      return refuse(`${preview.machine} is not a machine this Dashboard reaches`)
+    // its install reads the password from this item, so a name no item can take is refused here, not at Approve
+    try {
+      peerSecret(preview.machine)
+    } catch (error) {
+      return refuse(error instanceof Error ? error.message : String(error))
+    }
+  }
   if (preview.step !== "install")
     return preview.scripts || preview.ca
       ? refuse("A root step's card lists no scripts and no CA")
@@ -1631,6 +1658,10 @@ const rootScripts = async (
   const scripts = await repoScripts()
   if (preview.scripts && !isDeepStrictEqual(preview.scripts, scripts))
     return refuse("An install card's scripts are this checkout's; post it with none to fill them")
+  if (preview.machine)
+    return preview.ca
+      ? refuse("An install card for another machine keeps no CA")
+      : { ...input, preview: { ...preview, scripts } }
   const pin = await caPin()
   if (preview.ca && preview.ca.sha256 !== pin)
     return refuse("An install card's CA is this machine's; post it with none to fill it")
@@ -2276,14 +2307,79 @@ const ROOT_EXITS: Record<number, string> = {
   143: `the password window got no answer in ${ROOT_TIMEOUT_MS / 60_000} minutes, so nothing ran as root`,
 }
 
+// ssh's and pkexec's codes on a peer: 126 and 127 when its polkit rule did not answer yes, so pkexec found no one to ask, and 255 when ssh could not connect
+const PEER_EXITS: Record<number, string> = {
+  126: "that machine's rule did not let it run, so nothing ran as root: approve a new install card for it",
+  127: "that machine's rule did not let it run, so nothing ran as root: approve a new install card for it",
+  143: `that machine gave no answer in ${ROOT_TIMEOUT_MS / 60_000} minutes, so nothing ran as root`,
+  255: "ssh could not reach that machine, so nothing ran as root",
+}
+
+// A peer's seams: the machines org.cluster names with their ssh key, and the secret store item an install reads its password from; a test passes its own.
+export type PeerSeams = {
+  key?: string
+  peers: readonly Peer[]
+  secret: (service: string) => { read: () => Promise<string | null>; remove: () => Promise<void> }
+}
+
+const PEER_SEAMS: PeerSeams = {
+  key: org.cluster.key,
+  peers: org.cluster.peers,
+  secret: (service) => keychainItem(service),
+}
+
+// Deletes a peer's password item, then reads it again, so the line says only what is true.
+async function forgetPassword(
+  stored: ReturnType<PeerSeams["secret"]>,
+  service: string,
+): Promise<{ gone: boolean; line: string }> {
+  await stored.remove().catch(() => undefined)
+  const gone = (await stored.read().catch(() => null)) === null
+  return {
+    gone,
+    line: gone ? `deleted ${service}` : `could not delete ${service}: remove it by hand`,
+  }
+}
+
 export const ROOT_LOST_LINE =
   "the Dashboard restarted while it ran, so its result is unknown: check it before you approve it again"
+
+// A peer install a restart cut off never reached its own delete, so its password may still be kept: delete it now, and say so on the card.
+async function forgetLostPassword(
+  db: Database,
+  item: InboxItem,
+  secret: PeerSeams["secret"],
+  now: Date,
+): Promise<InboxItem> {
+  const preview = item.preview as InboxPreview
+  if (preview.type !== "root" || !preview.machine || preview.step !== "install") return item
+  let service: string
+  try {
+    service = peerSecret(preview.machine)
+  } catch {
+    return item
+  }
+  const forgot = await forgetPassword(secret(service), service)
+  const rooted: RunResult = { exitCode: 1, line: `${ROOT_LOST_LINE}; ${forgot.line}` }
+  console.log(`inbox: ${preview.machine}'s install was cut off by a restart; ${forgot.line}`)
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`${inboxItem.answer} || (${JSON.stringify({ rooted })}::text)::jsonb`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(eq(inboxItem.id, item.id))
+    .returning()
+  return row ? toItem(row) : item
+}
 
 // Run once at API start: ends each approved root card with no result answered before this process started, as a failed rooted that says so, then tells its poster as its own run would have; only the process that claimed a card runs it, so a restart lost each one.
 export async function endLostRoots(
   db: Database,
   now: Date,
   telling?: Omit<Sending, "now">,
+  secret: PeerSeams["secret"] = PEER_SEAMS.secret,
 ): Promise<InboxItem[]> {
   const cutoff = now.toISOString()
   const rooted: RunResult = { exitCode: 1, line: ROOT_LOST_LINE }
@@ -2304,7 +2400,8 @@ export async function endLostRoots(
       ),
     )
     .returning()
-  const ended = rows.map(toItem)
+  const ended: InboxItem[] = []
+  for (const item of rows.map(toItem)) ended.push(await forgetLostPassword(db, item, secret, now))
   if (!telling) return ended
   const told: InboxItem[] = []
   // each card on its own, so a send that throws (a database write) leaves the other posters told
@@ -2329,7 +2426,9 @@ export async function rootRun(
   run: ArgvRun,
   preview: InboxRoot,
   installed: typeof installedRefusal = installedRefusal,
+  seams: PeerSeams = PEER_SEAMS,
 ): Promise<RunResult> {
+  if (preview.machine) return peerRootRun(run, preview, preview.machine, seams)
   let argv: string[]
   try {
     if (preview.step === "install")
@@ -2349,6 +2448,82 @@ export async function rootRun(
   const ran = await run(argv)
   const exit = ROOT_EXITS[ran.code]
   return exit ? { exitCode: ran.code, line: exit } : runResult(ran)
+}
+
+// A root card's run on a peer: an install copies the scripts as the ssh user, then runs PEER_INSTALL_TEXT through sudo with the password on stdin alone, and deletes the password's item on every path; a step reads its installed script there first, then runs it through pkexec, which the install's rule lets through.
+async function peerRootRun(
+  run: ArgvRun,
+  preview: InboxRoot,
+  machine: string,
+  { key, peers, secret }: PeerSeams,
+): Promise<RunResult> {
+  const fail = (error: unknown): RunResult => ({
+    exitCode: 1,
+    line: error instanceof Error ? error.message : String(error),
+  })
+  const result = (ran: Awaited<ReturnType<ArgvRun>>): RunResult => {
+    const exit = PEER_EXITS[ran.code]
+    return exit ? { exitCode: ran.code, line: exit } : runResult(ran)
+  }
+  let peer: Peer
+  try {
+    peer = peerOf(machine, peers)
+  } catch (error) {
+    return fail(error)
+  }
+  if (preview.step !== "install") {
+    try {
+      const read = await run(peerReadArgv(peer, key, preview.step))
+      if (read.code === 255) return result(read)
+      const mine = (await repoScripts()).find((script) => script.name === preview.step)
+      const refused = peerInstalledRefusal(read.out, preview.step, mine?.sha256 ?? "")
+      if (refused) return { exitCode: 1, line: refused }
+      return result(await run(peerStepArgv(peer, key, preview.step)))
+    } catch (error) {
+      return fail(error)
+    }
+  }
+  let service: string
+  let argv: string[]
+  try {
+    service = peerSecret(machine)
+    argv = peerInstallArgv(peer, key, preview.scripts ?? [])
+  } catch (error) {
+    return fail(error)
+  }
+  const item = secret(service)
+  const password = await item.read().catch(() => null)
+  if (!password)
+    return {
+      exitCode: 1,
+      line: `${machine}'s admin password is not in ${service}: post a secret card for it, then approve again`,
+    }
+  const cut = (text: string) => text.split(password).join("…")
+  let ran: RunResult
+  try {
+    ran = { exitCode: 0, line: "" }
+    for (const copy of peerCopyArgv(peer, key)) {
+      const copied = await run(copy)
+      if (copied.code !== 0) {
+        ran = result({ ...copied, err: cut(copied.err), out: cut(copied.out) })
+        break
+      }
+    }
+    if (ran.exitCode === 0) {
+      const installed = await run(argv, `${password}\n`)
+      ran = result({ ...installed, err: cut(installed.err), out: cut(installed.out) })
+    }
+  } catch (error) {
+    ran = fail(error instanceof Error ? cut(error.message) : "the install could not start")
+  }
+  const forgot = await forgetPassword(item, service)
+  console.log(
+    `inbox: ${machine}'s install ${ran.exitCode === 0 ? "ran" : "failed"}; ${forgot.line}`,
+  )
+  return {
+    exitCode: forgot.gone ? ran.exitCode : ran.exitCode || 1,
+    line: [ran.line, forgot.line].filter(Boolean).join("; "),
+  }
 }
 
 // Writes an own card's flag on its one row of usage.accounts at its scope as the owner's act, the list read whole and every other row put back as it was; a value that is not a list, or a row gone since the post, writes nothing.
