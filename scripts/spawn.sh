@@ -2056,10 +2056,10 @@ if [ "$BACKEND" = glm ]; then
   MODEL=$GLM_MODEL
 fi
 # The local model maps every model Claude Code asks for to the served name, on its loopback port and a placeholder token, the tool search deferred as on GLM.
-# Its chat template reads no effort, so each effort sets Claude Code's thinking instead (measured on M, 17 Nov: vLLM ends thinking at the cap; off answered 10-30x sooner, and was wrong where uncapped thinking was right): low turns it off, medium caps it at 8192 tokens (a budget is sent only for a model with no adaptive thinking), and high and above leave it uncapped.
+# Its chat template reads no effort, so each effort sets Claude Code's thinking instead (measured on M, 17 Nov: vLLM ends thinking at the cap; off answered 10-30x sooner, and was wrong where uncapped thinking was right): low turns it off and medium caps it at 8192 tokens, each with adaptive thinking off, since Claude Code sends adaptive thinking whatever MAX_THINKING_TOKENS says (measured at low: thinking blocks with it alone), and high and above leave it uncapped.
 if [ "$BACKEND" = local ]; then
   case "${EFFORT:-high}" in
-    low) THINKING="thinking off; MAX_THINKING_TOKENS=0 " ;;
+    low) THINKING="thinking off; CLAUDE_CODE_MODEL_CAPABILITIES=$LOCAL_SERVED=-adaptive_thinking MAX_THINKING_TOKENS=0 " ;;
     medium) THINKING="thinking capped at 8192 tokens; CLAUDE_CODE_MODEL_CAPABILITIES=$LOCAL_SERVED=-adaptive_thinking MAX_THINKING_TOKENS=8192 " ;;
     *) THINKING="thinking uncapped; " ;;
   esac

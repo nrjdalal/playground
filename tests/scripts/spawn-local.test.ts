@@ -23,7 +23,7 @@ const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
 // What each effort sets for the local model, whose template reads no effort: thinking off at low, a cap of 8192 thinking tokens at medium, and thinking uncapped from high.
 const THINKING: Record<string, string> = {
   high: "thinking uncapped; ",
-  low: "thinking off; MAX_THINKING_TOKENS=0 ",
+  low: "thinking off; CLAUDE_CODE_MODEL_CAPABILITIES=local=-adaptive_thinking MAX_THINKING_TOKENS=0 ",
   max: "thinking uncapped; ",
   medium:
     "thinking capped at 8192 tokens; CLAUDE_CODE_MODEL_CAPABILITIES=local=-adaptive_thinking MAX_THINKING_TOKENS=8192 ",
