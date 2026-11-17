@@ -13,6 +13,7 @@ import {
   ThreadsGroup,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
+import MODEL_ICONS from "../../../../../../web/next/src/lib/model-icons.json"
 import { groupOrder } from "../../../../../../web/next/src/lib/sidebar-groups"
 import { iconTone, STATES, statusIcon } from "../../../../../../web/next/src/lib/status-icons"
 import { tipsOf } from "../../tooltips"
@@ -27,11 +28,13 @@ const { createElement } = (await import(Bun.resolveSync("react", web))) as {
 const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server", web))) as {
   renderToStaticMarkup: (node: Node) => string
 }
-const { RiAnthropicFill, RiHammerFill, RiSignalCellular3Fill, RiSkull2Fill, RiZhipuAiFill } =
-  (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
-    "RiAnthropicFill" | "RiHammerFill" | "RiSignalCellular3Fill" | "RiSkull2Fill" | "RiZhipuAiFill",
-    unknown
-  >
+const { RiHammerFill, RiRobot2Line, RiSignalCellular3Fill, RiSkull2Fill } = (await import(
+  Bun.resolveSync("@remixicon/react", web)
+)) as Record<"RiHammerFill" | "RiRobot2Line" | "RiSignalCellular3Fill" | "RiSkull2Fill", unknown>
+
+// A maker's vendored icon as its logo draws it, to find it in a row.
+const logoOf = (id: string) => MODEL_ICONS.makers.find((maker) => maker.id === id)!.icon!.data
+const ANTHROPIC = logoOf("anthropic")
 
 type Worker = Parameters<typeof SessionRow>[0]["worker"]
 
@@ -479,7 +482,7 @@ describe("SessionRow", () => {
       model: "claude-opus-5-5",
     })
     const button = /<a[^>]*data-sidebar="menu-button"[^>]*>([\s\S]*?)<\/a>/.exec(html)?.[1] ?? ""
-    const logo = button.indexOf(pathOf(RiAnthropicFill))
+    const logo = button.indexOf(ANTHROPIC)
     const effort = button.indexOf(pathOf(RiSignalCellular3Fill))
     expect(logo).toBeGreaterThan(button.indexOf("Message dispatcher from the dashboard"))
     expect(effort).toBeGreaterThan(logo)
@@ -490,13 +493,19 @@ describe("SessionRow", () => {
     ])
     expect(shownText(html)).toBe("Message dispatcher from the dashboard")
     expect(shape(html)).toEqual(stock)
-    // a GLM model draws Z.ai's own Z, ZeroSDK's mark, and a row with no model or effort draws neither
+    // a GLM model draws Z.ai's logo, an Ornith one its Hugging Face avatar, a maker with no icon the fallback, and a row with no model or effort draws neither
     const glm = row("worker-greed", "worker", [], { model: "glm-5.3-flash" })
-    expect(glm).toContain('d="M20.1312 7.50002L17.4088')
-    expect(glm).not.toContain(pathOf(RiZhipuAiFill))
+    expect(glm).toContain(logoOf("zai"))
     expect(tipsOf(glm)).toContain("GLM 5.3 Flash")
+    const ornith = row("worker-greed", "worker", [], { model: "Ornith-1.5-122B-NVFP4" })
+    expect(ornith).toContain(logoOf("ornith"))
+    expect(tipsOf(ornith)).toContain("Ornith-1.5-122B-NVFP4")
+    const unknown = row("worker-greed", "worker", [], { model: "gpt-9" })
+    expect(unknown).toContain(pathOf(RiRobot2Line))
+    expect(tipsOf(unknown)).toContain("gpt-9")
     const bare = row("worker-greed", "worker")
-    expect(bare).not.toContain(pathOf(RiAnthropicFill))
+    expect(bare).not.toContain(ANTHROPIC)
+    expect(bare).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(bare)).toHaveLength(1)
   })
 
@@ -507,7 +516,7 @@ describe("SessionRow", () => {
   ] as const) {
     test(`a ${role} row that opens nothing keeps the effort's place with no effort, so its logo lines up with a row that has one`, () => {
       const html = row(name, role, [], { model: "claude-opus-5-5" })
-      const logo = html.indexOf(pathOf(RiAnthropicFill))
+      const logo = html.indexOf(ANTHROPIC)
       expect(logo).toBeGreaterThan(-1)
       expect(
         html.indexOf(
@@ -851,9 +860,7 @@ describe("SessionRow's dropdown and group", () => {
       ""
     expect(link).not.toContain("text-2xs")
     expect(shownText(link)).toBe("Message dispatcher from the dashboard")
-    expect(link.indexOf(pathOf(RiSignalCellular3Fill))).toBeGreaterThan(
-      link.indexOf(pathOf(RiAnthropicFill)),
-    )
+    expect(link.indexOf(pathOf(RiSignalCellular3Fill))).toBeGreaterThan(link.indexOf(ANTHROPIC))
     const button = openTag(html, /<a[^>]*href="\/dashboard\?worker=s-reviewer-greed"[^>]*>/)
     expect([...classesOf(button)].filter((c) => /^(h|min-h)-/.test(c))).toEqual(["h-7"])
     // its name and both lines are its tooltip, a line each (a reviewer: a reviewer and a tester otherwise read the same), and a screen reader hears them as one line
@@ -1452,7 +1459,7 @@ describe("Alpha's effort icon is the original effort symbol", () => {
       model: "claude-opus-5-5",
     })
     expect(alphaRow).toContain(pathOf(RiSignalCellular3Fill))
-    expect(alphaRow).toContain(pathOf(RiAnthropicFill))
+    expect(alphaRow).toContain(ANTHROPIC)
     expect(alphaRow).not.toContain(pathOf(RiSkull2Fill))
     expect(tipsOf(alphaRow)).toContain("high")
     const maxRow = row("dispatcher", "dispatcher", [], { effort: "max", model: "claude-opus-5-5" })

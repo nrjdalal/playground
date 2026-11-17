@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { StatusIcon } from "../../../../../web/next/src/components/dashboard/worker-light"
+import MODEL_ICONS from "../../../../../web/next/src/lib/model-icons.json"
 import {
   checkedOf,
   DOWN_ICON,
@@ -16,6 +17,8 @@ import {
   STATUS_TONES,
   statusIcon,
   effortIcon,
+  FALLBACK_PROVIDER_ICON,
+  providerIcon,
   taskIcon,
   type LightFacts,
 } from "../../../../../web/next/src/lib/status-icons"
@@ -353,13 +356,32 @@ describe("taskIcon", () => {
 })
 
 describe("PROVIDER_ICONS", () => {
-  test("Anthropic draws Remix's Anthropic mark, and Z.ai ZeroSDK's Z, not Zhipu's badge", () => {
-    expect(PROVIDER_ICONS.anthropic).toBe(icons.RiAnthropicFill!)
-    expect(PROVIDER_ICONS.zai).not.toBe(icons.RiZhipuAiFill!)
-    const zai = html(PROVIDER_ICONS.zai, { className: "size-4" })
-    expect(zai).toContain('viewBox="0 0 40 40"')
-    expect(zai).toContain('d="M20.1312 7.50002L17.4088 11.1913H5.81625')
-    expect(zai).toContain('class="size-4"')
+  const vendored = (id: string) => MODEL_ICONS.makers.find((maker) => maker.id === id)!.icon!
+
+  test("a one-colour logo draws as a mask over the text colour, so it stays muted in light and dark", () => {
+    for (const id of ["anthropic", "zai"]) {
+      const logo = html(providerIcon(id), { className: "size-4" })
+      expect(logo).toContain(`href="${vendored(id).data}"`)
+      expect(logo).toContain("<mask")
+      expect(logo).toContain('fill="currentColor"')
+      expect(logo).toContain('class="size-4"')
+    }
+  })
+
+  test("Ornith draws its Hugging Face avatar whole, clipped round", () => {
+    expect(vendored("ornith").mono).toBe(false)
+    const logo = html(providerIcon("ornith"), { className: "size-4" })
+    expect(logo).toContain(`href="${vendored("ornith").data}"`)
+    expect(logo).toContain("<clipPath")
+    expect(logo).not.toContain("<mask")
+  })
+
+  test("a maker with no vendored icon, or none known, draws the one fallback icon", () => {
+    expect(providerIcon(null)).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("no-such-maker")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(FALLBACK_PROVIDER_ICON).toBe(icons.RiRobot2Line!)
+    for (const { icon, id } of MODEL_ICONS.makers)
+      expect(PROVIDER_ICONS[id] === undefined).toBe(icon === null)
   })
 })
 
