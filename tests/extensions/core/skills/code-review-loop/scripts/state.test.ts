@@ -2188,42 +2188,6 @@ test("12n merge: a test file a red run's report leaves out and that is red alone
   ])
 })
 
-// bun's junit report leaves out a file that throws as it loads and a file that defines no test, as run-slot-children-fixture.test.ts does without RUN_SLOT_FIXTURE_HANG, so a left-out file runs once alone to tell them apart (PG-2609)
-test("12q merge: a test file the report leaves out that runs green alone, as an env-gated file with no test does, is not red beside a real red", () => {
-  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
-  const canary = git(repo, "rev-parse", "--short=7", "canary")
-  const out = runMerge(
-    repo,
-    head,
-    (_c, files) => files.filter((f) => f === t(3)),
-    undefined,
-    (files, red) =>
-      junit(
-        files.filter((f) => f !== t(5)),
-        red,
-      ),
-  )
-  expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`, `HEAD-RED: ${t(3)}`])
-  expect(out.calls.map((c) => c.slice(1))).toContainEqual([t(5)])
-})
-
-test("12r merge: a test file the report leaves out that stays red alone, as one that throws as it loads does, is still red beside another red", () => {
-  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
-  const canary = git(repo, "rev-parse", "--short=7", "canary")
-  const out = runMerge(
-    repo,
-    head,
-    (_c, files) => files.filter((f) => f === t(3) || f === t(5)),
-    undefined,
-    (files, red) =>
-      junit(
-        files.filter((f) => f !== t(5)),
-        red,
-      ),
-  )
-  expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`, `HEAD-RED: ${t(3)} ${t(5)}`])
-})
-
 test("12p merge's test run stays on this machine, where its junit report is written, since run-slot sends test:file to the runner box by default (#2468)", () => {
   const argv = state.testsArgv("probe-worker", "/s/review-501", ["tests/a.test.ts"], "/t/r.xml")
   expect(argv.slice(1, 6)).toEqual(["probe-worker", "--", "env", "RUN_SLOT_HERE=1", "bun"])
@@ -2255,6 +2219,69 @@ test("12o redIn reads bun's own junit report: a failed testcase's file is failed
     leftOut: ["t/c.test.ts"],
   })
   expect(state.redIn(undefined, ["t/a.test.ts"])).toEqual({ failed: [], leftOut: [] })
+})
+
+// bun's junit report leaves out a file that throws as it loads and a file that defines no test, as run-slot-children-fixture.test.ts does without RUN_SLOT_FIXTURE_HANG, so a left-out file runs once alone to tell them apart (PG-2609)
+test("12q merge: a test file the report leaves out that runs green alone, as an env-gated file with no test does, is not red beside a real red", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(
+    repo,
+    head,
+    (_c, files) => files.filter((f) => f === t(3)),
+    undefined,
+    (files, red) =>
+      junit(
+        files.filter((f) => f !== t(5)),
+        red,
+      ),
+  )
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`, `HEAD-RED: ${t(3)}`])
+  expect(out.calls.map((c) => c.slice(1))).toContainEqual([t(5)])
+})
+
+test("12r merge: a test file the report leaves out that is red alone, as one that throws as it loads is, stays red, and its lone run, which writes no report, prints no NO-REPORT", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(
+    repo,
+    head,
+    (_c, files) => files.filter((f) => f === t(3) || f === t(5)),
+    undefined,
+    (files, red) =>
+      files.length === 1
+        ? undefined
+        : junit(
+            files.filter((f) => f !== t(5)),
+            red,
+          ),
+  )
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 8 touched tests`, `HEAD-RED: ${t(3)} ${t(5)}`])
+  expect(out.calls.map((c) => c.slice(1))).toContainEqual([t(5)])
+})
+
+test("12s merge: a test file the report leaves out that is green alone with its testcase in the lone report, as one that throws as it loads only beside the others is, is BATCH-RED", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(
+    repo,
+    head,
+    (_c, files) => (files.length > 1 ? files.filter((f) => f === t(5)) : []),
+    undefined,
+    (files, red) =>
+      junit(
+        files.filter((f) => !red.includes(f)),
+        [],
+      ),
+  )
+  expect(out.lines).toEqual([
+    `BATCH-RED on ${canary}: ${t(5)} (merged with head ${head.slice(0, 7)}); open or link one issue for each by code-review-loop's step 2, never a second rerun`,
+  ])
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8].map(t),
+    [t(5)],
+    [t(5)],
+  ])
 })
 
 test("12k merge --conflict-only reads merge-tree alone: no checkout, no test (#2468)", () => {

@@ -1054,20 +1054,30 @@ export const cmdMerge = (...args: string[]): void => {
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
-  // A run's red files, read from its report, each file the report leaves out red only when it is red alone too, which tells a file that throws as it loads from one that defines no test; a red run whose report names none counts every file it ran as red, and says where.
+  // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test); a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
+  const readReport = (): string | undefined => {
+    try {
+      return readFileSync(report, "utf8")
+    } catch {
+      return undefined
+    }
+  }
+  const redAlone = (f: string): boolean => {
+    rmSync(report, { force: true })
+    if (!io.tests(session, clone, [f], report)) return true
+    const xml = readReport()
+    return xml !== undefined && redIn(xml, [f]).leftOut.length === 0
+  }
   const red = (files: string[], where: string): string[] => {
     if (!files.length) return []
     rmSync(report, { force: true })
     if (io.tests(session, clone, files, report)) return []
-    let xml: string | undefined
-    try {
-      xml = readFileSync(report, "utf8")
-    } catch {}
+    if (files.length === 1) return files
+    const xml = readReport()
     const { failed, leftOut } = redIn(xml, files)
-    const alone = files.length > 1 ? leftOut.filter((f) => red([f], where).length) : leftOut
-    const named = files.filter((f) => failed.includes(f) || alone.includes(f))
+    const named = files.filter((f) => failed.includes(f) || (leftOut.includes(f) && redAlone(f)))
     if (named.length) return named
     unnamed.push(where)
     return files
