@@ -31,6 +31,7 @@ The two stay apart in the verdict, so a well-built change that misses the ask ca
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
 They leave the review clone as it stands, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
+When the diff adds a schema refusal that a form reads, that prompt also traces each refusal the form can reach to the field that shows it on screen, since a refusal with no field shows as a whole line the person cannot place.
 
 ## State lives on the PR
 
@@ -103,6 +104,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A finding against a rule written in the code, such as a ratchet that never rises, stays blocking when the brief lists the bend as agreed, unless that agreement quotes the rule's owner.
 - A branch is called untested only once a grep of the tests for its effect and its entry point finds nothing, a mutation of it turns no test red, and the repo's testing guide has been read, so a suggested test never breaks that guide.
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
+  A runner-box red that a Mac rerun turns green gets one issue to root-cause it, or to delete the test with the reason, as a `BATCH-RED` does in [code-review-loop's step 2](../../extensions/core/skills/code-review-loop/SKILL.md).
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch` (`<scratch>` the reviewer's own `~/.playground/scratch/<session name>/`, made in a call of its own first), restore the clone,
   check it at the PR's head with `git -C <clone> apply --check <scratch>/fix.patch`,

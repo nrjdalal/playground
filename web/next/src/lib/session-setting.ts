@@ -1,8 +1,8 @@
 import type { Worker } from "@api/hono"
-import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
+import { LOCAL_SERVED, SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
 
 import { apiClient, unwrap } from "@/lib/api/client"
-import { MODEL_FAMILIES, rowModelName, showsEffort } from "@/lib/model-label"
+import { levelName, MODEL_FAMILIES, showsEffort } from "@/lib/model-label"
 
 export type SessionModel = (typeof SESSION_MODELS)[number]
 export type SessionEffort = (typeof SESSION_EFFORTS)[number]
@@ -83,7 +83,11 @@ export const choiceLabel = (
       ? MODEL_LABELS[choice]
       : null
 
-// Pure: the picker's words, the shown model then its effort, which a local model leaves out as its row does (showsEffort), since it turns thinking on or off by itself; a session on the served local model reads its row's name for it.
+// Pure: whether the picker's Effort group takes no pick: a session on the served local model, whose launch set its thinking from its effort, so a later /effort would change its words and not its thinking.
+export const effortFixed = (worker: Pick<Worker, "model">, model: string | null): boolean =>
+  model === null && worker.model === LOCAL_SERVED
+
+// Pure: the picker's words, the shown model then its effort, which a local model leaves out as its row does (showsEffort); a session on the served local model reads its level in words for both (levelName).
 export const pickerWords = (
   worker: Pick<Worker, "localModel" | "localModels" | "model">,
   model: string | null,
@@ -91,7 +95,9 @@ export const pickerWords = (
 ): string => {
   const served = model === null && !showsEffort(worker)
   const name =
-    (model && choiceLabel(model, worker.localModels)) || (served && rowModelName(worker)) || "Model"
+    (model && choiceLabel(model, worker.localModels)) ||
+    (served && levelName({ ...worker, effort })) ||
+    "Model"
   return model?.startsWith(LOCAL) || served
     ? name
     : `${name} · ${effort ? EFFORT_LABELS[effort] : "Effort"}`

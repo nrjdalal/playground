@@ -608,7 +608,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       held(4242),
     )
-    expect(r.out).toBe("another restore is running (pid 4242)\n")
+    expect(r.out).toBe(
+      "a restore is already running (pid 4242), so this one stops; nothing is wrong\n",
+    )
     expect(r.code).toBe(1)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
     expect(readlinkSync(lw(r.home, "resume", ".restore.lock"))).toBe(

@@ -21,8 +21,17 @@ import {
 setDefaultTimeout(40_000)
 
 const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
+// What each effort sets for the local model, whose template reads no effort: thinking off at low, a cap of 8192 thinking tokens at medium, and thinking uncapped from high.
+const THINKING: Record<string, string> = {
+  high: "thinking uncapped; ",
+  low: `thinking off; CLAUDE_CODE_EXTRA_BODY='{"thinking":{"type":"disabled"}}' `,
+  max: "thinking uncapped; ",
+  medium:
+    "thinking capped at 8192 tokens; CLAUDE_CODE_MODEL_CAPABILITIES=local=-adaptive_thinking MAX_THINKING_TOKENS=8192 ",
+  xhigh: "thinking uncapped; ",
+}
 const env_ = (effort = "high", context = 122880) =>
-  `: effort ${effort}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context} ENABLE_TOOL_SEARCH=true `
+  `: effort ${effort}, ${THINKING[effort]}ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context} ENABLE_TOOL_SEARCH=true `
 const command = launchAfterRm
 const pinOf = (r: Spawned, name: string) =>
   readFileSync(lw(r.home, "backends", name), "utf8").toString()
@@ -96,20 +105,33 @@ describe("--backend local runs the session on the local model through Claude Cod
     },
   )
 
-  test("--effort passes through, and the launch line labels it", async () => {
-    const r = await local([
-      "worker",
-      "worker-brave-otter",
-      "b.md",
-      "--backend",
-      "local",
-      "--effort",
-      "low",
-    ])
-    expect(r.code, r.err).toBe(0)
-    expect(command(r)).toStartWith(`(${env_("low")}env PLAYGROUND_ROLE=`)
-    expect(command(r)).toContain(" --model local --effort low ")
-  })
+  test.each(["low", "medium", "high", "xhigh", "max"])(
+    "--effort %s passes through, and the launch line sets and names its thinking",
+    async (effort) => {
+      const r = await local([
+        "worker",
+        "worker-brave-otter",
+        "b.md",
+        "--backend",
+        "local",
+        "--effort",
+        effort,
+      ])
+      expect(r.code, r.err).toBe(0)
+      expect(command(r)).toStartWith(`(${env_(effort)}env PLAYGROUND_ROLE=`)
+      expect(command(r)).toContain(` --model local --effort ${effort} `)
+    },
+  )
+
+  test.each(["low", "medium"])(
+    "a Claude launch at --effort %s carries none of the local model's thinking variables",
+    async (effort) => {
+      const r = await spawn(["worker", "worker-brave-otter", "b.md", "--effort", effort], [])
+      expect(r.code, r.err).toBe(0)
+      expect(command(r)).not.toContain("MAX_THINKING_TOKENS")
+      expect(command(r)).not.toContain("CLAUDE_CODE_MODEL_CAPABILITIES")
+    },
+  )
 
   test("a start records the pin claude-code local, which a resume runs on", async () => {
     const started = await local(["worker", "worker-brave-otter", "b.md", "--backend", "local"])
@@ -418,7 +440,7 @@ describe("the local gate: at most the sessions this machine's model server takes
     [
       "a request waiting",
       { ...quick, waiting: 1 },
-      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      "the local model here has 1 request waiting, so one more session would queue behind them",
       two,
     ],
     [
@@ -430,7 +452,7 @@ describe("the local gate: at most the sessions this machine's model server takes
     [
       "a request waiting with no live local session",
       { ...quick, waiting: 1 },
-      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      "the local model here has 1 request waiting, so one more session would queue behind them",
       [],
     ],
     [
