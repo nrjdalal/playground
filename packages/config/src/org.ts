@@ -15,7 +15,14 @@ export const orgSchema = z.object({
   // The other machines the System panel sums with this one (none by default, so one machine shows alone) and the ssh key it reaches them with (none, ssh's own default).
   cluster: z.object({
     key: z.string().startsWith("/").optional(),
-    peers: z.array(peerSchema).default([]),
+    // each name once in any case, since a peer's password item takes its name lowercased (peerSecret), so two names equal but for case would share one
+    peers: z
+      .array(peerSchema)
+      .default([])
+      .refine(
+        (peers) => new Set(peers.map((peer) => peer.name.toLowerCase())).size === peers.length,
+        "each peer name is listed once, in any case",
+      ),
   }),
   owner: z.object({ name: z.string().default("Owner") }),
   // The owner's day-job pull requests, which the Pull requests tab shows beside the dashboard's own queue: the GitHub org they are read from (unset, no work queue) and what the queue is called.
