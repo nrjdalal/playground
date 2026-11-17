@@ -207,6 +207,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   A probe alone can start with Remote Control on (`--remote-control <name>`), or run on another machine over ssh (`--ssh <user@host> --key <file>`) from its pane here, its brief copied there, its load and memory gates reading that machine, and Ops' sweep counting it live while its pane here still runs ssh; the restore below leaves such a probe down.
   `--remote-control` warns on a start that runs on a token (an `--account` one, or one on a machine with no claude.ai sign-in), since Remote Control forms no link there.
+  A probe on another machine reports with `playground send <name> <text>`, which the ops-peer-relay job carries across, and waits for answers with `playground alerts-wait <its name>`, since SendMessage reaches the sessions of its own machine alone.
   Before its pane opens, a probe or a `--sandbox` start checks that its machine can run Claude Code's sandbox (on Linux `bwrap`, `socat`, and the AppArmor profile Ubuntu 24.04 needs for `bwrap`), and a probe on another machine also that Claude Code finished its first run there, and stops naming what is missing, installing nothing.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
   the first dispatcher first and past the busy-machine check, then the other managers, which pass that check as `SPAWN.md`'s load gate says, then the rest,
@@ -260,8 +261,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
 - Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks.
-  A merge of `canary` makes a new head, which needs its own checks and 5/5.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there.
+  A merge of `canary` makes a new head, which needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
 - Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.

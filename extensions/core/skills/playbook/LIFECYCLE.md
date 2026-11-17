@@ -42,7 +42,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-peer-relay, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -68,6 +68,12 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A port another program already answers on starts no ssh.
   It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
   It posts the link once as an Inbox update whose title opens it, and `playground doctor`'s `tunnel` line reads its beat.
+  ops-peer-relay (`packages/scripts/src/ops-peer-relay/`, off by default) runs on one machine of a pair, from the Dashboard's checkout, whose `.env` names the other machines in `PLAYGROUND_PEERS` and the key in `PLAYGROUND_PEER_KEY` (`~/.ssh/playground_spark` when unset), the cluster the System page reads.
+  It holds one ssh to each peer, running `agent.ts` from that machine's own checkout at this one's path, and copies each new `ops-peer.jsonl` line both ways, `playground send`'s queue ([SESSIONS.md](SESSIONS.md#message-a-session)), each line once by its `id`, the copy stamped `relayedAt` and its `at` kept.
+  A byte cursor per side, `ops/peer-relay/<peer>.json`, moves only once the far side has written the line, so a line written during a drop arrives once after it; the first link starts each cursor at its queue's end, so only lines written after it cross.
+  The agent says hello with its protocol version first, and a far checkout without it reads `down: peer checkout lacks agent.ts v1`, which Ops answers by moving that clone to the shipped tag; nothing else runs or installs on the far machine.
+  A far end that stays silent reads `said no hello within <n>s`, and one that ends first `ended with code <n> before its hello`.
+  It tells Ops one line per down spell and one when it is up again, starts ssh again on ops-tunnel's waits, and tells Ops how many lines it passed over, each not a peer line or over 16 KB.
   ops-session-resume is `bun run ops:session-resume` in a checkout of `canary`: every 60 seconds it reads the state each session's hooks write (`session-state/<session id>.json` in the data folder),
   and to each live factory session (never a probe, nor one of the owner's own) at its usage limit whose reset passed a minute ago, unless Claude Code announced it carries on by itself (the **unstick** rule),
   it queues one resume line in the ops outbox, which the relay sends with `SendMessage` (**voice**), and one carry-on line to each such session whose turn a restart lost (its newest state `working`, written before its process started, 2 minutes on, with no Escape after it in the transcript),
