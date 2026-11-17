@@ -690,6 +690,21 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(`bun run --cwd ${MAIN}/.claude/worktrees/b build`, WORKTREE)).toBeUndefined()
   })
 
+  // #2397: the program a runner runs reads in the runner's own folder option, as env -C's program does (the 7-day replay's lefthook runs)
+  test.each([
+    ["bun run's --cwd", `bun run --cwd ${WORKTREE} lefthook run pre-push --all-files`],
+    [
+      "bun run's --cwd in a variable the line sets",
+      `W=${WORKTREE}; bun run --cwd $W lefthook run pre-commit`,
+    ],
+    ["pnpm's -C", `pnpm -C ${WORKTREE} exec lefthook run pre-commit`],
+  ])(
+    "from the main checkout, lefthook a runner runs past %s into a worktree runs",
+    async (_n, command) => {
+      expect(await bash(command)).toBeUndefined()
+    },
+  )
+
   // #1663: what a cd's || runs, runs where the cd failed; after an exit there, or an || that answers a later command of the cd's run, what follows runs where the cd landed
   test.each([
     ["an exit", `cd ${WORKTREE} || exit; git commit -m x`],

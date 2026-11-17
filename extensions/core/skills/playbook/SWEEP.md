@@ -13,6 +13,7 @@ the single-slot flag turning on or off or moving between held by load and lifted
 for the Builder, it reads the factory repo's open PRs in one GitHub call and prints `merge queue missing` while the owner's PRs into `canary` are open and `merge-queue.json` is not there, or `merge queue stale` when it lists a PR no longer open or leaves out an owner's open one, its parked PRs counting as listed, which the Builder fixes by step 4's queue upkeep;
 its cursor is `sweep/<your name>.json` in the data folder.
 A parked row's passed ETA reads `parked past eta` where any other row's reads `eta passed`, and its `hold` ([ROSTER.md](ROSTER.md)) prints once when it has closed (`parked on closed hold`), and once when it reads as neither open nor closed (`parked hold unreadable`).
+When gh cannot read, skipped while the gh sign-in probe reads failed or stopped past its 10 s cap, the sweep reads gh no more and prints one `gh unreachable: <reason>` line in place of each hold's and the queue check's.
 For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` ends only with `playground focus off`, which lifts its merge hold too.
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.
 

@@ -38,6 +38,7 @@ export const updateSteps = (changed: string[]) => ({
 })
 
 // With a tag, the checkout's main is moved to that release instead, back or on, and the Dashboard, which rolls on its own branch, is left as it is; a plain update later moves it on to origin/main again.
+// `peers` then moves each peer's clone to the commit this one reached (peer-sync.ts); a failure there is logged, never the update's.
 // `done` holds the commit the last finished update reached, or, for a run with no record, the reflog's last fast-forward onto origin/main, else where that run started, so a run after one cut short past its fast-forward still installs, builds and restarts what that merge changed.
 export const runUpdate = async (
   repo: string,
@@ -47,6 +48,7 @@ export const runUpdate = async (
   to?: string,
   done?: string,
   briefs?: (old: string) => Promise<void>,
+  peers?: (sha: string) => Promise<void>,
 ): Promise<number> => {
   const git = (...args: string[]) => run(["git", "-C", repo, ...args])
   // a step whose output the terminal shows, named before it runs and again when it fails
@@ -237,6 +239,12 @@ export const runUpdate = async (
   after.push(["ops-restart", [process.execPath, "--no-env-file", restart, repo, old, "HEAD"]])
   for (const step of after) if (!(await shown(step))) return 1
   if (done) await Bun.write(done, (await git("rev-parse", "HEAD")).out)
+  if (peers) {
+    const at = (await git("rev-parse", "HEAD")).out.trim()
+    await peers(at).catch((error: Error) =>
+      log(`playground update: peer sync failed: ${error.message}`),
+    )
+  }
   if (!to) return roll()
   log(
     `playground update: at ${to}; the Dashboard rolls on its own, and playground update moves on to origin/main`,

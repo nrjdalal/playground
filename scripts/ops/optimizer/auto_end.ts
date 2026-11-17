@@ -19,7 +19,8 @@ import { basename, dirname, join } from "node:path"
 import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
 import { dataDir } from "../../../packages/env/src/data-dir"
-import { freedOf, type Pr, type RmDeps } from "../../../packages/scripts/src/playground/rm"
+import { isUnreachable } from "../../../packages/scripts/src/gh-read"
+import { freedOf, type PrRead, type RmDeps } from "../../../packages/scripts/src/playground/rm"
 import STATUSES from "../../roster-statuses.json"
 import {
   type CollectInput,
@@ -458,7 +459,7 @@ export async function cleanWorktree(
 }
 
 // Whether a worktree's PR, as rm's reader returns it (its head beside its number and state, or none), is finished: merged or closed, rm's freed reading.
-export const finishedOf = (pr: Pr | "none" | null): boolean => freedOf(pr) !== undefined
+export const finishedOf = (pr: PrRead): boolean => freedOf(pr) !== undefined
 
 // Why the cleanup's held check keeps a worktree, with rm's roster, clone and link holders and the worktree's own PR's freed state among them: null when nothing holds it. Its process check reads none, since the stack dev:stop is about to stop, and rm's saved-work checks run after it.
 export const cleanupHeld = async (
@@ -477,7 +478,7 @@ export const cleanupHeld = async (
       freed: freedOf(own),
       live: STATUSES.live,
       merged: () => null,
-      ...(own && own !== "none" ? { ownPr: own.number } : {}),
+      ...(own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}),
       places: rm.places,
       ...(pr ? { pr } : {}),
       procs: [],

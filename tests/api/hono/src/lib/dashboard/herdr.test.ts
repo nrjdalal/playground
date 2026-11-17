@@ -37,6 +37,7 @@ import {
   restoring,
   RESUBSCRIBE,
   showsAsk,
+  sshLaunches,
   switchKeys,
   typeKeys,
   WATCHED,
@@ -365,6 +366,79 @@ describe("readServer and herdrRecords", () => {
     expect(
       herdrRecords([pane("dispatcher", ["less", "codex"])], registered([]), "t", codex),
     ).toEqual([])
+  })
+
+  test("an --ssh probe's pane holds its session while it runs ssh, live with no registry file here; gone with its pane, and a local session unchanged", () => {
+    const SID = "6aafeb8a-bce0-4ceb-92cf-97f92cece832"
+    const pane = (label: string, argv: string[], server = "playground-probes"): ServerRead => ({
+      panes: [
+        {
+          ...paneSchema.parse({ ...PANE, agent: null, agent_session: null, label }),
+          processes: [{ argv, cwd: "/tmp/home", pid: 6161 }],
+        },
+      ],
+      server,
+      workspaces: [],
+    })
+    const ssh = new Map([
+      ["rbwxpg-probe", { name: "rbwxpg-probe", server: "playground-probes", sessionId: SID }],
+    ])
+    const proof = { projects: "/tmp/projects", registry: registered([]), starts: new Map() }
+    const running = pane("rbwxpg-probe", ["ssh", "-tt", "u@10.0.0.2", "claude"])
+    const [record, ...rest] = herdrRecords([running], registered([]), "t", new Map(), ssh)
+    expect(rest).toEqual([])
+    expect(record).toMatchObject({
+      agent: "claude",
+      pid: 6161,
+      remote: true,
+      session_id: SID,
+      surface_id: "herdr:playground-probes:w1:p1",
+      transcript_path: "",
+    })
+    expect(liveRecords({ sessions: [record] }, proof).sessions).toHaveLength(1)
+    // its pane is gone, back at its shell, or on another server than its record names
+    expect(herdrRecords([], registered([]), "t", new Map(), ssh)).toEqual([])
+    const shell = pane("rbwxpg-probe", ["/bin/bash"])
+    expect(herdrRecords([shell], registered([]), "t", new Map(), ssh)).toEqual([])
+    const elsewhere = pane("rbwxpg-probe", running.panes[0]!.processes[0]!.argv!, "playground")
+    expect(herdrRecords([elsewhere], registered([]), "t", new Map(), ssh)).toEqual([])
+    // a local session is held by its registry file as before, never marked remote, and the proof still decides it
+    const local: ServerRead = {
+      panes: [
+        {
+          ...paneSchema.parse({ ...PANE, label: "rbwxpg-probe" }),
+          processes: [{ argv: CLAUDE.argv, cwd: CLAUDE.cwd, pid: 4242 }],
+        },
+      ],
+      server: "playground",
+      workspaces: [],
+    }
+    const [own] = herdrRecords([local], registered([[4242, SESSION]]), "t", new Map(), ssh)
+    expect(own).toMatchObject({ pid: 4242, session_id: SESSION })
+    expect(own).not.toHaveProperty("remote")
+    const projects = String(own?.transcript_path).split("/-tmp-probe-a/")[0]!
+    expect(liveRecords({ sessions: [own] }, { ...proof, projects }).sessions).toEqual([])
+  })
+
+  test("the --ssh launches are the resume records of the labels given that start an --ssh probe", () => {
+    const data = mkdtempSync(join(tmpdir(), "ssh-launch-"))
+    cleanups.push(() => rmSync(data, { force: true, recursive: true }))
+    mkdirSync(join(data, "resume"))
+    const SID = "6aafeb8a-bce0-4ceb-92cf-97f92cece832"
+    const record = (name: string, flags: string) =>
+      writeFileSync(
+        join(data, "resume", `${name}.sh`),
+        `#!/bin/bash\n# server: playground-probes\nexec /x/scripts/spawn.sh resume ${name} /x ${SID}${flags}\n`,
+      )
+    record("rbwxpg-probe", " --ssh u@10.0.0.2 --key /k")
+    record("local-probe", "")
+    record("unasked-probe", " --ssh u@10.0.0.2 --key /k")
+    expect(sshLaunches(["rbwxpg-probe", "local-probe", "no-record", "../x"], data)).toEqual(
+      new Map([
+        ["rbwxpg-probe", { name: "rbwxpg-probe", server: "playground-probes", sessionId: SID }],
+      ]),
+    )
+    expect(sshLaunches(["rbwxpg-probe"], join(data, "none"))).toEqual(new Map())
   })
 
   test("the Codex launch records are the sessions whose pin names codex, with their resume record's thread", () => {

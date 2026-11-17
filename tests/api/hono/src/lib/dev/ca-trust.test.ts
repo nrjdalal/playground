@@ -1,10 +1,12 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
+import { X509Certificate } from "node:crypto"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   CA_NAME,
+  CA_POLICY,
   type CaProbe,
   chromiumSteps,
   firefoxProfiles,
@@ -99,6 +101,7 @@ describe("readCaTrust", () => {
       certutil: true,
       chromium: [],
       firefox: [join(dir, SNAP), join(dir, DEB)],
+      policy: [],
       untrusted: [],
     })
   })
@@ -131,9 +134,53 @@ describe("readCaTrust", () => {
   })
 
   test("names each Chromium-family browser on PATH, which no file shows the trust of", async () => {
-    const read = await readCaTrust(CA, home({}), probe(["helium", "google-chrome", "firefox"], {}))
+    const read = await readCaTrust(
+      CA,
+      home({}),
+      probe(["helium", "google-chrome", "firefox"], {}),
+      null,
+    )
     expect(read.chromium).toEqual(["google-chrome", "helium"])
     expect(read.firefox).toEqual([])
+  })
+
+  // the policy chromium-ca writes, its certificate the DER as base64 (PG-2458)
+  const policy = (pem: string) => {
+    const path = join(home({}), "portless-ca.json")
+    writeFileSync(
+      path,
+      JSON.stringify({
+        CACertificatesWithConstraints: [
+          {
+            certificate: new X509Certificate(pem).raw.toString("base64"),
+            constraints: { permitted_dns_names: ["localhost"] },
+          },
+        ],
+      }),
+    )
+    return path
+  }
+
+  test("a policy holding the CA's key covers Helium alone, since Ubuntu's chromium snap reads another folder (PG-2458)", async () => {
+    const on = probe(["helium", "chromium", "chromium-browser", "google-chrome"], {})
+    expect(await readCaTrust(CA, home({}), on, policy(RESIGNED))).toMatchObject({
+      chromium: ["chromium", "chromium-browser", "google-chrome"],
+      policy: ["helium"],
+    })
+    expect(await readCaTrust(CA, home({}), on, policy(OTHER))).toMatchObject({
+      chromium: ["chromium", "chromium-browser", "google-chrome", "helium"],
+      policy: [],
+    })
+    expect(await readCaTrust(CA, home({}), on, join(state, "none.json"))).toMatchObject({
+      policy: [],
+    })
+  })
+
+  test("the policy path is the folder chromium-ca writes", async () => {
+    const script = await Bun.file(
+      join(import.meta.dir, "../../../../../../api/hono/src/lib/system/root/chromium-ca"),
+    ).text()
+    expect(script).toContain(CA_POLICY.replace("/portless-ca.json", ""))
   })
 })
 
@@ -144,5 +191,7 @@ describe("chromiumSteps", () => {
     expect(steps).toContain("Import /home/x/.portless/fallback/ca.pem")
     expect(steps).toContain("Restart the browser")
     expect(steps).toContain("Turn on warnings")
+    expect(steps).toContain("through the chromium-ca root step, which you approve in the Inbox")
+    expect(chromiumSteps(["google-chrome"], "/ca.pem")).not.toContain("chromium-ca")
   })
 })

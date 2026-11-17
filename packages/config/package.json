@@ -49,6 +49,11 @@
       "bun": "./src/site.ts",
       "default": "./dist/site.mjs"
     },
+    "./ssh-probe": {
+      "types": "./dist/ssh-probe.d.mts",
+      "bun": "./src/ssh-probe.ts",
+      "default": "./dist/ssh-probe.mjs"
+    },
     "./threads": {
       "types": "./dist/threads.d.mts",
       "bun": "./src/threads.ts",
