@@ -70,7 +70,11 @@ function world(facts: PrFacts) {
     },
     queue,
   }
-  return { local, merges, ready: () => mergeReady({ repo: REPO }, run, local) }
+  return {
+    local,
+    merges,
+    ready: (gates?: string) => mergeReady({ repo: REPO }, run, { ...local, gates }),
+  }
 }
 
 describe("pr:train ready", () => {
@@ -79,6 +83,22 @@ describe("pr:train ready", () => {
     const readied = await w.ready()
     expect(w.merges).toEqual([7])
     expect(readied.merged).toMatchObject({ n: 7, why: "2 checks passed" })
+  })
+
+  // the Dashboard's Ready reads this file, so it holds pr:merge's own gates at the head, the tester's included (#2499)
+  test("each call writes every read PR's failing gates at its head to the gates file it names", async () => {
+    const held = world(factsOf({ files: ["web/next/src/x.tsx"] }))
+    const gates = join(scratch, "gates-held", "gates.json")
+    await held.ready(gates)
+    expect(held.merges).toEqual([])
+    const file = await Bun.file(gates).json()
+    expect(file.prs).toEqual({ "o/r#7": { failed: ["tester"], head: HEAD } })
+    expect(Number.isNaN(Date.parse(file.at))).toBe(false)
+
+    const passing = world(factsOf({ draft: true }))
+    const next = join(scratch, "gates-pass", "gates.json")
+    await passing.ready(next)
+    expect((await Bun.file(next).json()).prs).toEqual({ "o/r#7": { failed: [], head: HEAD } })
   })
 
   test("the owner's draft whose only failing gate is ready still merges", async () => {

@@ -781,6 +781,8 @@ describe("SessionRow's dropdown and group", () => {
     ci: "passing",
     conflicts: false,
     draft: false,
+    gates: null,
+    head: "",
     number: 197,
     queued: false,
     reviewed: true,

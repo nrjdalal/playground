@@ -230,6 +230,8 @@ const pull = (fields: Partial<Pull> = {}): Pull => ({
   ci: "passing",
   conflicts: false,
   draft: false,
+  gates: null,
+  head: "",
   number: 36,
   queued: false,
   reviewed: false,
@@ -280,7 +282,11 @@ describe("statusOf", () => {
     expect(phrase({ state: "working" })).toEqual({ text: "Working", tone: "normal" })
     expect(phrase({ state: "idle" })).toEqual({ text: "Idle", tone: "muted" })
     expect(phrase({ pr: pull({ ci: "failing" }) }).text).toBe("Fixing")
-    expect(phrase({ pr: pull({ score: "5/5" }), state: "idle" }).text).toBe("Ready")
+    expect(phrase({ pr: pull({ gates: [], score: "5/5" }), state: "idle" }).text).toBe("Ready")
+    expect(phrase({ pr: pull({ gates: ["tester"], score: "5/5" }), state: "idle" }).text).toBe(
+      "Gated · tester",
+    )
+    expect(phrase({ pr: pull({ score: "5/5" }), state: "idle" }).text).toBe("Idle")
     expect(phrase({ pr: pull({ approvals: 2 }), state: "idle" }).text).toBe("Waiting on approvals")
     expect(phrase({ parked: "held", state: "idle" })).toEqual({ text: "Parked", tone: "muted" })
     expect(phrase({ pr: pull({ state: "closed" }), state: "idle" }).text).toBe("Idle")
@@ -508,6 +514,7 @@ describe("status words", () => {
 
 describe("rowLines and rowText", () => {
   const pr = pull({
+    gates: [],
     number: 197,
     reviewed: true,
     score: "5/5",

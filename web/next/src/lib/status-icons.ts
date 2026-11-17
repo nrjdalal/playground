@@ -15,6 +15,7 @@ import {
   RiPauseLine,
   RiQuestionLine,
   RiSearchEyeLine,
+  RiShieldLine,
   RiShutDownLine,
   RiSignalCellular1Fill,
   RiSignalCellular2Fill,
@@ -48,6 +49,7 @@ export type ShownState =
   | "approval"
   | "approvals"
   | "ready"
+  | "gated"
   | "parked"
   | "unknown"
   | "idle"
@@ -96,6 +98,7 @@ const ICONS: Record<ShownState, StatusIconSpec> = {
   approval: { Icon: RiUserLine, label: "Waiting on approvals", spins: false, tone: "caution" },
   approvals: { Icon: RiGroupLine, label: "Waiting on approvals", spins: false, tone: "caution" },
   ready: { Icon: RiZzzLine, label: "Ready", spins: false, tone: "success" },
+  gated: { Icon: RiShieldLine, label: "Gated", spins: false, tone: "caution" },
   parked: { Icon: RiPauseCircleLine, label: "Parked", spins: false, tone: "inactive" },
   // a session whose state no record tells, a Codex one, which writes none
   unknown: { Icon: RiQuestionLine, label: LIGHT_LABELS.unknown, spins: false, tone: "inactive" },
@@ -187,7 +190,7 @@ export type LightFacts = {
   waits?: Wait[]
 }
 
-// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Conflicts (idle on an open pull request that conflicts with its base, which GitHub runs no CI on, so it never waits on its checks), Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (5/5 at the head, CI green or none, no approval missing), Parked, Idle (State unknown for a session whose state no record tells, a Codex one). A reviewer or tester idle after its verdict at the head is done.
+// Pure: an agent's one state, the most urgent that applies: Stuck (Paused · usage limit when the account's usage limit alone holds it, since it waits on the reset rather than a person), Merged, Down (Ended when closed on purpose, Parked when the roster has it parked), Failing, No progress, Fixing (at work on a pull request whose CI fails or whose review is below 5/5), Working, Conflicts (idle on an open pull request that conflicts with its base, which GitHub runs no CI on, so it never waits on its checks), Waiting (idle with something it waits on still open), Waiting on approvals (one still needed, or two and more), Ready (the merge train read every pr:merge gate passing at the head, `Pull.gates`), Gated (a gate holds it there), Parked (Ops holds it, which pr:merge's held gate reads too), Idle (State unknown for a session whose state no record tells, a Codex one). A reviewer or tester idle after its verdict at the head is done.
 export function lightOf(facts: LightFacts): ShownState {
   const { light, pr = null } = facts
   if (light === "needs-you") return facts.usageLimit ? "usage-limit" : "stuck"
@@ -207,20 +210,22 @@ export function lightOf(facts: LightFacts): ShownState {
   if (facts.checked) return "done"
   if (pr?.state === "open") {
     if (pr.approvals > 0) return pr.approvals === 1 ? "approval" : "approvals"
-    if (pr.score === "5/5" && (pr.ci === "passing" || pr.ci === "none")) return "ready"
+    if (!facts.parked && pr.gates) return pr.gates.length === 0 ? "ready" : "gated"
   }
   if (facts.parked) return "parked"
   return light === "unknown" ? "unknown" : "idle"
 }
 
-// Pure: a state in words, as the row's tooltip and the table's Status column write it: the waiting state names what it waits on first, and Playground's own Stuck is on you, since his pickers are yours to answer.
+// Pure: a state in words, as the row's tooltip and the table's Status column write it: the waiting state names what it waits on first, the gated one each gate that holds it, and Playground's own Stuck is on you, since his pickers are yours to answer.
 export function stateWords(
   state: ShownState,
-  facts: Pick<LightFacts, "dispatcher" | "waits">,
+  facts: Pick<LightFacts, "dispatcher" | "pr" | "waits">,
 ): string {
   if (state === "stuck" && facts.dispatcher) return LIGHT_LABELS["needs-you"]
   const wait = facts.waits?.[0]
   if (state === "waiting" && wait) return WAIT_WORDS[wait]
+  const gates = facts.pr?.gates
+  if (state === "gated" && gates?.length) return `${ICONS.gated.label} · ${gates.join(", ")}`
   return ICONS[state].label
 }
 

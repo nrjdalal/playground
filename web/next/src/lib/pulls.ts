@@ -98,6 +98,8 @@ export function viewPulls(
         ci: "none",
         conflicts: false,
         draft: false,
+        gates: null,
+        head: "",
         etaMerge: entry.etaMerge,
         number: entry.pr,
         place: at + 1,
