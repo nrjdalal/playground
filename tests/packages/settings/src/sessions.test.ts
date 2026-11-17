@@ -92,11 +92,24 @@ describe("sessions.templates", () => {
     const local = { ...assistant!, model: "local" }
     expect(templateBackend(local)).toBe("local")
     expect(sessionTemplates.safeParse([{ ...local, effort: "low" }]).success).toBe(true)
-    expect(sessionTemplates.safeParse([{ ...local, account: "someone@example.com" }]).success).toBe(
-      false,
-    )
+    const issues = (template: object) =>
+      sessionTemplates.safeParse([template]).error?.issues.map(({ message, path }) => ({
+        message,
+        path,
+      }))
+    expect(issues({ ...local, account: "someone@example.com" })).toEqual([
+      {
+        message: "a local template runs on this machine's local model, so it takes no account",
+        path: [0, "account"],
+      },
+    ])
     for (const kind of ["dispatcher", "planner"] as const)
-      expect(sessionTemplates.safeParse([{ ...local, kind }]).success).toBe(false)
+      expect(issues({ ...local, kind })).toEqual([
+        {
+          message: "a dispatcher or a planner plans on Claude, so it takes no local model",
+          path: [0, "kind"],
+        },
+      ])
   })
 
   test("the Orchestrator is the seatless orchestrator kind, and the second dispatchers take their own brief", () => {

@@ -53,9 +53,11 @@ export const sessionTemplate = z
   })
   .refine((t) => t.model !== LOCAL_MODEL || t.account === undefined, {
     message: "a local template runs on this machine's local model, so it takes no account",
+    path: ["account"],
   })
   .refine((t) => t.model !== LOCAL_MODEL || (t.kind !== "dispatcher" && t.kind !== "planner"), {
     message: "a dispatcher or a planner plans on Claude, so it takes no local model",
+    path: ["kind"],
   })
 
 export type SessionTemplate = z.infer<typeof sessionTemplate>

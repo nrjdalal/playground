@@ -205,6 +205,18 @@ describe("the template editor", () => {
     ).toEqual({ fields: { brief: "a brief is a file name, with no /" }, rest: null })
   })
 
+  test("a dispatcher on the local model shows its refusal beside the kind, with no path words", () => {
+    expect(
+      templateRefusal(
+        "sessions.templates: ✖ a dispatcher or a planner plans on Claude, so it takes no local model   → at [2].kind",
+        2,
+      ),
+    ).toEqual({
+      fields: { kind: "a dispatcher or a planner plans on Claude, so it takes no local model" },
+      rest: null,
+    })
+  })
+
   test("an unknown account's refusal shows beside the account, and one at another template shows whole", () => {
     const message =
       "sessions.templates: ✖ sam@example.com is not in usage.accounts: add it in Settings > Accounts   → at [1].account"
