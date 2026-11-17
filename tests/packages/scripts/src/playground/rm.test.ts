@@ -1930,6 +1930,7 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
     expect(deps.merged("HEAD", wt)).toBeNull()
     expect(deps.defaultBranch(wt)).toBeNull()
+    expect(deps.prMerged(wt, 2484)).toBeNull()
     expect(existsSync(called)).toBe(false)
   } finally {
     process.env.PATH = saved.path
