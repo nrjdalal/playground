@@ -1088,7 +1088,13 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
   const git = (...args: string[]) =>
     run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
   const topics = [...new Bun.Glob(".agents/dashboard/*.md").scanSync({ cwd: ROOT, dot: true })]
-  const files = [".claude/settings.json", "AGENTS.md", "tests/AGENTS.test.ts", ...topics]
+  const files = [
+    ".agents/shipping.md",
+    ".claude/settings.json",
+    "AGENTS.md",
+    "tests/AGENTS.test.ts",
+    ...topics,
+  ]
   // stage these edits, run the hook, then put the tree back
   const hookWith = async (edits: Record<string, (text: string) => string>) => {
     for (const [file, edit] of Object.entries(edits)) {

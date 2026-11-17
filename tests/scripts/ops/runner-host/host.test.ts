@@ -25,7 +25,7 @@ setDefaultTimeout(20_000)
 const TOKEN = "AAAREGTOKEN0123456789"
 // the box's user home a stub ssh answers ci.sh's first read with, the state folder under it, and free memory well past the floor
 const BOX_HOME = "/home/box"
-const BOX_CI = `${BOX_HOME}/.playground/ci`
+const BOX_CI = `${BOX_HOME}/.cache/playground-ci`
 const BIG_KB = 64 * 1024 * 1024
 
 const dirs: string[] = []
@@ -728,11 +728,11 @@ exit 0`)
   test.skipIf(!BASH4)(
     "an exec run of the whole suite takes every slot, and one of a file takes one",
     () => {
-      expect(slotTake("exec", [], ["bun", "--cwd=/home/box/.playground/ci/x", "run", "test"])).toBe(
-        "0 3",
-      )
       expect(
-        slotTake("exec", [], ["bun", "run", "--cwd", "/home/box/.playground/ci/x", "test"]),
+        slotTake("exec", [], ["bun", "--cwd=/home/box/.cache/playground-ci/x", "run", "test"]),
+      ).toBe("0 3")
+      expect(
+        slotTake("exec", [], ["bun", "run", "--cwd", "/home/box/.cache/playground-ci/x", "test"]),
       ).toBe("0 3")
       expect(slotTake("exec", [3], ["bun", "run", "test"])).toBe("1 0")
       expect(slotTake("exec", [], ["bun", "run", "test", "tests/a.test.ts"])).toBe("0 1")
@@ -746,10 +746,14 @@ exit 0`)
   test.skipIf(!BASH4)("an exec run of dispatcher's checks takes one slot, as any exec does", () => {
     expect(slotTake("exec", [], ["bun", "run", "test:skills"])).toBe("0 1")
     expect(
-      slotTake("exec", [], ["bun", "--cwd=/home/box/.playground/ci/x", "run", "test:skills"]),
+      slotTake("exec", [], ["bun", "--cwd=/home/box/.cache/playground-ci/x", "run", "test:skills"]),
     ).toBe("0 1")
     expect(
-      slotTake("exec", [1], ["bun", "run", "--cwd", "/home/box/.playground/ci/x", "test:skills"]),
+      slotTake(
+        "exec",
+        [1],
+        ["bun", "run", "--cwd", "/home/box/.cache/playground-ci/x", "test:skills"],
+      ),
     ).toBe("0 1")
     expect(slotTake("exec", [1, 2, 3], ["bun", "run", "test:skills"])).toBe("1 0")
   })
@@ -942,7 +946,7 @@ const fakeBox = (
 BIG
 '; exit 0 ;; esac
 printf '%s\n' "${"$"}{@: -1}" >> ROOT/argv
-c=$(printf '%s' "${"$"}{@: -1}" | sed -e 's#ROOT/.playground/ci/suite.sh #ROOT/fake-suite.sh #g')
+c=$(printf '%s' "${"$"}{@: -1}" | sed -e 's#ROOT/.cache/playground-ci/suite.sh #ROOT/fake-suite.sh #g')
 exec bash -c "$c"`
       .replaceAll("ROOT", root)
       .replace("BIG", String(BIG_KB)),
@@ -992,7 +996,7 @@ describe("what a run puts on the box goes into the box's machine record (PG-2538
       clone,
       "--no-env-file packages/scripts/src/machine-record/cli.ts add --stdin",
     ])
-    const ci = join(r.root, ".playground", "ci")
+    const ci = join(r.root, ".cache", "playground-ci")
     expect(JSON.parse(stdin!)).toEqual([
       {
         by: "ci.sh",
@@ -1016,7 +1020,7 @@ describe("what a run puts on the box goes into the box's machine record (PG-2538
     expect(r.code).toBe(0)
     expect(r.out).toBe("done\n")
     expect(r.err.split("\n")[0]).toBe(
-      `ci.sh: ${r.root}/.playground/ci and docker image postgres:alpine are not in the box's machine record (its clone ${r.root}/clone); its next check names them`,
+      `ci.sh: ${r.root}/.cache/playground-ci and docker image postgres:alpine are not in the box's machine record (its clone ${r.root}/clone); its next check names them`,
     )
     expect(r.err.split("\n")[1]).toMatch(/^ci\.sh: ci-\S+ started on the box; /)
   })
@@ -1058,7 +1062,7 @@ describe("ci.sh exec", () => {
     const argv = args.split("\0").filter(Boolean)
     expect(argv.slice(0, 2)).toEqual(["bun", "test"])
     expect(argv[2]).toMatch(
-      /^\/home\/box\/\.playground\/ci\/\.claude\/worktrees\/[0-9a-f]{12}-[0-9a-z]{6}\/web\/a\.test\.ts$/,
+      /^\/home\/box\/\.cache\/playground-ci\/\.claude\/worktrees\/[0-9a-f]{12}-[0-9a-z]{6}\/web\/a\.test\.ts$/,
     )
   })
 
@@ -1102,8 +1106,8 @@ describe("ci.sh exec", () => {
     expect(boxExec("ok\nexit 0\n").code).toBe(0)
   })
 
-  // #2529: the box is a peer of this user's own, reached with no root, its state in that user's ~/.playground/ci, under user units
-  test("it logs in as this user, never root, and keeps every remote path under the box user's ~/.playground/ci in user units", () => {
+  // #2529: the box is a peer of this user's own, reached with no root, under user units; #2554: its state sits outside that user's ~/.playground, which a test sandbox hides
+  test("it logs in as this user, never root, and keeps every remote path under the box user's ~/.cache/playground-ci in user units", () => {
     const r = boxExec("exit 0\n")
     expect(r.code).toBe(0)
     const me = Bun.spawnSync(["id", "-un"]).stdout.toString().trim()
@@ -1113,6 +1117,8 @@ describe("ci.sh exec", () => {
     const sent = r.read("argv")
     expect(sent).not.toMatch(/\/srv\/ci|\/root|root@|runuser/)
     expect(sent).toContain(`cat > ${BOX_CI}/`)
+    expect(sent).not.toContain(`${BOX_HOME}/.playground`)
+    expect(readFileSync(join(DIR, "ci.sh"), "utf8")).toContain("BOX_CI_DIR=.cache/playground-ci\n")
     expect(sent).toContain("systemd-run --user ")
     expect(sent).toContain("systemctl --user is-active ")
   })

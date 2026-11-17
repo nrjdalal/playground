@@ -4,7 +4,7 @@
 # <rev>'s tree, never a token or a key, starts the run in a systemd user unit of its own and reads its lines every 20s, so a dropped ssh never
 # ends the run. Prints suite.sh's lines and exits as it does (0 green, 1 a step failed), or 255 when the box cannot be reached, so the
 # caller runs the suite on its own machine through run-slot instead. The host is RUNNER_HOST, else the address in
-# the data folder's ops/runner-host/ip, reached as this user with no root, its state under its own ~/.playground/ci. A re-run of a Linux-only
+# the data folder's ops/runner-host/ip, reached as this user with no root, its state under its own ~/$BOX_CI_DIR. A re-run of a Linux-only
 # test (below) runs in the current checkout, so <rev> is its HEAD.
 # The other modes: ci.sh web <rev> builds the web image there, ci.sh exec <dir> -- <command...> runs one command, and ci.sh cancel <run>
 # stops a run by the id ci.sh printed on stderr as it started (all below).
@@ -13,8 +13,6 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "ci.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 HOST_DIR=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host
-# the box's run folder, under its user's home: the one place to move it, which record() puts in the box's machine record (record.test.ts holds it to the check's watched places)
-BOX_CI_DIR=.playground/ci
 # the box's Playground clone, whose record CLI record() runs: RUNNER_HOST_CLONE, else where this main checkout sits under this home, the place peer-sync keeps each peer's clone (cloneOf); none when it is no plain path
 main=$(git -C "$(dirname "$(readlink -f "$HERE/suite.sh")")" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) && main=$(dirname "$main")
 CLONE=${RUNNER_HOST_CLONE:-}
@@ -34,6 +32,8 @@ SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o 
   -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "$(id -un)@$IP")
 # the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
+# the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there, and record() puts it in the box's machine record (record.test.ts holds it to the check's watched places)
+BOX_CI_DIR=.cache/playground-ci
 SUITE_PEAK_KB=$((4608 * 1024))
 PEAK_KB=$((2 * 1024 * 1024))
 # the box's home, where its state folder sits, and whether its free memory keeps the floor; 255 sends the run back to the caller's machine

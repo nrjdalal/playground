@@ -223,7 +223,10 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's, once no other checker of it is live); null when its transcript cannot be read.
+// The managers' shared worktree under a main checkout, where spawn.sh's manager mode starts every manager, so what sits there is no single session's work (a test pins it to spawn.sh's line).
+export const LEADS_WORKTREE = ".claude/worktrees/leads"
+
+// The worktrees a session used: each linked worktree its transcript ran in, but the managers' leads worktree, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's, once no other checker of it is live); null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
@@ -240,7 +243,9 @@ export async function worktreesOf(
       (await git(top, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"])) ??
       ""
     ).split("\n")
-    if (!gitDir || gitDir !== commonDir) dirs.add(top)
+    // The managers' leads worktree is theirs alone, so a session that ran there, a worker resumed from it included, neither waits on its files nor cleans it.
+    const leads = !!commonDir && top === join(dirname(commonDir), LEADS_WORKTREE)
+    if ((!gitDir || gitDir !== commonDir) && !leads) dirs.add(top)
     if (target.kind !== "worker" || !target.refs.length) continue
     const list = (await git(top, ["worktree", "list", "--porcelain"])) ?? ""
     for (const block of list.split("\n\n")) {
