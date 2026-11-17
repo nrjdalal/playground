@@ -77,6 +77,57 @@ test("each account in `accounts` is probed once a cycle, the factory's shared wi
   })
 })
 
+test("with no `accounts`, each account in rotation.pool is read into usage.json's accounts", () => {
+  const pool = [
+    {
+      account: "main@example.org",
+      ending: true,
+      endsAt: "2026-11-07T18:30:00+00:00",
+      renewsOn: null,
+    },
+    { account: "spare@example.org", ending: false, endsAt: null, renewsOn: 3 },
+  ]
+  expect(
+    run("pool", {
+      factory: "main@example.org",
+      rotation: { pool },
+      seen: { "main@example.org": stale, "spare@example.org": stale },
+    }),
+  ).toEqual({
+    accounts: { "spare@example.org": 40, "main@example.org": 50 },
+    factory: "main@example.org",
+    keys: ["factory", "rotation", "seen"],
+    probes: ["main@example.org", "spare@example.org"],
+    rotation: { pool },
+  })
+})
+
+test("with `accounts` present, only that list is read, not a different rotation.pool", () => {
+  const pool = [
+    {
+      account: "main@example.org",
+      ending: true,
+      endsAt: "2026-11-07T18:30:00+00:00",
+      renewsOn: null,
+    },
+    { account: "spare@example.org", ending: false, endsAt: null, renewsOn: 3 },
+  ]
+  expect(
+    run("pool-ignored", {
+      accounts: ["main@example.org"],
+      factory: "main@example.org",
+      rotation: { pool },
+      seen: { "main@example.org": stale },
+    }),
+  ).toEqual({
+    accounts: { "main@example.org": 50 },
+    factory: "main@example.org",
+    keys: ["accounts", "factory", "rotation", "seen"],
+    probes: ["main@example.org"],
+    rotation: { pool },
+  })
+})
+
 test("with no `accounts`, only the factory is probed, as before", () => {
   expect(run("one", { factory: "main@example.org", seen: {} })).toEqual({
     accounts: {},
