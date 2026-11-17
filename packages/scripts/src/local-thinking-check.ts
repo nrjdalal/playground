@@ -107,8 +107,8 @@ export const runLevel = async (level: string, env: Record<string, string>) => {
       HOME: home,
       ...env,
     },
-    stderr: "pipe",
-    stdout: "pipe",
+    stderr: "ignore",
+    stdout: "ignore",
   })
   const timer = setTimeout(() => run.kill(), 90_000)
   const code = await run.exited
