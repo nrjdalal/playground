@@ -32,6 +32,9 @@ at that head and the head is up to date with canary:
   body          the PR body is the PR template the Changelog reads, and its Evidence names
                 each changed *.md path by its full path
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
+  tester        on a diff under web/next/: ## TesterBot · PASS at <sha7>, at the head
+  new-user      on an installer or first-run diff (NEW_USER_PATHS): ## NewUserGate · PASS
+                at <sha7>, at the head
   types         last, inside the merge lock: the tree the squash makes type-checks by CI's own
                 type steps in the kept merge-types worktree, each through run-slot; skipped
                 when the head already holds canary's tip, and a type error refuses with the
