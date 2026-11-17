@@ -12,6 +12,10 @@ const controls = (): Row[] => [
     "a strict-mode header in a heredoc fed to a remote bash",
     "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
   ],
+  [
+    "awk's *100/(…) in a heredoc fed to a remote bash, which a * before a digit keeps from reading as a qualifier",
+    "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
+  ],
 ]
 
 const refused = (): Row[] => [

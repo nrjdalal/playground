@@ -665,7 +665,7 @@ function staticLine(line) {
 var GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
   /bashopts|dotglob|fignore|globdots|globignore/i,
-  /[*?[][^\s;&|()]*\([^()\s|]*\)/
+  /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
 ];
 var NO_GLOB = new Set([
   "errexit",

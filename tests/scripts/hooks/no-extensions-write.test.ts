@@ -4032,6 +4032,7 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh -o 'SetEnv FIGNORE=x' box 'touch ?playground/extensions/y'",
     "ssh -o setenv=BASHOPTS=dotglob box bash -s <<'EOF'\ntouch */extensions/x\nEOF",
     "ssh -o SendEnv=BASHOPTS box 'touch */extensions/x'",
+    "ssh box 'touch *1*(D)/extensions/x'",
   ])("%s is refused as a switch", async (command) => {
     expect(await bash(command)).toMatch(SWITCH)
   })
@@ -4049,6 +4050,7 @@ describe("a glob-option switch on a remote or fed line", () => {
     "echo 'set -euo pipefail; uptime' | ssh box bash",
     "ssh -o SetEnv=LANG=C box uptime",
     "ssh -o SendEnv=LANG box 'ls */notes'",
+    "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
   ])("%s, with no switch on its remote side, runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

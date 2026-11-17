@@ -647,11 +647,11 @@ function staticLine(line: string): boolean {
     (w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()),
   )
 }
-// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`); a set or a started shell's options are optionSwitch's
+// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but after a `*` before a digit (awk's `*100/(…)`), since the segment it leads ends in that digit and `.playground` holds none; a set or a started shell's options are optionSwitch's
 const GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
   /bashopts|dotglob|fignore|globdots|globignore/i,
-  /[*?[][^\s;&|()]*\([^()\s|]*\)/,
+  /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/,
 ]
 // The option names a -o may give that change no glob, so a strict-mode header (`set -euo pipefail`) runs
 const NO_GLOB = new Set([
