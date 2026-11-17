@@ -203,8 +203,10 @@ The `no-glm-heavy-path` hook fences it as a GLM session, its pin or its base URL
 spawn.sh refuses it where it refuses GLM (a reviewer or tester, an org's checkout, a brief naming a `glm-refused-sources` word) and also for a planner and a researcher, since Claude plans and researches; it refuses `--account`, `--model` and an `--ssh` probe beside it, since the model listens on this machine's loopback alone.
 Before the gate it GETs `http://127.0.0.1:8000/v1/models` (`LOCAL_URL`) with a 5 s timeout and refuses when the server is silent or lists no model named `local`, the name `serve.sh` gives each model (`LOCAL_SERVED`).
 Its gate (Capacity gate, gate 5) admits at most the `maxSessions` the model switch's state gives this machine's server, else 6; M runs on the other machine, so no M swap holds a local start.
-The launch starts with a no-op label, `: effort <effort>, which the local model reads as thinking on or off alone;`, since K's chat template switches thinking on or off alone, then `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder: no Keychain read), every model mapped to `local` and `ENABLE_TOOL_SEARCH=true`,
-and runs `--model local --effort <effort>` with `--settings ~/.playground/factory-settings-local-120k.json`, GLM's file with the telemetry off, in a 120k window, since K serves 131,072 tokens.
+The launch starts with a no-op label, `: effort <effort>, which the local model reads as thinking on or off alone;`, since K's chat template switches thinking on or off alone, then `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder: no Keychain read), every model mapped to `local`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and `ENABLE_TOOL_SEARCH=true`,
+and runs `--model local --effort <effort>` with `--settings ~/.playground/factory-settings-local-120k.json`, GLM's file with the telemetry off, in a 120k window.
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` declares the server's own window, since Claude Code assumes 1M for a model name it does not know and so never compacted before the server refused: the `local` card's `max_model_len` from that GET, less 8192 for the reply, which shares the window; a card with no number above 16384 takes 120000.
+The 120k compact window is capped at the declared one, so a session on a smaller server compacts inside it.
 A start records `claude-code local`, which a resume runs on.
 
 ## --runtime herdr and restore
