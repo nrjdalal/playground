@@ -16,7 +16,7 @@ export type ModelServer = {
   startedAt: string
 }
 
-// One machine's part: each server left running there, by its model's folder, the hold while a swap runs there, and the keep beat's last refusal, said once.
+// One machine's part: each server left running there, by its model's folder, the hold while a swap runs there, the keep beat's last refusal, said once, and each entry it skips, each named once.
 export type MachineState = {
   // while set, nothing starts on that machine but `for`
   hold?: { for: string; since: string }

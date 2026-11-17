@@ -388,7 +388,7 @@ const recordPaths = async (
     )
 }
 
-// The keep beat, once per machine: a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read stamping busyAt, then the kept model is started when it is not serving and no other model is left there. Null when it did nothing new, else the one line for ops; a refusal the last beat already said stays quiet. With a swap's hold set it does nothing.
+// The keep beat, once per machine: a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read stamping busyAt, then the kept model is started when it is not serving and no other model asked for is left there; an entry no start would give is skipped, never asked for, and named to ops once. Null when it did nothing new, else the one line for ops; a refusal or skip the last beat already said stays quiet. With a swap's hold set it does nothing.
 export async function keepUp(deps: ModelDeps): Promise<string | null> {
   const { config, data, now } = deps
   const machine = deps.machine.name
