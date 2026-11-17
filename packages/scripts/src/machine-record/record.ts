@@ -13,7 +13,7 @@ import {
 } from "@packages/config/inbox"
 import { writeAtomically } from "@packages/settings"
 
-// This file imports node and the workspace packages alone, since the API imports it (@packages/scripts/machine-record) and its type build emits no file a relative import reaches.
+// This file imports node and the workspace packages alone, since the API imports it (@packages/scripts/machine-record/record) and its type build emits no file a relative import reaches.
 
 // The machine record: every path the factory put on this machine, one JSON file in the data folder, and the daily check that names what it does not hold. "Footprint" stays a session's processes (api/hono/src/lib/system/footprint.ts).
 

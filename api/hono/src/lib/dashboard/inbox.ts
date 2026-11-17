@@ -20,7 +20,7 @@ import { cloneOf, type Peer, peerSchema } from "@packages/config/org"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { addEntries, peerRecordArgv, rootEntries } from "@packages/scripts/machine-record"
+import { addEntries, peerRecordArgv, rootEntries } from "@packages/scripts/machine-record/record"
 import {
   checkSetting,
   extensionsDir,
@@ -2333,13 +2333,13 @@ const PEER_SEAMS: PeerSeams = {
 }
 
 // The peers' clone: this checkout's main checkout as a ~/ path (cloneOf), the place peer-sync keeps each peer's clone, or null when git cannot say or the path is not plain under home.
-const peerClone = (): string | null => {
+const peerClone = async (run: ArgvRun): Promise<string | null> => {
   const root = checkoutRoot()
   const git =
     root &&
-    Bun.spawnSync(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"])
-  return git && git.exitCode === 0
-    ? cloneOf(dirname(git.stdout.toString().trim()), process.env.HOME || homedir())
+    (await run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"]))
+  return git && git.code === 0
+    ? cloneOf(dirname(git.out.trim()), process.env.HOME || homedir())
     : null
 }
 
@@ -2361,7 +2361,7 @@ async function recordRoot(
       return
     }
     // read here, not at import, since it asks git where the main checkout is
-    const clone = seams.clone === undefined ? peerClone() : seams.clone
+    const clone = seams.clone === undefined ? await peerClone(run) : seams.clone
     if (!clone) throw new Error("this checkout is not a plain path under home, so no peer clone")
     const ran = await run(
       peerRecordArgv(seams.key, peer.target, clone, "add"),

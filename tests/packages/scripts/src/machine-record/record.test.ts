@@ -183,9 +183,9 @@ describe("the record's writes (PG-2538)", () => {
 
   test("a record that does not read throws, so no write replaces it", async () => {
     writeFileSync(recordPath(data), "{ not json")
-    expect(addEntries(data, [entry("/x")])).rejects.toThrow()
+    await expect(addEntries(data, [entry("/x")])).rejects.toThrow()
     writeFileSync(recordPath(data), JSON.stringify({ baseline: [], entries: [{ path: "/x" }] }))
-    expect(readRecord(data)).rejects.toThrow("is not a machine record")
+    await expect(readRecord(data)).rejects.toThrow("is not a machine record")
   })
 })
 
