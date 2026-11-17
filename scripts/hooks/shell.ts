@@ -502,7 +502,6 @@ function sshStdin(cmd: Command, call: Ssh): StdinKind | undefined {
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
 }
 
-// A remote text that may set a glob option by a name the hook cannot read: an expansion, an eval or a source (EXPANDS), or, on the line a glob runs in, a program that starts a shell or an interpreter that can (DYNAMIC)
 // A remote line that may set a glob option by a name the hook cannot read: one holding a `$` or a backquote, or a word, as the lexer reads it and by its basename, naming eval, a source, or a program that starts a shell or an interpreter that can (DYNAMIC); its backslash-newline pairs are joined first, as the shell joins them
 const DYNAMIC =
   /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/
