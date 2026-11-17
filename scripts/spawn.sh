@@ -2427,7 +2427,7 @@ PY
   elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" sandbox)" = on ]; then
     set -- "$@" sandbox=
   fi
-  # A --priority start while a priority file stands marks its row, which the sessions gate leaves out of the count, and a start without it clears the mark, as for sandbox=on.
+  # A --priority start on a priority file that passes it marks its row, which the sessions gate leaves out of the count, and a start without it clears the mark, as for sandbox=on.
   if [ -n "$PRIORITY_FILE" ]; then
     set -- "$@" priority=1
   elif [ "$MODE" != resume ] && [ "$(roster_field "$NAME" priority)" = 1 ]; then
