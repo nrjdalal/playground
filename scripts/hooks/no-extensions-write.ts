@@ -2442,11 +2442,14 @@ async function inspect(
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) }
       sshOwn.add(own)
       const remote = lex(line, at.known)
-      // the remote line's first command reads the pipe into ssh, so a remote xargs takes the words piped into ssh as its local twin does; ssh's own input redirect is judged as ssh's script above
+      // the remote line's first command reads ssh's stdin, so a remote xargs takes the words piped into ssh, or ssh's own here-string or heredoc, as its local twin does, read from the login's home; a file ssh reads keeps its local twin's verdict (PG-2553)
       const head = remote.commands[0]
-      const redirected = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"))
-      if (head && !head.stdin && cmd.stdin && !redirected && !ssh.noStdin && parse(head).xargs)
-        head.stdin = cmd.stdin
+      const input = sshInput(cmd)
+      const feeds = (r: { fd: string; op: string }) => /^0?$/.test(r.fd) && r.op.startsWith("<")
+      if (head && !head.stdin && !head.redirects.some(feeds) && !ssh.noStdin && parse(head).xargs) {
+        if (input?.body) head.redirects = [input, ...head.redirects]
+        else if (!input && cmd.stdin) head.stdin = cmd.stdin
+      }
       return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
