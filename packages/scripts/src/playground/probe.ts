@@ -20,6 +20,7 @@ import { portlessCa, portlessDir } from "../portless-ca"
 import {
   dashboardBeatOf,
   staleBeat,
+  stepQueued,
   type DashboardBeat,
   type Dispatcher,
   type Probes,
@@ -231,6 +232,30 @@ const pidAlive = (file: string): boolean => {
 
 // The follower the supervisor started, by the pid it recorded; nothing reads the dashboard's database.
 export const followerRunning = (): boolean => pidAlive(join(opsDashboard(), "dashboard-ingest.pid"))
+
+// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid and the last 3000 lines of run-slot.runs.log.
+export const prebuildQueued = (): boolean => {
+  const read = (path: string) => {
+    try {
+      return readFileSync(path, "utf8")
+    } catch {
+      return undefined
+    }
+  }
+  const runs = (read(join(dataDir(), "ops", "run-slot.runs.log")) ?? "").split("\n").slice(-3000)
+  return stepQueued(
+    read(join(opsDashboard(), "prebuild.pid")),
+    (pid) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    },
+    runs,
+  )
+}
 
 // The ops-dashboard job's heartbeat: its age, its cycle and whether the pid that wrote it still runs; null with no file that reads.
 export const dashboardBeat = (now = Date.now()): DashboardBeat | null => {

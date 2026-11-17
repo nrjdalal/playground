@@ -200,6 +200,7 @@
   A fenced block in a transcript's text draws as shadcn's `CodeBlock` in one border on the page's background, its tokens coloured by shadcn's `useHighlightedCode` in the theme's light or dark colours, its long lines wrapping,
   and Copy over its top-right corner on hover and focus (`TranscriptCode` in `TRANSCRIPT_COMPONENTS.code`, which Streamdown's `data-block` marks, its language read from Streamdown's `language-<name>` class into `data-language`; inline code stays Streamdown's),
   a `diff` block's line starting `+` or `-` taking code-block's `added` or `removed` variant, whose marker shows the sign in place of the text's first character, `added` on the success tint as `removed` is on the destructive one, a `---` or `+++` file header staying a plain line and Copy copying the block as written (`diffLine`),
+  a `progress` block whose every line reads drawing as bars instead (`ProgressBlock`, asks.md's card paragraph),
   and a table as shadcn's `Table` in one bordered box with no action row above it (`TranscriptTable`: one border, the highlight kept).
   A test fails when any file but `transcript-markdown.tsx` imports the `Streamdown` component.
 - ALWAYS: Send a message from the web through the dashboard's outbox (`useDashboard().outbox`), not `sendMessage` alone.

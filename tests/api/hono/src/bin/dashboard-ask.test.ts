@@ -289,6 +289,39 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(JSON.parse(got.stdout)).toMatchObject({ kind: "draft", status: "open" })
   })
 
+  test("new and edit refuse a progress block line that does not read, naming it, and post one that does with no width hint (PG-2617)", async () => {
+    const status = (...lines: string[]) => ({
+      from: "worker-envy",
+      kind: "update",
+      preview: {
+        outcome: "merged",
+        text: ["```progress", ...lines, "```", "", "- One step landed."].join("\n"),
+      },
+      title: "Yard control progress",
+    })
+    const wide = `Sign-in | 40 | ${"x".repeat(ASK_CODE_COLUMNS)} | 1:00 am`
+    const short = await cli(["new"], JSON.stringify(status("Mac reads | 100 | done")))
+    expect(short.code).toBe(1)
+    expect(short.stderr).toContain(
+      'progress block 1, line 1, holds 3 fields, not 4: "Mac reads | 100 | done"',
+    )
+    expect(short.stdout).toBe("")
+    const { id, tag } = await post(status("Mac reads | 100 | Reads every Mac | 9:10 pm", wide))
+    const posted = await cli(["get", id])
+    expect(JSON.parse(posted.stdout)).toMatchObject({ kind: "update" })
+    const over = await cli(
+      ["edit", tag],
+      JSON.stringify(status("Mac reads | 100 | x | y", "Sign-in | 140 | x | y")),
+    )
+    expect(over.code).toBe(1)
+    expect(over.stderr).toContain(
+      'progress block 1, line 2, has a percent outside 0 to 100: "Sign-in | 140 | x | y"',
+    )
+    const edited = await cli(["edit", tag], JSON.stringify(status("Mac reads | 100 | x | y", wide)))
+    expect(edited.code).toBe(0)
+    expect(edited.stderr).not.toContain("columns the owner chose")
+  })
+
   test("refuses an invalid item with the reason, and posts nothing", async () => {
     const result = await cli(["new"], JSON.stringify({ ...DECISION, preview: undefined }))
     expect(result.code).toBe(1)
