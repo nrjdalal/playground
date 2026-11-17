@@ -138,6 +138,41 @@ def beat_pid(job):
         return 0
 
 
+def boot_time():
+    """The machine's boot time as epoch seconds, from sysctl on macOS and /proc/stat on Linux, else 0, so a just-started job is left alone only while the machine that ran it is still up."""
+    try:
+        r = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                if "sec" in line:
+                    return int(line.split("=")[1].strip())
+    except Exception:
+        pass
+    try:
+        with open("/proc/stat") as f:
+            for line in f:
+                if line.startswith("btime "):
+                    return int(line.split()[1])
+    except Exception:
+        pass
+    return 0
+
+
+def beat_started(job):
+    """The heartbeat's startedAt as epoch seconds, else 0: the moment the job recorded, so a start at or after the recorded one ends the grace and the job is restarted."""
+    try:
+        b = json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json")))
+        return time.mktime(time.strptime(b["startedAt"][:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+    except Exception:
+        return 0
+
+
+def grace_ended(job, start_at):
+    """Whether the start grace is over, so a job recorded within GRACE is restarted: its heartbeat recorded a start at or after the recorded one, or the machine booted at or after it, since the just-started loop went down with that boot."""
+    beat = beat_started(job)
+    return bool(beat and beat >= start_at) or bool(start_at and start_at <= boot_time())
+
+
 def deleted(pids):
     """Each of the pids whose executable no longer exists, with that path, read in one lsof call (the first txt file after each pid); a failed or empty read finds none."""
     if not pids:
@@ -348,7 +383,9 @@ def up(quiet):
                 os.kill(holder, 15)
                 log(f"{job['name']} is paused; stopped its loop, pid {holder}")
             continue
-        if job["name"] == skip or time.time() - (starts.get(job["name"]) or 0) < GRACE:
+        start_at = starts.get(job["name"]) or 0
+        # a job started this recently is left alone, but its grace ends when it recorded a later start or the machine booted after it, so a dead job restarts on the first pass after a reboot
+        if job["name"] == skip or (time.time() - start_at < GRACE and not grace_ended(job, start_at)):
             continue
         ok, why = healthy(job)
         # a heartbeat pid counts only with a holder to stop, or for a job ops-up never starts; with neither, a start would run a second copy beside it

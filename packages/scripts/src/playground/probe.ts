@@ -256,6 +256,19 @@ export const supervisorRunning = (): boolean => {
   return !!beat && beat.running && !staleBeat(beat)
 }
 
+// Whether up.py holds ops-dashboard's start: its start is recorded within up.py's 600s grace, so the Dashboard's wait keeps waiting for it to start again, not bailing on a beat up.py has not had time to refresh.
+export const upHolds = (now: number = Date.now()): boolean => {
+  let starts: unknown
+  try {
+    starts = JSON.parse(readFileSync(join(dataDir(), "ops", "up-state.json"), "utf8"))
+  } catch {
+    return false
+  }
+  if (typeof starts !== "object" || starts === null) return false
+  const start = Number((starts as Record<string, unknown>)["ops-dashboard"])
+  return Number.isFinite(start) && now - start * 1000 < 600 * 1000
+}
+
 export const probe = async (urls: Urls | null): Promise<Probes> => ({
   api: await apiUp(urls),
   dispatchers: liveDispatchers(),

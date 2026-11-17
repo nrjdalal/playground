@@ -459,6 +459,7 @@ type WaitRead = {
   failure: string | null
   now: number
   redirect?: Redirect | null
+  upHolds?: boolean
 }
 type WaitOutcome = { done: string; ok: boolean } | { progress: string | null }
 
@@ -550,7 +551,7 @@ export const aliasFailure = (results: string[]): string | null => {
   return failure
 }
 
-// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start or that portless does not route its addresses, once the API's health answers a redirect, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
+// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start or that portless does not route its addresses, once the API's health answers a redirect, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s. The wait keeps going past a missing beat while ops-up holds the job, since its grace starts it again, so it names "supervisor is not running" only up.py has let the grace run out.
 export const waitOutcome = (
   read: WaitRead,
   state: { shownAt: number; startedAt: number },
@@ -574,12 +575,12 @@ export const waitOutcome = (
         done: `the Dashboard's API answered ${read.redirect.status} at ${read.redirect.from}, a redirect to ${read.redirect.to}, so playground asks it at an address portless does not serve (waited ${duration(spent)}); ${AGAIN}`,
         ok: false,
       }
-    if (!beat?.running)
+    if (!beat?.running && !read.upHolds)
       return {
         done: `ops-dashboard's supervisor is not running, so the Dashboard will not come up (waited ${duration(spent)}); ${AGAIN}`,
         ok: false,
       }
-    if (staleBeat(beat))
+    if (beat && staleBeat(beat) && !read.upHolds)
       return {
         done: `ops-dashboard's heartbeat is ${duration(beat.ageMs)} old, past three of its ${beat.cycleSeconds}s cycles, so its supervisor has stopped; ${AGAIN}`,
         ok: false,
