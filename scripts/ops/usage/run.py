@@ -13,7 +13,7 @@ rate-limit headers (a setup-token's inference scope cannot read /usage), taken h
 limitedUntil has passed, and shared through login-flip.json, so the two never probe the same account twice in that time. usage.json then adds `readAt` (when the
 limits were measured), `source` "token/ratelimit-headers" and `storedLogin` (the stored login's account and week). Remove `factory`
 from login-flip.json when the factory moves back to the stored login. login-flip.json's `accounts` lists every pool account the factory's
-sessions spend into, login-flip.py pruning it to the pool on each run; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
+sessions spend into, login-flip.py pruning it to the pool on each run; when that list is missing, `rotation.pool`'s accounts stand in; each is probed the same way, and usage.json's `accounts` holds each fresh week reading, which week-marks.py sums.
 ops/alerts-usage.json holds, while each lasts, one alert per factory account whose week is past 90, 97 or 98% (usage.json's account
 and each in its `accounts`), and the logged-in account's 5-hour window at 90% or more; ops-unstick folds it in.
 Each alert's `name` is its account, since the leads' sweep keys an alert by its kind and name.
@@ -158,9 +158,13 @@ def seen(flip, email, now):
 
 
 def accounts_reading():
-    """Each account in login-flip.json's `accounts` (every account the factory's sessions spend into) with a fresh week reading."""
+    """Each account in login-flip.json's `accounts` (every account the factory's sessions spend into), or `rotation.pool`'s when that list is missing, each with a fresh week reading."""
     flip, now, out = flip_file() or {}, time.time(), {}
-    for email in flip.get("accounts") or []:
+    accounts = flip.get("accounts")
+    if not accounts:
+        rot = rotation(flip)
+        accounts = [e["account"] for e in rot["pool"]] if rot else []
+    for email in accounts:
         s = seen(flip, email, now)
         if fresh(s, now) and s.get("weekReset"):
             row = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
