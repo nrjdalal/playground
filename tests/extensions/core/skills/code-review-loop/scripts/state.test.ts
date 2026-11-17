@@ -664,6 +664,21 @@ test("05r checks: a gate check with no run yet, or two runs of one name, waits o
   expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
 })
 
+// Audit, Lint, and Build's run appears only once every Suite job concludes, so its jobs read green minutes before the gate check exists (#2517).
+test("05ac checks: Lint and Build and test green with no Audit, Lint, and Build run yet print no CHECK line and keep waiting", async () => {
+  const early = runs(run("Lint and Build", "success"), run("test", "success"))
+  const [out, naps] = await checksThrough(
+    [still],
+    [
+      early,
+      early,
+      runs(run("Lint and Build", "success"), run("test", "success"), run(AUDIT, "success", 2)),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300, 300])
+})
+
 test("05s checks: a head that moves mid-wait ends it as MOVED (#1410)", async () => {
   const [out, naps] = await checksThrough(
     [still, moved],

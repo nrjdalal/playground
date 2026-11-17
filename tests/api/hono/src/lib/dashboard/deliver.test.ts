@@ -524,6 +524,8 @@ describe("deliver", () => {
         "ON_PICKER",
       ],
       [live([worker()], {}), "NOT_FOUND"],
+      // an --ssh probe's transcript is on the other machine, so nothing here could confirm the message
+      [live([worker({ remote: true })], { "s-dispatcher": SURFACE }), "NOT_FOUND"],
     ]
     for (const [state, code] of cases) {
       const { deps, recorded, typed } = fakes(state)

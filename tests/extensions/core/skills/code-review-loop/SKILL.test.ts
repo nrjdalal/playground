@@ -13,6 +13,38 @@ const part = async (label: string) =>
     "**Done when**",
   )
 
+describe("code-review-loop names CI green only from state.ts checks (#2517)", () => {
+  test("step 7, VERIFY.md and the docs page read the gate checks from checks' CHECK lines, not the bare check-runs list", async () => {
+    const step7 = (await skill()).split("7. **Post**")[1]?.split("\n")[0] ?? ""
+    expect(step7).toContain(
+      "name the gate checks green in a 5/5 only from `state.ts checks`' `CHECK` line for each gate check",
+    )
+    expect(step7.split("**Done when**")[1] ?? "").toContain(
+      "a 5/5 names each gate check green only from a `CHECK success` line `state.ts checks` printed at the head",
+    )
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "`state.ts checks <repo> <n> <head>` printed `CHECK success` for GitHub's `test` and `Audit, Lint, and Build`",
+    )
+    const verify = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/VERIFY.md"),
+    ).text()
+    const read =
+      verify.split("\n").find((l) => l.startsWith("- **Read the head's own checks**")) ?? ""
+    expect(read).toContain(
+      "a verdict names a gate check green only from the `CHECK success <name>` line",
+    )
+    expect(read).toContain("before that gate check exists")
+    expect(await page()).toContain(
+      "A 5/5 calls the gate checks green only from `state.ts checks`' CHECK line for each gate check",
+    )
+    expect(await page()).toContain(
+      "When `state.ts checks` prints `CHECK success` for GitHub's `test` and `Audit, Lint, and Build` checks at the exact head",
+    )
+  })
+})
+
 describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("after a 5/5 the reviewer stays up until the PR merges", async () => {
     const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
@@ -435,6 +467,27 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     )
     expect(await page()).toContain(
       "A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it",
+    )
+  })
+
+  test("a patch whose paths or code lines hold the publish word goes to the worker by its path and its text, beside the prose swap (#2481)", async () => {
+    const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain('on a prose line write "ship" in its place in the posted block')
+    expect(step).toContain(
+      "A patch whose paths or code lines hold the word, which no swap can reword, stays out of the comment: send the worker one `SendMessage` holding the saved `fix.patch`'s absolute path and, under it, the patch's whole text, since an auto-end moves your scratch folder to the trash",
+    )
+    expect(step).toContain("say in the verdict which finding's patch went to the author that way")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "a patch whose paths or code lines hold the word sent to the worker by its path and its text and named in the verdict",
+    )
+    const comments = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),
+    ).text()
+    expect(comments).toContain(
+      "a patch whose paths or code lines hold the word stays out of the comment: save it to your scratch folder, send the worker one `SendMessage` holding its absolute path and, under it, its whole text, and say in the verdict which finding's patch went to the author that way",
+    )
+    expect(await page()).toContain(
+      "the reviewer sends the worker one `SendMessage` holding the saved patch's absolute path and, under it, the patch's whole text, since an auto-end moves the reviewer's scratch folder to the trash, and says in the verdict which finding's patch went to the author that way",
     )
   })
 
