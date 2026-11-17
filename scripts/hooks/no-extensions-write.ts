@@ -2441,7 +2441,13 @@ async function inspect(
       const at = remoteEnv(env, line)
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) }
       sshOwn.add(own)
-      return (await visit(own, parse(own), env)) ?? run(lex(line, at.known), at, visit, true)
+      const remote = lex(line, at.known)
+      // the remote line's first command reads the pipe into ssh, so a remote xargs takes the words piped into ssh as its local twin does; ssh's own input redirect is judged as ssh's script above
+      const head = remote.commands[0]
+      const redirected = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"))
+      if (head && !head.stdin && cmd.stdin && !redirected && !ssh.noStdin && parse(head).xargs)
+        head.stdin = cmd.stdin
+      return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
     // the reader walks the script a shell or a source runs, so the hook judges only one it cannot read: a -c script it reads none of, or a file this line wrote with such text
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
