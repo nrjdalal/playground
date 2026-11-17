@@ -330,7 +330,8 @@ const refusal = (probe: string[], code: number | null, err = "") => {
   try {
     return bwrapRefusal(probe)
   } finally {
-    process.env.PATH = was
+    if (was === undefined) delete process.env.PATH
+    else process.env.PATH = was
     rmSync(bin, { force: true, recursive: true })
   }
 }
