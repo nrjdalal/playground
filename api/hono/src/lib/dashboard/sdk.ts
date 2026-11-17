@@ -340,14 +340,10 @@ export class SdkHost {
     if (!this.restarting) throw new Error(`${SDK_PROBE} switches its model only under claim()`)
     if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
     const effort = this.effort
-    try {
-      this.session.close()
-      await Promise.race([this.reading, Bun.sleep(CLOSE_MS)])
-      this.start(this.cwd, this.claude, this.mode, local, model)
-      if (effort) await this.keepEffort(effort)
-    } finally {
-      this.restarting = false
-    }
+    this.session.close()
+    await Promise.race([this.reading, Bun.sleep(CLOSE_MS)])
+    this.start(this.cwd, this.claude, this.mode, local, model)
+    if (effort) await this.keepEffort(effort)
     this.changed()
   }
 
@@ -364,7 +360,7 @@ export class SdkHost {
     }
   }
 
-  // Takes the one restart that may run at a time, before the activity row is written, so a second pick from another tab reads BUSY rather than failing mid-switch; false when another holds it. restart() lets it go.
+  // Takes the one restart that may run at a time, before the activity row is written, so a second pick from another tab reads BUSY rather than failing mid-switch; false when another holds it. switchTo() lets it go, whichever way the restart ends.
   claim(): boolean {
     if (this.restarting) return false
     this.restarting = true
@@ -373,6 +369,7 @@ export class SdkHost {
 
   release(): void {
     this.restarting = false
+    this.changed()
   }
 
   // The local model loading for a pick, by its label, or null.

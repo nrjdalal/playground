@@ -799,6 +799,20 @@ describe("the hosted session on a local model", () => {
     }
   })
 
+  test("the claim holds until switchTo lets it go, so a pick right after a restart reads BUSY (PG-2647)", async () => {
+    const { dir, host } = started()
+    try {
+      expect(host.claim()).toBe(true)
+      await host.restart(null, "opus")
+      expect(host.claim()).toBe(false)
+      host.release()
+      expect(host.claim()).toBe(true)
+      host.release()
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a switch keeps the effort picked before it, on the local server and back", async () => {
     const { dir, fake, host, pick } = started()
     try {
