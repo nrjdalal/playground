@@ -31,6 +31,7 @@ The two stay apart in the verdict, so a well-built change that misses the ask ca
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
 They leave the review clone as it stands, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
+When the diff adds a schema refusal that a form reads, that prompt also traces each refusal the form can reach to the field that shows it on screen, since a refusal with no field shows as a whole line the person cannot place.
 
 ## State lives on the PR
 

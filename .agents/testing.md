@@ -71,6 +71,7 @@ each on every commit but one of images and fonts alone.
 Beside the shards, GitHub runs the suite once more as `Suite (<n>, clock ahead)` jobs with every test's clock 30 days on, so a test that takes its clock from two sources (a fixed `NOW` passed to one call while another defaults to `Date.now()`) goes red on its own PR, not on the day the real clock reaches it.
 Those jobs split on their own (`test-shards.ts legs`) without the exempt files, so they number fewer than the shards, and they keep no timings.
 Run it locally with `CLOCK_AHEAD_DAYS=30 bun run test:file [paths]`: `test-sandbox.ts` then preloads `tests/clock-ahead.ts` into both passes and leaves out the files `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`) lists, named or matched, and names each named file it leaves out.
+A test that reads the clock or a file's mtime runs `CLOCK_AHEAD_DAYS=30 bun run test:file <its path>` before review, since one PR's cache rows went red on the clock-ahead shard alone.
 Give the shift to `test-sandbox.ts` alone, since `BUN_OPTIONS` breaks `bun run` itself.
 The preload swaps in a `Date` that keeps running, moved ahead, because bun's `setSystemTime` stops the clock as it moves it (a 50 ms `Bun.sleep` read 0 ms elapsed, measured), which turns every test that times a wait red.
 The shift reaches the test's own process alone, so two clocks stay real: a child process (spawn.sh, run-slot.sh, a CLI, a Python job), and a file's mtime, which the OS stamps.
@@ -139,6 +140,8 @@ A small fixed pid fails it, since in a sandbox's pid namespace a test's own pid 
 A test that needs a path outside the repo names a made-up file under its own temp folder (`join(dir, "outside.txt")`), never `/etc/passwd`, since GitGuardian, which checks every pull request, reads that path in a diff as a leaked password and fails its check.
 A test whose result matches text in a path, such as a folder or session name, holds a made-up path outside `tmpdir()` (`/fixture/...`), since in a factory session on Linux the sandbox sits in that session's own temp folder, `/tmp/playground-<name>.<random>/test-sandbox-*`, so a path made there carries the session's name, and the test passes in one session and fails in another or on GitHub.
 The sandbox stays in that folder, since the nightly clean reads the session a sandbox orphan belongs to from it (`SESSION` in `packages/scripts/src/ops-tick/orphans.ts`) and keeps a live session's orphans.
+A fixture that stands for a large file is a small real file, never a sparse one made with `truncate -s`, since a sparse file takes almost nothing on disk but reads at its full apparent size: safe-delete measures apparent size, so a fixture taking 156K on disk read as 4.9G on the owner's removal card (measured, 17 Nov).
+Edit a bash script only once every live run of it has ended, since bash reads a script a block at a time as it runs, so an edit made mid-run can change what that run does next.
 
 ## End-to-end tests
 
