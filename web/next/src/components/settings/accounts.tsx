@@ -25,10 +25,10 @@ import { toast } from "@/components/ui/toast"
 import { ACCOUNTS_QUERY_KEY, type AccountRow, accountWords, readAccounts } from "@/lib/accounts"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { markOwn } from "@/lib/own-account"
-import { PROVIDER_ICONS } from "@/lib/status-icons"
+import { providerIcon } from "@/lib/status-icons"
 import { useAccount } from "@/lib/system"
 
-const ICONS = { claude: PROVIDER_ICONS.anthropic, glm: PROVIDER_ICONS.zai }
+const ICONS = { claude: providerIcon("anthropic"), glm: providerIcon("zai") }
 
 const KEY = "usage.accounts"
 
