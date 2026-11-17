@@ -12517,10 +12517,13 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const remote = lex(line, at.known);
       const head = remote.commands[0];
       const input = sshInput(cmd);
-      const feeds = (r) => /^0?$/.test(r.fd) && r.op.startsWith("<");
-      if (head && !head.stdin && !head.redirects.some(feeds) && !ssh.noStdin && parse3(head).xargs) {
+      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse3(head).xargs) {
+        const target = input?.op === "<" ? input.target : undefined;
+        const path = target && pathOf(target, env);
         if (input?.body)
           head.redirects = [input, ...head.redirects];
+        else if (input && target && path)
+          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects];
         else if (!input && cmd.stdin)
           head.stdin = cmd.stdin;
       }
