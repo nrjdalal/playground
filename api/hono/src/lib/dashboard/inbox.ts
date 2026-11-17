@@ -46,6 +46,8 @@ import { z } from "zod"
 import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import {
+  caFile,
+  caPin,
   installArgv,
   installedRefusal,
   repoScripts,
@@ -319,8 +321,11 @@ export const grantArgv = (preview: InboxGrant): string[] => [
   `x-apple.systempreferences:com.apple.preference.security?${GRANT_PANES[preview.permission]}`,
 ]
 
-// A step that needs root on this machine, which the owner approves from the Inbox in place of a terminal: `install` puts the listed scripts in place, their hashes frozen on the card as it is posted (rootScripts), and any other step is one listed script (system/root.ts's ROOT_STEPS), run through the desktop's password window with no argument.
+// A step that needs root on this machine, which the owner approves from the Inbox in place of a terminal: `install` puts the listed scripts in place, and the Dashboard's CA when it has one, their hashes frozen on the card as it is posted (rootScripts), and any other step is one listed script (system/root.ts's ROOT_STEPS), run through the desktop's password window with no argument.
 const rootSchema = z.strictObject({
+  ca: z
+    .strictObject({ sha256: z.string().regex(HEX64, "Must be a sha256 in 64 lowercase hex") })
+    .optional(),
   scripts: z
     .array(
       z.strictObject({
@@ -1612,7 +1617,7 @@ export async function postItem(
   return { item: toItem(row as Row), ok: true }
 }
 
-// An install card's scripts as this checkout holds them when it is posted or edited, so the card shows the very bytes its Approve installs: a poster's own list must match them, and a step card lists none.
+// An install card's scripts as this checkout holds them, and the Dashboard's CA as this machine holds it, when it is posted or edited, so the card shows the very bytes its Approve installs: a poster's own list or CA must match them, and a step card lists neither.
 const rootScripts = async (
   input: z.infer<typeof inboxInputSchema>,
 ): Promise<z.infer<typeof inboxInputSchema> | Refused> => {
@@ -1620,11 +1625,16 @@ const rootScripts = async (
   const { preview } = input
   const refuse = (message: string): Refused => ({ code: "VALIDATION_ERROR", message, ok: false })
   if (preview.step !== "install")
-    return preview.scripts ? refuse("A root step's card lists no scripts") : input
+    return preview.scripts || preview.ca
+      ? refuse("A root step's card lists no scripts and no CA")
+      : input
   const scripts = await repoScripts()
   if (preview.scripts && !isDeepStrictEqual(preview.scripts, scripts))
     return refuse("An install card's scripts are this checkout's; post it with none to fill them")
-  return { ...input, preview: { ...preview, scripts } }
+  const pin = await caPin()
+  if (preview.ca && preview.ca.sha256 !== pin)
+    return refuse("An install card's CA is this machine's; post it with none to fill it")
+  return { ...input, preview: { ...preview, ...(pin && { ca: { sha256: pin } }), scripts } }
 }
 
 // Pure: under owner.voice's singular, the refusal for a draft's or a slack decision's first we, us, our, ours or ourselves outside someone else's words; none under any other voice.
@@ -2314,7 +2324,7 @@ export async function endLostRoots(
   return told
 }
 
-// A root card's run: the install's fixed text with the card's frozen hashes, or a listed step's installed script once its install is root's own and current; a guard that refuses runs nothing.
+// A root card's run: the install's fixed text with the card's frozen hashes, the CA's path this machine's and its hash the card's, or a listed step's installed script once its install is root's own and current; a guard that refuses runs nothing.
 export async function rootRun(
   run: ArgvRun,
   preview: InboxRoot,
@@ -2322,7 +2332,12 @@ export async function rootRun(
 ): Promise<RunResult> {
   let argv: string[]
   try {
-    if (preview.step === "install") argv = installArgv(preview.scripts ?? [])
+    if (preview.step === "install")
+      argv = installArgv(
+        preview.scripts ?? [],
+        undefined,
+        preview.ca && { path: caFile(), sha256: preview.ca.sha256 },
+      )
     else {
       const refused = await installed(preview.step)
       if (refused) return { exitCode: 1, line: refused }

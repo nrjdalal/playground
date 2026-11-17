@@ -263,9 +263,102 @@ function envLong(v) {
   const name = hits.includes(m[1]) ? m[1] : hits.length === 1 ? hits[0] : undefined;
   return name ? { name, value: m[2] } : undefined;
 }
+var SSH_FLAGS = "46AaCfGgKkMNnqsTtVvXxYy";
+var SSH_VALUES = "BbcDEeFIiJLlmOoPpQRSWw";
+var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
+function sshCall({ args, first }) {
+  if (program(first?.value ?? "") !== "ssh")
+    return;
+  const call = { local: [], noStdin: false, remote: [], unread: false };
+  let remoteCommand;
+  const option = (word) => {
+    const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
+    const key = m?.[1]?.toLowerCase() ?? "";
+    if (marked(word.value.split(/[=\s]/)[0] ?? ""))
+      call.local.push(word);
+    else if (SSH_LOCAL.has(key))
+      call.local.push({ ...word, value: m?.[2] ?? "" });
+    else if (key === "remotecommand")
+      remoteCommand = { ...word, value: m?.[2] ?? "" };
+  };
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--" || !value.startsWith("-") || value === "-") {
+      const at = value === "--" ? k + 1 : k;
+      if (call.host || value === "--") {
+        call.host ??= args[at];
+        call.remote = args.slice(call.host === args[at] ? at + 1 : at);
+        break;
+      }
+      call.host = args[k];
+      call.unread ||= marked(value);
+      continue;
+    }
+    for (let c = 1;c < value.length; c++) {
+      if (value[c] === "n")
+        call.noStdin = true;
+      if (SSH_VALUES.includes(value[c])) {
+        const attached = value.slice(c + 1);
+        const given = attached ? { ...args[k], value: attached } : args[++k];
+        if (value[c] === "o" && given)
+          option(given);
+        break;
+      }
+      if (!SSH_FLAGS.includes(value[c]))
+        return { ...call, unread: true };
+    }
+  }
+  if (call.remote.length === 0 && remoteCommand)
+    call.remote = [remoteCommand];
+  return call;
+}
+function sshStdin(cmd, call) {
+  if (call.noStdin)
+    return;
+  if (call.unread || call.remote.length === 0)
+    return "shell";
+  const kinds = lex(call.remote.map((w) => w.value).join(" ")).commands.map((c) => stdinShell({ ...c, stdin: c.stdin ?? cmd }));
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
+}
+var DYNAMIC = /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/;
+function staticLine(line) {
+  const joined = line.replace(/\\\n/g, "");
+  if (marked(joined) || /[$`]/.test(joined))
+    return false;
+  const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
+  return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()));
+}
+function remoteEnv(env, line, fed = false) {
+  const home = env.process.HOME || undefined;
+  const { PWD: _pwd, ...known } = env.known;
+  return {
+    ...env,
+    cwd: home,
+    cwdAnywhere: undefined,
+    cwdBack: [],
+    cwdChain: undefined,
+    cwdChainToken: undefined,
+    cwdChainUnread: undefined,
+    cwdHeld: [],
+    cwdMaybe: [],
+    cwdOr: undefined,
+    cwdSure: home,
+    cwdUnread: home === undefined,
+    known: home && !/\b(?:cd|popd|pushd)\b/.test(line) ? { ...known, PWD: home } : known,
+    old: { dir: home },
+    oldFrom: undefined,
+    remote: true,
+    remoteDots: fed || !staticLine(line),
+    vars: new Map
+  };
+}
 function stdinShellOf(cmd, { args, first, name, xargs }) {
   const fed = !!cmd.stdin || !!xargs;
   if (first && !marked(first.value)) {
+    if (name === "ssh") {
+      const call = sshCall({ args, first });
+      return call && (fed || stdinFed(cmd)) ? sshStdin(cmd, call) : undefined;
+    }
     if (name === "." || name === "source" || name === "eval")
       return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
     const family = familyOf(name);
@@ -2082,10 +2175,12 @@ async function examine(cmd, env, visit, builtins) {
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env);
   }
-  if (!cmd.runsStdin || stdinScript(primary))
+  const remote = primary.name === "ssh" && ["root", "shell"].includes(stdinShellOf(cmd, primary) ?? "");
+  if (!remote && (!cmd.runsStdin || stdinScript(primary)))
     return;
   for (const script of await scriptStdin(cmd, env)) {
-    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    const at = remote ? remoteEnv(env, known(script), true) : subshell(env);
+    const verdict = await nested(cmd, env, () => run(lexScript(known(script), at), at, visit, builtins));
     if (verdict)
       return verdict;
   }
@@ -2695,7 +2790,7 @@ function shellOperand(args, shell) {
     const v = args[k].value;
     if (takes.has(v))
       k++;
-    else if (/^[-+][A-Za-z]+$/.test(v))
+    else if (/^[-+][A-Za-z0-9]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
     else if (!v.startsWith("--"))
       return { inline, operand: args[k] };
