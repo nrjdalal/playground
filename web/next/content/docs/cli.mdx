@@ -166,6 +166,10 @@ Otherwise it swaps: it holds new starts there, waits up to 30 minutes for the ru
 It refuses with the memory reading when not even one session fits, stops a server whose load takes the machine under 15 GiB free, and leaves alone any container it did not start.
 Each server it starts is kept in `<data>/models/state.json`, under `machines.<machine>.servers.<model>`: its container, port, share, most sessions and start time.
 The ops-tick beat `model-keep` keeps each machine's kept model up: it starts it when it is down, and brings it back once another model there sits idle `localModels.idleMinutes`.
+A `/metrics` that answers nothing counts as no idle time while `docker inspect` reads the container as running, as a swap's drain reads it, so a server too busy to answer is never stopped mid-request.
+On each beat it also reads every server's `/metrics` and keeps the snapshot beside the server in the state file, with the speed since the beat before: `decodeTps`, generated tokens over decode seconds, `ttftMean`, the mean wait for a first token, and `waiting`, the requests queued.
+A window with no generation or no first token, a `/metrics` that answers nothing, and a speed older than 15 minutes hold no samples.
+`spawn.sh --backend local` reads that speed against two floors, `localModels.minTps` and `localModels.maxFirstTokenSeconds` ([The keys](/docs/extensions#the-keys)): it refuses a start while a request waits, while each live local session's speed times n/(n+1) falls under the speed floor, with n the live local sessions, or while the first-token wait reaches its floor.
 The peer's servers reach this machine through the [`ops-model-tunnel` job](/docs/jobs#reach-the-model-servers-on-another-machine).
 
 To copy a model's folder to the other machine, use `rsync -a --copy-unsafe-links` (or `-L`), since a Hugging Face repo's files are links into its shared `hf/hub/blobs/` folder, which a plain `rsync -a` copies as links that point nowhere.

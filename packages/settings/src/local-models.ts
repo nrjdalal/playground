@@ -57,6 +57,18 @@ export const localModelSettings = defineSettings({
       z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name"),
     ]),
   },
+  "localModels.maxFirstTokenSeconds": {
+    default: 10,
+    description:
+      "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
+    schema: z.number().positive().max(600),
+  },
+  "localModels.minTps": {
+    default: 15,
+    description:
+      "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
+    schema: z.number().min(0).max(1000),
+  },
   "localModels.models": {
     default: {
       // Measured in the local-model test of 2026-11-17: 72.38 GiB loaded; 908,567 KV tokens in 15.99 GiB at 0.75, 18.45 KiB a token (estimated from those two); overhead estimated as 0.75 of 121 GiB less weights and KV; capped at 0.75, since 0.80 logged an out-of-memory line once.

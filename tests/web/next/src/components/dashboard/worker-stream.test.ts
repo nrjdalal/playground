@@ -14,6 +14,7 @@ import {
   StepRow,
   ToolStep,
 } from "../../../../../../web/next/src/components/dashboard/worker-stream"
+import { drawingOf, keepMakerIcon } from "../../../../../../web/next/src/lib/model-icons"
 
 // React resolves from the web app's own packages, which this directory cannot see; the two calls the test makes are typed here rather than through a path into node_modules.
 type Node = unknown
@@ -28,6 +29,11 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
 const { QueryClient, QueryClientProvider } = (await import(
   Bun.resolveSync("@tanstack/react-query", web)
 )) as { QueryClient: new () => unknown; QueryClientProvider: unknown }
+
+const { RiGitBranchLine } = (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
+  "RiGitBranchLine",
+  unknown
+>
 
 const older = { load: () => {}, state: "idle" as const }
 const render = (shown: boolean) => renderToStaticMarkup(createElement(OlderSteps, { older, shown }))
@@ -493,4 +499,59 @@ test("his delivered message draws the files its outbox record holds, though the 
     ),
   )
   expect(html).toContain("sketch.png")
+})
+
+// A subagent runs on its parent session's model, so its Agent call's line draws that model's logo, by the rows' resolver; a branch when the parent's model is unknown, never a robot (PG-2651).
+describe("a subagent's tool line", () => {
+  const T0 = "2026-10-06T00:00:00.000Z"
+  const ANTHROPIC = `data:image/svg+xml;base64,${Buffer.from('<svg data-maker="anthropic"><path d="M0 0"/></svg>').toString("base64")}`
+  const ORNITH = "data:image/png;base64,iVBORw0KGgo="
+  keepMakerIcon("anthropic", drawingOf(ANTHROPIC))
+  keepMakerIcon("ornith-ai", drawingOf(ORNITH))
+  const line = (worker: Record<string, unknown>) => {
+    const html = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: new QueryClient() },
+        createElement(StepRow, {
+          composer: "composer",
+          marker: null,
+          message: {
+            id: "a1",
+            metadata: { at: T0, from: null, kind: "assistant" },
+            parts: [
+              {
+                ...toolPart("output-available", {}),
+                input: { json: "{}", summary: "Review the diff" },
+                title: "Agent",
+                toolName: "Agent",
+              },
+            ],
+            role: "assistant",
+          },
+          newest: true,
+          now: new Date(T0),
+          outbox: {},
+          sent: null,
+          waiting: false,
+          worker: { name: "builder", sessionId: "s1", tasks: [], ...worker },
+        }),
+      ),
+    )
+    return html.slice(html.indexOf('data-slot="trace-icon"'), html.indexOf("Review the diff"))
+  }
+  const branch = /<path d="([^"]+)"/.exec(renderToStaticMarkup(createElement(RiGitBranchLine)))?.[1]
+
+  test("draws its parent's model logo: Claude's, or a local model's served maker", () => {
+    expect(line({ model: "claude-opus-5-5" })).toContain(ANTHROPIC)
+    expect(line({ localModel: "ornith-ai/Ornith-1.5-122B-NVFP4", model: "local" })).toContain(
+      ORNITH,
+    )
+  })
+
+  test("draws a branch when its parent's model is unknown", () => {
+    expect(branch).toBeString()
+    expect(line({ model: null })).toContain(branch ?? "none")
+    expect(line({ model: "claude-opus-5-5" })).not.toContain(branch ?? "none")
+  })
 })

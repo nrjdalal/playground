@@ -328,6 +328,16 @@ describe("the seed's notes (PG-2538)", () => {
     })
   })
 
+  test("reads a comma list's later item with a folder of its own from the first item's parent, as the usage's example says", () => {
+    const tree = "spark-test\n└── ~/\n    └── kit/a.sh, b.sh, logs/c.sh\n"
+    expect(treePaths(tree, "spark-test", "/h").paths.map((p) => p.path)).toEqual([
+      "/h/kit/a.sh",
+      "/h/kit/b.sh",
+      "/h/logs/c.sh",
+    ])
+    expect(USAGE).toContain('"kit/a.sh, b.sh, logs/c.sh"')
+  })
+
   test("an item the seed cannot take as written is skipped and named, never recorded: an aside, a space, a placeholder nothing matches", () => {
     expect(treePaths(FOOTPRINT, "spark-test", "/h").skipped).toEqual([
       "/h/models/hf/ acme/Model-7B",

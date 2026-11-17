@@ -51,6 +51,7 @@ import {
   prebuildQueued,
   probe,
   supervisorRunning,
+  upHolds,
 } from "./probe"
 import { dispatcherOptions, runSpawn, startDispatcher } from "./spawn"
 import { runStore, terminalIo } from "./store"
@@ -264,6 +265,7 @@ const dashboard = async (): Promise<number> => {
             failure,
             now,
             redirect: health.redirect,
+            upHolds: upHolds(now),
           },
           state,
         )
