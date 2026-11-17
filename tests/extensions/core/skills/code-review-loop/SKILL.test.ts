@@ -229,6 +229,22 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
       "A head that conflicts with canary, or goes red only on the merge",
     )
   })
+
+  // a test red only beside the other files was rerun until it passed, where a flaky test is root-caused or removed (PG-2577)
+  test("a BATCH-RED test gets one issue, opened by whoever saw it first, never a second rerun, and the PR merges on the lone run's green", async () => {
+    const step =
+      (await skill()).match(/^2\. \*\*Check the merge, then place the push\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain("gets an issue, never a second rerun to make the PR green")
+    expect(step).toContain(
+      "whoever saw it first, you or your worker, opens one issue for each such test",
+    )
+    expect(step).toContain("to root-cause it or to delete the test with the reason")
+    expect(step).toContain("the file, the run's id")
+    expect(step).toContain("the batch it went red in and the lone run's output")
+    expect(step).toContain("the other links that issue, so a test never gets two")
+    expect(step).toContain("with the issue named in its Merge Danger")
+    expect(await page()).toContain("never a second rerun")
+  })
 })
 
 describe("code-review-loop's touched tests come from the diff (#1104, #1525)", () => {
