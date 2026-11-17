@@ -58,7 +58,7 @@ export const localName = (repo: string): string => {
   return size ? `${family} ${size.toUpperCase()}` : family
 }
 
-// Pure: the name a row and its tooltip give its model: a local session's served repo and local (Ornith 122B, local), local alone while its server names none, else modelName's.
+// Pure: a row's model name with no level, which levelName and the initials chip read: a local session's served repo and local (Ornith 122B, local), local alone while its server names none, else modelName's.
 export const rowModelName = ({ localModel, model }: RowModel): string | null =>
   model === LOCAL_SERVED
     ? localModel

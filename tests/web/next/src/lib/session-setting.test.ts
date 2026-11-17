@@ -4,6 +4,7 @@ import {
   choiceLabel,
   choiceSetting,
   EFFORT_LABELS,
+  effortFixed,
   heldPick,
   isEffort,
   isModel,
@@ -79,6 +80,16 @@ describe("the composer's model and effort picker", () => {
     expect(pickerWords({ model: null }, null, null)).toBe("Model · Effort")
     // a pick of a cloud model off the local one reads as that model's, effort and all
     expect(pickerWords(served, "sonnet", "high")).toBe("Sonnet · High")
+  })
+
+  test("the Effort group takes no pick on a session on the served local model, whose launch set its thinking; any other session's does", () => {
+    expect(effortFixed({ model: "local" }, null)).toBe(true)
+    expect(effortFixed({ model: "local" }, "sonnet")).toBe(false)
+    expect(effortFixed({ model: "claude-opus-5-5" }, "opus")).toBe(false)
+    expect(effortFixed({ model: "ornith-1.5-122b-nvfp4" }, "local:ornith-1.5-122b-nvfp4")).toBe(
+      false,
+    )
+    expect(effortFixed({ model: null }, null)).toBe(false)
   })
 
   test("shows a pick until the row reports a value other than the one it was picked over", () => {

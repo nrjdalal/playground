@@ -342,7 +342,7 @@ export type RowLines = {
   eta: string | null
   // its kind (labelParts), which closes its label: its role word after the ticket and the pull request, else after the title
   kind: RosterKind | null
-  // the model's name, without the effort (levelName: a local model's with its level, as high: Ornith 122B, thinking)
+  // the model's name (levelName): any other model's without its effort, a local session's with its level in words, as high: Ornith 122B, thinking
   model: string | null
   pr: number | null
   // the row's one icon
