@@ -1,3 +1,5 @@
+import { join } from "node:path"
+
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
 import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
@@ -59,6 +61,7 @@ import {
   unknownManager,
   writeManagersOrder,
 } from "@/lib/dashboard/managers-order"
+import { serveModelIcon } from "@/lib/dashboard/model-icons"
 import { readOps } from "@/lib/dashboard/ops"
 import {
   PASTE_REPORT_BYTES,
@@ -113,7 +116,9 @@ import {
   validationErrorResponses,
   type ErrorCode,
 } from "@/lib/error"
+import { org } from "@/lib/org"
 import { upgradeWebSocket } from "@/lib/server"
+import { dataDir } from "@/lib/sessions/paths"
 import { listAccounts } from "@/lib/store/accounts"
 import { systemReport } from "@/lib/system/sampler"
 import {
@@ -1295,6 +1300,25 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     (c) => serveAttachment(c.req.param("id")),
+  )
+  .get(
+    "/model-icons/:maker",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id), fetched once from models.dev, else its Hugging Face avatar, and served from the data folder's cache after, never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
+      responses: {
+        200: { description: "The icon" },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    (c) =>
+      serveModelIcon(c.req.param("maker"), {
+        dir: join(dataDir(), "model-icons"),
+        local: org.local.models,
+      }),
   )
   .get(
     "/ws",
