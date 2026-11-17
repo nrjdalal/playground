@@ -4,10 +4,14 @@ import { type Group, type Paths, type Row } from "./_shared"
 // A cd ~ reads the process's own home, so its rows run in the process folders, as 356's do.
 
 // no-extensions-write: the same pipes fed a path outside the root
-const controls = (): Row[] => [
+const controls = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
   [
     "a path outside the root piped into a brace group's later xargs touch",
     "echo notes/x | { true; xargs touch; }",
+  ],
+  [
+    "a file of words outside the root fed to an xargs touch outside any group",
+    `xargs touch < ${WORDS}`,
   ],
   [
     "a path outside the root piped to a remote line's later xargs touch",
@@ -60,7 +64,11 @@ const refused = ({ HOME, WORDS }: Pick<Paths, "HOME" | "WORDS">): Row[] => [
     `{ true; xargs touch; } < ${WORDS}`,
   ],
 ]
-const cdRefused = (): Row[] => [
+const cdRefused = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
+  [
+    "a file of words outside the root fed to a brace group whose xargs touch follows a cd ~, which the hook does not read",
+    `{ cd ~ && xargs touch; } < ${WORDS}`,
+  ],
   [
     "the root's path piped into a brace group's later xargs touch after a cd ~",
     "cd ~ && echo .playground/extensions/.no-such-file | { true; xargs touch; }",
@@ -91,13 +99,13 @@ export const groups: Group[] = [
   {
     folders: ["checkout", "home", "tmp"],
     guards: ["no-extensions-write"],
-    rows: (paths) => [...controls(), ...refused(paths)],
+    rows: (paths) => [...controls(paths), ...refused(paths)],
   },
   {
     folders: ["process home", "process tmp", "process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...cdControls(), ...cdRefused()],
+    rows: (paths) => [...cdControls(), ...cdRefused(paths)],
   },
 ]
 
-export const allowed: string[] = [...controls(), ...cdControls()].map(([what]) => what)
+export const allowed: string[] = [...controls({ WORDS: "" }), ...cdControls()].map(([what]) => what)
