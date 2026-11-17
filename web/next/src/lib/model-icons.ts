@@ -1,11 +1,19 @@
-import { RiRobot2Line, type RemixiconComponentType } from "@remixicon/react"
+import type { RemixiconComponentType } from "@remixicon/react"
 import { useEffect, useSyncExternalStore } from "react"
 
-import { logoOf } from "@/components/dashboard/model-logo"
+import { chipOf, logoOf } from "@/components/dashboard/model-logo"
 import { apiClient } from "@/lib/api/client"
+import { initialsOf } from "@/lib/model-label"
 
-// The one icon a row draws for a model whose maker has none, or none the API could fetch.
-export const FALLBACK_PROVIDER_ICON: RemixiconComponentType = RiRobot2Line
+// What a row draws for a model whose maker has none, or none the API could fetch: its initials in a chip (chipOf), one drawing for each initials, so a row keeps the same component across renders.
+const chips = new Map<string, RemixiconComponentType>()
+export const initialsIcon = (initials: string): RemixiconComponentType => {
+  const kept = chips.get(initials)
+  if (kept) return kept
+  const chip = chipOf(initials)
+  chips.set(initials, chip)
+  return chip
+}
 
 // What the page knows of each maker's icon: its drawing once read, null once the API has none or could not be reached, absent while unread.
 const icons = new Map<string, RemixiconComponentType | null>()
@@ -39,7 +47,7 @@ export const keepMakerIcon = (maker: string, drawing: RemixiconComponentType | n
   redraw()
 }
 
-// Reads a maker's icon from the API once a page: a 404, or no answer at all, keeps the fallback.
+// Reads a maker's icon from the API once a page: a 404, or no answer at all, keeps the initials chip.
 export const readMakerIcon = async (maker: string): Promise<void> => {
   if (icons.has(maker) || reading.has(maker)) return
   reading.add(maker)
@@ -53,8 +61,11 @@ export const readMakerIcon = async (maker: string): Promise<void> => {
     })
 }
 
-// A maker's icon for a row: its drawing, the fallback for no maker or one with no icon, and undefined while it is still read, so the row keeps its place empty rather than flash the fallback. Each maker is read once a page.
-export function useMakerIcon(maker: string | null): RemixiconComponentType | undefined {
+// A maker's icon for a row: its drawing, the initials chip for no maker or one with no icon (the maker's own initials unless the row names its model's), and undefined while it is still read, so the row keeps its place empty rather than flash the chip. Each maker is read once a page.
+export function useMakerIcon(
+  maker: string | null,
+  initials: string = initialsOf(maker),
+): RemixiconComponentType | undefined {
   useEffect(() => {
     if (maker) void readMakerIcon(maker)
   }, [maker])
@@ -63,5 +74,5 @@ export function useMakerIcon(maker: string | null): RemixiconComponentType | und
     () => (maker ? icons.get(maker) : null),
     () => (maker ? icons.get(maker) : null),
   )
-  return !maker || known === null ? FALLBACK_PROVIDER_ICON : known
+  return !maker || known === null ? initialsIcon(initials) : known
 }

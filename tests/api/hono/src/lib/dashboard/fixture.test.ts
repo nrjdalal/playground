@@ -35,6 +35,7 @@ import {
 import { parseLines } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import { livePair } from "../../../../../../api/hono/src/lib/dev/live-dashboard"
 import { priceOf } from "../../../../../../api/hono/src/lib/usage/prices"
+import { LOCAL_SERVED } from "../../../../../../packages/config/src/console"
 import { listTrash } from "../../../../../../packages/safe-delete/src"
 import {
   cleanGitShims,
@@ -848,7 +849,7 @@ describe("writeFixture", () => {
     expect(raw).toContain('"email": "merritt@example.com"')
   })
 
-  test("every model the shipped fixture's assistant lines name is priced", () => {
+  test("every model the shipped fixture's assistant lines name is priced, but the local model, which runs on this machine and has no API price", () => {
     const models = new Set<string>()
     for (const [path, content] of Object.entries(shipped().files)) {
       if (!path.endsWith(".jsonl") || !Array.isArray(content)) continue
@@ -860,7 +861,8 @@ describe("writeFixture", () => {
     }
     expect(models.size).toBeGreaterThan(0)
     expect(models).toContain("glm-5.3-flash[1m]")
-    expect([...models].filter((model) => !priceOf(model))).toEqual([])
+    expect(models).toContain(LOCAL_SERVED)
+    expect([...models].filter((model) => model !== LOCAL_SERVED && !priceOf(model))).toEqual([])
   })
 })
 
