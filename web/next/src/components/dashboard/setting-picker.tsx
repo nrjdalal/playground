@@ -22,6 +22,7 @@ import {
   changeSetting,
   choiceSetting,
   EFFORT_LABELS,
+  effortFixed,
   heldPick,
   isEffort,
   localChoice,
@@ -70,6 +71,7 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
     change.mutate(setting)
   }
   const words = pickerWords(worker, shownModel, shownEffort)
+  const fixed = effortFixed(worker, shownModel)
   return (
     <DropdownMenu>
       <Hint content="Model and effort">
@@ -116,8 +118,10 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
         )}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Effort</DropdownMenuLabel>
+          <DropdownMenuLabel>{fixed ? "Effort, set when it started" : "Effort"}</DropdownMenuLabel>
+          {/* on the served local model the list still opens to browse, but takes no pick (effortFixed) */}
           <DropdownMenuRadioGroup
+            disabled={fixed}
             value={shownEffort ?? ""}
             onValueChange={(next) => {
               if (!isEffort(next) || next === shownEffort) return

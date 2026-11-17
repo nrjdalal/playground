@@ -159,8 +159,10 @@ import {
   dispatcherLabel,
   initialsOf,
   isGlmModel,
+  levelName,
   modelName,
   type Provider,
+  rowEffort,
   rowModelName,
   rowProvider,
   showsEffort,
@@ -186,7 +188,7 @@ import {
   useGroupOpen,
   useGroupOrder,
 } from "@/lib/sidebar-groups"
-import { effortIcon, PR_TONES, prTone } from "@/lib/status-icons"
+import { effortIcon, LOCAL_EFFORT_ICON, PR_TONES, prTone } from "@/lib/status-icons"
 import {
   glanceReadings,
   isStale,
@@ -834,7 +836,7 @@ const PLUS_EFFORT_HIDDEN =
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
-// A row's right end, ZeroSDK's: its provider's logo (its model's initials in a chip for a maker with none, nothing with no model), naming its model on hover, then its effort's level, naming itself, which a local model's row leaves out (showsEffort); with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
+// A row's right end, ZeroSDK's: its provider's logo (its model's initials in a chip for a maker with none, nothing with no model), naming its model on hover (a local model with its level, levelName), then its effort's level, naming itself, which a local model's row with no effort set draws as a plain circle (rowEffort, LOCAL_EFFORT_ICON); with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
 function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
@@ -852,19 +854,21 @@ function ModelIcons({
 }) {
   const name = rowModelName({ localModel, model })
   const Logo = useMakerIcon(rowProvider({ localModel, model }), initialsOf(name))
-  const Effort = showsEffort({ localModels, model }) ? effortIcon(effort) : null
+  const known = effortIcon(rowEffort({ effort, localModels, model }))
+  const Effort =
+    known ?? (model !== null && !showsEffort({ localModels, model }) ? LOCAL_EFFORT_ICON : null)
   return (
     <>
       {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
       {model && Logo && (
-        <Hint content={name}>
+        <Hint content={levelName({ effort, localModel, model })}>
           <span className={MODEL_ICON}>
             <Logo aria-hidden className="size-4" />
           </span>
         </Hint>
       )}
       {Effort ? (
-        <Hint content={effort}>
+        <Hint content={known ? effort : "No effort set"}>
           <span className={cn(MODEL_ICON, toggles && effortHidden)}>
             <Effort aria-hidden className="size-4" />
           </span>
