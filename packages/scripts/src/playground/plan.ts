@@ -88,7 +88,7 @@ playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <r
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
                       remove the LaunchAgents (on Linux the systemd user units) that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
-playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude] [--account <email>]
+playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|local|claude] [--account <email>]
                       start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title; --account names the Claude login, which a worker needs while usage.accounts lists a Claude account
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
@@ -269,11 +269,13 @@ export const planStart = (probes: Probes): Step[] => {
 export const modelOf = (backend: Backend | null): string =>
   backend === "glm"
     ? "GLM"
-    : backend === "claude"
-      ? "Claude"
-      : backend === "openai"
-        ? "Codex"
-        : "an unknown model"
+    : backend === "local"
+      ? "the local model"
+      : backend === "claude"
+        ? "Claude"
+        : backend === "openai"
+          ? "Codex"
+          : "an unknown model"
 
 export const statusLines = (probes: Probes): string[] => {
   const lead = probes.dispatchers.filter((d) => slotOfName(d.name) === 1)
@@ -324,7 +326,7 @@ export const addCommand = (
     }
   const backend = options["--backend"]
   if (backend !== undefined && !BACKENDS.includes(backend))
-    return { error: `--backend takes claude or glm, not ${backend}` }
+    return { error: `--backend takes claude, glm or local, not ${backend}` }
   const account = options["--account"]
   const passed = [
     ...(model ? ["--model", model] : []),
