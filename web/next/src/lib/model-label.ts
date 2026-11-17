@@ -82,7 +82,11 @@ export const levelName = ({
 export const rowProvider = ({ localModel, model }: RowModel): Provider | null =>
   providerOf(model === LOCAL_SERVED ? (localModel ?? null) : model)
 
-// Pure: whether a row shows its effort's bars: a local model's chat template reads no effort, so a session on the served `local` names its level in words instead (levelName), and one its own list names, as the hosted session's row reports after a pick, shows none.
+// Pure: the effort a row's icon draws: its own, which a served local session's launch set as its thinking, but none on a local model its own list names (the hosted session's pick), whose effort sets nothing.
+export const rowEffort = ({ effort, localModels, model }: RowModel & { effort: string | null }) =>
+  localModels?.some((local) => local.id === model) ? null : effort
+
+// Pure: whether a row's words name its effort apart: a local model's chat template reads no effort, so a session on the served `local` names its level in its model's words (levelName), and one its own list names, as the hosted session's row reports after a pick, names none; its icon is rowEffort's.
 export const showsEffort = ({ localModels, model }: RowModel): boolean =>
   model !== LOCAL_SERVED && !localModels?.some((local) => local.id === model)
 

@@ -7,6 +7,7 @@ import {
   localName,
   modelName,
   providerOf,
+  rowEffort,
   rowModelName,
   rowProvider,
   showsEffort,
@@ -93,9 +94,18 @@ describe("a local session's row", () => {
     expect(rowProvider(claude)).toBe("anthropic")
   })
 
-  test("a local row shows no effort bars, since its chat template reads no effort; a Claude row keeps them", () => {
+  test("a local row names no effort apart, since its chat template reads no effort; a Claude row does", () => {
     expect(showsEffort(local)).toBe(false)
     expect(showsEffort(claude)).toBe(true)
+  })
+
+  test("a row's icon draws its own effort, a served local session's included, but none on a local model its own list names", () => {
+    expect(rowEffort({ effort: "low", model: "local" })).toBe("low")
+    expect(rowEffort({ effort: null, model: "local" })).toBeNull()
+    expect(rowEffort({ effort: "high", model: "claude-opus-5-5" })).toBe("high")
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4" }]
+    expect(rowEffort({ effort: "high", localModels, model: "ornith-1.5-122b-nvfp4" })).toBeNull()
+    expect(rowEffort({ effort: "high", localModels, model: "claude-opus-5-5" })).toBe("high")
   })
 
   test.each([

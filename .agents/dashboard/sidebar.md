@@ -196,8 +196,8 @@
   naming the level (`ModelIcons`).
   A session on the local model, which its transcript records as the bare name `local` (spawn.sh's `LOCAL_SERVED`), takes its maker and name from the repo the local server serves under that name, its `/v1/models` root, which the API reads once a minute and gives its row as `localModel` (`api/hono/src/lib/dashboard/local-model.ts`, a fixture's `localModel` on a fixture stack):
   the row draws that repo's maker, and its tooltip and its logo's hover name the model with its level (`levelName`): `high: Ornith 122B, thinking`, `medium: Ornith 122B, thinking capped` or `low: Ornith 122B, no thinking`, from the effort its transcript records, and `Ornith 122B, local` (`rowModelName`) while none is known.
-  It shows no effort bars (`showsEffort`), since the local model's chat template reads no effort, so spawn.sh sets each effort as thinking.
-  The hosted session's row on a local model it picked, which reports that model's config id, shows no effort bars either, by the same `showsEffort`.
+  With its effort set (the launch's level, read from its transcript) it draws that effort's bars, as a Claude row does, and with none set a plain circle in their place (`LOCAL_EFFORT_ICON`, `RiCircleLine`, named "No effort set" on hover, `rowEffort`).
+  The hosted session's row on a local model it picked, which reports that model's config id, draws the circle whatever effort it reports, since that effort sets nothing on a local model (`rowEffort`).
   The composer's picker words read both (`pickerWords`): a session on the served local model by its row's `levelName`, and a picked one by its config label alone.
   On the served local model the picker's Effort group takes no pick (`effortFixed`), since the launch set its thinking from its effort, and a later `/effort` would change the words and not the thinking.
   A row that opens shows its chevron in the effort's place on hover, on keyboard focus, while open and always on a phone (`TOGGLE_SHOWN` and `EFFORT_HIDDEN`, ZeroSDK's `toggleShown` and `effortHidden`), so the two share one place.

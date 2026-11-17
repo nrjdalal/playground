@@ -73,7 +73,7 @@ Each row is one line: the agent's task title, with its ticket, pull request numb
 An AI runner's row adds a second, smaller line: what it last did, from its latest report, else its task.
 At its right end are the model's maker, by its logo, and the effort its latest reply ran with, each naming itself on hover.
 The logo is Anthropic's for a Claude model, Z.ai's for GLM, and for a local model `PLAYGROUND_LOCAL_MODELS` names as `org/repo` (such as `M=ornith-ai/Ornith-1.5-122B-NVFP4`) its Hugging Face org's, fetched once and kept on your machine; a model with no logo, or one read while offline, shows the first two letters of its name in a small square.
-A session on your local model takes the logo of the model your local server serves, and names it with its level, as `high: Ornith 122B, thinking`, `medium: Ornith 122B, thinking capped` or `low: Ornith 122B, no thinking`, in place of the effort bars, since its effort sets only how much it thinks.
+A session on your local model takes the logo of the model your local server serves, and names it with its level, as `high: Ornith 122B, thinking`, `medium: Ornith 122B, thinking capped` or `low: Ornith 122B, no thinking`, and draws its effort's bars as a Claude session does, or a plain circle while it has no effort set, since its effort sets only how much it thinks.
 Its model and effort menu reads the same words, and takes no effort pick, since the effort is set when the session starts.
 A row with checks or tasks under it shows its arrow in the effort's place while you hover or focus it, while it is open, and always on a phone.
 On a narrow sidebar the title cuts from its end.

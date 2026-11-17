@@ -3,6 +3,7 @@ import {
   RiAlarmWarningLine,
   RiCheckboxBlankCircleLine,
   RiCheckboxCircleLine,
+  RiCircleLine,
   RiErrorWarningLine,
   RiEyeFill,
   RiGitMergeLine,
@@ -141,6 +142,9 @@ const EFFORT_ICONS: Record<string, RemixiconComponentType> = {
 
 export const effortIcon = (effort: string | null): RemixiconComponentType | null =>
   effort && Object.hasOwn(EFFORT_ICONS, effort) ? (EFFORT_ICONS[effort] ?? null) : null
+
+// The plain circle a local model's row draws in the effort's place while it has no effort set (rowEffort); with one set it draws that effort's bars, as a Claude row does.
+export const LOCAL_EFFORT_ICON: RemixiconComponentType = RiCircleLine
 
 // A session busy with no new transcript line for this long is hung (a stuck command, a frozen Docker, a network call that never returns).
 export const NO_PROGRESS_MS = 30 * 60_000
