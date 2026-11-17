@@ -307,48 +307,55 @@ test("a kept item stays off the next card, and comes back on one once its size c
   expect(grown.kept).toEqual({})
 })
 
-test("an answer to a card changed after it, or older than the night's last edit, removes nothing and keeps nothing; a clear keeps nothing", async () => {
+// One night on a card nightly-clean saved at WROTE for weights and image, the Inbox showing preview with answer.
+const answeredNight = async (
+  preview: unknown,
+  answer: { at?: string; choice: string; options?: number[] },
+  status = "approved",
+) => {
   const items = offered([here(weights, image)], HOME, out, {})
-  const night = async (
-    preview: unknown,
-    answer: { at?: string; choice: string; options?: number[] },
-    status = "approved",
-  ) => {
-    const fake = inbox({ answer, status })
-    fake.setPosted({ from: "ops", kind: "decision", preview, title: "Remove 2 unused items?" })
-    const done = await cardNight(
-      [here(weights, image)],
-      HOME,
-      { card: { at: WROTE, id: ID, items } },
-      fake.deps,
-    )
-    return { ...done, removed: fake.removed }
-  }
-  const preview = cardOf(items).preview as Questions
+  const fake = inbox({ answer, status })
+  fake.setPosted({ from: "ops", kind: "decision", preview, title: "Remove 2 unused items?" })
+  const done = await cardNight(
+    [here(weights, image)],
+    HOME,
+    { card: { at: WROTE, id: ID, items } },
+    fake.deps,
+  )
+  return { ...done, removed: fake.removed }
+}
+const savedPreview = () =>
+  cardOf(offered([here(weights, image)], HOME, out, {})).preview as Questions
+
+test("an answer to a card whose questions or options an edit changed after it removes nothing and keeps nothing", async () => {
+  const preview = savedPreview()
   const swapped = {
     ...preview,
     questions: preview.questions.map((q) => ({ ...q, options: [...q.options].reverse() })),
   }
-  const swap = await night(swapped, { at: LATER, choice: "approve", options: [1, 1] })
+  const swap = await answeredNight(swapped, { at: LATER, choice: "approve", options: [1, 1] })
   expect(swap.removed).toEqual([])
   expect(swap.said).toContain("no longer reads as nightly-clean wrote it")
-  const reordered = await night(cardOf([...items].reverse()).preview, {
-    at: LATER,
-    choice: "approve",
-    options: [0, 1],
-  })
+  const reordered = await answeredNight(
+    { ...preview, questions: [...preview.questions].reverse() },
+    { at: LATER, choice: "approve", options: [0, 1] },
+  )
   expect(reordered.removed).toEqual([])
-  const raced = await night(preview, {
+  for (const n of [swap, reordered]) expect(n.kept).toEqual({})
+})
+
+test("an answer older than the night's last edit removes nothing and keeps nothing, and a clear keeps nothing", async () => {
+  const raced = await answeredNight(savedPreview(), {
     at: "2026-11-17T02:00:00.000Z",
     choice: "approve",
     options: [0, 0],
   })
   expect(raced.removed).toEqual([])
   expect(raced.said).toContain("answered before nightly-clean's last write")
-  for (const n of [swap, reordered, raced]) expect(n.kept).toEqual({})
-  const cleared = await night(preview, { at: LATER, choice: "clear" }, "cleared")
-  expect(cleared.kept).toEqual({})
+  expect(raced.kept).toEqual({})
+  const cleared = await answeredNight(savedPreview(), { at: LATER, choice: "clear" }, "cleared")
   expect(cleared.removed).toEqual([])
+  expect(cleared.kept).toEqual({})
 })
 
 test("kept stays for a machine not read, and drops an item gone from tonight's list", () => {
