@@ -1,4 +1,5 @@
 // Pure, with no app import, so verify's checks read the same labels the dashboard draws.
+import { BACKEND_MAKERS } from "@packages/config/console"
 import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 
 type ModelFacts = { effort: string | null; model: string | null }
@@ -41,9 +42,9 @@ export const providerOf = (model: string | null): Provider | null =>
   !model
     ? null
     : model.startsWith("claude-")
-      ? "anthropic"
+      ? BACKEND_MAKERS.claude
       : isGlmModel(model)
-        ? "zai"
+        ? BACKEND_MAKERS.glm
         : (REPO_ORG.exec(model)?.[1] ?? null)
 
 // Pure: a dispatcher no label names (chatLabel's fallback), from its newest reply alone: that reply's model and effort, each word capitalised (Opus 5.5 High, GLM 5.3 Flash High). With no reply read yet, or its session down, the slot's label: Alpha for the primary, Bravo for the other.

@@ -7,12 +7,12 @@ import { apiClient } from "@/lib/api/client"
 // The one icon a row draws for a model whose maker has none, or none the API could fetch.
 export const FALLBACK_PROVIDER_ICON: RemixiconComponentType = RiRobot2Line
 
-// What the page knows of each maker's icon: its drawing once read, null once the API has none (or could not be reached), absent while unread.
+// What the page knows of each maker's icon: its drawing once read, null once the API has none or could not be reached, absent while unread.
 const icons = new Map<string, RemixiconComponentType | null>()
 const reading = new Set<string>()
 const listeners = new Set<() => void>()
 
-const told = () => {
+const redraw = () => {
   for (const listener of listeners) listener()
 }
 
@@ -36,7 +36,7 @@ export const drawingOf = (data: string): RemixiconComponentType =>
 // Keeps a maker's icon as known, for the page and its tests alike, and redraws every row that reads it.
 export const keepMakerIcon = (maker: string, drawing: RemixiconComponentType | null): void => {
   icons.set(maker, drawing)
-  told()
+  redraw()
 }
 
 // Reads a maker's icon from the API once a page: a 404, or no answer at all, keeps the fallback.
@@ -53,8 +53,8 @@ export const readMakerIcon = async (maker: string): Promise<void> => {
     })
 }
 
-// A maker's icon for a row: its drawing, the fallback for no maker or one with no icon, and null while it is still read, so the row keeps its place empty rather than flash the fallback. Each maker is read once a page.
-export function useMakerIcon(maker: string | null): RemixiconComponentType | null {
+// A maker's icon for a row: its drawing, the fallback for no maker or one with no icon, and undefined while it is still read, so the row keeps its place empty rather than flash the fallback. Each maker is read once a page.
+export function useMakerIcon(maker: string | null): RemixiconComponentType | undefined {
   useEffect(() => {
     if (maker) void readMakerIcon(maker)
   }, [maker])
@@ -63,6 +63,5 @@ export function useMakerIcon(maker: string | null): RemixiconComponentType | nul
     () => (maker ? icons.get(maker) : null),
     () => (maker ? icons.get(maker) : null),
   )
-  if (!maker || known === null) return FALLBACK_PROVIDER_ICON
-  return known ?? null
+  return !maker || known === null ? FALLBACK_PROVIDER_ICON : known
 }

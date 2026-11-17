@@ -122,6 +122,36 @@ describe("iconFor", () => {
     const { fetch } = stub({ "https://models.dev/logos/anthropic.svg": () => new Response(LOGO) })
     expect((await iconFor("anthropic", { dir, fetch }))?.type).toBe("image/svg+xml")
   })
+
+  test("a 429 or a 5xx from a source reads as out of reach and caches nothing, where a 404 is no icon", async () => {
+    for (const status of [429, 500, 503]) {
+      const dir = scratch()
+      const { fetch } = stub({ [HF]: () => new Response("busy", { status }) })
+      expect(await iconFor("ornith-ai", { dir, fetch })).toBeNull()
+      expect(readdirSync(dir)).toEqual([])
+    }
+    const dir = scratch()
+    expect(await iconFor("ornith-ai", { dir, fetch: stub().fetch })).toBeNull()
+    expect(readdirSync(dir)).toEqual(["ornith-ai.none"])
+  })
+
+  test("an answer past 1 MB is refused, whether its length is declared or not", async () => {
+    const big = new Uint8Array(1024 * 1024 + 1)
+    big.set(PNG)
+    const streamed = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(big)
+            controller.close()
+          },
+        }),
+      )
+    for (const answer of [() => new Response(big), streamed]) {
+      const { fetch } = stub({ [CDN]: answer, [HF]: () => Response.json({ avatarUrl: CDN }) })
+      expect(await iconFor("ornith-ai", { dir: scratch(), fetch })).toBeNull()
+    }
+  })
 })
 
 describe("servedIconHeaders", () => {

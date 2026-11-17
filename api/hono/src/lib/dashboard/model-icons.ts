@@ -1,14 +1,14 @@
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+
+import { BACKEND_MAKERS } from "@packages/config/console"
 
 import { ApiError } from "@/lib/error"
 
-// The makers whose icons the dashboard draws, from config alone: each backend's (Claude's Anthropic, GLM's Z.ai), then the Hugging Face org of each local model's repo id (org/repo); a bare id names no maker.
-export const BACKEND_MAKERS = ["anthropic", "zai"] as const
-
+// The makers whose icons the dashboard draws, from config alone: each backend's (BACKEND_MAKERS), then the Hugging Face org of each local model's repo id (org/repo); a bare id names no maker.
 export const makersOf = (local: readonly { id: string }[]): Set<string> =>
   new Set([
-    ...BACKEND_MAKERS,
+    ...Object.values(BACKEND_MAKERS),
     ...local.flatMap(({ id }) => {
       const org = id.split("/")[0]
       return id.includes("/") && org && isMaker(org) ? [org] : []
@@ -36,11 +36,13 @@ const MODELS_DEV = "https://models.dev/logos"
 // A provider id models.dev cannot hold: it answers any unknown id with one fallback SVG (1421 bytes, measured) and 200, so this one's body is that fallback, whatever its size.
 const SENTINEL = "playground-no-such-maker"
 const MAX_BYTES = 1024 * 1024
+const FETCH_TIMEOUT_MS = 10_000
 // How long a maker found to have no icon stays so before it is asked again, so an icon added later still arrives.
 const NONE_FOR_MS = 24 * 60 * 60 * 1000
 
-// Only the maker's name leaves the machine, and a redirect is refused, so no answer can send the fetch to another host.
-const plainFetch: Fetch = (url) => fetch(url, { redirect: "error" })
+// Only the maker's name leaves the machine, and a redirect is refused, so no answer can send the fetch to another host; a source that does not answer in time counts as out of reach.
+const plainFetch: Fetch = (url) =>
+  fetch(url, { redirect: "error", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
 
 const huggingFace = (url: string): boolean => {
   try {
@@ -63,10 +65,29 @@ const rasterType = (bytes: Uint8Array): IconType | null => {
   return null
 }
 
+// An answer's bytes up to MAX_BYTES, read no further than that: null for a 404, an empty body or one past the cap; any other failed answer (a 429, a 5xx) throws, so it reads as out of reach, never as no icon.
 const body = async (answer: Response): Promise<Uint8Array<ArrayBuffer> | null> => {
-  if (!answer.ok) return null
-  const bytes = new Uint8Array(await answer.arrayBuffer())
-  return bytes.length > 0 && bytes.length <= MAX_BYTES ? bytes : null
+  if (answer.status === 404) return null
+  if (!answer.ok) throw new Error(`${answer.url} answered ${answer.status}`)
+  if (Number(answer.headers.get("content-length") ?? 0) > MAX_BYTES) return null
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for await (const chunk of answer.body ?? []) {
+    size += chunk.length
+    if (size > MAX_BYTES) {
+      await answer.body?.cancel().catch(() => {})
+      return null
+    }
+    chunks.push(chunk)
+  }
+  if (size === 0) return null
+  const bytes = new Uint8Array(new ArrayBuffer(size))
+  let at = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, at)
+    at += chunk.length
+  }
+  return bytes
 }
 
 // A maker's icon from its source: models.dev's logo unless its answer is the fallback, else its Hugging Face org's avatar from huggingface.co's hosts alone, else null. Throws when a source cannot be reached, so offline is not mistaken for no icon.
@@ -79,9 +100,15 @@ const fetchIcon = async (maker: string, fetch: Fetch): Promise<ModelIcon | null>
   const svg = logo ? new TextDecoder().decode(logo) : ""
   if (svg.includes("<svg") && svg.trim() !== fallback.trim())
     return { bytes: logo!, type: "image/svg+xml" }
-  const answer = await fetch(`https://huggingface.co/api/organizations/${maker}/avatar`)
-  if (!answer.ok) return null
-  const { avatarUrl } = (await answer.json().catch(() => ({}))) as { avatarUrl?: unknown }
+  const answer = await body(await fetch(`https://huggingface.co/api/organizations/${maker}/avatar`))
+  if (!answer) return null
+  const { avatarUrl } = (() => {
+    try {
+      return JSON.parse(new TextDecoder().decode(answer)) as { avatarUrl?: unknown }
+    } catch {
+      return {}
+    }
+  })()
   if (typeof avatarUrl !== "string" || !huggingFace(avatarUrl)) return null
   const bytes = await body(await fetch(avatarUrl))
   const type = bytes && rasterType(bytes)
@@ -121,8 +148,11 @@ export const iconFor = async (
     const icon = await fetchIcon(maker, fetch).catch(() => undefined)
     if (icon === undefined) return null
     await mkdir(dir, { recursive: true })
-    if (icon) await writeFile(join(dir, `${maker}.${EXT[icon.type]}`), icon.bytes)
-    else await writeFile(join(dir, `${maker}.none`), "")
+    // written whole under a name no reader looks for, then renamed, so a read mid-write never serves part of a file
+    const name = join(dir, icon ? `${maker}.${EXT[icon.type]}` : `${maker}.none`)
+    const part = `${name}.${process.pid}.${crypto.randomUUID()}.part`
+    await writeFile(part, icon ? icon.bytes : "")
+    await rename(part, name)
     return icon
   })().finally(() => inFlight.delete(key))
   inFlight.set(key, work)

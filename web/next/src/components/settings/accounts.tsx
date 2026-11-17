@@ -1,5 +1,6 @@
 "use client"
 
+import { BACKEND_MAKERS } from "@packages/config/console"
 import { RiDeleteBinLine } from "@remixicon/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
@@ -28,11 +29,9 @@ import { useMakerIcon } from "@/lib/model-icons"
 import { markOwn } from "@/lib/own-account"
 import { useAccount } from "@/lib/system"
 
-const MAKERS = { claude: "anthropic", glm: "zai" } as const
-
 // An account's maker's icon, its place kept empty while it is read.
-function AccountIcon({ provider }: { provider: keyof typeof MAKERS }) {
-  const Icon = useMakerIcon(MAKERS[provider])
+function AccountIcon({ provider }: { provider: keyof typeof BACKEND_MAKERS }) {
+  const Icon = useMakerIcon(BACKEND_MAKERS[provider])
   return Icon ? <Icon /> : <span className="size-4" />
 }
 
