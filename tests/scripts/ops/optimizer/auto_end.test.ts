@@ -16,6 +16,7 @@ import {
   type EndDeps,
   endMerged,
   endOne,
+  LEADS_WORKTREE,
   reportArgv,
   finishedOf,
   leftoversOf,
@@ -891,6 +892,40 @@ describe("unsavedLive: the worktrees a session used, read for unsaved work", () 
     const { main, projects, target } = scratch()
     writeFileSync(join(main, "par.out"), "x\n")
     expect(await unsavedLive(target, projects)).toBeNull()
+  })
+
+  // PG-2521: a worker resumed from the managers' worktree was held by the managers' untracked .scratch/ there
+  test("the managers' leads worktree a worker ran in is not the worker's: its untracked files hold no end, it is never cleaned, and the worker's own PR worktree still is", async () => {
+    const { main, projects } = scratch()
+    const leads = join(main, LEADS_WORKTREE)
+    sh(main, "git", "worktree", "add", "-q", "-b", "leads", leads)
+    mkdirSync(join(leads, ".scratch"))
+    writeFileSync(join(leads, ".scratch", "card.ts"), "x\n")
+    const own = join(main, ".claude", "worktrees", "pg-7")
+    sh(main, "git", "worktree", "add", "-q", "-b", "PG-7-fix", own)
+    writeFileSync(join(projects, "-scratch", "sess-1.jsonl"), `${JSON.stringify({ cwd: leads })}\n`)
+    const worker: Target = {
+      kind: "worker",
+      name: "pyctkg-worker",
+      pr: "https://github.com/o/r/pull/7",
+      refs: ["PG-7-fix"],
+      sessionId: "sess-1",
+    }
+    expect(await worktreesOf(worker, projects, main)).toEqual([own])
+    expect(await unsavedLive(worker, projects)).toBeNull()
+    const ended = await endOne(worker, "worker-prs-done", {
+      cleanup: async () => [],
+      close: async () => ({ ok: true, out: "" }),
+      report: async () => {},
+      unsaved: (t) => unsavedLive(t, projects),
+    })
+    expect(ended[0]!.text).toStartWith("Ended pyctkg-worker: worker-prs-done")
+    expect(existsSync(join(leads, ".scratch", "card.ts"))).toBe(true)
+  })
+
+  test("auto-end's leads worktree is the folder spawn.sh's manager mode starts every manager in", async () => {
+    const spawn = await Bun.file(join(import.meta.dir, "../../../../scripts/spawn.sh")).text()
+    expect(spawn).toContain(`DIR="\${PLAYGROUND_REPO:-$MAIN}/${LEADS_WORKTREE}"`)
   })
 
   test("a read that fails holds the end: a worktree with no commit to read, and a transcript folder that cannot be read", async () => {

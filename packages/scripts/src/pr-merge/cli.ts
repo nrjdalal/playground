@@ -16,6 +16,9 @@ at that head and the head is up to date with canary:
                 line, until it lapses (bun run ship:freeze), or a file that does not read,
                 holds every PR
   base          it merges into canary
+  code          this checkout's pr-merge code and verdicts.ts, uncommitted edits included,
+                match origin/canary's, so a checkout behind canary never skips a gate canary
+                has added; else run it from a checkout on origin/canary
   up to date    canary has no commit the head lacks, or the head merges with canary clean;
                 a conflict needs canary merged in, then checks and a 5/5 at the new head
   keeps canary  no merge of canary into the PR dropped a line canary added that git's own

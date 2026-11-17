@@ -862,8 +862,10 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     if (!isAgentBrowser(holder.command)) return by
     const session =
       /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
-      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean) ??
-      "default"
+      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean)
+    // a bare daemon names its session nowhere, and sessions are machine-wide, so a guessed name could close another agent's browser
+    if (!session)
+      return `${by}: an agent-browser session whose name it does not show, so close your own by its name: agent-browser --session <your-name> close`
     return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
   }
   if (holders.discard) return null

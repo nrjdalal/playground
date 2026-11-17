@@ -647,7 +647,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
   return []
 }
 
-// run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-ssh-key, runner-host-off, slot-off).
+// run-slot's runner-box route, which falls back to this Mac without a word: one finding naming each precondition run-slot.sh box-off reports failing (no-ci-sh, no-host, no-ssh-key, runner-host-off, slot-off).
 export async function boxRoute(ctx: Context): Promise<string[]> {
   const r = await ctx.run([join(ctx.ops, "run-slot.sh"), "box-off"], { timeoutMs: 60_000 })
   if (r.code) return ["box-route-unreadable"]
