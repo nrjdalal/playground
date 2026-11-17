@@ -2,6 +2,7 @@
 
 A Playground PR reaches `canary` only through `bun run pr:merge <n>`, or merge-on-ready (`bun run pr:train ready`), which runs pr:merge on the first gated PR in queue order, once it is ready at 5/5 with GitHub's checks green at its head, and for a diff under `web/next/` its tester's PASS there.
 This file holds the gates, the merge lock and the merge queue's readers.
+Every gh call either makes goes through `runGh` in `merge.ts`, which skips gh and answers `gh unreachable: <reason>` while ops-tick's gh sign-in probe reads failed, so a broken gh is never flooded ([LIFECYCLE.md](../../../../extensions/core/skills/playbook/LIFECYCLE.md)'s ops-tick beats).
 
 ## Gates
 

@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
 import { FREEZE_LAPSE_MS } from "../../../../../packages/scripts/src/pr-merge/held"
@@ -19,6 +20,7 @@ import {
   lockRootOf,
   realLockRoot,
   prMerge,
+  runGh,
   shipNowLine,
   takeLock,
   unfoundTokens,
@@ -1084,4 +1086,33 @@ describe("the body gate's token grep at the head", () => {
       ["SKILLS_LINE", "SUITE_LINE"],
     )
   })
+})
+
+// the train's every gh call goes through runGh, so a broken gh is never flooded (#2526)
+test("runGh skips gh while the gh-auth beat's fresh result reads failed", async () => {
+  const data = process.env.PLAYGROUND_DATA_DIR!
+  const bin = mkdtempSync(join(tmpdir(), "run-gh-"))
+  const called = join(bin, "called")
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\ntouch "${called}"\n`)
+  chmodSync(join(bin, "gh"), 0o755)
+  const result = join(data, "ops", "tick", "gh-auth.json")
+  mkdirSync(dirname(result), { recursive: true })
+  writeFileSync(
+    result,
+    JSON.stringify({ at: new Date().toISOString(), ok: false, reason: "gh token invalid" }),
+  )
+  const path = process.env.PATH
+  process.env.PATH = `${bin}:${path}`
+  try {
+    expect(await runGh(["pr", "list"])).toEqual({
+      code: 1,
+      stderr: "gh unreachable: gh token invalid",
+      stdout: "",
+    })
+    expect(existsSync(called)).toBe(false)
+  } finally {
+    process.env.PATH = path
+    rmSync(result, { force: true })
+    rmSync(bin, { force: true, recursive: true })
+  }
 })

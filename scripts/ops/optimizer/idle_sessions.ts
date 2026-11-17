@@ -20,6 +20,7 @@ import { costOf } from "../../../api/hono/src/lib/usage/prices"
 import { kindOf } from "../../../packages/config/src/kinds"
 import { verdictsOf } from "../../../packages/config/src/verdicts"
 import { dataDirOf } from "../../../packages/env/src/data-dir"
+import { ghDown } from "../../../packages/scripts/src/gh-read"
 
 const CACHE_TTL_S = 300
 
@@ -332,7 +333,9 @@ export async function readRoster(path: string): Promise<Record<string, RosterEnt
   }
 }
 
+// One gh api read, null when it fails or while ghDown names why gh cannot read.
 async function ghApi(path: string): Promise<unknown> {
+  if (ghDown()) return null
   const proc = Bun.spawn(["gh", "api", path], { stderr: "ignore", stdout: "pipe", timeout: 30_000 })
   const out = await new Response(proc.stdout).text()
   if ((await proc.exited) !== 0) return null

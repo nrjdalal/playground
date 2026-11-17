@@ -17,6 +17,7 @@ import {
 } from "@packages/safe-delete"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
+import { ghRead, type Unreachable } from "../gh-read"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
@@ -68,15 +69,17 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
 
 export type PrState = "CLOSED" | "MERGED" | "OPEN"
 export type Pr = { head: string; number: number; state: PrState }
+// A worktree's PR read: its PR, "none" when gh answers with no PR, unreachable when ghRead skips or stops gh, null when no PR of its own reads.
+export type PrRead = Pr | "none" | Unreachable | null
 // A worktree's PR once it reads MERGED or CLOSED, as the hold check's freed: its head beside its number and state, or undefined while it reads OPEN or GitHub cannot read it. The hold check frees a row naming the worktree by its branch or by this PR's number only when the PR's head is the worktree's HEAD; commits past it keep the hold, named with them.
 export const freedOf = (
-  pr: Pr | "none" | null,
+  pr: PrRead,
 ): { head: string; number: number; state: "CLOSED" | "MERGED" } | undefined =>
-  pr && pr !== "none" && pr.state !== "OPEN"
+  pr && pr !== "none" && "state" in pr && pr.state !== "OPEN"
     ? { head: pr.head, number: pr.number, state: pr.state }
     : undefined
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch ("none" when gh answers with no PR, null when no PR of its own reads), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
 export type RmDeps = {
   clones: () => Clone[]
   data: string
@@ -88,7 +91,7 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
-  prState: (path: string, pr?: string) => Promise<Pr | "none" | null>
+  prState: (path: string, pr?: string) => Promise<PrRead>
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -168,31 +171,25 @@ const processes = (): Proc[] | null => {
   return procs.length ? procs : null
 }
 
+// gh's stdout in the worktree, trimmed, through ghRead, or null when gh cannot answer, a skipped or stopped read included.
+const ghOut = (args: string[], at: string): string | null => {
+  const run = ghRead(args, { cwd: at })
+  return "code" in run && run.code === 0 ? run.out.trim() : null
+}
+
 // Whether a merged PR holds the commit, from GitHub's REST list of the commit's PRs in the worktree's own repository, or null when gh cannot answer.
 const merged = (sha: string, at: string): boolean | null => {
-  const run = Bun.spawnSync(
-    [
-      "gh",
-      "api",
-      `repos/{owner}/{repo}/commits/${sha}/pulls`,
-      "--jq",
-      "any(.[]; .merged_at != null)",
-    ],
-    { cwd: at, stderr: "ignore", stdout: "pipe" },
+  const out = ghOut(
+    ["api", `repos/{owner}/{repo}/commits/${sha}/pulls`, "--jq", "any(.[]; .merged_at != null)"],
+    at,
   )
-  const out = run.stdout.toString().trim()
-  return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
+  return out === "true" || out === "false" ? out === "true" : null
 }
 
 // The default branch gh names for the worktree's repository, or null when gh cannot answer.
-const defaultBranch = (at: string): string | null => {
-  const run = Bun.spawnSync(
-    ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
-    { cwd: at, stderr: "ignore", stdout: "pipe" },
-  )
-  const name = run.stdout.toString().trim()
-  return run.exitCode === 0 && name ? name : null
-}
+const defaultBranch = (at: string): string | null =>
+  ghOut(["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"], at) ||
+  null
 
 // Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; "none" when gh's list is empty; else null.
 export const prStateOf = (
@@ -208,12 +205,13 @@ export const prStateOf = (
     : null
 }
 
-// A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
-const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> => {
-  const gh = (args: string[]) => {
+// A worktree's PR state from gh in it through ghRead, the --pr URL's else its branch's, by prStateOf, unreachable when ghRead skips or stops gh, or null when gh or git cannot answer.
+const prState = async (path: string, pr?: string): Promise<PrRead> => {
+  const gh = (args: string[]): unknown => {
     try {
-      const run = Bun.spawnSync(["gh", ...args], { cwd: path, stderr: "ignore", stdout: "pipe" })
-      return run.exitCode === 0 ? JSON.parse(run.stdout.toString()) : null
+      const run = ghRead(args, { cwd: path })
+      if ("unreachable" in run) return run
+      return run.code === 0 ? JSON.parse(run.out) : null
     } catch {
       return null
     }
@@ -227,6 +225,7 @@ const prState = async (path: string, pr?: string): Promise<Pr | "none" | null> =
   const list = pr
     ? gh(["pr", "view", pr, ...fields, "--jq", "[.]"])
     : gh(["pr", "list", "--head", branch!, "--state", "all", "--limit", "2", ...fields])
+  if (list && typeof list === "object" && "unreachable" in list) return list as Unreachable
   const states = new Set(["CLOSED", "MERGED", "OPEN"])
   const prs =
     Array.isArray(list) && list.every((p) => states.has(p?.state) && Number.isInteger(p?.number))
@@ -379,6 +378,11 @@ export async function removePath(
   const repo = args.worktree ? worktreeRepo(args.path, roots) : null
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
   const own = args.worktree ? await deps.prState(args.path, args.pr) : undefined
+  if (own && typeof own === "object" && "unreachable" in own)
+    return {
+      line: `gh unreachable: can't check the branch's PR; retry once gh answers (${own.unreachable})`,
+      ok: false,
+    }
   const freed = own === undefined ? undefined : freedOf(own)
   let liveBranch: string | undefined
   if (args.worktree)
@@ -408,7 +412,7 @@ export async function removePath(
             ...(liveBranch ? { liveBranch } : {}),
             merged: deps.merged,
             note,
-            ...(own && own !== "none" ? { ownPr: own.number } : {}),
+            ...(own && own !== "none" && "number" in own ? { ownPr: own.number } : {}),
             places: deps.places,
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),

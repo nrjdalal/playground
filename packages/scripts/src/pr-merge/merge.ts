@@ -7,6 +7,7 @@ import { dataDir } from "@packages/env/data-dir"
 import type { LockStore } from "@packages/redis"
 
 import { endMergedLive } from "../../../../scripts/ops/optimizer/auto_end"
+import { ghDown } from "../gh-read"
 import { sendAs } from "../ops-job/job"
 import { factoryRepoOf } from "../playground/setting"
 import { bareTokens, ownerAsk, templatePlaceholders } from "./body"
@@ -33,7 +34,10 @@ export type RunResult = { code: number; stderr: string; stdout: string }
 // Runs gh with these arguments; a test hands in a stub, as the Usage app's prs.ts does.
 export type Run = (args: string[]) => Promise<RunResult>
 
+// gh, skipped while the gh-auth beat's fresh result reads failed (ghDown), so the train never floods a broken gh.
 export const runGh: Run = async (args) => {
+  const down = ghDown()
+  if (down) return { code: 1, stderr: `gh unreachable: ${down}`, stdout: "" }
   const proc = Bun.spawn(["gh", ...args], { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),

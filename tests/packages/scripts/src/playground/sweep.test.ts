@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -15,6 +16,8 @@ import {
   LIFT_GAP,
   LIFT_HOLD,
   LOAD_CAP,
+  readHold,
+  readOpenPrs,
   runSweep,
   SWITCH_HOURS,
   SWITCHES,
@@ -424,5 +427,64 @@ describe("playground sweep", () => {
     writeFileSync(join(dir, "sweep", "builder.json"), "{}")
     expect(await sweep(dir)).toEqual(["quiet"])
     expect(await sweep(dir)).toEqual(["quiet"])
+  })
+})
+
+// a sweep once hung past 120 s on a gh that could not reach GitHub (#2526)
+describe("a gh that cannot read", () => {
+  const ROW = { eta: "2026-10-23T13:00:00Z", kind: "worker", status: "parked", task: "t" }
+
+  test("prints one gh unreachable line, and the sweep reads gh no more", async () => {
+    const dir = folder([
+      { ...ROW, hold: "#12", name: "q7r2tn-worker" },
+      { ...ROW, hold: "#13", name: "b7k2mq-worker" },
+    ])
+    const asked: string[] = []
+    let opened = 0
+    const hold = async (held: string) => (
+      asked.push(held),
+      { unreachable: "gh hangs: keyring locked" }
+    )
+    const open = async () => (opened++, null)
+    expect(await runSweep("builder", dir, NOW, 4, hold, open)).toEqual([
+      "gh unreachable: gh hangs: keyring locked",
+    ])
+    expect(asked).toEqual(["#12"])
+    expect(opened).toBe(0)
+  })
+
+  test("an unreachable open-PR read prints the line and keeps the last queue check", async () => {
+    const dir = folder()
+    const open = async () => ({ unreachable: "gh token invalid" })
+    expect(await runSweep("builder", dir, NOW, 4, undefined, open)).toEqual([
+      "gh unreachable: gh token invalid",
+    ])
+  })
+
+  test("a fresh failed gh-auth result stops each read with no gh call", async () => {
+    const dir = folder()
+    const bin = mkdtempSync(join(root, "bin-"))
+    const called = join(bin, "called")
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\ntouch "${called}"\necho open\n`)
+    chmodSync(join(bin, "gh"), 0o755)
+    mkdirSync(join(dir, "ops", "tick"), { recursive: true })
+    writeFileSync(
+      join(dir, "ops", "tick", "gh-auth.json"),
+      JSON.stringify({ at: new Date().toISOString(), ok: false, reason: "gh token invalid" }),
+    )
+    const saved = { data: process.env.PLAYGROUND_DATA_DIR, path: process.env.PATH }
+    process.env.PATH = `${bin}:${process.env.PATH}`
+    process.env.PLAYGROUND_DATA_DIR = dir
+    try {
+      expect(await readHold(dir, "acme/archive")("#12")).toEqual({
+        unreachable: "gh token invalid",
+      })
+      expect(await readOpenPrs("acme/archive")()).toEqual({ unreachable: "gh token invalid" })
+      expect(existsSync(called)).toBe(false)
+    } finally {
+      process.env.PATH = saved.path
+      if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = saved.data
+    }
   })
 })

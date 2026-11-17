@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { configDirOf, dataDirOf } from "@packages/env/data-dir"
 
+import { ghDown } from "../gh-read"
 import { mainCheckout } from "../main-checkout"
 import { herdrDir, serverEnv } from "../ops-herdr/herdr"
 import { herdrPath } from "../ops-herdr/pin"
@@ -16,8 +17,10 @@ const ops = join(data, "ops")
 loadSessionNames()
 const main = mainCheckout()
 
-// stdout and stderr apart, in the folder and env given; one past its time is killed by its own handle, and one that cannot start reads as exit 127.
+// stdout and stderr apart, in the folder and env given; one past its time is killed by its own handle, one that cannot start reads as exit 127, and gh is skipped while ghDown names why, so a broken gh is never flooded.
 const run: Run = async (argv, { cwd, env, timeoutMs = 120_000 } = {}) => {
+  const down = argv[0] === "gh" ? ghDown() : null
+  if (down) return { code: 1, err: `gh unreachable: ${down}`, out: "" }
   try {
     const proc = Bun.spawn(argv, {
       cwd,

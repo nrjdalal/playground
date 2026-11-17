@@ -4,6 +4,7 @@ import { join } from "node:path"
 
 import { dispatcherOf, isManagerKind, kindOf, managerOf } from "@packages/config/kinds"
 
+import { ghRead, type Unreachable } from "../gh-read"
 import { leadOf } from "../ops-tick/tick"
 import { writeAtomic } from "../write-atomic"
 
@@ -240,10 +241,10 @@ const readableHold = (row: Row): string | null =>
     ? row.hold
     : null
 
-// Reads each hold on this machine: an issue or PR through gh in factory.repo, an Inbox item through bun run ask get in the Dashboard's checkout, which holds the Inbox's database; null when neither reads.
+// Reads each hold on this machine: an issue or PR through ghRead in factory.repo, unreachable when ghRead skips or stops gh, an Inbox item through bun run ask get in the Dashboard's checkout, which holds the Inbox's database; null when neither reads.
 export const readHold =
   (repo: string, factory: string) =>
-  async (hold: string): Promise<HoldState> => {
+  async (hold: string): Promise<HoldState | Unreachable> => {
     try {
       if (hold.startsWith("#i")) {
         const { dashboardCheckout } = await import("./probe")
@@ -258,12 +259,10 @@ export const readHold =
         const { status } = JSON.parse(out.slice(out.indexOf("{"))) as { status?: unknown }
         return typeof status === "string" ? (status === "open" ? "open" : "closed") : null
       }
-      const run = Bun.spawnSync(
-        ["gh", "api", `repos/${factory}/issues/${hold.slice(1)}`, "--jq", ".state"],
-        { stderr: "ignore", stdout: "pipe" },
-      )
-      const state = run.stdout.toString().trim()
-      return run.exitCode === 0 && (state === "open" || state === "closed") ? state : null
+      const run = ghRead(["api", `repos/${factory}/issues/${hold.slice(1)}`, "--jq", ".state"])
+      if ("unreachable" in run) return run
+      const state = run.out.trim()
+      return run.code === 0 && (state === "open" || state === "closed") ? state : null
     } catch {
       return null
     }
@@ -333,25 +332,20 @@ const singleOf = (ops: string, on: boolean, cap: number, load5: number, now: Dat
   return load5 < cap && at - last <= LIFT_GAP && at - first >= LIFT_HOLD ? "lifted" : "held"
 }
 
-// Reads the factory repo's open PRs, drafts included, and which are the owner's into canary, in one REST call a sweep (the **github** rule); null when it does not read.
-export const readOpenPrs = (factory: string) => async (): Promise<OpenPrs | null> => {
+// Reads the factory repo's open PRs, drafts included, and which are the owner's into canary, in one REST call a sweep (the **github** rule) through ghRead; unreachable when ghRead skips or stops gh, null when it does not read.
+export const readOpenPrs = (factory: string) => async (): Promise<OpenPrs | Unreachable | null> => {
   const owner = factory.split("/")[0]?.toLowerCase()
   if (!owner) return null
   try {
-    const run = Bun.spawnSync(
-      [
-        "gh",
-        "api",
-        `repos/${factory}/pulls?state=open&per_page=100`,
-        "--jq",
-        `{all: [.[].number], mine: [.[] | select(.base.ref == "canary" and (.user.login | ascii_downcase) == "${owner}") | .number]}`,
-      ],
-      { stderr: "ignore", stdout: "pipe" },
-    )
-    if (run.exitCode !== 0) return null
-    const { all, mine } = JSON.parse(run.stdout.toString()) as Partial<
-      Record<keyof OpenPrs, unknown>
-    >
+    const run = ghRead([
+      "api",
+      `repos/${factory}/pulls?state=open&per_page=100`,
+      "--jq",
+      `{all: [.[].number], mine: [.[] | select(.base.ref == "canary" and (.user.login | ascii_downcase) == "${owner}") | .number]}`,
+    ])
+    if ("unreachable" in run) return run
+    if (run.code !== 0) return null
+    const { all, mine } = JSON.parse(run.out) as Partial<Record<keyof OpenPrs, unknown>>
     const numbers = (list: unknown): list is number[] =>
       Array.isArray(list) && list.every((pr) => typeof pr === "number")
     return numbers(all) && numbers(mine) ? { all, mine } : null
@@ -366,8 +360,8 @@ export async function runSweep(
   dir: string,
   now = new Date(),
   load5 = loadavg()[1],
-  hold: (hold: string) => Promise<HoldState> = async () => null,
-  open: () => Promise<OpenPrs | null> = async () => null,
+  hold: (hold: string) => Promise<HoldState | Unreachable> = async () => null,
+  open: () => Promise<OpenPrs | Unreachable | null> = async () => null,
 ): Promise<string[]> {
   const roster = readJson(join(dir, "roster.json"))
   const leads = leadsOf(roster)
@@ -381,17 +375,28 @@ export async function runSweep(
   const cap = capOf(ops, switches)
   // only the lead's own parked rows' holds are read, and none already known closed
   const agents = listOf(roster, "agents") as Row[]
+  // once one gh read is unreachable the sweep reads gh no more, its unread holds left out, so one line says why in place of a line a hold
   const holds: Record<string, HoldState> = {}
+  let unreachable: string | undefined
   for (const row of agents) {
     const held = readableHold(row)
     if (
+      unreachable ||
       held === null ||
       ownerOf(agents, row) !== lead ||
       prev?.holds?.includes(`closed ${row.name} ${held}`) ||
       held in holds
     )
       continue
-    holds[held] = await hold(held)
+    const state = await hold(held)
+    if (state !== null && typeof state === "object") unreachable = state.unreachable
+    else holds[held] = state
+  }
+  let openPrs: OpenPrs | null = null
+  if (lead === builderLead && !unreachable) {
+    const read = await open()
+    if (read && "unreachable" in read) unreachable = read.unreachable
+    else openPrs = read
   }
   const { lines, next } = sweep(
     lead,
@@ -401,7 +406,7 @@ export async function runSweep(
       holds,
       load5,
       now,
-      open: lead === builderLead ? await open() : null,
+      open: openPrs,
       queue: readJson(join(dir, "merge-queue.json")),
       roster,
       single: singleOf(
@@ -416,5 +421,6 @@ export async function runSweep(
     prev,
   )
   await writeAtomic(statePath, `${JSON.stringify(next, null, 2)}\n`)
+  if (unreachable) lines.unshift(`gh unreachable: ${unreachable}`)
   return lines.length ? lines : ["quiet"]
 }
