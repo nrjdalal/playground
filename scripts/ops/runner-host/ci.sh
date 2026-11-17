@@ -4,7 +4,7 @@
 # <rev>'s tree, never a token or a key, starts the run in a systemd user unit of its own and reads its lines every 20s, so a dropped ssh never
 # ends the run. Prints suite.sh's lines and exits as it does (0 green, 1 a step failed), or 255 when the box cannot be reached, so the
 # caller runs the suite on its own machine through run-slot instead. The host is RUNNER_HOST, else the address in
-# the data folder's ops/runner-host/ip, reached as this user with no root, its state under its own ~/.playground/ci. A re-run of a Linux-only
+# the data folder's ops/runner-host/ip, reached as this user with no root, its state under its own ~/$BOX_CI_DIR. A re-run of a Linux-only
 # test (below) runs in the current checkout, so <rev> is its HEAD.
 # The other modes: ci.sh web <rev> builds the web image there, ci.sh exec <dir> -- <command...> runs one command, and ci.sh cancel <run>
 # stops a run by the id ci.sh printed on stderr as it started (all below).
@@ -27,6 +27,8 @@ SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o 
   -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "$(id -un)@$IP")
 # the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
+# the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there
+BOX_CI_DIR=.cache/playground-ci
 SUITE_PEAK_KB=$((4608 * 1024))
 PEAK_KB=$((2 * 1024 * 1024))
 # the box's home, where its state folder sits, and whether its free memory keeps the floor; 255 sends the run back to the caller's machine
@@ -37,7 +39,7 @@ reach() {
   kb=$(printf '%s\n' "$got" | sed -n 2p)
   [[ "$BOXHOME" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$kb" =~ ^[0-9]+$ ]] || { echo "ci.sh: the box's home or free memory did not read" >&2; exit 255; }
   [ "$kb" -ge $((FLOOR_KB + PEAK_KB)) ] || { echo "ci.sh: the box has $((kb / 1024)) MiB free, under the model server's 15 GiB floor and the run's peak, so it runs here" >&2; exit 255; }
-  CI=$BOXHOME/.playground/ci
+  CI=$BOXHOME/$BOX_CI_DIR
 }
 new_run() { RUN=${1:0:12}-$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6); }
 upload() {
