@@ -17,7 +17,15 @@ describe("code-review-loop names CI green only from state.ts checks (#2517)", ()
   test("step 7, VERIFY.md and the docs page read the gate checks from checks' CHECK lines, not the bare check-runs list", async () => {
     const step7 = (await skill()).split("7. **Post**")[1]?.split("\n")[0] ?? ""
     expect(step7).toContain(
-      "name the gate checks green in a 5/5 only from `state.ts checks`' `CHECK` lines for both of them",
+      "name the gate checks green in a 5/5 only from `state.ts checks`' `CHECK` line for each gate check",
+    )
+    expect(step7.split("**Done when**")[1] ?? "").toContain(
+      "a 5/5 names each gate check green only from a `CHECK success` line `state.ts checks` printed at the head",
+    )
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
+    expect(stand).toContain(
+      "`state.ts checks <repo> <n> <head>` printed `CHECK success` for GitHub's `test` and `Audit, Lint, and Build`",
     )
     const verify = await Bun.file(
       join(root, "extensions/core/skills/code-review-loop/references/VERIFY.md"),
@@ -29,7 +37,10 @@ describe("code-review-loop names CI green only from state.ts checks (#2517)", ()
     )
     expect(read).toContain("before that gate check exists")
     expect(await page()).toContain(
-      "A 5/5 calls the gate checks green only from `state.ts checks`' CHECK lines for both",
+      "A 5/5 calls the gate checks green only from `state.ts checks`' CHECK line for each gate check",
+    )
+    expect(await page()).toContain(
+      "When `state.ts checks` prints `CHECK success` for GitHub's `test` and `Audit, Lint, and Build` checks at the exact head",
     )
   })
 })
