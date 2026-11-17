@@ -185,7 +185,10 @@ PY
 # run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
 if [ "${1:-}" = box-off ]; then
   [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
-  [ -e "${RUNNER_HOST_KEY:-$HOME/.ssh/playground_runner}" ] || echo no-ssh-key
+  # the host and key as ci.sh's HOST_DIR, KEY and IP lines read them; keep the two equal
+  [ -n "${RUNNER_HOST:-}" ] || [ -s "$OPS/runner-host/ip" ] || echo no-host
+  key=${RUNNER_HOST_KEY:-$(cat "$OPS/runner-host/key" 2>/dev/null)}
+  [ -e "${key:-$HOME/.ssh/playground_runner}" ] || echo no-ssh-key
   switch_on runner-host/off && echo runner-host-off
   switch_on runner-host/slot-off && echo slot-off
   exit 0
@@ -430,85 +433,6 @@ merge_pass() {
 if [ -z "$KIND_ONLY" ] && merge_pass "$@"; then
   echo "run-slot.sh: bun run $MERGE_NAME runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
   exec "$@" 3<&-
-fi
-# dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
-# sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
-# verify, an install, a dev stack) waits for a slot here, and so does a run the box cannot take (ci.sh exits 255, as on an untracked file it does not take).
-# The box has no /private/tmp, so a run that sets TMPDIR to a Mac path takes RUN_SLOT_HERE=1.
-# runner-host/off and runner-host/slot-off turn it off; every box run is a line in runner-host/runs.log.
-box_dir() {
-  local prev="" a
-  for a in "$@"; do
-    case "$a" in --cwd=*) echo "${a#--cwd=}"; return ;; esac
-    case "$prev" in --cwd|-C) echo "$a"; return ;; esac
-    prev=$a
-  done
-  pwd
-}
-box_fits() {
-  local a first="" line=" $* "
-  # RUN_SLOT_HERE=1, in run-slot's environment or as an env word of the command, keeps the run on this Mac (builder, 19 Oct: a Mac rerun of a red seen only on the box)
-  [ -n "${RUN_SLOT_HERE:-}" ] && return 1
-  for a in "$@"; do case "$a" in RUN_SLOT_HERE=?*) return 1 ;; esac; done
-  # the box gets no PLAYGROUND_REPO, so a run from the factory's main checkout stays here, where test:file's refusal of a relative path there reads it (PG-2368)
-  if [ -n "${PLAYGROUND_REPO:-}" ]; then
-    local repo dir
-    repo=$(cd "$PLAYGROUND_REPO" 2>/dev/null && pwd -P)
-    dir=$(cd "$(box_dir "$@")" 2>/dev/null && pwd -P)
-    [ -n "$repo" ] && [ "$dir" = "$repo" ] && return 1
-  fi
-  for a in "$@"; do
-    case "$a" in env|*=*) continue ;; esac
-    first=$a
-    break
-  done
-  case "$first" in bun|bunx) ;; *) return 1 ;; esac
-  # a build's output is this Mac's dist, so a build stays here (worker-firm-keel, 19 Oct)
-  printf '%s' "$line" | grep -qE ' (test|run test|test:file|check-types|run check-types|lint|run lint|test:skills|run test:skills|format:check|run format:check)( |$)' || return 1
-  if printf '%s' "$line" | grep -qE ' (check-types|run check-types)( |$)'; then
-    local d p
-    d=$(box_dir "$@")
-    # a type check goes only from a checkout's root: one from a subfolder (--cwd=<wt>/web/next) reads the other workspaces' dist, which the box lacks (worker-firm-keel, 19 Oct: 332 false errors)
-    [ -e "$d/.git" ] || return 1
-    # a type check here also builds this checkout's packages/*/dist, which a later run on the Mac imports, so it stays here while one is missing (round 2); this checks that a dist exists, not that it is fresh
-    for p in "$d"/packages/*/package.json; do
-      grep -q '"build"' "$p" 2>/dev/null && [ ! -d "$(dirname "$p")/dist" ] && return 1
-    done
-  fi
-  # a word that needs this Mac (a browser, a stack, docker, an install) keeps the run here; a path is judged only as an e2e test (a review's finding)
-  for a in "$@"; do
-    case "$a" in
-      */*) case "$a" in *.e2e.*) return 1 ;; esac ;;
-      *verify*|*e2e*|*install*|*shadcn*|*playwright*|agent-browser|--watch|dev|dev:*|*docker*) return 1 ;;
-    esac
-  done
-}
-# runner-host/slot-off keeps run-slot's runs here and leaves the box to Checks (ops, 20 Oct: 19 one-file runs queued ahead of 3 gate suites on its 2 slots)
-if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" ] && ! switch_on runner-host/off && ! switch_on runner-host/slot-off && box_fits "$@"; then
-  BOXDIR=$(box_dir "$@")
-  # the box runs BOXDIR's checkout, so a path in another one would run in the wrong tree there and go red as "Script not found" (9jhtsd, 24 Oct)
-  checkout_of() {
-    local d=$1
-    while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
-    d=$(cd "$d" 2>/dev/null && pwd -P) || return
-    while [ "$d" != / ] && [ ! -e "$d/.git" ]; do d=$(dirname "$d"); done
-    [ "$d" != / ] && echo "$d"
-  }
-  here=$(checkout_of "$BOXDIR")
-  for a in "$@"; do
-    case "$a" in /*) there=$(checkout_of "$a") ;; *) continue ;; esac
-    if [ -n "$there" ] && [ "$there" != "$here" ]; then
-      echo "run-slot.sh: $a is in the checkout $there, but the runner host runs ${here:-$BOXDIR}'s: run from inside $there, or pass --cwd $there" >&2
-      exit 2
-    fi
-  done
-  echo "run-slot.sh: $WHO runs this on the runner host, with no slot here" >&2
-  echo "$(date -u +%FT%TZ) start $WHO $BOXDIR $*" >> "$OPS/runner-host/runs.log"
-  bash "$OPS/runner-host/ci.sh" exec "$BOXDIR" -- "$@"
-  rc=$?
-  echo "$(date -u +%FT%TZ) end $WHO rc=$rc" >> "$OPS/runner-host/runs.log"
-  [ "$rc" -ne 255 ] && exit "$rc"
-  echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
 # A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), its steps with exit 3 for a chain with a program word, in any step, written as an unquoted glob or brace that can expand to docker or podman, and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), a program word, or the program word behind a wrapper (every later word past an option its list lacks), written as an unquoted brace or a glob that can expand to a shell or a wrapper, or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one word (a count, a duration, a lock file or a CPU mask) before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
@@ -1048,7 +972,7 @@ file_ran_long() {
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
-  [ -n "$HEAVY" ] && return
+  [ -n "${HEAVY:-}" ] && return
   local kind
   kind=$(quick_rule "$@")
   [ "$kind" = quick ] && ran_long "$@" && kind=""
@@ -1278,6 +1202,86 @@ light_run() {
   [ -n "$turbo" ] && [ -n "$filter" ] && return
   [ -n "$types" ] && types_cached "$@"
 }
+# dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here, once the quick
+# lane has passed on it: a run quick_kind sends to the quick, commit or clone lane stays on this machine. ci.sh exec
+# sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
+# verify, an install, a dev stack) waits for a slot here, and so does a run the box cannot take (ci.sh exits 255, as on an untracked file it does not take).
+# The box has no /private/tmp, so a run that sets TMPDIR to a Mac path takes RUN_SLOT_HERE=1.
+# runner-host/off and runner-host/slot-off turn it off; every box run is a line in runner-host/runs.log.
+box_dir() {
+  local prev="" a
+  for a in "$@"; do
+    case "$a" in --cwd=*) echo "${a#--cwd=}"; return ;; esac
+    case "$prev" in --cwd|-C) echo "$a"; return ;; esac
+    prev=$a
+  done
+  pwd
+}
+box_fits() {
+  local a first="" line=" $* "
+  # RUN_SLOT_HERE=1, in run-slot's environment or as an env word of the command, keeps the run on this Mac (builder, 19 Oct: a Mac rerun of a red seen only on the box)
+  [ -n "${RUN_SLOT_HERE:-}" ] && return 1
+  for a in "$@"; do case "$a" in RUN_SLOT_HERE=?*) return 1 ;; esac; done
+  # the box gets no PLAYGROUND_REPO, so a run from the factory's main checkout stays here, where test:file's refusal of a relative path there reads it (PG-2368)
+  if [ -n "${PLAYGROUND_REPO:-}" ]; then
+    local repo dir
+    repo=$(cd "$PLAYGROUND_REPO" 2>/dev/null && pwd -P)
+    dir=$(cd "$(box_dir "$@")" 2>/dev/null && pwd -P)
+    [ -n "$repo" ] && [ "$dir" = "$repo" ] && return 1
+  fi
+  for a in "$@"; do
+    case "$a" in env|*=*) continue ;; esac
+    first=$a
+    break
+  done
+  case "$first" in bun|bunx) ;; *) return 1 ;; esac
+  # a build's output is this Mac's dist, so a build stays here (worker-firm-keel, 19 Oct)
+  printf '%s' "$line" | grep -qE ' (test|run test|test:file|check-types|run check-types|lint|run lint|test:skills|run test:skills|format:check|run format:check)( |$)' || return 1
+  if printf '%s' "$line" | grep -qE ' (check-types|run check-types)( |$)'; then
+    local d p
+    d=$(box_dir "$@")
+    # a type check goes only from a checkout's root: one from a subfolder (--cwd=<wt>/web/next) reads the other workspaces' dist, which the box lacks (worker-firm-keel, 19 Oct: 332 false errors)
+    [ -e "$d/.git" ] || return 1
+    # a type check here also builds this checkout's packages/*/dist, which a later run on the Mac imports, so it stays here while one is missing (round 2); this checks that a dist exists, not that it is fresh
+    for p in "$d"/packages/*/package.json; do
+      grep -q '"build"' "$p" 2>/dev/null && [ ! -d "$(dirname "$p")/dist" ] && return 1
+    done
+  fi
+  # a word that needs this Mac (a browser, a stack, docker, an install) keeps the run here; a path is judged only as an e2e test (a review's finding)
+  for a in "$@"; do
+    case "$a" in
+      */*) case "$a" in *.e2e.*) return 1 ;; esac ;;
+      *verify*|*e2e*|*install*|*shadcn*|*playwright*|agent-browser|--watch|dev|dev:*|*docker*) return 1 ;;
+    esac
+  done
+}
+# runner-host/slot-off keeps run-slot's runs here and leaves the box to Checks (ops, 20 Oct: 19 one-file runs queued ahead of 3 gate suites on its 2 slots)
+if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" ] && ! switch_on runner-host/off && ! switch_on runner-host/slot-off && box_fits "$@" && [ -z "$(quick_kind "$@")" ]; then
+  BOXDIR=$(box_dir "$@")
+  # the box runs BOXDIR's checkout, so a path in another one would run in the wrong tree there and go red as "Script not found" (9jhtsd, 24 Oct)
+  checkout_of() {
+    local d=$1
+    while [ ! -d "$d" ] && [ "$d" != / ]; do d=$(dirname "$d"); done
+    d=$(cd "$d" 2>/dev/null && pwd -P) || return
+    while [ "$d" != / ] && [ ! -e "$d/.git" ]; do d=$(dirname "$d"); done
+    [ "$d" != / ] && echo "$d"
+  }
+  here=$(checkout_of "$BOXDIR")
+  for a in "$@"; do
+    case "$a" in /*) there=$(checkout_of "$a") ;; *) continue ;; esac
+    if [ -n "$there" ] && [ "$there" != "$here" ]; then
+      echo "run-slot.sh: $a is in the checkout $there, but the runner host runs ${here:-$BOXDIR}'s: run from inside $there, or pass --cwd $there" >&2
+      exit 2
+    fi
+  done
+  echo "run-slot.sh: $WHO runs this on the runner host, with no slot here" >&2
+  echo "$(date -u +%FT%TZ) start $WHO $BOXDIR $*" >> "$OPS/runner-host/runs.log"
+  bash "$OPS/runner-host/ci.sh" exec "$BOXDIR" -- "$@"
+  rc=$?
+  echo "$(date -u +%FT%TZ) end $WHO rc=$rc" >> "$OPS/runner-host/runs.log"
+  [ "$rc" -ne 255 ] && exit "$rc"
+  echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
+fi
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)
 rlog() { echo "$(date -u +%FT%TZ) $1 $WHO $$ $2" >> "$OPS/run-slot.runs.log" 2>/dev/null; }
 [ -n "$KIND_ONLY" ] || [ -n "$CAN_TAKE" ] || [ -n "$REREAD" ] || rlog ask "$*"

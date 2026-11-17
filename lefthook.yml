@@ -29,6 +29,7 @@ pre-commit:
       priority: 5
       glob:
         - ".agents/dashboard/*.md"
+        - ".agents/shipping.md"
         - "AGENTS.md"
         - "CLAUDE.md"
         - "tests/AGENTS.test.ts"
@@ -54,6 +55,7 @@ pre-commit:
       priority: 4
       glob:
         - ".agents/dashboard/*.md"
+        - ".agents/shipping.md"
         - ".agents/skill-trial.md"
         - ".agents/testing.md"
         - "AGENTS.md"
