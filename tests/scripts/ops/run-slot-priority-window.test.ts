@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { WAITING, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, runSlot } from "./run-slot-fake"
 
 setDefaultTimeout(60_000)
 
@@ -146,6 +146,17 @@ describe("a priority window's session", () => {
     ).toEqual(["worker-o", "worker-p", "worker-q", "worker-r", "worker-s"])
   })
 
+  // a window emptied mid-write names no pick, as spawn.sh's --priority passes no start on it (#2491)
+  test("nor a window emptied mid-write", async () => {
+    expect(
+      await order((m) => {
+        const data = m.env().PLAYGROUND_DATA_DIR
+        mkdirSync(data, { recursive: true })
+        writeFileSync(join(data, "priority-worker-p.json"), "")
+      }),
+    ).toEqual(["worker-o", "worker-p"])
+  })
+
   // the shape on writes, a reason holding an escaped quote and a backslash, still names its session
   test("while a window whose reason holds an escaped quote still names its session", async () => {
     expect(
@@ -232,5 +243,44 @@ describe("a priority window's session", () => {
     m.release("run-slot")
     expect(await p.ran()).toBe(true)
     expect(await older.ran()).toBe(true)
+  })
+})
+
+// spawn.sh's --priority reads a session's own window through run-slot.sh window, the reader the queue's pick uses, so the two agree on every file (#2491)
+describe("run-slot.sh window", () => {
+  const read = async (name: string, text: string) => {
+    const m = machine({})
+    const data = m.env().PLAYGROUND_DATA_DIR
+    mkdirSync(data, { recursive: true })
+    writeFileSync(join(data, name), text)
+    const p = runSlot(["bash", SCRIPT, "window", join(data, name)], {
+      env: m.env(),
+      ops: m.ops,
+      stderr: "pipe",
+    })
+    return { code: await p.exited, out: (await new Response(p.stdout).text()).trim() }
+  }
+  const shaped = (session: string) =>
+    `${JSON.stringify({ by: "dispatcher", reason: "the owner's ask", session, since: "2026-11-16T20:00:00.000Z" }, null, 2)}\n`
+
+  test("prints the session of a window in playground priority on's shape", async () => {
+    expect(await read("priority-worker-p.json", shaped("worker-p"))).toEqual({
+      code: 0,
+      out: "worker-p",
+    })
+  })
+
+  test.each([
+    ["an empty file", "priority-worker-p.json", ""],
+    ["a truncated one", "priority-worker-p.json", shaped("worker-p").slice(0, 40)],
+    [
+      "one on a single line",
+      "priority-worker-p.json",
+      `${JSON.stringify(JSON.parse(shaped("worker-p")))}\n`,
+    ],
+    ["another file's session", "priority-worker-q.json", shaped("worker-p")],
+    ["a job's priority-start.json", "priority-start.json", shaped("start")],
+  ])("prints nothing and exits 1 on %s", async (_, name, text) => {
+    expect(await read(name, text)).toEqual({ code: 1, out: "" })
   })
 })
