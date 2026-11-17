@@ -371,7 +371,8 @@ describe("a progress block", () => {
     for (const card of [true, false]) {
       const html = shown(BLOCK, card)
       expect(html).not.toContain('data-slot="code-block"')
-      expect(html).toContain("grid-cols-[minmax(0,max-content)_minmax(4rem,1fr)_auto]")
+      // the name column stops at 6rem, so a long name never narrows the bars (PG-2617, a 63-character name left 64px bars)
+      expect(html).toContain("grid-cols-[fit-content(6rem)_minmax(4rem,1fr)_auto]")
       const bars = [...html.matchAll(/<[^>]*role="progressbar"[^>]*>/g)].map((m) => m[0])
       expect(bars).toHaveLength(2)
       expect(bars[0]).toContain('aria-valuenow="100"')

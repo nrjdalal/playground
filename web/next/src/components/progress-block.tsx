@@ -3,18 +3,21 @@
 import type { ProgressItem } from "@packages/config/inbox"
 import { Fragment } from "react"
 
+import { Hint } from "@/components/hint"
 import { Progress } from "@/components/ui/progress"
 
-// A progress fenced block, drawn at the width of whatever holds it, so its bars fill an Inbox card on a phone and a wide screen alike: each item is its name, a bar and its percent on one line, the names in one column so the bars start at one x, then what is going on with its ETA at the right.
+// A progress fenced block, drawn at the width of whatever holds it, so its bars fill an Inbox card on a phone and a wide screen alike: each item is its name, a bar and its percent on one line, the names in one column of at most 6rem so the bars start at one x and a long name never narrows them, a name past it cut short with its whole name on hover, then what is going on with its ETA at the right.
 export function ProgressBlock({ items }: { items: ProgressItem[] }) {
   return (
     <div
-      className="my-3 grid grid-cols-[minmax(0,max-content)_minmax(4rem,1fr)_auto] items-center gap-x-3 rounded-md border p-3 text-xs"
+      className="my-3 grid grid-cols-[fit-content(6rem)_minmax(4rem,1fr)_auto] items-center gap-x-3 rounded-md border p-3 text-xs"
       data-language="progress"
     >
       {items.map((item, index) => (
         <Fragment key={index}>
-          <span className="truncate font-medium">{item.name}</span>
+          <Hint content={item.name} description={null}>
+            <span className="min-w-0 truncate font-medium">{item.name}</span>
+          </Hint>
           <Progress aria-label={item.name} value={item.percent} />
           <span className="text-right font-mono tabular-nums">{`${item.percent}%`}</span>
           <div className="text-muted-foreground col-span-3 mt-1 flex gap-3 not-last:mb-3">
