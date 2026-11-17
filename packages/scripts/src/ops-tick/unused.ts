@@ -1,0 +1,324 @@
+import { lstatSync, readdirSync } from "node:fs"
+import { homedir, hostname } from "node:os"
+import { basename, join, sep } from "node:path"
+
+import { cloneOf } from "@packages/config/org"
+import { dataDir } from "@packages/env/data-dir"
+
+import { type Entry, readRecord, type Run } from "../machine-record/record"
+import { mainCheckout } from "../main-checkout"
+import { peersOf } from "./peers"
+
+// The unused space nightly-clean lists on each machine and removes none of: model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
+
+// Ops' cleanup list, Thresholds (bundles/cleanup-list.md): an image no container uses and not pulled or run in 7 days is unused.
+export const IMAGE_UNUSED_DAYS = 7
+// Ops' cleanup list, Thresholds: an item under 100 MB folds into one small leftovers total.
+export const MIN_LIST_BYTES = 100 * 1024 ** 2
+// Ops' cleanup list, Thresholds: a replay worktree is unused 24 hours after its row ends, read as the row's newest result file.
+export const RUN_WORKTREE_AGE_MS = 24 * 3_600_000
+// Ops' cleanup list, Thresholds: the image a live job names stays, such as the merge lock's.
+export const KEEP_IMAGES = ["redis:alpine"]
+
+export const UNUSED_CLI = "packages/scripts/src/ops-tick/unused.ts"
+const WEIGHTS = /\.(gguf|safetensors)$/
+const REHEARSAL = /^rehearse\d+$/
+
+export const KINDS = ["image", "rehearsal", "run", "weights"] as const
+export type UnusedKind = (typeof KINDS)[number]
+export type Unused = { bytes: number; kind: UnusedKind; path: string; recorded: boolean }
+export type Machine = { items: Unused[]; machine: string } | { machine: string; why: string }
+
+// What a measure reads: the data folder (its record and scratchpads), the home folder (~/models), the clock and docker through run.
+export type Places = { data: string; home: string; now: number; run: Run }
+
+const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
+const stat = (path: string) => {
+  try {
+    return lstatSync(path)
+  } catch {
+    return null
+  }
+}
+const list = (dir: string): string[] => {
+  try {
+    return readdirSync(dir).sort()
+  } catch {
+    return []
+  }
+}
+const inside = (path: string, folder: string) => path === folder || path.startsWith(folder + sep)
+
+// The bytes a tree holds, each inode once, read through no symlink; 0 for a path that is gone.
+export const sizeOf = (path: string, seen = new Set<string>()): number => {
+  const st = stat(path)
+  if (!st || seen.has(`${st.dev}:${st.ino}`)) return 0
+  seen.add(`${st.dev}:${st.ino}`)
+  if (!st.isDirectory()) return st.isFile() ? st.size : 0
+  return list(path).reduce((sum, name) => sum + sizeOf(join(path, name), seen), 0)
+}
+
+// Each file under a folder whose name marks model weights, read through no symlink.
+const weightFiles = (dir: string, skip: string[]): string[] =>
+  list(dir).flatMap((name) => {
+    const path = join(dir, name)
+    const st = stat(path)
+    if (!st || skip.includes(path)) return []
+    if (st.isDirectory())
+      return name === ".git" || name === "node_modules" ? [] : weightFiles(path, skip)
+    return st.isFile() && WEIGHTS.test(name) ? [path] : []
+  })
+
+// The text of every model folder's serve.sh and model.env, ~/models/<model>/ and ~/models/trial/<model>/, which names each repo and image a model keeps.
+const modelTexts = async (models: string): Promise<string> => {
+  const folders = [
+    ...list(models).map((name) => join(models, name)),
+    ...list(join(models, "trial")).map((name) => join(models, "trial", name)),
+  ]
+  const texts = await Promise.all(
+    folders.flatMap((dir) =>
+      ["model.env", "serve.sh"].map((name) =>
+        Bun.file(join(dir, name))
+          .text()
+          .catch(() => ""),
+      ),
+    ),
+  )
+  return texts.join("\n")
+}
+
+// Weights no model folder names: each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit) or in a recorded folder outside the data folder and the home's dot folders.
+const weights = async (home: string, folders: string[], data: string): Promise<string[]> => {
+  const models = join(home, "models")
+  const named = await modelTexts(models)
+  const hub = join(models, "hf", "hub")
+  const repos = list(hub)
+    .filter((name) => name.startsWith("models--"))
+    .filter((name) => !named.includes(name.slice("models--".length).replace("--", "/")))
+    .map((name) => join(hub, name))
+  const roots = [
+    models,
+    ...folders.filter(
+      (f) => f !== home && !inside(f, models) && !inside(f, data) && !basename(f).startsWith("."),
+    ),
+  ]
+  const files = [
+    ...new Set(
+      roots.flatMap((root) => weightFiles(root, [join(models, "hf"), join(models, "kit")])),
+    ),
+  ]
+  return [...repos, ...files]
+}
+
+// Pure: the images no container uses, last pulled or run before the cutoff, and no model text or KEEP_IMAGES names; each as `docker image <ref>`, the record's form, with its bytes. inspect is `docker image inspect`'s lines of id, size and last tag time in JSON.
+export const unusedImages = (
+  listed: string,
+  used: string,
+  inspect: string,
+  named: string,
+  cutoff: number,
+): { bytes: number; path: string }[] => {
+  const usedBy = new Set(lines(used).map((ref) => ref.trim()))
+  const facts = new Map(
+    lines(inspect).map((l) => {
+      const [id = "", size = "0", at = '""'] = l.split("\t")
+      return [id, { at: Date.parse(JSON.parse(at) as string) || 0, bytes: Number(size) }]
+    }),
+  )
+  return lines(listed).flatMap((l) => {
+    const [id = "", ref = ""] = l.split("\t")
+    const bare = ref.endsWith(":latest") ? ref.slice(0, -":latest".length) : ref
+    const fact = facts.get(id)
+    if (!fact || ref === "<none>:<none>") return []
+    if (
+      [id, ref, bare].some((name) => usedBy.has(name)) ||
+      [...usedBy].some((u) => id.startsWith(`sha256:${u}`))
+    )
+      return []
+    if (KEEP_IMAGES.includes(ref) || named.includes(ref) || fact.at >= cutoff) return []
+    return [{ bytes: fact.bytes, path: `docker image ${ref}` }]
+  })
+}
+
+const images = async (places: Places, named: string) => {
+  const listed = await places.run([
+    "docker",
+    "image",
+    "ls",
+    "--no-trunc",
+    "--format",
+    "{{.ID}}\t{{.Repository}}:{{.Tag}}",
+  ])
+  const used = await places.run(["docker", "ps", "-a", "--no-trunc", "--format", "{{.Image}}"])
+  if (listed.code !== 0 || used.code !== 0) return []
+  const ids = [...new Set(lines(listed.out).map((l) => l.split("\t")[0]!))]
+  if (!ids.length) return []
+  const inspect = await places.run([
+    "docker",
+    "image",
+    "inspect",
+    "--format",
+    "{{.Id}}\t{{.Size}}\t{{json .Metadata.LastTagTime}}",
+    ...ids,
+  ])
+  const cutoff = places.now - IMAGE_UNUSED_DAYS * 86_400_000
+  return inspect.code === 0 ? unusedImages(listed.out, used.out, inspect.out, named, cutoff) : []
+}
+
+// Each row in ~/models/kit/runs whose newest result file is past RUN_WORKTREE_AGE_MS, as its worktree folders alone, so its grade.log, stream.jsonl and stderr stay out of the list.
+const runs = (home: string, now: number): string[] => {
+  const root = join(home, "models", "kit", "runs")
+  return list(root).flatMap((row) => {
+    const dir = join(root, row)
+    const entries = list(dir).map((name) => ({ path: join(dir, name), st: stat(join(dir, name)) }))
+    const results = entries.filter((e) => e.st?.isFile())
+    const ended = Math.max(0, ...results.map((e) => e.st!.mtimeMs))
+    if (!results.length || now - ended < RUN_WORKTREE_AGE_MS) return []
+    return entries.filter((e) => e.st?.isDirectory()).map((e) => e.path)
+  })
+}
+
+// Each scratchpad/<session>/rehearse<N> folder, a hand-run ship rehearsal no step removes.
+const rehearsals = (data: string): string[] => {
+  const pads = join(data, "scratchpad")
+  return list(pads).flatMap((session) =>
+    list(join(pads, session))
+      .filter((name) => REHEARSAL.test(name) && stat(join(pads, session, name))?.isDirectory())
+      .map((name) => join(pads, session, name)),
+  )
+}
+
+// Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under.
+export const recordedBy = (entries: Entry[], path: string): boolean =>
+  entries.some(
+    (e) => inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path)),
+  )
+
+// This machine's unused space, largest first.
+export async function measureUnused(places: Places): Promise<Unused[]> {
+  const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
+  const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
+  const named = await modelTexts(join(places.home, "models"))
+  const of = (kind: UnusedKind, path: string, bytes = sizeOf(path)): Unused => ({
+    bytes,
+    kind,
+    path,
+    recorded: recordedBy(entries, path),
+  })
+  return [
+    ...(await images(places, named)).map((i) => of("image", i.path, i.bytes)),
+    ...rehearsals(places.data).map((path) => of("rehearsal", path)),
+    ...runs(places.home, places.now).map((path) => of("run", path)),
+    ...(await weights(places.home, folders, places.data)).map((path) => of("weights", path)),
+  ].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
+}
+
+const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
+const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2)} MB`
+const tilde = (path: string, home: string) =>
+  inside(path, home) ? `~${path.slice(home.length)}` : path
+
+// Pure: a machine's two lines, the log's total by kind and the outbox's each item, items under min folded into one small leftovers total.
+export const linesOf = (
+  found: Machine,
+  home: string,
+  min = MIN_LIST_BYTES,
+): { item: string; total: string } => {
+  if ("why" in found)
+    return { item: `${found.machine}: not read: ${found.why}`, total: `${found.machine} not read` }
+  const big = found.items.filter((i) => i.bytes >= min)
+  const small = found.items.filter((i) => i.bytes < min)
+  const sum = (items: Unused[]) => items.reduce((n, i) => n + i.bytes, 0)
+  const kinds = KINDS.flatMap((kind) => {
+    const of = big.filter((i) => i.kind === kind)
+    return of.length ? [`${kind} ${gb(sum(of))}`] : []
+  })
+  const leftovers = small.length ? [`small leftovers ${small.length} at ${mb(sum(small))}`] : []
+  const total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
+  const items = big.map(
+    (i) => `${i.kind} ${tilde(i.path, home)} ${gb(i.bytes)}${i.recorded ? " recorded" : ""}`,
+  )
+  return {
+    item: `${found.machine} unused: ${[...items, ...leftovers].join("; ") || "none"}`,
+    total,
+  }
+}
+
+// The one ssh a peer's measure runs through: read only, its JSON on stdout, never prompting.
+export const peerUnusedArgv = (
+  key: string | undefined,
+  target: string,
+  clone: string,
+): string[] => [
+  "ssh",
+  "-F",
+  "none",
+  ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
+  ...["BatchMode=yes", "ConnectTimeout=10"].flatMap((option) => ["-o", option]),
+  target,
+  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${UNUSED_CLI} --json`,
+]
+
+const PEER_MS = 10 * 60_000
+
+// This machine's unused space, then each peer's that peersOf names, each read by peerUnusedArgv; a peer that does not answer is named with why. checkout, the Dashboard's checkout, is a test's seam.
+export async function unusedEverywhere(
+  places: Places,
+  repo: string,
+  run: (argv: string[], timeoutMs?: number) => Promise<{ code: number; out: string }>,
+  checkout?: (repo: string) => string | null,
+): Promise<Machine[]> {
+  const found: Machine[] = [
+    { items: await measureUnused(places), machine: hostname().split(".")[0]! },
+  ]
+  const cluster = await peersOf(repo, places.home, checkout)
+  if ("why" in cluster) return found
+  const clone = cloneOf(repo, places.home)
+  for (const peer of cluster.peers) {
+    if (clone === null) {
+      found.push({ machine: peer.name, why: "this checkout is not a plain path under home" })
+      continue
+    }
+    const ran = await run(peerUnusedArgv(cluster.key, peer.target, clone), PEER_MS)
+    try {
+      if (ran.code !== 0) throw new Error()
+      found.push({ items: JSON.parse(ran.out) as Unused[], machine: peer.name })
+    } catch {
+      found.push({ machine: peer.name, why: ran.out.trim().split("\n")[0] || `exit ${ran.code}` })
+    }
+  }
+  return found
+}
+
+const run: Run = async (argv) => {
+  try {
+    const proc = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "pipe" })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    // stderr only on a failure, so --json's stdout parses whole
+    return { code, out: code === 0 ? out : `${err}${out}` }
+  } catch {
+    return { code: 127, out: "" }
+  }
+}
+
+export const livePlaces = (): Places => ({
+  data: dataDir(),
+  home: process.env.HOME || homedir(),
+  now: Date.now(),
+  run,
+})
+
+// --json: this machine's items as JSON, the peer's half; bare: the dry run, every machine's lines, removing nothing.
+if (import.meta.main) {
+  const places = livePlaces()
+  if (process.argv.includes("--json")) console.log(JSON.stringify(await measureUnused(places)))
+  else
+    for (const found of await unusedEverywhere(places, mainCheckout(), run)) {
+      const { item, total } = linesOf(found, places.home)
+      console.log(`${total}\n${item}`)
+    }
+}
