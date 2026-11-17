@@ -103,6 +103,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A finding against a rule written in the code, such as a ratchet that never rises, stays blocking when the brief lists the bend as agreed, unless that agreement quotes the rule's owner.
 - A branch is called untested only once a grep of the tests for its effect and its entry point finds nothing, a mutation of it turns no test red, and the repo's testing guide has been read, so a suggested test never breaks that guide.
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
+  A runner-box red that a Mac rerun turns green gets one issue to root-cause it, or to delete the test with the reason, as a `BATCH-RED` does above.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch` (`<scratch>` the reviewer's own `~/.playground/scratch/<session name>/`, made in a call of its own first), restore the clone,
   check it at the PR's head with `git -C <clone> apply --check <scratch>/fix.patch`,
