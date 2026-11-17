@@ -58,6 +58,18 @@ const REPLY = sse([
   { type: "message_stop" },
 ])
 
+// The shell's environment with nothing that could move claude off the stub or onto a login: every ANTHROPIC_ and Claude Code variable dropped, as parity's replayEnv drops them.
+const shellEnv = () =>
+  Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) =>
+        value !== undefined &&
+        !key.startsWith("ANTHROPIC_") &&
+        !/^CLAUDE_CODE_/.test(key) &&
+        !["CLAUDECODE", "CLAUDE_CONFIG_DIR"].includes(key),
+    ),
+  ) as Record<string, string>
+
 // One level's run: every messages request claude sent, as its model and thinking field (absent when it sent none).
 export const runLevel = async (level: string, env: Record<string, string>) => {
   const seen: { model: unknown; thinking: unknown }[] = []
@@ -84,6 +96,7 @@ export const runLevel = async (level: string, env: Record<string, string>) => {
   const run = Bun.spawn(["claude", "-p", "say ok", "--model", "local", "--effort", level], {
     cwd: home,
     env: {
+      ...shellEnv(),
       ANTHROPIC_AUTH_TOKEN: "local",
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`,
       ANTHROPIC_DEFAULT_HAIKU_MODEL: "local",
@@ -92,7 +105,6 @@ export const runLevel = async (level: string, env: Record<string, string>) => {
       CLAUDE_CONFIG_DIR: join(home, ".claude"),
       ENABLE_TOOL_SEARCH: "true",
       HOME: home,
-      PATH: process.env.PATH ?? "",
       ...env,
     },
     stderr: "pipe",
