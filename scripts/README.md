@@ -207,6 +207,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
   all pointing into the main checkout, so a pull there updates the factory's hooks and the command.
+  Each link it makes outside the data folder goes into the machine record (`playground record add`, GLOSSARY.md's **Machine record**), and a link the record holds already writes nothing, so every run records only what is new.
+  A record that fails prints one line on stderr and leaves the run's status alone, since the next daily check names the link.
 - Before it links, it removes each link into the checkout whose file a pull removed, in the folders `playground doctor` reads (`linksInto` in `packages/scripts/src/playground/links.ts`), so a link doctor names MISSING clears on the next run; a live link, and every link that points elsewhere, stays.
 - Beside its links, `scripts/link-skills.sh` sets `rerere.enabled false` in the checkout's config, which every worktree reads.
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
