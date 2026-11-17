@@ -799,6 +799,41 @@ describe("the hosted session on a local model", () => {
     }
   })
 
+  test("the claim holds until switchTo lets it go, so a pick right after a restart reads BUSY (PG-2647)", async () => {
+    const { dir, host } = started()
+    try {
+      expect(host.claim()).toBe(true)
+      await host.restart(null, "opus")
+      expect(host.claim()).toBe(false)
+      host.release()
+      expect(host.claim()).toBe(true)
+      host.release()
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a pick made as the first switch's restart ends reads BUSY, and a pick once that switch lets go switches (PG-2647)", async () => {
+    const { dir, fake, on, pick } = started()
+    try {
+      const record = on.record
+      let during: Awaited<ReturnType<typeof pick>> | undefined
+      on.record = async (event, run) => {
+        on.record = record
+        await record(event, async () => {
+          await run()
+          during = await pick({ model: "sonnet" })
+        })
+      }
+      expect(await pick({ local: M.id })).toMatchObject({ ok: true })
+      expect(during).toMatchObject({ code: "BUSY", ok: false })
+      expect(await pick({ model: "opus" })).toMatchObject({ ok: true })
+      expect(fake.calls).toHaveLength(3)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a switch keeps the effort picked before it, on the local server and back", async () => {
     const { dir, fake, host, pick } = started()
     try {
