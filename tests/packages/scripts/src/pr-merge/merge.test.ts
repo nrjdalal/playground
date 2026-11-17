@@ -1186,7 +1186,9 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     writeFileSync(join(repo, path), text)
   }
   const GATES = "packages/scripts/src/pr-merge/gates.ts"
+  const PATHS = "packages/scripts/src/new-user-gate/paths.ts"
   write(GATES, "export const gates = ['review']\n")
+  write(PATHS, "export const NEW_USER_PATHS = ['install.sh']\n")
   write("README.md", "a\n")
   at("init", "-q", "-b", "canary")
   at("add", ".")
@@ -1207,6 +1209,12 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     write("README.md", "b\n")
     expect(await gateCodeOf(git, canary)).toEqual([])
     at("checkout", "-q", "--", "README.md")
+  })
+
+  test("an edit to the new-user gate's path list counts, since the gate reads which diffs it holds from it (PG-2496)", async () => {
+    write(PATHS, "export const NEW_USER_PATHS = []\n")
+    expect(await gateCodeOf(git, canary)).toEqual([PATHS])
+    at("checkout", "-q", "--", PATHS)
   })
 
   test("an uncommitted edit to the gate code counts, as a commit does", async () => {

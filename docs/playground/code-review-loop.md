@@ -73,7 +73,10 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
   On a stack held at 5/5 until the owner's try, that verdict is one signal to sync it with canary, and between syncs the reviewer runs only this conflict check on it.
 - Every round, round 1 included, starts with `state.ts merge`, which checks the head's merge with canary before any full read: a conflict, or a touched test red on the merge and green both at the head and on canary, ends the round as one blocking finding, merge canary and rerun the touched tests, so no full read is spent on a head that only canary's drift fails.
   A test red at the head too is the PR's own, scored in the round as usual, and one red at canary itself is canary's own, sent to the lead rather than to the worker, since a merge cannot clear it.
-  The run's junit report names the red files, and only those run again, so one red among about 155 files costs three runs of that one file; a file red beside the others and green alone is named rather than read as clean, and a red run whose report names no file runs the whole list once more and says so.
+  The run's junit report names the red files, and only those run again, so one red among about 155 files costs three runs of that one file; a file red beside the others and green alone is named rather than read as clean,
+  and gets one issue to root-cause it or delete it, opened by whoever saw it first (on a work-org PR, sent up the chain by the lead) with the file, the run, the batch and the lone run's output (the merge check's own output) and linked by the other, never a second rerun,
+  while the PR merges on the lone run's green with that issue in its Merge Danger,
+  and a red run whose report names no file runs the whole list once more and says so.
   The check runs exactly the touched tests, whose repo scanners put about 155 files in every list, a one-line docs change's included (measured: 38,004 tests, 167 s of tests, 18 minutes' wall time mostly spent queueing for a slot).
   On an outside author's PR it runs `--conflict-only`, merge-tree alone, since the reviewer never runs that PR's code, and no-outside-pr-code refuses the check without it in read mode.
   When canary changed `bun.lock` or a `package.json`, the check runs no test, since the clone's install is the head's, so a canary-only red there waits for the last 5/5's merge.
@@ -90,6 +93,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
   `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
+  A file red in that run, a by-hand local merge's included, runs again alone once: red there, it is scored, and green there, it is a `BATCH-RED`, with its one issue and no second rerun.
 - When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
 - A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.
 - Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited.
@@ -153,6 +157,6 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and on a `web/next/` diff for its tester's PASS there.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and for each PASS its diff calls for there: the tester's on a `web/next/` diff, the new-user gate's on an installer or first-run diff.
 The Builder's sweep runs its recovery scan.
 It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.

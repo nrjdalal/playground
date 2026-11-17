@@ -386,6 +386,49 @@ describe("the tester gate holds a web/next diff for its tester's PASS at the hea
   })
 })
 
+// a PR broke curl | bash and it showed only at the ship's new-user gate, so a diff on what a new user meets first waits for that gate's PASS at its head (PG-2496).
+describe("the new-user gate holds an installer or first-run diff for the gate's PASS at the head", () => {
+  const ran = (word: "FAIL" | "INCONCLUSIVE" | "PASS", sha = HEAD, why = "7 of 7 passed") =>
+    said(`## NewUserGate · ${word} at ${sha.slice(0, 7)} · ${why}`)
+  const files = ["install.sh", "AGENTS.md"]
+  const gate = (patch: Partial<PrFacts>) => gatesOf(facts(patch)).find((g) => g.name === "new-user")
+
+  test("a PASS at the head passes, naming the line", () => {
+    expect(gate({ comments: [review(), ran("PASS")], files })).toEqual({
+      detail: "## NewUserGate · PASS at 69a6a4c · 7 of 7 passed",
+      name: "new-user",
+      ok: true,
+    })
+  })
+
+  test.each([
+    ["no verdict", [review()]],
+    ["a FAIL at the head", [review(), ran("FAIL", HEAD, "6 of 7 passed")]],
+    ["an INCONCLUSIVE at the head", [review(), ran("INCONCLUSIVE", HEAD, "6 of 7 passed")]],
+    ["a PASS at an older head", [review(), ran("PASS", OLD)]],
+    ["a PASS by anyone else", [review(), said(ran("PASS").body, "someone-else")]],
+  ])("%s refuses", (_, comments) => {
+    expect(failing({ comments, files })).toEqual(["new-user"])
+  })
+
+  test("an INCONCLUSIVE refuses like a FAIL, printing its reason", () => {
+    const why = "6 of 7 passed, 1 inconclusive; 7. Usage: spawn refused"
+    expect(gate({ comments: [review(), ran("INCONCLUSIVE", HEAD, why)], files })?.detail).toBe(
+      `newest new-user gate verdict is not a pass: ## NewUserGate · INCONCLUSIVE at 69a6a4c · ${why}`,
+    )
+  })
+
+  test("its refusal names the matched files and the run that posts the verdict", () => {
+    expect(gate({ files })?.detail).toBe(
+      "install.sh waits for the new-user gate: missing ## NewUserGate · PASS at 69a6a4c from acme; run ~/.playground/ops/run-slot.sh <your name> -- bun run gate:new-user 69a6a4c5e6caf46c4abda6a89de4ce6f3b309e88 --pr 7",
+    )
+  })
+
+  test("a diff matching no path meets no new-user gate", () => {
+    expect(gate({})).toBe(undefined)
+  })
+})
+
 describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-1274)", () => {
   const stacked = (line: string) => `${SKILL_BODY}\n- ${line}`
   const parent = (patch: Partial<PrFacts>) =>
