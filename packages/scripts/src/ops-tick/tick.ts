@@ -37,6 +37,7 @@ import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
+import { machineRecord } from "./machine-record"
 import { nightlyClean } from "./nightly-clean"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
@@ -1155,6 +1156,7 @@ export const BEATS: Beat[] = [
     run: nightlyClean(),
     to: "ops/log/nightly-clean.log and the outbox line to ops",
   },
+  { cron: "45 3 * * *", name: "machine-record", run: machineRecord(), to: "ops, a line a finding" },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },

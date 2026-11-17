@@ -6152,10 +6152,6 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
-  "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
-    description: "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
-    schedule: { always: true }
-  }),
   "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
     cwd: "{dashboard}",
     description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
@@ -12518,7 +12514,20 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const at = remoteEnv(env, line);
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) };
       sshOwn.add(own);
-      return await visit(own, parse3(own), env) ?? run(lex(line, at.known), at, visit, true);
+      const remote = lex(line, at.known);
+      const head = remote.commands[0];
+      const input = sshInput(cmd);
+      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse3(head).xargs) {
+        const target = input?.op === "<" ? input.target : undefined;
+        const path = target && pathOf(target, env);
+        if (input?.body)
+          head.redirects = [input, ...head.redirects];
+        else if (input && target && path)
+          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects];
+        else if (!input && cmd.stdin)
+          head.stdin = cmd.stdin;
+      }
+      return await visit(own, parse3(own), env) ?? run(remote, at, visit, true);
     }
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name);

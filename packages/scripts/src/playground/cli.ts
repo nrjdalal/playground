@@ -506,6 +506,12 @@ const rm = async (words: string[]): Promise<number> => {
   return runRm(words, rmDeps(REPO))
 }
 
+// playground record: the machine record (machine-record/cli.ts), loaded only for this command.
+const record = async (words: string[]): Promise<number> => {
+  const { recordIo, runRecord } = await import("../machine-record/cli")
+  return runRecord(words, recordIo())
+}
+
 // playground migrate: the switch's one-time move (migrate.ts), loaded only for this command.
 const migrateMachine = async (words: string[]): Promise<number> => {
   const { runMigrate } = await import("./migrate")
@@ -552,41 +558,41 @@ const code =
                       ? await alertsWaitFor(rest[0]!)
                       : command === "send"
                         ? await sendTo(rest)
-                        : command === "model"
-                          ? await (await import("../local-model/live")).runModel(rest)
-                          : command === "doctor"
-                            ? report(await doctor(REPO, homedir(), HOME_DATA))
-                            : command === "version"
-                              ? (console.log(version(REPO, HOME_DATA).join("\n")), 0)
-                              : command === "uninstall"
-                                ? await uninstallAll(rest[0] === "--purge")
-                                : command === "ext" || command === "settings"
-                                  ? await runStore(command, rest, await terminalIo(), console.error)
-                                  : command === "rules"
-                                    ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
-                                      await (
-                                        await import("./rules")
-                                      ).runRules(
-                                        rest,
-                                        process.cwd(),
-                                        process.env,
-                                        console.log,
-                                        console.error,
-                                      )
-                                    : command === "migrate"
-                                      ? await migrateMachine(rest)
-                                      : command === "orgs"
-                                        ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
-                                        : command === "accounts"
-                                          ? await runAccounts(rest, accountsIo(dataDir()))
-                                          : command === "focus"
+                        : command === "doctor"
+                          ? report(await doctor(REPO, homedir(), HOME_DATA))
+                          : command === "version"
+                            ? (console.log(version(REPO, HOME_DATA).join("\n")), 0)
+                            : command === "uninstall"
+                              ? await uninstallAll(rest[0] === "--purge")
+                              : command === "ext" || command === "settings"
+                                ? await runStore(command, rest, await terminalIo(), console.error)
+                                : command === "rules"
+                                  ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
+                                    await (
+                                      await import("./rules")
+                                    ).runRules(
+                                      rest,
+                                      process.cwd(),
+                                      process.env,
+                                      console.log,
+                                      console.error,
+                                    )
+                                  : command === "migrate"
+                                    ? await migrateMachine(rest)
+                                    : command === "orgs"
+                                      ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
+                                      : command === "accounts"
+                                        ? await runAccounts(rest, accountsIo(dataDir()))
+                                        : command === "focus"
+                                          ? await (
+                                              await import("./focus")
+                                            ).runFocus(rest, await focusDeps())
+                                          : command === "priority"
                                             ? await (
-                                                await import("./focus")
-                                              ).runFocus(rest, await focusDeps())
-                                            : command === "priority"
-                                              ? await (
-                                                  await import("./priority")
-                                                ).runPriority(rest, await priorityDeps())
+                                                await import("./priority")
+                                              ).runPriority(rest, await priorityDeps())
+                                            : command === "record"
+                                              ? await record(rest)
                                               : command === "rm"
                                                 ? await rm(rest)
                                                 : command === "yard"
@@ -613,7 +619,11 @@ const code =
                                                         ? await verb(command, rest)
                                                         : command === "ci-wait"
                                                           ? await ciWaitFor(rest)
-                                                          : fail(
-                                                              `no command ${command}; playground --help lists them`,
-                                                            )
+                                                          : command === "model"
+                                                            ? await (
+                                                                await import("../local-model/live")
+                                                              ).runModel(rest)
+                                                            : fail(
+                                                                `no command ${command}; playground --help lists them`,
+                                                              )
 process.exit(code)

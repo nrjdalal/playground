@@ -9951,10 +9951,6 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
-  "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
-    description: "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
-    schedule: { always: true }
-  }),
   "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
     cwd: "{dashboard}",
     description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
@@ -10145,92 +10141,6 @@ var liveSettings = defineSettings({
     schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
   }
 });
-// packages/settings/src/local-models.ts
-var folder2 = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model folder under ~/models, such as ornith-1.5-35b-a3b-nvfp4");
-var figures = strictObject({
-  cap: number2().gt(0).max(0.95),
-  kvKiBPerToken: number2().positive(),
-  overheadGiB: number2().min(0),
-  weightsGiB: number2().positive()
-});
-var localModelSettings = defineSettings({
-  "localModels.boxLanes": {
-    default: 2,
-    description: "How many box test runs the peer runs at once beside its model servers (the box suite's SLOTS); a peer server's share leaves room for this many runs of localModels.boxRunGiB.",
-    schema: number2().int().min(0).max(16)
-  },
-  "localModels.boxRunGiB": {
-    default: 2.25,
-    description: "Estimated: the memory one box test run takes, half the 4.5 GiB peak of a suite across both lanes, measured on the old runner box on 24 Oct, not on the peer.",
-    schema: number2().min(0).max(64)
-  },
-  "localModels.container": {
-    default: "local-vllm",
-    description: "The name each server's container starts with, then its model's folder (local-vllm-<folder>); playground model use stops only a container it started under such a name.",
-    schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
-  },
-  "localModels.drainMinutes": {
-    default: 30,
-    description: "The longest a swap waits for the running model's requests to finish before it refuses and leaves that model serving.",
-    schema: number2().int().min(1).max(240)
-  },
-  "localModels.hereModel": {
-    default: "",
-    description: "The model this machine keeps up, such as K for the local workers; empty, the default, keeps none. Another model loads here on request, and this one comes back after localModels.idleMinutes.",
-    schema: union([literal(""), folder2])
-  },
-  "localModels.hereReserveGiB": {
-    default: 40,
-    description: "Estimated: the memory a server on this machine leaves free for the factory's own sessions, stacks and test runs; its share is what is free above this.",
-    schema: number2().min(0).max(512)
-  },
-  "localModels.idleMinutes": {
-    default: 30,
-    description: "How long a model other than its machine's kept one (localModels.hereModel, localModels.peerModel) may sit with no request before it is stopped and the kept one comes back; 0 keeps whichever model was loaded last.",
-    schema: number2().int().min(0).max(1440)
-  },
-  "localModels.machine": {
-    default: "",
-    description: "The PLAYGROUND_PEERS machine that runs the model servers; empty means the only machine PLAYGROUND_PEERS names.",
-    schema: union([
-      literal(""),
-      string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
-    ])
-  },
-  "localModels.minFreeGiB": {
-    default: 15,
-    description: "The free memory a server never takes its machine under: a server whose load takes it under this is stopped, and on the peer it is part of the reserve a share leaves free, with the box-run reserve.",
-    schema: number2().min(0).max(512)
-  },
-  "localModels.models": {
-    default: {
-      "ornith-1.5-122b-nvfp4": {
-        cap: 0.75,
-        kvKiBPerToken: 18.45,
-        overheadGiB: 2.38,
-        weightsGiB: 72.38
-      },
-      "ornith-1.5-35b-a3b-nvfp4": {
-        cap: 0.7,
-        kvKiBPerToken: 12.77,
-        overheadGiB: 6.65,
-        weightsGiB: 21.86
-      }
-    },
-    description: "Each model folder's sizing figures: cap (its measured working share), weightsGiB, overheadGiB and kvKiBPerToken; a model with no row here is refused.",
-    schema: record(folder2, figures)
-  },
-  "localModels.peerModel": {
-    default: "",
-    description: "The model the peer keeps up, such as M for the Dashboard's chat; empty, the default, keeps none. Another model loads there on request, and this one comes back after localModels.idleMinutes.",
-    schema: union([literal(""), folder2])
-  },
-  "localModels.sessionTokens": {
-    default: 65536,
-    description: "The KV cache one session takes, in tokens: a server's --max-num-seqs is its KV cache left over this many tokens.",
-    schema: number2().int().min(1024).max(1048576)
-  }
-});
 // packages/settings/src/owner.ts
 var ownerSettings = defineSettings({
   "owner.names": {
@@ -10250,6 +10160,11 @@ var pathsSettings = defineSettings({
     default: "",
     description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
     schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
+  },
+  "paths.factoryHomes": {
+    default: ["{data}", "{checkout}", "~/models"],
+    description: "The folders the factory may put things in, each an absolute path, a ~/ path, {data} (the data folder) or {checkout} (the Playground clone): the machine record's daily check names a new path outside them as misplaced.",
+    schema: array(string2().regex(/^(?:\/.+|~\/.+|\{data\}|\{checkout\})$/, "a path, {data} or {checkout}")).min(1)
   }
 });
 // packages/settings/src/rules.ts
