@@ -190,7 +190,7 @@ fake(
   `[ -n "$FAKE_UPTIME_BROKEN" ] && exit 1
 echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
 )
-// The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
+// The swap-in read, vm_stat -c <n> 1: its first row the totals since boot, then one row a second for the n-1 seconds after, swap-ins at FAKE_SWAPINS's words in turn (0 by default), its last word held for any second past them.
 fake(
   "vm_stat",
   `[ -n "$FAKE_LINUX" ] && { echo "vm_stat: command not found" >&2; exit 127; }
@@ -198,7 +198,10 @@ fake(
 echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
 echo "    free  pageins  pageout  swapins swapouts"
 echo "    8023  346118K   502178  9966113 12153731"
-echo "    7698      542        0  \${FAKE_SWAPINS:-0}        0"`,
+vals=(\${FAKE_SWAPINS:-0})
+for ((i = 0; i < \${2:-2} - 1; i++)); do
+  echo "    7698      542        0  \${vals[i]:-\${vals[\${#vals[@]} - 1]}}        0"
+done`,
 )
 // sleep as it is, but first the next second read's /proc text moves in (FAKE_SLEEP)
 fake("sleep", FAKE_SLEEP.replace("#!/bin/bash\n", ""))

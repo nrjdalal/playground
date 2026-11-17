@@ -437,23 +437,34 @@ def cpu_idle():
     source["cpu_idle"] = "/proc/stat"
     return round((b[3] + b[4] - a[3] - a[4]) * 100 / total, 2)
 
-# the last second's swap-ins, from vm_stat's last row under a header naming each column, else pswpin's rise over a second in Linux's /proc/vmstat, or None when neither reads
+# the swap-ins a second as the median of 3 one-second samples, so one burst (a page-in that spikes a single second) holds no start while a sustained rate does: vm_stat -c 4 1's three rows after its since-boot row under a header naming each column, else pswpin's rises over 3 seconds in Linux's /proc/vmstat, or None when neither reads
+SWAPIN_SAMPLES = 3
+
 def swapins():
     try:
-        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
-        column = next(row for row in rows if "swapins" in row).index("swapins")
-        return int(rows[-1][column])
+        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", str(SWAPIN_SAMPLES + 1), "1"], capture_output=True, text=True, timeout=10 + SWAPIN_SAMPLES, check=True).stdout.splitlines()]
+        header = next(i for i, row in enumerate(rows) if "swapins" in row)
+        column = rows[header].index("swapins")
+        samples = [int(row[column]) for row in rows[header + 2:]]
+        if len(samples) == SWAPIN_SAMPLES:
+            return sorted(samples)[SWAPIN_SAMPLES // 2]
     except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
         pass
-    pair = proc_pair("vmstat")
+    texts = [proc_text("vmstat")]
+    for _ in range(SWAPIN_SAMPLES):
+        if texts[-1] is None:
+            return None
+        subprocess.run(["sleep", "1"])
+        texts.append(proc_text("vmstat"))
     try:
-        a, b = (int(re.search(r"^pswpin (\d+)$", text, re.M).group(1)) for text in pair)
+        counts = [int(re.search(r"^pswpin (\d+)$", text, re.M).group(1)) for text in texts]
     except (AttributeError, TypeError):
         return None
-    if b < a:
+    rises = [b - a for a, b in zip(counts, counts[1:])]
+    if min(rises) < 0:
         return None
     source["swapins"] = "/proc/vmstat"
-    return b - a
+    return sorted(rises)[SWAPIN_SAMPLES // 2]
 
 def load(name):
     path = os.path.join(data_dir, name)
@@ -490,7 +501,7 @@ def manager_room():
 if backend in ("glm", "local") and not host:
     starts = "a GLM session" if backend == "glm" else "a local session"
     try:
-        # a GLM or local session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second, here; an --ssh one takes the target's load and memory gates below
+        # a GLM or local session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second (swapins(), the median of 3 seconds), here; an --ssh one takes the target's load and memory gates below
         loads = loadavg()
         if loads is None:
             refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime), nor Linux's /proc/loadavg")
@@ -506,7 +517,7 @@ if backend in ("glm", "local") and not host:
             refuse("memory", f"pressure level is {readings['pressure']} ({source['pressure']}), and {starts} starts at 1 alone")
         readings["swapins"] = swapins()
         if readings["swapins"] is None:
-            refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
+            refuse("memory", "it cannot read the swap-ins (vm_stat -c 4 1), nor Linux's /proc/vmstat")
         if readings["swapins"] >= gates["glmSwapinsMax"]:
             refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), and {starts} starts under {fmt(gates['glmSwapinsMax'])}/s")
     except Skip:
@@ -602,7 +613,7 @@ else:
             readings["memory"] = "pressure level and free share refused by the sandbox"
             readings["swapins"] = swapins()
             if readings["swapins"] is None:
-                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
+                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 4 1), nor Linux's /proc/vmstat")
             if readings["swapins"] >= gates["glmSwapinsMax"]:
                 refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s ({source['swapins']}), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
         else:
@@ -619,7 +630,7 @@ else:
         if room and "swapins" not in readings:
             readings["swapins"] = swapins()
             if readings["swapins"] is None:
-                refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
+                refuse("memory", "it cannot read the swap-ins (vm_stat -c 4 1), nor Linux's /proc/vmstat")
             if readings["swapins"] >= gates["glmSwapinsMax"]:
                 free = f", while free reads {readings['free']}% ({source['free']}), which counts compressible pages" if "free" in readings else ""
                 refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), {fmt(gates['glmSwapinsMax'])}/s is the line{free}. Close a session or wait for the paging to pass, and run it again.")
