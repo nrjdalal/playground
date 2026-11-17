@@ -193,8 +193,10 @@ describe("memory shuts slots 2 to 4 as mem_ok reads it", () => {
     ])
   })
 
-  test("a free share under 40% shuts them, as does pressure over normal", () => {
+  // issue 2660: macOS keeps its 40% bar, the memorystatus free share, which Linux's MemAvailable does not mirror
+  test("a free share under 40% shuts them, 33% as 39%, as does pressure over normal", () => {
     expect(slots({ free: 39 })).toBe("1\n")
+    expect(slots({ free: 33, swapins: 5 })).toBe("1\n")
     expect(slots({ pressure: 2 })).toBe("1\n")
   })
 })

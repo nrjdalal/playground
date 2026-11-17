@@ -75,6 +75,8 @@ describe("defineSettings", () => {
       "localModels.hereReserveGiB",
       "localModels.idleMinutes",
       "localModels.machine",
+      "localModels.maxFirstTokenSeconds",
+      "localModels.minTps",
       "localModels.models",
       "localModels.peerModel",
       "models.checker",
