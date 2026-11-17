@@ -6356,6 +6356,59 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }
     })
 
+    test("a cut-off peer install whose card write throws leaves the next one's password deleted (#2535)", async () => {
+      const at = new Date("2026-11-07T20:00:00.000Z")
+      const services = ["playground-spark-one-sudo", "playground-spark-two-sudo"]
+      const ids: string[] = []
+      for (const machine of ["spark-one", "spark-two"]) {
+        const posted = await post(decision(ROOT_INSTALL))
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", seen: posted.updatedAt },
+          { actor, now: at, root: () => new Promise(() => {}) },
+        )
+        const writer = new SQL(url, { max: 1 })
+        await writer`update inbox_item set preview = jsonb_set(preview, '{machine}', to_jsonb(${machine}::text)) where id = ${posted.id}`
+        await writer.close()
+        ids.push(posted.id)
+      }
+      const kept = new Map(services.map((service) => [service, "pw-left-behind"]))
+      // the first of these cards to reach its own write throws there, as a database write that fails
+      let armed = false
+      const order: string[] = []
+      const secret = (name: string) => {
+        if (services.includes(name)) {
+          order.push(name)
+          armed = order.length === 1
+        }
+        return {
+          read: async () => kept.get(name) ?? null,
+          remove: async () => {
+            kept.delete(name)
+          },
+        }
+      }
+      const failing = new Proxy(db, {
+        get: (target, key, receiver) =>
+          key === "update" && armed
+            ? () => {
+                armed = false
+                throw new Error("write failed")
+              }
+            : Reflect.get(target, key, receiver),
+      })
+      const ended = await store.endLostRoots(failing, new Date(at.getTime() + 1), undefined, secret)
+      expect(order).toHaveLength(2)
+      const second = order[1]!
+      const card = ids[services.indexOf(second)]!
+      const rooted = { exitCode: 1, line: `${store.ROOT_LOST_LINE}; deleted ${second}` }
+      expect(ended.find((item) => item.id === card)?.answer).toMatchObject({ rooted })
+      expect((await store.getItem(db, card))?.answer).toMatchObject({ rooted })
+      expect(kept.has(second)).toBe(false)
+      expect(ended.map((item) => item.id)).toEqual(expect.arrayContaining(ids))
+    })
+
     test("the API ends lost root runs once at its start on a stack that reads this machine, and the Inbox's read writes nothing", async () => {
       const read = (path: string) =>
         Bun.file(join(import.meta.dir, "../../../../../../api/hono/src", path)).text()
