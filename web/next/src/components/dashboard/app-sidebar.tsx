@@ -157,10 +157,13 @@ import { inboxWaitOf, inboxWaiting, useInbox } from "@/lib/inbox"
 import { useMakerIcon } from "@/lib/model-icons"
 import {
   dispatcherLabel,
+  initialsOf,
   isGlmModel,
   modelName,
-  providerOf,
   type Provider,
+  rowModelName,
+  rowProvider,
+  showsEffort,
 } from "@/lib/model-label"
 import { needsYouAnchor, sessionWaiting, targetNeedsYou } from "@/lib/needs-you"
 import {
@@ -807,7 +810,7 @@ function MemberRow({
         <Hint content={info.join("\n")} description={null} side="right">
           <span className="min-w-0 flex-1 truncate">{rowLabel(lines) ?? first}</span>
         </Hint>
-        <ModelIcons effort={worker.effort} model={worker.model} />
+        <ModelIcons effort={worker.effort} localModel={worker.localModel} model={worker.model} />
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   )
@@ -826,25 +829,28 @@ const PLUS_EFFORT_HIDDEN =
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
-// A row's right end, ZeroSDK's: its provider's logo (the fallback for a maker with none, nothing with no model), naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
+// A row's right end, ZeroSDK's: its provider's logo (its model's initials in a chip for a maker with none, nothing with no model), naming its model on hover, then its effort's level, naming itself, which a local model's row leaves out (showsEffort); with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
 function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
+  localModel,
   model,
   toggles = false,
 }: {
   effort: string | null
   effortHidden?: string
+  localModel?: string
   model: string | null
   toggles?: boolean
 }) {
-  const Logo = useMakerIcon(providerOf(model))
-  const Effort = effortIcon(effort)
+  const name = rowModelName({ localModel, model })
+  const Logo = useMakerIcon(rowProvider({ localModel, model }), initialsOf(name))
+  const Effort = showsEffort({ model }) ? effortIcon(effort) : null
   return (
     <>
       {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
       {model && Logo && (
-        <Hint content={modelName(model)}>
+        <Hint content={name}>
           <span className={MODEL_ICON}>
             <Logo aria-hidden className="size-4" />
           </span>
@@ -1064,6 +1070,7 @@ function SessionRowView({
       <ModelIcons
         effort={worker.effort}
         effortHidden={action ? PLUS_EFFORT_HIDDEN : undefined}
+        localModel={worker.localModel}
         model={worker.model}
         toggles={expandable || Boolean(action)}
       />
