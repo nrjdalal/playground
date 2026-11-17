@@ -25,6 +25,7 @@ export const SANDBOX_KEYS: readonly string[] = [
   "E2E_POSTGRES_URL",
   "E2E_WEB_URL",
   "NODE_ENV",
+  "REFUSED_FORMS_SEED",
   "SKIP_ENV_VALIDATION",
 ]
 

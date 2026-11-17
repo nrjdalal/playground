@@ -79,6 +79,17 @@ A time the test writes for a child to read (a kept failure's `failedAt`) is writ
 Where it cannot, its file joins `CLOCK_EXEMPT` with the reason.
 Any other red in the pass is a real clock mix: fix it so the code takes one clock, passed in as `readHeld` takes its `now` (`packages/scripts/src/pr-merge/held.ts`).
 
+## The property test
+
+`tests/scripts/hooks/refused-forms.test.ts`'s "every generated spelling of a refused form stays refused" is a fast-check property over every Bash row of the refused-forms fixture whose call opens on a plain program word (`programWord`), each fed to the guards as `check()` input alone.
+For each case, `fc.assert` tries `SPELLING_RUNS` spellings from `SPELLING` (`tests/scripts/hooks/refused-spellings.ts`), each one of the rewrites listed there that keep what the call runs.
+A spelling stays refused when the row's own guard refuses it, or when no-hidden-program refuses its program word as no plain name.
+Each case seeds from its own key, so every run, CI's included, tries the same spellings and prints no new one.
+A failure prints `{ seed, path }` and the shrunk spelling; replay it with `REFUSED_FORMS_SEED=<seed> bun run test:file tests/scripts/hooks/refused-forms.test.ts`, which the sandbox passes through `SANDBOX_KEYS`.
+Any other seed explores the same way, every case then taking that seed.
+A spelling that passes is a guard hole: send your lead its spelling, seed and guard, and keep it off GitHub until its fix merges ([scripts/hooks/README.md](../scripts/hooks/README.md)).
+The fix's PR adds its rewrite to `refused-spellings.ts` with its refused-forms rows, so the property holds the fix; it is done when the default seed runs green with the rewrite in.
+
 ## Traps
 
 Write a run's output to a log file, then grep the log (`bun run test:file <paths> > <scratch>/run.log 2>&1`, then `grep -E "pass|fail" <scratch>/run.log`), since the run keeps its own exit status that way, and the `no-false-green` hook refuses a test run piped into `tail` or any other command ([scripts/hooks/README.md](../scripts/hooks/README.md#no-false-green)).

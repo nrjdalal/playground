@@ -15,6 +15,8 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
+import fc from "fast-check"
+
 import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
@@ -45,6 +47,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { pinPlatform } from "./platform"
+import { programWord, spell, SPELLING } from "./refused-spellings"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -831,6 +834,42 @@ describe("every refused form stays refused in its Codex shape", () => {
         "apply_patch in the shell",
       ])
   })
+})
+
+// Each case's seed is its own, so every run tries the same spellings and CI prints no new one; REFUSED_FORMS_SEED=<n> tries another seed's, and the seed a failure prints replays it
+const SPELLING_RUNS = 4
+const SEED = process.env.REFUSED_FORMS_SEED
+
+// A spelling stays refused when the row's own guard refuses it, or when its program word is no plain name, which no-hidden-program refuses for every guard
+const speltRefused = async (c: (typeof CASES)[number], text: string, [cwd, home]: string[]) => {
+  if ((await verdict({ ...c, call: text }, cwd!, home!))?.includes(`${c.guard} hook `)) return true
+  const hidden = await GUARDS["no-hidden-program"].run(input(text, cwd!), home!)
+  return !!hidden?.includes("no-hidden-program hook ")
+}
+
+describe("every generated spelling of a refused form stays refused", () => {
+  test.each(
+    CASES.filter((c) => typeof c.call === "string" && !!programWord(c.call) && !allowed(c)).map(
+      (c) => [c.key, c] as const,
+    ),
+  )(
+    "%s",
+    async (_, c) => {
+      const call = c.call as string
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      await fc.assert(
+        fc.asyncProperty(SPELLING, async (s) => {
+          const text = spell(call, s)
+          expect({ refused: await speltRefused(c, text, at), text }).toEqual({
+            refused: true,
+            text,
+          })
+        }),
+        { numRuns: SPELLING_RUNS, seed: SEED ? Number(SEED) : Bun.hash.crc32(c.key) | 0 },
+      )
+    },
+    60_000,
+  )
 })
 
 // Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
