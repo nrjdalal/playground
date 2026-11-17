@@ -396,23 +396,41 @@ describe("the local gate: at most the sessions this machine's model server takes
       "a speed under the floor with one more",
       { ...quick, decodeTps: 20 },
       "each of the 2 live local sessions decodes 20.0 tokens a second, so one more would leave about 13.3, under the speed floor of 15 (localModels.minTps)",
+      two,
     ],
     [
       "a request waiting",
       { ...quick, waiting: 1 },
       "the local model here has 1 requests waiting, so one more session would queue behind them",
+      two,
     ],
     [
       "a first token too slow",
       { ...quick, ttftMean: 12 },
       "the local model here takes 12.0 s on average to a first token, at or over the first-token floor of 10 s (localModels.maxFirstTokenSeconds)",
+      two,
     ],
-  ])("PG-2559 %s is refused before herdr runs, naming the reading", async (_, speed, says) => {
-    const r = await local(start, roster(two.map((n) => row(n))), pinned(two, reading(speed)))
-    expect(r.code).toBe(1)
-    expect(r.err).toContain(says)
-    expect(placing(r)).toEqual([])
-  })
+    [
+      "a request waiting with no live local session",
+      { ...quick, waiting: 1 },
+      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      [],
+    ],
+    [
+      "a first token too slow with no live local session",
+      { ...quick, ttftMean: 12 },
+      "the local model here takes 12.0 s on average to a first token, at or over the first-token floor of 10 s (localModels.maxFirstTokenSeconds)",
+      [],
+    ],
+  ])(
+    "PG-2559 %s is refused before herdr runs, naming the reading",
+    async (_, speed, says, live) => {
+      const r = await local(start, roster(live.map((n) => row(n))), pinned(live, reading(speed)))
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(says)
+      expect(placing(r)).toEqual([])
+    },
+  )
 
   test("a resume of a live local row at the cap brings it back", async () => {
     const r = await local(
