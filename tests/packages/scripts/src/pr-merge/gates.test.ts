@@ -455,3 +455,86 @@ describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-
     expect(gate?.detail).not.toContain("#12")
   })
 })
+
+// a PR could change CI's workflows, the merge gates or a refused-forms row, and the same review passed it like any other diff (PG-2576).
+describe("the checks gate holds a PR that changes a check judging it for its 5/5 to name each change", () => {
+  const WORKFLOW = ".github/workflows/auto-test.yml"
+  const ROW = "tests/scripts/hooks/fixtures/refused-forms/2522.ts"
+  const named = (...paths: string[]) =>
+    said(
+      [
+        "## ReviewBot · round 2: 5/5 at 69a6a4c · 0 blocking",
+        "",
+        ...paths.map((path) => `Reviewed check change: \`${path}\``),
+      ].join("\n"),
+    )
+  const gate = (patch: Partial<PrFacts>) =>
+    gatesOf(facts({ removed: [], ...patch })).find((g) => g.name === "checks")
+
+  test("a workflow change with no line in its 5/5 is refused, naming the file and the line", () => {
+    expect(failing({ files: [WORKFLOW, "AGENTS.md"], removed: [] })).toEqual(["checks"])
+    expect(gate({ files: [WORKFLOW] })?.detail).toBe(
+      "the PR changes a check that judges it (.github/workflows/auto-test.yml): its 5/5 at 69a6a4c does not name .github/workflows/auto-test.yml in a `Reviewed check change: <path>` line",
+    )
+  })
+
+  test("the same change with the line in its 5/5 passes", () => {
+    expect(gate({ comments: [named(WORKFLOW)], files: [WORKFLOW, "AGENTS.md"] })).toEqual({
+      detail: "its 5/5 names each check change: .github/workflows/auto-test.yml",
+      name: "checks",
+      ok: true,
+    })
+  })
+
+  test("a refused-forms file the diff deletes a line from, with no line, is refused", () => {
+    expect(failing({ files: [ROW], removed: [ROW] })).toEqual(["checks"])
+    expect(gate({ comments: [named(ROW)], files: [ROW], removed: [ROW] })?.ok).toBe(true)
+  })
+
+  test("a refused-forms file the diff only adds to changes no check", () => {
+    expect(gate({ files: [ROW] })).toEqual({
+      detail: "the PR changes no check that judges it",
+      name: "checks",
+      ok: true,
+    })
+  })
+
+  test("a PR touching none of them passes", () => {
+    expect(gate({ files: ["AGENTS.md", "packages/scripts/src/ship/cli.ts"] })?.ok).toBe(true)
+  })
+
+  test("a verdict naming a path outside the diff and missing one in it is refused, naming the missing one", () => {
+    const missed = "packages/scripts/src/pr-merge/gates.ts"
+    const result = gate({ comments: [named(WORKFLOW, "AGENTS.md")], files: [WORKFLOW, missed] })
+    expect(result?.ok).toBe(false)
+    expect(result?.detail).toBe(
+      "the PR changes a check that judges it (.github/workflows/auto-test.yml, packages/scripts/src/pr-merge/gates.ts): its 5/5 at 69a6a4c does not name packages/scripts/src/pr-merge/gates.ts in a `Reviewed check change: <path>` line",
+    )
+  })
+
+  test.each([
+    [
+      "a line under a 4/5",
+      () => said(`## ReviewBot · round 2: 4/5 at 69a6a4c\n\nReviewed check change: ${WORKFLOW}`),
+    ],
+    [
+      "a line under a 5/5 at an older head",
+      () => said(`## ReviewBot · round 1: 5/5 at 5740cea\n\nReviewed check change: ${WORKFLOW}`),
+    ],
+    [
+      "a line by anyone else",
+      () =>
+        said(
+          `## ReviewBot · round 2: 5/5 at 69a6a4c\n\nReviewed check change: ${WORKFLOW}`,
+          "someone-else",
+        ),
+    ],
+    ["a line in a comment that is no verdict", () => said(`Reviewed check change: ${WORKFLOW}`)],
+  ])("%s does not count", (_, comment) => {
+    expect(gate({ comments: [review(), comment()], files: [WORKFLOW] })?.ok).toBe(false)
+  })
+
+  test("facts read with no removed list, as a test's, meet no checks gate", () => {
+    expect(gatesOf(facts({ files: [WORKFLOW] })).find((g) => g.name === "checks")).toBe(undefined)
+  })
+})

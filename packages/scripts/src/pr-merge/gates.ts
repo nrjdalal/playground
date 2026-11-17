@@ -65,6 +65,8 @@ export type PrFacts = {
   owner: string
   // Each PR the body says it is stacked on (parentsOf) with its GitHub state, or why the state did not read; set wherever the body is read, [] for none.
   parents?: { n: number; state: string }[]
+  // Each path the diff deletes a line from, and each renamed file's old path, from the same files read; left out in a test, which skips the checks gate.
+  removed?: string[]
   // The pr template's own placeholders, read at the head, which the body gate refuses in the body's prose; left out in a test, which skips that check.
   placeholders?: string[]
   state: string
@@ -78,13 +80,18 @@ export const BASE = "canary"
 
 // Pure: the newest verdict per gate at the head, from the owner's comments only, oldest comment first so a later one replaces an earlier.
 export function verdictsAt(facts: Pick<PrFacts, "comments" | "head" | "owner">) {
-  const newest = new Map<GateName, Verdict>()
+  const newest = new Map<GateName, Verdict & { body: string }>()
   const sorted = [...facts.comments].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   for (const comment of sorted) {
     if (comment.author.toLowerCase() !== facts.owner.toLowerCase()) continue
     for (const verdict of verdictsOf(comment.body))
       if (atHead(verdict.at, facts.head))
-        newest.set(verdict.gate, { ...verdict, createdAt: comment.createdAt, url: comment.url })
+        newest.set(verdict.gate, {
+          ...verdict,
+          body: comment.body,
+          createdAt: comment.createdAt,
+          url: comment.url,
+        })
   }
   return newest
 }
@@ -352,6 +359,41 @@ export function codeGate(differs: string[]): Gate {
       }
 }
 
+// The checks that judge a PR: CI's workflows and the merge gates, any change to which counts, and the refused-forms rows, a deleted line of which counts.
+export const CHECK_CODE = [".github/workflows/", "packages/scripts/src/pr-merge/"]
+export const REFUSED_FORMS = "tests/scripts/hooks/fixtures/refused-forms/"
+// A 5/5 verdict's line naming one reviewed check change, one path a line, in backticks or bare.
+const REVIEWED_CHANGE = /^[\s>*-]*Reviewed check change:\s*`?([^`\s]+)`?\s*$/gim
+
+// Pure: each changed path that is a check judging the PR, once each, sorted.
+export const checkChangesOf = (files: string[], removed: string[]): string[] =>
+  [
+    ...new Set([
+      ...files.filter((path) => CHECK_CODE.some((dir) => path.startsWith(dir))),
+      ...removed.filter((path) => path.startsWith(REFUSED_FORMS)),
+    ]),
+  ].sort()
+
+// Pure: the checks gate, since a change can never edit the check that judges it unseen: a PR changing one merges only once its 5/5 at the head names each such path in a `Reviewed check change: <path>` line; null where the facts read no removed list.
+function checksGate(facts: PrFacts): Gate | null {
+  if (!facts.removed) return null
+  const changes = checkChangesOf(facts.files, facts.removed)
+  if (changes.length === 0)
+    return { detail: "the PR changes no check that judges it", name: "checks", ok: true }
+  const review = verdictsAt(facts).get("review")
+  const named = new Set(
+    review?.pass ? [...review.body.matchAll(REVIEWED_CHANGE)].map((line) => line[1]) : [],
+  )
+  const missing = changes.filter((path) => !named.has(path))
+  return missing.length === 0
+    ? { detail: `its 5/5 names each check change: ${changes.join(", ")}`, name: "checks", ok: true }
+    : {
+        detail: `the PR changes a check that judges it (${changes.join(", ")}): its 5/5 at ${facts.head.slice(0, 7)} does not name ${missing.join(", ")} in a \`Reviewed check change: <path>\` line`,
+        name: "checks",
+        ok: false,
+      }
+}
+
 // Pure: every gate, in the order a PR meets them, each saying what it found at the head. The PR merges only when every one is ok.
 export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOptions = {}): Gate[] {
   const gates: Gate[] = [
@@ -397,6 +439,8 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
     )
   }
   gates.push(reviewGate(facts))
+  const checks = checksGate(facts)
+  if (checks) gates.push(checks)
   const tester = testerGate(facts)
   if (tester) gates.push(tester)
   return gates

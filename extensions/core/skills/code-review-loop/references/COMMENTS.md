@@ -20,6 +20,12 @@ One new comment per round, never an edit of an earlier one: the record of what w
 
 On an outside author's PR, the verdict also carries three lines: need (do we need it), hit (do we hit the problem it fixes, with evidence) and factory (does it upgrade or degrade the factory, and why).
 
+A 5/5 on a PR that changes a check judging it carries one line of its own per such path, after you have read that change as a check change: a path under `.github/workflows/` or `packages/scripts/src/pr-merge/`, or a refused-forms file the diff deletes a line from or renames away. `pr:merge`'s `checks` gate reads these lines and refuses while one path is unnamed:
+
+```
+Reviewed check change: `<path>`
+```
+
 Then, in this order:
 
 - **Spec** (the right thing): every spec line from step 3, marked delivered, partial or missing with where, then each finding as `- [blocking|should-fix|nit] path:line: what is wrong. Fix: what to do. (measured|reasoned)`, quoting the spec line it answers. For a finding that asks for a behaviour, `Fix:` states the behaviour wanted, not only the defect, so the fix cannot be read the other way. When the ticket carries samples, your samples table from step 4 follows, every row at this head. Keep the two axes apart, never merged or re-ranked, so one cannot hide the other.
