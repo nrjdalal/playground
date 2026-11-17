@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { hidden, ROOT_TOOLS } from "../packages/scripts/src/sandbox"
+import { scratchEnv } from "./scratch-env"
 
 // The suite runs through packages/scripts/src/test-sandbox.ts, which puts a fake claude first on PATH and a scratch HOME and CLAUDE_CONFIG_DIR under TEST_SANDBOX_HOME before bun starts, so no test can start a real session or read the real config by accident. A bare bun test stops at tests/require-sandbox.ts before these load; they check the sandbox itself is built right.
 describe("the test sandbox", () => {
@@ -70,6 +71,19 @@ describe.skipIf(process.platform !== "linux")("the test sandbox on Linux", () =>
     const outer = Number(process.env.TEST_SANDBOX_OUTER_PID)
     expect(outer).toBeGreaterThan(0)
     expect(() => process.kill(outer, 0)).toThrow()
+  })
+
+  // a test's own child (test-skills.test.ts's step) builds a sandbox again, which needs the box's proof, since the runner refuses a box inside one
+  test("a child a test spawns at a scratch home still reads as inside the box", () => {
+    const run = Bun.spawnSync(
+      [
+        "bun",
+        "-e",
+        `import { insideBox } from "${join(import.meta.dir, "..", "packages", "scripts", "src", "sandbox")}"; console.log(insideBox())`,
+      ],
+      { env: scratchEnv(join(process.env.TEST_SANDBOX_HOME!, "home")), stderr: "pipe" },
+    )
+    expect([run.stdout.toString().trim(), run.stderr.toString()]).toEqual(["true", ""])
   })
 
   // the dev launcher records its process group, which read as 0 while its leader was bwrap, outside the pid view
