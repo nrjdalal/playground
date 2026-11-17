@@ -87,7 +87,7 @@ def healthy(job):
         b = json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json")))
     except Exception:
         return False, "no heartbeat"
-    age = time.time() - (time.mktime(time.strptime(b["lastBeatAt"][:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone)
+    age = time.time() - calendar.timegm(time.strptime(b["lastBeatAt"][:19], "%Y-%m-%dT%H:%M:%S"))
     if age > 3 * int(b.get("cycleSeconds", 60)):
         return False, f"heartbeat {int(age // 60)}m old"
     if not alive(b.get("pid", 0)):

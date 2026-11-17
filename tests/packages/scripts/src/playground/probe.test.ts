@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -9,10 +9,12 @@ import {
   cutDashboardCheckout,
   dashboardCheckout,
   dashboardUrls,
+  graceEnded,
   homeDataDir,
   liveBranch,
   linesSince,
   liveSessions,
+  upHolds,
   webUp,
 } from "../../../../../packages/scripts/src/playground/probe"
 import { pidsDir, withProc } from "../../../../scripts/fixtures/proc"
@@ -336,5 +338,80 @@ describe("liveSessions on Linux", () => {
       if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR
       else process.env.CLAUDE_CONFIG_DIR = saved
     }
+  })
+})
+
+// Mirrors up.py's grace_ended: a start within grace is over only when the heartbeat recorded a later start, or the machine booted at or after the recorded one.
+describe("graceEnded", () => {
+  test("is over when the heartbeat recorded a start at or after the one up.py made", () => {
+    expect(graceEnded(100, 150, 0)).toBe(true)
+  })
+
+  test("is over when the machine booted at or after the one up.py made", () => {
+    expect(graceEnded(100, 50, 100)).toBe(true)
+  })
+
+  test("still holds when the heartbeat recorded an earlier start and the machine booted before it", () => {
+    expect(graceEnded(100, 50, 0)).toBe(false)
+  })
+})
+
+describe("upHolds", () => {
+  // bootTime reads the machine's /proc/stat btime on Linux, so the rows set the start after it: only the intended rule can fire, and the row stays the same on a freshly booted machine.
+  const readBoot = (): number => {
+    try {
+      for (const line of readFileSync("/proc/stat", "utf8").split("\n")) {
+        if (line.startsWith("btime ")) {
+          const secs = line.trim().split(/\s+/)[1]
+          if (secs) return Number(secs)
+        }
+      }
+    } catch {
+      return 0
+    }
+    return 0
+  }
+  const writeOps = (data: string, state: unknown, beat?: Record<string, unknown>): void => {
+    const ops = join(data, "ops")
+    mkdirSync(ops, { recursive: true })
+    writeFileSync(join(ops, "up-state.json"), JSON.stringify(state))
+    if (beat) writeFileSync(join(ops, "ops-dashboard.json"), JSON.stringify(beat))
+  }
+  const withData = (data: string, read: () => boolean): boolean => {
+    const saved = process.env.PLAYGROUND_DATA_DIR
+    try {
+      process.env.PLAYGROUND_DATA_DIR = data
+      return read()
+    } finally {
+      if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = saved
+    }
+  }
+
+  test("holds a start still within grace, so the wait keeps waiting for up.py to start it", () => {
+    const boot = readBoot()
+    const data = join(dir, "up-holds-holds")
+    const start = boot + 100
+    const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
+    writeOps(data, { "ops-dashboard": start }, beat)
+    expect(withData(data, () => upHolds(start * 1000 + 50_000))).toBe(true)
+  })
+
+  test("ends early when the heartbeat recorded a start at or after the one up.py made, so the wait stops holding it", () => {
+    const boot = readBoot()
+    const data = join(dir, "up-holds-beat")
+    const start = boot + 100
+    const beat = { startedAt: new Date((start + 10) * 1000).toISOString() }
+    writeOps(data, { "ops-dashboard": start }, beat)
+    expect(withData(data, () => upHolds(start * 1000 + 50_000))).toBe(false)
+  })
+
+  test("drops a start past its 600s grace, so the wait bails, even with a heartbeat up.py made later", () => {
+    const boot = readBoot()
+    const data = join(dir, "up-holds-past")
+    const start = boot + 100
+    const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
+    writeOps(data, { "ops-dashboard": start }, beat)
+    expect(withData(data, () => upHolds(start * 1000 + 700_000))).toBe(false)
   })
 })

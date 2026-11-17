@@ -1075,3 +1075,66 @@ test("beat_started reads a summer heartbeat start as its UTC epoch", () => {
   expect(child.stderr.toString()).toBe("")
   expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(expected)
 })
+
+// #2665: a heartbeat's lastBeatAt is a UTC stamp, so healthy must read it as its UTC epoch, not the zone-bent mktime read that is an hour early under DST, so the row picks the zone in DST on the current date (always one of these two) and writes the beat a minute old under it.
+const tzOffset = (zone: string, iso: string): number => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(iso))
+  const wall = parts
+    .filter((p) => p.type !== "literal")
+    .map((p) => p.value)
+    .join(" ")
+  return Date.parse(wall) - Date.parse(iso)
+}
+const zoneInDST = (zone: string, nowIso: string): boolean => {
+  const y = new Date(nowIso).getFullYear()
+  const jan = tzOffset(zone, new Date(Date.UTC(y, 0, 15)).toISOString())
+  const jul = tzOffset(zone, new Date(Date.UTC(y, 6, 15)).toISOString())
+  return tzOffset(zone, nowIso) === Math.max(jan, jul)
+}
+test("healthy reads a minute-old beat as healthy where the zone is in DST", () => {
+  const config = mkdtempSync(join(scratch, "healthy-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  const now = Math.floor(Date.now() / 1000)
+  const beat = new Date((now - 60) * 1000).toISOString()
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 1,
+      lastBeatAt: beat,
+      startedAt: beat,
+      lastResult: "ok",
+      cycleSeconds: 60,
+    }),
+  )
+  const snippet = `${LOAD}up.alive = lambda pid: True
+print(up.healthy({"heartbeat": "ops-dashboard"})[0])
+`
+  const child = Bun.spawnSync(["python3", "-I", "-c", snippet, upPy], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      // the zone in DST on the current date, so the old mktime/time.timezone read is one hour early and the minute-old beat reads unhealthy
+      TZ: zoneInDST("America/New_York", new Date().toISOString())
+        ? "America/New_York"
+        : "Australia/Sydney",
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(child.stdout.toString().trim()).toEqual("True")
+})

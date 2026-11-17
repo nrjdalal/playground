@@ -281,7 +281,48 @@ export const supervisorRunning = (): boolean => {
   return !!beat && beat.running && !staleBeat(beat)
 }
 
-// Whether up.py holds ops-dashboard's start: its start is recorded within up.py's 600s grace, so the Dashboard's wait keeps waiting for it to start again, not bailing on a beat up.py has not had time to refresh.
+// The machine's boot time, epoch seconds, from sysctl on macOS and /proc/stat btime on Linux, else 0, so a start is held only while the machine that made it still runs, mirroring up.py boot_time().
+const bootTime = (): number => {
+  if (process.platform === "darwin") {
+    const mac = Bun.spawnSync(["sysctl", "-n", "kern.boottime"], { stdout: "pipe" })
+    if (mac.exitCode === 0) {
+      const m = mac.stdout.toString().match(/\bsec = (\d+)/)
+      if (m) return Number(m[1])
+    }
+  }
+  try {
+    for (const line of readFileSync("/proc/stat", "utf8").split("\n")) {
+      if (line.startsWith("btime ")) {
+        const secs = line.trim().split(/\s+/)[1]
+        if (secs) return Number(secs)
+      }
+    }
+  } catch {
+    return 0
+  }
+  return 0
+}
+
+// The heartbeat's recorded start at, epoch seconds, else 0: up.py's beat_started, so a start at or after the one up.py made ends the grace.
+const readStartedAt = (): number => {
+  let json: unknown
+  try {
+    json = JSON.parse(readFileSync(join(opsDashboard(), "..", "ops-dashboard.json"), "utf8"))
+  } catch {
+    return 0
+  }
+  const at =
+    json && typeof (json as Record<string, unknown>)["startedAt"] === "string"
+      ? Date.parse((json as Record<string, unknown>)["startedAt"] as string)
+      : Number.NaN
+  return Number.isNaN(at) ? 0 : Math.floor(at / 1000)
+}
+
+// Whether the start grace has already ended, so up.py will start ops-dashboard again and the wait need not hold it: the heartbeat recorded a later start, or the machine booted at or after the recorded one.
+export const graceEnded = (startAt: number, beat: number, boot: number): boolean =>
+  (beat > 0 && beat >= startAt) || (startAt > 0 && startAt <= boot)
+
+// Whether up.py still holds ops-dashboard's start: its grace has not ended early, so the wait need not bail, and its start is within up.py's 600s, so the Dashboard's wait keeps waiting for it to start again, not bailing on a beat up.py has not had time to refresh.
 export const upHolds = (now: number = Date.now()): boolean => {
   let starts: unknown
   try {
@@ -291,7 +332,9 @@ export const upHolds = (now: number = Date.now()): boolean => {
   }
   if (typeof starts !== "object" || starts === null) return false
   const start = Number((starts as Record<string, unknown>)["ops-dashboard"])
-  return Number.isFinite(start) && now - start * 1000 < 600 * 1000
+  if (!Number.isFinite(start)) return false
+  if (graceEnded(start, readStartedAt(), bootTime())) return false
+  return now - start * 1000 < 600 * 1000
 }
 
 export const probe = async (urls: Urls | null): Promise<Probes> => ({
