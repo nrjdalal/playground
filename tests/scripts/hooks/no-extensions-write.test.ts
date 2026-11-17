@@ -4128,6 +4128,11 @@ describe("a glob-option switch on a remote or fed line", () => {
     `ssh box 'bash >| x -O extglob -c "touch ?playground/extensions/y"'`,
     `ssh box 'bash &>x -O extglob -c "touch ?playground/extensions/y"'`,
     "ssh box 'set >x -o extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash {fd}>/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >>! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh {fd}>/dev/null -4 -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -4 -c "touch ?playground/extensions/y"'`,
   ])(
     "%s, an option a shell reads by any of its spellings, is refused as a switch",
     async (command) => {
@@ -4147,6 +4152,8 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh box 'kubectl config set-context x'",
     "ssh box 'bash 2>&1 -e -c uptime'",
     "ssh box 'bash > log -euo pipefail -c uptime'",
+    "ssh box 'bash {fd}>/dev/null -euo pipefail -c uptime'",
+    "ssh box 'zsh >! log -e -c uptime'",
   ])(
     "%s, a shell's name inside a longer word or a redirect before strict mode, runs",
     async (command) => {

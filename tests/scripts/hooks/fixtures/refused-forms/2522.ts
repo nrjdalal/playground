@@ -152,6 +152,22 @@ const refused = (): Row[] => [
     "ssh box 'set > x -o extendedglob; touch ?playground/extensions/y'",
   ],
   [
+    "a remote touch through a ? glob in a bash whose -O comes after a named-descriptor redirect",
+    `ssh box 'bash {fd}>/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh whose -o comes after a >! and its own target word",
+    `ssh box 'zsh >! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh whose -4 comes after a named-descriptor redirect, which canary's dot reading refused",
+    `ssh box 'zsh {fd}>/dev/null -4 -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh whose -4 comes after a >! and its own target word, which canary's dot reading refused",
+    `ssh box 'zsh >! log -4 -c "touch ?playground/extensions/y"'`,
+  ],
+  [
     "a remote touch through a zsh qualifier holding a space, refused by the glob reading rather than as a switch",
     `ssh box "touch *(D e:'true':)/notes/x"`,
   ],

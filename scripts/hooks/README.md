@@ -511,14 +511,17 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A remote line, or a script a remote shell reads from stdin, that holds a glob-option switch is refused with "drop the option, or run the line locally", never read (`globSwitch` and `remoteSwitch` in `scripts/hooks/shell.ts`), a refusal wider than the risk on purpose.
   The reason names the one form of a shell's options that runs: a cluster with no `O` or `4`, and a `-o` or a long option naming a `NO_GLOB` name, its list built from `NO_GLOB`, as in `set -euo pipefail`.
   A switch is a `shopt`, `setopt`, `unsetopt`, `emulate` or zsh `options[…]`, or a name that turns dot matching on (`dotglob`, `GLOB_DOTS`, tcsh's `globdot`, `GLOBIGNORE`, `BASHOPTS`, ksh93's `FIGNORE`).
-  So is a `set` or a shell started as a whole command word, `rbash`, `rzsh` and a versioned name (`bash-5.2`) included, whose options hold a switch (`optionSwitch`), read until its first other word or a `--`.
-  The reading goes past a `-c` cluster and past a redirect with its target (`>x`, `> x`, `2>&1`, `>|`, `&>`), as bash and zsh read options up to the command string (`bash -c -O extglob "…"`, `bash >/dev/null -O extglob -c …`).
-  A shell's name inside a longer word starts no shell, so `cat /etc/bash-completion.d/git`, `ls ~/zsh-config` and `kubectl config set-context` run.
-  A switch there is a cluster holding `O` or zsh's `4` (`-xO`, `-Oe`), one holding `o` with a name off `NO_GLOB` (`pipefail`, `errexit`, `nounset`, `xtrace` and the like), a long option off `NO_GLOB` past case and dashes (`--extended-glob`, `--rcfile`), or any other `-` or `+` word, which the hook does not read.
-  A strict-mode header (`set -euo pipefail`) and `bash --login` run, since their names are on `NO_GLOB`.
-  A cluster holding `o` gives two names, and both must be on `NO_GLOB`: zsh's, the rest of the cluster after the `o` (`-oextendedglob`), and bash's, the next word, so `set -oe pipefail` is refused, since zsh reads its name as `e`.
-  Each `set` or shell is read on its own, a `set` inside a `-c` script too, while a word of a `-c` script or a script's own argument is no option of the shell before it (`bash -c "tar -xOf …"`, `bash deploy.sh -o x` and `./run.sh -o out.txt` run).
-  So is a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but one after a `*` a digit follows, as awk's arithmetic spells it (`*100/(…)`), runs, its line counting dots as on (`DIGIT_QUALIFIER` and `remoteDots`), so a dot-led link it could match (`~/.p1`) is still judged.
+  So is a `set` or a started shell whose options hold a switch (`optionSwitch`), read word by word: the heads and words it reads are this list, and any other `-` or `+` word in a head's options refuses the call, naming the word.
+  - Heads: `set`, `bash`, `dash`, `ksh`, `ksh93`, `mksh`, `rbash`, `rksh`, `rzsh`, `sh`, `yash` and `zsh`, with a version too (`bash-5.2`), each as a whole command word, so `cat /etc/bash-completion.d/git`, `ls ~/zsh-config` and `kubectl config set-context` start no shell.
+  - Runs, read on past it: a cluster with no `O`, `4` or `o` (`-eux`, `-c`).
+  - Runs: a cluster holding `o` whose two names are both on `NO_GLOB`, zsh's the rest of the cluster after the `o` and bash's the next word (`set -euo pipefail`), so `set -oe pipefail` is refused, since zsh reads its name as `e`.
+  - Runs: a long option on `NO_GLOB`, past case and dashes (`bash --login`, `--norc`).
+  - Read past: a redirect with its target, by the lexer's own operators (`REDIRECT_OP`) after a number, `&` or a `{name}` descriptor (`>x`, `> x`, `2>&1`, `{fd}>x`, zsh's `>! x`), as bash and zsh read options after one.
+  - Ends the options: `--`, or the first other word, a `-c` command string or a script's name included, so `bash -c "tar -xOf …"`, `bash deploy.sh -o x` and `./run.sh -o out.txt` run.
+  - Refused: a cluster holding `O` or zsh's `4` (`-xO`, `-Oe`), a cluster holding `o` with a name off `NO_GLOB` (`-o extendedglob`), a long option off `NO_GLOB` (`--extended-glob`, `--rcfile`), and any other `-` or `+` word (`set -$o`).
+
+  Each `set` or shell is read on its own, a `set` inside a `-c` script too.
+  A switch is also a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but one after a `*` a digit follows, as awk's arithmetic spells it (`*100/(…)`), runs, its line counting dots as on (`DIGIT_QUALIFIER` and `remoteDots`), so a dot-led link it could match (`~/.p1`) is still judged.
   A qualifier holding a space or a group (`*(D e:'true':)`) is no switch to this reading, and the glob reading refuses it as a glob in the home it cannot read.
   Each is read past case, quotes, backslashes, backslash-newlines and underscores (`g_l_o_b_d_o_t_s`, `dot''glob`), so a quoted regex (`grep -E "a*(b)"`) or a file name holding a name (`cat bashopts.txt`) is refused too.
   A `-o SetEnv=…` or `-o SendEnv=…` value starts the remote shell with its variable, so one holding a switch is refused the same way, and one the hook cannot read (`SetEnv=$V`, a `SendEnv=BASH*` pattern) is refused with "name each variable literally".

@@ -6387,7 +6387,8 @@ function filled(script, mark, value) {
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
-var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
+var REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)";
+var REDIRECT = new RegExp(`^(\\d*|&)${REDIRECT_OP}`);
 var RESERVED = new Set([
   "!",
   "{",
@@ -6755,12 +6756,15 @@ var NO_GLOB = new Set([
   "verbose",
   "xtrace"
 ]);
+var OPTION_REDIRECT = `(?:\\d*|&|\\{[A-Za-z_]\\w*\\})${REDIRECT_OP}`;
+var SHELL_HEAD = new RegExp(`(?<=^|[\\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\\d.]*\\d)?(?=[\\s<>;&|)]|$)(?=((?:${OPTION_REDIRECT}|[^;&|\\n])*))`, "gi");
+var LEADING_REDIRECT = new RegExp(`^${OPTION_REDIRECT}`);
 function optionSwitch(bare) {
-  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?(?=[\s<>;&|)]|$)(?=((?:\d*[<>]+[&|]?|&>>?|[^;&|\n])*))/gi)) {
+  for (const [, head, rest] of bare.matchAll(SHELL_HEAD)) {
     const words = rest.split(/\s+/).filter(Boolean);
     for (let i = 0;i < words.length; i++) {
       const word = words[i];
-      const redirect = /^(?:\d*|&)[<>]+[&|]?/.exec(word);
+      const redirect = LEADING_REDIRECT.exec(word);
       if (redirect) {
         if (redirect[0] === word)
           i++;

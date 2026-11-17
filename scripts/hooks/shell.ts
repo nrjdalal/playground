@@ -186,7 +186,9 @@ export function filled(script: string, mark: string, value: string): string {
 const held = (text: Text): Text => (text.value.length > MAX_BYTES ? unknown(LARGE) : text)
 
 const BREAK = new Set([" ", "\t", "\n", ";", "&", "|", "<", ">", "(", ")"])
-const REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/
+// A redirect's operator, bash's and zsh's, the lexer's REDIRECT and optionSwitch's OPTION_REDIRECT alike
+const REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)"
+const REDIRECT = new RegExp(`^(\\d*|&)${REDIRECT_OP}`)
 const RESERVED = new Set([
   "!",
   "{",
@@ -672,14 +674,19 @@ export const NO_GLOB = new Set([
   "xtrace",
 ])
 // A set or a started shell, as a whole command word (rbash, rzsh and a versioned name such as bash-5.2 too, but not bash-completion.d), whose options, read until its first other word or a `--`, past a -c cluster and a redirect (`>x`, `2>&1`, `> x`) as bash and zsh read them, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
+// A redirect a shell drops before it reads on: a number, `&` or a `{name}` descriptor, then REDIRECT_OP's operator (`2>&1`, `{fd}>x`, zsh's `>!`)
+const OPTION_REDIRECT = `(?:\\d*|&|\\{[A-Za-z_]\\w*\\})${REDIRECT_OP}`
+const SHELL_HEAD = new RegExp(
+  `(?<=^|[\\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\\d.]*\\d)?(?=[\\s<>;&|)]|$)(?=((?:${OPTION_REDIRECT}|[^;&|\\n])*))`,
+  "gi",
+)
+const LEADING_REDIRECT = new RegExp(`^${OPTION_REDIRECT}`)
 function optionSwitch(bare: string): string | undefined {
-  for (const [, head, rest] of bare.matchAll(
-    /(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?(?=[\s<>;&|)]|$)(?=((?:\d*[<>]+[&|]?|&>>?|[^;&|\n])*))/gi,
-  )) {
+  for (const [, head, rest] of bare.matchAll(SHELL_HEAD)) {
     const words = rest!.split(/\s+/).filter(Boolean)
     for (let i = 0; i < words.length; i++) {
       const word = words[i]!
-      const redirect = /^(?:\d*|&)[<>]+[&|]?/.exec(word)
+      const redirect = LEADING_REDIRECT.exec(word)
       if (redirect) {
         if (redirect[0] === word) i++
         continue
