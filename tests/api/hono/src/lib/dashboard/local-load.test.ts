@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
+  keptLocalModel,
   loadArgv,
   MODEL_FOLDER,
   runStart,
@@ -69,5 +73,21 @@ describe("startModel", () => {
       line: "a fixture stack starts no model",
     })
     expect(START_MS).toBe(20 * 60_000)
+  })
+})
+
+describe("keptLocalModel", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "kept-"))
+  afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+
+  test("it reads localModels.peerModel from the settings, and none when nothing sets it", () => {
+    const set = join(scratch, "set")
+    mkdirSync(join(set, "extensions"), { recursive: true })
+    writeFileSync(
+      join(set, "extensions", "policy.json"),
+      JSON.stringify({ schemaVersion: 1, values: { "localModels.peerModel": "ornith-1.5-122b" } }),
+    )
+    expect(keptLocalModel(set)).toBe("ornith-1.5-122b")
+    expect(keptLocalModel(join(scratch, "none"))).toBe("")
   })
 })

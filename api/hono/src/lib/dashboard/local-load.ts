@@ -1,6 +1,9 @@
 import { join } from "node:path"
 
+import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
+
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
+import { dataDir } from "@/lib/sessions/paths"
 
 // A model's folder under ~/models as `playground model use` takes it: a letter or digit first, then lowercase, digits, dots and dashes, so it names no path or flag.
 export const MODEL_FOLDER = /^[a-z0-9][a-z0-9.-]*$/
@@ -10,7 +13,11 @@ export const START_MS = 20 * 60_000
 
 export type Started = { code: number; line: string }
 
-export const keptLocalModel = (): string => ""
+// The model the local server's machine keeps up (localModels.peerModel), which a pick starts when the server is down: "" when none is set or the settings do not read, so the pick is refused as before.
+export const keptLocalModel = (data: string = dataDir()): string => {
+  const read = readPolicyOrDefaults(data)
+  return read.settings ? localModelSettings.get(read.settings, "localModels.peerModel") : ""
+}
 
 // Pure: the one fixed argv a local pick starts a model with, the playground CLI's own `model use` run by this bun with no shell, so its hold, memory floor and refusals stay the single path; a name MODEL_FOLDER refuses throws before anything runs.
 export function loadArgv(model: string, root: string, bun: string = process.execPath): string[] {
