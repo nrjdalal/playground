@@ -69,8 +69,14 @@ import {
   CLOCKS_STOPPED_AT,
   INSTALL_TEXT,
   payloadOf,
+  ROOT_STEPS,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import {
+  peerRecordArgv,
+  readRecord,
+  rootEntries,
+} from "../../../../../../packages/scripts/src/machine-record/record"
 import type { Run } from "../../../../../../packages/scripts/src/ops-tick/tick"
 import { extInitCheck, extVerb } from "../../../../../../packages/scripts/src/playground/ext-init"
 import type { Io } from "../../../../../../packages/scripts/src/playground/store"
@@ -1559,15 +1565,60 @@ describe("a root step decision (PG-2433)", () => {
       calls.push(argv)
       return { code: 0, err: "", out: "bwrap may now make a user namespace" }
     }
+    const data = mkdtempSync(join(tmpdir(), "root-record-"))
+    const seams = {
+      data,
+      peers: [],
+      secret: () => ({ read: async () => null, remove: async () => {} }),
+    }
     const preview = inboxInputSchema.parse(decision(ROOT_STEP)).preview as InboxRoot
     const refused = "/usr/local/lib/playground is not owned by root: approve a new install card"
-    expect(await rootRun(run, preview, async () => refused)).toEqual({ exitCode: 1, line: refused })
+    expect(await rootRun(run, preview, async () => refused, seams)).toEqual({
+      exitCode: 1,
+      line: refused,
+    })
     expect(calls).toHaveLength(0)
-    expect(await rootRun(run, preview, async () => undefined)).toEqual({
+    expect((await readRecord(data)).entries).toEqual([])
+    expect(await rootRun(run, preview, async () => undefined, seams)).toEqual({
       exitCode: 0,
       line: "bwrap may now make a user namespace",
     })
     expect(calls).toEqual([stepArgv("bwrap-userns")])
+    // PG-2538: what the step wrote goes into this machine's record, with its undo
+    expect((await readRecord(data)).entries).toMatchObject([
+      { by: "the Inbox", path: "/etc/apparmor.d/bwrap", undo: ROOT_STEPS["bwrap-userns"].undo },
+    ])
+  })
+
+  test("a record that cannot be written leaves a step's run as it was, and says why in the log (PG-2538)", async () => {
+    const data = mkdtempSync(join(tmpdir(), "root-record-"))
+    writeFileSync(join(data, "machine-record.json"), "{ not json")
+    const seams = {
+      data,
+      peers: [],
+      secret: () => ({ read: async () => null, remove: async () => {} }),
+    }
+    const preview = inboxInputSchema.parse(decision(ROOT_STEP)).preview as InboxRoot
+    const held = console.error
+    const lines: string[] = []
+    console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "))
+    try {
+      expect(
+        await rootRun(
+          async () => ({ code: 0, err: "", out: "ok" }),
+          preview,
+          async () => undefined,
+          seams,
+        ),
+      ).toEqual({ exitCode: 0, line: "ok" })
+    } finally {
+      console.error = held
+    }
+    expect(lines).toEqual([
+      expect.stringContaining(
+        "this machine's record of its root bwrap-userns failed, so its next check names those paths",
+      ),
+    ])
   })
 
   test("a run stopped at ROOT_TIMEOUT_MS reads in plain words, not an empty line", async () => {
@@ -1583,6 +1634,11 @@ describe("a root step decision (PG-2433)", () => {
 describe("a root step on another machine (PG-2434)", () => {
   const PEER = { name: "spark-test", target: "me@spark-test" }
   const SERVICE = "playground-spark-test-sudo"
+  const CLONE = "~/code/playground"
+  // PG-2538: the peer's own record add, its entries on stdin, which ends every run that put a path there
+  const RECORD = peerRecordArgv(undefined, PEER.target, CLONE, "add")
+  const recorded = (input: string | undefined) =>
+    (JSON.parse(input ?? "[]") as { path: string }[]).map((entry) => entry.path)
   // a password holding what a shell or a log would bend, so a leak shows whole
   const MARKER = "pw-MARKER-7f3a'$(id)"
   const ok = { code: 0, err: "", out: "" }
@@ -1591,6 +1647,7 @@ describe("a root step on another machine (PG-2434)", () => {
     let value = held
     const removed: string[] = []
     const peerSeams: PeerSeams = {
+      clone: CLONE,
       peers: [PEER],
       secret: (service) => ({
         read: async () => value,
@@ -1652,8 +1709,16 @@ describe("a root step on another machine (PG-2434)", () => {
     expect(calls.map((call) => call.argv)).toEqual([
       ...peerCopyArgv(PEER, undefined),
       peerInstallArgv(PEER, undefined, preview.scripts ?? []),
+      RECORD,
     ])
-    expect(calls.map((call) => call.input)).toEqual([undefined, undefined, `${MARKER}\n`])
+    expect(calls.slice(0, 3).map((call) => call.input)).toEqual([
+      undefined,
+      undefined,
+      `${MARKER}\n`,
+    ])
+    expect(recorded(calls[3]?.input)).toEqual(
+      rootEntries("install", { now: new Date(), peer: true }).map((entry) => entry.path),
+    )
     expect(removed).toEqual([SERVICE])
     expect(lines).toEqual([`inbox: spark-test's install ran; deleted ${SERVICE}`])
   })
@@ -1741,8 +1806,10 @@ describe("a root step on another machine (PG-2434)", () => {
     expect(current.calls.map((call) => call.argv)).toEqual([
       peerReadArgv(PEER, undefined, "bwrap-userns"),
       peerStepArgv(PEER, undefined, "bwrap-userns"),
+      RECORD,
     ])
-    expect(current.calls.every((call) => call.input === undefined)).toBe(true)
+    expect(current.calls.slice(0, 2).every((call) => call.input === undefined)).toBe(true)
+    expect(recorded(current.calls[2]?.input)).toEqual(["/etc/apparmor.d/bwrap"])
     const stale = recorder(async () => ({ ...ok, out: read("b".repeat(64)) }))
     expect(await rootRun(stale.run, preview, undefined, peerSeams)).toEqual({
       exitCode: 1,

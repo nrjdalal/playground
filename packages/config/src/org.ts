@@ -1,3 +1,5 @@
+import { isAbsolute, relative } from "node:path"
+
 import { z } from "zod"
 
 type Env = Record<string, string | undefined>
@@ -9,6 +11,17 @@ export const peerSchema = z.object({
 })
 
 export type Peer = z.infer<typeof peerSchema>
+
+// a path a remote shell reads as itself: no space, quote, $, ; or glob
+const PLAIN_PATH = /^[A-Za-z0-9._/-]+$/
+
+// Pure: where a peer's clone sits, the same place under its home as this checkout under this one's, as a ~ path; null when this checkout is outside home or its path holds a character a remote shell would read.
+export const cloneOf = (repo: string, home: string): string | null => {
+  const rel = relative(home, repo)
+  return rel && !isAbsolute(rel) && PLAIN_PATH.test(rel) && !rel.split("/").includes("..")
+    ? `~/${rel}`
+    : null
+}
 
 // The one place an organisation's own values come from: who owns the dashboard and whose work queue it reads, each read from env with a generic default, so a copy for anyone else names no person, team or workspace. Pure: it reads only the env it is given. The data folder is data-dir.ts's, in packages/env, since it reads the disk.
 export const orgSchema = z.object({

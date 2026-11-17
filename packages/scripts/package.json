@@ -8,6 +8,7 @@
   "type": "module",
   "exports": {
     "./gh-read": "./src/gh-read.ts",
+    "./machine-record": "./src/machine-record/record.ts",
     "./ops-machine/readings": "./src/ops-machine/readings.ts",
     "./orphan-reapers": "./src/orphan-reapers.ts"
   },
