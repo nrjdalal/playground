@@ -245,19 +245,29 @@ export const gh = async (run: Run, args: string[]): Promise<string> => {
 export const repoOf = async (run: Run, repo?: string): Promise<string> =>
   repo || gh(run, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
 
-// The files PR n changes; a renamed file counts by both paths, so canary's edit to its old path, which git's merge carries onto the new one, reads as the PR's.
-async function filesOf(run: Run, repo: string, n: number): Promise<string[]> {
-  return (
-    await gh(run, [
-      "api",
-      `repos/${repo}/pulls/${n}/files`,
-      "--paginate",
-      "--jq",
-      ".[] | .filename, (.previous_filename // empty)",
-    ])
-  )
-    .split("\n")
-    .filter(Boolean)
+// The files PR n changes; a renamed file counts by both paths, so canary's edit to its old path, which git's merge carries onto the new one, reads as the PR's. removed: each file the diff deletes a line from, and each renamed file's old path, which the checks gate reads for a refused-forms row; a line with no tab is a file's name alone.
+async function filesOf(
+  run: Run,
+  repo: string,
+  n: number,
+): Promise<{ files: string[]; removed: string[] }> {
+  const files: string[] = []
+  const removed: string[] = []
+  const rows = await gh(run, [
+    "api",
+    `repos/${repo}/pulls/${n}/files`,
+    "--paginate",
+    "--jq",
+    '.[] | [.filename, (.previous_filename // ""), (.deletions // 0)] | @tsv',
+  ])
+  for (const row of rows.split("\n").filter(Boolean)) {
+    const [name = "", previous = "", deletions = "0"] = row.split("\t")
+    files.push(name)
+    if (previous) files.push(previous)
+    if (Number(deletions) > 0) removed.push(name)
+    if (previous) removed.push(previous)
+  }
+  return { files, removed }
 }
 
 // Everything the gates read about one PR, from gh: its state, head and base, the files its diff touches, every comment with its author, how far canary is ahead of its head, the state of each PR its body says it is stacked on, and its merge with canary now.
@@ -289,7 +299,7 @@ export async function factsOf(
     statusCheckRollup: Check[] | null
     title?: string
   }
-  const [files, comments, ahead, held] = await Promise.all([
+  const [{ files, removed }, comments, ahead, held] = await Promise.all([
     filesOf(run, repo, n),
     commentsOf(run, repo, n),
     gh(run, ["api", `repos/${repo}/compare/${view.headRefOid}...${BASE}`, "--jq", ".ahead_by"]),
@@ -343,6 +353,7 @@ export async function factsOf(
     owner,
     parents,
     placeholders,
+    removed,
     state: view.state,
     title: view.title,
     unfound,
