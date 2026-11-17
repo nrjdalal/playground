@@ -117,6 +117,10 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
+  // Set on the line ssh runs on the remote side, read from the login's home (`remoteEnv`), where a hook may read a glob by the names it can match there rather than as any code it fails closed on
+  remote?: boolean
+  // Set on a remote line that is not fully static, whose shell may turn dot matching on by a name the hook cannot read, so a glob there may match a dot-led name
+  remoteDots?: boolean
   vars: Map<string, Text>
   // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
   visitShells?: boolean
@@ -561,10 +565,118 @@ export type StdinKind = "code" | "root" | "shell"
 // A command whose piped input may run as code, with the kind stdinShell gives it
 type Fed = { consumer: Command; kind: StdinKind }
 
+// ssh's flags and its options that take a value (OpenSSH's getopt string), and the -o keywords whose value ssh runs as a command line: on this machine through the user's shell (`local`), or on the remote side in place of a command
+const SSH_FLAGS = "46AaCfGgKkMNnqsTtVvXxYy"
+const SSH_VALUES = "BbcDEeFIiJLlmOoPpQRSWw"
+const SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"])
+export type Ssh = {
+  host?: Word
+  // each ProxyCommand, LocalCommand and KnownHostsCommand value, which ssh runs here; a -o the hook cannot read is one too
+  local: Word[]
+  // -n: the remote side reads /dev/null in place of stdin
+  noStdin: boolean
+  // the command line the remote shell runs: the words after the host, which ssh joins with blanks, else a RemoteCommand's value
+  remote: Word[]
+  // an option off ssh's lists, or a host the hook cannot read, which may be an option, so the remote side may be any command; a remote line's own unread program is read by lexing it
+  unread: boolean
+}
+// An ssh call read as OpenSSH reads its words: options before the host and again after it, until a `--` or the first other word, which starts the remote command; undefined for a program other than ssh
+export function sshCall({ args, first }: Pick<Parsed, "args" | "first">): Ssh | undefined {
+  if (program(first?.value ?? "") !== "ssh") return
+  const call: Ssh = { local: [], noStdin: false, remote: [], unread: false }
+  let remoteCommand: Word | undefined
+  const option = (word: Word) => {
+    const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value)
+    const key = m?.[1]?.toLowerCase() ?? ""
+    if (marked(word.value.split(/[=\s]/)[0] ?? "")) call.local.push(word)
+    else if (SSH_LOCAL.has(key)) call.local.push({ ...word, value: m?.[2] ?? "" })
+    else if (key === "remotecommand") remoteCommand = { ...word, value: m?.[2] ?? "" }
+  }
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--" || !value.startsWith("-") || value === "-") {
+      const at = value === "--" ? k + 1 : k
+      if (call.host || value === "--") {
+        call.host ??= args[at]
+        call.remote = args.slice(call.host === args[at] ? at + 1 : at)
+        break
+      }
+      call.host = args[k]
+      call.unread ||= marked(value)
+      continue
+    }
+    for (let c = 1; c < value.length; c++) {
+      if (value[c] === "n") call.noStdin = true
+      if (SSH_VALUES.includes(value[c])) {
+        const attached = value.slice(c + 1)
+        const given = attached ? { ...args[k], value: attached } : args[++k]
+        if (value[c] === "o" && given) option(given)
+        break
+      }
+      if (!SSH_FLAGS.includes(value[c])) return { ...call, unread: true }
+    }
+  }
+  if (call.remote.length === 0 && remoteCommand) call.remote = [remoteCommand]
+  return call
+}
+
+// What ssh fed stdin does with it: the remote side reads it as its script when it runs no command (the login shell), when its command line reads stdin as code by stdinShellOf's own reading, or when the hook cannot read that line; -n gives it /dev/null instead
+function sshStdin(cmd: Command, call: Ssh): StdinKind | undefined {
+  if (call.noStdin) return undefined
+  if (call.unread || call.remote.length === 0) return "shell"
+  const kinds = lex(call.remote.map((w) => w.value).join(" ")).commands.map((c) =>
+    stdinShell({ ...c, stdin: c.stdin ?? cmd }),
+  )
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
+}
+
+// A remote line that may set a glob option by a name the hook cannot read: one holding a `$` or a backquote, or a word, as the lexer reads it and by its basename, naming eval, a source, or a program that starts a shell or an interpreter that can (DYNAMIC); its backslash-newline pairs are joined first, as the shell joins them
+const DYNAMIC =
+  /^(?:\.|bash|bun|busybox|dash|deno|env|eval|exec|expect|fish|g?awk|ksh|lua|mawk|mksh|node|perl|php|python[\d.]*|ruby|script|sh|source|su|sudo|tclsh|watch|zsh)$/
+function staticLine(line: string): boolean {
+  const joined = line.replace(/\\\n/g, "")
+  if (marked(joined) || /[$`]/.test(joined)) return false
+  const words = (cmds: Command[]): Word[] =>
+    cmds.flatMap((c) => [...c.words, ...(c.inner ? words(c.inner()) : [])])
+  return !words(lex(joined).commands).some(
+    (w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()),
+  )
+}
+// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static (staticLine), or a script the remote side reads from stdin (`fed`), may match dot-led names (`remoteDots`)
+export function remoteEnv(env: Env, line: string, fed = false): Env {
+  const home = env.process.HOME || undefined
+  const { PWD: _pwd, ...known } = env.known
+  return {
+    ...env,
+    cwd: home,
+    cwdAnywhere: undefined,
+    cwdBack: [],
+    cwdChain: undefined,
+    cwdChainToken: undefined,
+    cwdChainUnread: undefined,
+    cwdHeld: [],
+    cwdMaybe: [],
+    cwdOr: undefined,
+    cwdSure: home,
+    cwdUnread: home === undefined,
+    known: home && !/\b(?:cd|popd|pushd)\b/.test(line) ? { ...known, PWD: home } : known,
+    old: { dir: home },
+    oldFrom: undefined,
+    remote: true,
+    remoteDots: fed || !staticLine(line),
+    vars: new Map(),
+  }
+}
+
 function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): StdinKind | undefined {
   // piped input, or input xargs hands on as words, reaches whatever the command runs, so a command that can run code takes it as code whatever its arguments say
   const fed = !!cmd.stdin || !!xargs
   if (first && !marked(first.value)) {
+    // ssh hands its stdin, a redirect's included, to the remote side
+    if (name === "ssh") {
+      const call = sshCall({ args, first })
+      return call && (fed || stdinFed(cmd)) ? sshStdin(cmd, call) : undefined
+    }
     if (name === "." || name === "source" || name === "eval")
       return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
     const family = familyOf(name)
@@ -2949,11 +3061,14 @@ export async function examine(
     if (MOVES.has(parsed.name))
       await chdirTo(parsed.name, { ...variant, unsure: true }, parsed, env)
   }
-  // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
-  if (!cmd.runsStdin || stdinScript(primary)) return
+  // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already; ssh's stdin, a redirect's included, as one the remote side runs from the login's home
+  const remote =
+    primary.name === "ssh" && ["root", "shell"].includes(stdinShellOf(cmd, primary) ?? "")
+  if (!remote && (!cmd.runsStdin || stdinScript(primary))) return
   for (const script of await scriptStdin(cmd, env)) {
+    const at = remote ? remoteEnv(env, known(script), true) : subshell(env)
     const verdict = await nested(cmd, env, () =>
-      run(lexScript(known(script), env), subshell(env), visit, builtins),
+      run(lexScript(known(script), at), at, visit, builtins),
     )
     if (verdict) return verdict
   }
@@ -3804,7 +3919,7 @@ export function shellOperand(args: Word[], shell: string): { inline: boolean; op
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
     if (takes.has(v)) k++
-    else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
+    else if (/^[-+][A-Za-z0-9]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }
   return { inline }
