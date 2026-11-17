@@ -111,10 +111,22 @@ export const STALE_CYCLES = 3
 
 const EXITED = /^(supervisor exited|loop exited)/
 
+// A job's steady healthy beat that is not `ok` but is not a failure, matching HEALTHY_PREFIXES in packages/scripts/src/ops-sweep/sweep.ts, kept in step with it by a test (tests/api/hono/src/lib/dashboard/ops.test.ts): up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job.
+export const HEALTHY_PREFIXES: Record<string, string[]> = {
+  "ops-model-tunnel": ["up: "],
+  "ops-peer-relay": ["idle: "],
+  "ops-tunnel": ["up: "],
+}
+
+// A job's beat steady and healthy, so it reads Running like ops-sweep does and not Failing: it is not `ok`, but it starts one of its job's healthy prefixes.
+function healthyBeat(job: string, result: string): boolean {
+  return (HEALTHY_PREFIXES[job] ?? []).some((prefix) => result.startsWith(prefix))
+}
+
 // What jobs.json says a job calls, beside its pause mark.
 export type JobCalls = { callsModel: boolean; model: string | null }
 
-// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Waiting when the last result starts `waiting: ` (a job with nothing to read yet, the reason after it); Failing when it is anything else but ok; else Running.
+// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Waiting when the last result starts `waiting: ` (a job with nothing to read yet, the reason after it); Failing when it is not `ok` and not one of its job's steady healthy beats; a healthy steady beat, and `ok`, reads Running.
 export function opsRowOf(
   job: string,
   text: string | null,
@@ -175,7 +187,7 @@ export function opsRowOf(
   }
   const waiting = /^waiting: (.+)/.exec(beat.lastResult)?.[1]
   if (waiting) return { ...withRefused, lastBeatAt, problem, reason: waiting, status: "waiting" }
-  if (beat.lastResult !== "ok") {
+  if (beat.lastResult !== "ok" && !healthyBeat(job, beat.lastResult)) {
     return {
       ...withRefused,
       lastBeatAt,
