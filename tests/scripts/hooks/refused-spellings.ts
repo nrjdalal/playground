@@ -35,9 +35,9 @@ const REWRITES = {
 
 export type Spelling = keyof typeof REWRITES
 
-export const SPELLING: fc.Arbitrary<Spelling> = fc.constantFrom(
-  ...(Object.keys(REWRITES) as Spelling[]),
-)
+export const REWRITE_NAMES = Object.keys(REWRITES) as Spelling[]
+
+export const SPELLING: fc.Arbitrary<Spelling> = fc.constantFrom(...REWRITE_NAMES)
 
 // The call as the spelling writes it, for a call programWord reads a program word from
 export const spell = (call: string, spelling: Spelling) => {

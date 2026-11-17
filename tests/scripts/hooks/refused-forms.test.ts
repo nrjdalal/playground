@@ -47,7 +47,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { pinPlatform } from "./platform"
-import { programWord, spell, SPELLING } from "./refused-spellings"
+import { programWord, REWRITE_NAMES, spell, SPELLING, type Spelling } from "./refused-spellings"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -838,21 +838,28 @@ describe("every refused form stays refused in its Codex shape", () => {
 
 // Each case's seed is its own, so every run tries the same spellings and CI prints no new one; REFUSED_FORMS_SEED=<n> tries another seed's, and the seed a failure prints replays it
 const SPELLING_RUNS = 4
-const SEED = process.env.REFUSED_FORMS_SEED
+const SEED = process.env.REFUSED_FORMS_SEED ? Number(process.env.REFUSED_FORMS_SEED) : undefined
+if (SEED !== undefined && !Number.isInteger(SEED))
+  throw new Error(`REFUSED_FORMS_SEED=${process.env.REFUSED_FORMS_SEED} is not a whole number`)
 
-// A spelling stays refused when the row's own guard refuses it, or when its program word is no plain name, which no-hidden-program refuses for every guard
+// A spelling stays refused when the row's own guard refuses it, or when its program word is no plain name, which no-hidden-program refuses beside every guard guards.ts gates to a factory session, the one gate it runs behind
 const speltRefused = async (c: (typeof CASES)[number], text: string, [cwd, home]: string[]) => {
   if ((await verdict({ ...c, call: text }, cwd!, home!))?.includes(`${c.guard} hook `)) return true
   const hidden = await GUARDS["no-hidden-program"].run(input(text, cwd!), home!)
   return !!hidden?.includes("no-hidden-program hook ")
 }
 
+// the cases whose guard runs behind the factory gate, where no-hidden-program backs it
+const SPELT = CASES.filter(
+  (c) =>
+    typeof c.call === "string" &&
+    !!programWord(c.call) &&
+    !!dispatched(c.guard)?.factory &&
+    !allowed(c),
+)
+
 describe("every generated spelling of a refused form stays refused", () => {
-  test.each(
-    CASES.filter((c) => typeof c.call === "string" && !!programWord(c.call) && !allowed(c)).map(
-      (c) => [c.key, c] as const,
-    ),
-  )(
+  test.each(SPELT.map((c) => [c.key, c] as const))(
     "%s",
     async (_, c) => {
       const call = c.call as string
@@ -865,7 +872,12 @@ describe("every generated spelling of a refused form stays refused", () => {
             text,
           })
         }),
-        { numRuns: SPELLING_RUNS, seed: SEED ? Number(SEED) : Bun.hash.crc32(c.key) | 0 },
+        // every rewrite runs once as an example, so no case leaves one untried, and the seeded draws come after
+        {
+          examples: REWRITE_NAMES.map((s) => [s] as [Spelling]),
+          numRuns: SPELLING_RUNS,
+          seed: SEED ?? Bun.hash.crc32(c.key) | 0,
+        },
       )
     },
     60_000,
