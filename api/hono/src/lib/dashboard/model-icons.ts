@@ -3,6 +3,7 @@ import { join } from "node:path"
 
 import { BACKEND_MAKERS, MAKER_NAME } from "@packages/config/console"
 
+import { MAKER_MARKS } from "@/lib/dashboard/maker-marks"
 import { ApiError } from "@/lib/error"
 
 // The makers whose icons the dashboard draws, from config alone: each backend's (BACKEND_MAKERS), then the Hugging Face org of each local model's repo id (org/repo); a bare id names no maker.
@@ -134,11 +135,13 @@ const cached = async (
 
 const inFlight = new Map<string, Promise<ModelIcon | null>>()
 
-// A maker's icon, from the cache in dir once fetched; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
+// A maker's icon: its mark of ours (MAKER_MARKS) when it has one, else from the cache in dir once fetched; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
 export const iconFor = async (
   maker: string,
   { dir, fetch = plainFetch, now = Date.now }: { dir: string; fetch?: Fetch; now?: () => number },
 ): Promise<ModelIcon | null> => {
+  const mark = MAKER_MARKS[maker]
+  if (mark) return { bytes: new TextEncoder().encode(mark), type: "image/svg+xml" }
   const hit = await cached(dir, maker, now())
   if (hit !== undefined) return hit
   const key = `${dir}\0${maker}`

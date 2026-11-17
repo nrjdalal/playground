@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, statSync } from "node:fs"
+import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { MAKER_MARKS } from "../../../../../../api/hono/src/lib/dashboard/maker-marks"
 import {
   type Fetch,
   iconFor,
@@ -17,8 +18,9 @@ import { orgOf } from "../../../../../../packages/config/src/org"
 const FALLBACK = '<svg viewBox="0 0 24 24" fill="none"><path d="M9.8 15.9L9 18.7"/></svg>\n'
 const LOGO = '<svg viewBox="0 0 40 40"><path d="M26.9 9.8H22.1" fill="currentColor"/></svg>\n'
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
-const HF = "https://huggingface.co/api/organizations/ornith-ai/avatar"
-const CDN = "https://cdn-avatars.huggingface.co/v1/production/uploads/x/ornith.png"
+// a maker with no models.dev logo and no mark of ours, so its Hugging Face avatar is fetched
+const HF = "https://huggingface.co/api/organizations/heron-ai/avatar"
+const CDN = "https://cdn-avatars.huggingface.co/v1/production/uploads/x/heron.png"
 
 // A fetch stub answering by URL, as models.dev does for a URL it does not hold (its fallback) and Hugging Face for an org it does not know (404); every URL asked is recorded, so no test reaches the network.
 const stub = (answers: Record<string, () => Response> = {}) => {
@@ -90,8 +92,8 @@ describe("iconFor", () => {
       [CDN]: () => new Response(PNG, { headers: { "content-type": "text/html" } }),
       [HF]: () => Response.json({ avatarUrl: CDN }),
     })
-    expect(await iconFor("ornith-ai", { dir, fetch })).toEqual({ bytes: PNG, type: "image/png" })
-    expect(asked.slice(1)).toEqual(["https://models.dev/logos/ornith-ai.svg", HF, CDN])
+    expect(await iconFor("heron-ai", { dir, fetch })).toEqual({ bytes: PNG, type: "image/png" })
+    expect(asked.slice(1)).toEqual(["https://models.dev/logos/heron-ai.svg", HF, CDN])
   })
 
   test("an avatar URL on a host other than huggingface.co, or an answer that is no image, is refused and never served", async () => {
@@ -101,14 +103,14 @@ describe("iconFor", () => {
       "https://huggingface.co.example.com/a.png",
     ]) {
       const { asked, fetch } = stub({ [HF]: () => Response.json({ avatarUrl }) })
-      expect(await iconFor("ornith-ai", { dir: scratch(), fetch })).toBeNull()
+      expect(await iconFor("heron-ai", { dir: scratch(), fetch })).toBeNull()
       expect(asked).not.toContain(avatarUrl)
     }
     const html = stub({
       [CDN]: () => new Response("<script>alert(1)</script>"),
       [HF]: () => Response.json({ avatarUrl: CDN }),
     })
-    expect(await iconFor("ornith-ai", { dir: scratch(), fetch: html.fetch })).toBeNull()
+    expect(await iconFor("heron-ai", { dir: scratch(), fetch: html.fetch })).toBeNull()
   })
 
   test("a maker with neither is cached as none for a day, then asked again", async () => {
@@ -137,12 +139,12 @@ describe("iconFor", () => {
     for (const status of [429, 500, 503]) {
       const dir = scratch()
       const { fetch } = stub({ [HF]: () => new Response("busy", { status }) })
-      expect(await iconFor("ornith-ai", { dir, fetch })).toBeNull()
+      expect(await iconFor("heron-ai", { dir, fetch })).toBeNull()
       expect(readdirSync(dir)).toEqual([])
     }
     const dir = scratch()
-    expect(await iconFor("ornith-ai", { dir, fetch: stub().fetch })).toBeNull()
-    expect(readdirSync(dir)).toEqual(["ornith-ai.none"])
+    expect(await iconFor("heron-ai", { dir, fetch: stub().fetch })).toBeNull()
+    expect(readdirSync(dir)).toEqual(["heron-ai.none"])
   })
 
   test("an answer past 1 MB is refused, whether its length is declared or not", async () => {
@@ -159,7 +161,7 @@ describe("iconFor", () => {
       )
     for (const answer of [() => new Response(big), streamed]) {
       const { fetch } = stub({ [CDN]: answer, [HF]: () => Response.json({ avatarUrl: CDN }) })
-      expect(await iconFor("ornith-ai", { dir: scratch(), fetch })).toBeNull()
+      expect(await iconFor("heron-ai", { dir: scratch(), fetch })).toBeNull()
     }
   })
 })
@@ -199,5 +201,18 @@ describe("serveModelIcon", () => {
     await expect(
       serveModelIcon("anthropic", { dir: scratch(), fetch: offline, local: [] }),
     ).rejects.toThrow("No icon for that maker")
+  })
+})
+
+// Ornith publishes no logo, only a full-colour avatar on an opaque tile, so the API serves a one-colour mark of its own for it (PG-2662).
+describe("a maker's own mark", () => {
+  test("Ornith is served its one-colour mark, with no fetch, over an avatar cached before", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, "ornith-ai.webp"), PNG)
+    const { asked, fetch } = stub()
+    const icon = await iconFor("ornith-ai", { dir, fetch })
+    expect(icon?.type).toBe("image/svg+xml")
+    expect(new TextDecoder().decode(icon?.bytes)).toBe(MAKER_MARKS["ornith-ai"]!)
+    expect(asked).toEqual([])
   })
 })

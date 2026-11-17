@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { MAKER_MARKS } from "../../../../../api/hono/src/lib/dashboard/maker-marks"
 import {
   drawingOf,
   initialsIcon,
@@ -98,4 +99,14 @@ describe("useMakerIcon", () => {
     keepMakerIcon("kept", drawingOf(svgData))
     expect(html(Row, { maker: "kept" })).toContain("<mask")
   })
+})
+
+// Ornith's icon, as the API serves it, draws as the other makers' logos do: a mask in the text colour, never its avatar's image on a tile or the initials chip (PG-2662).
+test("Ornith's served mark draws through the mask, with no image tile and no chip", () => {
+  const served = `data:image/svg+xml;base64,${Buffer.from(MAKER_MARKS["ornith-ai"]!).toString("base64")}`
+  const drawn = html(drawingOf(served), { className: "size-4" })
+  expect(drawn).toContain("<mask")
+  expect(drawn).toContain('fill="currentColor"')
+  expect(drawn).not.toContain("clip-path")
+  expect(drawn).not.toContain("data-initials")
 })
