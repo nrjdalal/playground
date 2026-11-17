@@ -25,7 +25,7 @@ import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
-import { linesOf, livePlaces, type Machine, unusedEverywhere } from "./unused"
+import { aged, linesOf, livePlaces, type Machine, unusedEverywhere } from "./unused"
 
 // ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear), then each machine's unused space, listed and never removed (unused.ts); then one log line with the free disk before and after and each machine's unused total, which the System page also shows, and one outbox line to ops naming each removal and each machine's unused items. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
@@ -66,8 +66,8 @@ export type NightDeps = {
   unused: (ctx: Context) => Promise<Machine[]>
 }
 
-// The beat's own record: the last run's time alone; a decision or denied key an older run wrote is read past and dropped on the next write.
-type State = { at?: string }
+// The beat's own record: the last run's time, and the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged); a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = { at?: string; imagesSeen?: Record<string, string> }
 
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
@@ -811,9 +811,12 @@ export const nightlyClean =
       return pruned.line
     })
     const unused: string[] = []
+    let imagesSeen = state.imagesSeen ?? {}
     await step("unused", async () => {
-      const found = (await deps.unused(ctx)).map((m) => linesOf(m, homedir()))
-      unused.push(...found.map((m) => m.item))
+      const judged = aged(await deps.unused(ctx), imagesSeen, ctx.now.getTime())
+      imagesSeen = judged.seen
+      const found = judged.found.map((m) => linesOf(m, homedir()))
+      unused.push(...found.flatMap((m) => m.item ?? []))
       return found.map((m) => m.total).join("; ") || "none read"
     })
     const purged = trashSince(
@@ -831,7 +834,13 @@ export const nightlyClean =
       )
     const after = deps.free(data)
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
-    await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
+    await writeAtomic(
+      statePath,
+      JSON.stringify({
+        at: ctx.now.toISOString(),
+        ...(Object.keys(imagesSeen).length ? { imagesSeen } : {}),
+      } satisfies State),
+    )
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(
       join(ctx.ops, "log", "nightly-clean.log"),

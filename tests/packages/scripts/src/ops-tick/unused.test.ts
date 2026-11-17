@@ -12,12 +12,14 @@ import { hostname, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import {
+  aged,
   linesOf,
   measured,
   measureUnused,
   peerUnusedArgv,
   type Unused,
   unusedEverywhere,
+  unusedImages,
 } from "../../../../../packages/scripts/src/ops-tick/unused"
 
 const HERE = hostname().split(".")[0]!
@@ -37,13 +39,15 @@ const sized = (path: string, bytes: number, at = NOW) => {
   utimesSync(path, at / 1000, at / 1000)
 }
 
-// The docker this machine answers with: four images, one a container uses, one pulled yesterday, redis:alpine and the one a serve.sh names, and one old and unused.
+// The docker this machine answers with: postgres:alpine and postgres:18-alpine one image a container uses by one tag, one pulled yesterday, redis:alpine and the one a serve.sh names, one old and unused, and one pulled with no tag time.
 const IMAGES = [
-  "sha256:aaa\tpostgres:18-alpine",
+  "sha256:aaa\told:1",
+  "sha256:bbb\tpostgres:18-alpine",
   "sha256:bbb\tpostgres:alpine",
   "sha256:ccc\tfresh:1",
   "sha256:ddd\tredis:alpine",
   "sha256:eee\tvllm/vllm-openai:v0.32.0",
+  "sha256:fff\tpulled:1",
 ].join("\n")
 const INSPECT = [
   `sha256:aaa\t${300 * MB}\t"2026-11-01T00:00:00Z"`,
@@ -51,6 +55,7 @@ const INSPECT = [
   `sha256:ccc\t${300 * MB}\t"2026-11-17T00:00:00Z"`,
   `sha256:ddd\t${50 * MB}\t"0001-01-01T00:00:00Z"`,
   `sha256:eee\t${24_000 * MB}\t"0001-01-01T00:00:00Z"`,
+  `sha256:fff\t${250 * MB}\t"0001-01-01T00:00:00Z"`,
 ].join("\n")
 
 // A scratch home: a data folder whose record holds ~/.bun, the clone and ~/probe-local-model/gguf, ~/models with a kept and a dropped hf repo, one old test row and one fresh, Ops' rehearse142, and a clone whose .env names one peer; every argv its run is handed is kept.
@@ -111,18 +116,64 @@ const setUp = (dashboard = false) => {
   return { at, checkout, data, home, models, places: { data, home, now: NOW, run }, repo, runs }
 }
 
-test("this machine's unused space: an old unused image, the dropped repo, the recorded gguf, the old row's worktree and the rehearsal, largest first", async () => {
+test("this machine's unused space: an old unused image, one of unknown age, the dropped repo, the recorded gguf, the old row's worktree and the rehearsal, largest first", async () => {
   const { at, data, models, places } = setUp()
   const items = await measureUnused(places)
-  expect(items.map(({ kind, path, recorded }) => ({ kind, path, recorded }))).toEqual([
+  expect(items.map(({ bytes: _, ...rest }) => rest)).toEqual([
     { kind: "weights", path: join(models, "hf/hub/models--nvidia--Qwen-27B"), recorded: false },
     { kind: "weights", path: at("probe-local-model/gguf/GLM-Flash.gguf"), recorded: true },
-    { kind: "image", path: "docker image postgres:18-alpine", recorded: false },
+    { kind: "image", path: "docker image old:1", recorded: false },
+    { kind: "image", path: "docker image pulled:1", recorded: false, unknownAge: true },
     { kind: "run", path: join(models, "kit/runs/MB-old/pr0001"), recorded: false },
     { kind: "rehearsal", path: join(data, "scratchpad/ops/rehearse142"), recorded: false },
     { kind: "weights", path: at("probe-local-model/gguf/tiny.gguf"), recorded: true },
   ])
   expect(items[0]!.bytes).toBe(1500 * MB)
+})
+
+test("an image's tags are one image: a container using postgres:alpine keeps postgres:18-alpine, its other tag, off the list", () => {
+  const listed = "sha256:bbb\tpostgres:18-alpine\nsha256:bbb\tpostgres:alpine\nsha256:aaa\told:1"
+  const inspect = `sha256:bbb\t1\t"2026-01-01T00:00:00Z"\nsha256:aaa\t2\t"2026-01-01T00:00:00Z"`
+  expect(unusedImages(listed, "postgres:alpine\n", inspect, "", NOW)).toEqual([
+    { bytes: 2, path: "docker image old:1" },
+  ])
+  expect(unusedImages(listed, "", inspect, "", NOW)).toEqual([
+    { bytes: 1, path: "docker image postgres:18-alpine" },
+    { bytes: 2, path: "docker image old:1" },
+  ])
+})
+
+test("an image with no tag time, as a pull leaves it, has an unknown age: nightly lists it only 7 days after it first read it unused, and forgets it once used", () => {
+  const item = {
+    bytes: 250 * MB,
+    kind: "image" as const,
+    path: "docker image pulled:1",
+    recorded: false,
+  }
+  const night = (
+    seen: Record<string, string>,
+    at: number,
+    items = [{ ...item, unknownAge: true as const }],
+  ) =>
+    aged(
+      [
+        { items, machine: "m" },
+        { machine: "peer", why: "exit 255" },
+      ],
+      seen,
+      at,
+    )
+  const first = night({ "peer docker image x:1": "2026-11-01T00:00:00.000Z" }, NOW)
+  expect(first.found[0]).toEqual({ items: [], machine: "m" })
+  expect(first.seen).toEqual({
+    "m docker image pulled:1": "2026-11-18T03:00:00.000Z",
+    "peer docker image x:1": "2026-11-01T00:00:00.000Z",
+  })
+  expect(night(first.seen, NOW + 6 * DAY).found[0]).toEqual({ items: [], machine: "m" })
+  expect(night(first.seen, NOW + 7 * DAY).found[0]).toEqual({ items: [item], machine: "m" })
+  expect(night(first.seen, NOW + 8 * DAY, []).seen).toEqual({
+    "peer docker image x:1": "2026-11-01T00:00:00.000Z",
+  })
 })
 
 test("a path removed between its listing and its measure, as by a delete running at once, is skipped and counted nowhere", () => {
@@ -144,10 +195,7 @@ test("a path removed between its listing and its measure, as by a delete running
   ])
   expect(
     linesOf({ items: measured([{ kind: "weights", path: gone }], []), machine: "m" }, "/x"),
-  ).toEqual({
-    item: "m unused: none",
-    total: "m unused 0.0 GB",
-  })
+  ).toEqual({ item: null, total: "m unused 0.0 GB" })
 })
 
 test("the record guards and lists nothing itself: ~/.bun and the clone, both recorded, give no line", async () => {
@@ -262,7 +310,7 @@ test("a machine's lines: the log's totals by kind, the outbox's items with recor
     total: "spark-9dfb unused 38.3 GB (image 0.3 GB, weights 38.0 GB, small leftovers 2 at 45 MB)",
   })
   expect(linesOf({ items: [], machine: "spark-a566" }, home)).toEqual({
-    item: "spark-a566 unused: none",
+    item: null,
     total: "spark-a566 unused 0.0 GB",
   })
 })

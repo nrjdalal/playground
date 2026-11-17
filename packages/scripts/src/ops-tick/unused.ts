@@ -5,7 +5,7 @@ import { basename, join, sep } from "node:path"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 
-import { type Entry, readRecord, type Run } from "../machine-record/record"
+import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { peersOf } from "./peers"
 
@@ -26,7 +26,14 @@ const REHEARSAL = /^rehearse\d+$/
 
 export const KINDS = ["image", "rehearsal", "run", "weights"] as const
 export type UnusedKind = (typeof KINDS)[number]
-export type Unused = { bytes: number; kind: UnusedKind; path: string; recorded: boolean }
+// unknownAge: an image with no last tag time, listed by nightly-clean only once its own first-seen date is IMAGE_UNUSED_DAYS old.
+export type Unused = {
+  bytes: number
+  kind: UnusedKind
+  path: string
+  recorded: boolean
+  unknownAge?: true
+}
 export type Machine = { items: Unused[]; machine: string } | { machine: string; why: string }
 
 // What a measure reads: the data folder (its record and scratchpads), the home folder (~/models), the clock and docker through run.
@@ -109,14 +116,14 @@ const weights = (home: string, folders: string[], data: string, named: string): 
   return [...repos, ...files]
 }
 
-// Pure: the images no container uses, last pulled or run before the cutoff, and no model text or KEEP_IMAGES names; each as `docker image <ref>`, the record's form, with its bytes. inspect is `docker image inspect`'s lines of id, size and last tag time in JSON.
+// Pure: the images no container uses, by id, so one tag in use keeps every tag of its image, and no model text or KEEP_IMAGES names; each as `docker image <ref>`, the record's form, its tags A to Z, with its bytes. An image docker gives a last tag time stays while that time is past the cutoff; one whose time is zero, as a pull leaves it, has no age docker knows and is marked unknownAge, for nightly-clean's own first-seen date to judge. inspect is `docker image inspect`'s lines of id, size and last tag time in JSON.
 export const unusedImages = (
   listed: string,
   used: string,
   inspect: string,
   named: string,
   cutoff: number,
-): { bytes: number; path: string }[] => {
+): { bytes: number; path: string; unknownAge?: true }[] => {
   const usedBy = new Set(lines(used).map((ref) => ref.trim()))
   const facts = new Map(
     lines(inspect).map((l) => {
@@ -124,18 +131,26 @@ export const unusedImages = (
       return [id, { at: Date.parse(JSON.parse(at) as string) || 0, bytes: Number(size) }]
     }),
   )
-  return lines(listed).flatMap((l) => {
+  const refsOf = new Map<string, string[]>()
+  for (const l of lines(listed)) {
     const [id = "", ref = ""] = l.split("\t")
-    const bare = ref.endsWith(":latest") ? ref.slice(0, -":latest".length) : ref
+    if (ref !== "<none>:<none>") refsOf.set(id, [...(refsOf.get(id) ?? []), ref])
+  }
+  return [...refsOf].flatMap(([id, refs]) => {
     const fact = facts.get(id)
-    if (!fact || ref === "<none>:<none>") return []
-    if (
-      [id, ref, bare].some((name) => usedBy.has(name)) ||
+    const names = refs.flatMap((ref) => [ref, ref.replace(/:latest$/, "")])
+    const inUse =
+      [id, ...names].some((name) => usedBy.has(name)) ||
       [...usedBy].some((u) => id.startsWith(`sha256:${u}`))
-    )
+    if (!fact || inUse || refs.some((ref) => KEEP_IMAGES.includes(ref) || named.includes(ref)))
       return []
-    if (KEEP_IMAGES.includes(ref) || named.includes(ref) || fact.at >= cutoff) return []
-    return [{ bytes: fact.bytes, path: `docker image ${ref}` }]
+    if (fact.at >= cutoff) return []
+    const path = `docker image ${[...refs].sort()[0]}`
+    return [
+      fact.at > 0
+        ? { bytes: fact.bytes, path }
+        : { bytes: fact.bytes, path, unknownAge: true as const },
+    ]
   })
 }
 
@@ -195,15 +210,16 @@ export const recordedBy = (entries: Entry[], path: string): boolean =>
 
 // Each listed path measured, largest first; a path that is gone by its measure (removed after it was listed, such as by a delete running at the same time) is skipped, counted nowhere. An image keeps the size docker gave it.
 export const measured = (
-  found: { bytes?: number; kind: UnusedKind; path: string }[],
+  found: { bytes?: number; kind: UnusedKind; path: string; unknownAge?: true }[],
   entries: Entry[],
 ): Unused[] =>
   found
-    .flatMap(({ bytes, kind, path }) => {
+    .flatMap(({ bytes, kind, path, unknownAge }) => {
       const size = bytes ?? sizeOf(path)
       // read after the walk, so a path removed while it was measured is skipped too
       if (bytes === undefined && !stat(path)) return []
-      return [{ bytes: size, kind, path, recorded: recordedBy(entries, path) }]
+      const item: Unused = { bytes: size, kind, path, recorded: recordedBy(entries, path) }
+      return [unknownAge ? { ...item, unknownAge } : item]
     })
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
 
@@ -229,12 +245,12 @@ const mb = (bytes: number) => `${Math.round(bytes / 1024 ** 2)} MB`
 const tilde = (path: string, home: string) =>
   inside(path, home) ? `~${path.slice(home.length)}` : path
 
-// Pure: a machine's two lines, the log's total by kind and the outbox's each item, items under min folded into one small leftovers total.
+// Pure: a machine's two lines, the log's total by kind and the outbox's each item (null with none, so a night with nothing unused sends no line), items under min folded into one small leftovers total.
 export const linesOf = (
   found: Machine,
   home: string,
   min = MIN_LIST_BYTES,
-): { item: string; total: string } => {
+): { item: string | null; total: string } => {
   if ("why" in found)
     return { item: `${found.machine}: not read: ${found.why}`, total: `${found.machine} not read` }
   const big = found.items.filter((i) => i.bytes >= min)
@@ -247,28 +263,40 @@ export const linesOf = (
   const leftovers = small.length ? [`small leftovers ${small.length} at ${mb(sum(small))}`] : []
   const total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
   const items = big.map(
-    (i) => `${i.kind} ${tilde(i.path, home)} ${gb(i.bytes)}${i.recorded ? " recorded" : ""}`,
+    (i) =>
+      `${i.kind} ${tilde(i.path, home)} ${gb(i.bytes)}${i.recorded ? " recorded" : ""}${i.unknownAge ? " age unknown" : ""}`,
   )
-  return {
-    item: `${found.machine} unused: ${[...items, ...leftovers].join("; ") || "none"}`,
-    total,
-  }
+  const named = [...items, ...leftovers]
+  return { item: named.length ? `${found.machine} unused: ${named.join("; ")}` : null, total }
+}
+
+// Pure: each machine's items with an unknown age judged by seen, the night each `<machine> <path>` was first read unused: listed once that night is IMAGE_UNUSED_DAYS old, dropped before; and seen as it stands after tonight, each key read now kept at its first night, a machine not read keeping its keys, and the rest dropped, so an image used again starts over.
+export const aged = (
+  found: Machine[],
+  seen: Record<string, string>,
+  now: number,
+): { found: Machine[]; seen: Record<string, string> } => {
+  const next: Record<string, string> = {}
+  for (const m of found)
+    if ("why" in m)
+      for (const [key, at] of Object.entries(seen))
+        if (key.startsWith(`${m.machine} `)) next[key] = at
+  const judged = found.map((m) => {
+    if ("why" in m) return m
+    const items = m.items.flatMap(({ unknownAge, ...item }) => {
+      if (!unknownAge) return [item]
+      const key = `${m.machine} ${item.path}`
+      next[key] = seen[key] ?? new Date(now).toISOString()
+      return now - Date.parse(next[key]) >= IMAGE_UNUSED_DAYS * 86_400_000 ? [item] : []
+    })
+    return { ...m, items }
+  })
+  return { found: judged, seen: next }
 }
 
 // The one ssh a peer's measure runs through: read only, its JSON on stdout, never prompting.
-export const peerUnusedArgv = (
-  key: string | undefined,
-  target: string,
-  clone: string,
-): string[] => [
-  "ssh",
-  "-F",
-  "none",
-  ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
-  ...["BatchMode=yes", "ConnectTimeout=10"].flatMap((option) => ["-o", option]),
-  target,
-  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${UNUSED_CLI} --json`,
-]
+export const peerUnusedArgv = (key: string | undefined, target: string, clone: string): string[] =>
+  peerArgv(key, target, clone, `${UNUSED_CLI} --json`)
 
 const PEER_MS = 10 * 60_000
 
@@ -330,6 +358,6 @@ if (import.meta.main) {
   else
     for (const found of await unusedEverywhere(places, mainCheckout(), run)) {
       const { item, total } = linesOf(found, places.home)
-      console.log(`${total}\n${item}`)
+      console.log(item ? `${total}\n${item}` : total)
     }
 }

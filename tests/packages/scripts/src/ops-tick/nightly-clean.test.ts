@@ -741,6 +741,26 @@ describe("one night's run against a fixture data folder", () => {
     expect(runs.flat()).not.toContain(gguf)
   })
 
+  test("an image of unknown age is kept off the night's lines, its first night written to the state file for the next run", async () => {
+    const { ctx, deps, ops, sent } = night()
+    const path = "docker image pulled:1"
+    deps.unused = async () => [
+      {
+        items: [{ bytes: 2 * 1024 ** 3, kind: "image", path, recorded: false, unknownAge: true }],
+        machine: "spark-9dfb",
+      },
+    ]
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "unused: spark-9dfb unused 0.0 GB (",
+    )
+    expect(sent.map((s) => s.text).join("\n")).not.toContain(path)
+    expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
+      at: "2026-11-05T03:00:00.000Z",
+      imagesSeen: { [`spark-9dfb ${path}`]: "2026-11-05T03:00:00.000Z" },
+    })
+  })
+
   // #1515
   test("a stale unmerged worktree goes through playground rm with no decision, and its trash id is logged", async () => {
     const { ctx, deps, inputs, ops, runs, sent, wt } = night()
