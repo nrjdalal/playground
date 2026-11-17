@@ -546,15 +546,19 @@ touch "\${@: -1}"
   chmodSync(join(m.bin, "git"), 0o755)
   return m
 }
-// a fake bun whose `turbo run build --dry=json` reads one cached task and `count` more with the cache status given, fails for null, prints text that is no dry run's for "unreadable" and outlasts run-slot's 10 s for "slow", passing anything else to the machine's own
+// a fake bun whose `turbo run build --dry=json` reads `hits` cached tasks and `count` more with the cache status given, fails for null, prints text that is no dry run's for "unreadable" and outlasts run-slot's 10 s for "slow", passing anything else to the machine's own
 export const turbo = (
   m: ReturnType<typeof machine>,
   status: string | null | "slow" | "unreadable",
   count = 1,
+  hits = 1,
 ) => {
   renameSync(join(m.bin, "bun"), join(m.bin, "bun-machine"))
   const tasks = [
-    { cache: { status: "HIT" }, command: "next build" },
+    ...Array.from({ length: hits }, (_, i) => ({
+      cache: { status: "HIT" },
+      command: `cached ${i}`,
+    })),
     ...Array.from({ length: count }, (_, i) => ({ cache: { status }, command: `tsdown ${i}` })),
   ]
   const dry =

@@ -54,9 +54,9 @@ describe("a bash script file: the option word and the cached build", () => {
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 
-  test("that commits a web/next file in a build past the limit waits as a big run", async () => {
+  test("that commits a web/next file whose dry run fails waits as a big run", async () => {
     const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
-    turbo(m, "MISS", 10)
+    turbo(m, null)
     m.hold("run-slot", 3, "big")
     expect(await m.start("worker-x", {}, undefined, ["bash", script(m, NEXT)]).waits()).toBe(true)
     expect(log(m)).not.toContain("run-slot-commit")

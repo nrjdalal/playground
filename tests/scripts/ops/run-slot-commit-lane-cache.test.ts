@@ -28,16 +28,16 @@ describe("a commit whose next build turbo replays from its cache", () => {
   })
 })
 
-// #2587: each commit build that waited 17 to 27 minutes on 17 Nov held 3 to 9 tasks to run, web/next's among them, and ran 8 to 23 s
+// 17 Nov: each commit build that waited 17 to 27 minutes held 3 to 9 tasks to run, web/next's among them, and ran 8 to 23 s, and 3 whole rebuilds of 11 tasks ran 13 to 19 s
 describe("a commit whose build holds tasks to run", () => {
-  for (const [what, staged, count] of [
-    ["a packages-only build", "packages/safe-delete/src/index.ts", 2],
-    ["a build with web/next's", "web/next/src/app/page.tsx", 3],
-    ["a build at the limit", "packages/config/src/org.ts", 9],
+  for (const [what, staged, count, hits] of [
+    ["a packages-only build", "packages/safe-delete/src/index.ts", 2, 1],
+    ["a build with web/next's", "web/next/src/app/page.tsx", 3, 1],
+    ["a whole rebuild, every task to run", "package.json", 11, 0],
   ] as const)
     test(`takes run-slot-commit beside a big run for ${what}, its count in the runs log`, async () => {
       const m = repo({ idle: 30 }, [staged])
-      turbo(m, "MISS", count)
+      turbo(m, "MISS", count, hits)
       m.hold("run-slot", 3, "big")
       expect(await m.start("worker-x", {}, undefined, commit(m.root)).ran()).toBe(true)
       expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
@@ -45,7 +45,6 @@ describe("a commit whose build holds tasks to run", () => {
     })
 
   for (const [what, status, count, tasks] of [
-    ["a whole rebuild past the limit", "MISS", 10, "10"],
     ["a dry run that fails", null, 1, "unread"],
     ["a dry run that cannot be read", "unreadable", 1, "unread"],
     ["a dry run past 10 s", "slow", 1, "unread"],

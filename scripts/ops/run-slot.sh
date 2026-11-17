@@ -1082,7 +1082,7 @@ runs_program() {
   esac
   return 1
 }
-# a commit whose pre-commit build runs next build with more than BUILD_MISS_MAX tasks to run goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
+# a commit whose pre-commit build runs next build, and whose dry run cannot say how many tasks it would run, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
   local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
@@ -1182,13 +1182,12 @@ heavy_build() {
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files" || return 1
-  # a build with at most BUILD_MISS_MAX tasks to run ends in seconds, web/next's included, so only a bigger one, or a dry run that cannot say, counts big (5 Nov: under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
+  # a commit's build ends in seconds whatever turbo would run, so only a dry run that cannot say counts big, failing closed: on 17 Nov each commit build that waited 17 to 27 minutes in the queue held 3 to 9 tasks to run and ran 8 to 23 s, and 3 whole rebuilds of 11 tasks ran 13 to 19 s (5 Nov: under run-slot, commit-slot.ts runs the build bare inside the commit's own slot); the cache folder is lefthook.yml's pre-commit default
   BUILD_TASKS=$(turbo_misses build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"})
-  [[ "$BUILD_TASKS" =~ ^[0-9]+$ ]] || { BUILD_TASKS=unread; return 0; }
-  [ "$BUILD_TASKS" -gt "$BUILD_MISS_MAX" ]
+  [[ "$BUILD_TASKS" =~ ^[0-9]+$ ]] && return 1
+  BUILD_TASKS=unread
 }
-# the most uncached tasks a commit's build may hold and still take run-slot-commit: every commit build that waited on 17 Nov held 3 to 9 and ran 8 to 23 s, and 33 uncached web/next builds ran 13 s at the median and 19 s at most, while a whole rebuild holds 10 or more
-BUILD_MISS_MAX=9
+# the tasks a commit's build would run, or unread, which main logs as a why line
 BUILD_TASKS=
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
