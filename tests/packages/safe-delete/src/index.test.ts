@@ -20,10 +20,13 @@ import { hasManagerRole, ROSTER_KINDS } from "../../../../packages/config/src/ki
 import {
   archiveUnlanded,
   bundleToTrash,
+  bytesOf,
   CARVE_OUTS,
   type CarveOut,
   type Clone,
+  deleteWeights,
   isProtected,
+  isWeights,
   LIMITS,
   linkPlaces,
   listTrash,
@@ -34,6 +37,7 @@ import {
   purgeTrash,
   quarantine,
   type Quarantined,
+  removeReplay,
   removeScratch,
   removeStale,
   restore,
@@ -1903,4 +1907,173 @@ test("movesLeft counts a session's own moves inside the minute and changes nothi
     LIMITS.perMinute,
   )
   expect(readdirSync(roots.trash).sort()).toEqual(before)
+})
+
+describe("an approved card's removal", () => {
+  const card = "11111111-2222-3333-4444-555555555555"
+  const weightsOf = () => {
+    const roots = machine()
+    const repo = join(roots.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+    file(join(repo, "blobs", "b"), "weights")
+    symlinkSync(
+      join(repo, "blobs", "b"),
+      join(dirname(file(join(repo, "snapshots", "s", "x"))), "model.safetensors"),
+    )
+    const gguf = file(join(roots.home, "probe-local-model", "gguf", "GLM-Flash.gguf"), "gguf")
+    return { gguf, repo, roots }
+  }
+  const at = (bytes: number) => ({ bytes, card })
+
+  test("approved weights are deleted outright at the card's size, logged in deleted.jsonl, never trashed", () => {
+    const { gguf, repo, roots } = weightsOf()
+    expect(bytesOf(repo)).toBe(8)
+    const folders = [dirname(gguf)]
+    expect(
+      deleteWeights(
+        repo,
+        { approved: at(8), folders, reason: "nightly-clean", session: "shell" },
+        roots,
+        NOW,
+      ),
+    ).toEqual({ size: 8 })
+    expect(
+      deleteWeights(
+        gguf,
+        { approved: at(4), folders, reason: "nightly-clean", session: "shell" },
+        roots,
+        NOW,
+      ),
+    ).toEqual({ size: 4 })
+    expect(existsSync(repo) || existsSync(gguf)).toBe(false)
+    const log = readFileSync(join(roots.trash, "deleted.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l))
+    expect(log.map((l) => [l.path, l.bytes, l.card])).toEqual([
+      [repo, 8, card],
+      [gguf, 4, card],
+    ])
+    expect(listTrash(roots.trash)).toEqual([])
+  })
+
+  test("weights whose size changed since the card, a symlink, the models folder itself and a file outside the folders are refused, each left in place", () => {
+    const { gguf, repo, roots } = weightsOf()
+    const folders = [dirname(gguf)]
+    const del = (path: string, bytes: number) =>
+      deleteWeights(
+        path,
+        { approved: at(bytes), folders, reason: "t", session: "shell" },
+        roots,
+        NOW,
+      )
+    expect(del(repo, 7)).toMatchObject({ refused: expect.stringContaining("its size changed") })
+    const link = join(roots.home, "models", "link.gguf")
+    symlinkSync(gguf, link)
+    expect(del(link, 4)).toMatchObject({ refused: expect.stringContaining("is a symlink") })
+    const models = join(roots.home, "models")
+    expect(del(models, bytesOf(models))).toMatchObject({
+      refused: expect.stringContaining("is not model weights"),
+    })
+    const outside = file(join(roots.home, "Downloads", "x.gguf"), "abcd")
+    expect(isWeights(outside, roots.home, folders)).toBe(false)
+    expect(del(outside, 4)).toMatchObject({
+      refused: expect.stringContaining("is not model weights"),
+    })
+    expect(del(`${dirname(gguf)}/../gguf/GLM-Flash.gguf`, 4)).toMatchObject({
+      refused: expect.stringContaining("no .."),
+    })
+    for (const path of [repo, gguf, link, outside]) expect(existsSync(path)).toBe(true)
+  })
+
+  test("an approved rehearsal in Ops' scratchpad moves whole past the caps, and --restore puts it back; unapproved it stays protected", () => {
+    const roots = machine()
+    const rehearsal = join(roots.home, ".playground", "scratchpad", "ops", "rehearse142")
+    for (let i = 0; i < LIMITS.files + 1; i++) file(join(rehearsal, "clone", String(i)), "")
+    expect(quarantine(rehearsal, opts, roots, { now: NOW })).toMatchObject({ kind: "protected" })
+    expect(quarantine(rehearsal, { ...opts, approved: at(1) }, roots, { now: NOW })).toMatchObject({
+      refused: expect.stringContaining("its size changed"),
+    })
+    const moved = quarantine(rehearsal, { ...opts, approved: at(0) }, roots, {
+      now: NOW,
+    }) as Quarantined
+    expect(moved.files).toBe(LIMITS.files + 1)
+    expect(existsSync(rehearsal)).toBe(false)
+    expect(listTrash(roots.trash)[0]).toMatchObject({ approved: card, path: rehearsal })
+    expect(restore(moved.id, roots)).toEqual({ path: rehearsal })
+    expect(existsSync(join(rehearsal, "clone", "0"))).toBe(true)
+  })
+})
+
+describe("a model test's replay worktree", () => {
+  // A main checkout pushed to origin/canary, with one replay worktree detached at canary's commit under ~/models/kit/runs, holding a tracked edit and an untracked file.
+  const replay = () => {
+    const roots = machine()
+    const remote = join(roots.root, "remote.git")
+    git(roots.root, "init", "--bare", "-q", remote)
+    git(roots.main, "init", "-q", "-b", "canary")
+    file(join(roots.main, "README.md"), "one\n")
+    git(roots.main, "add", ".")
+    git(roots.main, "commit", "-qm", "init")
+    git(roots.main, "remote", "add", "origin", remote)
+    git(roots.main, "push", "-q", "origin", "canary")
+    const add = (wt: string) => {
+      mkdirSync(dirname(wt), { recursive: true })
+      git(roots.main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+      writeFileSync(join(wt, "README.md"), "two\n")
+      file(join(wt, "answer.ts"), "export const a = 1\n")
+      return wt
+    }
+    const wt = add(join(roots.home, "models", "kit", "runs", "MB-1", "pr0001"))
+    return { add, roots, wt }
+  }
+
+  test("one under kit/runs at a canary commit goes through git worktree remove, its work written to <name>.diff first", () => {
+    const { roots, wt } = replay()
+    expect(removeReplay(wt, { folders: [] }, roots)).toEqual({ diff: `${wt}.diff` })
+    expect(existsSync(wt)).toBe(false)
+    const diff = readFileSync(`${wt}.diff`, "utf8")
+    expect(diff).toContain("+two")
+    expect(diff).toContain("+export const a = 1")
+    expect(git(roots.main, "worktree", "list")).not.toContain(wt)
+  })
+
+  test("the diff is written before the worktree goes: a remove git refuses leaves both, naming the diff", () => {
+    const { roots, wt } = replay()
+    git(roots.main, "worktree", "lock", wt)
+    expect(removeReplay(wt, { folders: [] }, roots)).toMatchObject({
+      refused: expect.stringContaining(`its work is kept in ${wt}.diff`),
+    })
+    expect(existsSync(wt)).toBe(true)
+    expect(readFileSync(`${wt}.diff`, "utf8")).toContain("+two")
+  })
+
+  test("a recorded folder outside kit/runs with a tracked edit, a commit canary lacks, and a folder no rule names are refused, each left in place", () => {
+    const { add, roots, wt } = replay()
+    const recorded = join(roots.home, "trials")
+    const outside = add(join(recorded, "pr0002"))
+    expect(removeReplay(outside, { folders: [recorded] }, roots)).toMatchObject({
+      refused: expect.stringContaining("has a tracked edit"),
+    })
+    git(wt, "commit", "-qam", "test output")
+    expect(removeReplay(wt, { folders: [] }, roots)).toMatchObject({
+      refused: expect.stringContaining("a commit origin/canary does not hold"),
+    })
+    const loose = add(join(roots.home, "elsewhere", "pr0003"))
+    expect(removeReplay(loose, { folders: [] }, roots)).toMatchObject({
+      refused: expect.stringContaining("is not a replay worktree's place"),
+    })
+    for (const path of [outside, wt, loose]) expect(existsSync(path)).toBe(true)
+    expect(existsSync(`${outside}.diff`) || existsSync(`${wt}.diff`)).toBe(false)
+  })
+
+  test("a recorded folder outside kit/runs with no tracked edit goes too", () => {
+    const { roots } = replay()
+    const recorded = join(roots.home, "trials")
+    mkdirSync(recorded, { recursive: true })
+    git(roots.main, "worktree", "add", "-q", "--detach", join(recorded, "pr0004"), "HEAD")
+    file(join(recorded, "pr0004", "out.log"), "graded\n")
+    expect(removeReplay(join(recorded, "pr0004"), { folders: [recorded] }, roots)).toEqual({
+      diff: join(recorded, "pr0004.diff"),
+    })
+  })
 })

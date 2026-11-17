@@ -4,6 +4,7 @@ import { basename, join, sep } from "node:path"
 
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
+import { bytesOf } from "@packages/safe-delete"
 
 import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
@@ -58,15 +59,6 @@ const list = (dir: string): string[] => {
   }
 }
 const inside = (path: string, folder: string) => path === folder || path.startsWith(folder + sep)
-
-// The bytes a tree holds, each inode once, read through no symlink; 0 for a path that is gone.
-export const sizeOf = (path: string, seen = new Set<string>()): number => {
-  const st = stat(path)
-  if (!st || seen.has(`${st.dev}:${st.ino}`)) return 0
-  seen.add(`${st.dev}:${st.ino}`)
-  if (!st.isDirectory()) return st.isFile() ? st.size : 0
-  return list(path).reduce((sum, name) => sum + sizeOf(join(path, name), seen), 0)
-}
 
 // Each weights file (.gguf, .safetensors) under dir, past .git, node_modules and the skip folders, read through no symlink.
 const weightFiles = (dir: string, skip: string[]): string[] =>
@@ -220,7 +212,7 @@ export const measured = (
 ): Unused[] =>
   found
     .flatMap(({ bytes, id, kind, path, unknownAge }) => {
-      const size = bytes ?? sizeOf(path)
+      const size = bytes ?? bytesOf(path)
       // read after the walk, so a path removed while it was measured is skipped too
       if (bytes === undefined && !stat(path)) return []
       const item: Unused = {

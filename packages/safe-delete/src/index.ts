@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, dirname, join, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path"
 
 import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
 
@@ -72,6 +72,7 @@ export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
 
 export type TrashEntry = {
   at: string
+  approved?: string
   bundle?: string
   carveOut?: string
   ended?: string
@@ -307,6 +308,44 @@ const retiredOf = (path: string, home: string): string | undefined => {
   return retiredPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
 }
 
+// The owner's Remove on an Inbox card for one exact path: the card's id and the bytes it showed, which the path must still hold.
+export type Approved = { bytes: number; card: string }
+
+// The bytes a tree holds as the unused list shows them and an approved removal checks them: each real file once, a hard link counted once, a symlink and a folder adding nothing; 0 for a path that is gone.
+export const bytesOf = (path: string, seen = new Set<string>()): number => {
+  const st = lstat(path)
+  if (!st || seen.has(`${st.dev}:${st.ino}`)) return 0
+  seen.add(`${st.dev}:${st.ino}`)
+  if (!st.isDirectory()) return st.isFile() ? st.size : 0
+  return entriesOf(path).reduce((sum, e) => sum + bytesOf(join(path, e.name), seen), 0)
+}
+
+// A ship rehearsal's own place: a real rehearse<N> folder in a session's scratchpad folder, scratchpad/<session>/rehearse<N>, which only an approved card removes from outside that session, and a restore puts back.
+const rehearsalPlace = (own: string, home: string): boolean =>
+  dirname(dirname(own)) === real(join(home, ".playground", "scratchpad")) &&
+  SESSION.test(basename(dirname(own))) &&
+  /^rehearse\d+$/.test(basename(own))
+
+const rehearsalOf = (path: string, home: string): string | undefined => {
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  return own === abs && rehearsalPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
+}
+
+// Why an approved path is not the one its card names as the owner saw it, or null: a path written relative or with a `..`, a symlink at it or on its way, or a size other than the card's.
+const approvedRefusal = (path: string, approved: Approved): string | null => {
+  if (!isAbsolute(path) || path.split(sep).includes(".."))
+    return `${path} is not written as one absolute path with no ..; card ${approved.card} names its path whole`
+  if (lstat(path)?.isSymbolicLink())
+    return `${path} is a symlink; card ${approved.card} approves only a real path`
+  if (real(path) !== resolve(path))
+    return `${path} goes through a symlink to ${real(path)}; card ${approved.card} approves only a real path`
+  const now = bytesOf(path)
+  return now === approved.bytes
+    ? null
+    : `${path} holds ${now} bytes, and card ${approved.card} approved it at ${approved.bytes}: its size changed, so it stays; the next card names it at its new size`
+}
+
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
@@ -513,6 +552,7 @@ const ownTempOf = (own: string, session: string, tmp: string): boolean =>
 export function quarantine(
   path: string,
   opts: {
+    approved?: Approved
     carveOut?: string
     ended?: Ended
     gone?: true
@@ -533,19 +573,18 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
+  const wrong = opts.approved && approvedRefusal(path, opts.approved)
+  if (wrong) return refused(wrong)
+  const rehearsal = opts.approved && rehearsalOf(abs, roots.home)
   const live = opts.ended
   const ended =
     (live && SCRATCH_DIRS.map((dir) => endedPadOf(abs, roots.home, live, dir)).find(Boolean)) ||
     (opts.gone && goneScratchOf(abs, roots.home)) ||
     retiredOf(abs, roots.home)
-  const carve = carveOutOf(
-    abs,
-    opts.carveOut,
-    roots,
-    io.carveOuts ?? CARVE_OUTS,
-    opts.session,
-    ended ? [ended] : [],
-  )
+  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS, opts.session, [
+    ...(ended ? [ended] : []),
+    ...(rehearsal ? [rehearsal] : []),
+  ])
   if (carve && "refused" in carve) return carve
   const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
@@ -569,7 +608,14 @@ export function quarantine(
   const temp = ownTempOf(own, opts.session, io.tmp ?? "/tmp")
   const ownPad = join(real(join(roots.home, ".playground", "scratchpad")), opts.session)
   const whole = (ended && own === ended) || temp || (own !== ownPad && inside(own, ownPad))
-  const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
+  // an approved path moves whole, its size already checked against the card's
+  const cap =
+    carve ??
+    (opts.approved
+      ? { ...LIMITS, bytes: Infinity, files: Infinity }
+      : whole
+        ? { ...LIMITS, files: Infinity }
+        : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
     skip: carve ? undefined : isRebuildable,
@@ -630,6 +676,7 @@ export function quarantine(
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
+    ...(opts.approved ? { approved: opts.approved.card } : {}),
     ...kept,
     ...(carve ? { carveOut: opts.carveOut } : {}),
     ...(ended ? { ended } : {}),
@@ -695,6 +742,13 @@ export function restore(
         `${entry.path} came from ${entry.ended}, an ended session's folder or a gone session's entry, which no longer reaches it as a real entry directly in ${pads.join(" or ")}`,
       )
     back = [entry.ended]
+  } else if (entry.approved && rehearsalPlace(entry.path, roots.home)) {
+    // an approved rehearsal comes back only to its own place, reached through no symlink
+    if (!existsSync(dirname(entry.path)) || real(dirname(entry.path)) !== dirname(entry.path))
+      return refused(
+        `${entry.path} came from a rehearsal folder card ${entry.approved} approved, which no longer reaches it as a real folder`,
+      )
+    back = [entry.path]
   }
   const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session, back)
   if (carve && "refused" in carve) return carve
@@ -704,6 +758,119 @@ export function restore(
   renameSync(join(slot, items[0]!), entry.path)
   rmdirSync(slot)
   return { path: entry.path }
+}
+
+const WEIGHT_FILE = /\.(gguf|safetensors)$/
+
+// Whether path is model weights an approved card deletes outright, since they download again: a .gguf or .safetensors file under ~/models or a recorded weights folder, or a repo folder directly in ~/models/hf/hub; ~/models and each folder itself never.
+export const isWeights = (path: string, home: string, folders: string[]): boolean => {
+  const abs = resolve(path)
+  const models = join(home, "models")
+  const st = lstat(abs)
+  if (!st) return false
+  if (st.isDirectory())
+    return dirname(abs) === join(models, "hf", "hub") && basename(abs).startsWith("models--")
+  return (
+    st.isFile() &&
+    WEIGHT_FILE.test(abs) &&
+    [models, ...folders].some((root) => abs !== root && inside(abs, root))
+  )
+}
+
+// Deletes approved weights outright, never through the trash (a model's weights download again, and one repo can outgrow the trash's disk), after approvedRefusal, the protected list and isWeights, with one line in <trash>/deleted.jsonl naming the card.
+export function deleteWeights(
+  path: string,
+  opts: { approved: Approved; folders: string[]; reason: string; session: string },
+  roots: Roots,
+  now = new Date(),
+): { size: number } | Refusal {
+  if (!lstat(path)) return refused(`no such path ${path}`)
+  const wrong = approvedRefusal(path, opts.approved)
+  if (wrong) return refused(wrong)
+  const why = isProtected(path, roots)
+  if (why) return refused(why, "protected")
+  if (!isWeights(path, roots.home, opts.folders))
+    return refused(
+      `${path} is not model weights: a .gguf or .safetensors file under ${join(roots.home, "models")} or a recorded folder, or a repo folder directly in its hf/hub; a card's other items move to the trash`,
+    )
+  try {
+    rmSync(path, { recursive: true })
+  } catch (error) {
+    return refused(`${path} did not delete whole: ${(error as Error).message}`)
+  }
+  const trash = real(roots.trash)
+  mkdirSync(trash, { recursive: true })
+  appendFileSync(
+    join(trash, "deleted.jsonl"),
+    `${JSON.stringify({ at: now.toISOString(), bytes: opts.approved.bytes, card: opts.approved.card, path, reason: opts.reason, session: opts.session })}\n`,
+  )
+  return { size: opts.approved.bytes }
+}
+
+// Whether path is a model test's replay worktree place: a folder in a row of ~/models/kit/runs, or one inside a recorded folder.
+export const replayPlace = (path: string, home: string, folders: string[]): boolean => {
+  const abs = resolve(path)
+  const runs = join(home, "models", "kit", "runs")
+  return (
+    (dirname(dirname(abs)) === runs && abs.startsWith(runs + sep)) ||
+    folders.some((root) => abs !== root && inside(abs, root))
+  )
+}
+
+// Removes a model test's replay worktree through its own clone's git worktree remove --force, never a plain delete, after it writes the worktree's work beside it as <name>.diff (git diff HEAD with the untracked files), so no graded attempt is lost: only a real folder at replayPlace that is a worktree of the main checkout, detached at a commit origin/canary holds, and outside ~/models/kit/runs one with no tracked edit, since under kit/runs every change is the test's output.
+export function removeReplay(
+  path: string,
+  opts: { folders: string[] },
+  roots: Roots,
+): { diff: string } | Refusal {
+  const abs = resolve(path)
+  const st = lstat(abs)
+  if (!st?.isDirectory()) return refused(`no such folder ${abs}`)
+  if (real(abs) !== abs) return refused(`${abs} goes through a symlink to ${real(abs)}`)
+  if (!replayPlace(abs, roots.home, opts.folders))
+    return refused(
+      `${abs} is not a replay worktree's place: a folder in a row of ${join(roots.home, "models", "kit", "runs")} or inside a recorded folder`,
+    )
+  const git = (at: string, ...args: string[]) => {
+    const run = Bun.spawnSync(["git", "-C", at, ...args], { stderr: "pipe", stdout: "pipe" })
+    return { ok: run.exitCode === 0, out: run.stdout.toString().trim() }
+  }
+  const main = real(roots.main)
+  const common = git(abs, "rev-parse", "--path-format=absolute", "--git-common-dir")
+  if (
+    !common.ok ||
+    common.out !== join(main, ".git") ||
+    git(abs, "rev-parse", "--show-toplevel").out !== abs
+  )
+    return refused(`${abs} is not a worktree of ${main}`)
+  if (git(abs, "symbolic-ref", "-q", "HEAD").ok)
+    return refused(`${abs} is on a branch; a replay worktree is detached at its commit`)
+  const sha = git(abs, "rev-parse", "HEAD").out
+  if (!git(main, "merge-base", "--is-ancestor", sha, "origin/canary").ok)
+    return refused(`${abs} is at ${sha}, a commit origin/canary does not hold`)
+  const underRuns = inside(abs, join(roots.home, "models", "kit", "runs"))
+  if (!underRuns && !git(abs, "diff", "HEAD", "--quiet").ok)
+    return refused(
+      `${abs} has a tracked edit and sits outside ~/models/kit/runs, where a change is the test's output alone`,
+    )
+  const diff = `${abs}.diff`
+  if (lstat(diff)) return refused(`${diff} already exists; move it aside first`)
+  // intent-to-add puts the untracked files in git diff HEAD; the index it writes goes with the worktree
+  if (!git(abs, "add", "-A", "--intent-to-add").ok) return refused(`git add -N failed in ${abs}`)
+  const work = Bun.spawnSync(["git", "-C", abs, "diff", "HEAD", "--binary"], {
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  if (work.exitCode !== 0) return refused(`git diff HEAD failed in ${abs}`)
+  writeFileSync(diff, work.stdout)
+  const gone = Bun.spawnSync(["git", "-C", main, "worktree", "remove", "--force", abs], {
+    stderr: "pipe",
+  })
+  if (gone.exitCode !== 0)
+    return refused(
+      `git worktree remove failed: ${gone.stderr.toString().trim()}; its work is kept in ${diff}`,
+    )
+  return { diff }
 }
 
 // The running clone that reads from or copies into a worktree, as its refusal, or null; a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699).
