@@ -35,6 +35,7 @@ import {
   quarantine,
   type Quarantined,
   removeScratch,
+  removeStale,
   restore,
   type Roots,
   rowPullRequests,
@@ -1319,14 +1320,12 @@ describe("worktreeRefusal", () => {
     expect(existsSync(wt)).toBe(false)
   })
 
-  test("refuses a worktree whose branch has not landed on canary, pushed or not, and --discard lets it go", () => {
+  test("refuses a worktree whose branch has not landed on canary or been pushed, and --discard lets it go", () => {
     const { holders, roots, wt } = withWorktree()
     const unmerged = { ...holders, merged: () => false }
     expect(worktreeRefusal(wt, roots, unmerged)).toBe(
-      `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
+      `${wt}'s HEAD holds work not landed on origin/canary or on any remote branch (fetch origin if it merged or was pushed since): playground rm --worktree ${wt} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`,
     )
-    git(wt, "push", "-q", "origin", "PG-1-thing")
-    expect(worktreeRefusal(wt, roots, unmerged)).toContain("not landed on origin/canary")
     expect(worktreeRefusal(wt, roots, { ...holders, merged: () => null })).toContain("not landed")
     expect(worktreeRefusal(wt, roots, { ...unmerged, discard: true })).toBeNull()
     expect(quarantine(wt, { ...opts, worktree: unmerged }, roots, { now: NOW })).toHaveProperty(
@@ -1558,6 +1557,33 @@ describe("removeScratch", () => {
     symlinkSync(made, join(tmp, "link"))
     expect(removeScratch(join(tmp, "link"), tmp)).toBeString()
     expect(existsSync(made)).toBe(true)
+  })
+})
+
+describe("removeStale", () => {
+  test("removes an old marked folder with the prefix, and keeps a young one, an unmarked one and a link to an old one", () => {
+    const { root } = machine()
+    const tmp = join(root, "tmp")
+    mkdirSync(tmp)
+    const now = new Date("2026-11-17T03:00:00Z")
+    const at = (dir: string, h: number) => {
+      const when = new Date(now.getTime() - h * 3_600_000)
+      utimesSync(dir, when, when)
+      return dir
+    }
+    const old = at(makeScratch("job-", tmp), 25)
+    file(join(old, "deep", "x"))
+    at(old, 25)
+    const young = at(makeScratch("job-", tmp), 1)
+    mkdirSync(join(tmp, "job-plain"))
+    const plain = at(join(tmp, "job-plain"), 25)
+    const away = join(root, "away")
+    mkdirSync(away)
+    const target = at(makeScratch("job-", away), 25)
+    symlinkSync(target, join(tmp, "job-link"))
+    expect(removeStale("job-", tmp, 86_400_000, now)).toEqual([{ bytes: 1, path: old }])
+    expect(existsSync(old)).toBe(false)
+    for (const dir of [young, plain, target]) expect(existsSync(dir)).toBe(true)
   })
 })
 

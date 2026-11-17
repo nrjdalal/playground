@@ -45,6 +45,7 @@ const SET = [
   ["no-progress", "RiTimeLine", "text-destructive", "No progress", false],
   ["fixing", "RiLoader4Line", "text-caution", "Fixing", true],
   ["working", "RiLoader4Line", "text-info", "Working", true],
+  ["conflicts", "RiGitMergeLine", "text-destructive", "Conflicts", false],
   ["waiting", "RiSearchEyeLine", "text-caution", "Waiting", false],
   ["approval", "RiUserLine", "text-caution", "Waiting on approvals", false],
   ["approvals", "RiGroupLine", "text-caution", "Waiting on approvals", false],
@@ -85,6 +86,7 @@ type Pull = NonNullable<Agent["pr"]>
 const pull = (fields: Partial<Pull> = {}): Pull => ({
   approvals: 0,
   ci: "passing",
+  conflicts: false,
   draft: false,
   number: 97,
   queued: false,
@@ -194,6 +196,16 @@ describe("lightOf", () => {
   test("Working: the session is busy", () => {
     expect(light({ light: "working" })).toBe("working")
     expect(light({ light: "working", waits: ["checks"] })).toBe("working")
+  })
+
+  test("Conflicts: idle on an open pull request that conflicts with its base, ahead of every wait (#2457)", () => {
+    expect(light({ pr: pull({ conflicts: true }), waits: ["checks"] })).toBe("conflicts")
+    expect(light({ pr: pull({ ci: "none", conflicts: true, score: "5/5" }) })).toBe("conflicts")
+    expect(light({ light: "working", pr: pull({ conflicts: true }) })).toBe("working")
+    expect(light({ pr: pull({ conflicts: true, state: "merged" }) })).toBe("merged")
+    expect(light({ pr: pull({ conflicts: true, state: "closed" }), waits: ["checks"] })).toBe(
+      "waiting",
+    )
   })
 
   test("Waiting: idle with something still open", () => {

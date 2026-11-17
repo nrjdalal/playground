@@ -6152,6 +6152,11 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
+    cwd: "{dashboard}",
+    description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
+    schedule: { always: true }
+  }),
   "ops-restore": {
     ...launchd("ops-restore", {
       description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
@@ -7705,7 +7710,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -10027,24 +10032,23 @@ var testsAName = (args, expands) => args.some((w, k) => {
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
-function steadyNames(named, commands, past = false) {
+function setterCounts(named, commands, parses) {
   if (named.blind || named.counts.has("IFS"))
-    return () => NONE2;
+    return;
   const counts = new Map(named.counts);
-  const parses = commands.map((cmd) => parse3(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name) || marked(name))
-      return () => NONE2;
+      return;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
-      return () => NONE2;
+      return;
     if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
-      return () => NONE2;
+      return;
     if (name === "print" && flagged(/P/))
-      return () => NONE2;
+      return;
     if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
-      return () => NONE2;
+      return;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
@@ -10056,13 +10060,20 @@ function steadyNames(named, commands, past = false) {
       if (!word)
         continue;
       if (marked(word.value.split("=")[0]))
-        return () => NONE2;
+        return;
       if (word.quoted && word.value.includes("["))
-        return () => NONE2;
+        return;
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1);
     }
   }
+  return counts;
+}
+function steadyNames(named, commands, past = false) {
+  const parses = commands.map((cmd) => parse3(cmd));
+  const counts = setterCounts(named, commands, parses);
+  if (!counts)
+    return () => NONE2;
   const set = new Map;
   const pasts = new Map;
   let moves = false;
@@ -10140,6 +10151,23 @@ function steadyNames(named, commands, past = false) {
       past: (key) => (pasts.get(key) ?? here.at) < here.at
     };
   };
+}
+function startingVariables(command, environment, known) {
+  const commands = lex(command, known).commands;
+  const counts = setterCounts(namings2(command), commands, commands.map((cmd) => parse3(cmd)));
+  const starting = {};
+  if (!counts)
+    return starting;
+  for (const [key, value] of Object.entries(environment)) {
+    if (!value || key in known || !/^[A-Z_][A-Z0-9_]*$/.test(key) || counts.has(key))
+      continue;
+    if (SHELL_SETS.has(key) || SHELL_SETS_PREFIX.test(key) || TIED.has(key))
+      continue;
+    if (key === "IFS" || key === "ZDOTDIR" || key.startsWith("CLAUDE"))
+      continue;
+    starting[key] = value;
+  }
+  return starting;
 }
 var LITERAL = /^(?:[\w./:@%+,-]|'[^'\s]*'|"[^"$`\\\s]*")+$/;
 var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
@@ -12749,7 +12777,8 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     return refuse(afterUnreadCd(unread ? `${verb} under xargs on the words it reads from ${unread}` : `${verb} on ${shown(loose)}`));
   };
   const named = namings2(command);
-  const known = knownVariables(command, environment, directory);
+  const own = knownVariables(command, environment, directory);
+  const known = { ...own, ...startingVariables(command, environment, own) };
   const steered = Object.keys(known).filter((key) => named.counts.has(key));
   if (unknown)
     for (const key of steered)

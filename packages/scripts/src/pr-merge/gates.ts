@@ -54,7 +54,7 @@ export type PrFacts = {
   head: string
   // Why held-prs.json holds the PR, or null when it is not held.
   held: string | null
-  // The PR's label names; a `ship-now` one sends Ops the ship-now line once it merges (shipNowLine); absent only in a test.
+  // The PR's label names; a `ship-now` one sends Ops the ship-now line once it merges, where shipNowLine ships it; absent only in a test.
   labels?: string[]
   // The lines canary added that a merge of canary into the PR dropped from git's own merge and the squash still lacks, or why they could not be read (lostLines).
   lost: Lost
@@ -66,6 +66,8 @@ export type PrFacts = {
   // The pr template's own placeholders, read at the head, which the body gate refuses in the body's prose; left out in a test, which skips that check.
   placeholders?: string[]
   state: string
+  // The PR's title, whose fix( opening ships a ship-now PR (shipNowLine); absent only in a test.
+  title?: string
   // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
   unfound?: string[]
 }
@@ -316,6 +318,24 @@ function reviewGate(facts: PrFacts): Gate {
   }
 }
 
+// Pure: the newest tester's word on the head, for a diff that touches web/next/ alone, since a UI change merges only once its tester has driven it; null for any other diff.
+function testerGate(facts: PrFacts): Gate | null {
+  if (!facts.files.some((path) => path.startsWith("web/next/"))) return null
+  const tester = verdictsAt(facts).get("tester")
+  if (tester)
+    return {
+      detail: tester.pass ? tester.text : `newest tester verdict is not a pass: ${tester.text}`,
+      name: "tester",
+      ok: tester.pass,
+    }
+  const sha = facts.head.slice(0, 7)
+  return {
+    detail: `a web/next diff waits for its tester's drive: missing ## TesterBot · PASS at ${sha} from ${facts.owner}; spawn or resume the PR's tester, which posts ## TesterBot · PASS at ${sha}`,
+    name: "tester",
+    ok: false,
+  }
+}
+
 // Pure: every gate, in the order a PR meets them, each saying what it found at the head. The PR merges only when every one is ok.
 export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOptions = {}): Gate[] {
   const gates: Gate[] = [
@@ -360,5 +380,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
     )
   }
   gates.push(reviewGate(facts))
+  const tester = testerGate(facts)
+  if (tester) gates.push(tester)
   return gates
 }

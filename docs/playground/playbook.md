@@ -86,7 +86,7 @@ A job launchd runs starts on the next pass after you turn it on in Settings > Jo
 One of them, ops-unstick, reads every session's screen every 2 minutes, clears a usage-limit dialog when there is room, takes one with no room on a probe to its spawner, names each capped account's live sessions to the builder and ops once a reset, and takes any other block no hook recorded to the session's manager,
 as the session-state hook does for one it did,
 and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paused · usage limit, with gray pause bars, when the usage limit alone holds it.
-Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
+Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, turbo cache files over 2 days old, and a ship rehearsal's scratch folder left over a day.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
 A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
 It spaces its deletes under `playground rm`'s limit of 3 a minute, so none is refused, and leaves what does not fit in a 10-minute wait for the next night.
@@ -132,6 +132,7 @@ For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions a
 A priority start (spawn.sh's `--priority`) passes the gates `SPAWN.md` names for it while a priority file stands, its roster row marked so it counts against no later start.
 It passes focus too on any of them: `priority.json`, an org's own `priority-<name>.json`, a session's own window or a job's own `priority-start.json`.
 A session's window opens only with `playground priority on <session> --reason "<why>"`, and a lead opens one only on the owner's or the dispatcher's word; `playground priority off <session> --reason "<why>"` lifts it, ops-tick lifts one left standing after a set age, and each opening and lift is a line in `ops/priority.log`.
+While a window stands, run-slot's queue runs that session's heavy work first, after focus and a lead's hand-written pick.
 A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the gates `SPAWN.md` names for it as well, as a Claude Code update's close and resume do.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as a failed ship.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
@@ -202,12 +203,15 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
   spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
+  In the main checkout and its worktrees a Claude start is refused until Claude Code's config holds the owner's yes for the checkout, which install.sh records for the checkout it cloned and first run's **Trust this folder** on Claude Code's card records otherwise; an `--ssh` probe skips it, since its claude reads the other machine's config.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
-  A probe alone can start with Remote Control on (`--remote-control <name>`), or run on another machine over ssh (`--ssh <user@host> --key <file>`) from its pane here; the restore below leaves such a probe down.
+  A probe alone can start with Remote Control on (`--remote-control <name>`), or run on another machine over ssh (`--ssh <user@host> --key <file>`) from its pane here, its brief copied there, its load and memory gates reading that machine, and Ops' sweep and the Dashboard counting it live while its pane here still runs ssh; the restore below leaves such a probe down.
+  `--remote-control` warns on a start that runs on a token (an `--account` one, or one on a machine with no claude.ai sign-in), since Remote Control forms no link there.
+  A probe on another machine reports with `playground send <name> <text>`, which the ops-peer-relay job carries across, and waits for answers with `playground alerts-wait <its name>`, since SendMessage reaches the sessions of its own machine alone.
   Before its pane opens, a probe or a `--sandbox` start checks that its machine can run Claude Code's sandbox (on Linux `bwrap`, `socat`, and the AppArmor profile Ubuntu 24.04 needs for `bwrap`), and a probe on another machine also that Claude Code finished its first run there, and stops naming what is missing, installing nothing.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused (that row read again once its resume finds the session gone, so a session you closed stays down), one that never got its first message included,
   the first dispatcher first and past the busy-machine check, then the other managers, which pass that check as `SPAWN.md`'s load gate says, then the rest,
-  on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, and skips any still running.
+  on the account its start named, else the login with the most room, the model it started with, an effort other than high and, for a reviewer or tester, the PRs its roster row serves, else the PR its record names, and skips any still running.
   It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words, and counts as on its way back, not as a failure.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
@@ -257,8 +261,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
 - Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks.
-  A merge of `canary` makes a new head, which needs its own checks and 5/5.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there.
+  A merge of `canary` makes a new head, which needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
 - Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.

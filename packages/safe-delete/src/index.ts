@@ -41,8 +41,12 @@ export type Holders = {
   discard: boolean
   freed?: { head: string; number: number; state: "CLOSED" | "MERGED" }
   live: string[]
+  // The live Dashboard's branch (the live.branch setting): the main checkout's worktree on it is never removed, --discard included.
+  liveBranch?: string
   merged: (sha: string, at: string) => boolean | null
   note?: (line: string) => void
+  // The number of the worktree's own pull request, as GitHub names it by the worktree's branch, in any state: a live row listing it holds the worktree whatever the worktree's folder and branch are named.
+  ownPr?: number
   places: () => string[]
   pr?: string
   procs: Proc[] | null
@@ -745,7 +749,7 @@ export const rowPullRequests = (row: { pr?: unknown; prs?: unknown }): string[] 
   ),
 ]
 
-// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or on a branch the remote itself holds now (remoteHolding), or, given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
+// Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or, for either, on a branch the remote itself holds now (remoteHolding), or, for another repo's worktree given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   const repo = worktreeRepo(at, roots)
@@ -774,6 +778,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const head = git("rev-parse", "HEAD").out
   const own = repo === real(roots.main)
+  if (own && holders.liveBranch && branch === holders.liveBranch)
+    return `${at} is the live Dashboard's checkout (branch ${branch}); it moves only by .agents/dashboard/live.md's roll`
   const baseOf = () => (own ? "origin/canary" : defaultBase(git, holders, at))
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
@@ -791,12 +797,12 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // a row holds by its pr and every PR in its prs; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr); --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
     const prs = rowPullRequests(agent)
       .filter((u) => !(liftable && u === holders.pr))
       .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
-      .filter((n) => new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+      .filter((n) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more
@@ -856,7 +862,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   const base = baseOf()
   if (landed(git, holders, at, base)) return null
-  const holding = own ? null : remoteHolding(git, at)
+  const holding = remoteHolding(git, at)
   if (holding) {
     holders.note?.(
       `${at}'s commits are all on ${holding}, which the remote still holds, so no work is lost`,
@@ -871,9 +877,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     )
     return null
   }
-  const measured = own
-    ? "origin/canary (fetch origin canary if it merged since)"
-    : `${base ?? "its repo's default branch, which neither origin/HEAD nor gh names,"} or on any remote branch (fetch origin if it merged or was pushed since)`
+  const measured = `${base ?? "its repo's default branch, which neither origin/HEAD nor gh names,"} or on any remote branch (fetch origin if it merged or was pushed since)`
   return `${at}'s HEAD holds work not landed on ${measured}${archived ? `, and ${archived.refused}` : ""}: ${discard}`
 }
 
@@ -1081,6 +1085,27 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
   if (!lstat(join(abs, MARKER))?.isFile()) return `${abs} has no ${MARKER} marker`
   rmSync(abs, { force: true, recursive: true })
   return null
+}
+
+// Each folder makeScratch made directly in tmp whose name starts with prefix and whose mtime is olderThanMs before now, removed through removeScratch, so an unmarked folder stays whatever its name or age: each removed path with its bytes.
+export function removeStale(
+  prefix: string,
+  tmp: string,
+  olderThanMs: number,
+  now: Date,
+): { bytes: number; path: string }[] {
+  const root = real(tmp)
+  const removed: { bytes: number; path: string }[] = []
+  for (const entry of entriesOf(root)) {
+    const at = join(root, entry.name)
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue
+    const st = lstat(at)
+    if (!st || st.mtimeMs >= now.getTime() - olderThanMs) continue
+    if (!lstat(join(at, MARKER))?.isFile()) continue
+    const { size } = measure(at)
+    if (removeScratch(at, root) === null) removed.push({ bytes: size, path: at })
+  }
+  return removed
 }
 
 // The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB; deleting the trash is cheap, so no load holds either, and a batch whose real path is not a folder directly in the trash root is skipped.

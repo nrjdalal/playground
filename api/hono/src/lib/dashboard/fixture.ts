@@ -221,10 +221,11 @@ const doctorCheck = z.object({
   status: z.enum(["MISSING", "ok", "optional", "waiting"]),
 })
 
-// A harness's made-up facts: the version installed (null when none), whether it is signed in, and its plan.
+// A harness's made-up facts: the version installed (null when none), whether it is signed in, its plan, and for Claude Code whether it trusts the checkout's folder (trusted when unsaid).
 const harnessFacts = z.object({
   plan: z.string().nullable(),
   signedIn: z.boolean(),
+  trusted: z.boolean().optional(),
   version: z.string().nullable(),
 })
 
