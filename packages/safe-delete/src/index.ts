@@ -221,6 +221,10 @@ const whyHolds = (path: string, roots: Roots): string | null => {
   return null
 }
 
+// The data folder's two session folders, scratch/<name>/ and scratchpad/<name>/, which every scratch rule below reads as one pair.
+const SCRATCH_DIRS = ["scratch", "scratchpad"] as const
+type ScratchDir = (typeof SCRATCH_DIRS)[number]
+
 // The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, path when it is the memory trial's settings file spawn.sh wrote for the session, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path), while scratch/ is a real folder reached through no symlink from the real HOME; none for a name no session may hold.
 const ownScratchOf = (home: string, session: string, path: string): string[] => {
   if (!SESSION.test(session)) return []
@@ -237,10 +241,7 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
     `factory-settings-400k-memory-${session}.json`,
   )
   return [
-    ...[
-      join(home, ".playground", "scratch", session),
-      join(home, ".playground", "scratchpad", session),
-    ].map(real),
+    ...SCRATCH_DIRS.map((dir) => real(join(home, ".playground", dir, session))),
     ...(loose ? [path] : []),
     ...(path === settings && (!stat || stat.isFile()) ? [path] : []),
   ]
@@ -254,7 +255,7 @@ const endedPadOf = (
   path: string,
   home: string,
   ended: Ended,
-  dir: "scratch" | "scratchpad",
+  dir: ScratchDir,
 ): string | undefined => {
   const pad = real(join(home, ".playground", dir))
   const abs = resolve(path)
@@ -291,7 +292,7 @@ const goneScratchOf = (path: string, home: string): string | undefined => {
 }
 
 // The top-level data folders a merged PR retired, A to Z, each with that PR: playground rm removes one whole on any machine, through the trash.
-export const RETIRED: Record<string, string> = {
+const RETIRED: Record<string, string> = {
   ci: "https://github.com/nrjdalal/playground/pull/2567",
 }
 
@@ -532,10 +533,9 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
+  const live = opts.ended
   const ended =
-    (opts.ended &&
-      (endedPadOf(abs, roots.home, opts.ended, "scratchpad") ||
-        endedPadOf(abs, roots.home, opts.ended, "scratch"))) ||
+    (live && SCRATCH_DIRS.map((dir) => endedPadOf(abs, roots.home, live, dir)).find(Boolean)) ||
     (opts.gone && goneScratchOf(abs, roots.home)) ||
     retiredOf(abs, roots.home)
   const carve = carveOutOf(
@@ -580,7 +580,7 @@ export function quarantine(
       ? refused(
           `${abs} holds over ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire: it stays in place`,
         )
-      : ["scratch", "scratchpad"].some(
+      : SCRATCH_DIRS.some(
             (dir) => own === join(real(join(roots.home, ".playground", dir)), opts.session),
           )
         ? refused(
@@ -677,7 +677,7 @@ export function restore(
   // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, a gone session's entry directly in scratch/ or a retired data folder back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
-    const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
+    const pads = SCRATCH_DIRS.map((dir) => real(join(roots.home, ".playground", dir)))
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)
