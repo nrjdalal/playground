@@ -30,29 +30,31 @@ test("a session's role is its seat's: a manager, a worker, checker, runner or pr
   expect(roleOf("my-own-session")).toBe("other")
 })
 
-test("a sample reads load, memory and swap from sysctl, and counts sessions by role and backend", () => {
+test("a sample reads load, memory and swap from sysctl, and counts sessions by role and by each Claude Code backend, a --model local one as local", () => {
   const sample = sampleOf({
     at: new Date("2026-01-02T03:04:05.678Z"),
     sessions: [
       { args: "claude --model glm-4.6", name: "b7k2mq-worker" },
       { args: "claude", name: "c8m3nr-worker" },
       { args: "claude", name: "d9n4ps-builder" },
+      { args: "claude --model local --effort low", name: "h2p5qt-worker" },
+      { args: "claude --model claude-opus-5-5 --effort high", name: "f3q6rv-worker" },
     ],
     sysctl: SYSCTL,
     waiters: 2,
   })
   expect(sample).toEqual({
     at: "2026-01-02T03:04:05Z",
-    backends: { claude: 2, glm: 1 },
+    backends: { claude: 3, glm: 1, local: 1 },
     cores: 12,
     freePct: 64,
     load1: 3.1,
     load15: 5.3,
     load5: 4.2,
     pressure: 2,
-    roles: { manager: 1, worker: 2 },
+    roles: { manager: 1, worker: 4 },
     runSlotWaiters: 2,
-    sessions: 3,
+    sessions: 5,
     swapUsedMB: 512.25,
   })
 })
@@ -69,7 +71,7 @@ test("one read appends its line to the ops folder's machine.jsonl, and a failed 
   const lines = readFileSync(join(ops, "machine.jsonl"), "utf8").trim().split("\n")
   expect(lines).toHaveLength(1)
   expect(JSON.parse(lines[0]!)).toMatchObject({
-    backends: { claude: 0, glm: 1 },
+    backends: { claude: 0, glm: 1, local: 0 },
     runSlotWaiters: 1,
     sessions: 1,
   })

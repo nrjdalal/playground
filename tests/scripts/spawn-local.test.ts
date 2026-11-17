@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { SOURCES } from "../glm-refused-sources"
 import { OLD } from "../session-names"
 import {
+  capacityLog,
   FACTORY_SETTINGS,
   launchAfterRm,
   lw,
@@ -497,5 +498,27 @@ describe("the local gate: at most the sessions this machine's model server takes
     )
     expect(r.code, r.err).toBe(0)
     expect(r.curl).toBeUndefined()
+  })
+})
+
+describe("a local start reads swap-ins as the median of 3 one-second samples", () => {
+  const start = ["worker", "t4n7vx-worker", "b.md", "--backend", "local"]
+
+  test.each([
+    ["lands on one second at 8403/s, the seconds after it at 5/s", "8403 5 5"],
+    ["reads one second at 8403/s between seconds at 5/s", "5 8403 5"],
+  ])("PG-2659 a start that %s passes, reading 5/s", async (_, swapins) => {
+    const r = await local(start, { FAKE_SWAPINS: swapins })
+    expect(r.code, r.err).toBe(0)
+    expect(capacityLog(r).at(-1).readings.swapins).toBe(5)
+  })
+
+  test("PG-2659 swap-ins over 100/s in two of the three seconds still refuse", async () => {
+    const r = await local(start, { FAKE_SWAPINS: "150 8403 120" })
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(
+      "the memory gate holds it: swap-ins are 150/s (vm_stat), and a local session starts under 100/s",
+    )
+    expect(placing(r)).toEqual([])
   })
 })

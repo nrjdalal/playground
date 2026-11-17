@@ -30,7 +30,7 @@ Before turbo starts, the launcher's `preflight()` (`api/hono/src/lib/dev/launch.
 
 A pass prints `dev: database <proof>`; on the live dashboard's checkout (branch `live.branch`) the launcher then sets `PLAYGROUND_BARE_NAMES`, which `packages/scripts/src/portless.ts` reads to trust the bare web origin beside the apps' own `desk.` URLs, and every 2s points the aliases `playground.localhost` and `api.playground.localhost` at the ports portless gave the apps, read from its routes (`syncAliases()` in `api/hono/src/lib/dev/launch.ts`), printing `dev: portless alias <name> -> <port>` each time one moves. An alias never takes a name a running stack holds; the failure prints once. Then it prints `dev: dashboard source matched <rule>`, then `dev: dashboard reads the fixture written to <dir>` on a fixture stack, or, on a stack reading this machine, a line saying it shows every real session, so take no screenshots of it. On the live dashboard's checkout and a person's own clone it then runs the main checkout's `bun run ops:herdr start` (never this checkout's, which on the live dashboard is its branch's latest head), which brings the herdr servers up when they are down (playbook's LIFECYCLE.md, Ops jobs), and prints its `dev: ops-herdr: …` line; the stack starts whatever that line says. A dry run (`--dry`, `--dry-run`, either with `=json`) starts nothing and skips the launcher's checks; `bun run dev` hands its arguments to the launcher alone, so the running-stack refusal and the prebuild still run before it.
 
-Start the stack on its own, as one Bash call with `run_in_background: true`:
+Start the stack on its own, as one Bash call with `run_in_background: true`, outside run-slot, which refuses a dev stack since it never exits:
 
 ```bash
 bun run dev --ui stream > /tmp/playground-dev.log 2>&1
@@ -59,6 +59,8 @@ Drop `--cacert <pdir>/ca.pem` when that folder holds no `ca.pem`; on Linux, a he
 Ready when the health curl prints `"message":"ok"` with `"db":"ok"` and `"dashboard":"fixture"` (`"live"` on the live dashboard, a live-reads stack or a person's own clone, `"hosted"` on a hosted build) and `/` returns `307` to `/dashboard` (`200` with `curl -L`). To fill the Sessions page's tables from the fixture's transcripts, run `bun run ingest` once in the worktree: on a fixture stack it reads the fixture's config folder, and the Sessions pages show only what it read from there, so a database an older stack filled shows none of its old rows. `PORTLESS_STATE_DIR=<pdir> bunx portless list` shows every active route.
 
 An edit to the fixture's `machine.json` that the System sampler reads (the made-up machine's size, load, update, origin and account) shows on the sampler's next cycle (`INTERVAL_MS` in `api/hono/src/lib/system/sampler.ts`), 25 to 50 s later as testers saw, so a reload before then still shows the old values.
+
+A settings write on a fixture stack takes the fixture login's scope, `taylor`, as the `ui-verify` skill's Settings write line says.
 
 Then run `bun run verify health` (it checks the version against your `HEAD`) and grep the dev log for `Is port`: portless can hand a new API a port another worktree's Next already holds, and `/api/health` then answers from the other stack. `verify` runs one check a call: for several, run each (`verify health`, then `verify cursor`) or `verify all`, which a bare `bun run verify` runs too; a word after any check but `pages`, `extension-node`, `screenshots`, `cls`, `tooltips` or `all` is refused, not ignored, but for `ended`, which takes one session name.
 
