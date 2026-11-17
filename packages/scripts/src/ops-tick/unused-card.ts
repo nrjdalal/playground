@@ -19,6 +19,8 @@ export type CardItem = {
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }
+// A pick with at, the position of its question on the card, which a saved card's item must hold.
+export type AnsweredPick = CardPick & { at: number }
 // The open card nightly-clean keeps in its state file: its Inbox id and the items it asks about.
 export type CardState = { id: string; items: CardItem[] }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
@@ -138,17 +140,19 @@ export const cardOf = (items: CardItem[]) => {
 }
 
 // Pure: each item the owner's answer picked Remove for, read back from the card's own words: a single question's Approve, or each question's Remove pick; none while the card is unanswered, denied, or from another poster than from.
-export const approvedOf = (card: CardAnswer, from: string): CardPick[] => {
+export const approvedOf = (card: CardAnswer, from: string): AnsweredPick[] => {
   if (card.from !== from || card.status !== "approved" || card.preview?.type !== "ask") return []
-  const read = (question: string) => {
+  const read = (question: string, at: number) => {
     const m = QUESTION.exec(question)
-    return m ? [{ bytes: Number(m[3]), machine: m[2]!, path: m[1]! }] : []
+    return m ? [{ at, bytes: Number(m[3]), machine: m[2]!, path: m[1]! }] : []
   }
   const { questions, text } = card.preview
   if (!questions)
-    return card.answer?.choice === "approve" ? read((text ?? "").split("\n")[0] ?? "") : []
+    return card.answer?.choice === "approve" ? read((text ?? "").split("\n")[0] ?? "", 0) : []
   const picks = picksOf(card.preview as Parameters<typeof picksOf>[0], card.answer?.options ?? [])
-  return (picks ?? []).flatMap((pick) => (pick.label === "Remove" ? read(pick.question) : []))
+  return (picks ?? []).flatMap((pick, at) =>
+    pick.label === "Remove" ? read(pick.question, at) : [],
+  )
 }
 
 // What the card's night reads and runs: ask runs `bun run ask <args>` with stdin, remove takes one of this machine's picks away (docker image rm by its id, else playground rm --card), from is the ops manager's name the card posts under, here this machine's name, and out whether a rehearsal's tag is out.
@@ -174,14 +178,17 @@ export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAn
   return lastLine(read.out) || `exit ${read.code}`
 }
 
-// Pure: each Remove pick on card id that the card nightly-clean saved also holds at the same machine, path and size, so an edit of the card's words after the owner answered approves nothing it did not ask.
+// Pure: each Remove pick on card id whose question's position holds the same machine, path and size in the card nightly-clean saved, the order cardOf built its questions in, so an edit of the card's words or order after the owner answered approves nothing it did not ask.
 export const savedPicks = (
-  picks: CardPick[],
+  picks: AnsweredPick[],
   saved: CardState | undefined,
   id: string,
-): CardPick[] =>
+): AnsweredPick[] =>
   saved?.id === id
-    ? picks.filter((p) => saved.items.some((i) => keyOf(i) === keyOf(p) && i.bytes === p.bytes))
+    ? picks.filter((p) => {
+        const item = saved.items[p.at]
+        return !!item && keyOf(item) === keyOf(p) && item.bytes === p.bytes
+      })
     : []
 
 // Pure: the command Ops runs by hand on a peer for one approved item, since nothing approved crosses ssh as a delete.
@@ -233,7 +240,7 @@ export async function cardNight(
         said: `card ${card.id} open, ${tonight.length} items`,
       }
     }
-    const picks = approvedOf(item, deps.from)
+    const picks = savedPicks(approvedOf(item, deps.from), card, card.id)
     const listed = new Map(
       found.flatMap((m) =>
         "why" in m

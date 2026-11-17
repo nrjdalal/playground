@@ -92,7 +92,7 @@ test("an approval reads back each Remove pick from the card's own words, and non
     status: "approved",
   }
   expect(approvedOf(many, "ops")).toEqual([
-    { bytes: image.bytes, machine: "here", path: image.path },
+    { at: 1, bytes: image.bytes, machine: "here", path: image.path },
   ])
   expect(approvedOf(many, "builder")).toEqual([])
   const one = {
@@ -102,7 +102,7 @@ test("an approval reads back each Remove pick from the card's own words, and non
     status: "approved",
   }
   expect(approvedOf(one, "ops")).toEqual([
-    { bytes: weights.bytes, machine: "here", path: weights.path },
+    { at: 0, bytes: weights.bytes, machine: "here", path: weights.path },
   ])
   expect(approvedOf({ ...one, answer: { choice: "deny" }, status: "denied" }, "ops")).toEqual([])
 })
@@ -128,6 +128,22 @@ test("an edit of the card's words after the owner's answer approves nothing the 
   expect(savedPicks(approvedOf(edited, "ops"), saved, ID).map((p) => p.path)).toEqual([image.path])
   expect(savedPicks(approvedOf(answered, "ops"), { ...saved, id: "another" }, ID)).toEqual([])
   expect(savedPicks(approvedOf(answered, "ops"), undefined, ID)).toEqual([])
+})
+
+test("a card whose questions an edit reordered after the answer removes nothing the owner kept", async () => {
+  const items = offered([here(weights, image)], HOME, out, {})
+  const answer = { choice: "approve", options: [0, 1] }
+  const reordered = { ...cardOf([...items].reverse()), answer, from: "ops", status: "approved" }
+  expect(approvedOf(reordered, "ops").map((p) => p.path)).toEqual([image.path])
+  expect(savedPicks(approvedOf(reordered, "ops"), { id: ID, items }, ID)).toEqual([])
+  const { deps, removed, setPosted } = inbox({ answer, status: "approved" })
+  setPosted({ from: "ops", ...cardOf([...items].reverse()) })
+  const night = await cardNight([here(weights, image)], HOME, { card: { id: ID, items } }, deps)
+  expect(removed).toEqual([])
+  expect(night.kept).toEqual({
+    [`here ${weights.path}`]: weights.bytes,
+    "here docker image old:1": image.bytes,
+  })
 })
 
 test("a peer's approved item is a command Ops runs by hand, naming the card", () => {
