@@ -500,6 +500,7 @@ describe("certificateCheck", () => {
     certutil: true,
     chromium: [],
     firefox: [PROFILE],
+    policy: [],
     untrusted: [],
     ...over,
   })
@@ -535,6 +536,14 @@ describe("certificateCheck", () => {
       status: "ok",
     })
     expect(certificateCheck(read({ firefox: [] }), CA, "/repo").detail).toBe("no browser found")
+  })
+
+  test("ok naming the browsers the chromium-ca policy covers (PG-2458)", () => {
+    expect(certificateCheck(read({ firefox: [], policy: ["helium"] }), CA, "/repo")).toEqual({
+      detail: `helium trust ${CA} through the browser policy`,
+      name: "browser certificate",
+      status: "ok",
+    })
   })
 })
 

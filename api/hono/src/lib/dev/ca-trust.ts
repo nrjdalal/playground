@@ -2,7 +2,7 @@ import { X509Certificate } from "node:crypto"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-// Which of Linux's browsers trust portless's CA, which no setup step puts in a browser's own store. Firefox keeps an NSS store in each profile, read here and written by the ca-trust fix with certutil. A Chromium-family browser trusts the CA only through its own certificate manager, which no file here reads: ~/.pki/nssdb holding it as C,, was measured not to count on Chromium 157 and 159. Imports only node: modules, since playground doctor reads it too.
+// Which of Linux's browsers trust portless's CA, which no setup step puts in a browser's own store. Firefox keeps an NSS store in each profile, read here and written by the ca-trust fix with certutil. A Chromium-family browser trusts the CA through its own certificate manager, which no file here reads, or through the managed policy the chromium-ca root step writes, read here: ~/.pki/nssdb holding it as C,, was measured not to count on Chromium 157 and 159. Imports only node: modules, since playground doctor reads it too.
 
 export const CA_NAME = "portless Local CA"
 
@@ -18,9 +18,13 @@ export const CHROMIUM = [
   "vivaldi",
 ]
 
+// The managed policy the chromium-ca root step writes (api/hono/src/lib/system/root/chromium-ca) in the folder Chromium and Helium read, world-readable, and the browsers on PATH that read it.
+export const CA_POLICY = "/etc/chromium/policies/managed/portless-ca.json"
+const READS_CA_POLICY = ["chromium", "chromium-browser", "helium"]
+
 // In a Chromium-family browser's own words: its certificate manager's import, and the page info button that drops a Proceed made before it (IDS_PAGE_INFO_RESET_INVALID_CERTIFICATE_DECISIONS_BUTTON, "Turn on warnings").
 export const chromiumSteps = (browsers: string[], ca: string): string =>
-  `In ${browsers.join(", ")}, open chrome://certificate-manager, then Local certificates, Custom, Installed by you, Trusted certificates, and Import ${ca}. Restart the browser. If the address still reads Not secure, click it and choose Turn on warnings, which drops a Proceed you clicked before.`
+  `In ${browsers.join(", ")}, open chrome://certificate-manager, then Local certificates, Custom, Installed by you, Trusted certificates, and Import ${ca}. Restart the browser. If the address still reads Not secure, click it and choose Turn on warnings, which drops a Proceed you clicked before.${browsers.some((cmd) => READS_CA_POLICY.includes(cmd)) ? " Helium and Chromium can trust it instead through the chromium-ca root step, which you approve in the Inbox." : ""}`
 
 export type CaProbe = {
   has: (cmd: string) => boolean
@@ -31,6 +35,7 @@ export type CaTrust = {
   certutil: boolean
   chromium: string[]
   firefox: string[]
+  policy: string[]
   untrusted: string[]
 }
 
@@ -54,9 +59,9 @@ export const firefoxProfiles = (home: string): string[] =>
   })
 
 // A certificate's public key, so a copy the proxy signed again still matches its CA; null for text that holds none.
-const keyOf = (pem: string): string | null => {
+const keyOf = (cert: string | Buffer): string | null => {
   try {
-    return new X509Certificate(pem).publicKey
+    return new X509Certificate(cert).publicKey
       .export({ format: "der", type: "spki" })
       .toString("hex")
   } catch {
@@ -87,8 +92,29 @@ const trustedIn = async (profile: string, key: string, probe: CaProbe): Promise<
   )
 }
 
-// What trusts the CA file at ca: each Firefox profile, those that do not (every one while certutil is missing, since none can be read), and the Chromium-family browsers on PATH, which only the owner's import reaches.
-export const readCaTrust = async (ca: string, home: string, probe: CaProbe): Promise<CaTrust> => {
+// Whether the managed policy at path names the CA's key among the certificates it trusts.
+const policyHolds = (path: string, key: string): boolean => {
+  try {
+    const policy = JSON.parse(readFileSync(path, "utf8")) as {
+      CACertificatesWithConstraints?: { certificate?: string }[]
+    }
+    return (policy.CACertificatesWithConstraints ?? []).some(
+      (entry) =>
+        typeof entry.certificate === "string" &&
+        keyOf(Buffer.from(entry.certificate, "base64")) === key,
+    )
+  } catch {
+    return false
+  }
+}
+
+// What trusts the CA file at ca: each Firefox profile, those that do not (every one while certutil is missing, since none can be read), the Chromium-family browsers on PATH that the managed policy at policyPath covers (none with no path), and the rest, which only the owner's import reaches.
+export const readCaTrust = async (
+  ca: string,
+  home: string,
+  probe: CaProbe,
+  policyPath: string | null = CA_POLICY,
+): Promise<CaTrust> => {
   const firefox = firefoxProfiles(home)
   const certutil = probe.has("certutil")
   const key = (() => {
@@ -101,5 +127,23 @@ export const readCaTrust = async (ca: string, home: string, probe: CaProbe): Pro
   const untrusted: string[] = []
   for (const profile of firefox)
     if (!certutil || !key || !(await trustedIn(profile, key, probe))) untrusted.push(profile)
-  return { certutil, chromium: CHROMIUM.filter((cmd) => probe.has(cmd)), firefox, untrusted }
+  const covered = key !== null && policyPath !== null && policyHolds(policyPath, key)
+  const onPath = CHROMIUM.filter((cmd) => probe.has(cmd))
+  const byPolicy = (cmd: string) => covered && READS_CA_POLICY.includes(cmd)
+  return {
+    certutil,
+    chromium: onPath.filter((cmd) => !byPolicy(cmd)),
+    firefox,
+    policy: onPath.filter(byPolicy),
+    untrusted,
+  }
 }
+
+// Pure: where the CA is trusted, as an ok row reads it.
+export const trustedWhere = (read: CaTrust): string =>
+  [
+    read.firefox.length > 0 && "trusted in Firefox",
+    read.policy.length > 0 && `trusted in ${read.policy.join(", ")} through the browser policy`,
+  ]
+    .filter(Boolean)
+    .join("; ") || "no browser found"

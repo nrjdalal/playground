@@ -1,5 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
-// ca-trust.ts: on Linux, imports portless's CA into each Firefox profile that does not trust it yet, with certutil as the signed-in user, then says to restart Firefox, since a running browser keeps its old store, and names a Chromium-family browser's own import, which no file reaches. First run's Trust it in Firefox runs it on the owner's click; it installs nothing and asks for no password.
+// ca-trust.ts: on Linux, imports portless's CA into each Firefox profile that does not trust it yet, with certutil as the signed-in user, then says to restart Firefox, since a running browser keeps its old store, and names a Chromium-family browser's own import, which no file reaches, for each one the chromium-ca policy does not cover. First run's Trust it in Firefox runs it on the owner's click; it installs nothing and asks for no password.
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -54,6 +54,8 @@ export const trustCa = async (
         ? "Restart Firefox if it is open, since a running browser keeps its old store."
         : "Firefox already trusts portless's CA in every profile.",
     )
+  if (read.policy.length > 0)
+    lines.push(`${read.policy.join(", ")} trust portless's CA through the browser policy.`)
   if (read.chromium.length > 0) lines.push(chromiumSteps(read.chromium, ca))
   if (lines.length === 0) lines.push("No Firefox profile or Chromium-family browser was found.")
   return { code: 0, lines }
