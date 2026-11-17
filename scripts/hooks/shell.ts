@@ -297,8 +297,9 @@ export const WRAPPERS = new Map<string, Options>(
   ]),
 )
 
-// A package runner's options before its program, as a wrapper's are, with those whose value is a shell script it runs (`script`), the flags that run its words joined as one script (`joined`, true for a runner that always does), whether its program word is a package name a version may follow (`spec`), and whether tool names sit before a `--` and the program (`tools`); a folder option (`bunx --cwd`, `pnpm -C`) is read as an option alone, as each folder guard reads the runners it knows itself
+// A package runner's options before its program, as a wrapper's are, with those whose value is a shell script it runs (`script`), the flags that run its words joined as one script (`joined`, true for a runner that always does), whether its program word is a package name a version may follow (`spec`), whether tool names sit before a `--` and the program (`tools`), and the options naming the folder it runs its program in (`folder`, `bunx --cwd`, `pnpm -C`), which move the program's reading as env -C does
 type Runner = Options & {
+  folder: Set<string>
   joined: Set<string> | true
   script: Set<string>
   spec: boolean
@@ -307,9 +308,17 @@ type Runner = Options & {
 const runner = (
   flags: string,
   values: string,
-  more: { always?: true; joined?: string; script?: string; spec?: true; tools?: true } = {},
+  more: {
+    always?: true
+    folder?: string
+    joined?: string
+    script?: string
+    spec?: true
+    tools?: true
+  } = {},
 ): Runner => ({
   flags: new Set(flags.split(" ")),
+  folder: new Set(more.folder?.split(" ")),
   joined: more.always ?? new Set(more.joined?.split(" ")),
   script: new Set(more.script?.split(" ")),
   spec: !!more.spec,
@@ -325,7 +334,7 @@ const NPM = runner(
 const BUNX = runner(
   "--bun --ignore-scripts --no-install --silent --trust --verbose",
   "-p --ca --cafile --cwd --env-file --minimum-release-age --package --registry",
-  { spec: true },
+  { folder: "--cwd", spec: true },
 )
 const PNPM_FLAGS =
   "-c -r -w -y --aggregate-output --color --fail-if-no-match --ignore-workspace --include-workspace-root --no-fail-if-no-match --no-include-workspace-root --no-progress --no-sort --parallel --recursive --reverse --shell-mode --sort --stream --use-stderr --workspace-root --yes"
@@ -334,7 +343,7 @@ const PNPM_VALUES =
 const PNPM_DLX = runner(
   `${PNPM_FLAGS} -v --version`,
   `${PNPM_VALUES} --allow-build --cpu --libc --os --package`,
-  { joined: "-c --shell-mode", spec: true },
+  { folder: "-C --dir", joined: "-c --shell-mode", spec: true },
 )
 const MISE = runner(
   "--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all",
@@ -351,8 +360,8 @@ const DENO = runner(
   { spec: true },
 )
 export const RUNNERS = new Map<string, Runner>([
-  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true })],
-  ["bun run", runner(BUN_FLAGS, BUN_VALUES)],
+  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true, folder: "--cwd" })],
+  ["bun run", runner(BUN_FLAGS, BUN_VALUES, { folder: "--cwd" })],
   ["bun x", BUNX],
   ["bunx", BUNX],
   ["corepack", runner("", "", { spec: true })],
@@ -364,7 +373,7 @@ export const RUNNERS = new Map<string, Runner>([
   ["npm x", NPM],
   ["npx", NPM],
   ["pnpm dlx", PNPM_DLX],
-  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { joined: "-c --shell-mode" })],
+  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
@@ -1954,6 +1963,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     for (let w = peek(); w; w = peek()) {
       const v = w.value
       const script = runs && namedOption(v, runs, runs.script)
+      const folder = runs && namedOption(v, runs, runs.folder)
       if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
       if (runs && runs.joined !== true && joinsWords(v, runs.joined)) joined = true
       if (ASSIGN.test(v)) assign(local, take() as Word)
@@ -1982,6 +1992,10 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
+      } else if (folder !== undefined) {
+        // a runner's folder option is where its program runs, read as env -C's folder is, with no reading of its value as the program
+        take()
+        state.chdir = chdirOf(state, folder === -1 ? take() : slice(w, folder))
       } else if (script !== undefined) {
         // a runner's script option runs its value in a shell, read as `sh -c` reads it
         take()
@@ -2159,7 +2173,7 @@ function scopeAt(name: string, args: Word[], at: number) {
   return scope && { ...scope, words: SCOPES.has(two) ? 2 : 1 }
 }
 
-// Whether bun run's or pnpm's name is a script of the nearest package.json at or above the folder the shell is in, which each runs in place of a program of that name (measured: `bun run echo` and `pnpm echo` run a script named echo, from a subfolder too); false wherever the folder is unread
+// Whether bun run's or pnpm's name is a script of the nearest package.json at or above the folder it runs in (readingEnv), which each runs in place of a program of that name (measured: `bun run echo` and `pnpm echo` run a script named echo, from a subfolder too); false wherever the folder is unread
 export function runsScript({ first, via }: Parsed, env: Env): boolean {
   if (via !== "bun run" && via !== "pnpm") return false
   const name = first?.value
@@ -2921,7 +2935,7 @@ export async function examine(
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
   if (verdict) return verdict
   for (const parsed of others) {
-    if (runsScript(parsed, before)) continue
+    if (runsScript(parsed, readingEnv(cmd, parsed, before))) continue
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
@@ -3306,6 +3320,20 @@ const apart = (env: Env): Env => ({
   vars: new Map(env.vars),
 })
 
+// The folder a reading runs in: env -C's or a runner's folder option runs the command in the folder it names, wherever the shell is, so its own reading of the folder, or the literal absolute path a steady variable there holds, replaces every other; a runner's program whose folder the reader cannot place is judged in the shell's own folder, as the runner's own reading is
+function readingEnv(cmd: Command, { chdir, via }: Parsed, env: Env): Env {
+  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
+  if (!chdir || (via && into === undefined)) return env
+  return {
+    ...env,
+    cwd: into,
+    cwdHeld: [],
+    cwdMaybe: [],
+    cwdSure: into,
+    cwdUnread: into === undefined,
+  }
+}
+
 async function examineReading(
   cmd: Command,
   parsed: Parsed,
@@ -3313,19 +3341,8 @@ async function examineReading(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  const { args, chdir, local, name } = parsed
-  // env -C runs the command in the folder it names, wherever the shell is, so its own reading of the folder, or the literal absolute path a steady variable there holds, replaces every other
-  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
-  const here: Env = chdir
-    ? {
-        ...env,
-        cwd: into,
-        cwdHeld: [],
-        cwdMaybe: [],
-        cwdSure: into,
-        cwdUnread: into === undefined,
-      }
-    : env
+  const { args, local, name } = parsed
+  const here = readingEnv(cmd, parsed, env)
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {

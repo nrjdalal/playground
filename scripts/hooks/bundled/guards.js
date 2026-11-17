@@ -403,6 +403,7 @@ var WRAPPERS = new Map(Object.entries({
 ]));
 var runner = (flags, values, more = {}) => ({
   flags: new Set(flags.split(" ")),
+  folder: new Set(more.folder?.split(" ")),
   joined: more.always ?? new Set(more.joined?.split(" ")),
   script: new Set(more.script?.split(" ")),
   spec: !!more.spec,
@@ -410,17 +411,17 @@ var runner = (flags, values, more = {}) => ({
   values: new Set(values.split(" "))
 });
 var NPM = runner("-y --dangerously-allow-all-scripts --include-workspace-root --no --strict-allow-scripts --workspaces --yes", "-c -w --allow-scripts --call --package --workspace", { script: "-c --call", spec: true });
-var BUNX = runner("--bun --ignore-scripts --no-install --silent --trust --verbose", "-p --ca --cafile --cwd --env-file --minimum-release-age --package --registry", { spec: true });
+var BUNX = runner("--bun --ignore-scripts --no-install --silent --trust --verbose", "-p --ca --cafile --cwd --env-file --minimum-release-age --package --registry", { folder: "--cwd", spec: true });
 var PNPM_FLAGS = "-c -r -w -y --aggregate-output --color --fail-if-no-match --ignore-workspace --include-workspace-root --no-fail-if-no-match --no-include-workspace-root --no-progress --no-sort --parallel --recursive --reverse --shell-mode --sort --stream --use-stderr --workspace-root --yes";
 var PNPM_VALUES = "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages";
-var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { joined: "-c --shell-mode", spec: true });
+var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { folder: "-C --dir", joined: "-c --shell-mode", spec: true });
 var MISE = runner("--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all", "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets", { script: "-c --command", tools: true });
 var BUN_FLAGS = "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces";
 var BUN_VALUES = "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell";
 var DENO = runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true });
 var RUNNERS = new Map([
-  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true })],
-  ["bun run", runner(BUN_FLAGS, BUN_VALUES)],
+  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true, folder: "--cwd" })],
+  ["bun run", runner(BUN_FLAGS, BUN_VALUES, { folder: "--cwd" })],
   ["bun x", BUNX],
   ["bunx", BUNX],
   ["corepack", runner("", "", { spec: true })],
@@ -432,7 +433,7 @@ var RUNNERS = new Map([
   ["npm x", NPM],
   ["npx", NPM],
   ["pnpm dlx", PNPM_DLX],
-  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { joined: "-c --shell-mode" })],
+  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
@@ -1831,6 +1832,7 @@ function unwrap(state, inside, budget) {
     for (let w = peek();w; w = peek()) {
       const v = w.value;
       const script = runs && namedOption(v, runs, runs.script);
+      const folder = runs && namedOption(v, runs, runs.folder);
       if (wrapper === "xargs")
         xargsOption(state.xargs ??= {}, w, next(), state);
       if (runs && runs.joined !== true && joinsWords(v, runs.joined))
@@ -1861,6 +1863,9 @@ function unwrap(state, inside, budget) {
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
       } else if (wrapper === "env" && v === "-") {
         take();
+      } else if (folder !== undefined) {
+        take();
+        state.chdir = chdirOf(state, folder === -1 ? take() : slice(w, folder));
       } else if (script !== undefined) {
         take();
         const text = script === -1 ? take() : slice(w, script);
@@ -2655,7 +2660,7 @@ async function examine(cmd, env, visit, builtins) {
   if (verdict)
     return verdict;
   for (const parsed of others) {
-    if (runsScript(parsed, before))
+    if (runsScript(parsed, readingEnv(cmd, parsed, before)))
       continue;
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins);
     if (verdict)
@@ -2965,17 +2970,22 @@ var apart = (env) => ({
   process: { ...env.process },
   vars: new Map(env.vars)
 });
-async function examineReading(cmd, parsed, env, visit, builtins) {
-  const { args, chdir, local, name } = parsed;
+function readingEnv(cmd, { chdir, via }, env) {
   const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
-  const here = chdir ? {
+  if (!chdir || via && into === undefined)
+    return env;
+  return {
     ...env,
     cwd: into,
     cwdHeld: [],
     cwdMaybe: [],
     cwdSure: into,
     cwdUnread: into === undefined
-  } : env;
+  };
+}
+async function examineReading(cmd, parsed, env, visit, builtins) {
+  const { args, local, name } = parsed;
+  const here = readingEnv(cmd, parsed, env);
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
