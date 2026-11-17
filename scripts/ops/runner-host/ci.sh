@@ -32,7 +32,8 @@ SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o 
   -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "$(id -un)@$IP")
 # the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
-# the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there, and record() puts it in the box's machine record (record.test.ts holds it to the check's watched places)
+# the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there
+# record() puts it in the box's machine record, and record.test.ts holds it to the check's watched places
 BOX_CI_DIR=.cache/playground-ci
 SUITE_PEAK_KB=$((4608 * 1024))
 PEAK_KB=$((2 * 1024 * 1024))
