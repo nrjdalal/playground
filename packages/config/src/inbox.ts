@@ -8,10 +8,10 @@ export const PROGRESS_LANGUAGE = "progress"
 
 export type ProgressItem = { eta: string; name: string; percent: number; text: string }
 
-// Why a progress block's line does not read: too few or too many fields (`count` of them), a percent outside 0 to 100, or no line at all; `line` counts from 1 inside the block.
+// Why a progress block's line does not read: no line at all, too few or too many fields (`count` of them), or a percent outside 0 to 100; `line` counts from 1 inside the block.
 export type ProgressFault =
-  | { count: number; kind: "fields"; line: number; text: string }
   | { kind: "empty"; line: 0; text: "" }
+  | { count: number; kind: "fields"; line: number; text: string }
   | { kind: "percent"; line: number; text: string }
 
 const PERCENT = /^(\d{1,3}(?:\.\d+)?)%?$/
