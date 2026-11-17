@@ -6778,7 +6778,21 @@ function staticLine(line) {
   const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
   return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename2(w.value).toLowerCase()));
 }
-function remoteEnv(env, line, fed = false) {
+var GLOB_SWITCHES = [
+  /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
+  /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*[o4](?=\s|$)/i,
+  /bashopts|dotglob|fignore|globdots|globignore/i,
+  /[*?[][^\s;&|()]*\([^()\s|]*\)/
+];
+function globSwitch(text) {
+  const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+  for (const pattern of GLOB_SWITCHES) {
+    const found = pattern.exec(bare);
+    if (found)
+      return found[0].trim();
+  }
+}
+function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -6799,6 +6813,7 @@ function remoteEnv(env, line, fed = false) {
     oldFrom: undefined,
     remote: true,
     remoteDots: fed || !staticLine(line),
+    remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };
 }
@@ -10606,6 +10621,7 @@ var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWit
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
+var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook does not read, since it can let a glob in the home match the data folder: write it as plain words or run it locally`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -12323,8 +12339,6 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     reachSeen.set(at, names);
     return names;
   };
-  const bare = typeof input.command === "string" ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "") : "";
-  const dotsOn = /dotglob|globdots|globignore/i.test(bare) || /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare);
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
@@ -12382,7 +12396,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
         const folder = dir && dirname4(dir);
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0];
         const climbs = text.value.slice(glob.index).split("/").includes("..");
-        const reaches = (folder) => inRoot(folder) || (real(folder) === sep2 ? rootNames().some((entry) => mayMatch(segment, entry)) : !env.remote || remover || climbs || reachNames(folder).some((name) => globMatches2(segment, name, dotsOn || !!env.remoteDots)));
+        const reaches = (folder) => inRoot(folder) || (real(folder) === sep2 ? rootNames().some((entry) => mayMatch(segment, entry)) : !env.remote || remover || climbs || reachNames(folder).some((name) => globMatches2(segment, name, !!env.remoteDots)));
         if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`;
       }
@@ -12493,8 +12507,11 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
+    if (env.remote && env.remoteSwitch)
+      return GLOB_SWITCH(env.remoteSwitch);
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true));
+      const fed = cmd.words.map((word) => word.value).join(" ");
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true, fed));
       if (verdict)
         return verdict;
     }

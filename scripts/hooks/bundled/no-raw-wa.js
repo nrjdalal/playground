@@ -663,7 +663,21 @@ function staticLine(line) {
   const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
   return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()));
 }
-function remoteEnv(env, line, fed = false) {
+var GLOB_SWITCHES = [
+  /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
+  /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*[o4](?=\s|$)/i,
+  /bashopts|dotglob|fignore|globdots|globignore/i,
+  /[*?[][^\s;&|()]*\([^()\s|]*\)/
+];
+function globSwitch(text) {
+  const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+  for (const pattern of GLOB_SWITCHES) {
+    const found = pattern.exec(bare);
+    if (found)
+      return found[0].trim();
+  }
+}
+function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -684,6 +698,7 @@ function remoteEnv(env, line, fed = false) {
     oldFrom: undefined,
     remote: true,
     remoteDots: fed || !staticLine(line),
+    remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };
 }

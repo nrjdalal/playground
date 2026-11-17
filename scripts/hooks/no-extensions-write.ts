@@ -131,6 +131,9 @@ const refuseNearEval = (program: string) => (what: string) =>
 // text the shell runs as code where the lexer reads a plain word (evaluatedParts), read past by the reader, so code naming the root's folders may write there
 const EVALUATES_ROOT =
   "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
+// a shell feature that changes what a glob matches, on a line a remote shell runs, which the hook refuses in any spelling rather than reads (globSwitch in shell.ts)
+const GLOB_SWITCH = (found: string) =>
+  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook does not read, since it can let a glob in the home match the data folder: write it as plain words or run it locally`
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -409,7 +412,7 @@ function alternatives(word: string): string[] {
   const [before, after] = [word.slice(0, group.index), word.slice(group.index + group[0].length)]
   return group[1].split("|").flatMap((alt) => alternatives(before + alt + after))
 }
-// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with no dotglob or GLOB_DOTS (`dots`), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group or a zsh qualifier follows
+// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with `dots` off (a fully static remote line, which holds no glob-option switch once visit has refused one), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group or a zsh qualifier follows
 function globMatches(segment: string, name: string, dots: boolean): boolean {
   const words = braceWords(segment)?.flatMap(alternatives)
   if (!words || words.length > 64) return true
@@ -2155,14 +2158,6 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes, backslashes or a backslash-newline inside, or zsh's -4) spelled on the line lets a glob match a name led by a dot; a remote line not fully static counts as one too (`remoteDots`, set by remoteEnv)
-  const bare =
-    typeof input.command === "string"
-      ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
-      : ""
-  const dotsOn =
-    /dotglob|globdots|globignore/i.test(bare) ||
-    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2240,7 +2235,7 @@ async function inspect(
         const folder = dir && dirname(dir)
         // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none; any other folder above the root fails closed on a glob, since code text (`node -e '…'`, an awk program) reads as one there
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0]
-        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in a folder above the root reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it
+        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in a folder above the root reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it; a dot-led name matches only on a line not fully static (`remoteDots`), since visit refuses one holding a glob-option switch first (`remoteSwitch`)
         const climbs = text.value.slice(glob.index).split("/").includes("..")
         const reaches = (folder: string) =>
           inRoot(folder) ||
@@ -2249,9 +2244,7 @@ async function inspect(
             : !env.remote ||
               remover ||
               climbs ||
-              reachNames(folder).some((name) =>
-                globMatches(segment, name, dotsOn || !!env.remoteDots),
-              ))
+              reachNames(folder).some((name) => globMatches(segment, name, !!env.remoteDots)))
         if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`
       }
@@ -2410,10 +2403,13 @@ async function inspect(
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
+    // a glob-option switch on a remote line or in the script a remote shell reads is refused, never read, so a spelling no list names is refused too
+    if (env.remote && env.remoteSwitch) return GLOB_SWITCH(env.remoteSwitch)
     // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
     // a command ssh's stdin reads as code was typed here, so its text is judged from the remote home too, as its local twin there would be
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true))
+      const fed = cmd.words.map((word) => word.value).join(" ")
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true, fed))
       if (verdict) return verdict
     }
     const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed)
