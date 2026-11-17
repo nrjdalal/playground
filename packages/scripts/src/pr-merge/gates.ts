@@ -2,6 +2,7 @@
 
 import { atHead, verdictsOf, type GateName, type Verdict } from "@packages/config/verdicts"
 
+import { newUserFiles } from "../new-user-gate/paths"
 import { bodyRefusal } from "./body"
 import type { Lost } from "./lost"
 
@@ -318,7 +319,7 @@ function reviewGate(facts: PrFacts): Gate {
   }
 }
 
-// Pure: the newest tester's word on the head, for a diff that touches web/next/ alone, since a UI change merges only once its tester has driven it; null for any other diff.
+// Pure: the newest tester's word on the head, for a diff that touches web/next/, since a UI change merges only once its tester has driven it; null for any other diff.
 function testerGate(facts: PrFacts): Gate | null {
   if (!facts.files.some((path) => path.startsWith("web/next/"))) return null
   const tester = verdictsAt(facts).get("tester")
@@ -332,6 +333,24 @@ function testerGate(facts: PrFacts): Gate | null {
   return {
     detail: `a web/next diff waits for its tester's drive: missing ## TesterBot · PASS at ${sha} from ${facts.owner}; spawn or resume the PR's tester, which posts ## TesterBot · PASS at ${sha}`,
     name: "tester",
+    ok: false,
+  }
+}
+
+// Pure: the newest new-user gate's word on the head, for a diff that touches what a new user meets first (NEW_USER_PATHS), since a broken installer shows nowhere else before a ship; INCONCLUSIVE refuses like FAIL; null for any other diff.
+function newUserGate(facts: PrFacts): Gate | null {
+  const matched = newUserFiles(facts.files)
+  if (matched.length === 0) return null
+  const ran = verdictsAt(facts).get("new-user")
+  if (ran)
+    return {
+      detail: ran.pass ? ran.text : `newest new-user gate verdict is not a pass: ${ran.text}`,
+      name: "new-user",
+      ok: ran.pass,
+    }
+  return {
+    detail: `${matched.join(", ")} waits for the new-user gate: missing ## NewUserGate · PASS at ${facts.head.slice(0, 7)} from ${facts.owner}; run ~/.playground/ops/run-slot.sh <your name> -- bun run gate:new-user ${facts.head} --pr ${facts.n}`,
+    name: "new-user",
     ok: false,
   }
 }
@@ -382,5 +401,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   gates.push(reviewGate(facts))
   const tester = testerGate(facts)
   if (tester) gates.push(tester)
+  const newUser = newUserGate(facts)
+  if (newUser) gates.push(newUser)
   return gates
 }

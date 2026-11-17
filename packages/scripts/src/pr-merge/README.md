@@ -1,6 +1,6 @@
 # pr:merge and pr:train
 
-A Playground PR reaches `canary` only through `bun run pr:merge <n>`, or merge-on-ready (`bun run pr:train ready`), which runs pr:merge on the first gated PR in queue order, once it is ready at 5/5 with GitHub's checks green at its head, and for a diff under `web/next/` its tester's PASS there.
+A Playground PR reaches `canary` only through `bun run pr:merge <n>`, or merge-on-ready (`bun run pr:train ready`), which runs pr:merge on the first gated PR in queue order, once it is ready at 5/5 with GitHub's checks green at its head, for a diff under `web/next/` its tester's PASS there, and for an installer or first-run diff the new-user gate's PASS there.
 This file holds the gates, the merge lock and the merge queue's readers.
 
 ## Gates
@@ -13,7 +13,7 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
 - `parent`: every PR the body says it is stacked on, each `Stacked on #N` anywhere in the body (playbook DISPATCH.md's stack line, in any case, a list such as `Stacked on #N and #M` included), reads `MERGED`, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's lines unreviewed (`parentGate` in `gates.ts`, each state read by `factsOf`).
   An open parent refuses, naming it; a parent closed without merging refuses until the body loses its `Stacked on #N` line, once its lines land another way; a state gh cannot read refuses, so the gate fails closed.
   A body with no such line meets no `parent` gate.
-- `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
+- `up to date`: the head holds everything on `canary`, or merges with it clean; a conflict waits for a merge of `canary`, whose new head then needs its own checks and 5/5, and its own tester's or new-user gate's PASS where its diff calls for one.
 - `ci`: the newest run of every GitHub check on the head, by workflow and name, has finished and passed, since a rerun or a close and reopen leaves the older runs listed; `Audit, Lint, and Build` and `test` (`REQUIRED_CHECKS` in `gates.ts`) are among them, and on factory.repo (the checkout's origin when unset) a GitGuardian check too, since a head GitGuardian never started on ran no secret scan.
   A required check missing while every job of its workflow's run passed is GitHub's: it ended that run without creating the job and concluded it `failure`, as run 42670675952 did with all 20 jobs green, so `ci` names the run and its step, `gh run rerun <run id>`.
   That rerun tests the same merge, which suits this shape alone, since the run's code was green; a red check's step stays a fix or a merge of `canary`.
@@ -24,6 +24,9 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
 - `review`: the newest `## ReviewBot · round <n>: <s>/5 at <sha7>` on the head reads 5/5.
 - `tester`: on a diff with a file under `web/next/`, the newest `## TesterBot · <PASS|FAIL> at <sha7>` on the head reads PASS, since a UI change lands only once its tester has driven it (`testerGate` in `gates.ts`; a UI PR once merged on ready while its tester's drive was still open).
   No verdict at the head refuses, naming the line it waits for and the next move, spawn or resume the PR's tester; a FAIL, or a PASS at an older head, refuses too, and a diff with no `web/next/` file meets no `tester` gate.
+- `new-user`: on an installer or first-run diff, one with a file `NEW_USER_PATHS` covers (`packages/scripts/src/new-user-gate/paths.ts`: the installer, first run's trust and setup, the first start and the gate itself, `scripts/spawn.sh` whole, since a gate run takes 65 to 121 s as Ops measured it), the newest `## NewUserGate · <PASS|FAIL|INCONCLUSIVE> at <sha7>` on the head reads PASS (`newUserGate` in `gates.ts`), since a broken `curl | bash` once showed only at a ship's gate run.
+  `bun run gate:new-user <head> --pr <n>`, run through `~/.playground/ops/run-slot.sh`, posts that line from a file with `gh pr comment --body-file`: FAIL on a failed step or a run cut short, INCONCLUSIVE when a step was (it reads this machine, not the build), else PASS, then the count and each step that did not pass.
+  An INCONCLUSIVE refuses like a FAIL, its reason printed; no verdict at the head refuses, naming the matched files and that run; a diff matching no path meets no `new-user` gate.
 - `types`: last, inside the merge lock once every other gate passes, the tree the squash makes type-checks (`types.ts`), since a head's own checks typed it alone and a clean textual merge can still call an API `canary` changed.
   It skips when the head already holds `canary`'s tip (`git merge-base --is-ancestor`), whose own checks typed that very tree.
   Else it checks the `git merge-tree --write-tree` tree out detached in `.claude/worktrees/merge-types`, the one worktree every merge reuses and keeps however it ends, since cloning and removing a whole `node_modules` (about 114k files) on each merge drove the load to 93 on 2 Nov.
@@ -36,7 +39,7 @@ pr:merge refuses a PR the repo's owner did not open unless `--outside-author <lo
   A type error refuses with the first errors and the fix (merge `canary` in, fix it, and the new head needs its checks and a 5/5), and a stale bundle with the files `--check` names and its fix (merge `canary` in plainly, run `bun run hooks:bundle` and commit the rebuild on its own, then checks and a 5/5); either is kept beside the lock (`merge-types/<head>-<canary>`), so merge-on-ready's next cycle refuses the same pair at once; a run it cannot finish in 600s (`TYPES_BUDGET_MS`, which every gate in one `pr:train ready` call shares, so the call ends inside the merge train's 900s), counting each step's wait for a CPU slot as well as its run, or a step that fails another way refuses, naming it, and runs again on the next try.
   `--explain` names whether it would run or skip, and why, and runs no type check.
 
-Every verdict is read from the comments of the account that owns `factory.repo` alone (`packages/config/src/verdicts.ts` parses them): the reviewer's `## ReviewBot` line, which the `review` gate reads, and the tester's `## TesterBot · <PASS|FAIL> at <sha7>` line, which the `tester` gate reads on a `web/next/` diff and the Dashboard shows.
+Every verdict is read from the comments of the account that owns `factory.repo` alone (`packages/config/src/verdicts.ts` parses them): the reviewer's `## ReviewBot` line, which the `review` gate reads, and the tester's `## TesterBot · <PASS|FAIL> at <sha7>` line, which the `tester` gate reads on a `web/next/` diff and the Dashboard shows, and the new-user gate's `## NewUserGate · <PASS|FAIL|INCONCLUSIVE> at <sha7>` line, which the `new-user` gate reads.
 `--explain` prints each gate and what it found.
 suite.sh's `audit` fails only on an advisory the head adds over its merge base with `canary`.
 It also refuses a head holding a merge of `canary` that dropped a line its `canary` side added, in a file git merges without a conflict, which git's own merge of its two parents (`git merge-tree --write-tree`) keeps, `canary` still holds and the squash onto `canary` lacks (`keeps canary`, `lost.ts`), naming each file and merge:
@@ -99,7 +102,7 @@ On every run, built or not, pr:merge and pr:train also stop on a worktree whose 
 ## When canary moves
 
 A PR behind `canary` that merges with it clean merges on its own head's checks and 5/5 once the `types` gate's check of the merged tree passes (its type check, and its bundles step for a PR touching `scripts/hooks/` or `packages/`), so several gated PRs merge back to back with no new GitHub run.
-When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own, and on a `web/next/` diff its own tester's PASS.
+When its head conflicts with `canary`, merge `canary` in and resolve it; the new head then needs GitHub's checks and a 5/5 of its own, and its own tester's or new-user gate's PASS where its diff calls for one.
 A refusal `--explain` shows to be wrong goes to the Builder, who alone may merge that PR by hand with `gh pr merge <n> --squash --body-file <file> --match-head-commit <head>`, `<file>` holding the body pr:merge would pass (above), the one hand merge the no-protected-push hook passes ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-protected-push)), on an override in the factory's **override** shape, and has pr:merge fixed.
 
 ## The merge queue

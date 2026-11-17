@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // The new-user gate: a fresh scratch HOME installs Playground at a given sha the way `curl | bash` does, then each step a new user meets is checked in turn, printed PASS, FAIL or INCONCLUSIVE and screenshotted; it exits 1 when any step does not pass.
-// Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep], or --clean <box> for a box a --keep run left. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
+// Usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep] [--pr <n>], or --clean <box> for a box a --keep run left; --pr posts the run's verdict on PR n, which pr-merge's new-user gate reads. The box (makeBox's /tmp/pg-gate-<sha7>-<random> unless --box names its folder, short since herdr's socket path must fit 104 bytes) holds the HOME, the stand-ins, a bare source repo and the screenshots.
 import {
   chmodSync,
   existsSync,
@@ -47,6 +47,29 @@ export const STEP_COUNT = 7
 // Pure: the gate's last line, which ship:merge reads in the ship PR's body: PASS only for a run that reached every step with none reading FAIL.
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
+
+// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count and each step that did not pass.
+export const verdictLine = (sha: string, steps: Step[]): string => {
+  const short = steps.length < STEP_COUNT
+  const unsure = steps.filter((s) => s.inconclusive).length
+  const word =
+    short || steps.some((s) => !s.ok && !s.inconclusive) ? "FAIL" : unsure ? "INCONCLUSIVE" : "PASS"
+  const why = [
+    `${steps.filter((s) => s.ok).length} of ${STEP_COUNT} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
+    ...steps.flatMap((s, i) =>
+      s.ok ? [] : [`${i + 1}. ${s.name}${s.detail ? `: ${s.detail.replace(/\s+/g, " ")}` : ""}`],
+    ),
+    ...(short ? [`stopped after ${steps.length} of ${STEP_COUNT} steps`] : []),
+  ]
+  return `## NewUserGate · ${word} at ${sha.slice(0, 7)} · ${why.join("; ")}`
+}
+
+// Writes the verdict to a file in dir and returns the gh call that posts it, the file named by its literal path, since the comment hooks read a body from a file.
+export const verdictPost = (n: number, line: string, dir: string): string[] => {
+  const file = join(dir, `new-user-verdict-${n}.md`)
+  writeFileSync(file, `${line}\n`)
+  return ["gh", "pr", "comment", String(n), "--body-file", file]
+}
 
 // Pure: the report a run prints, a PASS, FAIL or INCONCLUSIVE line per step with its detail and any shot it could not take, then the count.
 export const report = (steps: Step[]): string => {
@@ -533,9 +556,10 @@ const main = async (args: string[]) => {
     return 0
   }
   const sha = args.find((a) => !a.startsWith("--"))
-  if (!sha) {
+  const pr = args.includes("--pr") ? (args[args.indexOf("--pr") + 1] ?? "") : null
+  if (!sha || (pr !== null && !/^\d+$/.test(pr))) {
     console.error(
-      "usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep] | --clean <box>",
+      "usage: bun run gate:new-user <tag|sha> [--box <parent dir>] [--keep] [--pr <n>] | --clean <box>",
     )
     return 2
   }
@@ -758,6 +782,16 @@ const main = async (args: string[]) => {
       console.log(`gate: screenshots and logs in ${shots}`)
     }
     console.log(resultLine(full, steps))
+    if (pr !== null) {
+      const posted = run(verdictPost(Number(pr), verdictLine(full, steps), dirname(box)), {
+        cwd: REPO,
+      })
+      console.log(
+        posted.code === 0
+          ? `gate: posted the verdict on #${pr}: ${posted.out.trim()}`
+          : `gate: posting the verdict on #${pr} failed: ${posted.err.trim()}`,
+      )
+    }
   }
   return steps.every((s) => s.ok) ? 0 : 1
 }
