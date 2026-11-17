@@ -31,6 +31,15 @@ export type Unreachable = { unreachable: string }
 
 export type GhRead = { code: number; out: string } | Unreachable
 
+export const isUnreachable = (value: unknown): value is Unreachable =>
+  typeof value === "object" && value !== null && "unreachable" in value
+
+// The line a gh caller answers in place of gh while ghDown names why, else null.
+export const ghSkipped = (): string | null => {
+  const down = ghDown()
+  return down ? `gh unreachable: ${down}` : null
+}
+
 // One gh read: skipped while ghDown names a reason, else gh under GH_TIMEOUT_MS, a read past it unreachable as GH_HANGS; out is stdout alone, and env is passed so gh is found on PATH as it stands now, not as the process started.
 export const ghRead = (
   args: string[],

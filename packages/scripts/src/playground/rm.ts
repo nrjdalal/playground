@@ -17,7 +17,7 @@ import {
 } from "@packages/safe-delete"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
-import { ghRead, type Unreachable } from "../gh-read"
+import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
@@ -75,7 +75,7 @@ export type PrRead = Pr | "none" | Unreachable | null
 export const freedOf = (
   pr: PrRead,
 ): { head: string; number: number; state: "CLOSED" | "MERGED" } | undefined =>
-  pr && pr !== "none" && "state" in pr && pr.state !== "OPEN"
+  pr && pr !== "none" && !isUnreachable(pr) && pr.state !== "OPEN"
     ? { head: pr.head, number: pr.number, state: pr.state }
     : undefined
 
@@ -210,7 +210,7 @@ const prState = async (path: string, pr?: string): Promise<PrRead> => {
   const gh = (args: string[]): unknown => {
     try {
       const run = ghRead(args, { cwd: path })
-      if ("unreachable" in run) return run
+      if (isUnreachable(run)) return run
       return run.code === 0 ? JSON.parse(run.out) : null
     } catch {
       return null
@@ -225,7 +225,7 @@ const prState = async (path: string, pr?: string): Promise<PrRead> => {
   const list = pr
     ? gh(["pr", "view", pr, ...fields, "--jq", "[.]"])
     : gh(["pr", "list", "--head", branch!, "--state", "all", "--limit", "2", ...fields])
-  if (list && typeof list === "object" && "unreachable" in list) return list as Unreachable
+  if (isUnreachable(list)) return list
   const states = new Set(["CLOSED", "MERGED", "OPEN"])
   const prs =
     Array.isArray(list) && list.every((p) => states.has(p?.state) && Number.isInteger(p?.number))
@@ -378,7 +378,7 @@ export async function removePath(
   const repo = args.worktree ? worktreeRepo(args.path, roots) : null
   // a MERGED or CLOSED PR frees its worktree from a roster row naming its branch; an unreadable one keeps the row's hold; on gh's clean answer of no PR alone, another repo's worktree may go once archiveUnlanded, with every remote read, archives its commits no remote holds
   const own = args.worktree ? await deps.prState(args.path, args.pr) : undefined
-  if (own && typeof own === "object" && "unreachable" in own)
+  if (isUnreachable(own))
     return {
       line: `gh unreachable: can't check the branch's PR; retry once gh answers (${own.unreachable})`,
       ok: false,
@@ -412,7 +412,7 @@ export async function removePath(
             ...(liveBranch ? { liveBranch } : {}),
             merged: deps.merged,
             note,
-            ...(own && own !== "none" && "number" in own ? { ownPr: own.number } : {}),
+            ...(own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}),
             places: deps.places,
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),

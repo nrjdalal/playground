@@ -4,7 +4,7 @@ import { join } from "node:path"
 
 import { dispatcherOf, isManagerKind, kindOf, managerOf } from "@packages/config/kinds"
 
-import { ghRead, type Unreachable } from "../gh-read"
+import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
 import { leadOf } from "../ops-tick/tick"
 import { writeAtomic } from "../write-atomic"
 
@@ -260,7 +260,7 @@ export const readHold =
         return typeof status === "string" ? (status === "open" ? "open" : "closed") : null
       }
       const run = ghRead(["api", `repos/${factory}/issues/${hold.slice(1)}`, "--jq", ".state"])
-      if ("unreachable" in run) return run
+      if (isUnreachable(run)) return run
       const state = run.out.trim()
       return run.code === 0 && (state === "open" || state === "closed") ? state : null
     } catch {
@@ -343,7 +343,7 @@ export const readOpenPrs = (factory: string) => async (): Promise<OpenPrs | Unre
       "--jq",
       `{all: [.[].number], mine: [.[] | select(.base.ref == "canary" and (.user.login | ascii_downcase) == "${owner}") | .number]}`,
     ])
-    if ("unreachable" in run) return run
+    if (isUnreachable(run)) return run
     if (run.code !== 0) return null
     const { all, mine } = JSON.parse(run.out) as Partial<Record<keyof OpenPrs, unknown>>
     const numbers = (list: unknown): list is number[] =>
@@ -389,13 +389,13 @@ export async function runSweep(
     )
       continue
     const state = await hold(held)
-    if (state !== null && typeof state === "object") unreachable = state.unreachable
+    if (isUnreachable(state)) unreachable = state.unreachable
     else holds[held] = state
   }
   let openPrs: OpenPrs | null = null
   if (lead === builderLead && !unreachable) {
     const read = await open()
-    if (read && "unreachable" in read) unreachable = read.unreachable
+    if (isUnreachable(read)) unreachable = read.unreachable
     else openPrs = read
   }
   const { lines, next } = sweep(

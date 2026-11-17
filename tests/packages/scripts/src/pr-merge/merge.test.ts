@@ -1,6 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
 import { FREEZE_LAPSE_MS } from "../../../../../packages/scripts/src/pr-merge/held"
@@ -28,6 +27,7 @@ import {
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
 import "./scratch-config"
+import { withGhDown } from "../../../../gh-down"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { PR_TEMPLATE, SKILL_BODY } from "./bodies"
 import { greenChecks } from "./suite"
@@ -1088,31 +1088,11 @@ describe("the body gate's token grep at the head", () => {
   })
 })
 
-// the train's every gh call goes through runGh, so a broken gh is never flooded (#2526)
+// the train's every gh call goes through runGh, so a broken gh is never flooded
 test("runGh skips gh while the gh-auth beat's fresh result reads failed", async () => {
-  const data = process.env.PLAYGROUND_DATA_DIR!
-  const bin = mkdtempSync(join(tmpdir(), "run-gh-"))
-  const called = join(bin, "called")
-  writeFileSync(join(bin, "gh"), `#!/bin/sh\ntouch "${called}"\n`)
-  chmodSync(join(bin, "gh"), 0o755)
-  const result = join(data, "ops", "tick", "gh-auth.json")
-  mkdirSync(dirname(result), { recursive: true })
-  writeFileSync(
-    result,
-    JSON.stringify({ at: new Date().toISOString(), ok: false, reason: "gh token invalid" }),
-  )
-  const path = process.env.PATH
-  process.env.PATH = `${bin}:${path}`
-  try {
-    expect(await runGh(["pr", "list"])).toEqual({
-      code: 1,
-      stderr: "gh unreachable: gh token invalid",
-      stdout: "",
-    })
-    expect(existsSync(called)).toBe(false)
-  } finally {
-    process.env.PATH = path
-    rmSync(result, { force: true })
-    rmSync(bin, { force: true, recursive: true })
-  }
+  expect(await withGhDown(() => runGh(["pr", "list"]))).toEqual({
+    code: 1,
+    stderr: "gh unreachable: gh token invalid",
+    stdout: "",
+  })
 })

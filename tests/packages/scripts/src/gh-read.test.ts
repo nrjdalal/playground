@@ -97,8 +97,11 @@ test("ghDown reads no result, an unreadable one and a passing one as up", () => 
 test("every recurring gh caller checks the probe's result before gh", () => {
   const repo = join(import.meta.dir, "..", "..", "..", "..")
   const callers: [string, string, string][] = [
-    ["packages/scripts/src/ops-sweep/cli.ts", "ghDown()", "Bun.spawn("],
-    ["packages/scripts/src/pr-merge/merge.ts", "ghDown()", 'Bun.spawn(["gh"'],
+    ["api/hono/src/lib/dashboard/agents.ts", "ghSkipped()", 'run(["gh", "api", "graphql"'],
+    ["extensions/core/skills/code-review-loop/scripts/state.ts", "ghDown()", "Bun.spawnSync(args"],
+    ["packages/scripts/src/ops-sweep/cli.ts", "ghSkipped()", "Bun.spawn("],
+    ["packages/scripts/src/playground/ci-wait.ts", "ghSkipped()", 'Bun.spawnSync(["gh"'],
+    ["packages/scripts/src/pr-merge/merge.ts", "ghSkipped()", 'Bun.spawn(["gh"'],
     ["scripts/ops/optimizer/idle_sessions.ts", "ghDown()", 'Bun.spawn(["gh"'],
     ["scripts/ops/unstick/run.py", "gh_down()", '["gh", "pr", "list"'],
     ["scripts/ops/merge-train/run.py", "gh_down()", "fingerprint()\n"],
