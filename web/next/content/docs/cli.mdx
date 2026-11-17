@@ -156,6 +156,18 @@ A session on another machine keeps one running too, for the lines `playground se
 The [`ops-peer-relay` job](/docs/jobs#carry-messages-to-another-machine) copies it to the other machine, where that session's `playground alerts-wait` prints it.
 The text goes on one line, and a line over 16 KB is refused: send the path of a file that holds the text.
 
+## Start a local model: `playground model use`
+
+`playground model use <name> [--machine <name>]` starts the vLLM server in `~/models/<name>/` on one machine: the one `--machine` names, else the one whose `localModels.hereModel` (this machine) or `localModels.peerModel` (the peer) names that model, else the peer.
+It sizes the server from that machine's free memory as it starts: the share is what is free above the machine's reserve (`localModels.hereReserveGiB` here; on the peer the 15 GiB floor plus `localModels.boxLanes` runs of `localModels.boxRunGiB`), capped at the model's working share in `localModels.models`, and `--max-num-seqs` is the KV cache that share leaves at 64k tokens a session.
+It hands `serve.sh` the size as `CONTAINER`, `PORT`, `GPU_MEMORY_UTILIZATION` and `MAX_NUM_SEQS`, and refuses a `serve.sh` that does not take all four from its environment.
+When the reading holds a session of the new model beside what runs, it starts beside it, under its own container (`local-vllm-<name>`) on the next port, 8000 then 8001.
+Otherwise it swaps: it holds new starts there, waits up to 30 minutes for the running model's requests to finish, stops that model by the container name it started it under, and sizes again.
+It refuses with the memory reading when not even one session fits, stops a server whose load takes the machine under 15 GiB free, and leaves alone any container it did not start.
+Each server it starts is kept in `<data>/models/state.json`, under `machines.<machine>.servers.<model>`: its container, port, share, most sessions and start time.
+The ops-tick beat `model-keep` keeps each machine's kept model up: it starts it when it is down, and brings it back once another model there sits idle `localModels.idleMinutes`.
+The peer's servers reach this machine through the [`ops-model-tunnel` job](/docs/jobs#reach-the-model-servers-on-another-machine).
+
 ## Answer a permission prompt: `playground picker`
 
 `playground picker <session> allow <key>` or `playground picker <session> deny <key> "<reason>"` is how a manager answers the permission prompt a session it runs is stuck on, once that session's alert reaches it with the command and its key.
@@ -175,9 +187,9 @@ The dashboard moves its own leftovers there too: a fixture stack's scratch folde
 `playground rm --list` prints what the trash holds, and `playground rm --restore <id>` puts one item back where it was, refusing when something already stands there, and a worktree's restore also refuses as its `--worktree` lines below say.
 It refuses, before moving anything:
 
-- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve, the caller's own loose regular file directly in `scratch/` named `<name>-*` or `<name>.*` while `scratch/` is a real folder reached through no symlink (a symlink, a folder or a longer name such as `<name>x.txt` stays refused), the caller's own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file), and an ended session's whole `scratchpad/<folder>/`: a real folder, not a symlink, that no live roster row names as itself or as `<folder>-<role>` (refused while the roster cannot be read), which `--restore` puts back.
+- HOME, any folder that holds it, and `~/.config`, `~/.ssh`, `~/.gnupg`, `~/.claude`, `~/Library`, `~/Music` and `~/.playground` with everything in them but the caller's own `scratch/<name>/` and `scratchpad/<name>/` there, checked after symlinks resolve, the caller's own loose regular file directly in `scratch/` named `<name>-*` or `<name>.*` while `scratch/` is a real folder reached through no symlink (a symlink, a folder or a longer name such as `<name>x.txt` stays refused), the caller's own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file), an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/`: a real folder, not a symlink, that no live roster row names as itself or as `<folder>-<role>` (refused while the roster cannot be read), which `--restore` puts back, and a retired data folder whole: a real folder directly in the data folder that safe-delete's `RETIRED` list names with the PR that retired it (`ci`, the runner host's old run folder).
 - The main checkout and everything in it but the worktrees under `.claude/worktrees/`.
-- A path over 5,000 files or 2 GB (an ended session's whole `scratchpad/<folder>/` and the caller's own temp folder `/tmp/playground-<name>.*` skip the file count and keep the 2 GB cap), and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
+- A path over 5,000 files or 2 GB (an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/`, a retired data folder, a folder inside the caller's own `scratchpad/<name>/` and the caller's own temp folder `/tmp/playground-<name>.*` skip the file count and keep the 2 GB cap), and a fourth delete within a minute from one session; these and a protected path are also sent to the dispatcher, a session at the per-minute limit once for each burst, however many deletes it then tries.
   A session's own `scratch/<name>/`, `scratchpad/<name>/` or temp folder over that size is a plain refusal, with no alert: the folder stays in place whole, never split, for the nightly clean (`scratch/`) or its lead's cleanup (`scratchpad/`), and its end's line to the lead names it.
 - A move to another disk, since that would copy rather than rename.
 
