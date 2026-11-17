@@ -20,7 +20,7 @@ One new comment per round, never an edit of an earlier one: the record of what w
 
 On an outside author's PR, the verdict also carries three lines: need (do we need it), hit (do we hit the problem it fixes, with evidence) and factory (does it upgrade or degrade the factory, and why).
 
-A 5/5 on a PR that changes a check judging it carries one line of its own per such path, after you have read that change as a check change: a path under `.github/workflows/` or `packages/scripts/src/pr-merge/`, or a refused-forms file the diff deletes a line from or renames away. `pr:merge`'s `checks` gate reads these lines and refuses while one path is unnamed:
+A 5/5 on a PR that changes a check judging it carries one line of its own per such path, after you have read that change as a check change: a CI workflow or action, the gate code, the refused-forms harness, or a refused-forms file the diff deletes a line from or renames away, as `packages/scripts/src/pr-merge/README.md`'s `checks` gate lists them. `pr:merge`'s `checks` gate reads these lines and refuses while one path is unnamed:
 
 ```
 Reviewed check change: `<path>`

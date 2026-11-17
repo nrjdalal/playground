@@ -382,8 +382,16 @@ export function codeGate(differs: string[]): Gate {
       }
 }
 
-// The checks that judge a PR: CI's workflows and the merge gates, any change to which counts, and the refused-forms rows, a deleted line of which counts.
-export const CHECK_CODE = [".github/workflows/", "packages/scripts/src/pr-merge/"]
+// The checks that judge a PR, any change to which counts: CI's workflows and actions, the gate code (GATE_CODE) and the refused-forms harness; a path ending in / is a folder, any other a file or folder; the refused-forms rows count by a deleted line (REFUSED_FORMS)
+export const CHECK_CODE = [
+  ".github/actions/",
+  ".github/workflows/",
+  ...GATE_CODE,
+  "tests/scripts/hooks/fixtures/refused-forms.ts",
+  "tests/scripts/hooks/refused-forms.test.ts",
+]
+const under = (path: string, entry: string) =>
+  entry.endsWith("/") ? path.startsWith(entry) : path === entry || path.startsWith(`${entry}/`)
 export const REFUSED_FORMS = "tests/scripts/hooks/fixtures/refused-forms/"
 // A 5/5 verdict's line naming one reviewed check change, one path a line, in backticks or bare.
 const REVIEWED_CHANGE = /^[\s>*-]*Reviewed check change:\s*`?([^`\s]+)`?\s*$/gim
@@ -392,7 +400,7 @@ const REVIEWED_CHANGE = /^[\s>*-]*Reviewed check change:\s*`?([^`\s]+)`?\s*$/gim
 export const checkChangesOf = (files: string[], removed: string[]): string[] =>
   [
     ...new Set([
-      ...files.filter((path) => CHECK_CODE.some((dir) => path.startsWith(dir))),
+      ...files.filter((path) => CHECK_CODE.some((entry) => under(path, entry))),
       ...removed.filter((path) => path.startsWith(REFUSED_FORMS)),
     ]),
   ].sort()

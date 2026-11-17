@@ -529,6 +529,24 @@ describe("the checks gate holds a PR that changes a check judging it for its 5/5
     })
   })
 
+  test.each([
+    "packages/config/src/verdicts.ts",
+    "packages/scripts/src/new-user-gate/paths.ts",
+    ".github/actions/install-zsh/action.yml",
+    "tests/scripts/hooks/fixtures/refused-forms.ts",
+    "tests/scripts/hooks/refused-forms.test.ts",
+  ])("%s, a check judging the PR, needs the checks gate", (path) => {
+    expect(failing({ files: [path], removed: [] })).toContain("checks")
+    expect(gate({ comments: [named(path)], files: [path] })?.ok).toBe(true)
+  })
+
+  test.each([".github/assets/banner.png", "packages/scripts/src/pr-merge-notes.md"])(
+    "%s, beside a check but none, meets a passing checks gate",
+    (path) => {
+      expect(gate({ files: [path] })?.ok).toBe(true)
+    },
+  )
+
   test("a refused-forms file the diff deletes a line from, with no line, is refused", () => {
     expect(failing({ files: [ROW], removed: [ROW] })).toEqual(["checks"])
     expect(gate({ comments: [named(ROW)], files: [ROW], removed: [ROW] })?.ok).toBe(true)
