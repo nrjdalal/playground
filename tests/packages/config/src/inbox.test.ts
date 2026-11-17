@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { type ChoicePreview, choicesOf, rowOfAnswer } from "../../../../packages/config/src/inbox"
+import {
+  type ChoicePreview,
+  choicesOf,
+  progressItems,
+  rowOfAnswer,
+} from "../../../../packages/config/src/inbox"
 
 describe("choicesOf", () => {
   test("a typed decision is a yes or no over its own default labels (#873)", () => {
@@ -69,5 +74,50 @@ describe("rowOfAnswer", () => {
   test("an option past the rows, or a secret, picks nothing", () => {
     expect(rowOfAnswer(ask, { choice: "approve", option: 3 })).toBeNull()
     expect(rowOfAnswer({ type: "secret" }, { choice: "approve" })).toBeNull()
+  })
+})
+
+describe("progressItems", () => {
+  test("reads one item a line, its fields trimmed, a blank line skipped and a % taken (PG-2617)", () => {
+    expect(
+      progressItems(
+        "Mac reads | 100 | Reads every Mac | 9:10 pm\n\nYard channel|40%|Posts land |\n",
+      ),
+    ).toEqual({
+      items: [
+        { eta: "9:10 pm", name: "Mac reads", percent: 100, text: "Reads every Mac" },
+        { eta: "", name: "Yard channel", percent: 40, text: "Posts land" },
+      ],
+      ok: true,
+    })
+    expect(progressItems("Edge | 0 | Not started | 1:00 am")).toMatchObject({ ok: true })
+    expect(progressItems("Half | 12.5 | Some | soon")).toMatchObject({
+      items: [{ percent: 12.5 }],
+    })
+  })
+
+  test("names the first line with other than 4 fields, counting from 1 inside the block", () => {
+    expect(progressItems("A | 10 | x | y\nB | 20 | no eta")).toEqual({
+      fault: { count: 3, kind: "fields", line: 2, text: "B | 20 | no eta" },
+      ok: false,
+    })
+    expect(progressItems("A | 10 | x | y | z")).toMatchObject({
+      fault: { count: 5, kind: "fields", line: 1 },
+    })
+  })
+
+  test("names a percent outside 0 to 100, or one that is no number", () => {
+    for (const percent of ["101", "-1", "150%", "half", "", "1e2"])
+      expect(progressItems(`A | 10 | x | y\nB | ${percent} | x | y`)).toEqual({
+        fault: { kind: "percent", line: 2, text: `B | ${percent} | x | y` },
+        ok: false,
+      })
+  })
+
+  test("refuses a block with no item", () => {
+    expect(progressItems("\n  \n")).toEqual({
+      fault: { kind: "empty", line: 0, text: "" },
+      ok: false,
+    })
   })
 })

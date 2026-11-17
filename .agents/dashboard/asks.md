@@ -82,6 +82,10 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
+  A `progress` block draws as bars at the card's own width, on a phone and a wide screen alike (`ProgressBlock` in `web/next/src/components/progress-block.tsx`, `progressItems` in `@packages/config/inbox`).
+  It holds one item a line, `name | percent | what's going on | ETA`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
+  The names share one column of at most 6rem, so every bar starts at one x and a long name never narrows them: a name past it is cut short, its whole name on hover.
+  A block with a line that does not read stays the plain code block, and `bun run ask` refuses it before it posts (below).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
   A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
@@ -561,7 +565,7 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them, and a `progress` block's, which the card draws at its own width.
      Draw several items or events as a compact table, one row per item, over a tall chain of one event per line.
      A wider drawing still posts: the card shrinks its font until the widest line fits, down to 10px, and scrolls sideways only when that line is still wider at 10px, so the limit is a writing guide.
      A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
@@ -576,7 +580,8 @@
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
   a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`, never a version such as `GLM-4.7`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
-  or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  or a code block other than a `diff` or `progress` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` and `ask edit` refuse an ask's or a read-only update's `progress` block whose line holds other than 4 fields or a percent outside 0 to 100, naming the block, the line and its words, and post nothing (`progressRefusal` in `api/hono/src/lib/dashboard/ask-shape.ts`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
