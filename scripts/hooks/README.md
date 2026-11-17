@@ -880,6 +880,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name names `glm` (`glm`, or `claude-code glm` since the harness split); a Claude session commits those paths as before.
+  A local session (`spawn.sh --backend local`) counts as on GLM too, so every refusal here holds for it: its `ANTHROPIC_BASE_URL` points at `127.0.0.1:8000` (or `localhost:8000`), or its pin names `claude-code local`.
   It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host or input it cannot read, a call it cannot parse inside a guarded checkout,
   a read path it cannot read or a recursive read past its walk (each below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.

@@ -308,7 +308,7 @@ describe("addCommand", () => {
       ["otter", "--model", "claude-opus-4"],
       "--model takes claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 or claude-haiku-5-5, not claude-opus-4",
     ],
-    [["otter", "--backend", "gpt"], "--backend takes claude or glm, not gpt"],
+    [["otter", "--backend", "gpt"], "--backend takes claude, glm or local, not gpt"],
     [
       ["k3m9px-runner"],
       "k3m9px-runner reads as a runner, not a worker: bun run name worker gives one",
