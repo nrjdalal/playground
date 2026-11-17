@@ -438,6 +438,27 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
     )
   })
 
+  test("a patch whose paths or code lines hold the publish word goes to the worker by its path and its text, beside the prose swap (#2481)", async () => {
+    const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain('on a prose line write "ship" in its place in the posted block')
+    expect(step).toContain(
+      "A patch whose paths or code lines hold the word, which no swap can reword, stays out of the comment: send the worker one `SendMessage` holding the saved `fix.patch`'s absolute path and, under it, the patch's whole text, since an auto-end moves your scratch folder to the trash",
+    )
+    expect(step).toContain("say in the verdict which finding's patch went to the author that way")
+    expect(step.split("**Done when**")[1] ?? "").toContain(
+      "a patch whose paths or code lines hold the word sent to the worker by its path and its text and named in the verdict",
+    )
+    const comments = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/COMMENTS.md"),
+    ).text()
+    expect(comments).toContain(
+      "a patch whose paths or code lines hold the word stays out of the comment: save it to your scratch folder, send the worker one `SendMessage` holding its absolute path and, under it, its whole text, and say in the verdict which finding's patch went to the author that way",
+    )
+    expect(await page()).toContain(
+      "the reviewer sends the worker one `SendMessage` holding the saved patch's absolute path and, under it, the patch's whole text, since an auto-end moves the reviewer's scratch folder to the trash, and says in the verdict which finding's patch went to the author that way",
+    )
+  })
+
   test("step 8 asks for a canary merge in the push before the 5/5 candidate (three rounds lost to a moved head)", async () => {
     const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
