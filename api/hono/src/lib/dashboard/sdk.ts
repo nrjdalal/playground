@@ -834,7 +834,7 @@ export async function loadLocal(
       } else if (deps.now().getTime() >= until) {
         return host.endLoad(
           ticket,
-          `${picked.label} didn't come up on the local model server within 15 minutes, so the chat stays on its model.`,
+          `${picked.label} didn't come up on the local model server within ${LOAD_WAIT_MS / 60_000} minutes, so the chat stays on its model.`,
         )
       }
       await deps.sleep(LOAD_POLL_MS)
