@@ -272,10 +272,16 @@ export function picksOf(
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
 
-// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with what it does in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
+// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with what it does and how to undo it in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
 export const ROOT_STEPS = {
-  "bwrap-userns":
-    "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace",
+  "bwrap-userns": {
+    undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
+    what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace",
+  },
+  "chromium-ca": {
+    undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
+    what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart",
+  },
 } as const
 
 export type RootStep = keyof typeof ROOT_STEPS
@@ -285,11 +291,19 @@ export const ROOT_NAMES = Object.keys(ROOT_STEPS) as [RootStep, ...RootStep[]]
 export const ROOT_BASE = "/usr/local/lib/playground"
 export const ROOT_DIR = `${ROOT_BASE}/root`
 
+// The Dashboard's CA as the install kept it, root's own: DER, checked against the approved card's hash, the one file chromium-ca reads.
+export const ROOT_CA = `${ROOT_BASE}/data/portless-ca.der`
+
+// The most of a CA file the install reads, so a file that is not a CA never fills root's staging folder.
+export const CA_MAX_BYTES = 16_384
+
 export const HEX64 = /^[0-9a-f]{64}$/
 
 const REFUSE_HASH = 'echo "refused: a hash is not 64 lowercase hex" >&2; exit 1'
 
-// The install, run by /bin/sh as root before any root-owned script exists, so the card shows this very text: it refuses any hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against the hash the approved card passed, and moves them into place, or refuses with nothing moved.
+const refuse = (why: string) => `{ echo "refused: ${why}" >&2; exit 1; }`
+
+// The install, run by /bin/sh as root before any root-owned script exists, so the card shows this very text: it refuses any hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against the hash the approved card passed, and moves them into place, or refuses with nothing moved. With the CA's path and hash after the scripts' hashes, it reads at most CA_MAX_BYTES of the CA once, refuses a file over that or holding other than one certificate, turns that copy into DER and keeps it at ROOT_CA only if the DER matches the card's hash.
 export const INSTALL_TEXT = [
   "set -eu",
   "umask 022",
@@ -297,14 +311,17 @@ export const INSTALL_TEXT = [
   "src=$1",
   "shift",
   'case $src in /*) ;; *) echo "refused: the scripts folder is not an absolute path" >&2; exit 1 ;; esac',
-  `[ $# -eq ${ROOT_NAMES.length} ] || { echo "refused: ${ROOT_NAMES.length} hashes are needed, one for each script" >&2; exit 1; }`,
+  `[ $# -eq ${ROOT_NAMES.length} ] || [ $# -eq ${ROOT_NAMES.length + 2} ] || ${refuse(`${ROOT_NAMES.length} hashes are needed, one for each script, then the CA's path and hash or neither`)}`,
+  "n=0",
   'for h in "$@"; do',
+  "  n=$((n + 1))",
+  `  [ $n -le ${ROOT_NAMES.length} ] || break`,
   `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
   "done",
-  'mkdir -p "$base/root"',
-  'chown root:root "$base" "$base/root"',
-  'chmod 0755 "$base" "$base/root"',
+  'mkdir -p "$base/root" "$base/data"',
+  'chown root:root "$base" "$base/root" "$base/data"',
+  'chmod 0755 "$base" "$base/root" "$base/data"',
   'stage=$(mktemp -d "$base/.stage.XXXXXX")',
   `trap 'rm -f "$stage"/*; rmdir "$stage"' EXIT`,
   `for name in ${ROOT_NAMES.join(" ")}; do`,
@@ -313,10 +330,27 @@ export const INSTALL_TEXT = [
   '  [ "${sum%% *}" = "$1" ] || { echo "refused: $name changed since you approved it" >&2; exit 1; }',
   "  shift",
   "done",
+  "if [ $# -eq 2 ]; then",
+  `  case $1 in /*) ;; *) ${refuse("the CA's path is not absolute")} ;; esac`,
+  `  case $2 in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  [ \${#2} -eq 64 ] || { ${REFUSE_HASH}; }`,
+  `  head -c ${CA_MAX_BYTES + 1} "$1" > "$stage/ca.pem"`,
+  `  [ "$(wc -c < "$stage/ca.pem")" -le ${CA_MAX_BYTES} ] || ${refuse(`the CA file is over ${CA_MAX_BYTES / 1024} KB`)}`,
+  `  [ "$(grep -c -- "-----BEGIN CERTIFICATE-----" "$stage/ca.pem")" -eq 1 ] || ${refuse("the CA file holds other than one certificate")}`,
+  '  openssl x509 -in "$stage/ca.pem" -outform DER -out "$stage/ca.der"',
+  '  sum=$(sha256sum "$stage/ca.der")',
+  `  [ "\${sum%% *}" = "$2" ] || ${refuse("the Dashboard's CA changed since you approved it")}`,
+  "fi",
   `for name in ${ROOT_NAMES.join(" ")}; do`,
   '  chown root:root "$stage/$name"',
   '  chmod 0755 "$stage/$name"',
   '  mv -f "$stage/$name" "$base/root/$name"',
   "done",
   `echo "installed ${ROOT_NAMES.join(", ")} in $base/root"`,
+  'if [ -f "$stage/ca.der" ]; then',
+  '  chown root:root "$stage/ca.der"',
+  '  chmod 0644 "$stage/ca.der"',
+  '  mv -f "$stage/ca.der" "$base/data/portless-ca.der"',
+  `  echo "kept the Dashboard's CA in $base/data/portless-ca.der"`,
+  "fi",
 ].join("\n")

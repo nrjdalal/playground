@@ -58,6 +58,8 @@ On Linux, portless's proxy serves the Dashboard under its own certificate, `ca.p
   2. Go to **Local certificates**, then **Custom**, **Installed by you**, **Trusted certificates**, and click **Import**.
   3. Pick the `ca.pem` the row names.
   4. Restart the browser.
+- **Helium or Chrome for Testing, with no import**: approve the Inbox card **Run chromium-ca as root**, after an install card that carries the Dashboard's certificate. It writes a browser policy that trusts the certificate for `.localhost` addresses alone, in `/etc/chromium/policies/managed/` (Helium's) and `/etc/opt/chrome_for_testing/policies/managed/` (the test browser's). Restart Helium once; it may then show **Managed by your organization** in its menu. To undo it, remove `portless-ca.json` from both folders.
+  When portless makes a new certificate, every `.localhost` page in those browsers fails with `ERR_CERT_AUTHORITY_INVALID` until you approve a new install card and the step again.
 - **The address still reads `Not secure` after the import**: you clicked through the warning before the import, and the browser keeps that choice. Click **Not secure** left of the address. The panel says "You have chosen to turn off security warnings for this site." Click **Turn on warnings**, then reload.
 
 ## A port is in use

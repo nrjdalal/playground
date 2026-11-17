@@ -2264,10 +2264,26 @@ describe("a root step card (PG-2433)", () => {
     expect(html).toContain(">Do not install them<")
   })
 
+  test("an install card shows the CA's fingerprint it pins, or says the browser step waits for one (PG-2458)", () => {
+    const pinned = {
+      ...install,
+      preview: { ...install.preview, ca: { sha256: "cd".repeat(32) } },
+    } as unknown as InboxItem
+    const shown = unescape(opened(pinned))
+    expect(shown).toContain(
+      `only if its sha256 is <code class="font-mono break-all">${"cd".repeat(32)}</code>`,
+    )
+    expect(shown).toContain("A new certificate needs a new install card")
+    expect(unescape(opened(install))).toContain(
+      "The Dashboard has no certificate yet, so chromium-ca refuses until a later install card carries one",
+    )
+  })
+
   test("a step card names the one installed script it runs as root, and what it does", () => {
     const html = opened(step)
     expect(html).toContain(`${ROOT_DIR}/bwrap-userns`)
-    expect(unescape(html)).toContain(ROOT_STEPS["bwrap-userns"])
+    expect(unescape(html)).toContain(ROOT_STEPS["bwrap-userns"].what)
+    expect(unescape(html)).toContain(`To undo it: ${ROOT_STEPS["bwrap-userns"].undo}.`)
     expect(html).toContain(">Run bwrap-userns as root<")
   })
 

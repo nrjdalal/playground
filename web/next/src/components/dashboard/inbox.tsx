@@ -840,6 +840,18 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
               </li>
             ))}
           </ul>
+          {preview.ca ? (
+            <p>
+              It also keeps the Dashboard&apos;s certificate as root, only if its sha256 is{" "}
+              <code className="font-mono break-all">{preview.ca.sha256}</code>. A new certificate
+              needs a new install card.
+            </p>
+          ) : (
+            <p>
+              The Dashboard has no certificate yet, so chromium-ca refuses until a later install
+              card carries one.
+            </p>
+          )}
           <pre className={`${QUOTE} font-mono text-xs`}>{INSTALL_TEXT}</pre>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
@@ -850,8 +862,9 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             <code className="font-mono break-all">
               {ROOT_DIR}/{preview.step}
             </code>{" "}
-            as root. {ROOT_STEPS[preview.step]}.
+            as root. {ROOT_STEPS[preview.step].what}.
           </p>
+          <p>To undo it: {ROOT_STEPS[preview.step].undo}.</p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
