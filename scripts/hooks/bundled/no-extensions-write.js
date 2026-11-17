@@ -12576,7 +12576,20 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const at = remoteEnv(env, line);
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) };
       sshOwn.add(own);
-      return await visit(own, parse3(own), env) ?? run(lex(line, at.known), at, visit, true);
+      const remote = lex(line, at.known);
+      const head = remote.commands[0];
+      const input = sshInput(cmd);
+      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse3(head).xargs) {
+        const target = input?.op === "<" ? input.target : undefined;
+        const path = target && pathOf(target, env);
+        if (input?.body)
+          head.redirects = [input, ...head.redirects];
+        else if (input && target && path)
+          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects];
+        else if (!input && cmd.stdin)
+          head.stdin = cmd.stdin;
+      }
+      return await visit(own, parse3(own), env) ?? run(remote, at, visit, true);
     }
     if (SHELLS.has(parsed.name) || parsed.name === "." || parsed.name === "source") {
       const shellCall = SHELLS.has(parsed.name);
