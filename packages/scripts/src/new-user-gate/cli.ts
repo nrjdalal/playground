@@ -608,6 +608,7 @@ const main = async (args: string[]) => {
     await step(steps, name, judge, capacity)
     capacity.since = isoNow()
   }
+  let postFailed = false
   try {
     const out = await install(box, home, path)
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
@@ -789,14 +790,13 @@ const main = async (args: string[]) => {
       const posted = run(verdictPost(Number(pr), verdictLine(full, steps), dirname(box)), {
         cwd: REPO,
       })
-      console.log(
-        posted.code === 0
-          ? `gate: posted the verdict on #${pr}: ${posted.out.trim()}`
-          : `gate: posting the verdict on #${pr} failed: ${posted.err.trim()}`,
-      )
+      postFailed = posted.code !== 0
+      if (postFailed)
+        console.error(`gate: posting the verdict on #${pr} failed: ${posted.err.trim()}`)
+      else console.log(`gate: posted the verdict on #${pr}: ${posted.out.trim()}`)
     }
   }
-  return steps.every((s) => s.ok) ? 0 : 1
+  return steps.every((s) => s.ok) && !postFailed ? 0 : 1
 }
 
 if (import.meta.main) process.exit(await main(process.argv.slice(2)))
