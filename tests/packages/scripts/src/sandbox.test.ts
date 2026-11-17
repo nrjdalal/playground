@@ -14,7 +14,13 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
-import { insideBox, rootFiles, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
+import {
+  bwrapRefusal,
+  insideBox,
+  rootFiles,
+  sandbox,
+  wrap,
+} from "../../../../packages/scripts/src/sandbox"
 
 // Builds the sandbox while the parent reads Asia/Kolkata, as the Mac does, and returns the zone a Python child reports with that env plus the given overrides
 const childZone = (overrides: Record<string, string> = {}) => {
@@ -306,4 +312,43 @@ test("the sandbox is a marked scratch folder in the temp folder, which removeScr
     else process.env.TMPDIR = was
     rmSync(root, { force: true, recursive: true })
   }
+})
+
+// bwrapRefusal under a PATH holding only a stand-in bwrap that prints `err` and exits with `code`, or no bwrap for null
+const refusal = (probe: string[], code: number | null, err = "") => {
+  const bin = mkdtempSync(join(tmpdir(), "sandbox-bwrap-"))
+  if (code !== null) {
+    writeFileSync(join(bin, "err"), `${err}\n`)
+    writeFileSync(
+      join(bin, "bwrap"),
+      `#!/bin/sh\n/bin/cat "${join(bin, "err")}" >&2\nexit ${code}\n`,
+    )
+    chmodSync(join(bin, "bwrap"), 0o755)
+  }
+  const was = process.env.PATH
+  process.env.PATH = bin
+  try {
+    return bwrapRefusal(probe)
+  } finally {
+    process.env.PATH = was
+    rmSync(bin, { force: true, recursive: true })
+  }
+}
+
+test("bwrapRefusal names the package only when bwrap is missing, and words a refusal by a bwrap that ran apart from it", () => {
+  expect(refusal(["bwrap", "true"], 0)).toBeNull()
+  expect(refusal(["bwrap", "true"], null)).toBe(
+    "the test sandbox needs bwrap on Linux: install the bubblewrap package (sandbox.ts)",
+  )
+  const mount = "bwrap: Can't mount tmpfs on /newroot/x: No such file or directory"
+  const refused = refusal(["bwrap", "true"], 1, mount)
+  expect(refused).toContain(`the test sandbox could not start bwrap (${mount})`)
+  expect(refused).not.toContain("install the bubblewrap package")
+})
+
+test("bwrapRefusal takes wrap's argv alone, whose program is bwrap", () => {
+  expect(() => refusal(["setsid", "--wait", "true"], 0)).toThrow(
+    "bwrapRefusal takes wrap's argv, whose program is bwrap",
+  )
+  expect(refusal(["/usr/bin/bwrap", "true"], 0)).toBeNull()
 })

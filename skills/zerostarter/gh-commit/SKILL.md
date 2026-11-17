@@ -92,4 +92,5 @@ Stop after the commit. Push only when the user says "commit and push", "push the
 
 - Never commit directly to canary (the default branch); branch first, then PR.
 - Squash a branch with `git reset --soft $(git merge-base HEAD origin/<base>)`, never onto a base that has moved: the soft reset keeps the branch's old copies of whatever the base changed since, and the squash reverts it. Check the file list after.
+- Start a subject lower-case, and put a capitalised name in backticks after a lower-case verb (`` cover `Gated` in the gates ``), since commitlint's `subject-case` refuses a subject that opens on a capital (`Gated covers…`), whatever the name.
 - The pre-commit build prints the size table only. Refresh the graph svg manually: `bun packages/scripts/src/build-sizes.ts --graph`.

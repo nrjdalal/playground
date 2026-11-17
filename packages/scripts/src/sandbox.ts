@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, userInfo } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 import { MARKER, makeScratch } from "@packages/safe-delete"
@@ -177,9 +177,11 @@ export const wrap = (
   ]
 }
 
-// Why bwrap cannot start the box here, or null, tried as wrap's own argv around a no-op: missing, or refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap) or one of wrap's mounts, so a Linux run fails at its start with this line rather than running any test unsandboxed
+// Why bwrap cannot start the box here, or null, tried as wrap's own argv around a no-op: missing, or, once it ran, refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap) or one of wrap's mounts, so a Linux run fails at its start with this line rather than running any test unsandboxed
 export const bwrapRefusal = (probe: string[]): string | null => {
-  const tool = Bun.which("bwrap")
+  if (basename(probe[0] ?? "") !== "bwrap")
+    throw new Error(`bwrapRefusal takes wrap's argv, whose program is bwrap, not ${probe[0]}`)
+  const tool = Bun.which("bwrap", { PATH: process.env.PATH ?? "" })
   if (!tool)
     return "the test sandbox needs bwrap on Linux: install the bubblewrap package (sandbox.ts)"
   const run = Bun.spawnSync([tool, ...probe.slice(1)], {
@@ -188,5 +190,5 @@ export const bwrapRefusal = (probe: string[]): string | null => {
   })
   if (run.exitCode === 0) return null
   const line = run.stderr.toString().trim().split("\n").at(-1) ?? ""
-  return `the test sandbox could not start bwrap (${line}): install the bubblewrap package, and where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them (sandbox.ts)`
+  return `the test sandbox could not start bwrap (${line}): bwrap ran and refused the box, so where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them, else fix the mount its line names (sandbox.ts)`
 }

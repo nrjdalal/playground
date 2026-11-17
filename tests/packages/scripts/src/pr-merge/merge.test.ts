@@ -874,7 +874,7 @@ describe("the merge lock in Redis", () => {
   }
   const root = () => mkdtempSync(join(scratch, "redis-lock-"))
   const held = (lock: Awaited<ReturnType<typeof takeLock>>) => "release" in lock
-  const deadPid = () => Bun.spawnSync(["true"]).pid
+  const deadPid = () => 4_194_305
 
   test("a holder that crashed lets its key lapse, and the next taker gets the lock", async () => {
     const at = root()
