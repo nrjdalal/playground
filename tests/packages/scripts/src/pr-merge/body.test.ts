@@ -246,6 +246,13 @@ describe("bodyRefusal, reading TBD in the Evidence", () => {
     expect(bodyRefusal(evidence("```text\nTBD\n```"))).toBeNull()
     expect(bodyRefusal(evidence("- TBDs and xtbd are other words."))).toBeNull()
   })
+
+  test("refuses a line that names `TBD` in inline code and still says TBD as bare text", () => {
+    const line = "- The gate refuses `TBD`; this line's own count is still TBD."
+    expect(bodyRefusal(evidence(line))).toBe(
+      `its body's Evidence holds TBD: "${line}"; write what was measured, or say what is pending and when`,
+    )
+  })
 })
 
 describe("bodyRefusal, reading an unfilled placeholder", () => {
