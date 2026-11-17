@@ -9609,6 +9609,11 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
+    cwd: "{dashboard}",
+    description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
+    schedule: { always: true }
+  }),
   "ops-restore": {
     ...launchd("ops-restore", {
       description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
