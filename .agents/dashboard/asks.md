@@ -146,7 +146,7 @@
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
   `B · Hotfix main` for a lettered pick, `A. staging · C. soon` for a multi-question ask's one pick per question, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
-  A go's light stays blue while its poster carries it out (an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
+  A go's light stays blue while its poster carries it out (an accept, a clone, an apps change, a guard setting, an own account change or a root step the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
   until its poster closes it, even once typed into its session,
   since only the ack says it landed (#i115's earlier Delivered word read as landed when it was not).
   A `<taker>` is the session that took the answer: its poster, unless the poster has ended.
@@ -174,13 +174,13 @@
   A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
   A multi-question ask's payload names `picks` instead, one entry per question with its `question` and the same three fields (`picksOf`).
   His comment rides as `comment`, a changed draft's words as `text` (left out once they went with its files, below), a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
-  `cloned` (a clone), `listed` (an apps change), `set` (a guard setting), `owned` (an own account change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
+  `cloned` (a clone), `listed` (an apps change), `set` (a guard setting), `owned` (an own account change), `rooted` (a root step) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
   A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
   A page loaded with a card's anchor in its URL (`#needs-you-<id>`, a link or a reload) leaves every shelf shut, so only a click on a chip or a sidebar row opens one for its card (`shelfToOpen` in `web/next/src/lib/inbox.ts`, the hook's `TargetSource`).
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
-  Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
+  Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`, an `--ssh` probe's `runs on another machine over ssh`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, herdr.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `SESSIONS_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
   The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `playground ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
@@ -333,7 +333,7 @@
   What that read found goes in the item's `thread`, a line for each message that leads up to the reply.
   A draft, and a `slack`, `ship` or `ticket` decision, also names where it will land, upfront, not after the send: `link`, the https URL of the Slack thread, channel or DM it posts in (a DM's conversation found or opened first, read-only where it already exists), the canary compare or the pull request,
   or the Linear team or project; or, with no place yet (a brand-new DM nobody can open), `noLink`, one line saying why.
-  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `clone`, `delete`, `grant`, `guard`, `own`, `reveal`, `schema` and `secret` take neither.
+  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `clone`, `delete`, `grant`, `guard`, `own`, `reveal`, `root`, `schema` and `secret` take neither.
   A draft that asks or nudges a named person goes to that person's DM, never a public comment: its `to` names the DM and its `link` is that DM conversation, never a thread reply or a PR comment; a channel ask, such as the one in an org's review channel, stays in its channel.
   Its card's place line, above its title, shows the link by name (Open thread for a draft or a Slack link, `owner/repo#N`, `owner/repo compare`, a Linear ID) or `No link: <why>` (`upfrontLink` in `web/next/src/lib/inbox.ts`), until the poster's ack links where it landed.
   An `ask`'s or an update's optional `scope` names whose work it is, unlike a `guard`'s or an `own`'s `scope`, the settings scope its write lands in.
@@ -349,10 +349,10 @@
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `playground ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
   A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `playground ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
-  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
+  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, a clone, an apps change, a grant, a guard setting, an own account change, a root step) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
-  an accept, a clone, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
+  an accept, a clone, an apps change, a guard setting, an own account change or a root step the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
   and once closed with no link it adds `No link: <why>`, but for a Draft, which reads, gray, `Draft not saved: <why>`.
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
@@ -402,7 +402,7 @@
   ```
 
 - An `accept` decision asks the owner to accept an extension proposal no 5 has accepted (`web/next/content/docs/extensions.mdx`'s Review), since a 5 from another session accepts it itself (`judgeItem` in `packages/settings/src/items.ts`) with no card.
-  It is one of the six decisions whose Approve the Dashboard carries out itself, with a `clone`, an `apps` change, a `grant`, a `guard` setting and an `own` account change (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
+  It is one of the seven decisions whose Approve the Dashboard carries out itself, with a `clone`, an `apps` change, a `grant`, a `guard` setting, an `own` account change and a `root` step (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
   Its `scope`, `kind` and `key` name the proposal in the store's own patterns, none able to start as a flag; its `rev` (7 to 40 hex) is the proposal's head the poster read, so a proposal written since is refused with a 409 (`acceptSchema` in `api/hono/src/lib/dashboard/inbox.ts`); `why` says why to accept it.
   A set the owner reads as one change is one card: `more` lists 1 to 20 further proposals, each with its own `scope`, `kind`, `key` and `rev` by the same rules, accepted after the first in the order written, so a proposal that needs another lands after it.
   Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why, or with `more` one numbered line a proposal, in order, and an Approve of `Accept the <kind> <key> and N more`; Edit is refused, so the words approved are the words posted.
@@ -477,6 +477,45 @@
   {"from": "dispatcher", "title": "Let agent-desktop see the screen?",
    "preview": {"type": "grant", "permission": "screen-recording",
                "why": "The simulator check takes a screenshot"}}
+  EOF
+  ```
+
+- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule), or on a peer, whose password a secret card carries (below);
+  `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs, and `chromium-ca`, the browser policy below),
+  and `why` (`rootSchema`).
+  Each entry holds what the step does and how to undo it, and its card shows both.
+  Every listed step is one fixed script in `api/hono/src/lib/system/root/`, and the card takes no argument, path or command: every other key is refused, so no text from a card reaches root.
+  An `install` card is posted with no `scripts` and no `ca`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it, and `ca`, the sha256 of the DER inside the Dashboard's CA (`caFile()`, `ca.pem` in portless's folder) when it has one (`caPin`, `rootScripts`).
+  They refuse a poster's own list or `ca` that differs, and either one on a step card, so the card shows the very bytes its Approve installs; an install card with no `ca` says the browser step refuses until a later one carries it.
+  Its card shows `INSTALL_TEXT` (`packages/config/src/inbox.ts`) whole beside each script's hash, and Approve runs `pkexec --disable-internal-agent /bin/sh -c <INSTALL_TEXT> sh <this checkout's root/ folder> <each hash>` (`installArgv`, `api/hono/src/lib/system/root.ts`):
+  the text refuses a hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against its hash, and moves them into `/usr/local/lib/playground/root/` (root, 0755), or refuses with nothing moved, so a source changed after approval never installs.
+  With a `ca`, the argv adds the CA's path, read from this machine at Approve and never from the card, and the card's hash: the text reads at most 16 KB of that file once (`CA_MAX_BYTES`), refuses a file over it or holding other than one certificate before openssl reads it,
+  turns that copy into DER with `openssl x509` and keeps it at `/usr/local/lib/playground/data/portless-ca.der` (`ROOT_CA`, root, 0644) only if its sha256 matches the card's, or refuses with nothing moved.
+  A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
+  A card with `machine`, a name from org.ts's cluster (`PLAYGROUND_PEERS`) and never a host, runs on that machine over ssh instead (`api/hono/src/lib/system/peer-root.ts`, [ADR 0027](../adr/0027-a-peer-runs-its-listed-root-steps-with-no-password.md)); a name the cluster does not hold, or one no secret store item can take (`peerSecret`), is refused at post.
+  Its install keeps no CA. It reads the machine's admin password from `playground-<machine>-sudo`, the item a `secret` card with a keychain sink writes, refusing with nothing run when it is not there.
+  It copies the scripts to `~/.cache/playground-root/` there as the ssh user, then runs `ssh … sudo -k -S -p '' /bin/sh -c <PEER_INSTALL_TEXT> sh <stage> <each hash>` with the password on stdin alone (`peerInstallArgv`).
+  It deletes the item on every path, the result line ending `deleted <item>`, and cuts the value out of every line it keeps.
+  `PEER_INSTALL_TEXT` reads no stdin, refuses when sudo names no user but root, runs `INSTALL_TEXT`, then writes one polkit action per listed script, pinned to its installed path (`PEER_POLICY`), and a rule that answers yes to those actions alone for that user (`PEER_RULE`).
+  A peer step reads the script's owner, mode, kind and sha256 there first (`peerReadArgv`, `peerInstalledRefusal`), then runs `ssh -o BatchMode=yes <target> pkexec --disable-internal-agent <path>` with no password; `126` and `127` read that the rule did not let it run, and `255` that ssh could not reach the machine.
+  Approve takes `seen`, as a guard's does, and Edit is refused.
+  It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
+  The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window,
+  `127` that no window could ask and `143` that the window got no answer in 5 minutes,
+  and its poster is told.
+  The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
+  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
+  The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
+  `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
+  The constraint means even a swapped CA vouches for `*.localhost` alone.
+  It refuses when no DER is kept, and when another file in either folder already sets the same policy, naming that file, since two files setting it conflict.
+  A new CA means a new install card, then the step again: until then every `.localhost` page in those browsers fails with `ERR_CERT_AUTHORITY_INVALID`.
+  Helium takes the policy at its next start, and may show Managed by your organization in its menu.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "ops", "title": "Install the root steps on this machine?",
+   "preview": {"type": "root", "step": "install", "why": "No root step is installed here yet"}}
   EOF
   ```
 

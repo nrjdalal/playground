@@ -101,6 +101,19 @@ const session = (ctx: Context, name: string, pid: number, status = "busy") =>
   write(join(ctx.cfg, "sessions", `${name}.json`), { name, pid, status })
 const roster = (ctx: Context, agents: Record<string, unknown>[]) =>
   write(join(ctx.data, "roster.json"), { agents })
+// A resume record as spawn.sh writes it: the server it ran on, then its exec line, with --ssh for a remote probe.
+const sshRecord = (
+  ctx: Context,
+  name: string,
+  server = "playground-probes",
+  ssh = " --ssh a@10.0.0.2 --key /k",
+) => {
+  mkdirSync(join(ctx.data, "resume"), { recursive: true })
+  writeFileSync(
+    join(ctx.data, "resume", `${name}.sh`),
+    `#!/bin/bash\n# server: ${server}\nexec /main/scripts/spawn.sh resume ${name} /main 6aafeb8a-bce0-4ceb-92cf-97f92cece832${ssh}\n`,
+  )
+}
 
 const DOCKER_PS = "docker ps --filter name=^playground-"
 const TEST_PS = "docker ps --filter name=^playground-test-"
@@ -274,6 +287,94 @@ describe("check", () => {
       "probe-old": now - 16 * 60,
       "probe-stray": now - 11 * 60,
     })
+  })
+
+  test("an --ssh probe is live while its labelled pane runs ssh, read once a server, and gone when the pane is gone or back at its shell", async () => {
+    const { ctx, sweep } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [
+      { kind: "probe", name: "ssh-live", status: "working" },
+      { kind: "probe", name: "ssh-old", status: "working" },
+      { kind: "probe", name: "ssh-shell", status: "working" },
+      { kind: "probe", name: "ssh-gone", status: "working" },
+      { name: "probe-local", status: "working" },
+    ])
+    sshRecord(ctx, "ssh-live")
+    sshRecord(ctx, "ssh-old")
+    sshRecord(ctx, "ssh-shell")
+    sshRecord(ctx, "ssh-gone")
+    sshRecord(ctx, "probe-local", "playground-probes", "")
+    write(join(sweep, "probe-first-seen.json"), { "ssh-old": NOW / 1000 - 16 * 60 })
+    const reads: string[] = []
+    ctx.herdr = async (server, args) => {
+      reads.push(`${server} ${args.join(" ")}`)
+      if (args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              { label: "ssh-live", pane_id: "w1:p1" },
+              { label: "ssh-old", pane_id: "w1:p2" },
+              { label: "ssh-shell", pane_id: "w1:p3" },
+              { label: "probe-local", pane_id: "w1:p4" },
+            ],
+          },
+        })
+      const name = args.at(-1) === "w1:p3" ? "bash" : "ssh"
+      return JSON.stringify({
+        result: { process_info: { foreground_processes: [{ argv: [name], name, pid: 1 }] } },
+      })
+    }
+    expect((await check(ctx)).sort()).toEqual([
+      "probe-gone-unended:probe-local",
+      "probe-gone-unended:ssh-gone",
+      "probe-gone-unended:ssh-shell",
+      "probe-over-15m:ssh-old",
+    ])
+    expect(reads.filter((r) => r.endsWith("pane list"))).toEqual(["playground-probes pane list"])
+    expect(read(join(sweep, "probe-first-seen.json"))).toEqual({
+      "ssh-live": NOW / 1000,
+      "ssh-old": NOW / 1000 - 16 * 60,
+    })
+  })
+
+  test("an --ssh probe is live when any pane under its label runs ssh, a stale shell pane listed first", async () => {
+    const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [{ kind: "probe", name: "ssh-again", status: "working" }])
+    sshRecord(ctx, "ssh-again")
+    ctx.herdr = async (_server, args) => {
+      if (args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              { label: "ssh-again", pane_id: "w1:p1" },
+              { label: "ssh-again", pane_id: "w1:p2" },
+            ],
+          },
+        })
+      const name = args.at(-1) === "w1:p1" ? "bash" : "ssh"
+      return JSON.stringify({
+        result: { process_info: { foreground_processes: [{ argv: [name], name, pid: 1 }] } },
+      })
+    }
+    expect(await check(ctx)).toEqual([])
+  })
+
+  test("an --ssh probe reads gone with no herdr reader, and no pane is read with no --ssh probe unended", async () => {
+    const { ctx } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [
+      { kind: "probe", name: "ssh-live", status: "working" },
+      { kind: "probe", name: "ssh-ended", status: "ended" },
+    ])
+    sshRecord(ctx, "ssh-live")
+    sshRecord(ctx, "ssh-ended")
+    expect(await check(ctx)).toEqual(["probe-gone-unended:ssh-live"])
+    const reads: string[] = []
+    ctx.herdr = async (server, args) => {
+      reads.push(`${server} ${args.join(" ")}`)
+      return ""
+    }
+    roster(ctx, [{ name: "ssh-ended", status: "ended" }])
+    expect(await check(ctx)).toEqual([])
+    expect(reads).toEqual([])
   })
 
   test("a runner and a probe by their kind: an <id>-<kind> name, or a roster kind over any name", async () => {

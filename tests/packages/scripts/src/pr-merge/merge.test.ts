@@ -19,6 +19,7 @@ import {
   lockRootOf,
   realLockRoot,
   prMerge,
+  runGh,
   shipNowLine,
   takeLock,
   unfoundTokens,
@@ -26,6 +27,7 @@ import {
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
 import "./scratch-config"
+import { withGhDown } from "../../../../gh-down"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { PR_TEMPLATE, SKILL_BODY } from "./bodies"
 import { greenChecks } from "./suite"
@@ -289,7 +291,7 @@ describe("prMerge", () => {
     expect(outcome).toMatchObject({ kind: "merged" })
   })
 
-  // a fix for a bug live on the factory's own machine waited for the usual ship beat, so a ship-now label tells Ops to ship once it merges.
+  // a fix for a bug live on the factory's own machine, or a feat for an ask the owner waits to see live, waited for the usual ship beat, so a ship-now label tells Ops to ship once it merges.
   test("a ship-now fix's merge and a ship-now feat's naming the owner's ask each send Ops one ship line; an unlabelled merge, a feat naming no owner ask and a refusal send none", async () => {
     const sent: string[] = []
     const shipNow = async (line: string) => void sent.push(line)
@@ -344,6 +346,22 @@ describe("prMerge", () => {
       expect(outcome.gates.find((gate) => gate.name === "up to date")?.ok).toBe(false)
       expect(merges(calls)).toEqual([])
     }
+  })
+
+  // #2478's shape: a web/next diff at 5/5 with every check green and no tester verdict merged on ready (PG-2485).
+  test("refuses a web/next diff at 5/5 with green checks and no tester verdict, and never calls gh pr merge", async () => {
+    const { calls, run } = stub({ files: ["web/next/src/components/dashboard/row.tsx"] })
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["tester"])
+    expect(merges(calls)).toEqual([])
+    const tested = stub({
+      comments: `${PASSING}\n${comment("## TesterBot · PASS at 69a6a4c · both shots attached", "2026-10-06T19:05:00Z")}`,
+      files: ["web/next/src/components/dashboard/row.tsx"],
+    })
+    expect(await prMerge(112, { repo: REPO }, tested.run, local())).toMatchObject({
+      kind: "merged",
+    })
   })
 
   test("refuses a PR the held list names, saying why, and never calls gh pr merge", async () => {
@@ -1067,5 +1085,14 @@ describe("the body gate's token grep at the head", () => {
     expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SKILLS_LINE", "SUITE_LINE"])).toEqual(
       ["SKILLS_LINE", "SUITE_LINE"],
     )
+  })
+})
+
+// the train's every gh call goes through runGh, so a broken gh is never flooded
+test("runGh skips gh while the gh-auth beat's fresh result reads failed", async () => {
+  expect(await withGhDown(() => runGh(["pr", "list"]))).toEqual({
+    code: 1,
+    stderr: "gh unreachable: gh token invalid",
+    stdout: "",
   })
 })

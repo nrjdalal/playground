@@ -132,6 +132,44 @@ describe("runUpdate", () => {
     expect(said).toContain("playground update: brief refresh failed: a made-up git failure")
   })
 
+  test("the peer sync runs after ops-restart and before the roll, with the commit HEAD reached, on --to too, and its failure is logged while the update succeeds (#2449)", async () => {
+    const order: string[] = []
+    const { calls, run } = fakeRun({ "rev-parse": { out: "new\n" } })
+    const peers = async (sha: string) => {
+      order.push(`peers ${sha} after ${calls.at(-1)?.join(" ")}`)
+    }
+    const roll = async () => (order.push("roll"), 0)
+    expect(await runUpdate(repo, run, roll, quiet, undefined, undefined, undefined, peers)).toBe(0)
+    expect(order).toEqual([`peers new after git -C ${repo} rev-parse HEAD`, "roll"])
+    expect(calls.at(-2)?.[2]).toContain("ops-restart")
+    const tagged = fakeRun({ "rev-parse": { out: "tagged\n" } })
+    const seen: string[] = []
+    const atTag = async (sha: string) => {
+      seen.push(sha)
+    }
+    expect(
+      await runUpdate(repo, tagged.run, roll, quiet, "v1.0.0", undefined, undefined, atTag),
+    ).toBe(0)
+    expect(seen).toEqual(["tagged"])
+    const said: string[] = []
+    const failing = async () => {
+      throw new Error("a made-up ssh failure")
+    }
+    expect(
+      await runUpdate(
+        repo,
+        fakeRun().run,
+        async () => 0,
+        (l) => said.push(l),
+        undefined,
+        undefined,
+        undefined,
+        failing,
+      ),
+    ).toBe(0)
+    expect(said).toContain("playground update: peer sync failed: a made-up ssh failure")
+  })
+
   test("a merge that changed a skill names it and the folder in the checkout a live session reads it from; one that changed none says nothing of skills", async () => {
     const said: string[] = []
     const { run } = fakeRun({

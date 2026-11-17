@@ -378,6 +378,7 @@ Playground installs into $DIR. Outside it, it writes only in:
   $HOME/.bun/bin             the playground command, and on Linux the secret store as security
   $HOME/.playground          the data folder: your extensions, the brief templates, the ops scripts and the skill sets
   Claude Code's user settings  the home skill set, installed with claude plugin install
+  $HOME/.claude.json  Claude Code's yes to trusting $DIR, the one its folder question records
   $startup  a PATH line for each tool it installs off your PATH, once$service
 Every ops job starts off but the Dashboard's own and the usage read, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
@@ -425,11 +426,22 @@ EOF
   on_path "$HOME/.bun/bin" BUN_INSTALL
   # With gh signed in, your extensions get their private repo and your login's folder; without it they stay on this machine, and doctor says sync is off.
   ext_init
+  # Running this installer is the choice to run the code it cloned, so it records Claude Code's yes for that checkout alone, which covers the leads worktree the dispatcher starts in; spawn.sh asks every other folder through first run's Trust this folder.
+  local trusted=0 why
+  if ! why=$("$BUN" --no-env-file "$DIR/packages/scripts/src/playground/claude-trust.ts" "$DIR" 2>&1); then
+    trusted=1
+    left "Claude Code's trust of $DIR: $why; run playground, then click Trust this folder on Claude Code's card in first run"
+  fi
+  echo "$why"
   local proxy=0
   proxy_service || proxy=1
   finish
   if [ "$proxy" -ne 0 ]; then
     echo "The Dashboard's local address is not set up, so playground does not start yet: run bash $DIR/install.sh again in a terminal to set it up and start it."
+    exit 1
+  fi
+  if [ "$trusted" -ne 0 ]; then
+    echo "Then run: playground, and click Trust this folder on Claude Code's card in first run, so the dispatcher can start."
     exit 1
   fi
   if "$BUN" --no-env-file "$DOCTOR" --tools >/dev/null; then

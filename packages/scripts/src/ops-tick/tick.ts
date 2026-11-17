@@ -1,5 +1,6 @@
 import { realpathSync, statfsSync } from "node:fs"
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
+import { userInfo } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -10,7 +11,13 @@ import {
   managerOf,
 } from "@packages/config/kinds"
 import { purgeTrash, stripTrash } from "@packages/safe-delete"
-import { accountSettings, readPolicy, ruleSettings } from "@packages/settings"
+import {
+  accountKey,
+  accountSettings,
+  accountsOf,
+  readPolicy,
+  ruleSettings,
+} from "@packages/settings"
 
 import {
   sweep as autoEndSweep,
@@ -18,6 +25,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
 import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
@@ -98,8 +106,8 @@ const lines = (out: string): string[] =>
     .map((line) => line.trimEnd())
     .filter(Boolean)
 
-const python = (ctx: Context, path: string, isolated = true) =>
-  ctx.run(["python3", ...(isolated ? ["-I"] : []), join(ctx.ops, path)])
+const python = (ctx: Context, path: string, isolated = true, args: string[] = []) =>
+  ctx.run(["python3", ...(isolated ? ["-I"] : []), join(ctx.ops, path), ...args])
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await Bun.file(path).text())
 
@@ -703,6 +711,54 @@ const glmCredits = async (ctx: Context) => {
   )
 }
 
+// Every Claude row of usage.accounts but the stored login, which ops-usage reads, read by account-watch.py into usage-<local part>.json, so spawn.sh judges an --account start on a reading under its hour; each line lands in ops/log/account-watch.log, and a read that fails throws, so the beat reads failed. A login whose read fails twice in a row has a file past that hour, which spawn.sh skips, so ops is told once per run of failures, kept in tick/other-logins.json by login until a read passes.
+export const otherLogins = async (ctx: Context) => {
+  const read = await readPolicy(join(ctx.ops, ".."))
+  if (read.refusal !== undefined) throw new Error(`the policy does not read: ${read.refusal}`)
+  const stored = (await readJson(join(ctx.ops, "usage", "stored-login.json")).catch(
+    () => null,
+  )) as {
+    account?: unknown
+  } | null
+  const skip = typeof stored?.account === "string" ? stored.account.toLowerCase() : ""
+  const emails = accountsOf(accountSettings.get(read.settings, "usage.accounts"), "claude")
+    .map(accountKey)
+    .filter((email) => email.includes("@") && email.toLowerCase() !== skip)
+  const streakPath = join(ctx.ops, "tick", "other-logins.json")
+  const streaks = ((await readJson(streakPath).catch(() => ({}))) ?? {}) as Record<
+    string,
+    { failed: number; told?: boolean }
+  >
+  const before = JSON.stringify(streaks)
+  const failed: string[] = []
+  const log: string[] = []
+  for (const email of emails) {
+    const { code, out } = await python(ctx, "usage/account-watch.py", true, [email])
+    const line = lines(out).at(-1) ?? `${email}: exit ${code}`
+    log.push(`${isoSeconds(ctx.now)} ${line.slice(0, 300)}\n`)
+    if (!code) {
+      delete streaks[email]
+      continue
+    }
+    failed.push(line)
+    const streak = (streaks[email] = {
+      failed: (streaks[email]?.failed ?? 0) + 1,
+      told: streaks[email]?.told,
+    })
+    if (streak.failed >= 2 && !streak.told) {
+      const text = `other-logins: ${email}'s usage read failed ${streak.failed} times in a row, so spawn.sh skips the usage check for --account ${email}: ${line.slice(0, 300)}`
+      if (await ctx.send("ops", text, true)) streak.told = true
+    }
+  }
+  for (const email of Object.keys(streaks)) if (!emails.includes(email)) delete streaks[email]
+  if (JSON.stringify(streaks) !== before) await writeAtomic(streakPath, JSON.stringify(streaks))
+  if (log.length) {
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(join(ctx.ops, "log", "account-watch.log"), log.join(""))
+  }
+  if (failed.length) throw new Error(failed.join("; "))
+}
+
 const freeBytes = (dir: string): number => {
   const fs = statfsSync(dir)
   return fs.bavail * fs.bsize
@@ -997,6 +1053,79 @@ const relayWatch = async (ctx: Context) => {
   }
 }
 
+export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
+export const TOKEN_INVALID = "gh token invalid"
+const BOOT_MS = 10 * 60_000
+const HOUR_MS = 60 * 60_000
+
+// Whether the owner is signed in at the desktop: loginctl lists a session of this user's on a seat, else, with no loginctl (macOS), who lists this user on the console or a display; true when neither reads, so an unread desktop never blames the keyring.
+const desktopUp = async (ctx: Context): Promise<boolean> => {
+  const me = userInfo().username
+  const sessions = await ctx.run(["loginctl", "list-sessions", "-o", "json"]).catch(() => null)
+  if (sessions?.code === 0)
+    try {
+      const list = JSON.parse(sessions.out) as { seat?: unknown; user?: unknown }[]
+      return list.some((s) => s.user === me && typeof s.seat === "string" && s.seat !== "")
+    } catch {
+      // not loginctl's JSON: who reads it instead
+    }
+  const who = await ctx.run(["who"]).catch(() => null)
+  if (who?.code !== 0) return true
+  return lines(who.out).some((line) => {
+    const [user, tty = ""] = line.split(/\s+/)
+    return user === me && /^(?:console|seat\d+|:\d+)$/.test(tty)
+  })
+}
+
+// One probe of gh's sign-in, null when it reads, else why not: past timeoutMs gh hangs, and a failure whose account line names the keyring as its store ("default" when the keyring gave no token, as a locked one gives none) with no desktop session up is the locked keyring's. ctx.run is async, so a hang holds no other beat.
+const ghProbe = async (ctx: Context, timeoutMs: number): Promise<string | null> => {
+  const start = performance.now()
+  const probe = await ctx
+    .run(["gh", "auth", "status", "-h", "github.com"], timeoutMs)
+    .catch(() => ({ code: 1, out: "" }))
+  if (performance.now() - start >= timeoutMs) return GH_HANGS
+  if (probe.code === 0) return null
+  return /account \S+ \((?:default|keyring)\)/.test(probe.out) && !(await desktopUp(ctx))
+    ? KEYRING_LOCKED
+    : TOKEN_INVALID
+}
+
+// gh-auth: probes gh's sign-in each minute for BOOT_MS after boot or wake and while it fails, else hourly, its last result in tick/gh-auth.json, which ghRead reads so no caller floods a broken gh. The first failure sends one line to Ops' waiter queue and posts one Inbox alert naming the fix; it stays quiet while gh keeps failing, and once gh reads again says so to Ops and resolves the alert.
+export const ghAuth =
+  (timeoutMs = GH_TIMEOUT_MS) =>
+  async (ctx: Context) => {
+    const path = join(ctx.ops, "tick", "gh-auth.json")
+    const last = (await readJson(path).catch(() => null)) as GhAuth | null
+    const now = ctx.now.getTime()
+    const booting = now - (await readUpSince(ctx.run)) < BOOT_MS
+    if (last?.ok && !last.id && !booting && now - Date.parse(last.at) < HOUR_MS) return
+    const reason = await ghProbe(ctx, timeoutMs)
+    const at = ctx.now.toISOString()
+    const alert = last?.id && last.by ? { by: last.by, id: last.id } : null
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    const ops = managerOf(roster?.agents, "ops")
+    if (reason === null) {
+      await writeAtomic(path, JSON.stringify({ at, ok: true, ...alert }))
+      if (last?.ok === false) await queueWaiterLine(ctx, ops, "gh reads GitHub again")
+      if (!alert) return
+      await resolveOwn(ctx, alert.id, alert.by, "gh reads GitHub again")
+      await writeAtomic(path, JSON.stringify({ at, ok: true }))
+      return
+    }
+    const failing: GhAuth = { at, ok: false, reason, ...alert }
+    await writeAtomic(path, JSON.stringify(failing))
+    if (last?.ok !== false) await queueWaiterLine(ctx, ops, `gh cannot read GitHub: ${reason}`)
+    if (alert) return
+    const posted = await postAlert(
+      ctx,
+      `gh cannot read GitHub: ${reason}`,
+      "- 🔑 Every gh read waits until gh reads again, and this clears by itself then.",
+    )
+    await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
+  }
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -1006,6 +1135,12 @@ export const BEATS: Beat[] = [
   { cron: "7,37 * * * *", name: "sweep", run: sweep, to: "the session's lead, ops, dispatcher" },
   { cron: "*/5 * * * *", name: "auto-end", run: autoEnd(), to: "the session's lead" },
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
+  {
+    cron: "21,51 * * * *",
+    name: "other-logins",
+    run: otherLogins,
+    to: "ops/log/account-watch.log",
+  },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
   {
@@ -1028,6 +1163,7 @@ export const BEATS: Beat[] = [
   { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
+  { cron: "* * * * *", name: "gh-auth", run: ghAuth(), to: "ops and the Inbox, once a failure" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

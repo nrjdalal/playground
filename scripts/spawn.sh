@@ -665,6 +665,60 @@ try:
                 parked[row["email"].lower()] = row["parkedUntil"]
         except (KeyError, TypeError, ValueError, AttributeError):
             pass
+    # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
+    # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
+    pace_off = None
+    try:
+        with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
+            until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
+        if until.tzinfo is not None and until > now:
+            pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    except (OSError, ValueError):
+        pass
+
+    # One login's reading: what it read, and why it is over the gate (None when it passes).
+    def judge(name, usage, limit, writer):
+        seen = {}
+        try:
+            written = from_iso(usage["writtenAt"])
+        except (KeyError, TypeError, ValueError):
+            return seen, f"it cannot read {name} (does not read)"
+        age = int((now - written).total_seconds() // 60)
+        if age >= limit:
+            return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
+        rate = usage.get("rate_limits")
+        if not isinstance(rate, dict):
+            return seen, f"{name} holds no rate_limits (does not read)"
+        try:
+            week = rate["seven_day"]
+            resets = from_iso(week["resets_at"])
+            week_pct = week["used_percentage"]
+            if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
+                raise TypeError
+        except (KeyError, TypeError, ValueError):
+            return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
+        five = rate.get("five_hour")
+        five_hour = five.get("used_percentage") if isinstance(five, dict) else None
+        if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
+            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+        seen["fiveHour"] = "none" if five_hour is None else five_hour
+        if five_hour is not None and five_hour >= 90:
+            try:
+                reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
+            except (KeyError, TypeError, ValueError):
+                reset = "later"
+            return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
+        seen["week"] = week_pct
+        if pace_off:
+            if week_pct >= 98:
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+        else:
+            days_in = 7 - (resets - now).total_seconds() / 86400
+            pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
+            if week_pct > pace:
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
+        return seen, None
+
     if account:
         if account.lower() in parked:
             refuse("usage", f"--account {account} is parked until {parked[account.lower()]} (usage.accounts parkedUntil). Name another account, or none, so it starts on the login with the most room")
@@ -702,7 +756,22 @@ try:
                 roomiest = min(((acct, week) for key, (acct, week, _) in weeks.items() if key != account.lower() and week < 100), key=lambda pair: pair[1], default=None)
                 hint = f"Name {roomiest[0]}, the account with the most room (its week reads {fmt(roomiest[1])}%), or, for a session that may run on this machine's login, none" if roomiest else "No account in usage.json's accounts has room; wait for a week to reset"
                 refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% (usage.json accounts) until {resets:%a %H:%M} UTC. {hint}")
-        readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
+        # its own usage-<local part>.json, which the ops tick's other-logins beat writes every 30 minutes (account-watch.py), judged at a bare start's pace while under its hour; with none fresh, the check skips
+        name = f"usage-{account.split('@')[0]}.json"
+        other, other_detail = load(name)
+        try:
+            age = (now - from_iso(other["writtenAt"])).total_seconds() / 60 if not other_detail and str(other.get("account") or "").lower() == account.lower() else None
+        except (AttributeError, KeyError, TypeError, ValueError):
+            age = None
+        if age is None or age >= 60:
+            readings["usage"] = f"skipped (--account {account}: this machine holds no {name} for it under 60 minutes old, which the ops tick's other-logins beat writes)"
+        else:
+            seen, detail = judge(name, other, 60, "")
+            readings.update(seen)
+            if pace_off:
+                readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+            if detail:
+                refuse("usage", f"--account {account}: {detail}. Name another account, or none, so it starts on the login with the most room")
     elif backend == "glm":
         beat = read("ops/ops-zai-usage.json")
         if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
@@ -739,64 +808,10 @@ try:
             week_pct = None
         readings["week"] = week_pct
     else:
-        # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
-        # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
-        pace_off = None
-        try:
-            with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
-                until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
-            if until.tzinfo is not None and until > now:
-                pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-        except (OSError, ValueError):
-            pass
         if pace_off:
             readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
-
-        # One login's reading: what it read, and why it is over the gate (None when it passes).
-        def judge(name, usage, limit, writer):
-            seen = {}
-            try:
-                written = from_iso(usage["writtenAt"])
-            except (KeyError, TypeError, ValueError):
-                return seen, f"it cannot read {name} (does not read)"
-            age = int((now - written).total_seconds() // 60)
-            if age >= limit:
-                return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
-            rate = usage.get("rate_limits")
-            if not isinstance(rate, dict):
-                return seen, f"{name} holds no rate_limits (does not read)"
-            try:
-                week = rate["seven_day"]
-                resets = from_iso(week["resets_at"])
-                week_pct = week["used_percentage"]
-                if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
-                    raise TypeError
-            except (KeyError, TypeError, ValueError):
-                return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
-            five = rate.get("five_hour")
-            five_hour = five.get("used_percentage") if isinstance(five, dict) else None
-            if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-                five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
-            seen["fiveHour"] = "none" if five_hour is None else five_hour
-            if five_hour is not None and five_hour >= 90:
-                try:
-                    reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
-                except (KeyError, TypeError, ValueError):
-                    reset = "later"
-                return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
-            seen["week"] = week_pct
-            if pace_off:
-                if week_pct >= 98:
-                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
-            else:
-                days_in = 7 - (resets - now).total_seconds() / 86400
-                pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
-                if week_pct > pace:
-                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
-            return seen, None
-
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-        # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
+        # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
         usage, detail = load("usage.json")
         own = usage.get("account") if isinstance(usage, dict) else None
         writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -831,7 +846,7 @@ try:
             email = other.get("account") if isinstance(other, dict) else None
             if not isinstance(email, str) or not email or email.lower() in known:
                 continue
-            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
+            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and the ops tick's other-logins beat (account-watch.py <email>) every other account's every 30 minutes.")
             logins.append((email, name, email, seen, detail))
             # a refused file leaves the account open to its login-flip reading below
             if detail is None:
@@ -1790,7 +1805,7 @@ restoring_row_down() {
 }
 ! restoring_row_down || REFUSE_CODE=4 refuse "its roster row reads $row_status"
 # Claude Code asks whether you trust a folder before its first session there and waits with No, exit marked; its yes stays in its config as projects[<folder>].hasTrustDialogAccepted, read on the session's folder and each folder above it up to the checkout's root and no further (measured on 2.1.325), so the yes on the checkout's root covers every worktree in it and a yes on a folder above the checkout counts for nothing.
-# A Claude session in this checkout starts only once that yes is there, which first run's Trust this folder records; a folder outside it keeps herdr_answer's answer, and an --ssh probe's claude runs on the other machine, whose own config it reads.
+# A Claude session in this checkout starts only once that yes is there, which install.sh records for the checkout it cloned and first run's Trust this folder records otherwise; a folder outside it keeps herdr_answer's answer, and an --ssh probe's claude runs on the other machine, whose own config it reads.
 claude_trusts() {
   python3 -I - "$(own_config)" "$1" "$2" <<'PY'
 import json, os, sys
@@ -2129,6 +2144,8 @@ else
   [ "$ROLE" = worker ] && [ "$BACKEND" != glm ] && [ -f "$DATA/brief-rush.md" ] && BINDS=" $SHOWN/brief-rush.md binds you too, on this Claude lane."
   WHO="a $ROLE in the Playground factory; you report to $TO"
   REPORT=" Report to $TO with SendMessage (to: $TO)."
+  # SendMessage reaches no session on another machine, so a start over --ssh reports through the outbox, which ops-peer-relay copies across, and waits on its own queue for the answers.
+  [ -z "$SSH_HOST" ] || REPORT=" Report to $TO with: playground send $TO <your text>, since SendMessage does not reach $TO from this machine, and keep playground alerts-wait $NAME running as a background task, started again after each line it prints, for the answers."
   if [ "$ROLE" = dispatcher ]; then
     WHO="the Playground factory's dispatcher; $TO briefs you with a handoff"
     [ -z "$FIRST" ] || WHO="the Playground factory's dispatcher; you work with the owner, who talks to you here and in the Dashboard's chat"

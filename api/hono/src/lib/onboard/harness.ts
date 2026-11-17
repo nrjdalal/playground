@@ -152,7 +152,7 @@ export const cardOf = (id: HarnessId, facts: HarnessFacts, refusal: string | nul
                 "Trusted",
                 "MISSING",
                 "not trusted",
-                `Claude Code asks whether you trust ${site.name}'s folder before its first session there, and Alpha would wait on that question. Trust it here once; it covers every session ${site.name} starts in it.`,
+                `Claude Code asks whether you trust ${site.name}'s folder before its first session there, and Alpha would wait on that question. The installer trusts the folder it cloned; trust this one here once, and it covers every session ${site.name} starts in it.`,
                 { id: "claude-trust", label: "Trust this folder" },
               ),
             ]

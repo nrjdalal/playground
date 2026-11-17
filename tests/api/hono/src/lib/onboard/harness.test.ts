@@ -136,6 +136,7 @@ describe("each harness's card on a machine it reads (#1835)", () => {
       const trust = claude.checks.find((check) => check.name === "Trusted")!
       expect(trust.action).toEqual({ id: "claude-trust", label: "Trust this folder" })
       expect(trust.note).toContain("Alpha would wait on that question")
+      expect(trust.note).toContain("The installer trusts the folder it cloned")
       expect(claude.ready).toBe(false)
     }
     const missing = card(

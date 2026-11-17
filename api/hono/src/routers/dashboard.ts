@@ -1068,7 +1068,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no pull request, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no pull request, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words, or for a probe started with --ssh, refused before the close since spawn.sh does not resume one.",
       responses: {
         200: {
           description: "Restarted: the session runs again on the account named",
@@ -1131,6 +1131,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         cwd: worker.cwd,
         name: worker.name,
         prs,
+        ...(worker.remote && { remote: worker.remote }),
         sessionId,
       })
       if (restarted.status === "refused") throw new ApiError(502, "ERROR", restarted.detail)

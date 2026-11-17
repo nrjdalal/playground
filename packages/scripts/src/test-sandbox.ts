@@ -158,8 +158,10 @@ if (left.length > 0)
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
 )
+// a flag left alone in `rest` (every path named was serial) would have bun test run the whole suite
+const named = (list: string[]) => list.some((path) => !path.startsWith("-"))
 const parallel =
-  rest.length > 0
+  named(rest) || (rest.length > 0 && !named(paths))
     ? await runPass(
         [
           `--preload=${preload}`,

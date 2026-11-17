@@ -36,13 +36,13 @@ playground sweep <lead>
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
                       give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground priority [on <session> --reason "<why>" | off <session> --reason "<why>"]
-                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes focus and the gates playbook's SPAWN.md, Capacity gate, names for a priority start; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
+                      the one way to open a priority window, and only on the owner's or the dispatcher's word: on writes the data folder's priority-<session>.json, naming the session, who opened it, the reason and the time, and while it stands a spawn.sh --priority start passes focus and the gates playbook's SPAWN.md, Capacity gate, names for a priority start, and run-slot ranks that session's runs first after focus and a hand-written run-slot.priority; off lifts it, and ops-tick's priority-lapse beat lifts one still standing after ${LAPSE_HOURS} hours; each on, off and lapse is a line in ops/priority.log; a priority file another writer keeps it leaves alone; bare, it lists the priority files standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground page --remove <file.html>
                       take one kept page off the Pages tab: drop its line from pages.jsonl and move its HTML, caption and PDF to the trash, printing each trash id for playground rm --restore; it refuses, moving nothing, a page pages.jsonl does not list, a path outside the previews folder, a previews folder that is a symlink, a page file or pages.jsonl that is a symlink or hard link, a file over 20 MiB, and a page whose moves the trash's per-minute cap has no room for
 playground update [--to <tag>]
-                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
+                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd, or on Linux systemd, should hold
 playground herdr pin [--check | --asset <file>]
                       put the pinned herdr's release asset for this machine (macOS or Linux, on arm64 or x64) at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
@@ -93,11 +93,13 @@ playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <fil
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
-                      for a manager's background task: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up, print it and exit, so it wakes without waiting on the relay
+                      for a manager's background task, or a session on another machine's: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up or a playground send from the other machine, led by [ops-peer] and its sender's name, print it and exit, so it wakes without waiting on the relay
 playground ci-wait <pr> [--repo <owner/name>]
-                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
+                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
-                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log`
+                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log
+playground send <name> <text>
+                      message a session on the other machine, which SendMessage does not reach: queue one line, {at, from, id, text, to}, in the outbox's ops-peer.jsonl, which the ops-peer-relay job copies to the other machine, where that session's alerts-wait prints it; from is your session's name, and a line over 16 KB is refused`
 
 // The package scripts playground runs as its own verbs.
 export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread", "wa"]
@@ -178,6 +180,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "priority on": 1,
   rm: "rest",
   rules: 1,
+  send: "rest",
   "settings get": 1,
   "settings import-jobs": 1,
   "settings list": 0,
@@ -216,7 +219,7 @@ export const usageOf = (command: string): string =>
     .map((line, i) => `${i ? "       " : "usage: "}${line.split(/ {2,}/)[0]}`)
     .join("\n")
 
-// Why a command's words are refused, or null: a word past what WORDS gives its command or subcommand, with its usage; then the shapes uninstall, update, sweep and alerts-wait take.
+// Why a command's words are refused, or null: a word past what WORDS gives its command or subcommand, with its usage; then the shapes uninstall, update, sweep, alerts-wait and send take.
 export const extraWordRefusal = ([command, ...rest]: string[]): string | null => {
   const named = `${command} ${rest[0]}` in WORDS ? `${command} ${rest[0]}` : command
   const takes = named === undefined ? undefined : WORDS[named]
@@ -238,6 +241,7 @@ export const extraWordRefusal = ([command, ...rest]: string[]): string | null =>
     return rest.length === 1
       ? null
       : "usage: playground alerts-wait <name> (your own session's name)"
+  if (command === "send") return rest.length >= 2 ? null : "usage: playground send <name> <text>"
   return null
 }
 

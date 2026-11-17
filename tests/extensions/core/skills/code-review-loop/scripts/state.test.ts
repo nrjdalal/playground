@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import * as state from "../../../../../../extensions/core/skills/code-review-loop/scripts/state"
+import { GH_STALE_MS } from "../../../../../../packages/scripts/src/gh-read"
 import { REQUIRED_CHECKS } from "../../../../../../packages/scripts/src/pr-merge/gates"
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
@@ -662,6 +663,21 @@ test("05r checks: a gate check with no run yet, or two runs of one name, waits o
     ],
   )
   expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+})
+
+// Audit, Lint, and Build's run appears only once every Suite job concludes, so its jobs read green minutes before the gate check exists (#2517).
+test("05ac checks: Lint and Build and test green with no Audit, Lint, and Build run yet print no CHECK line and keep waiting", async () => {
+  const early = runs(run("Lint and Build", "success"), run("test", "success"))
+  const [out, naps] = await checksThrough(
+    [still],
+    [
+      early,
+      early,
+      runs(run("Lint and Build", "success"), run("test", "success"), run(AUDIT, "success", 2)),
+    ],
+  )
+  expect(out).toBe(`CHECK success ${AUDIT}\nCHECK success test`)
+  expect(naps).toEqual([300, 300])
 })
 
 test("05s checks: a head that moves mid-wait ends it as MOVED (#1410)", async () => {
@@ -1880,4 +1896,389 @@ test("11b pr over REST marks another account's comment and thread untrusted too 
   expect(text).toContain(
     "comment 3 b.py:9 (someone else's, untrusted someone, resolution unknown): a human's note",
   )
+})
+
+// A PR branch off canary, then canary's own move; the fake test run reads each file in the clone as it stands, and a file holding RED is red.
+const mergeRepo = (
+  pr: Record<string, string>,
+  canary: Record<string, string>,
+): [string, string] => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "b.txt": "b\n",
+    "src/a.ts": "export const a = 1\n",
+    "tests/src/a.test.ts": "green\n",
+  })
+  writeFiles(repo, pr)
+  git(repo, "add", ".")
+  git(repo, "commit", "-qm", "pr")
+  const head = git(repo, "rev-parse", "HEAD")
+  git(repo, "checkout", "-q", "canary")
+  writeFiles(repo, canary)
+  git(repo, "add", ".")
+  git(repo, "commit", "-qm", "canary moves")
+  git(repo, "checkout", "-q", "--detach", head)
+  return [repo, head]
+}
+
+// A junit report in bun's shape: a testsuite and a testcase per file, a red file's testcase holding its failure
+const junit = (files: string[], red: string[]): string =>
+  `<testsuites>${files
+    .map(
+      (f) =>
+        `<testsuite name="${f}" file="${f}">${
+          red.includes(f)
+            ? `<testcase name="t" file="${f}" line="1"><failure type="AssertionError" message="x" /></testcase>`
+            : `<testcase name="t" file="${f}" line="1" />`
+        }</testsuite>`,
+    )
+    .join("")}</testsuites>`
+
+// The fake run: `red` names a run's red files, `report` writes its report (undefined writes none), and the run is green when none is red.
+const runMerge = (
+  repo: string,
+  head: string,
+  red: (clone: string, files: string[]) => string[] = (clone, files) =>
+    files.filter((f) => readFileSync(join(clone, f), "utf8").includes("RED")),
+  args: string[] = [repo, head, "canary", "probe-worker"],
+  report: (files: string[], red: string[]) => string | undefined = junit,
+): { calls: string[][]; code: number | undefined; lines: string[] } => {
+  const real = { ...state.io }
+  const calls: string[][] = []
+  state.io.tests = (session, clone, files, path) => {
+    calls.push([session, ...files])
+    const reds = red(clone, files)
+    const xml = report(files, reds)
+    if (xml !== undefined) writeFileSync(path, xml)
+    return reds.length === 0
+  }
+  const lines: string[] = []
+  const realLog = console.log
+  console.log = (line?: unknown) => {
+    lines.push(String(line))
+  }
+  const realCode = process.exitCode
+  process.exitCode = 0
+  try {
+    state.cmdMerge(...args)
+    return { calls, code: process.exitCode, lines }
+  } finally {
+    console.log = realLog
+    process.exitCode = realCode
+    Object.assign(state.io, real)
+  }
+}
+
+test("12a merge: a conflict with canary names the conflicted files, exits 1 and runs no test (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "src/a.ts": "export const a = 3\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`CONFLICT on ${canary}: src/a.ts`])
+  expect(out.code).toBe(1)
+  expect(out.calls).toEqual([])
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+// red only where canary's test meets the PR's a = 2, as a test canary changed fails on the PR's code alone
+const redTogether = (clone: string, files: string[]): string[] =>
+  readFileSync(join(clone, "src/a.ts"), "utf8").includes("= 2")
+    ? files.filter((f) => readFileSync(join(clone, f), "utf8").includes("expects a = 3"))
+    : []
+
+test("12b merge: a touched test red on the merge, green at the head and at canary, is a canary-only red (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "tests/src/a.test.ts": "expects a = 3\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, redTogether)
+  expect(out.lines).toEqual([`CANARY-RED on ${canary}: tests/src/a.test.ts`])
+  expect(out.code).toBe(1)
+  expect(out.calls).toEqual([
+    ["probe-worker", "tests/src/a.test.ts"],
+    ["probe-worker", "tests/src/a.test.ts"],
+    ["probe-worker", "tests/src/a.test.ts"],
+    ["probe-worker", "tests/src/a.test.ts"],
+  ])
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+  expect(git(repo, "status", "--porcelain")).toBe("")
+})
+
+test("12c merge: green touched tests on the merge read clean, and a red at both is the PR's own, on its own line (#2468)", () => {
+  const [clean, cleanHead] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(clean, "rev-parse", "--short=7", "canary")
+  const out = runMerge(clean, cleanHead)
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 1 touched tests`])
+  expect(out.code).toBe(0)
+  expect(git(clean, "rev-parse", "HEAD")).toBe(cleanHead)
+
+  const [own, ownHead] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n", "tests/src/a.test.ts": "RED in the PR\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const ownCanary = git(own, "rev-parse", "--short=7", "canary")
+  const mine = runMerge(own, ownHead)
+  expect(mine.lines).toEqual([
+    `CLEAN on ${ownCanary}: 1 touched tests`,
+    "HEAD-RED: tests/src/a.test.ts",
+  ])
+  expect(mine.code).toBe(0)
+})
+
+test("12d merge: a lockfile canary changed is named, with no test run, since the clone's install is the head's (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "bun.lock": "{}\n", "tests/src/a.test.ts": "RED since canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`LOCK-CHANGED on ${canary}: bun.lock; no tests ran`])
+  expect(out.code).toBe(0)
+  expect(out.calls).toEqual([])
+})
+
+test("12e merge: a test run that throws still leaves the clone at the head (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  expect(() =>
+    runMerge(repo, head, () => {
+      throw new Error("run-slot refused")
+    }),
+  ).toThrow("run-slot refused")
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+  expect(git(repo, "status", "--porcelain")).toBe("")
+})
+
+test("12g merge: a clone on a branch at the head goes back to that branch, not a detached head (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  git(repo, "checkout", "-q", "pr")
+  runMerge(repo, head)
+  expect(git(repo, "symbolic-ref", "--short", "HEAD")).toBe("pr")
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("12f merge takes four arguments on its command line, or three with --conflict-only (#2468)", () => {
+  for (const args of [
+    ["merge", "/nowhere", "HEAD", "canary"],
+    ["merge", "--conflict-only", "/nowhere", "HEAD", "canary", "r-reviewer"],
+  ]) {
+    const out = runCli(args)
+    expect(out.code).toBe(1)
+    expect(out.stderr).toContain("state.ts merge <clone> <head> <base> <session> ")
+    expect(out.stderr).toContain("state.ts merge --conflict-only <clone> <head> <base> ")
+  }
+})
+
+test("12h merge: a red at canary itself is canary's own, on its own line, and the round goes on (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "tests/src/a.test.ts": "RED on canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([
+    `CLEAN on ${canary}: 1 touched tests`,
+    `BASE-RED on ${canary}: tests/src/a.test.ts`,
+  ])
+  expect(out.code).toBe(0)
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+const eight = Object.fromEntries(
+  Array.from({ length: 8 }, (_, i) => [
+    [`src/t${i + 1}.ts`, `export const t = ${i + 1}\n`],
+    [`tests/src/t${i + 1}.test.ts`, "green\n"],
+  ]).flat(),
+)
+
+const t = (n: number) => `tests/src/t${n}.test.ts`
+// red on the merge alone, where b.txt holds canary's line
+const onCanary =
+  (...reds: string[]) =>
+  (clone: string, files: string[]): string[] =>
+    readFileSync(join(clone, "b.txt"), "utf8").includes("canary")
+      ? files.filter((f) => reds.includes(f))
+      : []
+
+test("12i merge: one red in a long list, read from the report, runs again alone, not the list (#2468)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, onCanary(t(8)))
+  expect(out.lines).toEqual([`CANARY-RED on ${canary}: ${t(8)}`])
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8].map(t),
+    [t(8)],
+    [t(8)],
+  ])
+})
+
+test("12l merge: two reds run again together, and each lands by where it is red (#2468)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const own = onCanary(t(8))
+  const out = runMerge(repo, head, (clone, files) => [
+    ...files.filter((f) => f === t(3)),
+    ...own(clone, files),
+  ])
+  expect(out.lines).toEqual([`CANARY-RED on ${canary}: ${t(8)}`, `HEAD-RED: ${t(3)}`])
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8].map(t),
+    [t(3), t(8)],
+    [t(3), t(8)],
+  ])
+})
+
+test("12j merge: a red only beside the other files, green when it runs again alone, is named, never read as clean (#2468)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, (_c, files) =>
+    files.includes(t(3)) ? files.filter((f) => f === t(1)) : [],
+  )
+  expect(out.lines).toEqual([`BATCH-RED on ${canary}: ${t(1)}`])
+  expect(out.code).toBe(0)
+})
+
+test("12m merge: a red run with no report runs every touched test again, once, and says so (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/t1.ts": "1\n", "src/t2.ts": "2\n", [t(1)]: "g\n", [t(2)]: "g\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, onCanary(t(1)), undefined, () => undefined)
+  expect(out.lines).toEqual([
+    `CANARY-RED on ${canary}: ${t(1)} ${t(2)}`,
+    `NO-REPORT on ${canary}: a red run's report named no red file on the merge, so all 2 touched tests ran again; on the merge's second run; each such run counts every file it ran as red`,
+  ])
+  expect(out.code).toBe(1)
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [t(1), t(2)],
+    [t(1), t(2)],
+    [t(1), t(2)],
+  ])
+})
+
+test("12n merge: a test file a red run's report leaves out, as bun leaves out one that throws as it loads, is red (#2468)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, onCanary(t(8)), undefined, (files, red) =>
+    junit(
+      files.filter((f) => !red.includes(f)),
+      [],
+    ),
+  )
+  expect(out.lines).toEqual([`CANARY-RED on ${canary}: ${t(8)}`])
+  expect(out.calls.map((c) => c.slice(1))).toEqual([
+    [1, 2, 3, 4, 5, 6, 7, 8].map(t),
+    [t(8)],
+    [t(8)],
+  ])
+})
+
+test("12p merge's test run stays on this machine, where its junit report is written, since run-slot sends test:file to the runner box by default (#2468)", () => {
+  const argv = state.testsArgv("probe-worker", "/s/review-501", ["tests/a.test.ts"], "/t/r.xml")
+  expect(argv.slice(1, 6)).toEqual(["probe-worker", "--", "env", "RUN_SLOT_HERE=1", "bun"])
+  expect(argv.slice(6)).toEqual([
+    "--cwd=/s/review-501",
+    "run",
+    "test:file",
+    "--reporter=junit",
+    "--reporter-outfile=/t/r.xml",
+    "tests/a.test.ts",
+  ])
+})
+
+test("12o redIn reads bun's own junit report: a failed testcase's file and a test file left out are red, a green file and a non-test file are not (#2468)", () => {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="3" assertions="3" failures="1" skipped="0" time="0.01">
+  <testsuite name="t/a.test.ts" file="t/a.test.ts" tests="2" assertions="2" failures="1" skipped="0" time="0.001" hostname="h">
+    <testcase name="a passes" classname="" time="0.000056" file="t/a.test.ts" line="3" assertions="1" />
+    <testcase name="a fails" classname="" time="0.000106" file="t/a.test.ts" line="4" assertions="1">
+      <failure type="AssertionError" message="expect(received).toBe(expected)">AssertionError</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="t/b.test.ts" file="t/b.test.ts" tests="1" assertions="1" failures="0" skipped="0" time="0.0006" hostname="h">
+    <testcase name="b passes" classname="" time="0.000029" file="t/b.test.ts" line="3" assertions="1" />
+  </testsuite>
+</testsuites>`
+  expect(state.redIn(xml, ["t/a.test.ts", "t/b.test.ts", "t/c.test.ts", "tests/x.py"])).toEqual([
+    "t/a.test.ts",
+    "t/c.test.ts",
+  ])
+  expect(state.redIn(undefined, ["t/a.test.ts"])).toEqual([])
+})
+
+test("12k merge --conflict-only reads merge-tree alone: no checkout, no test (#2468)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "tests/src/a.test.ts": "RED since canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const ran: string[][] = []
+  const realRun = state.io.run
+  state.io.run = (...args: string[]) => {
+    ran.push(args.slice(3, 4))
+    return realRun(...args)
+  }
+  let out: ReturnType<typeof runMerge>
+  try {
+    out = runMerge(repo, head, undefined, ["--conflict-only", repo, head, "canary"])
+  } finally {
+    state.io.run = realRun
+  }
+  expect(out.lines).toEqual([`CLEAN on ${canary}: no conflict; --conflict-only ran no tests`])
+  expect(out.calls).toEqual([])
+  expect(ran.flat()).toEqual(["rev-parse", "rev-parse", "merge-tree"])
+
+  const [clash, clashHead] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    { "src/a.ts": "export const a = 3\n" },
+  )
+  const clashCanary = git(clash, "rev-parse", "--short=7", "canary")
+  const conflict = runMerge(clash, clashHead, undefined, [
+    clash,
+    clashHead,
+    "canary",
+    "--conflict-only",
+  ])
+  expect(conflict.lines).toEqual([`CONFLICT on ${clashCanary}: src/a.ts`])
+  expect(conflict.code).toBe(1)
+})
+
+// wait and checks poll GitHub every 5 minutes for each reviewer, so they skip gh while ops-tick's gh sign-in probe reads failed
+test("io.run skips gh while the gh sign-in probe's fresh result reads failed, and only then", () => {
+  const data = mkdtempSync(join(tmpdir(), "state-gh-down-"))
+  dirs.push(data)
+  mkdirSync(join(data, "ops", "tick"), { recursive: true })
+  const result = (ok: boolean, at = new Date()) =>
+    writeFileSync(
+      join(data, "ops", "tick", "gh-auth.json"),
+      JSON.stringify({ at: at.toISOString(), ok, reason: "gh token invalid" }),
+    )
+  result(false)
+  expect(state.ghDown(data)).toBe("gh token invalid")
+  const saved = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    expect(() => state.io.run("gh", "api", "user")).toThrow("gh unreachable: gh token invalid")
+    expect(state.io.run("git", "--version")).toStartWith("git version")
+  } finally {
+    if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = saved
+  }
+  result(false, new Date(Date.now() - state.GH_STALE_SECONDS * 1000 - 1_000))
+  expect(state.ghDown(data)).toBeNull()
+  result(true)
+  expect(state.ghDown(data)).toBeNull()
+  expect(state.GH_STALE_SECONDS * 1000).toBe(GH_STALE_MS)
 })

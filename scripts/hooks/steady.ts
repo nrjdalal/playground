@@ -566,7 +566,7 @@ export function steadyNames(
   }
 }
 
-// The variables of the session's starting environment, the hook's own, that hold their value for every command of a line, beside known (the line's HOME, TMPDIR and PWD), so a cd or a -C through one (`cd "${PLAYGROUND_REPO:?}"`, `git -C "$W"`) is judged by the folder it names: an uppercase name (zsh keeps its lowercase parameters apart from the environment) that the line names nowhere but by reading it, on a line setterCounts holds something on, and none the shell sets or ties to another, nor IFS or ZDOTDIR, which the shell takes from no environment as is, nor CLAUDE_*, some of which Claude Code sets in a hook's environment alone (CLAUDE_PROJECT_DIR)
+// The variables of the session's starting environment, the hook's own, that hold their value for every command of a line, beside known (the line's HOME, TMPDIR and PWD), so a cd or a -C through one (`cd "${PLAYGROUND_REPO:?}"`, `git -C "$W"`) is judged by the folder it names: an uppercase name (zsh keeps its lowercase parameters apart from the environment) that the line names nowhere but by reading it, on a line setterCounts holds something on, and none the shell sets or ties to another, nor IFS or ZDOTDIR, which the shell takes from no environment as is, nor one led by CLAUDE (CLAUDECODE, CLAUDE_*), some of which Claude Code sets in a hook's environment alone (CLAUDE_PROJECT_DIR)
 export function startingVariables(
   command: string,
   environment: Record<string, string | undefined>,

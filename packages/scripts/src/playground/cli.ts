@@ -338,18 +338,37 @@ const roll = async (): Promise<number> => {
   return 1
 }
 
-// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), then the roll.
+// playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads, at the main checkout's place under home whichever worktree runs it (peer-sync.ts), then the roll.
 const update = (to?: string): Promise<number> =>
-  runUpdate(REPO, spawnRun, roll, console.log, to, join(dataDir(), "ops", "update-head"), (old) =>
-    refreshBriefs({
-      data: HOME_DATA,
-      live: (name) => liveSessions((live) => live === name).length > 0,
-      log: console.log,
-      managers: MANAGERS.map((kind) => ({ kind, name: nameOf(kind) })),
-      old,
-      repo: REPO,
-      send: sendBrief,
-    }),
+  runUpdate(
+    REPO,
+    spawnRun,
+    roll,
+    console.log,
+    to,
+    join(dataDir(), "ops", "update-head"),
+    (old) =>
+      refreshBriefs({
+        data: HOME_DATA,
+        live: (name) => liveSessions((live) => live === name).length > 0,
+        log: console.log,
+        managers: MANAGERS.map((kind) => ({ kind, name: nameOf(kind) })),
+        old,
+        repo: REPO,
+        send: sendBrief,
+      }),
+    // loaded only here, since the bare start and every other command need neither
+    async (sha) => {
+      const [{ cloneOf, syncPeers }, { mainCheckout }] = await Promise.all([
+        import("./peer-sync"),
+        import("../main-checkout"),
+      ])
+      await syncPeers(
+        join(dashboardCheckout(REPO) ?? REPO, ".env"),
+        sha,
+        cloneOf(mainCheckout(REPO), homedir()),
+      )
+    },
   )
 
 // playground uninstall: the install's links, LaunchAgents (on Linux the systemd user units) and the Dashboard's stack (uninstall.ts); --purge, after asking, also the database, and moves the data folder aside.
@@ -430,16 +449,27 @@ const alertsWaitFor = async (name: string): Promise<number> => {
   return 0
 }
 
+// playground send: one line for a session on the other machine, queued in the outbox's ops-peer.jsonl for ops-peer-relay to copy there (send.ts).
+const sendTo = async ([to, ...words]: string[]): Promise<number> => {
+  const { peerLine, sendPeer } = await import("./send")
+  const { sessionName } = await import("../trash")
+  const line = peerLine(to!, words.join(" "), await sessionName(), new Date(), crypto.randomUUID())
+  if ("error" in line) {
+    console.error(`playground: ${line.error}`)
+    return 2
+  }
+  await sendPeer(join(dataDir(), "ops", "outbox"), line)
+  console.log(`queued ${line.id} for ${line.to}`)
+  return 0
+}
+
 // playground ci-wait: blocks until the PR's required checks exist at its head and conclude (ci-wait.ts), loaded only for this command.
 const ciWaitFor = async (words: string[]): Promise<number> => {
-  const { runCiWait } = await import("./ci-wait")
+  const { machineGh, runCiWait } = await import("./ci-wait")
   const { factoryRepoOf } = await import("./setting")
   return runCiWait(words, {
     err: console.error,
-    gh: (args) => {
-      const run = Bun.spawnSync(["gh", ...args], { stderr: "pipe", stdout: "pipe" })
-      return { code: run.exitCode, stderr: run.stderr.toString(), stdout: run.stdout.toString() }
-    },
+    gh: machineGh,
     now: Date.now,
     out: console.log,
     repo: () => factoryRepoOf(),
@@ -520,63 +550,68 @@ const code =
                     ? await picker(rest)
                     : command === "alerts-wait"
                       ? await alertsWaitFor(rest[0]!)
-                      : command === "doctor"
-                        ? report(await doctor(REPO, homedir(), HOME_DATA))
-                        : command === "version"
-                          ? (console.log(version(REPO, HOME_DATA).join("\n")), 0)
-                          : command === "uninstall"
-                            ? await uninstallAll(rest[0] === "--purge")
-                            : command === "ext" || command === "settings"
-                              ? await runStore(command, rest, await terminalIo(), console.error)
-                              : command === "rules"
-                                ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
-                                  await (
-                                    await import("./rules")
-                                  ).runRules(
-                                    rest,
-                                    process.cwd(),
-                                    process.env,
-                                    console.log,
-                                    console.error,
-                                  )
-                                : command === "migrate"
-                                  ? await migrateMachine(rest)
-                                  : command === "orgs"
-                                    ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
-                                    : command === "accounts"
-                                      ? await runAccounts(rest, accountsIo(dataDir()))
-                                      : command === "focus"
-                                        ? await (
-                                            await import("./focus")
-                                          ).runFocus(rest, await focusDeps())
-                                        : command === "priority"
+                      : command === "send"
+                        ? await sendTo(rest)
+                        : command === "doctor"
+                          ? report(await doctor(REPO, homedir(), HOME_DATA))
+                          : command === "version"
+                            ? (console.log(version(REPO, HOME_DATA).join("\n")), 0)
+                            : command === "uninstall"
+                              ? await uninstallAll(rest[0] === "--purge")
+                              : command === "ext" || command === "settings"
+                                ? await runStore(command, rest, await terminalIo(), console.error)
+                                : command === "rules"
+                                  ? // loaded only here, since it reads the rules hook and the settings package, which the bare dispatcher's start needs neither of
+                                    await (
+                                      await import("./rules")
+                                    ).runRules(
+                                      rest,
+                                      process.cwd(),
+                                      process.env,
+                                      console.log,
+                                      console.error,
+                                    )
+                                  : command === "migrate"
+                                    ? await migrateMachine(rest)
+                                    : command === "orgs"
+                                      ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
+                                      : command === "accounts"
+                                        ? await runAccounts(rest, accountsIo(dataDir()))
+                                        : command === "focus"
                                           ? await (
-                                              await import("./priority")
-                                            ).runPriority(rest, await priorityDeps())
-                                          : command === "rm"
-                                            ? await rm(rest)
-                                            : command === "yard"
-                                              ? await (
-                                                  await import("./yard")
-                                                ).runYard(
-                                                  rest,
-                                                  await (
+                                              await import("./focus")
+                                            ).runFocus(rest, await focusDeps())
+                                          : command === "priority"
+                                            ? await (
+                                                await import("./priority")
+                                              ).runPriority(rest, await priorityDeps())
+                                            : command === "rm"
+                                              ? await rm(rest)
+                                              : command === "yard"
+                                                ? await (
                                                     await import("./yard")
-                                                  ).yardIo(REPO, accountsIo(dataDir()).readSecret),
-                                                )
-                                              : command === "herdr" && rest[0] === "stop"
-                                                ? (await opsHerdr(["stop-all"]).exited) === 0
-                                                  ? 0
-                                                  : 1
-                                                : command === "herdr" && rest[0] === "pin"
-                                                  ? await (
-                                                      await import("./herdr-pin")
-                                                    ).runHerdrPin(rest.slice(1))
-                                                  : VERBS.includes(command)
-                                                    ? await verb(command, rest)
-                                                    : command === "ci-wait"
-                                                      ? await ciWaitFor(rest)
-                                                      : fail(
-                                                          `no command ${command}; playground --help lists them`,
-                                                        )
+                                                  ).runYard(
+                                                    rest,
+                                                    await (
+                                                      await import("./yard")
+                                                    ).yardIo(
+                                                      REPO,
+                                                      accountsIo(dataDir()).readSecret,
+                                                    ),
+                                                  )
+                                                : command === "herdr" && rest[0] === "stop"
+                                                  ? (await opsHerdr(["stop-all"]).exited) === 0
+                                                    ? 0
+                                                    : 1
+                                                  : command === "herdr" && rest[0] === "pin"
+                                                    ? await (
+                                                        await import("./herdr-pin")
+                                                      ).runHerdrPin(rest.slice(1))
+                                                    : VERBS.includes(command)
+                                                      ? await verb(command, rest)
+                                                      : command === "ci-wait"
+                                                        ? await ciWaitFor(rest)
+                                                        : fail(
+                                                            `no command ${command}; playground --help lists them`,
+                                                          )
 process.exit(code)
