@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   dispatcherLabel,
   initialsOf,
+  levelName,
   localName,
   modelName,
   providerOf,
@@ -92,9 +93,25 @@ describe("a local session's row", () => {
     expect(rowProvider(claude)).toBe("anthropic")
   })
 
-  test("a local row shows no effort, since its chat template turns thinking on or off itself; a Claude row does", () => {
+  test("a local row shows no effort bars, since its chat template reads no effort; a Claude row keeps them", () => {
     expect(showsEffort(local)).toBe(false)
     expect(showsEffort(claude)).toBe(true)
+  })
+
+  test.each([
+    ["high", "high: Ornith 122B, thinking"],
+    ["medium", "medium: Ornith 122B, thinking capped"],
+    ["low", "low: Ornith 122B, no thinking"],
+    ["xhigh", "xhigh: Ornith 122B, thinking"],
+    ["max", "max: Ornith 122B, thinking"],
+  ])("a local row at %s names its level, its model and its thinking", (effort, words) => {
+    expect(levelName({ ...local, effort })).toBe(words)
+  })
+
+  test("a local row with no known effort reads as rowModelName, one with no known repo by the served name, and a Claude row by modelName", () => {
+    expect(levelName({ ...local, effort: null })).toBe("Ornith 122B, local")
+    expect(levelName({ effort: "low", model: "local" })).toBe("low: local, no thinking")
+    expect(levelName({ ...claude, effort: "high" })).toBe("Opus 5.5")
   })
 
   test("a row on a local model its own list names, as the hosted session's after a pick, shows no effort either, while a Claude model beside that list does (PG-2651)", () => {

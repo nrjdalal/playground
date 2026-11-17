@@ -59,11 +59,14 @@ describe("the composer's model and effort picker", () => {
     expect(choiceLabel("sonnet")).toBe("Sonnet")
   })
 
-  test("the picker on a local model reads its short name with no effort word, as its row does, while a Claude session keeps its effort (PG-2651)", () => {
+  test("the picker on a local model reads its level in words, as its row's hint does, while a Claude session keeps its effort (PG-2651)", () => {
     const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }]
     const served = { localModel: "ornith-ai/Ornith-1.5-122B-NVFP4", model: "local" }
-    expect(pickerWords(served, null, "high")).toBe("Ornith 122B, local")
-    expect(pickerWords({ model: "local" }, null, "high")).toBe("local")
+    expect(pickerWords(served, null, "high")).toBe("high: Ornith 122B, thinking")
+    expect(pickerWords(served, null, "medium")).toBe("medium: Ornith 122B, thinking capped")
+    expect(pickerWords(served, null, "low")).toBe("low: Ornith 122B, no thinking")
+    expect(pickerWords(served, null, null)).toBe("Ornith 122B, local")
+    expect(pickerWords({ model: "local" }, null, "high")).toBe("high: local, thinking")
     expect(
       pickerWords(
         { localModels, model: "ornith-1.5-122b-nvfp4" },

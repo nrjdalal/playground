@@ -195,8 +195,10 @@
   then at its right end its maker's logo (`useMakerIcon` by `rowProvider` in `web/next/src/lib/model-label.ts`, the design skill's Icons line, which says where they come from), its model's initials in a chip for a maker with none (`initialsIcon`), an empty place while it is read, and nothing with no model, naming the model on hover, and its effort's icon (`effortIcon`),
   naming the level (`ModelIcons`).
   A session on the local model, which its transcript records as the bare name `local` (spawn.sh's `LOCAL_SERVED`), takes its maker and name from the repo the local server serves under that name, its `/v1/models` root, which the API reads once a minute and gives its row as `localModel` (`api/hono/src/lib/dashboard/local-model.ts`, a fixture's `localModel` on a fixture stack):
-  the row draws that repo's maker, names the model `Ornith 122B, local` (`rowModelName`) in its tooltip and on its logo's hover, and shows no effort, since the local model's chat template turns thinking on or off itself (`showsEffort`).
-  The hosted session's row on a local model it picked, which reports that model's config id, shows no effort either, by the same `showsEffort`, which the composer's picker words read too (`pickerWords`).
+  the row draws that repo's maker, and its tooltip and its logo's hover name the model with its level (`levelName`): `high: Ornith 122B, thinking`, `medium: Ornith 122B, thinking capped` or `low: Ornith 122B, no thinking`, from the effort its transcript records, and `Ornith 122B, local` (`rowModelName`) while none is known.
+  It shows no effort bars (`showsEffort`), since the local model's chat template reads no effort, so spawn.sh sets each effort as thinking.
+  The hosted session's row on a local model it picked, which reports that model's config id, shows no effort bars either, by the same `showsEffort`.
+  The composer's picker words read both (`pickerWords`): a session on the served local model by its row's `levelName`, and a picked one by its config label alone.
   A row that opens shows its chevron in the effort's place on hover, on keyboard focus, while open and always on a phone (`TOGGLE_SHOWN` and `EFFORT_HIDDEN`, ZeroSDK's `toggleShown` and `effortHidden`), so the two share one place.
   A row with no effort keeps the effort's place empty, whether it opens or not, so the logos line up down the sidebar.
   The rest of the row's words are in the title's tooltip, a line each: its full name (a dispatcher's label names it instead), its title whole,

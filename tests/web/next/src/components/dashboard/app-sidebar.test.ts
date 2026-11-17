@@ -521,7 +521,7 @@ describe("SessionRow", () => {
     expect(tipsOf(bare)).toHaveLength(1)
   })
 
-  test("a local session's row draws its served model's maker and names it, Ornith 122B, local, where a Claude row draws its effort; with no served repo known, its initials chip (PG-2642)", () => {
+  test("a local session's row draws its served model's maker and names its level, high: Ornith 122B, thinking, where a Claude row draws its effort; with no served repo known, its initials chip (PG-2642)", () => {
     const local = row("worker-greed", "worker", [], {
       effort: "high",
       localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
@@ -531,15 +531,26 @@ describe("SessionRow", () => {
     expect(local).not.toContain(pathOf(RiSignalCellular3Fill))
     expect(local).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(local)).toEqual([
-      "worker-greed\nMessage dispatcher from the dashboard\nOrnith 122B, local · Working",
-      "Ornith 122B, local",
+      "worker-greed\nMessage dispatcher from the dashboard\nhigh: Ornith 122B, thinking · Working",
+      "high: Ornith 122B, thinking",
     ])
     expect(shape(local)).toEqual(stock)
+    for (const [effort, words] of [
+      ["low", "low: Ornith 122B, no thinking"],
+      ["medium", "medium: Ornith 122B, thinking capped"],
+    ]) {
+      const level = row("worker-greed", "worker", [], {
+        effort,
+        localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+        model: "local",
+      })
+      expect(tipsOf(level)).toContain(words)
+    }
     const unknown = row("worker-greed", "worker", [], { effort: "high", model: "local" })
     expect(unknown).toContain('data-initials="Lo"')
     expect(unknown).not.toContain(pathOf(RiSignalCellular3Fill))
     expect(unknown).not.toContain(pathOf(RiRobot2Line))
-    expect(tipsOf(unknown)).toContain("local")
+    expect(tipsOf(unknown)).toContain("high: local, thinking")
     const claude = row("worker-greed", "worker", [], { effort: "high", model: "claude-opus-5-5" })
     expect(claude).toContain(pathOf(RiSignalCellular3Fill))
   })

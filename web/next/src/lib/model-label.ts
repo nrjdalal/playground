@@ -66,11 +66,23 @@ export const rowModelName = ({ localModel, model }: RowModel): string | null =>
       : LOCAL_SERVED
     : modelName(model)
 
+// What a local session's effort does to its thinking, as spawn.sh's local launch sets it: low turns it off, medium caps it, and high and above leave it uncapped.
+const LOCAL_THINKING: Record<string, string> = { low: "no thinking", medium: "thinking capped" }
+
+// Pure: the words a row's model hint and its picker give: a local session's effort, name and thinking (high: Ornith 122B, thinking), else rowModelName's, as for a local session whose effort is unknown.
+export const levelName = ({
+  effort,
+  ...row
+}: RowModel & { effort: string | null }): string | null =>
+  row.model === LOCAL_SERVED && effort
+    ? `${effort}: ${row.localModel ? localName(row.localModel) : LOCAL_SERVED}, ${LOCAL_THINKING[effort] ?? "thinking"}`
+    : rowModelName(row)
+
 // Pure: whose icon a row draws: a local session's served repo's maker, none while its server names none, else its model's.
 export const rowProvider = ({ localModel, model }: RowModel): Provider | null =>
   providerOf(model === LOCAL_SERVED ? (localModel ?? null) : model)
 
-// Pure: whether a row shows its effort: a local model's chat template turns thinking on or off itself, so the effort its launch passes claims nothing; that is the served `local`, or the id of one its own list names, as the hosted session's row reports after a pick.
+// Pure: whether a row shows its effort's bars: a local model's chat template reads no effort, so a session on the served `local` names its level in words instead (levelName), and one its own list names, as the hosted session's row reports after a pick, shows none.
 export const showsEffort = ({ localModels, model }: RowModel): boolean =>
   model !== LOCAL_SERVED && !localModels?.some((local) => local.id === model)
 

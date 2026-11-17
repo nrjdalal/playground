@@ -19,7 +19,7 @@ import {
   type EntriesListener,
   type SessionTask,
 } from "@/lib/dashboard"
-import { rowModelName, showsEffort } from "@/lib/model-label"
+import { levelName, showsEffort } from "@/lib/model-label"
 import { whenWords } from "@/lib/ops"
 import {
   checkedOf,
@@ -342,7 +342,7 @@ export type RowLines = {
   eta: string | null
   // its kind (labelParts), which closes its label: its role word after the ticket and the pull request, else after the title
   kind: RosterKind | null
-  // the model's name, without the effort (rowModelName: a local model's as Ornith 122B, local)
+  // the model's name, without the effort (levelName: a local model's with its level, as high: Ornith 122B, thinking)
   model: string | null
   pr: number | null
   // the row's one icon
@@ -381,7 +381,7 @@ export function rowLines(
     light,
     worker,
   })
-  const model = label ? null : rowModelName(worker)
+  const model = label ? null : levelName(worker)
   // a dispatcher named by its label keeps no session name (#i520), else its state keeps its name (Inbox #i493: "dispatcher keeps Playground; only managers drop names"), and an AI runner's ends with when it runs
   const name = dispatcher && !label ? sinName(worker) : null
   const when = worker.role === "runner" ? rosterWhen(agent?.schedule ?? null) : null
