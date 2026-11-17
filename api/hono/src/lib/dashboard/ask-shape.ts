@@ -33,9 +33,9 @@ const longestCodeLine = (text: string): number => {
   return longest
 }
 
-// What the owner would open from a card: a PR (a number of 2 digits or more after a #, so step #1 is none, or any after PR), a tracker ID (ABC-123) or a commit sha (7 to 40 hex characters, holding a digit and a letter); an Inbox ref (#iN) is none.
+// What the owner would open from a card: a PR (a number of 2 digits or more after a #, so step #1 is none, or any after PR), a tracker ID (ABC-123, but not a version such as GLM-4.7, whose number runs on past a dot) or a commit sha (7 to 40 hex characters, holding a digit and a letter); an Inbox ref (#iN) is none.
 const REF =
-  /(?<![\w#/&])#\d{2,}\b|\bPR\s*#?\d+\b|(?<![\w/-])[A-Z]{2,10}-\d+(?![\w-])|(?<![\w-])[0-9a-f]{7,40}(?![\w-])/g
+  /(?<![\w#/&])#\d{2,}\b|\bPR\s*#?\d+\b|(?<![\w/-])[A-Z]{2,10}-\d+(?![\w-]|\.\d)|(?<![\w-])[0-9a-f]{7,40}(?![\w-])/g
 // Encodings and standards that read as a team key and a number.
 const NOT_TRACKERS = new Set(["ISO", "SHA", "UTF"])
 const LINKED = /\]\([^)]+\)|https?:\/\//
