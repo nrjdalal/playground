@@ -39,6 +39,7 @@ import {
   grantArgv,
   type InboxApps,
   type InboxRoot,
+  type PeerSeams,
   type InboxItem,
   inboxOrder,
   isGo,
@@ -55,6 +56,12 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 import { KEYCHAIN_ITEM_NAMES } from "../../../../../../api/hono/src/lib/keychain-items"
+import {
+  peerCopyArgv,
+  peerInstallArgv,
+  peerReadArgv,
+  peerStepArgv,
+} from "../../../../../../api/hono/src/lib/system/peer-root"
 import { installArgv, repoScripts, stepArgv } from "../../../../../../api/hono/src/lib/system/root"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
 import {
@@ -1570,6 +1577,197 @@ describe("a root step decision (PG-2433)", () => {
       exitCode: 143,
       line: "the password window got no answer in 5 minutes, so nothing ran as root",
     })
+  })
+})
+
+describe("a root step on another machine (PG-2434)", () => {
+  const PEER = { name: "spark-test", target: "me@spark-test" }
+  const SERVICE = "playground-spark-test-sudo"
+  // a password holding what a shell or a log would bend, so a leak shows whole
+  const MARKER = "pw-MARKER-7f3a'$(id)"
+  const ok = { code: 0, err: "", out: "" }
+  type Call = { argv: string[]; input?: string }
+  const seams = (held: string | null = MARKER, sticks = false) => {
+    let value = held
+    const removed: string[] = []
+    const peerSeams: PeerSeams = {
+      peers: [PEER],
+      secret: (service) => ({
+        read: async () => value,
+        remove: async () => {
+          removed.push(service)
+          if (!sticks) value = null
+        },
+      }),
+    }
+    return { peerSeams, removed }
+  }
+  const install = async () =>
+    inboxInputSchema.parse(
+      decision({ ...ROOT_INSTALL, machine: "spark-test", scripts: await repoScripts() }),
+    ).preview as InboxRoot
+  const recorder = (answer: (call: Call) => Promise<typeof ok>) => {
+    const calls: Call[] = []
+    const run = async (argv: string[], input?: string) => {
+      calls.push({ argv, input })
+      return answer({ argv, input })
+    }
+    return { calls, run }
+  }
+  const logged = async (fn: () => Promise<unknown>) => {
+    const lines: string[] = []
+    const held = [console.log, console.error]
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "))
+    console.error = console.log
+    try {
+      return { lines, result: await fn() }
+    } finally {
+      ;[console.log, console.error] = held
+    }
+  }
+
+  test("names a machine, never a host, and its card keeps no CA", () => {
+    expect(
+      inboxInputSchema.safeParse(decision({ ...ROOT_STEP, machine: "spark-test" })).success,
+    ).toBe(true)
+    for (const machine of ["me@spark-test", "-oProxyCommand=id", ""])
+      expect(inboxInputSchema.safeParse(decision({ ...ROOT_STEP, machine })).success, machine).toBe(
+        false,
+      )
+  })
+
+  test("an install copies, then sends the password on sudo's stdin alone, then deletes it", async () => {
+    const { peerSeams, removed } = seams()
+    const { calls, run } = recorder(async ({ argv }) =>
+      argv[0] === "ssh" && argv.at(-1)?.startsWith("sudo")
+        ? { ...ok, out: "installed bwrap-userns, chromium-ca in /usr/local/lib/playground/root" }
+        : ok,
+    )
+    const preview = await install()
+    const { lines, result } = await logged(() => rootRun(run, preview, undefined, peerSeams))
+    expect(result).toEqual({
+      exitCode: 0,
+      line: `installed bwrap-userns, chromium-ca in /usr/local/lib/playground/root; deleted ${SERVICE}`,
+    })
+    expect(calls.map((call) => call.argv)).toEqual([
+      ...peerCopyArgv(PEER, undefined),
+      peerInstallArgv(PEER, undefined, preview.scripts ?? []),
+    ])
+    expect(calls.map((call) => call.input)).toEqual([undefined, undefined, `${MARKER}\n`])
+    expect(removed).toEqual([SERVICE])
+    expect(lines).toEqual([`inbox: spark-test's install ran; deleted ${SERVICE}`])
+  })
+
+  test("the password reaches no argv, line or log, and is deleted once, on a failure, a timeout and a throw", async () => {
+    const echoes = `sudo: ${MARKER}: incorrect password attempt`
+    const cases: [string, (call: Call) => Promise<typeof ok>, RegExp][] = [
+      [
+        "exit 1",
+        async ({ input }) => (input ? { code: 1, err: echoes, out: MARKER } : ok),
+        /incorrect password/,
+      ],
+      [
+        "timeout",
+        async ({ input }) => (input ? { code: 143, err: echoes, out: "" } : ok),
+        /no answer in 5 minutes/,
+      ],
+      [
+        "throw",
+        async ({ input }) => {
+          if (input) throw new Error(`spawn failed: ${MARKER}`)
+          return ok
+        },
+        /spawn failed/,
+      ],
+      ["no ssh", async () => ({ code: 255, err: `ssh: ${MARKER}`, out: "" }), /could not reach/],
+    ]
+    for (const [name, answer, line] of cases) {
+      const { peerSeams, removed } = seams()
+      const { calls, run } = recorder(answer)
+      const { lines, result } = await logged(async () =>
+        rootRun(run, await install(), undefined, peerSeams),
+      )
+      const text = JSON.stringify({ lines, result })
+      expect(text.includes("pw-MARKER"), name).toBe(false)
+      expect(JSON.stringify(calls.map((call) => call.argv)).includes("pw-MARKER"), name).toBe(false)
+      expect(calls.filter((call) => call.input !== undefined).length, name).toBeLessThanOrEqual(1)
+      expect((result as { line: string }).line, name).toMatch(line)
+      expect((result as { line: string }).line, name).toEndWith(`deleted ${SERVICE}`)
+      expect((result as { exitCode: number }).exitCode, name).not.toBe(0)
+      expect(removed, name).toEqual([SERVICE])
+    }
+  })
+
+  test("with no password kept, nothing runs; a delete that fails says so and reads failed", async () => {
+    const none = seams(null)
+    const quiet = recorder(async () => ok)
+    expect(await rootRun(quiet.run, await install(), undefined, none.peerSeams)).toEqual({
+      exitCode: 1,
+      line: `spark-test's admin password is not in ${SERVICE}: post a secret card for it, then approve again`,
+    })
+    expect(quiet.calls).toEqual([])
+    const stuck = seams(MARKER, true)
+    const { result } = await logged(async () =>
+      rootRun(recorder(async () => ok).run, await install(), undefined, stuck.peerSeams),
+    )
+    expect(result).toMatchObject({
+      exitCode: 1,
+      line: `could not delete ${SERVICE}: remove it by hand`,
+    })
+  })
+
+  test("a step reads its installed script first and runs it only when it is root's own and current", async () => {
+    const { peerSeams } = seams()
+    const preview = inboxInputSchema.parse(decision({ ...ROOT_STEP, machine: "spark-test" }))
+      .preview as InboxRoot
+    const sha = (await repoScripts()).find((script) => script.name === "bwrap-userns")?.sha256
+    const path = "/usr/local/lib/playground/root/bwrap-userns"
+    const read = (sum: string) =>
+      [
+        "root 755 directory /usr/local/lib/playground",
+        "root 755 directory /usr/local/lib/playground/root",
+        `root 755 regular file ${path}`,
+        `${sum}  ${path}`,
+      ].join("\n")
+    const current = recorder(async ({ argv }) =>
+      argv.includes("stat")
+        ? { ...ok, out: read(sha ?? "") }
+        : { ...ok, out: "bwrap may now make a user namespace" },
+    )
+    expect(await rootRun(current.run, preview, undefined, peerSeams)).toEqual({
+      exitCode: 0,
+      line: "bwrap may now make a user namespace",
+    })
+    expect(current.calls.map((call) => call.argv)).toEqual([
+      peerReadArgv(PEER, undefined, "bwrap-userns"),
+      peerStepArgv(PEER, undefined, "bwrap-userns"),
+    ])
+    expect(current.calls.every((call) => call.input === undefined)).toBe(true)
+    const stale = recorder(async () => ({ ...ok, out: read("b".repeat(64)) }))
+    expect(await rootRun(stale.run, preview, undefined, peerSeams)).toEqual({
+      exitCode: 1,
+      line: `${path} is an older copy: approve a new install card`,
+    })
+    expect(stale.calls).toHaveLength(1)
+    const denied = recorder(async ({ argv }) =>
+      argv.includes("stat") ? { ...ok, out: read(sha ?? "") } : { code: 126, err: "", out: "" },
+    )
+    expect(await rootRun(denied.run, preview, undefined, peerSeams)).toMatchObject({
+      exitCode: 126,
+      line: "that machine's rule did not let it run, so nothing ran as root: approve a new install card for it",
+    })
+  })
+
+  test("a machine org.cluster does not name runs nothing", async () => {
+    const { peerSeams } = seams()
+    const { calls, run } = recorder(async () => ok)
+    const preview = inboxInputSchema.parse(decision({ ...ROOT_STEP, machine: "elsewhere" }))
+      .preview as InboxRoot
+    expect(await rootRun(run, preview, undefined, peerSeams)).toEqual({
+      exitCode: 1,
+      line: "elsewhere is not a machine this Dashboard reaches",
+    })
+    expect(calls).toEqual([])
   })
 })
 
@@ -5946,6 +6144,16 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         rooted: { exitCode: 0 },
         type: "root",
       })
+    })
+
+    test("a root card for a machine org.cluster does not name is refused at post (PG-2434)", async () => {
+      for (const preview of [ROOT_INSTALL, ROOT_STEP])
+        expect(
+          await store.postItem(db, decision({ ...preview, machine: "spark-test" })),
+        ).toMatchObject({
+          code: "VALIDATION_ERROR",
+          message: "spark-test is not a machine this Dashboard reaches",
+        })
     })
 
     test("an install card pins this machine's CA, refuses another, and its Approve passes the CA's path with the pin (PG-2458)", async () => {

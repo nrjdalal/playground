@@ -354,3 +354,44 @@ export const INSTALL_TEXT = [
   `  echo "kept the Dashboard's CA in $base/data/portless-ca.der"`,
   "fi",
 ].join("\n")
+
+// A peer machine's polkit setup, which its install writes beside the scripts: one action per listed step, pinned to its installed script, and one rule that answers yes to those actions alone, for the user whose sudo ran the install, so each later step there runs with no password.
+export const PEER_ACTION = "org.playground.root"
+export const PEER_POLICY = `/usr/share/polkit-1/actions/${PEER_ACTION}.policy`
+export const PEER_RULE = "/etc/polkit-1/rules.d/49-playground-root.rules"
+
+const PEER_POLICY_LINES = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">',
+  "<policyconfig>",
+  ...ROOT_NAMES.flatMap((name) => [
+    `  <action id="${PEER_ACTION}.${name}">`,
+    `    <description>Run the Playground root step ${name}</description>`,
+    `    <message>The Playground root step ${name} needs an administrator</message>`,
+    "    <defaults><allow_any>auth_admin</allow_any><allow_inactive>auth_admin</allow_inactive><allow_active>auth_admin</allow_active></defaults>",
+    `    <annotate key="org.freedesktop.policykit.exec.path">${ROOT_DIR}/${name}</annotate>`,
+    "  </action>",
+  ]),
+  "</policyconfig>",
+]
+
+const PEER_IDS = ROOT_NAMES.map((name) => `"${PEER_ACTION}.${name}"`).join(", ")
+
+// The install on a peer, run by sudo's /bin/sh with the password on sudo's stdin alone: it reads no stdin of its own, refuses when sudo named no user but root, then runs INSTALL_TEXT, then writes the polkit action file and the rule, each root's own and world-readable, or refuses with the rule unwritten.
+export const PEER_INSTALL_TEXT = [
+  "set -eu",
+  "user=${SUDO_USER:-}",
+  `case $user in ""|root|*[!a-z0-9_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
+  `[ -d ${PEER_POLICY.slice(0, PEER_POLICY.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit actions folder")}`,
+  `[ -d ${PEER_RULE.slice(0, PEER_RULE.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit rules folder")}`,
+  INSTALL_TEXT,
+  `printf '%s\\n' ${PEER_POLICY_LINES.map((line) => `'${line}'`).join(" ")} > "$stage/policy"`,
+  `printf '%s\\n' '// Playground root steps: these actions alone, for this user alone, with no password' 'polkit.addRule(function (action, subject) {' > "$stage/rule"`,
+  `printf '  if (subject.user === "%s" && [%s].indexOf(action.id) >= 0) return polkit.Result.YES;\\n' "$user" '${PEER_IDS}' >> "$stage/rule"`,
+  `printf '%s\\n' '});' >> "$stage/rule"`,
+  'chown root:root "$stage/policy" "$stage/rule"',
+  'chmod 0644 "$stage/policy" "$stage/rule"',
+  `mv -f "$stage/policy" ${PEER_POLICY}`,
+  `mv -f "$stage/rule" ${PEER_RULE}`,
+  `echo "let $user run ${ROOT_NAMES.join(", ")} as root with no password, through ${PEER_RULE}"`,
+].join("\n")
