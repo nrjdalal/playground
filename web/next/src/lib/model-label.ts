@@ -47,8 +47,8 @@ export const providerOf = (model: string | null): Provider | null =>
         ? BACKEND_MAKERS.glm
         : (REPO_ORG.exec(model)?.[1] ?? null)
 
-// A row's model, and for a session on the local model the repo its server serves (the API's localModel).
-type RowModel = { localModel?: string; model: string | null }
+// A row's model, for a session on the local model the repo its server serves (the API's localModel), and the local models the hosted session's row lists.
+type RowModel = { localModel?: string; localModels?: { id: string }[]; model: string | null }
 
 // Pure: a local model's name as people say it, from its repo id: its family and size (ornith-ai/Ornith-1.5-122B-NVFP4 reads Ornith 122B), else its family alone.
 export const localName = (repo: string): string => {
@@ -70,8 +70,9 @@ export const rowModelName = ({ localModel, model }: RowModel): string | null =>
 export const rowProvider = ({ localModel, model }: RowModel): Provider | null =>
   providerOf(model === LOCAL_SERVED ? (localModel ?? null) : model)
 
-// Pure: whether a row shows its effort: a local model's chat template turns thinking on or off itself, so the effort its launch passes claims nothing.
-export const showsEffort = ({ model }: RowModel): boolean => model !== LOCAL_SERVED
+// Pure: whether a row shows its effort: a local model's chat template turns thinking on or off itself, so the effort its launch passes claims nothing; that is the served `local`, or the id of one its own list names, as the hosted session's row reports after a pick.
+export const showsEffort = ({ localModels, model }: RowModel): boolean =>
+  model !== LOCAL_SERVED && !localModels?.some((local) => local.id === model)
 
 // Pure: the two letters a maker with no icon draws in its chip, the first two of its model's name as people say it, the first capitalised (Or for Ornith 122B, local); none with no name.
 export const initialsOf = (name: string | null): string => {

@@ -97,6 +97,12 @@ describe("a local session's row", () => {
     expect(showsEffort(claude)).toBe(true)
   })
 
+  test("a row on a local model its own list names, as the hosted session's after a pick, shows no effort either, while a Claude model beside that list does (PG-2651)", () => {
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }]
+    expect(showsEffort({ localModels, model: "ornith-1.5-122b-nvfp4" })).toBe(false)
+    expect(showsEffort({ localModels, model: "claude-opus-5-5" })).toBe(true)
+  })
+
   test("initialsOf gives a chip's two letters from a model's name, its first capitalised", () => {
     expect(initialsOf("Ornith 122B, local")).toBe("Or")
     expect(initialsOf("local")).toBe("Lo")
