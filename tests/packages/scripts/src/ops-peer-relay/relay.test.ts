@@ -388,4 +388,32 @@ describe("the relay job's loop (PG-2444)", () => {
     await running
     expect(said()).not.toBe("ok")
   })
+
+  // The relay has no peer set, so it cannot link one; it beats idle: bare each cycle, and the sweep reads that bare idle: as healthy, not as ops-peer-relay: idle: ...
+  test("beats idle: bare each cycle when it has no peer, as the sweep reads it healthy (PG-2637)", async () => {
+    const { here, there } = machines("idle")
+    const key = join(scratch, "idle", "key")
+    writeFileSync(key, "fake\n")
+    const stop = new AbortController()
+    const running = keep({
+      checkout: "/c",
+      data: here,
+      envText: async () => `PLAYGROUND_PEER_KEY=${key}\n`,
+      home: "/h",
+      maxWaitMs: 200,
+      minWaitMs: 20,
+      notify: async () => {},
+      open: () => agentFar(there),
+      pollMs: 20,
+      replyMs: 5_000,
+      signal: stop.signal,
+      wait: (ms) => Bun.sleep(ms),
+    })
+    const said = () =>
+      existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
+    await until(() => said().startsWith("idle: "))
+    stop.abort()
+    await running
+    expect(said()).toBe("idle: PLAYGROUND_PEERS names no peer")
+  })
 })

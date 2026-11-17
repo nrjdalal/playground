@@ -302,7 +302,7 @@ export async function keep({
   let writes = Promise.resolve()
   const say = (peer: string, state: string) => {
     states.set(peer, state)
-    // ok while every peer is up, as the sweep and opsRowOf read ok alone as healthy; else each state, naming the peer that is down
+    // ok while every peer is up, the sweep reads it healthy; else each state, naming the peer that is down
     const line = [...states.values()].every((said) => said.startsWith("up: "))
       ? "ok"
       : [...states].map(([name, said]) => `${name}: ${said}`).join("; ")
@@ -371,7 +371,10 @@ export async function keep({
   while (!signal.aborted) {
     const cluster = clusterOf(envKeysOf(await envText()), home)
     if ("why" in cluster) await say(JOB, `down: ${cluster.why}`)
-    else if (!cluster.peers.length) await say(JOB, "idle: PLAYGROUND_PEERS names no peer")
+    else if (!cluster.peers.length)
+      writes = writes
+        .then(() => beat(path, startedAt, new Date(), "idle: PLAYGROUND_PEERS names no peer", JOB))
+        .catch(console.error)
     else {
       states.delete(JOB)
       for (const peer of cluster.peers)
