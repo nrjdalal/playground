@@ -30,21 +30,21 @@ PROGRESS=${RUNNER_HOST_PROGRESS:-300}
 mkdir -p -m 700 "$HOME/.ssh"
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15
   -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "$(id -un)@$IP")
-# the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
+# the room a run leaves the box's model server, defined here alone and passed to suite.sh's take() as the run's need: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
-# the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there
+# the box's run folder, under its user's home and outside its data folder ~/.playground, so a test sandbox that hides the data folder still reaches the run's tree; suite.sh runs from the copy ci.sh puts there
 # record() puts it in the box's machine record, and record.test.ts holds it to the check's watched places
 BOX_CI_DIR=.cache/playground-ci
 SUITE_PEAK_KB=$((4608 * 1024))
-PEAK_KB=$((2 * 1024 * 1024))
-# the box's home, where its state folder sits, and whether its free memory keeps the floor; 255 sends the run back to the caller's machine
+EXEC_PEAK_KB=$((2 * 1024 * 1024))
+# reach <peak KiB>: the box's home, where its state folder sits, and whether its free memory keeps the floor past the run's peak; 255 sends the run back to the caller's machine
 reach() {
   local got kb
   got=$("${SSH[@]}" 'printf "%s\n" "$HOME"; sed -n "s/^MemAvailable: *\([0-9]*\) kB$/\1/p" /proc/meminfo' < /dev/null) || exit 255
   BOXHOME=$(printf '%s\n' "$got" | sed -n 1p)
   kb=$(printf '%s\n' "$got" | sed -n 2p)
   [[ "$BOXHOME" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$kb" =~ ^[0-9]+$ ]] || { echo "ci.sh: the box's home or free memory did not read" >&2; exit 255; }
-  [ "$kb" -ge $((FLOOR_KB + PEAK_KB)) ] || { echo "ci.sh: the box has $((kb / 1024)) MiB free, under the model server's 15 GiB floor and the run's peak, so it runs here" >&2; exit 255; }
+  [ "$kb" -ge $((FLOOR_KB + $1)) ] || { echo "ci.sh: the box has $((kb / 1024)) MiB free, under the model server's 15 GiB floor and the run's peak, so it runs here" >&2; exit 255; }
   CI=$BOXHOME/$BOX_CI_DIR
 }
 new_run() { RUN=${1:0:12}-$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6); }
@@ -61,11 +61,11 @@ upload() {
   record
   git -C "$1" archive "$2" | "${SSH[@]}" "cat > $CI/$RUN.tar" || exit 255
 }
-# starts the run's unit with its heartbeat, which every poll touches (suite.sh's watch_beat), and says on stderr how to stop it; a TERM,
+# start <mode> <peak KiB>: starts the run's unit with its heartbeat, which every poll touches (suite.sh's watch_beat), and says on stderr how to stop it; a TERM,
 # INT or HUP here stops it too (go.py voids a run with TERM, TaskStop sends one first), so no orphan holds a place in the box's queue
 #
 start() {
-  "${SSH[@]}" "touch $CI/$RUN.beat && systemd-run --user --quiet --collect --unit=ci-$RUN --property='ExecStopPost=/bin/bash $CI/suite.sh $RUN stop' bash -c 'bash $CI/suite.sh $RUN $1 > $CI/$RUN.out 2>&1; c=\$?; [ -z \"\$(tail -c 1 $CI/$RUN.out)\" ] || echo >> $CI/$RUN.out; echo \"exit \$c\" >> $CI/$RUN.out'" < /dev/null || exit 255
+  "${SSH[@]}" "touch $CI/$RUN.beat && systemd-run --user --quiet --collect --unit=ci-$RUN --property='ExecStopPost=/bin/bash $CI/suite.sh $RUN stop' bash -c 'bash $CI/suite.sh $RUN $1 $((FLOOR_KB + $2)) > $CI/$RUN.out 2>&1; c=\$?; [ -z \"\$(tail -c 1 $CI/$RUN.out)\" ] || echo >> $CI/$RUN.out; echo \"exit \$c\" >> $CI/$RUN.out'" < /dev/null || exit 255
   trap '"${SSH[@]}" "systemctl --user stop ci-$RUN" < /dev/null > /dev/null 2>&1; exit 143' TERM INT HUP
   echo "ci.sh: ci-$RUN started on the box; ci.sh cancel $RUN stops it" >&2
 }
@@ -134,10 +134,9 @@ if [ "${1:-}" = web ]; then
   [ $# -eq 2 ] || { echo "usage: ci.sh web <rev>" >&2; exit 2; }
   TREE=$(git rev-parse --verify --quiet "$2^{tree}") || { echo "ci.sh: $2 is not a commit or tree here" >&2; exit 2; }
   new_run "$TREE"
-  PEAK_KB=$SUITE_PEAK_KB
-  reach
+  reach "$SUITE_PEAK_KB"
   upload . "$TREE"
-  start web
+  start web "$SUITE_PEAK_KB"
   POLL=${RUNNER_HOST_POLL:-10}
   res=$(finish) || exit 255
   output "$res"
@@ -176,8 +175,9 @@ if [ "${1:-}" = exec ]; then
     elif [ "$w" = --cwd ]; then skip=1
     elif [[ "$w" != --cwd=* ]]; then words+=("$w"); fi
   done
-  case "${words[*]}" in "bun run test" | "bun run test:file") PEAK_KB=$SUITE_PEAK_KB ;; esac
-  reach
+  peak=$EXEC_PEAK_KB
+  case "${words[*]}" in "bun run test" | "bun run test:file") peak=$SUITE_PEAK_KB ;; esac
+  reach "$peak"
   # under .claude/worktrees/, as a local worktree is, since some tests read their own checkout's path (dashboardSource's rule 4)
   BOXDIR=$CI/.claude/worktrees/$RUN
   args=()
@@ -193,7 +193,7 @@ if [ "${1:-}" = exec ]; then
   done
   upload "$ROOT" "$TREE"
   { printf '%s\n' "${CWD#"$ROOT"}"; printf '%s\0' "${args[@]}"; } | "${SSH[@]}" "cat > $CI/$RUN.cmd" || exit 255
-  start exec
+  start exec "$peak"
   POLL=${RUNNER_HOST_POLL:-5}
   res=$(finish) || exit 255
   output "$res"
@@ -202,13 +202,12 @@ fi
 [ $# -eq 1 ] || { sed -n '2,/^[^#]/{/^#/p;}' "$0" >&2; exit 2; }
 TREE=$(git rev-parse --verify --quiet "$1^{tree}") || { echo "ci.sh: $1 is not a commit or tree here" >&2; exit 2; }
 new_run "$TREE"
-PEAK_KB=$SUITE_PEAK_KB
-reach
+reach "$SUITE_PEAK_KB"
 upload . "$TREE"
 # the tree the box gets has no history, so the audit's base goes beside the tree: <rev>'s merge base with canary, or canary itself for a tree
 BASE=$(git merge-base "$1" origin/canary 2> /dev/null || git rev-parse --verify --quiet origin/canary)
 [ -z "$BASE" ] || git show "$BASE:bun.lock" | "${SSH[@]}" "cat > $CI/$RUN.base" || exit 255
-start suite
+start suite "$SUITE_PEAK_KB"
 res=$(finish) || exit 255
 trap - TERM INT HUP
 read -r code why <<< "$res"
