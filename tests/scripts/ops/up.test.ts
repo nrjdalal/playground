@@ -1075,3 +1075,40 @@ test("beat_started reads a summer heartbeat start as its UTC epoch", () => {
   expect(child.stderr.toString()).toBe("")
   expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(expected)
 })
+
+// #2665: lastBeatAt is a UTC stamp, so under a July New York clock the old mktime read is an hour early and the minute-old beat reads 61m old.
+test("healthy reads a minute-old July beat as healthy under New York's summer time", () => {
+  const config = mkdtempSync(join(scratch, "healthy-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  const beat = "2026-07-01T10:00:00Z"
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 1,
+      lastBeatAt: beat,
+      startedAt: beat,
+      lastResult: "ok",
+      cycleSeconds: 60,
+    }),
+  )
+  const snippet = `${LOAD}up.alive = lambda pid: True
+up.time.time = lambda: ${Date.parse(beat) / 1000 + 60}
+print(up.healthy({"heartbeat": "ops-dashboard"})[0])
+`
+  const child = Bun.spawnSync(["python3", "-I", "-c", snippet, upPy], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      TZ: "America/New_York",
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(child.stdout.toString().trim()).toEqual("True")
+})
