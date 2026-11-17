@@ -23,7 +23,7 @@ const TESTER = /^##\s*TesterBot\s*·\s*(PASS|FAIL)\s+at\s+([0-9a-f]{7,40})/i
 // ## NewUserGate · INCONCLUSIVE at 69a6a4c · 6 of 7 passed, 1 inconclusive; 7. Usage: ...
 const NEW_USER = /^##\s*NewUserGate\s*·\s*(PASS|FAIL|INCONCLUSIVE)\s+at\s+([0-9a-f]{7,40})/i
 
-// Pure: the verdict a comment's first line carries, a review or a tester's word, null for any other comment.
+// Pure: the verdict a comment's first line carries, a review, a tester's word or the new-user gate's, null for any other comment.
 export function verdictOf(body: string): Verdict | null {
   const line = body.trimStart().split("\n")[0]?.trim() ?? ""
   const review = REVIEW.exec(line)
