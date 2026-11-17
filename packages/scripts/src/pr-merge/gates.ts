@@ -2,6 +2,7 @@
 
 import { atHead, verdictsOf, type GateName, type Verdict } from "@packages/config/verdicts"
 
+import { newUserFiles } from "../new-user-gate/paths"
 import { bodyRefusal } from "./body"
 import type { Lost } from "./lost"
 
@@ -51,6 +52,8 @@ export type PrFacts = {
   comments: Comment[]
   draft: boolean
   files: string[]
+  // Each gate code file (GATE_CODE) whose copy in the checkout pr:merge runs from differs from canary's tip, which the code gate refuses; left out in a test, which skips that gate.
+  gateCode?: string[]
   head: string
   // Why held-prs.json holds the PR, or null when it is not held.
   held: string | null
@@ -205,7 +208,7 @@ function upToDate(facts: PrFacts): Gate {
         ok: true,
       }
     : {
-        detail: `${behind} and conflicts with it; merge ${BASE} in, then the new head needs its checks and a 5/5`,
+        detail: `${behind} and conflicts with it; merge ${BASE} in, then the new head needs its checks, a 5/5 and each PASS its diff calls for`,
         name,
         ok: false,
       }
@@ -318,7 +321,7 @@ function reviewGate(facts: PrFacts): Gate {
   }
 }
 
-// Pure: the newest tester's word on the head, for a diff that touches web/next/ alone, since a UI change merges only once its tester has driven it; null for any other diff.
+// Pure: the newest tester's word on the head, for a diff that touches web/next/, since a UI change merges only once its tester has driven it; null for any other diff.
 function testerGate(facts: PrFacts): Gate | null {
   if (!facts.files.some((path) => path.startsWith("web/next/"))) return null
   const tester = verdictsAt(facts).get("tester")
@@ -334,6 +337,42 @@ function testerGate(facts: PrFacts): Gate | null {
     name: "tester",
     ok: false,
   }
+}
+
+// Pure: the newest new-user gate's word on the head, for a diff that touches what a new user meets first (NEW_USER_PATHS), since a broken installer shows nowhere else before a ship; INCONCLUSIVE refuses like FAIL; null for any other diff.
+function newUserGate(facts: PrFacts): Gate | null {
+  const matched = newUserFiles(facts.files)
+  if (matched.length === 0) return null
+  const ran = verdictsAt(facts).get("new-user")
+  if (ran)
+    return {
+      detail: ran.pass ? ran.text : `newest new-user gate verdict is not a pass: ${ran.text}`,
+      name: "new-user",
+      ok: ran.pass,
+    }
+  return {
+    detail: `${matched.join(", ")} waits for the new-user gate: missing ## NewUserGate · PASS at ${facts.head.slice(0, 7)} from ${facts.owner}; run ~/.playground/ops/run-slot.sh <your name> -- bun run gate:new-user ${facts.head} --pr ${facts.n}`,
+    name: "new-user",
+    ok: false,
+  }
+}
+
+// The files the gates are read from: a checkout whose copy differs from canary's tip would judge a PR by other gates than the train, which runs from a worktree reset to origin/canary.
+export const GATE_CODE = [
+  "packages/config/src/verdicts.ts",
+  "packages/scripts/src/new-user-gate/paths.ts",
+  "packages/scripts/src/pr-merge",
+]
+
+// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
+export function codeGate(differs: string[]): Gate {
+  return differs.length === 0
+    ? { detail: `this checkout's gate code is ${BASE}'s`, name: "code", ok: true }
+    : {
+        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`,
+        name: "code",
+        ok: false,
+      }
 }
 
 // Pure: every gate, in the order a PR meets them, each saying what it found at the head. The PR merges only when every one is ok.
@@ -364,6 +403,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       ok: facts.base === BASE,
     },
   ]
+  if (facts.gateCode) gates.push(codeGate(facts.gateCode))
   const parent = parentGate(facts)
   if (parent) gates.push(parent)
   gates.push(upToDate(facts), keepsCanary(facts.lost))
@@ -382,5 +422,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
   gates.push(reviewGate(facts))
   const tester = testerGate(facts)
   if (tester) gates.push(tester)
+  const newUser = newUserGate(facts)
+  if (newUser) gates.push(newUser)
   return gates
 }

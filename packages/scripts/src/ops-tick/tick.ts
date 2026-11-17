@@ -37,6 +37,7 @@ import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
+import { machineRecord } from "./machine-record"
 import { nightlyClean } from "./nightly-clean"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
@@ -809,6 +810,12 @@ export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
+// The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.
+const modelKeep = async (ctx: Context) => {
+  const { keepBeat } = await import("../local-model/live")
+  for (const line of await keepBeat(dirname(ctx.ops))) await ctx.send("ops", line)
+}
+
 // Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
   const list = await ctx.run(["git", "-C", ctx.repo, "worktree", "list", "--porcelain"])
@@ -1149,9 +1156,11 @@ export const BEATS: Beat[] = [
     run: nightlyClean(),
     to: "ops/log/nightly-clean.log and the outbox line to ops",
   },
+  { cron: "45 3 * * *", name: "machine-record", run: machineRecord(), to: "ops, a line a finding" },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
+  { cron: "*/5 * * * *", name: "model-keep", run: modelKeep, to: "ops" },
   {
     cron: "*/5 * * * *",
     name: "relay-watch",

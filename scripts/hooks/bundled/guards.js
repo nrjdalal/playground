@@ -10750,6 +10750,10 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
+    description: "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
+    schedule: { always: true }
+  }),
   "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
     cwd: "{dashboard}",
     description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
@@ -10949,6 +10953,72 @@ var liveSettings = defineSettings({
     schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
   }
 });
+// packages/settings/src/local-models.ts
+var folder2 = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model folder under ~/models, such as ornith-1.5-35b-a3b-nvfp4");
+var figures = strictObject({
+  cap: number2().gt(0).max(0.95),
+  kvKiBPerToken: number2().positive(),
+  overheadGiB: number2().min(0),
+  weightsGiB: number2().positive()
+});
+var localModelSettings = defineSettings({
+  "localModels.boxLanes": {
+    default: 2,
+    description: "How many box test runs the peer runs at once beside its model servers (the box suite's SLOTS); a peer server's share leaves room for this many runs of localModels.boxRunGiB.",
+    schema: number2().int().min(0).max(16)
+  },
+  "localModels.boxRunGiB": {
+    default: 2.25,
+    description: "Estimated: the memory one box test run takes, half the 4.5 GiB peak of a suite across both lanes, measured on the old runner box on 24 Oct, not on the peer.",
+    schema: number2().min(0).max(64)
+  },
+  "localModels.hereModel": {
+    default: "",
+    description: "The model this machine keeps up, such as K for the local workers; empty, the default, keeps none. Another model loads here on request, and this one comes back after localModels.idleMinutes.",
+    schema: union([literal(""), folder2])
+  },
+  "localModels.hereReserveGiB": {
+    default: 40,
+    description: "Estimated: the memory a server on this machine leaves free for the factory's own sessions, stacks and test runs; its share is what is free above this.",
+    schema: number2().min(0).max(512)
+  },
+  "localModels.idleMinutes": {
+    default: 30,
+    description: "How long a model other than its machine's kept one (localModels.hereModel, localModels.peerModel) may sit with no request before it is stopped and the kept one comes back; 0 keeps whichever model was loaded last.",
+    schema: number2().int().min(0).max(1440)
+  },
+  "localModels.machine": {
+    default: "",
+    description: "The PLAYGROUND_PEERS machine that runs the model servers; empty means the only machine PLAYGROUND_PEERS names.",
+    schema: union([
+      literal(""),
+      string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
+    ])
+  },
+  "localModels.models": {
+    default: {
+      "ornith-1.5-122b-nvfp4": {
+        cap: 0.75,
+        kvKiBPerToken: 18.45,
+        overheadGiB: 2.38,
+        weightsGiB: 72.38
+      },
+      "ornith-1.5-35b-a3b-nvfp4": {
+        cap: 0.7,
+        kvKiBPerToken: 12.77,
+        overheadGiB: 6.65,
+        weightsGiB: 21.86
+      }
+    },
+    description: "Each model folder's sizing figures: cap (its measured working share), weightsGiB, overheadGiB and kvKiBPerToken; a model with no row here is refused.",
+    schema: record2(folder2, figures)
+  },
+  "localModels.peerModel": {
+    default: "",
+    description: "The model the peer keeps up, such as M for the Dashboard's chat; empty, the default, keeps none. Another model loads there on request, and this one comes back after localModels.idleMinutes.",
+    schema: union([literal(""), folder2])
+  }
+});
 // packages/settings/src/owner.ts
 var ownerSettings = defineSettings({
   "owner.names": {
@@ -10968,6 +11038,11 @@ var pathsSettings = defineSettings({
     default: "",
     description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
     schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
+  },
+  "paths.factoryHomes": {
+    default: ["{data}", "{checkout}", "~/models"],
+    description: "The folders the factory may put things in, each an absolute path, a ~/ path, {data} (the data folder) or {checkout} (the Playground clone): the machine record's daily check names a new path outside them as misplaced.",
+    schema: array(string2().regex(/^(?:\/.+|~\/.+|\{data\}|\{checkout\})$/, "a path, {data} or {checkout}")).min(1)
   }
 });
 // packages/settings/src/rules.ts
@@ -17145,7 +17220,7 @@ var INSPECT_TIMEOUT_MS = 8000;
 var WEB_DOCKERFILE = "web/next/Dockerfile";
 var API_HERE = "The api image still builds here (docker compose build api).";
 var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
-var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
+var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (a peer machine of your own user, by scripts/ops/README.md's runner-host section, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
 async function hasRunnerHost(environment) {
   const ip = environment.RUNNER_HOST || (await Bun.file(join18(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);

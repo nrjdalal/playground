@@ -12,8 +12,10 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
+import { codeGate } from "../../../../../packages/scripts/src/pr-merge/gates"
 import { FREEZE_LAPSE_MS } from "../../../../../packages/scripts/src/pr-merge/held"
 import {
+  gateCodeOf,
   gateOptions,
   isServerError,
   lockRootOf,
@@ -60,11 +62,12 @@ const CONFLICTED: RunResult = {
     "",
   ].join("\n"),
 }
-// git in a scratch world: canary is CANARY, the head merges into it as TREE (null: a conflict), and the lock lives in a fresh folder. parents: each commit's parents on the walk back from the head; clean: the merges among them that git re-runs to their own tree.
+// git in a scratch world: canary is CANARY, the head merges into it as TREE (null: a conflict), and the lock lives in a fresh folder. parents: each commit's parents on the walk back from the head; clean: the merges among them that git re-runs to their own tree; differs: the gate code files this checkout holds apart from canary's.
 const local = ({
   answer,
   canary = CANARY,
   clean = [] as string[],
+  differs = [] as string[],
   parents = { [HEAD]: ["p0"] } as Record<string, string[]>,
   template = PR_TEMPLATE as string | null,
   tree = TREE as string | null,
@@ -72,6 +75,7 @@ const local = ({
   answer?: RunResult
   canary?: string
   clean?: string[]
+  differs?: string[]
   parents?: Record<string, string[]>
   template?: string | null
   tree?: string | null
@@ -79,6 +83,7 @@ const local = ({
   const lockRoot = mkdtempSync(join(scratch, "lock-"))
   const git: Run = async (args) => {
     if (args[0] === "fetch") return ok("")
+    if (args[0] === "diff") return ok(differs.map((file) => `${file}\n`).join(""))
     if (args[0] === "show") {
       return template === null
         ? { code: 128, stderr: "fatal: path not in tree", stdout: "" }
@@ -361,6 +366,35 @@ describe("prMerge", () => {
     })
     expect(await prMerge(112, { repo: REPO }, tested.run, local())).toMatchObject({
       kind: "merged",
+    })
+  })
+
+  // #2500's shape: a hand merge from a checkout without #2497's tester gate passed every gate it had, while the train held the PR on that gate (PG-2525).
+  test("a checkout whose gate code differs from canary's refuses on the code gate, naming each file, and never calls gh pr merge", async () => {
+    const differs = ["packages/config/src/verdicts.ts", "packages/scripts/src/pr-merge/gates.ts"]
+    const { calls, run } = stub()
+    const outcome = await prMerge(112, { repo: REPO }, run, local({ differs }))
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.filter((gate) => !gate.ok)).toEqual([
+      {
+        detail: `this checkout's gate code differs from origin/canary's (${differs.join(", ")}); run pr:merge from a checkout on origin/canary, or let merge-on-ready land it`,
+        name: "code",
+        ok: false,
+      },
+    ])
+    expect(merges(calls)).toEqual([])
+    const explained = await prMerge(112, { explain: true, repo: REPO }, run, local({ differs }))
+    expect(explained.gates.find((gate) => gate.name === "code")?.ok).toBe(false)
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("a checkout holding canary's gate code passes the code gate", async () => {
+    const { run } = stub()
+    const outcome = await prMerge(112, { explain: true, repo: REPO }, run, local())
+    expect(outcome.gates.find((gate) => gate.name === "code")).toEqual({
+      detail: "this checkout's gate code is canary's",
+      name: "code",
+      ok: true,
     })
   })
 
@@ -1094,5 +1128,74 @@ test("runGh skips gh while the gh-auth beat's fresh result reads failed", async 
     code: 1,
     stderr: "gh unreachable: gh token invalid",
     stdout: "",
+  })
+})
+
+describe("the code gate's diff, in a real scratch checkout", () => {
+  const repo = mkdtempSync(join(tmpdir(), "pr-merge-code-"))
+  afterAll(() => rmSync(repo, { force: true, recursive: true }))
+  const git: Run = async (args) => {
+    const proc = Bun.spawnSync(["git", "-C", repo, ...args])
+    return { code: proc.exitCode, stderr: proc.stderr.toString(), stdout: proc.stdout.toString() }
+  }
+  const at = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", ...args])
+  const write = (path: string, text: string) => {
+    mkdirSync(join(repo, path, ".."), { recursive: true })
+    writeFileSync(join(repo, path), text)
+  }
+  const GATES = "packages/scripts/src/pr-merge/gates.ts"
+  const PATHS = "packages/scripts/src/new-user-gate/paths.ts"
+  write(GATES, "export const gates = ['review']\n")
+  write(PATHS, "export const NEW_USER_PATHS = ['install.sh']\n")
+  write("README.md", "a\n")
+  at("init", "-q", "-b", "canary")
+  at("add", ".")
+  at("commit", "-q", "-m", "behind")
+  const behind = at("rev-parse", "HEAD").stdout.toString().trim()
+  write(GATES, "export const gates = ['review', 'tester']\n")
+  at("commit", "-q", "-am", "the tester gate")
+  const canary = at("rev-parse", "HEAD").stdout.toString().trim()
+
+  test("a checkout behind canary's added gate names its gate file, so pr:merge refuses there (PG-2525)", async () => {
+    at("checkout", "-q", behind)
+    expect(await gateCodeOf(git, canary)).toEqual([GATES])
+    at("checkout", "-q", canary)
+  })
+
+  test("a checkout at canary names none, and a change outside the gate code names none", async () => {
+    expect(await gateCodeOf(git, canary)).toEqual([])
+    write("README.md", "b\n")
+    expect(await gateCodeOf(git, canary)).toEqual([])
+    at("checkout", "-q", "--", "README.md")
+  })
+
+  test("an edit to the new-user gate's path list counts, since the gate reads which diffs it holds from it (PG-2496)", async () => {
+    write(PATHS, "export const NEW_USER_PATHS = []\n")
+    expect(await gateCodeOf(git, canary)).toEqual([PATHS])
+    at("checkout", "-q", "--", PATHS)
+  })
+
+  test("an uncommitted edit to the gate code counts, as a commit does", async () => {
+    write(GATES, "export const gates = []\n")
+    expect(await gateCodeOf(git, canary)).toEqual([GATES])
+    at("checkout", "-q", "--", GATES)
+  })
+
+  test("a PR branch that changes pr-merge itself shows the code gate's ✗ from its own worktree, so its verdict is read from a checkout on origin/canary", async () => {
+    at("checkout", "-q", "-b", "PG-1-gate")
+    write("packages/scripts/src/pr-merge/new-gate.ts", "export {}\n")
+    at("add", ".")
+    at("commit", "-q", "-m", "a new gate")
+    const differs = await gateCodeOf(git, canary)
+    expect(differs).toEqual(["packages/scripts/src/pr-merge/new-gate.ts"])
+    expect(codeGate(differs).ok).toBe(false)
+    at("checkout", "-q", "canary")
+  })
+
+  test("a diff that cannot run throws, so the gate fails closed", async () => {
+    await expect(gateCodeOf(git, "0".repeat(40))).rejects.toThrow(
+      /git diff of the gate code exited/,
+    )
   })
 })

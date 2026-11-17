@@ -1210,6 +1210,29 @@ describe("opsDown", () => {
     ])
   })
 
+  test("reads the peer relay's all-up ok beat as healthy and its beat naming a down peer as failing, beside another job's ok (PG-2546)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const relay = (lastResult: string) =>
+      write(join(ops, "ops-peer-relay.json"), {
+        cycleSeconds: 60,
+        job: "ops-peer-relay",
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    write(join(ops, "ops-fine.json"), {
+      cycleSeconds: 60,
+      job: "ops-fine",
+      lastBeatAt: new Date(NOW - 30_000).toISOString(),
+      lastResult: "ok",
+    })
+    relay("ok")
+    expect(await opsDown(ctx)).toEqual([])
+    relay(
+      "spark-b: up: copying ops-peer.jsonl both ways with me@spark-b; spark-c: down: ssh exited 255; ssh starts again in 2s",
+    )
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-peer-relay"])
+  })
+
   test.each([
     [
       "stale",
