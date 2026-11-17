@@ -47,7 +47,7 @@ What the factory fetches from outside the lockfile runs at one known version, an
 
 - **What:** the property test runner behind the guards' generated spellings (`tests/scripts/hooks/refused-spellings.ts`, `.agents/testing.md`'s property test). MIT, from `dubzzz/fast-check`, with one dependency, `pure-rand`.
 - **Cost:** tests alone; nothing in a build or a bundle imports it.
-- **Watch:** a major that changes `fc.assert`, `fc.asyncProperty`, `fc.option`'s `nil` or the `seed` parameter shows as a red refused-forms test.
+- **Watch:** a major that changes `fc.assert`, `fc.asyncProperty`, `fc.constantFrom` or the `seed` and `examples` parameters shows as a red refused-forms test.
 
 ### `next`: its agent upgrade stop is off (web)
 

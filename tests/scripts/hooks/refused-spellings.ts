@@ -1,9 +1,7 @@
 import fc from "fast-check"
 
-// Words the shell reads as syntax only when written plainly, so a variable or an empty word in front turns them into a program name and the call means something else
+// Words the shell reads as syntax only when written plainly, so a variable or an empty word in front turns them into a program name and the call means something else; programWord's pattern already leaves out those of other characters (`!`, `[[`, an assignment)
 const SYNTAX = new Set([
-  "!",
-  "[[",
   "case",
   "coproc",
   "for",
@@ -22,7 +20,7 @@ const SYNTAX = new Set([
 // The call's first word when it is one plain program name, the one word a variable or an empty word can stand in for and keep the call's meaning
 export const programWord = (call: string) => {
   const word = /^[\w./-]+(?=[ \t\n]|$)/.exec(call)?.[0]
-  return word && !word.includes("=") && !SYNTAX.has(word) ? word : undefined
+  return word && !SYNTAX.has(word) ? word : undefined
 }
 
 // Each rewrite of a call's program word that keeps what the call runs
