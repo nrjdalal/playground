@@ -378,6 +378,18 @@ describe("what adds a path keeps it where the check looks (PG-2538)", () => {
     expect(watched.some((folder) => folder === "/tmp" || folder.startsWith("/tmp/"))).toBe(false)
   })
 
+  test("ci.sh's run folder on the box is held, and upload records it as it makes it", async () => {
+    const ci = await Bun.file(
+      join(import.meta.dir, "../../../../../scripts/ops/runner-host/ci.sh"),
+    ).text()
+    const folder = /^RUN_FOLDER=([A-Za-z0-9._/-]+)$/m.exec(ci)?.[1]
+    expect(folder).toBeDefined()
+    expect(held(`${HOME}/${folder}`), folder).toBe(true)
+    expect(ci).toContain("CI=$BOXHOME/$RUN_FOLDER")
+    expect(ci).toMatch(/\[ -d \$CI \] \|\| \{ install -d -m 0700 \$CI && \{ \$record; \}/)
+    expect(ci).toMatch(/local record=".*playground record add \$CI --kind folder /)
+  })
+
   test("a peer is reached by one fixed ssh: the key alone, no prompt, no user config, the record CLI in its clone", () => {
     expect(peerRecordArgv("/k", "me@spark", "~/code/playground", "check")).toEqual([
       "ssh",

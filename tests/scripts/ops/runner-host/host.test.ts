@@ -912,12 +912,22 @@ esac`,
 // free memory past the floor, systemd-run runs the unit in place, and the unit runs a stand-in suite that records its mode and prints the given output
 const fakeBox = (
   output: string,
-  { argv = (repo: string) => ["exec", repo, "--", "true"], code = 0 } = {},
+  {
+    argv = (repo: string) => ["exec", repo, "--", "true"],
+    code = 0,
+    made = false,
+    recorder = true,
+  } = {},
 ) => {
   const root = mkdtempSync(join(tmpdir(), "runner-fake-"))
   dirs.push(root)
   const b = join(root, "bin")
   mkdirSync(b)
+  if (made) mkdirSync(join(root, ".playground", "ci"), { recursive: true })
+  if (recorder) {
+    mkdirSync(join(root, ".bun", "bin"), { recursive: true })
+    bin(join(root, ".bun", "bin"), "playground", `printf '%s\\n' "$*" >> "${root}/recorded"`)
+  }
   writeFileSync(
     join(root, "fake-suite.sh"),
     `echo "$2" > "${root}/mode"; printf '%s' '${output}'; exit ${code}\n`,
@@ -953,8 +963,41 @@ exec bash -c "$c"`
     env,
   })
   const mode = existsSync(join(root, "mode")) ? readFileSync(join(root, "mode"), "utf8").trim() : ""
-  return { code: p.exitCode, err: p.stderr.toString(), mode, out: p.stdout.toString() }
+  const recorded = existsSync(join(root, "recorded"))
+    ? readFileSync(join(root, "recorded"), "utf8")
+    : ""
+  return {
+    code: p.exitCode,
+    err: p.stderr.toString(),
+    mode,
+    out: p.stdout.toString(),
+    recorded,
+    root,
+  }
 }
+
+describe("ci.sh's run folder in the box's machine record (PG-2538)", () => {
+  test("the upload that makes the run folder records it once, and a run folder already there is left to the record it has", () => {
+    const first = fakeBox("done")
+    expect(first.code).toBe(0)
+    expect(first.recorded).toBe(
+      `record add ${first.root}/.playground/ci --kind folder --why ci.sh runs heavy runs here --undo remove ${first.root}/.playground/ci and what it holds --by ci.sh\n`,
+    )
+    const again = fakeBox("done", { made: true })
+    expect(again.code).toBe(0)
+    expect(again.recorded).toBe("")
+  })
+
+  test("a box with no playground command still runs, with one line saying the run folder is not in the record", () => {
+    const r = fakeBox("done", { recorder: false })
+    expect(r.code).toBe(0)
+    expect(r.out).toBe("done\n")
+    expect(r.err.split("\n")[0]).toBe(
+      `ci.sh: ${r.root}/.playground/ci is not in the machine record; its next check names it`,
+    )
+    expect(r.err.split("\n")[1]).toMatch(/^ci\.sh: ci-\S+ started on the box; /)
+  })
+})
 
 describe("ci.sh exec", () => {
   test("a command whose output has no final newline still ends green, its output whole", () => {

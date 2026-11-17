@@ -13,6 +13,8 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "ci.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 HOST_DIR=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host
+# the box's run folder, under its user's home: the one place to move it, which the box's machine record holds as upload makes it (record.test.ts holds it to the check's watched places)
+RUN_FOLDER=.playground/ci
 KEY=${RUNNER_HOST_KEY:-$(cat "$HOST_DIR/key" 2> /dev/null)}
 KEY=${KEY:-$HOME/.ssh/playground_runner}
 IP=${RUNNER_HOST:-$(cat "$HOST_DIR/ip" 2> /dev/null)}
@@ -37,12 +39,13 @@ reach() {
   kb=$(printf '%s\n' "$got" | sed -n 2p)
   [[ "$BOXHOME" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$kb" =~ ^[0-9]+$ ]] || { echo "ci.sh: the box's home or free memory did not read" >&2; exit 255; }
   [ "$kb" -ge $((FLOOR_KB + PEAK_KB)) ] || { echo "ci.sh: the box has $((kb / 1024)) MiB free, under the model server's 15 GiB floor and the run's peak, so it runs here" >&2; exit 255; }
-  CI=$BOXHOME/.playground/ci
+  CI=$BOXHOME/$RUN_FOLDER
 }
 new_run() { RUN=${1:0:12}-$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6); }
 upload() {
-  # a new copy replaces the old by a rename, since bash reads a running script as it goes
-  "${SSH[@]}" "install -d -m 0700 $CI && t=\$(mktemp $CI/.suite.XXXXXX) && cat > \"\$t\" && chmod 700 \"\$t\" && mv \"\$t\" $CI/suite.sh" < "$HERE/suite.sh" || exit 255
+  # a new copy replaces the old by a rename, since bash reads a running script as it goes; the run folder goes into the box's machine record as it is made, and a record that fails leaves the run alone, since the next daily check names it
+  local record="PATH=\"\$HOME/.bun/bin:\$PATH\" playground record add $CI --kind folder --why 'ci.sh runs heavy runs here' --undo 'remove $CI and what it holds' --by ci.sh > /dev/null 2>&1 || echo 'ci.sh: $CI is not in the machine record; its next check names it' >&2"
+  "${SSH[@]}" "{ [ -d $CI ] || { install -d -m 0700 $CI && { $record; }; }; } && t=\$(mktemp $CI/.suite.XXXXXX) && cat > \"\$t\" && chmod 700 \"\$t\" && mv \"\$t\" $CI/suite.sh" < "$HERE/suite.sh" || exit 255
   git -C "$1" archive "$2" | "${SSH[@]}" "cat > $CI/$RUN.tar" || exit 255
 }
 # starts the run's unit with its heartbeat, which every poll touches (suite.sh's watch_beat), and says on stderr how to stop it; a TERM,
