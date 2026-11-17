@@ -25,8 +25,9 @@ import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
+import { aged, linesOf, livePlaces, type Machine, unusedEverywhere } from "./unused"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear); then one log line with the free disk before and after, which the System page also shows, and one outbox line to ops naming each removal. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear), then each machine's unused space, listed and never removed (unused.ts); then one log line with the free disk before and after and each machine's unused total, which the System page also shows, and one outbox line to ops naming each removal and each machine's unused items. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
@@ -44,7 +45,7 @@ export type Prs = {
 export type Ref = { name: string; sha: string; subject?: string }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the temp folders a rehearsal is made in, the clock the cap's pacing reads, and the sleep it waits on.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the temp folders a rehearsal is made in, the clock the cap's pacing reads, the sleep it waits on, and each machine's unused space.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
@@ -62,10 +63,11 @@ export type NightDeps = {
   temps: () => string[]
   trashRoots: () => Roots
   turbo: string
+  unused: (ctx: Context) => Promise<Machine[]>
 }
 
-// The beat's own record: the last run's time alone; a decision or denied key an older run wrote is read past and dropped on the next write.
-type State = { at?: string }
+// The beat's own record: the last run's time, and the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged); a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = { at?: string; imagesSeen?: Record<string, string> }
 
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
@@ -808,6 +810,15 @@ export const nightlyClean =
       removed.push(...pruned.gone.map((path) => `rehearsal ${path}`))
       return pruned.line
     })
+    const unused: string[] = []
+    let imagesSeen = state.imagesSeen ?? {}
+    await step("unused", async () => {
+      const judged = aged(await deps.unused(ctx), imagesSeen, ctx.now.getTime())
+      imagesSeen = judged.seen
+      const found = judged.found.map((m) => linesOf(m, homedir()))
+      unused.push(...found.flatMap((m) => m.item ?? []))
+      return found.map((m) => m.total).join("; ") || "none read"
+    })
     const purged = trashSince(
       await Bun.file(join(ctx.ops, "log", "trash-purge.log"))
         .text()
@@ -816,14 +827,20 @@ export const nightlyClean =
     )
     said.push(`trash: ${purged} batches purged since the last run`)
     const named = [...removed, ...kept]
-    if (named.length)
+    if (named.length || unused.length)
       await ctx.send(
         "ops",
-        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${named.join("; ")}`,
+        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${[...named, ...unused].join("; ")}`,
       )
     const after = deps.free(data)
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
-    await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
+    await writeAtomic(
+      statePath,
+      JSON.stringify({
+        at: ctx.now.toISOString(),
+        ...(Object.keys(imagesSeen).length ? { imagesSeen } : {}),
+      } satisfies State),
+    )
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(
       join(ctx.ops, "log", "nightly-clean.log"),
@@ -910,4 +927,6 @@ const liveNight: NightDeps = {
   temps: tempFolders,
   trashRoots: machineRoots,
   turbo: TURBO_CACHE,
+  unused: (ctx) =>
+    unusedEverywhere({ ...livePlaces(), now: ctx.now.getTime(), run: ctx.run }, ctx.repo, ctx.run),
 }

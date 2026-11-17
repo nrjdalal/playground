@@ -38,10 +38,13 @@ import {
   type Step,
   strayStandIns,
   usageWords,
+  verdictLine,
+  verdictPost,
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
 import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
+import { machineTest, zshMissing } from "../../../../machine"
 import { scratchEnv } from "../../../../scratch-env"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
@@ -455,26 +458,58 @@ describe("the gate's stand-ins preflight", () => {
     chmodSync(join(box, "stubs", name), 0o755)
   }
 
-  test("with no startup files, the box's zsh finds security outside the stubs folder, and the preflight names it", () => {
-    const stray = strayStandIns(box, home, names)
-    expect(stray.filter((line) => /^-l?c security\b/.test(line))).toHaveLength(2)
-  })
+  // the preflight's zsh runs with a PATH of its own, so the system folders, where macOS keeps zsh, are where it must be
+  const NO_ZSH = zshMissing("/usr/bin:/bin")
 
-  test("the box's startup relaxes spawn.sh's load gate by BOX_LOAD_MULT, read as a number over 1", () => {
-    const set = Bun.spawnSync(
-      ["zsh", "-c", `${zshStartup(box)}print -r -- $PLAYGROUND_LOAD_MULT`],
-      {
-        env: { HOME: home, PATH: "/usr/bin:/bin" },
-      },
-    )
-    expect(set.stdout.toString().trim()).toBe(String(BOX_LOAD_MULT))
-    expect(BOX_LOAD_MULT).toBeGreaterThan(1)
-  })
+  machineTest(
+    NO_ZSH,
+    "with no startup files, the box's zsh finds security outside the stubs folder, and the preflight names it",
+    () => {
+      const stray = strayStandIns(box, home, names)
+      expect(stray.filter((line) => /^-l?c security\b/.test(line))).toHaveLength(2)
+    },
+  )
 
-  test("with the box's startup files, every stand-in resolves to the stubs folder in a plain and a login zsh", () => {
-    for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
-    expect(strayStandIns(box, home, names)).toEqual([])
-  })
+  // a test that narrows this process's PATH and leaves it narrowed changes nothing here, since Bun finds the preflight's zsh on the PATH its child gets
+  machineTest(
+    NO_ZSH,
+    "the preflight still finds zsh after a test narrowed this process's PATH to a folder without it",
+    () => {
+      const was = process.env.PATH
+      process.env.PATH = join(box, "stubs")
+      try {
+        expect(Bun.which("zsh", { PATH: process.env.PATH })).toBeNull()
+        const stray = strayStandIns(box, home, names)
+        expect(stray.filter((line) => /^-l?c security\b/.test(line))).toHaveLength(2)
+      } finally {
+        process.env.PATH = was
+      }
+    },
+  )
+
+  machineTest(
+    NO_ZSH,
+    "the box's startup relaxes spawn.sh's load gate by BOX_LOAD_MULT, read as a number over 1",
+    () => {
+      const set = Bun.spawnSync(
+        ["zsh", "-c", `${zshStartup(box)}print -r -- $PLAYGROUND_LOAD_MULT`],
+        {
+          env: { HOME: home, PATH: "/usr/bin:/bin" },
+        },
+      )
+      expect(set.stdout.toString().trim()).toBe(String(BOX_LOAD_MULT))
+      expect(BOX_LOAD_MULT).toBeGreaterThan(1)
+    },
+  )
+
+  machineTest(
+    NO_ZSH,
+    "with the box's startup files, every stand-in resolves to the stubs folder in a plain and a login zsh",
+    () => {
+      for (const rc of [".zshenv", ".zprofile"]) writeFileSync(join(home, rc), zshStartup(box))
+      expect(strayStandIns(box, home, names)).toEqual([])
+    },
+  )
 
   test("the box's startup sends the profile read and ops-usage's probe to a closed loopback port, and ops-usage's stored-login reads to the box's usage reading", () => {
     expect(zshStartup(box)).toContain("export PLAYGROUND_PROFILE_URL=http://127.0.0.1:9/profile\n")
@@ -509,6 +544,50 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
     )
     expect(resultLine(SHA, [])).toBe(`New-user gate at ${SHA}: FAIL`)
     expect(resultLine(SHA, all().slice(1))).toBe(`New-user gate at ${SHA}: FAIL`)
+  })
+
+  // a PR touching the installer or first run merges only on this word at its head, and INCONCLUSIVE waits like FAIL there (PG-2496).
+  test("the PR's verdict reads PASS, FAIL or INCONCLUSIVE at the sha7, naming each step that did not pass", () => {
+    expect(verdictLine(SHA, all())).toBe(`## NewUserGate · PASS at a11fb88 · 7 of 7 passed`)
+    expect(
+      verdictLine(SHA, [
+        ...all().slice(1),
+        { ...step("Usage", false, true), detail: "spawn refused" },
+      ]),
+    ).toBe(
+      `## NewUserGate · INCONCLUSIVE at a11fb88 · 6 of 7 passed, 1 inconclusive; 7. Usage: spawn refused`,
+    )
+    expect(
+      verdictLine(SHA, [
+        ...all().slice(2),
+        step("Usage", false, true),
+        { ...step("Scripts", false), detail: "no group" },
+      ]),
+    ).toBe(
+      `## NewUserGate · FAIL at a11fb88 · 5 of 7 passed, 1 inconclusive; 6. Usage; 7. Scripts: no group`,
+    )
+    expect(verdictLine(SHA, all().slice(1))).toBe(
+      `## NewUserGate · FAIL at a11fb88 · 6 of 7 passed; stopped after 6 of 7 steps`,
+    )
+  })
+
+  test("--pr posts the verdict from a file, its literal path passed to gh pr comment --body-file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gate-verdict-"))
+    try {
+      const line = verdictLine(SHA, all())
+      const argv = verdictPost(2496, line, dir)
+      expect(argv).toEqual([
+        "gh",
+        "pr",
+        "comment",
+        "2496",
+        "--body-file",
+        join(dir, "new-user-verdict-2496.md"),
+      ])
+      expect(readFileSync(join(dir, "new-user-verdict-2496.md"), "utf8")).toBe(`${line}\n`)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 
   test("STEP_COUNT is the number of steps main checks", async () => {
