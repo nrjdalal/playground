@@ -806,7 +806,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr), but, where those PRs are its one hold, not by one that reads merged with HEAD at or behind its head (mergedHead), so commits past it keep the hold; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr), but, where those PRs are its one hold, not by another PR that reads merged with HEAD at or behind its head (mergedHead), so commits past it keep the hold, the worktree's own freed PR left to the freed check below; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
     const matched = rowPullRequests(agent)
       .filter((u) => !(liftable && u === holders.pr))
@@ -817,8 +817,12 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
       .filter(
         ({ n }) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where),
       )
-    const sole = !byBranch && !byName && !byId
-    const prs = (sole ? matched.filter(({ u }) => !atMergedHead(u)) : matched).map(({ n }) => n)
+    const byPrAlone = !byBranch && !byName && !byId
+    const prs = (
+      byPrAlone
+        ? matched.filter(({ n, u }) => n === String(holders.freed?.number) || !atMergedHead(u))
+        : matched
+    ).map(({ n }) => n)
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more

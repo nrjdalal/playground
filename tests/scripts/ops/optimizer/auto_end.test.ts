@@ -1335,7 +1335,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(existsSync(over.wt)).toBe(true)
   })
 
-  // round 1 of #2520's review: cleanupHeld always passes --discard, so a row holding the worktree by its own merged PR alone frees it at that PR's head, and keeps it, its commit named, past it
+  // PG-2498: cleanupHeld always passes --discard, so a row holding the worktree by its own merged PR alone frees it at that PR's head, and keeps it, its commit named, past it
   test("a live row holding the worktree only by its merged PR frees it at the PR's head, and keeps it with a commit past that head", async () => {
     const url = "https://github.com/o/r/pull/1"
     const rmOf = (data: string, main: string, prHead: string): RmDeps => ({

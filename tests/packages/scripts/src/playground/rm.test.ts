@@ -777,6 +777,22 @@ test("a worktree whose PR merged or closed passes a working roster row naming it
   }
 })
 
+// PG-2498: a row holding the worktree by its own merged PR's number alone is the freed check's, which names the PR that freed it, so the merged-head read asks gh nothing for it
+test("a worktree freed by its own merged PR, held by a row naming that PR alone, says which PR freed it and asks gh for no merged head", async () => {
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const asked: string[] = []
+  const head = git(wt, "rev-parse", "HEAD")
+  const merged: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), head) }
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  const { code, out } = await heldRun(merged, ["--worktree", wt, "--discard"], "MERGED", row, 7)
+  expect({ asked, code, said: out[0] }).toEqual({
+    asked: [],
+    code: 0,
+    said: `playground: ${wt} is freed by #7, which reads MERGED, past abc123-worker's roster row (working)`,
+  })
+})
+
 // PG-1419: the freed removal goes through the 7-day trash like any other, and --restore brings the worktree back, the work --discard let go with it
 test("a freed worktree's removal is restorable: --restore brings it back on its branch, at its commit, listed, its discarded work back as untracked", async () => {
   const { deps, main } = machine()
@@ -1359,7 +1375,7 @@ test("--worktree takes a review clone a live row holds only by a PR that has mer
   expect(existsSync(clone)).toBe(false)
 })
 
-// round 1 of #2520's review: a merged PR's number stopped holding before the past-head check, so --discard took a clone's commit past that PR's head; that number still holds while HEAD has a commit past it, and a row naming the PR alongside its branch never asks gh
+// PG-2498: a merged PR's number still holds while HEAD has a commit past that PR's head, so --discard cannot take it, and a row naming the PR alongside its branch never asks gh
 test("--worktree --discard keeps a clone with a commit past a merged PR's head, which the row holds by that PR alone", async () => {
   const { deps, main, own } = ownPushed()
   const clone = join(main, ".claude", "worktrees", "review-7")
