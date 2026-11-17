@@ -37,7 +37,7 @@ export type Provider = string
 
 const REPO_ORG = new RegExp(`^(${MAKER_NAME})/`)
 
-// Pure: who makes a model, for its row's icon: Anthropic for a Claude id, Z.ai for a GLM one, the org of an org/repo id (a local model's, as config names it), else null, which draws the fallback.
+// Pure: who makes a model, for its row's icon: Anthropic for a Claude id, Z.ai for a GLM one, the org of an org/repo id (a local model's, as config or the local server names it), else null, which draws the initials chip.
 export const providerOf = (model: string | null): Provider | null =>
   !model
     ? null

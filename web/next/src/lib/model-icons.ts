@@ -47,7 +47,7 @@ export const keepMakerIcon = (maker: string, drawing: RemixiconComponentType | n
   redraw()
 }
 
-// Reads a maker's icon from the API once a page: a 404, or no answer at all, keeps the fallback.
+// Reads a maker's icon from the API once a page: a 404, or no answer at all, keeps the initials chip.
 export const readMakerIcon = async (maker: string): Promise<void> => {
   if (icons.has(maker) || reading.has(maker)) return
   reading.add(maker)

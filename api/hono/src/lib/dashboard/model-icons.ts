@@ -167,7 +167,7 @@ export const servedIconHeaders = (type: string): Record<string, string> => ({
   "x-content-type-options": "nosniff",
 })
 
-// The serve route's work: the icon of a maker config names, from the cache or fetched once, with servedIconHeaders; a 404 for any other name, a maker with none, or one not yet fetched while offline, which the web draws as its fallback.
+// The serve route's work: the icon of a maker local names (config's, and the served local model's, iconModels), from the cache or fetched once, with servedIconHeaders; a 404 for any other name, a maker with none, or one not yet fetched while offline, which the web draws as its initials chip.
 export async function serveModelIcon(
   maker: string,
   { dir, fetch, local }: { dir: string; fetch?: Fetch; local: readonly { id: string }[] },
