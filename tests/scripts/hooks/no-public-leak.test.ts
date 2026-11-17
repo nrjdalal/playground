@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { UNSET_REPOS } from "../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../packages/scripts/src/trace-count/kinds"
 import { currentDir } from "../../../packages/settings/src/rendered"
 import { storeMarker } from "../../../scripts/hooks/lists"
 import { check } from "../../../scripts/hooks/no-public-leak"
-import { machineTest, NO_ORIGIN } from "../../machine"
+import { originCheckout } from "../../machine"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -23,12 +23,16 @@ const TERMS = {
 let scratch = ""
 let stored = ""
 let stranger = ""
+// the checkout the guard reads its origin from, a scratch one with a made-up GitHub origin
+let checkout = ""
+const ORIGIN = "acme/made-up-origin"
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), "no-public-leak-"))
   stored = join(scratch, "stored")
   stranger = join(scratch, "stranger")
   await mkdir(stranger, { recursive: true })
+  checkout = originCheckout(join(scratch, "checkout"), ORIGIN)
   storeWith(
     stored,
     { "no-public-leak.json": JSON.stringify(TERMS) },
@@ -48,11 +52,11 @@ const bash = (command: string) =>
     tool_input: { command },
     tool_name: "Bash",
   })
-const run = (raw: string, data = stored) => check(raw, env(data))
+const run = (raw: string, data = stored) => check(raw, env(data), checkout)
 
 const R = "--repo quillco/playground"
 // The checkout's origin, the one repository the guard keeps while factory.publicRepo is unset.
-const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
+const UNSET_R = `--repo ${ORIGIN}`
 
 // A made-up owner, Quilla (@qmarsh), whose names owner.names lists, and an outside contributor, Ostra Vell (@ovell).
 const OWNER_TERMS = {
@@ -389,40 +393,32 @@ describe("what it lets through", () => {
     expect(await run(bash(`gh pr comment 1 ${R} ${said}`), moved)).toBeUndefined()
   })
 
-  machineTest(
-    NO_ORIGIN,
-    "factory.publicRepo set empty leaves the guard on the repository it guards while unset",
-    async () => {
-      const empty = storeWith(
-        join(scratch, "empty-public"),
-        { "no-public-leak.json": JSON.stringify(TERMS) },
-        { "factory.publicRepo": "" },
-      )
-      expect(
-        await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh asked"`), empty),
-      ).toContain("a person's name")
-    },
-  )
+  test("factory.publicRepo set empty leaves the guard on the repository it guards while unset", async () => {
+    const empty = storeWith(
+      join(scratch, "empty-public"),
+      { "no-public-leak.json": JSON.stringify(TERMS) },
+      { "factory.publicRepo": "" },
+    )
+    expect(
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh asked"`), empty),
+    ).toContain("a person's name")
+  })
 
   // issue 1454: unset, the guard keeps the checkout's origin alone, with no fixed second repository
-  machineTest(
-    NO_ORIGIN,
-    "while factory.publicRepo is unset it guards the origin alone, and another repository's write passes",
-    async () => {
-      const empty = storeWith(
-        join(scratch, "unset-other"),
-        { "no-public-leak.json": JSON.stringify(TERMS) },
-        { "factory.publicRepo": "" },
-      )
-      expect(UNSET_REPOS.public).toHaveLength(1)
-      expect(
-        await run(
-          bash(`gh pr comment 1 --repo quillco/made-up-yard --body "Quilla Marsh asked"`),
-          empty,
-        ),
-      ).toBeUndefined()
-    },
-  )
+  test("while factory.publicRepo is unset it guards the origin alone, and another repository's write passes", async () => {
+    const empty = storeWith(
+      join(scratch, "unset-other"),
+      { "no-public-leak.json": JSON.stringify(TERMS) },
+      { "factory.publicRepo": "" },
+    )
+    expect(reposOf({ schemaVersion: 1, values: {} }, checkout).public).toEqual([ORIGIN])
+    expect(
+      await run(
+        bash(`gh pr comment 1 --repo quillco/made-up-yard --body "Quilla Marsh asked"`),
+        empty,
+      ),
+    ).toBeUndefined()
+  })
 
   test("factory.publicRepo set to a list guards each, and reads past each one's name", async () => {
     const both = storeWith(
@@ -443,21 +439,17 @@ describe("what it lets through", () => {
     ).toBeUndefined()
   })
 
-  machineTest(
-    NO_ORIGIN,
-    "a stranger's clone with no store still refuses the built-in kinds, and lets a key through, since keys come from the list alone",
-    async () => {
-      expect(
-        await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@madeup.test"`), stranger),
-      ).toContain("an email address")
-      expect(
-        await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
-      ).toBeUndefined()
-      expect(
-        await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh"`), stranger),
-      ).toBeUndefined()
-    },
-  )
+  test("a stranger's clone with no store still refuses the built-in kinds, and lets a key through, since keys come from the list alone", async () => {
+    expect(
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@madeup.test"`), stranger),
+    ).toContain("an email address")
+    expect(
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
+    ).toBeUndefined()
+    expect(
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh"`), stranger),
+    ).toBeUndefined()
+  })
 })
 
 describe("it fails closed on its list", () => {

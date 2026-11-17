@@ -11,7 +11,7 @@ import {
 import { dirname, join } from "node:path"
 
 import { sourceIn, SOURCES } from "../glm-refused-sources"
-import { machineTest, noZsh } from "../machine"
+import { machineTest, zshMissing } from "../machine"
 import { OLD } from "../session-names"
 import {
   FACTORY_SETTINGS,
@@ -41,7 +41,7 @@ describe("--backend glm runs the session on Z.ai's GLM through Claude Code", () 
     expect(cmd.indexOf('[ -n "$tk" ]')).toBeLessThan(cmd.indexOf(" claude "))
   })
 
-  machineTest(noZsh(), "an empty key ends the launch before claude runs", async () => {
+  machineTest(zshMissing(), "an empty key ends the launch before claude runs", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md", "--backend", "glm"], [], {
       FAKE_EMPTY_TOKEN: "1",
     })

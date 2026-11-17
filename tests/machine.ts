@@ -1,13 +1,7 @@
 import { test } from "bun:test"
 
-import { originRepo } from "../packages/scripts/src/playground/setting"
-
-// What a row needs from the machine it runs on, each the reason it cannot run here or undefined; the runner host's run clone has neither, while GitHub CI's checkout has its origin and its Suite shards install zsh.
-export const NO_ORIGIN = originRepo()
-  ? undefined
-  : "the checkout has no GitHub origin; GitHub CI and a local run cover this row"
-// zsh on the PATH a row's child gets, this process's unless the row names its own, since Bun finds a child's program on the PATH its own env holds.
-export const noZsh = (PATH?: string) =>
+// Why zsh is missing from the PATH a row's child gets (this process's unless the row names its own, since Bun finds a child's program on the PATH its own env holds), or undefined: the runner host has none, while GitHub CI's Suite shards install it.
+export const zshMissing = (PATH?: string) =>
   Bun.which("zsh", { PATH: PATH ?? process.env.PATH ?? "" })
     ? undefined
     : `zsh not on ${PATH ? `PATH ${PATH}` : "PATH"}; GitHub CI (install-zsh) and a local run cover this row`
@@ -28,4 +22,11 @@ export const machineTest = (
   return test(name, () => {
     throw new Error(`${reason}, but CI runs it: this machine lacks what CI provides`)
   })
+}
+
+// A scratch git checkout at dir whose origin is the made-up GitHub repo given, for a hook's checkout argument, so a row that reads the checkout's origin never reads the running checkout's, which the runner host's run clone lacks.
+export const originCheckout = (dir: string, repo: string): string => {
+  Bun.spawnSync(["git", "init", "-q", dir])
+  Bun.spawnSync(["git", "-C", dir, "remote", "add", "origin", `https://github.com/${repo}.git`])
+  return dir
 }

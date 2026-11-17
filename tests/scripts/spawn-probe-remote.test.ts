@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path"
 
 import { peerArgv } from "../../api/hono/src/lib/system/peer"
-import { machineTest, noZsh } from "../machine"
+import { machineTest, zshMissing } from "../machine"
 import { OLD } from "../session-names"
 import {
   bin,
@@ -166,7 +166,7 @@ describe("--remote-control", () => {
 
 describe("--ssh runs the probe's claude on another machine", () => {
   machineTest(
-    noZsh(),
+    zshMissing(),
     "the pane copies the settings and skills into one remote folder, then runs claude there under ssh -tt",
     async () => {
       const email = "spare@example.com"

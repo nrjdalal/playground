@@ -42,7 +42,7 @@ import {
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
 import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
-import { machineTest, noZsh } from "../../../../machine"
+import { machineTest, zshMissing } from "../../../../machine"
 import { scratchEnv } from "../../../../scratch-env"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
@@ -457,7 +457,7 @@ describe("the gate's stand-ins preflight", () => {
   }
 
   // the preflight's zsh runs with a PATH of its own, so the system folders, where macOS keeps zsh, are where it must be
-  const NO_ZSH = noZsh("/usr/bin:/bin")
+  const NO_ZSH = zshMissing("/usr/bin:/bin")
 
   machineTest(
     NO_ZSH,

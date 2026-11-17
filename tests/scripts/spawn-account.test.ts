@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 
-import { machineTest, noZsh } from "../machine"
+import { machineTest, zshMissing } from "../machine"
 import { OLD } from "../session-names"
 import {
   homes,
@@ -81,7 +81,7 @@ describe("--account logs the session in as another Claude account", () => {
     expect(cmd).not.toContain(TOKEN)
   })
 
-  machineTest(noZsh(), "an empty token ends the launch before claude runs", async () => {
+  machineTest(zshMissing(), "an empty token ends the launch before claude runs", async () => {
     const r = await spawn(["worker", "worker-brave-otter", "b.md", "--account", email], [], {
       FAKE_EMPTY_TOKEN: "1",
     })
