@@ -51,6 +51,8 @@ export type PrFacts = {
   comments: Comment[]
   draft: boolean
   files: string[]
+  // Each gate code file (GATE_CODE) whose copy in the checkout pr:merge runs from differs from canary's tip, which the code gate refuses; left out in a test, which skips that gate.
+  gateCode?: string[]
   head: string
   // Why held-prs.json holds the PR, or null when it is not held.
   held: string | null
@@ -336,6 +338,20 @@ function testerGate(facts: PrFacts): Gate | null {
   }
 }
 
+// The files the gates are read from: a checkout whose copy differs from canary's tip would judge a PR by other gates than the train, which runs from a worktree reset to origin/canary.
+export const GATE_CODE = ["packages/config/src/verdicts.ts", "packages/scripts/src/pr-merge"]
+
+// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
+export function codeGate(differs: string[]): Gate {
+  return differs.length === 0
+    ? { detail: `this checkout's gate code is ${BASE}'s`, name: "code", ok: true }
+    : {
+        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`,
+        name: "code",
+        ok: false,
+      }
+}
+
 // Pure: every gate, in the order a PR meets them, each saying what it found at the head. The PR merges only when every one is ok.
 export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOptions = {}): Gate[] {
   const gates: Gate[] = [
@@ -364,6 +380,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       ok: facts.base === BASE,
     },
   ]
+  if (facts.gateCode) gates.push(codeGate(facts.gateCode))
   const parent = parentGate(facts)
   if (parent) gates.push(parent)
   gates.push(upToDate(facts), keepsCanary(facts.lost))
