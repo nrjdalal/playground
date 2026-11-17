@@ -246,12 +246,17 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
   ]
 }
 
-// What tells an ended session's scratchpad folder: the roster's path and the statuses it counts as live.
+// What tells an ended session's scratch or scratchpad folder: the roster's path and the statuses it counts as live.
 export type Ended = { live: string[]; roster: string }
 
-// The folder directly in scratchpad/ that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
-const endedPadOf = (path: string, home: string, ended: Ended): string | undefined => {
-  const pad = real(join(home, ".playground", "scratchpad"))
+// The folder directly in dir (scratchpad/ or scratch/) that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
+const endedPadOf = (
+  path: string,
+  home: string,
+  ended: Ended,
+  dir: "scratch" | "scratchpad",
+): string | undefined => {
+  const pad = real(join(home, ".playground", dir))
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (own === pad || !inside(own, pad)) return undefined
@@ -300,7 +305,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -512,7 +517,9 @@ export function quarantine(
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
   const ended =
-    (opts.ended && endedPadOf(abs, roots.home, opts.ended)) ||
+    (opts.ended &&
+      (endedPadOf(abs, roots.home, opts.ended, "scratchpad") ||
+        endedPadOf(abs, roots.home, opts.ended, "scratch"))) ||
     (opts.gone && goneScratchOf(abs, roots.home))
   const carve = carveOutOf(
     abs,
@@ -540,10 +547,11 @@ export function quarantine(
       `refused a ${recent.length + 1}th removal: ${opts.session} moved ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, the session's own temp folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratch or scratchpad folder, the session's own temp folder, a path inside the session's own scratchpad folder (a ship rehearsal's two clones), or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
   const own = join(real(dirname(abs)), basename(abs))
   const temp = ownTempOf(own, opts.session, io.tmp ?? "/tmp")
-  const whole = (ended && own === ended) || temp
+  const ownPad = join(real(join(roots.home, ".playground", "scratchpad")), opts.session)
+  const whole = (ended && own === ended) || temp || (own !== ownPad && inside(own, ownPad))
   const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
@@ -649,7 +657,7 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  // an ended session's item comes back only into its folder directly in scratchpad/, or a gone session's entry directly in scratch/ back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
+  // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, or a gone session's entry directly in scratch/ back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
     const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
