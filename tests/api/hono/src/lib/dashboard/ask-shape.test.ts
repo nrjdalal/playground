@@ -153,6 +153,15 @@ describe("shapeHints: unlinked refs (#1020)", () => {
     expect(unlinked("Item 019ff17e-8ecb-0000-0dba-f7ab1c805ec1 and page#1234.")).toBeUndefined()
   })
 
+  test("reads a key followed by a dot and a digit as a version, never a ticket, and still reads a ticket ending a sentence", () => {
+    expect(unlinked("The worker runs on GLM-4.7-Flash, then GPT-5.1.")).toBeUndefined()
+    expect(unlinked("See ABC-123.")).toEqual({ kind: "unlinked", refs: ["ABC-123"] })
+    expect(unlinked("ABC-123 is done")).toEqual({ kind: "unlinked", refs: ["ABC-123"] })
+    expect(unlinked("Moved GLM-4.7 off ABC-123.")).toEqual({ kind: "unlinked", refs: ["ABC-123"] })
+    // a dot and a letter is a file name after the ID, which still names the ticket
+    expect(unlinked("Notes are in ABC-123.md")).toEqual({ kind: "unlinked", refs: ["ABC-123"] })
+  })
+
   test("hints on a draft, a slack decision and other kinds never", () => {
     expect(shapeHints({ kind: "draft", preview: { text: "See #1000.", to: "@Merritt" } })).toEqual(
       [],
