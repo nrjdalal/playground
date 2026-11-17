@@ -3,7 +3,6 @@ import { join } from "node:path"
 
 import { BACKEND_MAKERS, MAKER_NAME } from "@packages/config/console"
 
-import { MAKER_MARKS } from "@/lib/dashboard/maker-marks"
 import { ApiError } from "@/lib/error"
 
 // The makers whose icons the dashboard draws, from config alone: each backend's (BACKEND_MAKERS), then the Hugging Face org of each local model's repo id (org/repo); a bare id names no maker.
@@ -34,6 +33,8 @@ const EXT: Record<IconType, string> = {
 }
 
 const MODELS_DEV = "https://models.dev/logos"
+// A maker models.dev lists under another id, whose logo there is taken as it is, its placeholder included, and cached under that id, so a real logo comes from the same place once models.dev draws one: Ornith's models are listed under DeepReinforce, the team that makes them (models.dev's models/deepreinforce), whose logo there is models.dev's placeholder for now.
+export const MODELS_DEV_IDS: Record<string, string> = { "ornith-ai": "deepreinforce" }
 // A provider id models.dev cannot hold: it answers any unknown id with one fallback SVG (1421 bytes, measured) and 200, so this one's body is that fallback, whatever its size.
 const SENTINEL = "playground-no-such-maker"
 const MAX_BYTES = 1024 * 1024
@@ -91,8 +92,15 @@ const body = async (answer: Response): Promise<Uint8Array<ArrayBuffer> | null> =
   return bytes
 }
 
-// A maker's icon from its source: models.dev's logo unless its answer is the fallback, else its Hugging Face org's avatar from huggingface.co's hosts alone, else null. Throws when a source cannot be reached, or when models.dev's fallback does not read (its sentinel's answer is no SVG, a 404 included), so offline is not mistaken for no icon.
+// A maker's icon from its source: its MODELS_DEV_IDS logo as it is, else models.dev's logo unless its answer is the fallback, else its Hugging Face org's avatar from huggingface.co's hosts alone, else null. Throws when a source cannot be reached, or when models.dev's fallback does not read (its sentinel's answer is no SVG, a 404 included), so offline is not mistaken for no icon.
 const fetchIcon = async (maker: string, fetch: Fetch): Promise<ModelIcon | null> => {
+  const listed = MODELS_DEV_IDS[maker]
+  if (listed) {
+    const logo = await body(await fetch(`${MODELS_DEV}/${listed}.svg`))
+    return logo && new TextDecoder().decode(logo).includes("<svg")
+      ? { bytes: logo, type: "image/svg+xml" }
+      : null
+  }
   const fallback = new TextDecoder().decode(
     (await body(await fetch(`${MODELS_DEV}/${SENTINEL}.svg`))) ?? new Uint8Array(),
   )
@@ -135,16 +143,15 @@ const cached = async (
 
 const inFlight = new Map<string, Promise<ModelIcon | null>>()
 
-// A maker's icon: its mark of ours (MAKER_MARKS) when it has one, else from the cache in dir once fetched; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
+// A maker's icon, from the cache in dir once fetched (under its MODELS_DEV_IDS id where it has one); the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
 export const iconFor = async (
   maker: string,
   { dir, fetch = plainFetch, now = Date.now }: { dir: string; fetch?: Fetch; now?: () => number },
 ): Promise<ModelIcon | null> => {
-  const mark = MAKER_MARKS[maker]
-  if (mark) return { bytes: new TextEncoder().encode(mark), type: "image/svg+xml" }
-  const hit = await cached(dir, maker, now())
+  const id = MODELS_DEV_IDS[maker] ?? maker
+  const hit = await cached(dir, id, now())
   if (hit !== undefined) return hit
-  const key = `${dir}\0${maker}`
+  const key = `${dir}\0${id}`
   const running = inFlight.get(key)
   if (running) return running
   const work = (async () => {
@@ -152,7 +159,7 @@ export const iconFor = async (
     if (icon === undefined) return null
     await mkdir(dir, { recursive: true })
     // written whole under a name no reader looks for, then renamed, so a read mid-write never serves part of a file
-    const name = join(dir, icon ? `${maker}.${EXT[icon.type]}` : `${maker}.none`)
+    const name = join(dir, icon ? `${id}.${EXT[icon.type]}` : `${id}.none`)
     const part = `${name}.${process.pid}.${crypto.randomUUID()}.part`
     await writeFile(part, icon ? icon.bytes : "")
     await rename(part, name)

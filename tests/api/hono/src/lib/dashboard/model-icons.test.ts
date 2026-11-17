@@ -3,12 +3,12 @@ import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { MAKER_MARKS } from "../../../../../../api/hono/src/lib/dashboard/maker-marks"
 import {
   type Fetch,
   iconFor,
   isMaker,
   makersOf,
+  MODELS_DEV_IDS,
   servedIconHeaders,
   serveModelIcon,
 } from "../../../../../../api/hono/src/lib/dashboard/model-icons"
@@ -204,15 +204,33 @@ describe("serveModelIcon", () => {
   })
 })
 
-// Ornith publishes no logo, only a full-colour avatar on an opaque tile, so the API serves a one-colour mark of its own for it (PG-2662).
-describe("a maker's own mark", () => {
-  test("Ornith is served its one-colour mark, with no fetch, over an avatar cached before", async () => {
+// Ornith's models are listed on models.dev under DeepReinforce, the team that makes them, whose logo there is models.dev's placeholder for now: the owner takes it, drawn as the other makers' logos are (PG-2662).
+describe("a maker models.dev lists under another id", () => {
+  test("Ornith takes deepreinforce's models.dev logo as it is, its placeholder included, and never its Hugging Face avatar", async () => {
+    expect(MODELS_DEV_IDS["ornith-ai"]).toBe("deepreinforce")
+    const { asked, fetch } = stub()
+    const icon = await iconFor("ornith-ai", { dir: scratch(), fetch })
+    expect(icon).toEqual({ bytes: new TextEncoder().encode(FALLBACK), type: "image/svg+xml" })
+    expect(asked).toEqual(["https://models.dev/logos/deepreinforce.svg"])
+  })
+
+  test("it is cached under that id, so an avatar cached for ornith-ai before is never served again", async () => {
     const dir = scratch()
     writeFileSync(join(dir, "ornith-ai.webp"), PNG)
-    const { asked, fetch } = stub()
-    const icon = await iconFor("ornith-ai", { dir, fetch })
-    expect(icon?.type).toBe("image/svg+xml")
-    expect(new TextDecoder().decode(icon?.bytes)).toBe(MAKER_MARKS["ornith-ai"]!)
-    expect(asked).toEqual([])
+    const { fetch } = stub({
+      "https://models.dev/logos/deepreinforce.svg": () => new Response(LOGO),
+    })
+    expect((await iconFor("ornith-ai", { dir, fetch }))?.type).toBe("image/svg+xml")
+    expect(readdirSync(dir).sort()).toEqual(["deepreinforce.svg", "ornith-ai.webp"])
+    expect(await iconFor("ornith-ai", { dir, fetch: offline })).toEqual({
+      bytes: new TextEncoder().encode(LOGO),
+      type: "image/svg+xml",
+    })
+  })
+
+  test("offline, with nothing cached, gives no icon and caches nothing", async () => {
+    const dir = scratch()
+    expect(await iconFor("ornith-ai", { dir, fetch: offline })).toBeNull()
+    expect(readdirSync(dir)).toEqual([])
   })
 })

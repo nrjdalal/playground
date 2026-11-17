@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { MAKER_MARKS } from "../../../../../api/hono/src/lib/dashboard/maker-marks"
 import {
   drawingOf,
   initialsIcon,
@@ -101,10 +100,14 @@ describe("useMakerIcon", () => {
   })
 })
 
-// Ornith's icon, as the API serves it, draws as the other makers' logos do: a mask in the text colour, never its avatar's image on a tile or the initials chip (PG-2662).
-test("Ornith's served mark draws through the mask, with no image tile and no chip", () => {
-  const served = `data:image/svg+xml;base64,${Buffer.from(MAKER_MARKS["ornith-ai"]!).toString("base64")}`
-  const drawn = html(drawingOf(served), { className: "size-4" })
+// Ornith's icon, as the API serves it, models.dev's deepreinforce logo (its placeholder, a stroked sparkle), draws as the other makers' logos do: a mask in the text colour, never an image on a tile or the initials chip (PG-2662).
+test("Ornith's served models.dev logo draws through the mask, with no image tile and no chip", () => {
+  const placeholder =
+    '<svg viewBox="0 0 24 24" fill="none"><path d="M9.8 15.9L9 18.7" stroke="currentColor"/></svg>'
+  const drawn = html(
+    drawingOf(`data:image/svg+xml;base64,${Buffer.from(placeholder).toString("base64")}`),
+    { className: "size-4" },
+  )
   expect(drawn).toContain("<mask")
   expect(drawn).toContain('fill="currentColor"')
   expect(drawn).not.toContain("clip-path")
