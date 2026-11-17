@@ -790,6 +790,8 @@ describe("SessionRow's dropdown and group", () => {
     ci: "passing",
     conflicts: false,
     draft: false,
+    gates: null,
+    head: "",
     number: 197,
     queued: false,
     reviewed: true,
@@ -971,7 +973,10 @@ describe("SessionRow's dropdown and group", () => {
   })
 
   test(`its line leads with the ticket and the pull request joined (PG-12#173), and its tooltip says the rest`, () => {
-    const html = render({ agent: agent({ state: "idle" }) }, { light: "idle" })
+    const html = render(
+      { agent: agent({ pr: pull({ gates: [] }), state: "idle" }) },
+      { light: "idle" },
+    )
     expect(textOf(html, openTag(html, /<span class="[^"]*text-xs[^"]*">/))).toBe(
       "MADECEDAR-1234#197 Message dispatcher from the dashboard",
     )
@@ -1083,7 +1088,22 @@ describe("SessionRow's dropdown and group", () => {
       "approvals",
       "text-caution",
     ],
-    ["ready", { state: "idle" }, { light: "idle" }, "ready", "text-success"],
+    [
+      "ready",
+      { pr: pull({ gates: [] }), state: "idle" },
+      { light: "idle" },
+      "ready",
+      "text-success",
+    ],
+    [
+      "gated",
+      { pr: pull({ gates: ["tester"] }), state: "idle" },
+      { light: "idle" },
+      "gated",
+      "text-caution",
+    ],
+    // a 5/5 with green CI the merge train has not read at its head is no Ready
+    ["unread", { state: "idle" }, { light: "idle" }, "idle", "text-inactive"],
     [
       "parked",
       { parked: "held for the reset", pr: null, state: "idle" },
