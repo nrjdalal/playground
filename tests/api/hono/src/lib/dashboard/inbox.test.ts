@@ -5902,7 +5902,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
       expect(
         await store.postItem(db, decision({ ...ROOT_STEP, scripts: await repoScripts() })),
-      ).toMatchObject({ code: "VALIDATION_ERROR", message: "A root step's card lists no scripts" })
+      ).toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: "A root step's card lists no scripts and no CA",
+      })
     })
 
     test("Approve returns at once while the password window waits, then records the result and tells the poster", async () => {
@@ -5943,6 +5946,67 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         rooted: { exitCode: 0 },
         type: "root",
       })
+    })
+
+    test("an install card pins this machine's CA, refuses another, and its Approve passes the CA's path with the pin (PG-2458)", async () => {
+      const state = mkdtempSync(join(tmpdir(), "inbox-ca-"))
+      const made = Bun.spawnSync([
+        "openssl",
+        "req",
+        "-x509",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:prime256v1",
+        "-nodes",
+        "-keyout",
+        join(state, "ca-key.pem"),
+        "-out",
+        join(state, "ca.pem"),
+        "-subj",
+        "/CN=inbox test CA",
+        "-days",
+        "1",
+      ])
+      expect(made.exitCode).toBe(0)
+      const der = Bun.spawnSync([
+        "openssl",
+        "x509",
+        "-in",
+        join(state, "ca.pem"),
+        "-outform",
+        "DER",
+      ])
+      const pin = new Bun.CryptoHasher("sha256").update(der.stdout).digest("hex")
+      const held = process.env.PORTLESS_STATE_DIR
+      process.env.PORTLESS_STATE_DIR = state
+      try {
+        const posted = await post(decision(ROOT_INSTALL))
+        expect(posted.preview).toMatchObject({ ca: { sha256: pin } })
+        expect(
+          await store.postItem(db, decision({ ...ROOT_INSTALL, ca: { sha256: "c".repeat(64) } })),
+        ).toMatchObject({
+          code: "VALIDATION_ERROR",
+          message: "An install card's CA is this machine's; post it with none to fill it",
+        })
+        expect(
+          await store.postItem(db, decision({ ...ROOT_STEP, ca: { sha256: pin } })),
+        ).toMatchObject({ message: "A root step's card lists no scripts and no CA" })
+        const run = pkexec()
+        run.release()
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", seen: posted.updatedAt },
+          { actor, root: run.root },
+        )
+        await landed(posted.id)
+        expect(run.calls[0]!.slice(-2)).toEqual([join(state, "ca.pem"), pin])
+      } finally {
+        if (held === undefined) delete process.env.PORTLESS_STATE_DIR
+        else process.env.PORTLESS_STATE_DIR = held
+        rmSync(state, { force: true, recursive: true })
+      }
     })
 
     test("a closed password window is recorded in plain words", async () => {
