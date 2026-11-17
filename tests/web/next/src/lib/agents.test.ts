@@ -823,7 +823,7 @@ describe("orderByStatus", () => {
         }),
         row("worker-idle", "idle"),
         row("worker-parked", "idle", { parked: "held for a ship" }),
-        row("worker-ready", "idle", { pr: pull({ number: 2, score: "5/5" }) }),
+        row("worker-ready", "idle", { pr: pull({ gates: [], number: 2, score: "5/5" }) }),
         row("worker-waiting", "idle", {
           pr: pull({ ci: "pending", number: 3 }),
         }),

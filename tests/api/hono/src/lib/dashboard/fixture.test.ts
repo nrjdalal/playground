@@ -952,6 +952,7 @@ console.log(JSON.stringify({
   account: readings.account,
   answered,
   board: board.agents.map((a) => [a.name, a.state]),
+  gates: board.agents.filter((a) => ["p4r7ya-worker", "t2g6hb-worker", "w9n3kc-worker"].includes(a.name)).map((a) => [a.name, a.pr?.gates ?? null]),
   rosterPath: board.roster.path,
   delivered,
   skills,
@@ -1056,7 +1057,7 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(dashboard()).toEqual(before)
 
     // every read answered from the fixture, the id-named pair, the Codex worker, the conflicting worker and the --ssh probe live with the rest
-    expect(out.workers).toBe(24)
+    expect(out.workers).toBe(27)
     expect(out.names).toContain("c4dx7n-worker")
     expect(out.names).toContain("m5v8qd-worker")
     expect(out.names).toContain("s8hk2v-probe")
@@ -1091,6 +1092,12 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(newestAge).toBeGreaterThan(60 * 60 * 1000)
     expect(newestAge).toBeLessThan(2 * 60 * 60 * 1000)
     expect(out.board).toContainEqual(["worker-wrath", "down"])
+    // #2499: the merge train's gates.json reads Ready (#109, no gate failing at its head), Gated (#110, the tester's) and no read (#111, taken at an older head)
+    expect(out.gates).toEqual([
+      ["p4r7ya-worker", []],
+      ["t2g6hb-worker", ["tester"]],
+      ["w9n3kc-worker", null],
+    ])
     // ops-unstick's state, written a year ahead so it never reads stale, holds planner on the usage limit alone, so it reads paused, not stuck
     expect(out.paused).toEqual({ resets: "3pm (UTC)", resetsAt: null })
     // the Usage app's merged PRs, which a live stack asks GitHub for
