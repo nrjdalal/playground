@@ -106,6 +106,10 @@ const entryOf = (value: unknown, io: RecordIo): Entry | string => {
 // add, drop, seed or check: 0 done, 1 a finding or a failure, 2 a usage error.
 export async function runRecord(words: string[], io: RecordIo): Promise<number> {
   const [verb, ...rest] = words
+  if (verb === "--help" || verb === "-h" || verb === "help") {
+    io.out(USAGE)
+    return 0
+  }
   const { bare, named } = flags(rest)
   if (verb === "add") {
     let values: unknown[]

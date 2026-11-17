@@ -12,7 +12,11 @@ import {
   ROOT_NAMES,
   ROOT_STEPS,
 } from "../../../../../packages/config/src/inbox"
-import { type RecordIo, runRecord } from "../../../../../packages/scripts/src/machine-record/cli"
+import {
+  type RecordIo,
+  runRecord,
+  USAGE,
+} from "../../../../../packages/scripts/src/machine-record/cli"
 import {
   seedEntries,
   treePaths,
@@ -199,6 +203,12 @@ describe("playground record (PG-2538)", () => {
     out: (line) => lines.push(line),
     places: () => places(),
     stdin: async () => stdin,
+  })
+
+  test("--help prints the usage and exits 0", async () => {
+    const lines: string[] = []
+    expect(await runRecord(["--help"], io(lines))).toBe(0)
+    expect(lines).toEqual([USAGE])
   })
 
   test("add, drop and check by their words, and a usage error exits 2", async () => {
