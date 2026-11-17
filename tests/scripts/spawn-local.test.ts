@@ -402,8 +402,8 @@ describe("the local gate: at most the sessions this machine's model server takes
 describe("a local start reads swap-ins as the median of 3 one-second samples", () => {
   const start = ["worker", "t4n7vx-worker", "b.md", "--backend", "local"]
 
-  test("PG-2659 one second at 8403/s between seconds at 5/s passes, reading 5/s", async () => {
-    const r = await local(start, { FAKE_SWAPINS: "5 8403 5" })
+  test("PG-2659 a start that lands on one second at 8403/s, the seconds after it at 5/s, passes, reading 5/s", async () => {
+    const r = await local(start, { FAKE_SWAPINS: "8403 5 5" })
     expect(r.code, r.err).toBe(0)
     expect(capacityLog(r).at(-1).readings.swapins).toBe(5)
   })

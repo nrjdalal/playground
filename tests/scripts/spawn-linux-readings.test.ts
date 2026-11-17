@@ -81,7 +81,7 @@ describe("on Linux the capacity gate reads /proc", () => {
 
   // a GLM worker reads run-slot's room first too, whose gauges take the first two second reads (its swap-ins at 0), then the gate's three
   test.each([
-    ["one second at 8403 between seconds at 5 passes, reading 5", [0, 5, 8403, 5], 5],
+    ["a start on one second at 8403, then seconds at 5, passes, reading 5", [0, 8403, 5, 5], 5],
     ["two of the three seconds over 100 refuse, reading 150", [0, 150, 8403, 120], 150],
   ])(
     "PG-2659 a GLM start takes pswpin's median rise over 3 seconds: %s",
