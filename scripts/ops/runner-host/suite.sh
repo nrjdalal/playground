@@ -1,9 +1,9 @@
 #!/bin/bash
-# suite.sh <run>: runs local CI's steps on the runner host, so a suite takes no slot on the Mac (dispatcher, 18 Oct). ci.sh uploads a
+# suite.sh <run>: runs local CI's steps on the runner host, so a suite takes no slot on the caller's machine (dispatcher, 18 Oct). ci.sh uploads a
 # `git archive` to <ci>/<run>.tar, <ci> being the folder this copy sits in (the box user's ~/.playground/ci), and starts this as that user,
 # never root, in a systemd user unit of its own, so a dropped ssh never ends the run; it unpacks the archive into <ci>/.claude/worktrees/<run>
 # and runs every step beside a Postgres container of its own on loopback, with nothing that reads the keyring (Secret Service). The box gets
-# the code alone: .env comes from .env.example with a secret made here, and no token or key of the Mac's reaches it. Prints one line per
+# the code alone: .env comes from .env.example with a secret made here, and no token or key of the caller's machine reaches it. Prints one line per
 # step, `ok <step> <s>s` or `fail <step> <s>s: <tail>`, then `done <s>s`, and exits 1 when any step failed.
 set -uo pipefail
 
@@ -46,8 +46,7 @@ install -d -m 0700 "$CI" "$CI/.claude" "$CI/.claude/worktrees"
 # first served: only the oldest live waiter tries a slot, since a bare retry let short runs starve a suite (22 min, 19 Oct)
 SLOTS=$(cat "$CI/slots" 2> /dev/null || echo 2)
 [[ "$SLOTS" =~ ^[1-9][0-9]?$ ]] || SLOTS=2
-# a run takes a slot only while the box's MemAvailable keeps the model server's 15 GiB floor past the run's own peak: a suite's or a web
-# build's 4.5 GiB (measured on the old runner box, 24 Oct), an exec's 2 GiB (estimated); ci.sh's reach() reads the same floor before it uploads
+# a run takes a slot only while the box's MemAvailable keeps the model server's 15 GiB floor past the run's own peak, which ci.sh's reach() reads before it uploads: a suite's or a web build's 4.5 GiB (measured on the old runner box, 24 Oct), an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
 SUITE_PEAK_KB=$((4608 * 1024))
 EXEC_PEAK_KB=$((2048 * 1024))
@@ -159,14 +158,15 @@ esac
 exec /usr/bin/docker "$@"
 SHIM
 chmod 0755 "$CI/bin/.docker.$RUN" && mv "$CI/bin/.docker.$RUN" "$CI/bin/docker"
+# a box with no Node of its own gives the steps bun as node, which runs as Node by that name, as `bun run` does for its scripts (turbo's launcher calls node)
+if [ -x /usr/bin/node ]; then rm -f "$CI/bin/node"; else ln -sfn "$HOME/.bun/bin/bun" "$CI/bin/.node.$RUN" && mv "$CI/bin/.node.$RUN" "$CI/bin/node"; fi
 
 # the subshell closes the slot locks before the steps start, so a daemon a step leaves behind cannot keep a slot once this run ends
 (
   release
   # past the box's slowest parallel pass (1830s measured, 27 Oct) and under the suite step's timeout 2400, so a stall ends naming its files
-  # env -i drops the session bus, and docker and git read a config of the run's own, so no step reaches the keyring's Secret Service (a locked
-  # keyring daemon that linger kept alive jammed the factory's calls on spark-a566): no credential helper, docker login or gh
-  exec env -i CI_RUN="$RUN" HOME="$HOME" PATH="$CI/bin:$HOME/.bun/bin:$HOME/.local/bin:/usr/bin:/bin" DOCKER_CONFIG="$CI/docker" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 TEST_PARALLEL_DEADLINE_MS=2100000 RUN="$RUN" DIR="$DIR" F="$F" MODE="$MODE" bash -s
+  # no step reaches the keyring's Secret Service, whose locked daemon linger kept alive jammed the factory's calls on spark-a566: the bus is disabled, not just unset, since a bus library finds /run/user/<uid>/bus by itself, and docker, git and gh read configs of the run's own
+  exec env -i CI_RUN="$RUN" HOME="$HOME" PATH="$CI/bin:$HOME/.bun/bin:$HOME/.local/bin:/usr/bin:/bin" DBUS_SESSION_BUS_ADDRESS=disabled: DOCKER_CONFIG="$CI/docker" GH_CONFIG_DIR="$CI/gh" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 TEST_PARALLEL_DEADLINE_MS=2100000 RUN="$RUN" DIR="$DIR" F="$F" MODE="$MODE" bash -s
 ) << 'EOF'
 set -uo pipefail
 cd "$DIR" || { [ "$MODE" = suite ] || exit 255; exit 2; }
@@ -175,7 +175,7 @@ LOG=$F.log
 : > "$LOG"
 # a run that cannot reach Docker never reads green: a test that skips itself without Docker would pass with nothing run
 timeout 30 docker info > /dev/null 2>&1 || { echo "fail docker: Docker does not answer for this user"; [ "$MODE" = suite ] || exit 255; exit 1; }
-# web: ci.sh web's build of the web image, here since on the Mac its peak takes the Docker VM's out-of-memory killer to the live dashboard's
+# web: ci.sh web's build of the web image, here since on a Mac its peak takes the Docker VM's out-of-memory killer to the live dashboard's
 # Postgres; .env is the docker-test skill's smoke one, the image gets that skill's single-libc check, and it goes once checked
 if [ "$MODE" = web ]; then
   sed -e 's|^BETTER_AUTH_SECRET=$|BETTER_AUTH_SECRET=dummy|' \
@@ -239,15 +239,15 @@ test_step() {
       echo "ok test $(($(date +%s) - t0))s: $(summary "$out"); the first run had $first, its files each passed alone:${alone%,}, and the full suite passed again"
       return
     fi
-    # the lines below come from this second run alone, so the Mac re-runs the files that failed in it
+    # the lines below come from this second run alone, so the caller's machine re-runs the files that failed in it
     files=$(failing_files "$out")
     fails=$(failing_names "$out")
     first="$first, then the full suite again had $(summary "$out")"
   fi
-  # the failing tests by name and their files, so the Mac can re-run a test known to fail on Linux alone
+  # the failing tests by name and their files, so the caller's machine can re-run a test known to fail on Linux alone
   grep '^(fail)' "$out" | sed -e 's/^(fail) //' -e 's/ \[[0-9.]*m*s\]$//' | sort -u | sed 's/^/failed test /'
   [ -n "$files" ] && echo "files test" $files
-  # the failures and the errors outside a test the run counted, so the Mac never re-runs a run whose failures the names do not cover
+  # the failures and the errors outside a test the run counted, so the caller's machine never re-runs a run whose failures the names do not cover
   echo "tally test $(sed -n 's/^ *\([0-9]*\) fail$/\1/p' "$out" | awk '{ s += $1 } END { print s + 0 }') $(sed -n 's/^ *\([0-9]*\) errors\{0,1\}$/\1/p' "$out" | awk '{ s += $1 } END { print s + 0 }')"
   echo "fail test $(($(date +%s) - t0))s: exit $code: ${first:-no summary}; failing: ${fails:-$(tail -n 3 "$out" | tr '\n' ' ' | cut -c1-200)}${alone:+; re-run alone:${alone%,}}"
   failed=1
@@ -279,7 +279,7 @@ chmod 600 .env
 # Mac worktree already has; its output and its exit code are the run's, and 255 means the box could not prepare it
 if [ "$MODE" = exec ]; then
   export TURBO_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
-  # each with the suite path's time limit, so a hang ends the run and it goes back to the Mac
+  # each with the suite path's time limit, so a hang ends the run and it goes back to the caller's machine
   { timeout 900 bun install --ignore-scripts --frozen-lockfile && timeout 1800 node_modules/.bin/turbo run build --filter='./packages/*' &&
     timeout 600 env -u NODE_ENV -u SKIP_ENV_VALIDATION bun run db:migrate; } >> "$LOG" 2>&1 < /dev/null ||
     { echo "suite.sh: the box could not prepare $RUN (its log is $LOG)"; exit 255; }

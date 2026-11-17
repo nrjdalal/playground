@@ -185,6 +185,7 @@ PY
 # run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
 if [ "${1:-}" = box-off ]; then
   [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
+  # the host and key as ci.sh's HOST_DIR, KEY and IP lines read them; keep the two equal
   [ -n "${RUNNER_HOST:-}" ] || [ -s "$OPS/runner-host/ip" ] || echo no-host
   key=${RUNNER_HOST_KEY:-$(cat "$OPS/runner-host/key" 2>/dev/null)}
   [ -e "${key:-$HOME/.ssh/playground_runner}" ] || echo no-ssh-key

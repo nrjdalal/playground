@@ -1,5 +1,5 @@
 #!/bin/bash
-# tools.sh: checks, as root, that the runner user has what suite.sh's steps need: a full name for git, each tool on the PATH a
+# tools.sh: checks, as root, that an Actions runner VPS's runner user has what suite.sh's steps need: a full name for git, each tool on the PATH a
 # run gets, and systemd-run for ci.sh's units. Prints `ok <what>` or `missing <what>` for each, and exits 1 when any is missing.
 set -u
 missing=0

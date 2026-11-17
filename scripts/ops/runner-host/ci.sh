@@ -1,9 +1,9 @@
 #!/bin/bash
 # ci.sh <rev>: runs local CI's steps for a commit or tree of the current checkout on the runner host, so the suite takes no slot on the
-# Mac (dispatcher, 18 Oct: "Moving the suite runs to the box is the real relief for the Mac"). It uploads suite.sh and a `git archive` of
+# caller's machine (dispatcher, 18 Oct). It uploads suite.sh and a `git archive` of
 # <rev>'s tree, never a token or a key, starts the run in a systemd user unit of its own and reads its lines every 20s, so a dropped ssh never
 # ends the run. Prints suite.sh's lines and exits as it does (0 green, 1 a step failed), or 255 when the box cannot be reached, so the
-# caller runs the suite on the Mac through run-slot instead. The host is RUNNER_HOST, else the address in
+# caller runs the suite on its own machine through run-slot instead. The host is RUNNER_HOST, else the address in
 # the data folder's ops/runner-host/ip, reached as this user with no root, its state under its own ~/.playground/ci. A re-run of a Linux-only
 # test (below) runs in the current checkout, so <rev> is its HEAD.
 # The other modes: ci.sh web <rev> builds the web image there, ci.sh exec <dir> -- <command...> runs one command, and ci.sh cancel <run>
@@ -25,9 +25,9 @@ PROGRESS=${RUNNER_HOST_PROGRESS:-300}
 mkdir -p -m 700 "$HOME/.ssh"
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15
   -o ControlMaster=auto -o ControlPersist=60 -o "ControlPath=$HOME/.ssh/pg-%C" "$(id -un)@$IP")
-# the room a run leaves the box's model server: 15 GiB of MemAvailable past the run's own peak, a suite's 4.5 GiB (measured on the old runner
-# box, 24 Oct) or an exec's 2 GiB (estimated); suite.sh's take() holds the same floor as each run takes its slot
+# the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
+SUITE_PEAK_KB=$((4608 * 1024))
 PEAK_KB=$((2 * 1024 * 1024))
 # the box's home, where its state folder sits, and whether its free memory keeps the floor; 255 sends the run back to the caller's machine
 reach() {
@@ -35,7 +35,7 @@ reach() {
   got=$("${SSH[@]}" 'printf "%s\n" "$HOME"; sed -n "s/^MemAvailable: *\([0-9]*\) kB$/\1/p" /proc/meminfo' < /dev/null) || exit 255
   BOXHOME=$(printf '%s\n' "$got" | sed -n 1p)
   kb=$(printf '%s\n' "$got" | sed -n 2p)
-  [[ "$BOXHOME" == /* ]] && [[ "$kb" =~ ^[0-9]+$ ]] || { echo "ci.sh: the box's home or free memory did not read" >&2; exit 255; }
+  [[ "$BOXHOME" =~ ^/[A-Za-z0-9._/-]+$ ]] && [[ "$kb" =~ ^[0-9]+$ ]] || { echo "ci.sh: the box's home or free memory did not read" >&2; exit 255; }
   [ "$kb" -ge $((FLOOR_KB + PEAK_KB)) ] || { echo "ci.sh: the box has $((kb / 1024)) MiB free, under the model server's 15 GiB floor and the run's peak, so it runs here" >&2; exit 255; }
   CI=$BOXHOME/.playground/ci
 }
@@ -65,7 +65,7 @@ finish() {
     # unit's stop leaves no heartbeat behind
     if ! got=$("${SSH[@]}" "touch -c $CI/$RUN.beat; echo \"unit \$(systemctl --user is-active ci-$RUN 2> /dev/null) \$(ls $CI/queue 2> /dev/null | sed -n '/-$RUN\$/=')\"; tail -n 1 $CI/$RUN.out 2> /dev/null; echo" < /dev/null); then
       # the run goes on without us; 10 minutes after the last read, by the clock, so the run's heartbeat outlasts the wait, the caller
-      # falls back to the Mac
+      # falls back to its own machine
       [ $((SECONDS - seen)) -lt 600 ] || { echo "ci.sh: the box stopped answering while $RUN ran" >&2; return 255; }
       continue
     fi
@@ -111,14 +111,14 @@ if [ "${1:-}" = cancel ]; then
   exit 0
 fi
 
-# ci.sh web <rev>: builds the web image of <rev>'s tree on the box, since on the Mac its peak takes the Docker VM's out-of-memory killer to
+# ci.sh web <rev>: builds the web image of <rev>'s tree on the box, since on a Mac its peak takes the Docker VM's out-of-memory killer to
 # the live dashboard's Postgres, with the docker-test skill's smoke .env and its single-libc check, then removes the image. Prints the
-# build's output and exits with its code, or 255 when the box cannot take it; nothing falls back to the Mac, so commit what it should build
+# build's output and exits with its code, or 255 when the box cannot take it; nothing falls back to the caller's machine, so commit what it should build
 if [ "${1:-}" = web ]; then
   [ $# -eq 2 ] || { echo "usage: ci.sh web <rev>" >&2; exit 2; }
   TREE=$(git rev-parse --verify --quiet "$2^{tree}") || { echo "ci.sh: $2 is not a commit or tree here" >&2; exit 2; }
   new_run "$TREE"
-  PEAK_KB=$((4608 * 1024))
+  PEAK_KB=$SUITE_PEAK_KB
   reach
   upload . "$TREE"
   start web
@@ -130,7 +130,7 @@ fi
 # ci.sh exec <dir> -- <command...>: run-slot.sh's way to run one test, type check, lint or build of a checkout on the box
 # (dispatcher, 18 Oct). It sends <dir>'s working tree as it stands, runs <command> there with every path under the checkout moved to the
 # box's copy, prints its output and exits with its code, or 255 with nothing run when the tree cannot be written or the box cannot take
-# it, so run-slot.sh runs it on the Mac instead.
+# it, so run-slot.sh runs it on this machine instead.
 if [ "${1:-}" = exec ]; then
   [ $# -ge 4 ] && [ "$3" = -- ] || { echo "usage: ci.sh exec <dir> -- <command...>" >&2; exit 2; }
   ROOT=$(git -C "$2" rev-parse --show-toplevel 2> /dev/null) || exit 255
@@ -138,22 +138,31 @@ if [ "${1:-}" = exec ]; then
   CWD=$(cd -P "$2" && pwd -P)
   shift 3
   # the working tree as it stands, written through a scratch index, so the checkout's own index and the shared stash list stay as they are;
-  # a third of the box's runs fell back to the Mac on uncommitted changes (optimizer, 19 Oct). Tracked edits go; an untracked file goes only
+  # a third of the box's runs fell back to the caller's machine on uncommitted changes (optimizer, 19 Oct). Tracked edits go; an untracked file goes only
   # as source under a source folder, since .gitignore does not name every key (id_ed25519, credentials.json, .netrc), and
-  # any other untracked file keeps the run on the Mac
+  # any other untracked file keeps the run here
   while IFS= read -r -d '' u; do
     [[ "$u" =~ ^(api|packages|scripts|skills|tests|web)/[A-Za-z0-9._/@()+-]+\.(css|md|mdx|mjs|sh|sql|ts|tsx)$ ]] ||
-      { echo "ci.sh: $ROOT has an untracked file the box does not take ($u), so it runs on the Mac" >&2; exit 255; }
+      { echo "ci.sh: $ROOT has an untracked file the box does not take ($u), so it runs here" >&2; exit 255; }
   done < <(git -C "$ROOT" ls-files -z --others --exclude-standard)
   IDX=$(mktemp) || exit 255
   cp "$(git -C "$ROOT" rev-parse --path-format=absolute --git-path index)" "$IDX" 2> /dev/null || rm -f "$IDX"
   TREE=$(GIT_INDEX_FILE=$IDX git -C "$ROOT" add -A 2> /dev/null && GIT_INDEX_FILE=$IDX git -C "$ROOT" write-tree)
   rc=$?
   rm -f "$IDX"
-  [ "$rc" = 0 ] && [ -n "$TREE" ] || { echo "ci.sh: $ROOT's working tree could not be written as a tree, so it runs on the Mac" >&2; exit 255; }
+  [ "$rc" = 0 ] && [ -n "$TREE" ] || { echo "ci.sh: $ROOT's working tree could not be written as a tree, so it runs here" >&2; exit 255; }
   new_run "$TREE"
-  # under .claude/worktrees/, as a Mac worktree is, since some tests read their own checkout's path (dashboardSource's rule 4)
+  # a whole-suite exec, any --cwd aside, needs the suite's peak, read from the same words suite.sh's TAKE reads
+  words=()
+  skip=0
+  for w in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0
+    elif [ "$w" = --cwd ]; then skip=1
+    elif [[ "$w" != --cwd=* ]]; then words+=("$w"); fi
+  done
+  case "${words[*]}" in "bun run test" | "bun run test:file") PEAK_KB=$SUITE_PEAK_KB ;; esac
   reach
+  # under .claude/worktrees/, as a local worktree is, since some tests read their own checkout's path (dashboardSource's rule 4)
   BOXDIR=$CI/.claude/worktrees/$RUN
   args=()
   # the checkout, or a path under it, at a word's start or after its = or -C (--cwd=<it>), never a sibling that starts with the same
@@ -177,7 +186,7 @@ fi
 [ $# -eq 1 ] || { sed -n '2,/^[^#]/{/^#/p;}' "$0" >&2; exit 2; }
 TREE=$(git rev-parse --verify --quiet "$1^{tree}") || { echo "ci.sh: $1 is not a commit or tree here" >&2; exit 2; }
 new_run "$TREE"
-PEAK_KB=$((4608 * 1024))
+PEAK_KB=$SUITE_PEAK_KB
 reach
 upload . "$TREE"
 # the tree the box gets has no history, so the audit's base goes beside the tree: <rev>'s merge base with canary, or canary itself for a tree

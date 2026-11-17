@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -276,6 +277,7 @@ describe("setup.sh", () => {
 const boxExec = (
   out: string,
   {
+    cmd = (real: string): string[] => ["bun", "test", join(real, "web", "a.test.ts")],
     dirty = false,
     freeKb = BIG_KB,
     home = BOX_HOME,
@@ -338,17 +340,7 @@ esac`,
   const before = status()
   const real = realpathSync(repo)
   const p = Bun.spawnSync(
-    [
-      "bash",
-      join(DIR, "ci.sh"),
-      "exec",
-      join(real, "web"),
-      "--",
-      "bun",
-      "test",
-      join(real, "web", "a.test.ts"),
-      ...more(real),
-    ],
+    ["bash", join(DIR, "ci.sh"), "exec", join(real, "web"), "--", ...cmd(real), ...more(real)],
     { cwd: repo, env },
   )
   const read = (name: string) =>
@@ -1071,9 +1063,33 @@ describe("ci.sh exec", () => {
     expect(low.read("tar")).toBe("")
     expect(low.read("argv").trim().split("\n")).toHaveLength(1)
     expect(boxExec("exit 0\n", { freeKb: 17 * 1024 * 1024 }).code).toBe(0)
-    const lost = boxExec("exit 0\n", { home: "" })
-    expect(lost.code).toBe(255)
-    expect(lost.err).toContain("the box's home or free memory did not read")
+    for (const home of ["", "/home/two words", "relative/home"]) {
+      const lost = boxExec("exit 0\n", { home })
+      expect(lost.code).toBe(255)
+      expect(lost.err).toContain("the box's home or free memory did not read")
+      expect(lost.read("tar")).toBe("")
+    }
+  })
+
+  test.each([
+    [["bun", "run", "test"]],
+    [["bun", "run", "test:file"]],
+    [["bun", "run", "--cwd", "web", "test"]],
+  ])(
+    "an exec of the whole suite (%p) keeps the suite's 4.5 GiB peak, so at 18 GiB free it exits 255 before any upload, as suite.sh's take() would wait",
+    (argv) => {
+      const low = boxExec("exit 0\n", { cmd: () => argv, freeKb: 18 * 1024 * 1024 })
+      expect(low.code).toBe(255)
+      expect(low.err).toContain("under the model server's 15 GiB floor")
+      expect(low.read("tar")).toBe("")
+      expect(low.read("argv").trim().split("\n")).toHaveLength(1)
+      expect(boxExec("exit 0\n", { cmd: () => argv, freeKb: 19.5 * 1024 * 1024 }).code).toBe(0)
+    },
+  )
+
+  test("an exec of named test files keeps the exec's 2 GiB peak, so 18 GiB free takes it", () => {
+    const argv = ["bun", "run", "test:file", "tests/a.test.ts"]
+    expect(boxExec("exit 0\n", { cmd: () => argv, freeKb: 18 * 1024 * 1024 }).code).toBe(0)
   })
 
   // dispatcher, 17 Nov: on spark-a566, linger kept a locked keyring daemon alive, and the factory's calls jammed on it
@@ -1081,16 +1097,43 @@ describe("ci.sh exec", () => {
     const keyring = /\bgh\b|credential|docker login|secret-tool|keyring|DBUS/i
     const sent = boxExec("exit 0\n").read("argv")
     expect(sent).not.toMatch(keyring)
+    // the two settings that shut the bus and gh's own config are the one place either word may stand
+    const shut = ["DBUS_SESSION_BUS_ADDRESS=disabled: ", 'GH_CONFIG_DIR="$CI/gh" ']
     const code = (name: string) =>
       readFileSync(join(DIR, name), "utf8")
         .split("\n")
         .filter((line) => !/^\s*#/.test(line))
         .join("\n")
     expect(code("ci.sh")).not.toMatch(keyring)
-    expect(code("suite.sh")).not.toMatch(keyring)
     const steps = code("suite.sh").match(/exec env -i [^\n]*/)?.[0] ?? ""
+    for (const s of shut) expect(steps).toContain(s)
     expect(steps).toContain('DOCKER_CONFIG="$CI/docker"')
     expect(steps).toContain("GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1")
+    expect(shut.reduce((s, cut) => s.replace(cut, ""), code("suite.sh"))).not.toMatch(keyring)
+  })
+
+  test("a box with no /usr/bin/node gives the steps bun as node, and one with it drops that link", () => {
+    const root = mkdtempSync(join(tmpdir(), "runner-node-"))
+    dirs.push(root)
+    mkdirSync(join(root, "ci", "bin"), { recursive: true })
+    const suite = readFileSync(join(DIR, "suite.sh"), "utf8")
+    const line = suite.split("\n").find((l) => l.includes('"$CI/bin/node"')) ?? ""
+    const run = () =>
+      Bun.spawnSync(["bash", "-c", line.replaceAll("/usr/bin/node", join(root, "node"))], {
+        env: {
+          CI: join(root, "ci"),
+          HOME: root,
+          PATH: "/usr/bin:/bin",
+          RUN: "0123456789ab-abcdef",
+        },
+      }).exitCode
+    expect(run()).toBe(0)
+    expect(readlinkSync(join(root, "ci", "bin", "node"))).toBe(join(root, ".bun", "bin", "bun"))
+    expect(readdirSync(join(root, "ci", "bin"))).toEqual(["node"])
+    writeFileSync(join(root, "node"), "")
+    chmodSync(join(root, "node"), 0o755)
+    expect(run()).toBe(0)
+    expect(readdirSync(join(root, "ci", "bin"))).toEqual([])
   })
 })
 
