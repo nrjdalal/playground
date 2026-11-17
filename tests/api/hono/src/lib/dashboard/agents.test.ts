@@ -20,6 +20,7 @@ import {
   ciOf,
   foldTranscript,
   ghAnswer,
+  ghGraphql,
   matchAgents,
   mergedOnce,
   mergedPullsPath,
@@ -49,6 +50,7 @@ import { setSessionNames } from "../../../../../../packages/config/src/kinds"
 import { orgOf } from "../../../../../../packages/config/src/org"
 import { verdictsAt } from "../../../../../../packages/scripts/src/pr-merge/gates"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
+import { withGhDown } from "../../../../../gh-down"
 import { liveReads } from "../../../../../live-reads"
 import { OLD, SEEDED_NAMES } from "../../../../../session-names"
 
@@ -1570,4 +1572,13 @@ describe("branchTicketOf", () => {
     ] as const)
       expect(branchTicketOf(branch, repo, own)).toBeNull()
   })
+})
+
+// the board reads each session's PR again on every cache expiry, so it skips gh while ops-tick's gh sign-in probe reads failed, and the row shows why
+test("ghGraphql throws gh unreachable while the gh sign-in probe reads failed", async () => {
+  await withGhDown(() =>
+    expect(ghGraphql(["-f", "query={viewer{login}}"])).rejects.toThrow(
+      "gh unreachable: gh token invalid",
+    ),
+  )
 })

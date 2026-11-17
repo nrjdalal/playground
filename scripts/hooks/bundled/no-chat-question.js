@@ -5932,12 +5932,22 @@ var answerPayloadSchema = strictObject({
 });
 var CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z";
 var ROOT_STEPS = {
-  "bwrap-userns": "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace"
+  "bwrap-userns": {
+    undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
+    what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace"
+  },
+  "chromium-ca": {
+    undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
+    what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart"
+  }
 };
 var ROOT_NAMES = Object.keys(ROOT_STEPS);
 var ROOT_BASE = "/usr/local/lib/playground";
 var ROOT_DIR = `${ROOT_BASE}/root`;
+var ROOT_CA = `${ROOT_BASE}/data/portless-ca.der`;
+var CA_MAX_BYTES = 16384;
 var REFUSE_HASH = 'echo "refused: a hash is not 64 lowercase hex" >&2; exit 1';
+var refuse = (why) => `{ echo "refused: ${why}" >&2; exit 1; }`;
 var INSTALL_TEXT = [
   "set -eu",
   "umask 022",
@@ -5945,14 +5955,17 @@ var INSTALL_TEXT = [
   "src=$1",
   "shift",
   'case $src in /*) ;; *) echo "refused: the scripts folder is not an absolute path" >&2; exit 1 ;; esac',
-  `[ $# -eq ${ROOT_NAMES.length} ] || { echo "refused: ${ROOT_NAMES.length} hashes are needed, one for each script" >&2; exit 1; }`,
+  `[ $# -eq ${ROOT_NAMES.length} ] || [ $# -eq ${ROOT_NAMES.length + 2} ] || ${refuse(`${ROOT_NAMES.length} hashes are needed, one for each script, then the CA's path and hash or neither`)}`,
+  "n=0",
   'for h in "$@"; do',
+  "  n=$((n + 1))",
+  `  [ $n -le ${ROOT_NAMES.length} ] || break`,
   `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
   "done",
-  'mkdir -p "$base/root"',
-  'chown root:root "$base" "$base/root"',
-  'chmod 0755 "$base" "$base/root"',
+  'mkdir -p "$base/root" "$base/data"',
+  'chown root:root "$base" "$base/root" "$base/data"',
+  'chmod 0755 "$base" "$base/root" "$base/data"',
   'stage=$(mktemp -d "$base/.stage.XXXXXX")',
   `trap 'rm -f "$stage"/*; rmdir "$stage"' EXIT`,
   `for name in ${ROOT_NAMES.join(" ")}; do`,
@@ -5961,12 +5974,65 @@ var INSTALL_TEXT = [
   '  [ "${sum%% *}" = "$1" ] || { echo "refused: $name changed since you approved it" >&2; exit 1; }',
   "  shift",
   "done",
+  "if [ $# -eq 2 ]; then",
+  `  case $1 in /*) ;; *) ${refuse("the CA's path is not absolute")} ;; esac`,
+  `  case $2 in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  [ \${#2} -eq 64 ] || { ${REFUSE_HASH}; }`,
+  `  head -c ${CA_MAX_BYTES + 1} "$1" > "$stage/ca.pem"`,
+  `  [ "$(wc -c < "$stage/ca.pem")" -le ${CA_MAX_BYTES} ] || ${refuse(`the CA file is over ${CA_MAX_BYTES / 1024} KB`)}`,
+  `  [ "$(grep -c -- "-----BEGIN CERTIFICATE-----" "$stage/ca.pem")" -eq 1 ] || ${refuse("the CA file holds other than one certificate")}`,
+  '  openssl x509 -in "$stage/ca.pem" -outform DER -out "$stage/ca.der"',
+  '  sum=$(sha256sum "$stage/ca.der")',
+  `  [ "\${sum%% *}" = "$2" ] || ${refuse("the Dashboard's CA changed since you approved it")}`,
+  "fi",
   `for name in ${ROOT_NAMES.join(" ")}; do`,
   '  chown root:root "$stage/$name"',
   '  chmod 0755 "$stage/$name"',
   '  mv -f "$stage/$name" "$base/root/$name"',
   "done",
-  `echo "installed ${ROOT_NAMES.join(", ")} in $base/root"`
+  `echo "installed ${ROOT_NAMES.join(", ")} in $base/root"`,
+  'if [ -f "$stage/ca.der" ]; then',
+  '  chown root:root "$stage/ca.der"',
+  '  chmod 0644 "$stage/ca.der"',
+  '  mv -f "$stage/ca.der" "$base/data/portless-ca.der"',
+  `  echo "kept the Dashboard's CA in $base/data/portless-ca.der"`,
+  "fi"
+].join(`
+`);
+var PEER_ACTION = "org.playground.root";
+var PEER_POLICY = `/usr/share/polkit-1/actions/${PEER_ACTION}.policy`;
+var PEER_RULE = "/etc/polkit-1/rules.d/49-playground-root.rules";
+var PEER_POLICY_LINES = [
+  '<?xml version="1.0" encoding="UTF-8"?>',
+  '<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">',
+  "<policyconfig>",
+  ...ROOT_NAMES.flatMap((name) => [
+    `  <action id="${PEER_ACTION}.${name}">`,
+    `    <description>Run the Playground root step ${name}</description>`,
+    `    <message>The Playground root step ${name} needs an administrator</message>`,
+    "    <defaults><allow_any>auth_admin</allow_any><allow_inactive>auth_admin</allow_inactive><allow_active>auth_admin</allow_active></defaults>",
+    `    <annotate key="org.freedesktop.policykit.exec.path">${ROOT_DIR}/${name}</annotate>`,
+    "  </action>"
+  ]),
+  "</policyconfig>"
+];
+var PEER_IDS = ROOT_NAMES.map((name) => `"${PEER_ACTION}.${name}"`).join(", ");
+var PEER_INSTALL_TEXT = [
+  "set -eu",
+  "user=${SUDO_USER:-}",
+  `case $user in ""|root|*[!a-z0-9_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
+  `[ -d ${PEER_POLICY.slice(0, PEER_POLICY.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit actions folder")}`,
+  `[ -d ${PEER_RULE.slice(0, PEER_RULE.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit rules folder")}`,
+  INSTALL_TEXT,
+  `printf '%s\\n' ${PEER_POLICY_LINES.map((line) => `'${line}'`).join(" ")} > "$stage/policy"`,
+  `printf '%s\\n' '// Playground root steps: these actions alone, for this user alone, with no password' 'polkit.addRule(function (action, subject) {' > "$stage/rule"`,
+  `printf '  if (subject.user === "%s" && [%s].indexOf(action.id) >= 0) return polkit.Result.YES;\\n' "$user" '${PEER_IDS}' >> "$stage/rule"`,
+  `printf '%s\\n' '});' >> "$stage/rule"`,
+  'chown root:root "$stage/policy" "$stage/rule"',
+  'chmod 0644 "$stage/policy" "$stage/rule"',
+  `mv -f "$stage/policy" ${PEER_POLICY}`,
+  `mv -f "$stage/rule" ${PEER_RULE}`,
+  `echo "let $user run ${ROOT_NAMES.join(", ")} as root with no password, through ${PEER_RULE}"`
 ].join(`
 `);
 

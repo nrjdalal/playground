@@ -63,6 +63,7 @@
     "ship:approve-held": "bun packages/scripts/src/verify/prebuild.ts ship && bun --no-env-file packages/scripts/src/ship/approve-held.ts",
     "ship:freeze": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/freeze-cli.ts",
     "ship:merge": "bun packages/scripts/src/verify/prebuild.ts pr-merge && bun --no-env-file packages/scripts/src/pr-merge/ship-merge.ts",
+    "ship:rehearsal": "bun --no-env-file packages/scripts/src/ship/rehearsal.ts",
     "ship:title": "bun --no-env-file packages/scripts/src/ship/title.ts",
     "ship:yard": "bun --no-env-file packages/scripts/src/ship/yard.ts",
     "start": "turbo run start",

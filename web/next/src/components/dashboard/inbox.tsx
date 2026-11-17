@@ -5,6 +5,9 @@ import {
   type AskQuestion,
   type Choices,
   INSTALL_TEXT,
+  PEER_INSTALL_TEXT,
+  PEER_POLICY,
+  PEER_RULE,
   questionsOf,
   ROOT_DIR,
   ROOT_STEPS,
@@ -824,7 +827,49 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </>
       )
     case "root":
-      // an install shows the very program text pkexec runs and each script's hash it checks, so the owner approves the exact bytes
+      // a peer's card names the machine and how its one password is used; an install shows the very program text sudo or pkexec runs and each script's hash it checks, so the owner approves the exact bytes
+      if (preview.machine)
+        return preview.step === "install" ? (
+          <>
+            <p>
+              On Approve, the Dashboard copies each script below to {preview.machine}, then runs
+              this program there as root through sudo, with the admin password from your secret
+              card. The password is used once, then deleted from this computer. It copies each
+              script into <code className="font-mono">{ROOT_DIR}</code> only if its sha256 matches,
+              then lets your user on {preview.machine} run those scripts alone as root with no
+              password, through <code className="font-mono">{PEER_RULE}</code>.
+            </p>
+            <ul className="list-disc pl-5">
+              {preview.scripts?.map((script) => (
+                <li key={script.name}>
+                  <code className="font-mono">{script.name}</code>:{" "}
+                  <code className="font-mono break-all">{script.sha256}</code>
+                </li>
+              ))}
+            </ul>
+            <pre className={`${QUOTE} font-mono text-xs`}>{PEER_INSTALL_TEXT}</pre>
+            <p>
+              To undo it: remove <code className="font-mono">{PEER_RULE}</code> and{" "}
+              <code className="font-mono">{PEER_POLICY}</code> on {preview.machine}.
+            </p>
+            <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          </>
+        ) : (
+          <>
+            <p>
+              On Approve, the Dashboard checks{" "}
+              <code className="font-mono break-all">
+                {ROOT_DIR}/{preview.step}
+              </code>{" "}
+              on {preview.machine}, then runs it there as root, with no password, through the rule
+              its install card set up. {ROOT_STEPS[preview.step].what}.
+            </p>
+            <p>
+              To undo it: {ROOT_STEPS[preview.step].undo}, on {preview.machine}.
+            </p>
+            <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          </>
+        )
       return preview.step === "install" ? (
         <>
           <p>
@@ -840,6 +885,18 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
               </li>
             ))}
           </ul>
+          {preview.ca ? (
+            <p>
+              It also keeps the Dashboard&apos;s certificate as root, only if its sha256 is{" "}
+              <code className="font-mono break-all">{preview.ca.sha256}</code>. A new certificate
+              needs a new install card.
+            </p>
+          ) : (
+            <p>
+              The Dashboard has no certificate yet, so chromium-ca refuses until a later install
+              card carries one.
+            </p>
+          )}
           <pre className={`${QUOTE} font-mono text-xs`}>{INSTALL_TEXT}</pre>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
@@ -850,8 +907,9 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             <code className="font-mono break-all">
               {ROOT_DIR}/{preview.step}
             </code>{" "}
-            as root. {ROOT_STEPS[preview.step]}.
+            as root. {ROOT_STEPS[preview.step].what}.
           </p>
+          <p>To undo it: {ROOT_STEPS[preview.step].undo}.</p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )

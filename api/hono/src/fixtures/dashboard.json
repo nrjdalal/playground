@@ -3709,6 +3709,15 @@
           "task": "Fixture task: a worker running in Codex",
           "title": "Codex light",
           "workspace": "workspace:22"
+        },
+        {
+          "kind": "probe",
+          "name": "s8hk2v-probe",
+          "repo": "example/fixture",
+          "role": "worker",
+          "status": "working",
+          "task": "Fixture task: a probe whose claude runs on another machine over ssh",
+          "title": "Two machines"
         }
       ],
       "backlog": [
@@ -4901,7 +4910,8 @@
       "state": "stuck"
     },
     "playground/backends/c4dx7n-worker": "codex openai\n",
-    "playground/resume/c4dx7n-worker.sh": "#!/bin/bash\nexec /fixture/playground/scripts/spawn.sh resume c4dx7n-worker /fixture/playground/.claude/worktrees/codex-light 0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2c\n"
+    "playground/resume/c4dx7n-worker.sh": "#!/bin/bash\nexec /fixture/playground/scripts/spawn.sh resume c4dx7n-worker /fixture/playground/.claude/worktrees/codex-light 0f9a1c2e-3b4d-4e5f-8a6b-7c8d9e0f1a2c\n",
+    "playground/resume/s8hk2v-probe.sh": "#!/bin/bash\n# server: playground\nexec /fixture/playground/scripts/spawn.sh resume s8hk2v-probe /fixture/playground 11111111-1111-4111-8111-000000000056 --ssh fixture@10.0.0.2 --key /fixture/.ssh/spark\n"
   },
   "git": {
     "/fixture/playground": {
@@ -5536,6 +5546,34 @@
         },
         "terminal_id": "t-5f000000-0000-4000-8000-000000000054",
         "workspace_id": "wN"
+      },
+      {
+        "agent_status": "unknown",
+        "label": "s8hk2v-probe",
+        "pane_id": "wP:p1",
+        "processes": [
+          {
+            "argv": [
+              "ssh",
+              "-i",
+              "/fixture/.ssh/spark",
+              "-o",
+              "IdentitiesOnly=yes",
+              "-o",
+              "BatchMode=yes",
+              "-tt",
+              "fixture@10.0.0.2",
+              "cd /fixture/playground && claude"
+            ],
+            "cwd": "/fixture/playground",
+            "pid": 900056
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000056",
+        "workspace_id": "wP"
       }
     ],
     "prompts": {
@@ -5659,6 +5697,10 @@
       {
         "label": "c4dx7n-worker",
         "workspace_id": "wN"
+      },
+      {
+        "label": "s8hk2v-probe",
+        "workspace_id": "wP"
       }
     ]
   },
