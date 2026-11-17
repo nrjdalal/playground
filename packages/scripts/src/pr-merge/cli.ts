@@ -16,9 +16,10 @@ at that head and the head is up to date with canary:
                 line, until it lapses (bun run ship:freeze), or a file that does not read,
                 holds every PR
   base          it merges into canary
-  code          this checkout's pr-merge code and verdicts.ts, uncommitted edits included,
-                match origin/canary's, so a checkout behind canary never skips a gate canary
-                has added; else run it from a checkout on origin/canary
+  code          this checkout's pr-merge code, verdicts.ts and the new-user gate's paths.ts,
+                uncommitted edits included, match origin/canary's, so a checkout behind
+                canary never skips a gate canary has added; else run it from a checkout on
+                origin/canary
   up to date    canary has no commit the head lacks, or the head merges with canary clean;
                 a conflict needs canary merged in, then checks, a 5/5 and each PASS
                 its diff calls for at the new head

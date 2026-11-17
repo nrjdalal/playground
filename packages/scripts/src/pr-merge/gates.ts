@@ -358,7 +358,11 @@ function newUserGate(facts: PrFacts): Gate | null {
 }
 
 // The files the gates are read from: a checkout whose copy differs from canary's tip would judge a PR by other gates than the train, which runs from a worktree reset to origin/canary.
-export const GATE_CODE = ["packages/config/src/verdicts.ts", "packages/scripts/src/pr-merge"]
+export const GATE_CODE = [
+  "packages/config/src/verdicts.ts",
+  "packages/scripts/src/new-user-gate/paths.ts",
+  "packages/scripts/src/pr-merge",
+]
 
 // Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
 export function codeGate(differs: string[]): Gate {
