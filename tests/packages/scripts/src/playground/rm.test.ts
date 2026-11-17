@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -556,6 +557,31 @@ test.each(["scratchpad", "scratch"])(
     expect(existsSync(join(pad, "a4b5c6-reviewer"))).toBe(true)
   },
 )
+
+// a data folder a merged PR retired, such as the runner host's old run folder, goes whole to the trash on any machine
+test("runRm removes a retired data folder whole and --restore brings it back, and refuses an unlisted top-level folder and a retired name that is a symlink", async () => {
+  const { deps, home } = machine()
+  const ci = join(deps.data, "ci")
+  mkdirSync(join(ci, ".claude", "worktrees"), { recursive: true })
+  writeFileSync(join(ci, "suite.sh"), "x")
+  expect(await runRm([ci], deps)).toBe(0)
+  expect(existsSync(ci)).toBe(false)
+  const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === ci)!
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(readFileSync(join(ci, "suite.sh"), "utf8")).toBe("x")
+  const ops = join(deps.data, "ops")
+  mkdirSync(ops, { recursive: true })
+  expect(await runRm([ops], deps)).toBe(1)
+  expect(existsSync(ops)).toBe(true)
+  expect(await runRm([join(ci, "suite.sh")], deps)).toBe(1)
+  expect(existsSync(join(ci, "suite.sh"))).toBe(true)
+  rmSync(ci, { recursive: true })
+  mkdirSync(join(home, "kept"), { recursive: true })
+  symlinkSync(join(home, "kept"), ci)
+  expect(await runRm([ci], deps)).toBe(1)
+  expect(lstatSync(ci).isSymbolicLink()).toBe(true)
+  expect(existsSync(join(home, "kept"))).toBe(true)
+})
 
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {
   const { deps, home, told } = machine()

@@ -290,6 +290,22 @@ const goneScratchOf = (path: string, home: string): string | undefined => {
     : undefined
 }
 
+// The top-level data folders a merged PR retired, A to Z, each with that PR: playground rm removes one whole on any machine, through the trash.
+export const RETIRED: Record<string, string> = {
+  ci: "https://github.com/nrjdalal/playground/pull/2567",
+}
+
+// The retired folder path is, when it is that real folder (not a symlink) directly in the data folder.
+const retiredOf = (path: string, home: string): string | undefined => {
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  return dirname(own) === real(join(home, ".playground")) &&
+    Object.hasOwn(RETIRED, basename(own)) &&
+    lstat(own)?.isDirectory()
+    ? own
+    : undefined
+}
+
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
@@ -305,7 +321,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -520,7 +536,8 @@ export function quarantine(
     (opts.ended &&
       (endedPadOf(abs, roots.home, opts.ended, "scratchpad") ||
         endedPadOf(abs, roots.home, opts.ended, "scratch"))) ||
-    (opts.gone && goneScratchOf(abs, roots.home))
+    (opts.gone && goneScratchOf(abs, roots.home)) ||
+    retiredOf(abs, roots.home)
   const carve = carveOutOf(
     abs,
     opts.carveOut,
@@ -657,15 +674,19 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, or a gone session's entry directly in scratch/ back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
+  // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, a gone session's entry directly in scratch/ or a retired data folder back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
     const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)
+    const retired =
+      dirname(entry.ended) === real(join(roots.home, ".playground")) &&
+      Object.hasOwn(RETIRED, basename(entry.ended)) &&
+      at === entry.ended
     if (
-      !pads.includes(dirname(entry.ended)) ||
+      (!retired && !pads.includes(dirname(entry.ended))) ||
       !inside(at, entry.ended) ||
       (at !== entry.ended && stands && !stands.isDirectory())
     )
