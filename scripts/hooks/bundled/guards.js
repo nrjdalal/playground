@@ -10750,6 +10750,10 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
+    description: "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
+    schedule: { always: true }
+  }),
   "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
     cwd: "{dashboard}",
     description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
@@ -10947,6 +10951,72 @@ var liveSettings = defineSettings({
     default: "playground-dashboard-db",
     description: "The Docker container holding the live dashboard's database, which every stack off the live checkout refuses.",
     schema: string2().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name")
+  }
+});
+// packages/settings/src/local-models.ts
+var folder2 = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model folder under ~/models, such as ornith-1.5-35b-a3b-nvfp4");
+var figures = strictObject({
+  cap: number2().gt(0).max(0.95),
+  kvKiBPerToken: number2().positive(),
+  overheadGiB: number2().min(0),
+  weightsGiB: number2().positive()
+});
+var localModelSettings = defineSettings({
+  "localModels.boxLanes": {
+    default: 2,
+    description: "How many box test runs the peer runs at once beside its model servers (the box suite's SLOTS); a peer server's share leaves room for this many runs of localModels.boxRunGiB.",
+    schema: number2().int().min(0).max(16)
+  },
+  "localModels.boxRunGiB": {
+    default: 2.25,
+    description: "Estimated: the memory one box test run takes, half the 4.5 GiB peak of a suite across both lanes, measured on the old runner box on 24 Oct, not on the peer.",
+    schema: number2().min(0).max(64)
+  },
+  "localModels.hereModel": {
+    default: "",
+    description: "The model this machine keeps up, such as K for the local workers; empty, the default, keeps none. Another model loads here on request, and this one comes back after localModels.idleMinutes.",
+    schema: union([literal(""), folder2])
+  },
+  "localModels.hereReserveGiB": {
+    default: 40,
+    description: "Estimated: the memory a server on this machine leaves free for the factory's own sessions, stacks and test runs; its share is what is free above this.",
+    schema: number2().min(0).max(512)
+  },
+  "localModels.idleMinutes": {
+    default: 30,
+    description: "How long a model other than its machine's kept one (localModels.hereModel, localModels.peerModel) may sit with no request before it is stopped and the kept one comes back; 0 keeps whichever model was loaded last.",
+    schema: number2().int().min(0).max(1440)
+  },
+  "localModels.machine": {
+    default: "",
+    description: "The PLAYGROUND_PEERS machine that runs the model servers; empty means the only machine PLAYGROUND_PEERS names.",
+    schema: union([
+      literal(""),
+      string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
+    ])
+  },
+  "localModels.models": {
+    default: {
+      "ornith-1.5-122b-nvfp4": {
+        cap: 0.75,
+        kvKiBPerToken: 18.45,
+        overheadGiB: 2.38,
+        weightsGiB: 72.38
+      },
+      "ornith-1.5-35b-a3b-nvfp4": {
+        cap: 0.7,
+        kvKiBPerToken: 12.77,
+        overheadGiB: 6.65,
+        weightsGiB: 21.86
+      }
+    },
+    description: "Each model folder's sizing figures: cap (its measured working share), weightsGiB, overheadGiB and kvKiBPerToken; a model with no row here is refused.",
+    schema: record2(folder2, figures)
+  },
+  "localModels.peerModel": {
+    default: "",
+    description: "The model the peer keeps up, such as M for the Dashboard's chat; empty, the default, keeps none. Another model loads there on request, and this one comes back after localModels.idleMinutes.",
+    schema: union([literal(""), folder2])
   }
 });
 // packages/settings/src/owner.ts
@@ -11557,7 +11627,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
-async function inspect3(raw, environment) {
+async function inspect3(raw, environment, checkout) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -11569,7 +11639,7 @@ async function inspect3(raw, environment) {
   const { cwd, tool_input: input, tool_name: tool } = payload;
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment));
-    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : "";
   };
   if (typeof tool === "string" && MCP_TOOL2.test(tool))
     return judgeTool(tool, input ?? {}, factoryOf());
@@ -11636,9 +11706,9 @@ async function inspect3(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit);
 }
-async function check5(raw, environment = process.env) {
+async function check5(raw, environment = process.env, checkout) {
   try {
-    return await inspect3(raw, environment);
+    return await inspect3(raw, environment, checkout);
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;
@@ -18474,14 +18544,14 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check21(raw, environment = process.env) {
+async function check21(raw, environment = process.env, checkout) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings, checkout), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (false) {}
 
