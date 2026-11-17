@@ -139,7 +139,7 @@ export async function servedModels(
 
 export type LocalPlan = { do: "refuse"; down: boolean; reason: string } | { do: "switch" }
 
-// Pure: what a pick of a local model does, given the ids its server serves now (null when it does not answer): switch when it serves the pick, else refuse in words naming the model loaded and the one picked. The one place a pick's outcome is decided, so loading the picked model can come here later.
+// Pure: what a pick of a local model does, given the ids its server serves now (null when it does not answer): switch when it serves the pick, else refuse in words naming the model loaded and the one picked. The one place a pick's outcome is decided.
 export function localPlan(
   picked: LocalModel,
   served: string[] | null,
@@ -263,6 +263,7 @@ export class SdkHost {
   private claude = ""
   private local: LocalEndpoint | null = null
   private reading: Promise<void> = Promise.resolve()
+  private restarting = false
   private startedAt: string | null = null
   private session: Query | null = null
   private mode: HostedMode = "default"
@@ -319,18 +320,39 @@ export class SdkHost {
     return { resumed: Boolean(known) }
   }
 
-  // Starts the session again on another endpoint, its conversation resumed in the same mode: on a local model's server, or with local null on the default one with a cloud model. Only between turns (busy()), since a close mid-turn cuts its answer off.
+  // Starts the session again on another endpoint, its conversation resumed in the same mode and effort: on a local model's server, or with local null on the default one with a cloud model. Only between turns (busy()), since a close mid-turn cuts its answer off, and one at a time.
   async restart(local: LocalEndpoint | null, model: string): Promise<void> {
     if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
-    this.session.close()
-    await Promise.race([this.reading, Bun.sleep(CLOSE_MS)])
-    this.start(this.cwd, this.claude, this.mode, local, model)
+    if (this.restarting) throw new Error(`${SDK_PROBE} is already switching its model`)
+    this.restarting = true
+    const effort = this.effort
+    try {
+      this.session.close()
+      await Promise.race([this.reading, Bun.sleep(CLOSE_MS)])
+      this.start(this.cwd, this.claude, this.mode, local, model)
+      if (effort) await this.keepEffort(effort)
+    } finally {
+      this.restarting = false
+    }
     this.changed()
   }
 
-  // Whether a turn runs or a card waits, when a restart would cut either off.
+  // Puts the effort picked before a restart back on its successor; one it refuses leaves the row on none, as a fresh start has.
+  private async keepEffort(effort: SessionEffort): Promise<void> {
+    try {
+      await this.session?.applyFlagSettings({ effortLevel: effort })
+      this.effort = effort
+    } catch (error) {
+      console.error(
+        `${SDK_PROBE}: could not keep its effort after a restart:`,
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  // Whether a turn runs, a card waits or a restart is under way, when another restart would cut it off.
   busy(): boolean {
-    return this.working || this.waiting()
+    return this.restarting || this.working || this.waiting()
   }
 
   // The local model the session runs on, or null on the default endpoint.
@@ -715,7 +737,9 @@ export async function changeHostedSetting(
     const picked = models.find((model) => model.id === setting.local)
     if (!picked) return refused("NOT_FOUND", "No local model by that id is set up here.")
     if (deps.host.busy()) return busy
-    const plan = localPlan(picked, await deps.served(url), models)
+    const served = await deps.served(url)
+    if (deps.host.busy()) return busy
+    const plan = localPlan(picked, served, models)
     if (plan.do === "refuse") return refused(plan.down ? "SESSIONS_FAILED" : "BUSY", plan.reason)
     await deps.record(event, () => deps.host.restart({ id: picked.id, url }, picked.id))
   } else if ("model" in setting && deps.host.localModel() !== null) {

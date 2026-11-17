@@ -758,6 +758,36 @@ describe("the hosted session on a local model", () => {
     }
   })
 
+  test("a second switch while one restarts the session, as from another tab, is refused as BUSY", async () => {
+    const { dir, fake, pick, recorded } = started()
+    try {
+      const results = await Promise.all([pick({ local: M.id }), pick({ local: M.id })])
+      expect(results.map((result) => (result.ok ? "ok" : result.code)).sort()).toEqual([
+        "BUSY",
+        "ok",
+      ])
+      expect(fake.calls).toHaveLength(2)
+      expect(recorded).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a switch keeps the effort picked before it, on the local server and back", async () => {
+    const { dir, fake, host, pick } = started()
+    try {
+      await pick({ effort: "high" })
+      await pick({ local: M.id })
+      expect(fake.calls[1]!.settings).toEqual(["effort high"])
+      expect(host.worker()).toMatchObject({ effort: "high", model: M.id })
+      await pick({ model: "opus" })
+      expect(fake.calls[2]!.settings).toEqual(["effort high"])
+      expect(host.worker()).toMatchObject({ effort: "high", model: "opus" })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a server that does not answer, or serves another model, refuses the pick in plain words and leaves the session where it was", async () => {
     for (const [served, code, reason] of [
       [
