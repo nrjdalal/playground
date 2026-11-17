@@ -32,4 +32,4 @@ Sources: https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-no
 
 ## Keep the skills learning
 
-When a factory machine takes the AppArmor `userns` grant differently than this skill expects, or the menu entry lands somewhere the owner did not find, report it through `SendMessage` to `dispatcher`: what the machine showed and which step the finding belongs in, in a few plain lines. That session turns it into a reviewed change to the factory's repo.
+When a factory machine takes the AppArmor `userns` grant differently than this skill expects, or the menu entry lands somewhere the owner did not find, tell the `dispatcher` session: `SendMessage` to `dispatcher` with what the machine showed, what worked, and which step it belongs in, in a few plain lines. That session turns findings into a reviewed change to the factory's repo. When `ListAgents` lists no `dispatcher` session, end your report with the finding instead, so the owner can pass it on. A finding never carries prod data, secrets or customer details.

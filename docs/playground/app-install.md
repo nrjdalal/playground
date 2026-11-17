@@ -12,7 +12,7 @@ A session loads it on its own before it installs, moves, or updates an app, a br
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An app with a sandbox has no profile covering its path | Adds or extends an AppArmor profile granting `userns,` to the path, loading it, and sends the `/etc` write to the owner as one Inbox root step                |
 | The app is at its installed path                       | Launches it with its sandbox on and its real settings, in a profile folder of its own, keeping the exit status or a screenshot, and never with `--no-sandbox` |
-| The install writes a `.desktop` entry                  | Keeps its 644 mode, runs `update-desktop-database`, and puts the app on page 1 of Show Apps through `app-picker-layout`                                       |
+| The install writes a `.desktop` entry                  | Keeps its 644 mode, runs `update-desktop-database`, and gives an app the owner expects to see a spot on page 1 of Show Apps through `app-picker-layout`       |
 | The skill has finished                                 | Reports the app ready or installed only with the launch and its evidence, otherwise built or staged                                                           |
 
 ## The launch proof
