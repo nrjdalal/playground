@@ -1,9 +1,9 @@
-import { type Group, type Row } from "./_shared"
+import { type Group, type Paths, type Row } from "./_shared"
 
-// #2490: the words piped into ssh, or ssh's own here-string or heredoc, reach a remote xargs as its stdin, as they reach its local twin's, each passing form beside its nearest refused twin; rows are data, as refused-forms.ts says.
+// #2490: the words piped into ssh, ssh's own here-string or heredoc, or a file ssh reads, reach a remote xargs as its stdin, as they reach its local twin's, each passing form beside its nearest refused twin; rows are data, as refused-forms.ts says.
 
 // no-extensions-write: a remote xargs that reads no root path, none of ssh's stdin, or a stdin the hook cannot read, which its local twin passes too
-const extensionsControls = (): Row[] => [
+const extensionsControls = ({ HOME }: Pick<Paths, "HOME">): Row[] => [
   ["a path outside the root piped to a remote xargs touch", "echo notes/x | ssh box xargs touch"],
   [
     "the root's path piped to ssh -n, whose remote xargs reads /dev/null",
@@ -18,8 +18,16 @@ const extensionsControls = (): Row[] => [
     "ls | ssh box xargs touch",
   ],
   [
-    "a file ssh hands a remote xargs touch, as its local twin passes (PG-2553)",
+    "a missing file ssh hands a remote xargs touch, as its local twin passes (PG-2553)",
     "ssh box xargs touch < list",
+  ],
+  [
+    "a folder ssh hands a remote xargs touch, which the hook cannot read, as its local twin passes",
+    `ssh box xargs touch < ${HOME}/work`,
+  ],
+  [
+    "a file of words outside the root ssh hands a remote xargs touch",
+    `ssh box xargs touch < ${HOME}/words`,
   ],
   [
     "a path outside the root in a here-string ssh hands a remote xargs touch",
@@ -36,7 +44,7 @@ const extensionsControls = (): Row[] => [
 ]
 
 // no-extensions-write: the root's path in the words a remote xargs reads from ssh's stdin
-const extensionsRefused = (): Row[] => [
+const extensionsRefused = ({ HOME }: Pick<Paths, "HOME">): Row[] => [
   [
     "the root's path piped to a remote xargs touch",
     "echo .playground/extensions/.no-such-file | ssh box xargs touch",
@@ -61,14 +69,18 @@ const extensionsRefused = (): Row[] => [
     "the root's path in a quoted heredoc ssh hands a remote xargs touch",
     "ssh box xargs touch <<'EOF'\n.playground/extensions/.no-such-file\nEOF",
   ],
+  [
+    "a file naming the root's path ssh hands a remote xargs touch",
+    `ssh box xargs touch < ${HOME}/peer-write.sh`,
+  ],
 ]
 
 export const groups: Group[] = [
   {
     folders: ["checkout", "home", "tmp"],
     guards: ["no-extensions-write"],
-    rows: () => [...extensionsControls(), ...extensionsRefused()],
+    rows: (paths) => [...extensionsControls(paths), ...extensionsRefused(paths)],
   },
 ]
 
-export const allowed: string[] = extensionsControls().map(([what]) => what)
+export const allowed: string[] = extensionsControls({ HOME: "" }).map(([what]) => what)
