@@ -4002,3 +4002,38 @@ describe("a glob in / is judged by the names / holds", () => {
     },
   )
 })
+
+// #2522: a glob-option switch on a line ssh runs remotely or feeds a remote shell is refused by its own reason, whatever its spelling, rather than read name by name
+describe("a glob-option switch on a remote or fed line", () => {
+  const SWITCH =
+    /refuses a glob-option switch \(.+\) on a line a remote shell runs.*write it as plain words or run it locally/
+
+  test.each([
+    "ssh box 'shopt -s dotglob; touch */extensions/x'",
+    "ssh box 'GLOBIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt g_l_o_b_d_o_t_s; touch ?playground/extensions/y'",
+    `ssh box "shopt -s dot''glob; touch ?playground/extensions/y"`,
+    `ssh box "zsh -4 -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'shopt -s $(echo dot)glob; touch ?playground/extensions/y'",
+    "ssh box 'options[glob${x}dots]=on; touch ?playground/extensions/y'",
+    `ssh box 'bash -O $1 -c "touch ?playground/extensions/y"'`,
+    `ssh box "env BASHOPTS=dotglob bash -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'GLOBIGNOR\\\nE=x; touch ?playground/extensions/y'",
+    "ssh box bash -s <<'EOF'\nGLOBIGNOR\\\nE=x\ntouch ?playground/extensions/y\nEOF",
+    `printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | ssh box bash`,
+    "ssh box 'touch *(D)/extensions/x'",
+    "ssh box 'FIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt EXTENDED_GLOB; ls'",
+  ])("%s is refused as a switch", async (command) => {
+    expect(await bash(command)).toMatch(SWITCH)
+  })
+
+  test.each([
+    "shopt -s dotglob; ssh box uptime",
+    "ssh box 'ls */notes'",
+    "echo 'df -h' | ssh box bash",
+    `ssh spark-9dfb 'python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"'`,
+  ])("%s, with no switch on its remote side, runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
