@@ -670,6 +670,8 @@ var GLOB_SWITCHES = [
   /bashopts|dotglob|fignore|globdots|globignore/i,
   /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
 ];
+var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
+var bareText = (text) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
 var NO_GLOB = new Set([
   "errexit",
   "errtrace",
@@ -682,12 +684,12 @@ var NO_GLOB = new Set([
 ]);
 function optionSwitch(bare) {
   for (const [head, rest] of bare.matchAll(/\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi))
-    for (const [found, cluster, name] of rest.matchAll(/\s([-+][a-z0-9]*[o4])(?=\s|$)(?:\s+([a-z]+))?/gi))
+    for (const [found, cluster, name] of rest.matchAll(/\s([-+](?:[a-zA-Z0-9]*[O4][a-zA-Z0-9]*|[a-zA-Z0-9]*o))(?=\s|$)(?:\s+([a-zA-Z]+))?/g))
       if (/[O4]/.test(cluster) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
         return `${head.slice(0, head.length - rest.length).trim()} ${found.trim()}`;
 }
 function globSwitch(text) {
-  const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+  const bare = bareText(text);
   for (const pattern of GLOB_SWITCHES) {
     const found = pattern.exec(bare);
     if (found)
@@ -715,7 +717,7 @@ function remoteEnv(env, line, fed = false, text = line) {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: fed || !staticLine(line),
+    remoteDots: fed || !staticLine(line) || DIGIT_QUALIFIER.test(bareText(text)),
     remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };

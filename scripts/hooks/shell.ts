@@ -647,12 +647,16 @@ function staticLine(line: string): boolean {
     (w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()),
   )
 }
-// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but after a `*` before a digit (awk's `*100/(…)`), since the segment it leads ends in that digit and `.playground` holds none; a set or a started shell's options are optionSwitch's
+// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but after a `*` a digit follows (awk's `*100/(…)`), which is DIGIT_QUALIFIER's; a set or a started shell's options are optionSwitch's
 const GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
   /bashopts|dotglob|fignore|globdots|globignore/i,
   /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/,
 ]
+// A qualifier after a `*` a digit follows, which awk's arithmetic (`*100/(…)`) is spelled as: no switch, so it runs, but its line counts dots as on (remoteDots), so a dot-led link such a glob could match is still judged
+const DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/
+// A text read as the shell reads a name: its backslash-newline pairs joined, and past quotes, backslashes and underscores (`g_l_o_b_d_o_t_s`, `dot''glob`)
+const bareText = (text: string) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
 // The option names a -o may give that change no glob, so a strict-mode header (`set -euo pipefail`) runs
 const NO_GLOB = new Set([
   "errexit",
@@ -664,27 +668,27 @@ const NO_GLOB = new Set([
   "verbose",
   "xtrace",
 ])
-// A set or a started shell given an option cluster holding O or zsh's 4, or ending in o before a name off NO_GLOB, else undefined
+// A set or a started shell given an option cluster holding O or zsh's 4 anywhere, or ending in o before a name off NO_GLOB, else undefined
 function optionSwitch(bare: string): string | undefined {
   for (const [head, rest] of bare.matchAll(
     /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi,
   ))
     for (const [found, cluster, name] of rest!.matchAll(
-      /\s([-+][a-z0-9]*[o4])(?=\s|$)(?:\s+([a-z]+))?/gi,
+      /\s([-+](?:[a-zA-Z0-9]*[O4][a-zA-Z0-9]*|[a-zA-Z0-9]*o))(?=\s|$)(?:\s+([a-zA-Z]+))?/g,
     ))
       if (/[O4]/.test(cluster!) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
         return `${head.slice(0, head.length - rest!.length).trim()} ${found.trim()}`
 }
-// The first glob-option switch a text holds, read as the shell reads a name: its backslash-newline pairs joined, and past case, quotes, backslashes and underscores (`g_l_o_b_d_o_t_s`, `dot''glob`), else undefined
+// The first glob-option switch a text holds, read bare (bareText) and past case, else undefined
 export function globSwitch(text: string): string | undefined {
-  const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
+  const bare = bareText(text)
   for (const pattern of GLOB_SWITCHES) {
     const found = pattern.exec(bare)
     if (found) return found[0].trim()
   }
   return optionSwitch(bare)
 }
-// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static (staticLine), or a script the remote side reads from stdin (`fed`), may match dot-led names (`remoteDots`); the glob-option switch the line, or the fed script's `text`, holds is kept as `remoteSwitch`
+// The env a remote command line runs in: ssh's remote shell, this machine's included, starts in the login's home with none of the line's variables, so a relative path reads from there; PWD is known as the home until the line moves; a line not fully static (staticLine), a script the remote side reads from stdin (`fed`), or a text holding a DIGIT_QUALIFIER, may match dot-led names (`remoteDots`); the glob-option switch the line, or the fed script's `text`, holds is kept as `remoteSwitch`
 export function remoteEnv(env: Env, line: string, fed = false, text = line): Env {
   const home = env.process.HOME || undefined
   const { PWD: _pwd, ...known } = env.known
@@ -705,7 +709,7 @@ export function remoteEnv(env: Env, line: string, fed = false, text = line): Env
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: fed || !staticLine(line),
+    remoteDots: fed || !staticLine(line) || DIGIT_QUALIFIER.test(bareText(text)),
     remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map(),
   }

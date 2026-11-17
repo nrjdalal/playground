@@ -4063,4 +4063,44 @@ describe("a glob-option switch on a remote or fed line", () => {
       )
     },
   )
+
+  // a qualifier after a * a digit follows is no switch, so its line counts dots as on, and a dot-led link in the home into the root is still judged; this home holds one, ~/.p1 to the data folder
+  describe("a * a digit follows, then a qualifier", () => {
+    const home = mkdtempSync(join(tmpdir(), "no-extensions-write-digit-"))
+    mkdirSync(join(home, ".playground", "extensions", "hooks"), { recursive: true })
+    writeFileSync(join(home, ".playground", "extensions", "policy.json"), "{}\n")
+    symlinkSync(join(home, ".playground"), join(home, ".p1"))
+    afterAll(() => rmSync(home, { force: true, recursive: true }))
+    const at = (command: string) =>
+      check(
+        JSON.stringify({
+          cwd: home,
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+          tool_name: "Bash",
+        }),
+        { HOME: home },
+      )
+
+    test.each(["ssh box 'touch *1/extensions/x(D)'", "ssh box 'touch *1/extensions/x(N)'"])(
+      "%s reaches the root through ~/.p1 and is refused",
+      async (command) => {
+        expect(await at(command)).toMatch(/refuses touch on .+, a glob in/)
+      },
+    )
+
+    test.each([
+      "ssh box 'awk \"{ print (a[2]-a[1])*100/(b[2]-b[1]) }\" f'",
+      "ssh box 'touch *1(D)/notes/x'",
+    ])("%s reaches nothing in the root and runs", async (command) => {
+      expect(await at(command)).toBeUndefined()
+    })
+  })
+
+  test.each([
+    "ssh box 'bash -xO extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh box 'set -Oe; touch ?playground/extensions/y'",
+  ])("%s, a cluster holding O before its end, is refused as a switch", async (command) => {
+    expect(await bash(command)).toMatch(SWITCH)
+  })
 })
