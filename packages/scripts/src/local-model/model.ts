@@ -69,7 +69,7 @@ export const FIXED = {
 
 // A model's folder under ~/models: a letter or digit first, then lowercase, digits, dots and dashes, so it can name no path or flag.
 export const MODEL_NAME = /^[a-z0-9][a-z0-9.-]*$/
-// The four values a start hands serve.sh, which takes each from its environment over its own default.
+// The four values a start hands serve.sh, which takes each from its environment over its own default; in the order serve.sh's docker run line reads them.
 export const SERVE_ENV = ["CONTAINER", "PORT", "GPU_MEMORY_UTILIZATION", "MAX_NUM_SEQS"] as const
 const POLL_MS = 5_000
 // how long a stopped server's memory has to come back before a start is refused
@@ -139,7 +139,13 @@ export const sizeOf = (
 const gib = (value: number) => `${Math.round(value * 10) / 10} GiB`
 const refuse = (line: string): Result => ({ code: 1, line })
 
-// The fixed commands, each built from a name MODEL_NAME passed, a container name the setting's schema holds, a port from PORTS and numbers.
+// Pure: whether a server read back from the state file has the container name and port a start gives, since readModelState only casts its JSON and both reach a shell.
+const sendable = (server: { container: unknown; port: unknown }) =>
+  typeof server.container === "string" &&
+  MODEL_NAME.test(server.container) &&
+  PORTS.some((port) => port === server.port)
+
+// The fixed commands, each built from names MODEL_NAME passed, a port from PORTS and numbers.
 const commands = {
   health: (port: number) =>
     `curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health`,
@@ -178,6 +184,10 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   const run = (command: string, timeoutMs = 30_000) =>
     deps.run(commandArgv(deps.machine, deps.key, command), timeoutMs)
   const serves = await run(commands.serves(name))
+  if (deps.machine.target && serves.code === 255)
+    return refuse(
+      `${machine} did not answer over ssh (${lastLine(serves.out)}), so nothing changed`,
+    )
   if (!serves.out.startsWith("found"))
     return refuse(`${machine} has no ~/models/${name}/serve.sh, so nothing changed`)
   const taken = new Set(serves.out.match(/[A-Z_]+(?=:-)/g) ?? [])
@@ -204,10 +214,13 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
     const { [model]: _, ...rest } = servers()
     return rest
   }
-  // stops a server by the exact name it was started under; true once no container has that name
+  // stops a server by the exact name it was started under, a name of MODEL_NAME's shape alone, since the state file is read back; true once no container has that name
   const stopOwn = async (container: string) =>
-    (await run(commands.stop(container))).code === 0 ||
-    (await run(commands.inspect(container))).code !== 0
+    MODEL_NAME.test(container) &&
+    ((await run(commands.stop(container))).code === 0 ||
+      (await run(commands.inspect(container))).code !== 0)
+  const unstopped = (container: string) =>
+    refuse(`docker rm -fv ${container} failed on ${machine}, so nothing started`)
   const container = `${config.container}-${name}`
   const mine = servers()[name]
   const inspected = await run(commands.inspect(container))
@@ -219,13 +232,13 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
     return { code: 0, line: `${name} already serves on ${machine} at 127.0.0.1:${mine.port}` }
   if (mine) {
     // started by this command and since stopped: its name is freed before the new start
-    if (!(await stopOwn(container)))
-      return refuse(`docker rm -fv ${container} failed on ${machine}, so nothing started`)
+    if (!(await stopOwn(container))) return unstopped(container)
     await save({ ...state, servers: without(name) })
   }
   const readMemory = async () => memOf((await run(commands.memory)).out)
+  const unread = () => refuse(`/proc/meminfo on ${machine} did not read, so nothing started`)
   let memory = await readMemory()
-  if (!memory) return refuse(`/proc/meminfo on ${machine} did not read, so nothing started`)
+  if (!memory) return unread()
   let size = sizeOf(memory, figures, config)
   const others = Object.entries(servers())
   const freePort = () =>
@@ -235,6 +248,12 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   try {
     if (!beside) {
       if (others.length) {
+        // each container name and port the swap sends is read back from the state file, so each is checked once, before any is sent
+        const odd = others.find(([, server]) => !sendable(server))
+        if (odd)
+          return refuse(
+            `the state file's entry for ${odd[0]} on ${machine} (container ${odd[1].container}, port ${odd[1].port}) is not one playground model use starts, so nothing changed: fix or remove it in ${statePath(data)}`,
+          )
         held = { for: name, since: now().toISOString() }
         await save({ ...state, hold: held })
         say(
@@ -244,27 +263,34 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
         for (const [model, server] of others) {
           for (;;) {
             const busy = busyOf((await run(commands.metrics(server.port))).out)
-            if (!busy) break
+            // a /metrics that does not read is waited on while the container runs, since it can be a server too busy to answer
+            if (busy === 0) break
+            if (
+              busy === null &&
+              (await run(commands.inspect(server.container))).out.trim() !== "true"
+            )
+              break
+            const doing =
+              busy === null
+                ? "does not answer /metrics while it runs"
+                : `has ${busy} requests running or waiting`
             if (now().getTime() >= drainBy)
               return refuse(
-                `${model} still has ${busy} requests running or waiting after ${config.drainMinutes} minutes, so it keeps serving`,
+                `${model} still ${doing} after ${config.drainMinutes} minutes, so it keeps serving`,
               )
-            say(`${model} has ${busy} requests running or waiting; ${name} waits for them`)
+            say(`${model} ${doing}; ${name} waits for it`)
             await sleep(POLL_MS)
           }
         }
         for (const [model, server] of others) {
-          if (!(await stopOwn(server.container)))
-            return refuse(
-              `docker rm -fv ${server.container} failed on ${machine}, so nothing started`,
-            )
+          if (!(await stopOwn(server.container))) return unstopped(server.container)
           await save({ ...state, servers: without(model) })
         }
       }
       const freeBy = now().getTime() + FREE_WAIT_MS
       for (;;) {
         memory = await readMemory()
-        if (!memory) return refuse(`/proc/meminfo on ${machine} did not read, so nothing started`)
+        if (!memory) return unread()
         size = sizeOf(memory, figures, config)
         if (size.maxSessions >= 1) break
         if (now().getTime() >= freeBy)
@@ -372,7 +398,7 @@ export async function keepUp(deps: ModelDeps): Promise<string | null> {
   const servers = { ...state.servers }
   const stopped: string[] = []
   for (const [model, server] of Object.entries(servers)) {
-    if (model === config.keep || config.idleMinutes === 0) continue
+    if (model === config.keep || config.idleMinutes === 0 || !sendable(server)) continue
     if (busyOf((await run(commands.metrics(server.port))).out)) {
       servers[model] = { ...server, busyAt: now().toISOString() }
       continue

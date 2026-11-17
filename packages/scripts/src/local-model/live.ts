@@ -6,6 +6,7 @@ import { dataDir } from "@packages/env/data-dir"
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
 
 import { addEntries, peerRecordArgv } from "../machine-record/record"
+import { mainCheckout } from "../main-checkout"
 import { REPO, run } from "../ops-job/job"
 import { dashboardCheckout } from "../playground/probe"
 import { FIXED, keepUp, type Machine, type ModelDeps, useModel } from "./model"
@@ -83,10 +84,10 @@ const depsFor = async (
     // this machine's entries go straight in its record; the peer's through its own clone's record CLI, over one ssh
     record: async (entries, where) => {
       if (where === "here") return void (await addEntries(data, entries))
-      const clone = cloneOf(REPO, home)
+      const clone = cloneOf(mainCheckout(REPO), home)
       if (!clone || !machine.target)
         throw new Error(
-          "this checkout is not a plain path under home, so the peer's clone is not known",
+          "the main checkout is not a plain path under home, so the peer's clone is not known",
         )
       const ran = await run(
         peerRecordArgv(key, machine.target, clone, "add"),

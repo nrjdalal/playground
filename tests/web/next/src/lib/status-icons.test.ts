@@ -54,6 +54,7 @@ const SET = [
   ["approval", "RiUserLine", "text-caution", "Waiting on approvals", false],
   ["approvals", "RiGroupLine", "text-caution", "Waiting on approvals", false],
   ["ready", "RiZzzLine", "text-success", "Ready", false],
+  ["gated", "RiShieldLine", "text-caution", "Gated", false],
   ["parked", "RiPauseCircleLine", "text-inactive", "Parked", false],
   ["unknown", "RiQuestionLine", "text-inactive", "State unknown", false],
   ["idle", "RiCheckboxBlankCircleLine", "text-inactive", "Idle", false],
@@ -92,6 +93,8 @@ const pull = (fields: Partial<Pull> = {}): Pull => ({
   ci: "passing",
   conflicts: false,
   draft: false,
+  gates: null,
+  head: "abc1234def",
   number: 97,
   queued: false,
   reviewed: false,
@@ -138,7 +141,7 @@ describe("lightOf", () => {
     expect(light({ light: "unknown" })).toBe("unknown")
     expect(light({ light: "unknown", parked: "held" })).toBe("parked")
     expect(light({ light: "unknown", waits: ["inbox"] })).toBe("waiting")
-    expect(light({ light: "unknown", pr: pull({ score: "5/5" }) })).toBe("ready")
+    expect(light({ light: "unknown", pr: pull({ gates: [] }) })).toBe("ready")
     expect(light({ light: "unknown", pr: pull({ approvals: 1 }) })).toBe("approval")
     expect(light({ checked: true, light: "unknown" })).toBe("done")
     expect(light({ light: "unknown", pr: pull({ state: "merged" }) })).toBe("merged")
@@ -223,16 +226,35 @@ describe("lightOf", () => {
     expect(light({ pr: pull({ approvals: 2 }) })).toBe("approvals")
   })
 
-  test("Ready: idle at 5/5 on its head, CI green or none, no approval missing", () => {
-    expect(light({ pr: pull({ score: "5/5" }) })).toBe("ready")
-    expect(light({ pr: pull({ ci: "none", score: "5/5" }) })).toBe("ready")
-    expect(light({ pr: pull({ ci: "failing", score: "5/5" }) })).toBe("idle")
-    expect(light({ pr: pull({ score: "4/5" }) })).toBe("idle")
+  test("Ready: idle while the merge train read every pr:merge gate passing at its head (#2499)", () => {
+    expect(light({ pr: pull({ gates: [], score: "5/5" }) })).toBe("ready")
+    expect(light({ pr: pull({ ci: "none", gates: [], score: "5/5" }) })).toBe("ready")
+    expect(light({ pr: pull({ gates: ["ci"], score: "5/5" }) })).toBe("gated")
+    // no train read at this head: a 5/5 and green CI alone are not pr:merge's gates
+    expect(light({ pr: pull({ score: "5/5" }) })).toBe("idle")
+    expect(light({ pr: pull({ ci: "none", score: "5/5" }) })).toBe("idle")
   })
 
-  test("Parked: its pull request is on the held list", () => {
+  test("Gated: idle on a pull request a pr:merge gate holds, each gate it fails named (#2499)", () => {
+    const held = pull({ gates: ["tester"], score: "5/5" })
+    expect(light({ pr: held })).toBe("gated")
+    expect(stateWords("gated", { pr: held })).toBe("Gated · tester")
+    expect(stateWords("gated", { pr: pull({ gates: ["review", "tester"] }) })).toBe(
+      "Gated · review, tester",
+    )
+    // a gate its worker must fix holds it too, named the same way, so a gate added to pr:merge needs no list here
+    const scored = pull({ gates: ["review"], score: "3/5" })
+    expect(light({ pr: scored })).toBe("gated")
+    expect(stateWords("gated", { pr: scored })).toBe("Gated · review")
+    expect(light({ pr: held, waits: ["checks"] })).toBe("waiting")
+    expect(light({ light: "working", pr: held })).toBe("working")
+  })
+
+  test("Parked: its pull request is on the held list, which pr:merge's held gate reads too", () => {
     expect(light({ parked: "held for the weekly reset" })).toBe("parked")
-    expect(light({ parked: "held", pr: pull({ score: "5/5" }) })).toBe("ready")
+    expect(light({ parked: "held", pr: pull({ gates: ["held"], score: "5/5" }) })).toBe("parked")
+    expect(light({ parked: "held", pr: pull({ gates: ["held", "tester"] }) })).toBe("parked")
+    expect(light({ parked: "held", pr: pull({ score: "5/5" }) })).toBe("parked")
   })
 
   test("Idle: nothing running and nothing waiting; a closed pull request is not work", () => {
