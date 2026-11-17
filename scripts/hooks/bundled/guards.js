@@ -10959,6 +10959,7 @@ var HARNESSES = [
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
+var LOCAL_MODEL = "local";
 var readPin = (text) => {
   const words = text.trim().split(/\s+/);
   const [harnessId, backend] = words.length === 1 ? ["claude-code", words[0]] : words;
@@ -11197,6 +11198,12 @@ var sessionTemplate = strictObject({
   model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
 }).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
   message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
+}).refine((t) => t.model !== LOCAL_MODEL || t.account === undefined, {
+  message: "a local template runs on this machine's local model, so it takes no account",
+  path: ["account"]
+}).refine((t) => t.model !== LOCAL_MODEL || t.kind !== "dispatcher" && t.kind !== "planner", {
+  message: "a dispatcher or a planner plans on Claude, so it takes no local model",
+  path: ["kind"]
 });
 var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
   if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
