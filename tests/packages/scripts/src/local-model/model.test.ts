@@ -23,6 +23,7 @@ import {
   statePath,
   writeMachineState,
 } from "../../../../../packages/scripts/src/local-model/state"
+import { peerRecordArgv } from "../../../../../packages/scripts/src/machine-record/record"
 import { BEATS } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { JOBS } from "../../../../../packages/settings/src/jobs"
 
@@ -37,7 +38,8 @@ const metrics = (running: number, waiting = 0) =>
 const SIZED = "${CONTAINER:-\n${PORT:-\n${GPU_MEMORY_UTILIZATION:-\n${MAX_NUM_SEQS:-\n"
 
 type Box = {
-  busy: Record<number, number[]>
+  // a null reading is a /metrics that does not answer
+  busy: Record<number, (number | null)[]>
   containers: Set<string>
   health: string[]
   memory: number[]
@@ -115,7 +117,9 @@ const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
       }
       if ((found = /^curl -sf --max-time 5 http:\/\/127\.0\.0\.1:(\d+)\/metrics$/.exec(command))) {
         steps.push(`metrics ${found[1]}`)
-        return { code: 0, out: metrics(next(box.busy[Number(found[1])], 0)) }
+        const readings = box.busy[Number(found[1])] ?? [0]
+        const busy = (readings.length > 1 ? readings.shift() : readings[0]) as number | null
+        return busy === null ? { code: 28, out: "" } : { code: 0, out: metrics(busy) }
       }
       if (
         (found =
@@ -384,6 +388,60 @@ describe("playground model use (PG-2543)", () => {
     expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
   })
 
+  test("a /metrics that does not answer is waited on while its container runs, and a stopped one ends the wait", async () => {
+    const data = scratch()
+    await writeMachineState(data, PEER.name, { servers: { "k-model": kServer } })
+    const silent = stub(
+      box({ busy: { 8000: [null] }, containers: new Set(["local-vllm-k-model"]), memory: [32.4] }),
+      data,
+    )
+    expect((await useModel("m-model", silent.deps)).line).toBe(
+      "k-model still does not answer /metrics while it runs after 30 minutes, so it keeps serving",
+    )
+    expect(silent.steps.some((step) => step.startsWith("stop"))).toBe(false)
+    const gone = box({ busy: { 8000: [null] }, memory: [32.4, 117.1] })
+    const stopped = stub(gone, data)
+    expect((await useModel("m-model", stopped.deps)).code).toBe(0)
+    expect(stopped.steps.slice(0, 5)).toEqual([
+      "serves m-model",
+      "inspect local-vllm-m-model",
+      "memory",
+      "metrics 8000",
+      "inspect local-vllm-k-model",
+    ])
+  })
+
+  test("a peer that does not answer over ssh is named, not read as a missing serve.sh", async () => {
+    const data = scratch()
+    const { deps } = stub(box(), data, {
+      run: async () => ({
+        code: 255,
+        out: "ssh: connect to host spark-test port 22: No route to host\n",
+      }),
+    })
+    expect((await useModel("m-model", deps)).line).toBe(
+      "spark-test did not answer over ssh (ssh: connect to host spark-test port 22: No route to host), so nothing changed",
+    )
+  })
+
+  test("a container name in the state file of any other shape is never sent to a shell", async () => {
+    const data = scratch()
+    const odd = {
+      ...kServer,
+      busyAt: "2026-11-17T05:00:00.000Z",
+      container: "local-vllm-k-model;true",
+    }
+    await writeMachineState(data, PEER.name, { servers: { "k-model": odd } })
+    const { deps, steps } = stub(box({ memory: [32.4] }), data)
+    expect((await useModel("m-model", deps)).line).toBe(
+      "docker rm -fv local-vllm-k-model;true failed on spark-test, so nothing started",
+    )
+    deps.config = { ...PEER_CONFIG, keep: "m-model" }
+    await keepUp(deps)
+    expect(steps.some((step) => step.startsWith("stop"))).toBe(false)
+    expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
+  })
+
   test("a swap already running holds every other start, and a hold a killed run left behind is lifted", async () => {
     const data = scratch()
     await writeMachineState(data, PEER.name, {
@@ -510,7 +568,11 @@ describe("playground model use (PG-2543)", () => {
     deps.config = { ...PEER_CONFIG, reserveGiB: 15 }
     expect((await useModel("m-model", deps)).code).toBe(0)
     expect(calls.length).toBeGreaterThan(10)
-    for (const argv of calls) {
+    // a peer start's machine record entry goes over its own ssh, past the stub's record seam
+    for (const argv of [
+      ...calls,
+      peerRecordArgv("<key>", "box@peer", "~/Desktop/playground", "add"),
+    ]) {
       expect(argv[0]).toBe("ssh")
       const text = argv.join(" ")
       expect(text).not.toMatch(/(^|[\s;&|(])gh(\s|$)/)

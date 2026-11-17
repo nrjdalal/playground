@@ -139,7 +139,7 @@ export const sizeOf = (
 const gib = (value: number) => `${Math.round(value * 10) / 10} GiB`
 const refuse = (line: string): Result => ({ code: 1, line })
 
-// The fixed commands, each built from a name MODEL_NAME passed, a container name the setting's schema holds, a port from PORTS and numbers.
+// The fixed commands, each built from names MODEL_NAME passed, a port from PORTS and numbers.
 const commands = {
   health: (port: number) =>
     `curl -s --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/health`,
@@ -178,6 +178,10 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   const run = (command: string, timeoutMs = 30_000) =>
     deps.run(commandArgv(deps.machine, deps.key, command), timeoutMs)
   const serves = await run(commands.serves(name))
+  if (deps.machine.target && serves.code === 255)
+    return refuse(
+      `${machine} did not answer over ssh (${lastLine(serves.out)}), so nothing changed`,
+    )
   if (!serves.out.startsWith("found"))
     return refuse(`${machine} has no ~/models/${name}/serve.sh, so nothing changed`)
   const taken = new Set(serves.out.match(/[A-Z_]+(?=:-)/g) ?? [])
@@ -204,10 +208,11 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
     const { [model]: _, ...rest } = servers()
     return rest
   }
-  // stops a server by the exact name it was started under; true once no container has that name
+  // stops a server by the exact name it was started under, a name of MODEL_NAME's shape alone, since the state file is read back; true once no container has that name
   const stopOwn = async (container: string) =>
-    (await run(commands.stop(container))).code === 0 ||
-    (await run(commands.inspect(container))).code !== 0
+    MODEL_NAME.test(container) &&
+    ((await run(commands.stop(container))).code === 0 ||
+      (await run(commands.inspect(container))).code !== 0)
   const container = `${config.container}-${name}`
   const mine = servers()[name]
   const inspected = await run(commands.inspect(container))
@@ -244,12 +249,22 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
         for (const [model, server] of others) {
           for (;;) {
             const busy = busyOf((await run(commands.metrics(server.port))).out)
-            if (!busy) break
+            // a /metrics that does not read is waited on while the container runs, since it can be a server too busy to answer
+            if (busy === 0) break
+            if (
+              busy === null &&
+              (await run(commands.inspect(server.container))).out.trim() !== "true"
+            )
+              break
+            const doing =
+              busy === null
+                ? "does not answer /metrics while it runs"
+                : `has ${busy} requests running or waiting`
             if (now().getTime() >= drainBy)
               return refuse(
-                `${model} still has ${busy} requests running or waiting after ${config.drainMinutes} minutes, so it keeps serving`,
+                `${model} still ${doing} after ${config.drainMinutes} minutes, so it keeps serving`,
               )
-            say(`${model} has ${busy} requests running or waiting; ${name} waits for them`)
+            say(`${model} ${doing}; ${name} waits for it`)
             await sleep(POLL_MS)
           }
         }
@@ -379,6 +394,7 @@ export async function keepUp(deps: ModelDeps): Promise<string | null> {
     }
     const since = Date.parse(server.busyAt)
     if (Number.isFinite(since) && now().getTime() - since < config.idleMinutes * 60_000) continue
+    if (!MODEL_NAME.test(server.container)) continue
     if ((await run(commands.stop(server.container))).code !== 0) continue
     delete servers[model]
     stopped.push(model)
