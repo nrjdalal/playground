@@ -242,6 +242,10 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(step).toContain("each `BATCH-RED` test has its one issue")
     expect(step).toContain("the PR merges on that green with the issue named in its Merge Danger")
     expect(await page()).toContain("never a second rerun")
+    expect(await skill()).toContain("A file red in that run, a by-hand local merge included")
+    expect(await skill()).toContain(
+      "green there, it is step 2's `BATCH-RED`, which takes step 2's one issue, never a second rerun",
+    )
   })
 })
 
