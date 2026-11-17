@@ -1,3 +1,4 @@
+import { parseMetrics, speedOf } from "./speed"
 import {
   type MachineState,
   type ModelServer,
@@ -388,7 +389,7 @@ const recordPaths = async (
     )
 }
 
-// The keep beat, once per machine: a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read stamping busyAt, then the kept model is started when it is not serving and no other model asked for is left there; an entry no start would give is skipped, never asked for, and named to ops once. Null when it did nothing new, else the one line for ops; a refusal or skip the last beat already said stays quiet. With a swap's hold set it does nothing.
+// The keep beat, once per machine: each server's /metrics snapshot and speed are kept for the local gate; a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read, or a silent one while its container runs, stamping busyAt, then the kept model is started when it is not serving and no other model asked for is left there; an entry no start would give is skipped, never asked for, and named to ops once. Null when it did nothing new, else the one line for ops; a refusal or skip the last beat already said stays quiet. With a swap's hold set it does nothing.
 export async function keepUp(deps: ModelDeps): Promise<string | null> {
   const { config, data, now } = deps
   const machine = deps.machine.name
@@ -404,9 +405,23 @@ export async function keepUp(deps: ModelDeps): Promise<string | null> {
       skipped[model] =
         `the state file's entry for ${model} on ${machine} (container ${server.container}, port ${server.port}) is not one playground model use starts, so the keep beat skips it: fix or remove it in ${statePath(data)}`
   for (const [model, server] of Object.entries(servers)) {
-    if (model === config.keep || config.idleMinutes === 0 || skipped[model]) continue
-    if (busyOf((await run(commands.metrics(server.port))).out)) {
-      servers[model] = { ...server, busyAt: now().toISOString() }
+    if (skipped[model]) continue
+    const text = (await run(commands.metrics(server.port))).out
+    const snapshot = parseMetrics(text, now().toISOString())
+    // a /metrics that does not read leaves no snapshot and no speed, which the local gate reads as a window with no samples
+    const { metrics: _metrics, speed: _speed, ...kept } = server
+    const read = snapshot
+      ? { ...kept, metrics: snapshot, speed: speedOf(server.metrics, snapshot) }
+      : kept
+    servers[model] = read
+    if (model === config.keep || config.idleMinutes === 0) continue
+    const busy = busyOf(text)
+    // a /metrics that does not read is no idle time while the container runs, as a swap's drain reads it, since it can be a server too busy to answer
+    if (
+      busy ||
+      (busy === null && (await run(commands.inspect(server.container))).out.trim() === "true")
+    ) {
+      servers[model] = { ...read, busyAt: now().toISOString() }
       continue
     }
     const since = Date.parse(server.busyAt)
