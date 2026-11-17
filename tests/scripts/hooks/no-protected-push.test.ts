@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { originRepo } from "../../../packages/scripts/src/playground/setting"
 import { check } from "../../../scripts/hooks/no-protected-push"
+import { machineTest, NO_ORIGIN } from "../../machine"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -222,16 +223,20 @@ describe("a push the hook cannot read is refused where it may land in the factor
     expect(await bash('cd "$D" && git push origin main', dirs.other)).toContain("does not read")
   })
 
-  test("factory.repo unset falls back to the main checkout's origin", async () => {
-    const empty = join(scratch, "no-store")
-    const fallback = await clone("fallback", "work", [
-      "origin",
-      `https://github.com/${originRepo()}.git`,
-    ])
-    expect(
-      await check(input("git push origin main", fallback), { PLAYGROUND_DATA_DIR: empty }),
-    ).toContain(`writes main of ${originRepo()}`)
-  })
+  machineTest(
+    NO_ORIGIN,
+    "factory.repo unset falls back to the main checkout's origin",
+    async () => {
+      const empty = join(scratch, "no-store")
+      const fallback = await clone("fallback", "work", [
+        "origin",
+        `https://github.com/${originRepo()}.git`,
+      ])
+      expect(
+        await check(input("git push origin main", fallback), { PLAYGROUND_DATA_DIR: empty }),
+      ).toContain(`writes main of ${originRepo()}`)
+    },
+  )
 })
 
 describe("every other push runs", () => {

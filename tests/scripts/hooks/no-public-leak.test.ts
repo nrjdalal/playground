@@ -7,6 +7,7 @@ import { UNSET_REPOS } from "../../../packages/scripts/src/trace-count/kinds"
 import { currentDir } from "../../../packages/settings/src/rendered"
 import { storeMarker } from "../../../scripts/hooks/lists"
 import { check } from "../../../scripts/hooks/no-public-leak"
+import { machineTest, NO_ORIGIN } from "../../machine"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -388,32 +389,40 @@ describe("what it lets through", () => {
     expect(await run(bash(`gh pr comment 1 ${R} ${said}`), moved)).toBeUndefined()
   })
 
-  test("factory.publicRepo set empty leaves the guard on the repository it guards while unset", async () => {
-    const empty = storeWith(
-      join(scratch, "empty-public"),
-      { "no-public-leak.json": JSON.stringify(TERMS) },
-      { "factory.publicRepo": "" },
-    )
-    expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh asked"`), empty),
-    ).toContain("a person's name")
-  })
+  machineTest(
+    NO_ORIGIN,
+    "factory.publicRepo set empty leaves the guard on the repository it guards while unset",
+    async () => {
+      const empty = storeWith(
+        join(scratch, "empty-public"),
+        { "no-public-leak.json": JSON.stringify(TERMS) },
+        { "factory.publicRepo": "" },
+      )
+      expect(
+        await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh asked"`), empty),
+      ).toContain("a person's name")
+    },
+  )
 
   // issue 1454: unset, the guard keeps the checkout's origin alone, with no fixed second repository
-  test("while factory.publicRepo is unset it guards the origin alone, and another repository's write passes", async () => {
-    const empty = storeWith(
-      join(scratch, "unset-other"),
-      { "no-public-leak.json": JSON.stringify(TERMS) },
-      { "factory.publicRepo": "" },
-    )
-    expect(UNSET_REPOS.public).toHaveLength(1)
-    expect(
-      await run(
-        bash(`gh pr comment 1 --repo quillco/made-up-yard --body "Quilla Marsh asked"`),
-        empty,
-      ),
-    ).toBeUndefined()
-  })
+  machineTest(
+    NO_ORIGIN,
+    "while factory.publicRepo is unset it guards the origin alone, and another repository's write passes",
+    async () => {
+      const empty = storeWith(
+        join(scratch, "unset-other"),
+        { "no-public-leak.json": JSON.stringify(TERMS) },
+        { "factory.publicRepo": "" },
+      )
+      expect(UNSET_REPOS.public).toHaveLength(1)
+      expect(
+        await run(
+          bash(`gh pr comment 1 --repo quillco/made-up-yard --body "Quilla Marsh asked"`),
+          empty,
+        ),
+      ).toBeUndefined()
+    },
+  )
 
   test("factory.publicRepo set to a list guards each, and reads past each one's name", async () => {
     const both = storeWith(
@@ -434,17 +443,21 @@ describe("what it lets through", () => {
     ).toBeUndefined()
   })
 
-  test("a stranger's clone with no store still refuses the built-in kinds, and lets a key through, since keys come from the list alone", async () => {
-    expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@madeup.test"`), stranger),
-    ).toContain("an email address")
-    expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
-    ).toBeUndefined()
-    expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh"`), stranger),
-    ).toBeUndefined()
-  })
+  machineTest(
+    NO_ORIGIN,
+    "a stranger's clone with no store still refuses the built-in kinds, and lets a key through, since keys come from the list alone",
+    async () => {
+      expect(
+        await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@madeup.test"`), stranger),
+      ).toContain("an email address")
+      expect(
+        await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
+      ).toBeUndefined()
+      expect(
+        await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh"`), stranger),
+      ).toBeUndefined()
+    },
+  )
 })
 
 describe("it fails closed on its list", () => {

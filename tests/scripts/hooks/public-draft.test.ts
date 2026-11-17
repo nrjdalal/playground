@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { UNSET_REPOS } from "../../../packages/scripts/src/trace-count/kinds"
 import { FIGURE, publicDraftHit, publicRefusal } from "../../../scripts/hooks/public-draft"
+import { machineTest, NO_ORIGIN } from "../../machine"
 import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
@@ -118,22 +119,26 @@ describe("publicDraftHit", () => {
     expect(await hit(OWN_WORDS)).toEqual({})
   })
 
-  test("with factory.publicRepo unset, its default names the checkout's own origin", async () => {
-    const unset = join(scratch, "unset")
-    storeWith(unset, {
-      "no-public-leak.json": JSON.stringify(PUBLIC),
-      "playground-terms.json": JSON.stringify(terms),
-    })
-    expect(UNSET_REPOS.public).toHaveLength(1)
-    for (const repo of UNSET_REPOS.public) {
-      const checked = await publicDraftHit(
-        `The code is in ${repo}.`,
-        { PLAYGROUND_DATA_DIR: unset },
-        scratch,
-      )
-      expect(checked.hit?.detail).toBe("a repository's name")
-    }
-  })
+  machineTest(
+    NO_ORIGIN,
+    "with factory.publicRepo unset, its default names the checkout's own origin",
+    async () => {
+      const unset = join(scratch, "unset")
+      storeWith(unset, {
+        "no-public-leak.json": JSON.stringify(PUBLIC),
+        "playground-terms.json": JSON.stringify(terms),
+      })
+      expect(UNSET_REPOS.public).toHaveLength(1)
+      for (const repo of UNSET_REPOS.public) {
+        const checked = await publicDraftHit(
+          `The code is in ${repo}.`,
+          { PLAYGROUND_DATA_DIR: unset },
+          scratch,
+        )
+        expect(checked.hit?.detail).toBe("a repository's name")
+      }
+    },
+  )
 
   test("refuses, as the guards do, when a list cannot be read", async () => {
     const broken = join(scratch, "broken")
