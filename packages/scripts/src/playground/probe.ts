@@ -20,6 +20,7 @@ import { portlessCa, portlessDir } from "../portless-ca"
 import {
   dashboardBeatOf,
   staleBeat,
+  stepQueued,
   type DashboardBeat,
   type Dispatcher,
   type Probes,
@@ -232,6 +233,30 @@ const pidAlive = (file: string): boolean => {
 // The follower the supervisor started, by the pid it recorded; nothing reads the dashboard's database.
 export const followerRunning = (): boolean => pidAlive(join(opsDashboard(), "dashboard-ingest.pid"))
 
+// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid and the last 3000 lines of run-slot.runs.log.
+export const prebuildQueued = (): boolean => {
+  const read = (path: string) => {
+    try {
+      return readFileSync(path, "utf8")
+    } catch {
+      return undefined
+    }
+  }
+  const runs = (read(join(dataDir(), "ops", "run-slot.runs.log")) ?? "").split("\n").slice(-3000)
+  return stepQueued(
+    read(join(opsDashboard(), "prebuild.pid")),
+    (pid) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    },
+    runs,
+  )
+}
+
 // The ops-dashboard job's heartbeat: its age, its cycle and whether the pid that wrote it still runs; null with no file that reads.
 export const dashboardBeat = (now = Date.now()): DashboardBeat | null => {
   let json: unknown
@@ -254,6 +279,19 @@ export const dashboardBeat = (now = Date.now()): DashboardBeat | null => {
 export const supervisorRunning = (): boolean => {
   const beat = dashboardBeat()
   return !!beat && beat.running && !staleBeat(beat)
+}
+
+// Whether up.py holds ops-dashboard's start: its start is recorded within up.py's 600s grace, so the Dashboard's wait keeps waiting for it to start again, not bailing on a beat up.py has not had time to refresh.
+export const upHolds = (now: number = Date.now()): boolean => {
+  let starts: unknown
+  try {
+    starts = JSON.parse(readFileSync(join(dataDir(), "ops", "up-state.json"), "utf8"))
+  } catch {
+    return false
+  }
+  if (typeof starts !== "object" || starts === null) return false
+  const start = Number((starts as Record<string, unknown>)["ops-dashboard"])
+  return Number.isFinite(start) && now - start * 1000 < 600 * 1000
 }
 
 export const probe = async (urls: Urls | null): Promise<Probes> => ({

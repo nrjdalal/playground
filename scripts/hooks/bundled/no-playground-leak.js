@@ -10309,7 +10309,6 @@ var HARNESSES = [
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
-var LOCAL_MODEL = "local";
 
 // packages/settings/src/harness-alpha.ts
 var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
@@ -10403,6 +10402,16 @@ var localModelSettings = defineSettings({
       literal(""),
       string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
     ])
+  },
+  "localModels.maxFirstTokenSeconds": {
+    default: 10,
+    description: "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
+    schema: number2().positive().max(600)
+  },
+  "localModels.minTps": {
+    default: 15,
+    description: "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
+    schema: number2().min(0).max(1000)
   },
   "localModels.models": {
     default: {
@@ -10529,10 +10538,6 @@ var sessionTemplate = strictObject({
   model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
 }).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
   message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
-}).refine((t) => t.model !== LOCAL_MODEL || t.account === undefined, {
-  message: "a local template runs on this machine's local model, so it takes no account"
-}).refine((t) => t.model !== LOCAL_MODEL || t.kind !== "dispatcher" && t.kind !== "planner", {
-  message: "a dispatcher or a planner plans on Claude, so it takes no local model"
 });
 var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
   if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)

@@ -842,9 +842,9 @@ try:
             week_pct = None
         readings["week"] = week_pct
     elif backend == "local":
-        # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes (local-cap.ts read it before the gate)
-        cap, cap_from = local_cap.split("\t", 1)
-        cap = int(cap)
+        # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes, and the speed each keeps, which the keep beat reads from /metrics (local-cap.ts read both before the gate)
+        gate = json.loads(local_cap)
+        cap, cap_from, speed = gate["cap"], gate["from"], gate["speed"]
         rows = roster_rows()
         if rows is None:
             refuse("usage", f"it cannot read {roster_path} (does not read), so it cannot count the local sessions")
@@ -860,6 +860,17 @@ try:
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("usage", f"{len(live)} live local sessions ({', '.join(live)}), and the local model here serves {cap} at once ({cap_from}). Wait for one to end, close a session that is done, or start it on --backend glm or claude.")
+        elif speed:
+            # a window with no samples admits on the cap alone; the speed term reads only beside live local sessions, whose share of the server it is
+            n, tps, ttft = len(live), speed["decodeTps"], speed["ttftMean"]
+            readings.update(local_speed=speed)
+            later = "Wait for the next keep beat, close a session that is done, or start it on --backend glm or claude."
+            if speed["waiting"] > 0:
+                refuse("usage", f"the local model here has {speed['waiting']} requests waiting, so one more session would queue behind them. {later}")
+            if n and tps is not None and tps * n / (n + 1) < gate["minTps"]:
+                refuse("usage", f"each of the {n} live local sessions decodes {tps:.1f} tokens a second, so one more would leave about {tps * n / (n + 1):.1f}, under the speed floor of {gate['minTps']} (localModels.minTps). {later}")
+            if ttft is not None and ttft >= gate["maxFirstTokenSeconds"]:
+                refuse("usage", f"the local model here takes {ttft:.1f} s on average to a first token, at or over the first-token floor of {gate['maxFirstTokenSeconds']} s (localModels.maxFirstTokenSeconds). {later}")
     else:
         if pace_skip:
             readings["pace"] = pace_skip
@@ -1853,13 +1864,19 @@ LOCAL_URL=http://127.0.0.1:8000
 LOCAL_SERVED=local
 if [ "$BACKEND" = local ]; then
   listed=$(curl -sS --max-time 5 "$LOCAL_URL/v1/models" 2>&1) || refuse "the local model at $LOCAL_URL did not answer in 5 s ($listed): ask Ops to bring it up, or start it on --backend glm or claude"
-  python3 -I -c 'import json, sys
+  LOCAL_LEN=$(python3 -I -c 'import json, sys
 try:
-    ids = [m.get("id") for m in json.loads(sys.argv[1]).get("data", [])]
+    card = [m for m in json.loads(sys.argv[1]).get("data", []) if m.get("id") == sys.argv[2]]
 except (ValueError, AttributeError, TypeError):
-    ids = []
-sys.exit(0 if sys.argv[2] in ids else 1)' "$listed" "$LOCAL_SERVED" ||
+    card = []
+if not card:
+    sys.exit(1)
+n = card[0].get("max_model_len")
+print(n if type(n) is int and n > 16384 else "")' "$listed" "$LOCAL_SERVED") ||
     refuse "the local model at $LOCAL_URL serves no model named $LOCAL_SERVED: ask Ops which model is up, or start it on --backend glm or claude"
+  # Claude Code assumes 1M for a model name it does not know, so the session declares the server's own window, its card's max_model_len, less 8192 for the reply that shares it; a card without a number above twice that takes 120000, K's 131072 less that room and more.
+  LOCAL_CONTEXT=120000
+  [ -n "$LOCAL_LEN" ] && LOCAL_CONTEXT=$((LOCAL_LEN - 8192))
   LOCAL_CAP=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/local-cap.ts" "${LOCAL_URL##*:}") 2>&1) || refuse "$LOCAL_CAP"
 fi
 if [ "$BACKEND" = glm ]; then
@@ -2038,9 +2055,9 @@ if [ "$BACKEND" = glm ]; then
 fi
 # The local model maps every model Claude Code asks for to the served name, on its loopback port and a placeholder token, the tool search deferred as on GLM. Its chat template switches thinking on or off alone, so the launch line labels the effort it passes.
 if [ "$BACKEND" = local ]; then
-  LAUNCH=": effort ${EFFORT:-high}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=$LOCAL_URL ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_SONNET_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_HAIKU_MODEL=$LOCAL_SERVED ENABLE_TOOL_SEARCH=true $LAUNCH"
+  LAUNCH=": effort ${EFFORT:-high}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=$LOCAL_URL ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_SONNET_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_HAIKU_MODEL=$LOCAL_SERVED CLAUDE_CODE_MAX_CONTEXT_TOKENS=$LOCAL_CONTEXT ENABLE_TOOL_SEARCH=true $LAUNCH"
   MODEL=$LOCAL_SERVED
-  # K serves a 131072-token context (its max-model-len), so a local session compacts well inside it.
+  # The compact window, capped at the declared one above, so a session on a smaller server compacts at its window instead.
   WINDOW=120000
 fi
 # Every kind compacts in one window, context.window (400k by default), GLM's included (a local session's is 120k, set above), the window the factory's settings give a session spawn.sh did not start; it was read with the model settings above.

@@ -42,7 +42,7 @@ playground page <file.html> --title "<title>" --by <session> [--for <session>]
 playground page --remove <file.html>
                       take one kept page off the Pages tab: drop its line from pages.jsonl and move its HTML, caption and PDF to the trash, printing each trash id for playground rm --restore; it refuses, moving nothing, a page pages.jsonl does not list, a path outside the previews folder, a previews folder that is a symlink, a page file or pages.jsonl that is a symlink or hard link, a file over 20 MiB, and a page whose moves the trash's per-minute cap has no room for
 playground update [--to <tag>]
-                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
+                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then give its run slot back and roll the Dashboard to the newest build: Building (Waiting while its steps queue in run-slot), Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd, or on Linux systemd, should hold
 playground herdr pin [--check | --asset <file>]
                       put the pinned herdr's release asset for this machine (macOS or Linux, on arm64 or x64) at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
@@ -402,7 +402,53 @@ export const addCommand = (
 
 export type RollOutcome =
   | { phase: "building" | "going back" | "switching" }
+  | { phase: "waiting"; why: string }
   | { done: string; ok: boolean }
+
+// A waiting roll's line: the load it waits on, read now, when run-slot's reason is load5's line, else run-slot's own reason, said once.
+export const waitingLine = (why: string, load5: number) => {
+  const under = why.match(/load5 under (\d+)/)?.[1]
+  if (under)
+    return `Waiting for load: load5 is ${load5.toFixed(1)}, and the roll goes on under ${under}`
+  return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
+}
+
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+export const stepQueued = (
+  pid: string | undefined,
+  alive: (pid: number) => boolean,
+  runs: string[],
+) => {
+  const n = Number(pid?.trim() || Number.NaN)
+  if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  return !runs.some((line) => {
+    const words = line.split(" ")
+    return words[1] === "start" && words[3] === String(n)
+  })
+}
+
+// The end of a roll that gave no result in 30 minutes: one still queued in run-slot, by its log or by its step's own run (`queued`, stepQueued), goes on by itself, so it reads as waiting and passes, and any other is a failure.
+export const rollTimedOut = (
+  last: RollOutcome,
+  load5: number,
+  queued = false,
+): { done: string; ok: boolean } => {
+  const why =
+    "phase" in last && last.phase === "waiting"
+      ? last.why
+      : queued
+        ? "the roll's next step is still queued in run-slot"
+        : undefined
+  return why !== undefined
+    ? {
+        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+        ok: true,
+      }
+    : {
+        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+        ok: false,
+      }
+}
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
@@ -445,7 +491,17 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   const starting = log.findIndex(
     (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
   )
-  return { phase: rolling >= 0 && starting > rolling ? "switching" : "building" }
+  if (rolling >= 0 && starting > rolling) return { phase: "switching" }
+  // a prebuild step queued in run-slot, whose stderr the supervisor logs, waits until run-slot's next line of its own, the supervisor's own lines between leaving it waiting; the build, whose run-slot lines build_head captures, shows its wait only in the supervisor's still-queued line
+  let why: string | undefined
+  for (const line of rolling >= 0 ? log.slice(rolling + 1) : []) {
+    const said = line.match(/^run-slot\.sh: (.*)$/)?.[1]
+    if (said !== undefined)
+      why = /^(this clone waits|waiting for|queued behind) /.test(said) ? said : undefined
+    const queued = line.match(/^\S+ (prebuild \w+ still queued after \d+s.*)$/)?.[1]
+    if (queued !== undefined && why === undefined) why = queued
+  }
+  return why === undefined ? { phase: "building" } : { phase: "waiting", why }
 }
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.
@@ -459,6 +515,7 @@ type WaitRead = {
   failure: string | null
   now: number
   redirect?: Redirect | null
+  upHolds?: boolean
 }
 type WaitOutcome = { done: string; ok: boolean } | { progress: string | null }
 
@@ -550,7 +607,7 @@ export const aliasFailure = (results: string[]): string | null => {
   return failure
 }
 
-// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start or that portless does not route its addresses, once the API's health answers a redirect, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
+// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start or that portless does not route its addresses, once the API's health answers a redirect, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s. The wait keeps going past a missing beat while ops-up holds the job, since its grace starts it again, so it names "supervisor is not running" only up.py has let the grace run out.
 export const waitOutcome = (
   read: WaitRead,
   state: { shownAt: number; startedAt: number },
@@ -574,12 +631,12 @@ export const waitOutcome = (
         done: `the Dashboard's API answered ${read.redirect.status} at ${read.redirect.from}, a redirect to ${read.redirect.to}, so playground asks it at an address portless does not serve (waited ${duration(spent)}); ${AGAIN}`,
         ok: false,
       }
-    if (!beat?.running)
+    if (!beat?.running && !read.upHolds)
       return {
         done: `ops-dashboard's supervisor is not running, so the Dashboard will not come up (waited ${duration(spent)}); ${AGAIN}`,
         ok: false,
       }
-    if (staleBeat(beat))
+    if (beat && staleBeat(beat) && !read.upHolds)
       return {
         done: `ops-dashboard's heartbeat is ${duration(beat.ageMs)} old, past three of its ${beat.cycleSeconds}s cycles, so its supervisor has stopped; ${AGAIN}`,
         ok: false,

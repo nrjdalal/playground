@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { originRepo } from "../packages/scripts/src/playground/setting"
-import { zshMissing, originCheckout, rowMode } from "./machine"
+import { originCheckout, rowMode, zshMissing } from "./machine"
 
 const scratch = mkdtempSync(join(tmpdir(), "machine-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))

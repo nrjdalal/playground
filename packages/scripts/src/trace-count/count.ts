@@ -166,7 +166,7 @@ export const risen = (now: Counts, baseline: Counts): string[] =>
 
 // The refusal for the risen lines, naming the fix where a kind has one, then each file and line located found.
 export const refusal = (over: string[], at: string[] = []): string =>
-  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}${over.some((line) => line.startsWith("macOnly:")) ? "; put a Linux branch in front of a Mac-only call (a uname or process.platform check that takes Linux another way)" : ""}:\n${[...over, ...at].join("\n")}`
+  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number, and the PR body's Merge Danger or Links carry it" : ""}${over.some((line) => line.startsWith("macOnly:")) ? "; put a Linux branch in front of a Mac-only call (a uname or process.platform check that takes Linux another way)" : ""}:\n${[...over, ...at].join("\n")}`
 
 // Each line holding a hit of one of the kinds, as path:line: kind, past the paths never counted and the lines kept.json keeps while they hold no more than its hits; for each kind, the changed files' alone when they hold one, since a kind's floor can hold many older hits.
 export function located(

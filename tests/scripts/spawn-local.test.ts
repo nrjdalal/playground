@@ -20,8 +20,8 @@ import {
 setDefaultTimeout(40_000)
 
 const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
-const env_ = (effort = "high") =>
-  `: effort ${effort}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local ENABLE_TOOL_SEARCH=true `
+const env_ = (effort = "high", context = 122880) =>
+  `: effort ${effort}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=http://127.0.0.1:8000 ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=local ANTHROPIC_DEFAULT_SONNET_MODEL=local ANTHROPIC_DEFAULT_HAIKU_MODEL=local CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context} ENABLE_TOOL_SEARCH=true `
 const command = launchAfterRm
 const pinOf = (r: Spawned, name: string) =>
   readFileSync(lw(r.home, "backends", name), "utf8").toString()
@@ -284,6 +284,22 @@ describe("--backend local runs the session on the local model through Claude Cod
   })
 })
 
+describe("the local launch declares the model server's own window, so the session compacts inside it", () => {
+  const card = (extra: string) => ({
+    FAKE_LOCAL_MODELS: `{"object":"list","data":[{"id":"other","max_model_len":32768},{"id":"local"${extra}}]}`,
+  })
+  test.each([
+    ["the served card's max_model_len, less 8192 for the reply", ',"max_model_len":262144', 253952],
+    ["120000 for a card with no max_model_len", "", 120000],
+    ["120000 for a max_model_len that is no number", ',"max_model_len":"131072"', 120000],
+    ["120000 for a max_model_len the reply's room would empty", ',"max_model_len":16384', 120000],
+  ])("PG-2592 %s", async (_, extra, context) => {
+    const r = await local(["worker", "worker-a", "b.md", "--backend", "local"], card(extra))
+    expect(r.code, r.err).toBe(0)
+    expect(command(r)).toStartWith(`(${env_("high", context)}env PLAYGROUND_ROLE=`)
+  })
+})
+
 describe("the local gate: at most the sessions this machine's model server takes at once", () => {
   const row = (name: string, status = "working") => ({ name, role: "worker", status, task: "t" })
   const pinned =
@@ -351,6 +367,86 @@ describe("the local gate: at most the sessions this machine's model server takes
       "serves 6 at once (K's limit, as models/state.json sizes no server on 8000 here)",
     )
   })
+
+  // the keep beat's speed on this machine's server, written now unless an age in minutes is given
+  const reading = (
+    speed: { decodeTps: number | null; ttftMean: number | null; waiting: number },
+    minutesOld = 0,
+  ) => {
+    const state = sized(6) as { machines: Record<string, { servers: Record<string, object> }> }
+    const servers = state.machines[HERE]!.servers
+    const [model] = Object.keys(servers)
+    const at = new Date(Date.now() - minutesOld * 60_000).toISOString()
+    servers[model!] = { ...servers[model!], speed: { at, ...speed } }
+    return state
+  }
+  const two = six.slice(0, 2)
+  const quick = { decodeTps: 30, ttftMean: 3, waiting: 0 }
+
+  test.each([
+    ["a speed that clears both floors with one more", quick, 0, two],
+    ["a window with no samples", { decodeTps: null, ttftMean: null, waiting: 0 }, 0, two],
+    [
+      "a slow reading older than 15 minutes, which counts as no samples",
+      { decodeTps: 1, ttftMean: 60, waiting: 0 },
+      20,
+      two,
+    ],
+    [
+      "a slow reading with no live local session, whose share it is not",
+      { ...quick, decodeTps: 1 },
+      0,
+      [],
+    ],
+  ])("PG-2559 %s starts", async (_, speed, minutesOld, live) => {
+    const r = await local(
+      start,
+      roster(live.map((n) => row(n))),
+      pinned(live, reading(speed, minutesOld)),
+    )
+    expect(r.code, r.err).toBe(0)
+  })
+
+  test.each([
+    [
+      "a speed under the floor with one more",
+      { ...quick, decodeTps: 20 },
+      "each of the 2 live local sessions decodes 20.0 tokens a second, so one more would leave about 13.3, under the speed floor of 15 (localModels.minTps)",
+      two,
+    ],
+    [
+      "a request waiting",
+      { ...quick, waiting: 1 },
+      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      two,
+    ],
+    [
+      "a first token too slow",
+      { ...quick, ttftMean: 12 },
+      "the local model here takes 12.0 s on average to a first token, at or over the first-token floor of 10 s (localModels.maxFirstTokenSeconds)",
+      two,
+    ],
+    [
+      "a request waiting with no live local session",
+      { ...quick, waiting: 1 },
+      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      [],
+    ],
+    [
+      "a first token too slow with no live local session",
+      { ...quick, ttftMean: 12 },
+      "the local model here takes 12.0 s on average to a first token, at or over the first-token floor of 10 s (localModels.maxFirstTokenSeconds)",
+      [],
+    ],
+  ])(
+    "PG-2559 %s is refused before herdr runs, naming the reading",
+    async (_, speed, says, live) => {
+      const r = await local(start, roster(live.map((n) => row(n))), pinned(live, reading(speed)))
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(says)
+      expect(placing(r)).toEqual([])
+    },
+  )
 
   test("a resume of a live local row at the cap brings it back", async () => {
     const r = await local(
