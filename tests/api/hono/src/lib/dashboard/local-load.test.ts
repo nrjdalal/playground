@@ -6,11 +6,11 @@ import { join } from "node:path"
 import {
   keptLocalModel,
   loadArgv,
-  MODEL_FOLDER,
   runStart,
   START_MS,
   startModel,
 } from "../../../../../../api/hono/src/lib/dashboard/local-load"
+import { MODEL_NAME } from "../../../../../../packages/scripts/src/local-model/model"
 
 describe("loadArgv", () => {
   test("it runs the playground CLI's model use on the kept model's folder, by this bun and no shell", () => {
@@ -24,9 +24,9 @@ describe("loadArgv", () => {
     expect(loadArgv("m", "/repo")[0]).toBe(process.execPath)
   })
 
-  test("a name MODEL_FOLDER refuses throws before any argv is built", () => {
+  test("a name model use's MODEL_NAME refuses throws before any argv is built", () => {
     for (const name of ["", "-rf", "../m", "M", "a b", "m;ls", "m/n", "m\nn"]) {
-      expect(MODEL_FOLDER.test(name)).toBe(false)
+      expect(MODEL_NAME.test(name)).toBe(false)
       expect(() => loadArgv(name, "/repo")).toThrow("is not a model folder name")
     }
   })

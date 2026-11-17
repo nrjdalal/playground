@@ -1,12 +1,10 @@
 import { join } from "node:path"
 
+import { MODEL_NAME } from "@packages/scripts/local-model/model"
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
 
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { dataDir } from "@/lib/sessions/paths"
-
-// A model's folder under ~/models as `playground model use` takes it: a letter or digit first, then lowercase, digits, dots and dashes, so it names no path or flag.
-export const MODEL_FOLDER = /^[a-z0-9][a-z0-9.-]*$/
 
 // How long one `playground model use` may run: it waits for the server it starts to answer /health, so its timeout sits past the 15 minutes a load is given.
 export const START_MS = 20 * 60_000
@@ -19,9 +17,9 @@ export const keptLocalModel = (data: string = dataDir()): string => {
   return read.settings ? localModelSettings.get(read.settings, "localModels.peerModel") : ""
 }
 
-// Pure: the one fixed argv a local pick starts a model with, the playground CLI's own `model use` run by this bun with no shell, so its hold, memory floor and refusals stay the single path; a name MODEL_FOLDER refuses throws before anything runs.
+// Pure: the one fixed argv a local pick starts a model with, the playground CLI's own `model use` run by this bun with no shell, so its hold, memory floor and refusals stay the single path; a name `model use`'s own MODEL_NAME refuses throws before anything runs.
 export function loadArgv(model: string, root: string, bun: string = process.execPath): string[] {
-  if (!MODEL_FOLDER.test(model))
+  if (!MODEL_NAME.test(model))
     throw new Error(`${JSON.stringify(model)} is not a model folder name`)
   return [bun, join(root, "packages/scripts/src/playground/cli.ts"), "model", "use", model]
 }
