@@ -6152,6 +6152,10 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
+    description: "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
+    schedule: { always: true }
+  }),
   "ops-peer-relay": terminal("ops-peer-relay", `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`, {
     cwd: "{dashboard}",
     description: "Copies playground send's lines between this machine and each peer PLAYGROUND_PEERS names, over ssh, so a session on one machine reads a message from the other.",
