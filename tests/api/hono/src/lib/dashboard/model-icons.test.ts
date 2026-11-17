@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync } from "node:fs"
+import { mkdtempSync, readdirSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -105,8 +105,9 @@ describe("iconFor", () => {
   test("a maker with neither is cached as none for a day, then asked again", async () => {
     const dir = scratch()
     const { asked, fetch } = stub()
-    let now = Date.parse("2026-11-17T09:00:00Z")
-    expect(await iconFor("nobody", { dir, fetch, now: () => now })).toBeNull()
+    expect(await iconFor("nobody", { dir, fetch })).toBeNull()
+    // the marker's own mtime is the clock, so the row holds on any day and under a clock set ahead
+    let now = statSync(join(dir, "nobody.none")).mtimeMs
     const once = asked.length
     expect(await iconFor("nobody", { dir, fetch, now: () => now })).toBeNull()
     expect(asked).toHaveLength(once)
