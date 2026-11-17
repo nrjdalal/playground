@@ -61,6 +61,7 @@ const PEER_CONFIG: ModelConfig = {
 // A stub machine: each argv's command answered from the box, every step named in order; nothing reaches a machine or Docker.
 const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
   const steps: string[] = []
+  const calls: string[][] = []
   const holds: (string | null)[] = []
   let clock = Date.parse("2026-11-17T06:00:00.000Z")
   const next = <T>(list: T[] | undefined, last: T): T =>
@@ -73,6 +74,7 @@ const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
     now: () => new Date(clock),
     record: async () => {},
     run: async (argv) => {
+      calls.push(argv)
       expect(argv.slice(0, -1)).toEqual(commandArgv(deps.machine, deps.key, "").slice(0, -1))
       const command = argv.at(-1)!
       let found: RegExpExecArray | null
@@ -133,7 +135,7 @@ const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
     },
     ...overrides,
   }
-  return { advance: (ms: number) => (clock += ms), deps, holds, steps }
+  return { advance: (ms: number) => (clock += ms), calls, deps, holds, steps }
 }
 
 const scratch = () => mkdtempSync(join(tmpdir(), "local-model-"))
@@ -473,6 +475,34 @@ describe("playground model use (PG-2543)", () => {
       maxSessions: 14,
       share: 0.33,
     })
+  })
+
+  test("no command model use or the keep beat sends holds gh, a git credential helper, docker login or a keyring read", async () => {
+    const data = scratch()
+    await writeMachineState(data, PEER.name, { servers: { "k-model": kServer } })
+    const peer = box({
+      busy: { 8000: [2, 0] },
+      containers: new Set(["local-vllm-k-model"]),
+      memory: [32.4, 117.1, 26.3],
+    })
+    const { advance, calls, deps } = stub(peer, data)
+    // a swap, the beat's idle stop and the kept model's start, and a start beside it
+    expect((await useModel("m-model", deps)).code).toBe(0)
+    advance(31 * 60_000)
+    peer.memory = [117.1, 30]
+    expect(await keepUp(deps)).toContain("k-model serves")
+    peer.memory = [100, 30]
+    deps.config = { ...PEER_CONFIG, reserveGiB: 15 }
+    expect((await useModel("m-model", deps)).code).toBe(0)
+    expect(calls.length).toBeGreaterThan(10)
+    for (const argv of calls) {
+      expect(argv[0]).toBe("ssh")
+      const text = argv.join(" ")
+      expect(text).not.toMatch(/(^|[\s;&|(])gh(\s|$)/)
+      expect(text).not.toMatch(
+        /credential|docker login|secret-tool|keyring|keychain|security find|git /,
+      )
+    }
   })
 
   test("a usage pause leaves the models up: the keep beat runs in ops-tick and the tunnel in its own job, neither marked as calling a Claude model", () => {
