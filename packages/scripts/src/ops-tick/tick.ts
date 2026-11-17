@@ -26,7 +26,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
-import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
+import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
@@ -1135,15 +1135,14 @@ export const ghAuth =
     await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
   }
 
-// boot-check: once per boot or wake, inside BOOT_MS, as gh-auth's window reads it (bootCheckPass in boot-check.ts): a merge lock taken before the boot let go, git fsck on the shared store, a gate-owned worktree's torn object repaired, and every other break one line to Ops' waiter queue and one Inbox alert.
+// boot-check: once per boot, never a wake, inside BOOT_MS (bootCheckPass in boot-check.ts): a merge lock taken before the boot let go, git fsck on the shared store, a gate-owned worktree's torn object repaired, and every other break one line to Ops' waiter queue and one Inbox alert; a check that never finished inside BOOT_MS is one line to Ops after it.
 export const bootCheck = (lockRoot?: string) => async (ctx: Context) => {
-  const boot = await readUpSince(ctx.run)
-  if (ctx.now.getTime() - boot >= BOOT_MS) return
+  const boot = await readBootTime(ctx.run)
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
   } | null
   const ops = managerOf(roster?.agents, "ops")
-  await bootCheckPass(ctx, boot, {
+  await bootCheckPass(ctx, boot, ctx.now.getTime() - boot < BOOT_MS, {
     alert: async (title, text) => {
       await postAlert(ctx, title, text)
     },

@@ -74,13 +74,17 @@ const tear = (repo: string, sha: string, keep = 0) => {
 const kern = (ms: number) =>
   `{ sec = ${Math.floor(ms / 1000)}, usec = 0 } Tue Nov 17 10:01:45 2026\n`
 
-// ctx.run on the real git and the stub run-slot, with sysctl answering the boot and bun run ask recording each alert.
-const context = (s: ReturnType<typeof store>, boot: number, now: Date) => {
+// ctx.run on the real git and the stub run-slot, with sysctl answering the boot (and the wake when asked for it, as macOS does) and bun run ask recording each alert.
+const context = (s: ReturnType<typeof store>, boot: number, now: Date, wake?: number) => {
   const runs: string[][] = []
   const asks: string[] = []
   const run: Context["run"] = async (argv, timeoutMs = 120_000, stdin) => {
     runs.push(argv)
-    if (argv[0] === "sysctl") return { code: 0, out: kern(boot) }
+    if (argv[0] === "sysctl")
+      return {
+        code: 0,
+        out: kern(boot) + (wake && argv.includes("kern.waketime") ? kern(wake) : ""),
+      }
     if (argv[0] === "bun" && argv.includes("ask")) {
       asks.push(stdin ?? "")
       return { code: 0, out: "0b6f1c62-6a9e-4bb4-9c1e-2b1b3a4f5d6e\n" }
@@ -190,6 +194,50 @@ describe("boot-check", () => {
     expect(c.asks).toEqual([])
   })
 
+  test("a torn object only merge-types' reflog names is moved aside, and its HEAD stays", async () => {
+    const s = store("merge-types")
+    git(s.path, "checkout", "-q", "--detach", s.good)
+    const file = tear(s.repo, s.head)
+    const c = context(s, boot, now)
+    await bootCheck(s.data)(c.ctx)
+    expect(git(s.path, "rev-parse", "HEAD")).toBe(s.good)
+    expect(existsSync(file)).toBe(false)
+    expect(readdirSync(join(s.ops, "git-torn"))).toEqual([
+      expect.stringMatching(new RegExp(`^${s.head}-\\d+$`)),
+    ])
+    expect(c.told()).toEqual([expect.stringContaining("HEAD was another commit and stays")])
+    expect(c.fscks()).toBe(2)
+    expect(c.asks).toEqual([])
+  })
+
+  test("a wake is no boot: a merge lock taken before a sleep stays, and no fsck runs", async () => {
+    const s = store("merge-types")
+    const slept = now.getTime() - 2 * 60 * 60_000
+    lockAt(s.data, "2610", now.getTime() - 30 * 60_000)
+    const c = context(s, Math.floor(slept / 1000) * 1000, now, boot)
+    await bootCheck(s.data)(c.ctx)
+    expect(readFileSync(join(s.data, "merge.lock", "pr"), "utf8")).toBe("2610\n")
+    expect(c.fscks()).toBe(0)
+    expect(c.told()).toEqual([])
+  })
+
+  test("a check still unfinished when the boot window ends is one line to Ops, then quiet", async () => {
+    const s = store("merge-types")
+    tear(s.repo, s.head)
+    lockAt(s.data, "2600", boot + 30_000)
+    await bootCheck(s.data)(context(s, boot, now).ctx)
+    const late = context(s, boot, new Date(boot + 11 * 60_000))
+    await bootCheck(s.data)(late.ctx)
+    expect(late.told()).toEqual([expect.stringContaining("did not finish inside its window")])
+    expect(late.told()[0]).toContain("a live merge held the merge lock")
+    expect(late.fscks()).toBe(0)
+    expect(late.asks).toHaveLength(1)
+    expect(JSON.parse(late.asks[0]!).preview.text).toContain("did not finish inside its window")
+    await bootCheck(s.data)(late.ctx)
+    expect(late.told()).toHaveLength(1)
+    expect(late.asks).toHaveLength(1)
+  })
+
   test("past the boot window it runs no fsck", async () => {
     const s = store("merge-types")
     tear(s.repo, s.head)
@@ -207,7 +255,9 @@ describe("boot-check", () => {
     await bootCheck(s.data)(c.ctx)
     expect(git(s.path, "rev-parse", "HEAD")).toBe(s.head)
     expect(readFileSync(join(lock, "pr"), "utf8")).toBe("2600\n")
-    expect(existsSync(join(s.ops, "tick", "boot-check.json"))).toBe(false)
+    expect(JSON.parse(readFileSync(join(s.ops, "tick", "boot-check.json"), "utf8")).boot).not.toBe(
+      boot,
+    )
     rmSync(lock, { recursive: true })
     await bootCheck(s.data)(c.ctx)
     expect(git(s.path, "rev-parse", "HEAD")).toBe(s.good)

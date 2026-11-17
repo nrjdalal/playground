@@ -20,7 +20,9 @@ export type BootDeps = {
 
 type Tree = { gitDir: string; head: string; path: string }
 
-const TORN = /loose object ([0-9a-f]{40,64}) \(stored in [^)]+\) is corrupt/
+// fsck's two words for a torn loose object, measured: a fatal stop for one a HEAD reaches, an error for one only a reflog names.
+const TORN =
+  /loose object ([0-9a-f]{40,64}) \(stored in [^)]+\) is corrupt|^error: ([0-9a-f]{40,64}): object corrupt or missing: /
 const LEFTOVER = /invalid reflog entry ([0-9a-f]{40,64})/
 
 const git = (ctx: Context, cwd: string, ...args: string[]) =>
@@ -142,7 +144,10 @@ const pass = async (ctx: Context, deps: BootDeps): Promise<"again" | "clean" | "
   })
   if (found.length && !broken.length) return "clean"
   if (!broken.length) throw new Error(`git fsck exited ${fsck.code} naming nothing`)
-  const torn = broken.map((line) => TORN.exec(line)?.[1]).find(Boolean)
+  const torn = broken
+    .map((line) => TORN.exec(line))
+    .map((m) => m?.[1] ?? m?.[2])
+    .find(Boolean)
   if (!torn) {
     await report(deps, broken)
     return "told"
@@ -161,29 +166,59 @@ const pass = async (ctx: Context, deps: BootDeps): Promise<"again" | "clean" | "
       (name) => tree!.path === join(dirname(common), ".claude", "worktrees", name),
     )
   const good = gate && tree!.head === torn ? await lastGood(ctx, tree!, torn) : null
-  if (gate && (tree!.head !== torn || good)) {
+  const there = await stat(file).catch(() => null)
+  if (gate && there && (tree!.head !== torn || good)) {
     return (await repair(ctx, deps, tree!, file, torn, good)) ? "again" : "held"
   }
   const named = owners.length
     ? owners.map((t) => t.path).join(", ")
     : "no worktree's HEAD or reflog"
-  await report(deps, [`${file} is torn, named by ${named}`])
+  await report(deps, [`${file} is ${there ? "torn" : "missing"}, named by ${named}`])
   return "told"
 }
 
-// The boot check for the boot at boot (readUpSince), once per boot, kept in tick/boot-check.json once it finishes; a pass that waits on a live merge's lock or throws keeps nothing, so the next minute inside the boot window tries again.
-export const bootCheckPass = async (ctx: Context, boot: number, deps: BootDeps) => {
+type BootState = { at?: string; boot?: number; started?: number; why?: string }
+
+// The boot check for the boot at boot (readBootTime), once per boot, kept in tick/boot-check.json as done once it finishes. Inside the boot window (booting) a pass that waits on a live merge's lock or throws keeps why as unfinished, so the next minute tries again; past it, an unfinished check is one line to Ops, then done, so cycle never clears its failure unreported.
+export const bootCheckPass = async (
+  ctx: Context,
+  boot: number,
+  booting: boolean,
+  deps: BootDeps,
+) => {
   const statePath = join(ctx.ops, "tick", "boot-check.json")
-  const state = JSON.parse(await readFile(statePath, "utf8").catch(() => "null")) as {
-    boot?: number
-  } | null
+  const state = JSON.parse(
+    await readFile(statePath, "utf8").catch(() => "null"),
+  ) as BootState | null
   if (state?.boot === boot) return
-  const freed = await freeStaleLock(deps.lockRoot, boot)
-  if (freed) await deps.tell(freed)
-  let result = await pass(ctx, deps)
-  for (let i = 1; i < PASSES && result === "again"; i++) result = await pass(ctx, deps)
-  if (result === "held") return
-  if (result === "again")
-    await report(deps, [`git fsck found a torn object on each of ${PASSES} passes`])
-  await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString(), boot }))
+  const done = () => writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString(), boot }))
+  const unfinished = (why: string) =>
+    writeAtomic(statePath, JSON.stringify({ ...state, started: boot, why }))
+  if (!booting) {
+    if (state?.started !== boot) return
+    const why = `the check after the boot at ${new Date(boot).toISOString()} did not finish inside its window, so the store is unchecked: ${state.why}`
+    await deps.tell(`boot-check: ${why}`)
+    await deps.alert("The git store went unchecked after the boot", `- ⏳ ${why}`)
+    await done()
+    return
+  }
+  await unfinished("ops-tick stopped while it ran")
+  try {
+    const freed = await freeStaleLock(deps.lockRoot, boot)
+    if (freed) await deps.tell(freed)
+    let result = await pass(ctx, deps)
+    for (let i = 1; i < PASSES && result === "again"; i++) result = await pass(ctx, deps)
+    if (result === "held") {
+      await unfinished(
+        "a live merge held the merge lock at every try of the gate worktree's repair",
+      )
+      return
+    }
+    if (result === "again")
+      await report(deps, [`git fsck found a torn object on each of ${PASSES} passes`])
+  } catch (err) {
+    await unfinished(err instanceof Error ? err.message : String(err))
+    throw err
+  }
+  await done()
 }
