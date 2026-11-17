@@ -4052,6 +4052,9 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh -o SendEnv=LANG box 'ls */notes'",
     "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
     "ssh box 'set -opipefail; uptime'",
+    "ssh box 'bash --login -c uptime'",
+    "ssh box './run.sh -o out.txt'",
+    "ssh box 'bash deploy.sh --verbose -o x'",
     `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
   ])("%s, with no switch on its remote side, runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
@@ -4103,6 +4106,9 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh box 'bash -xO extglob -c \"touch ?playground/extensions/y\"'",
     "ssh box 'set -Oe; touch ?playground/extensions/y'",
     "ssh box 'set -oextendedglob; touch ?playground/extensions/y'",
+    `ssh box "zsh --extendedglob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "zsh --extended-glob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "bash --rcfile x -c 'touch ?playground/extensions/y'"`,
     `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
     "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
     `ssh box 'bash -c "set -o extendedglob; touch ?playground/extensions/y"'`,

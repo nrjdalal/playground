@@ -657,27 +657,35 @@ const GLOB_SWITCHES = [
 const DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/
 // A text read as the shell reads a name: its backslash-newline pairs joined, and past quotes, backslashes and underscores (`g_l_o_b_d_o_t_s`, `dot''glob`)
 const bareText = (text: string) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
-// The option names a -o may give that change no glob, so a strict-mode header (`set -euo pipefail`) runs
+// The option names a -o or a long option may give that change no glob, so a strict-mode header (`set -euo pipefail`) and a login shell run
 const NO_GLOB = new Set([
   "errexit",
   "errtrace",
   "functrace",
+  "login",
   "noclobber",
+  "noprofile",
+  "norc",
   "nounset",
   "pipefail",
   "verbose",
   "xtrace",
 ])
-// A set or a started shell given, before its -c script, an option cluster holding O or zsh's 4, or one holding o with a name off NO_GLOB: zsh's, the rest of the cluster after its o, and bash's, the next word; each head is read on its own, so a set inside a -c script is read too; else undefined
+// A set or a started shell, as a command word, whose options, read until its first other word, `--` or its -c cluster, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
 function optionSwitch(bare: string): string | undefined {
   for (const [, head, rest] of bare.matchAll(
-    /\b(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi,
+    /(?<=^|[\s;&|(/])(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi,
   )) {
     const words = rest!.split(/\s+/).filter(Boolean)
     for (let i = 0; i < words.length; i++) {
       const word = words[i]!
-      if (!/^[-+][a-zA-Z0-9]+$/.test(word)) continue
-      if (/[O4]/.test(word)) return `${head} ${word}`
+      if (word === "--" || !/^[-+]/.test(word)) break
+      const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word)
+      if (long) {
+        if (!NO_GLOB.has(long[1]!.replace(/-/g, "").toLowerCase())) return `${head} ${word}`
+        continue
+      }
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word) || /[O4]/.test(word)) return `${head} ${word}`
       const o = word.indexOf("o")
       if (o >= 0) {
         const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean)

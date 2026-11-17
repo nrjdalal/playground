@@ -5316,20 +5316,29 @@ var NO_GLOB = new Set([
   "errexit",
   "errtrace",
   "functrace",
+  "login",
   "noclobber",
+  "noprofile",
+  "norc",
   "nounset",
   "pipefail",
   "verbose",
   "xtrace"
 ]);
 function optionSwitch(bare) {
-  for (const [, head, rest] of bare.matchAll(/\b(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi)) {
+  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi)) {
     const words = rest.split(/\s+/).filter(Boolean);
     for (let i = 0;i < words.length; i++) {
       const word = words[i];
-      if (!/^[-+][a-zA-Z0-9]+$/.test(word))
+      if (word === "--" || !/^[-+]/.test(word))
+        break;
+      const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word);
+      if (long) {
+        if (!NO_GLOB.has(long[1].replace(/-/g, "").toLowerCase()))
+          return `${head} ${word}`;
         continue;
-      if (/[O4]/.test(word))
+      }
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word) || /[O4]/.test(word))
         return `${head} ${word}`;
       const o = word.indexOf("o");
       if (o >= 0) {

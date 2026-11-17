@@ -13,6 +13,10 @@ const controls = (): Row[] => [
     "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
   ],
   [
+    "a script's own -o after its name, past a shell's options",
+    "ssh box 'bash deploy.sh --verbose -o x'",
+  ],
+  [
     "a tar -xOf inside a remote bash -c, past the shell's own options",
     `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
   ],
@@ -74,6 +78,10 @@ const refused = (): Row[] => [
   [
     "a remote touch through a ? glob in a zsh started with its option inside its -o cluster",
     `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh started with its option as a long one",
+    `ssh box "zsh --extended-glob -c 'touch ?playground/extensions/y'"`,
   ],
   [
     "a remote touch through a ? glob after a set whose -o is mid-cluster, bash's name the next word",
