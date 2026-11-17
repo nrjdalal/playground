@@ -299,6 +299,15 @@ export const peerRecordArgv = (
   target: string,
   clone: string,
   verb: "add" | "check",
+): string[] =>
+  peerArgv(key, target, clone, `${RECORD_CLI} ${verb === "add" ? "add --stdin" : "check"}`)
+
+// The one ssh a factory script runs on a peer: no ssh config, the factory's key alone when given, never prompting, a 10-second connect, then `bun --no-env-file <command>` in the peer's clone.
+export const peerArgv = (
+  key: string | undefined,
+  target: string,
+  clone: string,
+  command: string,
 ): string[] => [
   "ssh",
   "-F",
@@ -306,7 +315,7 @@ export const peerRecordArgv = (
   ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
   ...["BatchMode=yes", "ConnectTimeout=10"].flatMap((option) => ["-o", option]),
   target,
-  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${RECORD_CLI} ${verb === "add" ? "add --stdin" : "check"}`,
+  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${command}`,
 ]
 
 // The seed: the record takes each entry the notes list for this machine, and the watched places' listing now as its baseline, so the first check names only what comes after.
