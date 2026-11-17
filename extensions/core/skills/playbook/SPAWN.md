@@ -139,6 +139,8 @@ A just-closed resume passes the load and sessions gates (the capacity gate, abov
 spawn.sh prints herdr's answer (`herdr pane <id> workspace <id>`) and records the session's `kind`, a checker's `worker=<its worker's full name>`, a worker's or runner's `reportsTo=<the session it reports to>` and, for an entry with no task, a `task` as [ROSTER.md](ROSTER.md) says, in the roster,
 by `set` through the checkout's `scripts/roster.ts`, which keeps a respawned session's work.
 The kind comes from the mode (`worker` for a worker, `runner` for a runner, the column's role for a checker or probe) or, for a manager, from its name (through `sessions.names`, then `sessions.aliases`, or `optimizer`), else an orchestrator's roster kind; a resume reads the roster's kind for the name first and refuses a name that neither the roster's kind nor a factory name places.
+Ops' sweep raises `probe-unrecorded` for a live probe the roster has not recorded after 10 minutes, and `probe-over-15m` for one live past 15 (`packages/scripts/src/ops-sweep/sweep.ts`).
+It leaves out `probe-sdk` (`SDK_PROBE` in `packages/config/src/kinds.ts`), the session the Dashboard hosts on the Agent SDK, which runs as a probe for the factory's hooks while spawn.sh never starts or records it.
 
 ## Live name and permissions
 

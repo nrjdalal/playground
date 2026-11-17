@@ -12495,14 +12495,14 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check(raw, environment = process.env) {
+async function check(raw, environment = process.env, checkout) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
+  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings, checkout), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await input("no-public-leak", "guard");

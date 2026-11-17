@@ -131,6 +131,7 @@ const machine = () => {
     liveBranch: () => "live/dashboard",
     main,
     merged: () => false,
+    mergedHead: () => null,
     notify: (text) => void told.push(text),
     places: () => [],
     prState: async () => null,
@@ -863,6 +864,22 @@ test("a worktree whose PR merged or closed passes a working roster row naming it
   }
 })
 
+// PG-2498: a row holding the worktree by its own merged PR's number alone is the freed check's, which names the PR that freed it, so the merged-head read asks gh nothing for it
+test("a worktree freed by its own merged PR, held by a row naming that PR alone, says which PR freed it and asks gh for no merged head", async () => {
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const asked: string[] = []
+  const head = git(wt, "rev-parse", "HEAD")
+  const merged: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), head) }
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  const { code, out } = await heldRun(merged, ["--worktree", wt, "--discard"], "MERGED", row, 7)
+  expect({ asked, code, said: out[0] }).toEqual({
+    asked: [],
+    code: 0,
+    said: `playground: ${wt} is freed by #7, which reads MERGED, past abc123-worker's roster row (working)`,
+  })
+})
+
 // PG-1419: the freed removal goes through the 7-day trash like any other, and --restore brings the worktree back, the work --discard let go with it
 test("a freed worktree's removal is restorable: --restore brings it back on its branch, at its commit, listed, its discarded work back as untracked", async () => {
   const { deps, main } = machine()
@@ -1404,6 +1421,78 @@ const ownPushed = () => {
   const discard = `playground rm --worktree ${own} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   return { ...m, discard, own }
 }
+
+// #2498: #2484's review clone stayed "held by gkbbch-worker" after #2484 merged, since the worker's row still named it as its pr; a row's hold by a PR that reads merged no longer counts, as SESSIONS.md's End says, while one on an open PR still keeps the clone
+test("--worktree takes a review clone a live row holds only by a PR that has merged, and keeps it while that PR is open", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-2484")
+  git(main, "worktree", "add", "-q", "--detach", clone, git(own, "rev-parse", "HEAD"))
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        {
+          branch: "PG-2475-other",
+          name: "gkbbch-worker",
+          pr: "https://github.com/o/r/pull/2484",
+          status: "working",
+        },
+      ],
+    }),
+  )
+  const held = {
+    code: 1,
+    err: [`playground: ${clone} is held by gkbbch-worker, which the roster lists as working`],
+    out: [],
+  }
+  const asked: string[] = []
+  const open: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), null) }
+  expect(await rmTold(["--worktree", clone], open)).toEqual(held)
+  expect(asked).toEqual(["https://github.com/o/r/pull/2484"])
+  const absent: RmDeps = { ...deps, mergedHead: () => "0".repeat(40) }
+  expect(await rmTold(["--worktree", clone], absent)).toEqual(held)
+  const head = git(clone, "rev-parse", "HEAD")
+  const merged: RmDeps = {
+    ...deps,
+    mergedHead: (_, u) => (u === "https://github.com/o/r/pull/2484" ? head : null),
+  }
+  const told = await rmTold(["--worktree", clone], merged)
+  expect(told.err).toEqual([])
+  expect(told.code).toBe(0)
+  expect(existsSync(clone)).toBe(false)
+})
+
+// PG-2498: a merged PR's number still holds while HEAD has a commit past that PR's head, so --discard cannot take it, and a row naming the PR alongside its branch never asks gh
+test("--worktree --discard keeps a clone with a commit past a merged PR's head, which the row holds by that PR alone", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-7")
+  const merged = git(own, "rev-parse", "HEAD")
+  git(main, "worktree", "add", "-q", "-b", "PG-7-review", clone, merged)
+  writeFileSync(join(clone, "past.txt"), "past\n")
+  git(clone, "add", "past.txt")
+  git(clone, "commit", "-qm", "past the merged head")
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-9-other" }] }),
+  )
+  const asked: string[] = []
+  const past: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), merged) }
+  expect(await rmTold(["--worktree", clone, "--discard"], past)).toEqual({
+    code: 1,
+    err: [`playground: ${clone} is held by abc123-worker, which the roster lists as working`],
+    out: [],
+  })
+  expect(asked).toEqual(["https://github.com/o/r/pull/7"])
+  expect(existsSync(join(clone, "past.txt"))).toBe(true)
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-7-review" }] }),
+  )
+  asked.length = 0
+  expect((await rmTold(["--worktree", clone, "--discard"], past)).code).toBe(1)
+  expect(asked).toEqual([])
+})
 
 test.each([
   ["an open PR", openPr],
@@ -1982,6 +2071,7 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
     expect(deps.merged("HEAD", wt)).toBeNull()
     expect(deps.defaultBranch(wt)).toBeNull()
+    expect(deps.mergedHead(wt, "https://github.com/o/r/pull/2484")).toBeNull()
     expect(existsSync(called)).toBe(false)
   } finally {
     process.env.PATH = saved.path

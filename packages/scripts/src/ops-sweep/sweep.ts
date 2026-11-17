@@ -1,7 +1,7 @@
 import { appendFile, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
-import { kindOf, placedKindOf } from "@packages/config/kinds"
+import { kindOf, placedKindOf, SDK_PROBE } from "@packages/config/kinds"
 import { type SshLaunch, sshLaunchOf, sshProcessOf } from "@packages/config/ssh-probe"
 import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
@@ -788,7 +788,7 @@ export async function check(ctx: Context): Promise<string[]> {
   }
   for (const name of Object.keys(seen)) if (!live.has(name)) delete seen[name]
   for (const name of live.keys()) {
-    if (kindOf(name, kinds.get(name)) !== "probe") continue
+    if (name === SDK_PROBE || kindOf(name, kinds.get(name)) !== "probe") continue
     seen[name] ??= now
     const age = Math.floor((now - seen[name]!) / 60)
     if (age >= 15) found.push(`probe-over-15m:${name}`)

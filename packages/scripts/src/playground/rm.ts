@@ -108,6 +108,8 @@ export type RmDeps = {
   machine?: string
   main: string
   merged: (sha: string, at: string) => boolean | null
+  // The head of the PR at url once it reads MERGED, from gh in the worktree, else null.
+  mergedHead: (path: string, url: string) => string | null
   notify: (text: string) => void
   places: () => string[]
   prState: (path: string, pr?: string) => Promise<PrRead>
@@ -224,6 +226,25 @@ export const prStateOf = (
     : null
 }
 
+// The head of the PR at url once it reads MERGED, from gh in the worktree through ghRead, by the URL so it answers for that PR's own repo; null while it reads open or closed, or when gh cannot answer, a skipped or stopped read included.
+const mergedHead = (path: string, url: string): string | null =>
+  ghOut(
+    [
+      "pr",
+      "view",
+      url,
+      "--json",
+      "state,headRefOid",
+      "--jq",
+      'if .state == "MERGED" then .headRefOid else "" end',
+    ],
+    path,
+  ) || null
+
+// The worktree's own PR number as a holder field, from rm's prState answer, none when it names no PR or gh was unreachable.
+export const ownPrOf = (own: PrRead | undefined): { ownPr?: number } =>
+  own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}
+
 // A worktree's PR state from gh in it through ghRead, the --pr URL's else its branch's, by prStateOf, unreachable when ghRead skips or stops gh, or null when gh or git cannot answer.
 const prState = async (path: string, pr?: string): Promise<PrRead> => {
   const gh = (args: string[]): unknown => {
@@ -266,6 +287,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   liveBranch,
   main: mainCheckout(repo),
   merged,
+  mergedHead,
   notify: (text) =>
     void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
       env: { ...process.env, NOTIFY_TO: "dispatcher" },
@@ -493,10 +515,10 @@ export async function removePath(
       ok: false,
     }
   const freed = own === undefined ? undefined : freedOf(own)
-  let liveBranch: string | undefined
+  let dashboardBranch: string | undefined
   if (args.worktree)
     try {
-      liveBranch = deps.liveBranch()
+      dashboardBranch = deps.liveBranch()
     } catch (error) {
       return {
         line: `the live.branch setting cannot be read (${(error as Error).message}), so no worktree is removed`,
@@ -518,10 +540,11 @@ export async function removePath(
             discard: args.discard,
             ...(freed ? { freed } : {}),
             live: STATUSES.live,
-            ...(liveBranch ? { liveBranch } : {}),
+            ...(dashboardBranch ? { liveBranch: dashboardBranch } : {}),
             merged: deps.merged,
+            mergedHead: (url: string) => deps.mergedHead(args.path, url),
             note,
-            ...(own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}),
+            ...ownPrOf(own),
             places: deps.places,
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),

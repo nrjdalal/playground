@@ -44,6 +44,8 @@ export type Holders = {
   // The live Dashboard's branch (the live.branch setting): the main checkout's worktree on it is never removed, --discard included.
   liveBranch?: string
   merged: (sha: string, at: string) => boolean | null
+  // The head of the PR at a URL a live row names once it reads MERGED, else null (open, closed or unreadable), asked only for a URL whose number matches the worktree and is the row's one hold: a merged PR's hold no longer counts while HEAD holds no commit past that head, as SESSIONS.md's End says, since its worker or checker is only finishing up.
+  mergedHead?: (url: string) => string | null
   note?: (line: string) => void
   // The number of the worktree's own pull request, as GitHub names it by the worktree's branch, in any state: a live row listing it holds the worktree whatever the worktree's folder and branch are named.
   ownPr?: number
@@ -982,6 +984,13 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const where = `${folder} ${branch.toLowerCase()}`
   // Each name's slug, after its PG-<n>- prefix: lint holds PG-12-lint-job, not PG-5-splint.
   const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
+  const heads = new Map<string, string | null>()
+  // Whether the merged PR at url holds all of HEAD, read once per URL: HEAD is its head or behind it, so no commit past it goes; an unreadable or open PR, or a head this clone lacks, reads false
+  const atMergedHead = (url: string) => {
+    if (!heads.has(url)) heads.set(url, holders.mergedHead?.(url) ?? null)
+    const merged = heads.get(url)
+    return !!merged && git("merge-base", "--is-ancestor", "HEAD", merged).ok
+  }
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
@@ -994,12 +1003,23 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr); --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr), but, where those PRs are its one hold, not by another PR that reads merged with HEAD at or behind its head (mergedHead), so commits past it keep the hold, the worktree's own freed PR left to the freed check below; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
-    const prs = rowPullRequests(agent)
+    const matched = rowPullRequests(agent)
       .filter((u) => !(liftable && u === holders.pr))
-      .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
-      .filter((n) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+      .flatMap((u) => {
+        const n = /\/pull\/(\d+)$/.exec(u)?.[1]
+        return n ? [{ n, u }] : []
+      })
+      .filter(
+        ({ n }) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where),
+      )
+    const byPrAlone = !byBranch && !byName && !byId
+    const prs = (
+      byPrAlone
+        ? matched.filter(({ n, u }) => n === String(holders.freed?.number) || !atMergedHead(u))
+        : matched
+    ).map(({ n }) => n)
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more

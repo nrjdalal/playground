@@ -11627,7 +11627,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
-async function inspect3(raw, environment) {
+async function inspect3(raw, environment, checkout) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -11639,7 +11639,7 @@ async function inspect3(raw, environment) {
   const { cwd, tool_input: input, tool_name: tool } = payload;
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment));
-    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : "";
   };
   if (typeof tool === "string" && MCP_TOOL2.test(tool))
     return judgeTool(tool, input ?? {}, factoryOf());
@@ -11706,9 +11706,9 @@ async function inspect3(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit);
 }
-async function check5(raw, environment = process.env) {
+async function check5(raw, environment = process.env, checkout) {
   try {
-    return await inspect3(raw, environment);
+    return await inspect3(raw, environment, checkout);
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;
@@ -18544,14 +18544,14 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check21(raw, environment = process.env) {
+async function check21(raw, environment = process.env, checkout) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings, checkout), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (false) {}
 
