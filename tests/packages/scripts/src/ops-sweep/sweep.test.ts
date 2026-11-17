@@ -1248,6 +1248,21 @@ describe("opsDown", () => {
     expect(await opsDown(ctx)).toEqual(["ops-failing:ops-peer-relay"])
   })
 
+  test("treats a steady up: beat as healthy and a failed: beat as failing (PG-2637)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const beat = (lastResult: string) =>
+      write(join(ops, "ops-tunnel.json"), {
+        cycleSeconds: 60,
+        job: "ops-tunnel",
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    beat("up: 127.0.0.1:18000")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("failed: x")
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-tunnel"])
+  })
+
   test.each([
     [
       "stale",

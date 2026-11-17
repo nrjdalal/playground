@@ -295,6 +295,9 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
+// A steady beat that is no ok and neither of these is a failure: a waiting: beat has nothing to read yet, and a healthy tunnel job beats up: while its link holds.
+const HEALTHY_RESULT = ["waiting: ", "up: "]
+
 // The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's; a RETIRED job's heartbeat file, which outlives it, goes unread.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
@@ -315,8 +318,8 @@ export async function opsDown(ctx: Context): Promise<string[]> {
       if (disabled.has(String(b.job))) continue
       const at = Date.parse(String(b.lastBeatAt))
       if (Number.isNaN(at)) throw new Error("lastBeatAt")
-      // a waiting: beat has nothing to read yet, as opsRowOf reads it, so it is no failure
-      if (b.lastResult !== "ok" && !String(b.lastResult).startsWith("waiting: "))
+      // a waiting: beat has nothing to read yet and a tunnel job's steady up: beat holds its link, so both are healthy, as opsRowOf reads them
+      if (b.lastResult !== "ok" && !HEALTHY_RESULT.some((p) => String(b.lastResult).startsWith(p)))
         out.push(`ops-failing:${b.job}`)
       if (ctx.now() - at > 3 * Number(b.cycleSeconds ?? 60) * 1000) out.push(`ops-stale:${b.job}`)
     } catch {
