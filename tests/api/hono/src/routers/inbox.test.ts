@@ -179,8 +179,8 @@ describe("an Approve the dashboard carries out: an accept, an apps change, a gra
       join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
     ).text()
     expect(source).toContain('readsLive() && process.platform === "linux"')
-    expect(source).toContain("? (argv) => runArgv(argv, ROOT_TIMEOUT_MS)")
-    expect(source.match(/runArgv\(argv, ROOT_TIMEOUT_MS\)/g)).toHaveLength(1)
+    expect(source).toContain("? (argv, input) => runArgv(argv, ROOT_TIMEOUT_MS, input)")
+    expect(source.match(/runArgv\(argv, ROOT_TIMEOUT_MS, input\)/g)).toHaveLength(1)
   })
 })
 
