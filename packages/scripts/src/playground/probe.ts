@@ -282,12 +282,14 @@ export const supervisorRunning = (): boolean => {
 }
 
 // The machine's boot time, epoch seconds, from sysctl on macOS and /proc/stat btime on Linux, else 0, so a start is held only while the machine that made it still runs, mirroring up.py boot_time().
-const bootTime = (): number => {
+export const bootTime = (): number => {
   if (process.platform === "darwin") {
-    const mac = Bun.spawnSync(["sysctl", "-n", "kern.boottime"], { stdout: "pipe" })
-    if (mac.exitCode === 0) {
-      const m = mac.stdout.toString().match(/\bsec = (\d+)/)
+    try {
+      const mac = Bun.spawnSync(["sysctl", "-n", "kern.boottime"], { stdout: "pipe" })
+      const m = mac.exitCode === 0 ? mac.stdout.toString().match(/\bsec = (\d+)/) : null
       if (m) return Number(m[1])
+    } catch {
+      return 0
     }
   }
   try {

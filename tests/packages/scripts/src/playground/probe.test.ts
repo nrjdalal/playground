@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   apiRead,
   apiUp,
+  bootTime,
   cutDashboardCheckout,
   dashboardCheckout,
   dashboardUrls,
@@ -357,20 +358,6 @@ describe("graceEnded", () => {
 })
 
 describe("upHolds", () => {
-  // bootTime reads the machine's /proc/stat btime on Linux, so the rows set the start after it: only the intended rule can fire, and the row stays the same on a freshly booted machine.
-  const readBoot = (): number => {
-    try {
-      for (const line of readFileSync("/proc/stat", "utf8").split("\n")) {
-        if (line.startsWith("btime ")) {
-          const secs = line.trim().split(/\s+/)[1]
-          if (secs) return Number(secs)
-        }
-      }
-    } catch {
-      return 0
-    }
-    return 0
-  }
   const writeOps = (data: string, state: unknown, beat?: Record<string, unknown>): void => {
     const ops = join(data, "ops")
     mkdirSync(ops, { recursive: true })
@@ -389,7 +376,7 @@ describe("upHolds", () => {
   }
 
   test("holds a start still within grace, so the wait keeps waiting for up.py to start it", () => {
-    const boot = readBoot()
+    const boot = bootTime()
     const data = join(dir, "up-holds-holds")
     const start = boot + 100
     const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
@@ -398,7 +385,7 @@ describe("upHolds", () => {
   })
 
   test("ends early when the heartbeat recorded a start at or after the one up.py made, so the wait stops holding it", () => {
-    const boot = readBoot()
+    const boot = bootTime()
     const data = join(dir, "up-holds-beat")
     const start = boot + 100
     const beat = { startedAt: new Date((start + 10) * 1000).toISOString() }
@@ -406,8 +393,16 @@ describe("upHolds", () => {
     expect(withData(data, () => upHolds(start * 1000 + 50_000))).toBe(false)
   })
 
+  test("ends early when the machine booted at or after the start up.py made, so the wait stops holding it", () => {
+    const start = bootTime()
+    const data = join(dir, "up-holds-boot")
+    const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
+    writeOps(data, { "ops-dashboard": start }, beat)
+    expect(withData(data, () => upHolds(start * 1000 + 50_000))).toBe(false)
+  })
+
   test("drops a start past its 600s grace, so the wait bails, even with a heartbeat up.py made later", () => {
-    const boot = readBoot()
+    const boot = bootTime()
     const data = join(dir, "up-holds-past")
     const start = boot + 100
     const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
