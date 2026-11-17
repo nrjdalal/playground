@@ -111,7 +111,9 @@ const kindOf = (path: string, folder: boolean): Kind => {
 const expand = (path: string): string[] => {
   if (!path.includes("*")) return [path]
   try {
-    return [...new Bun.Glob(basename(path)).scanSync({ cwd: dirname(path), dot: true, onlyFiles: false })]
+    return [
+      ...new Bun.Glob(basename(path)).scanSync({ cwd: dirname(path), dot: true, onlyFiles: false }),
+    ]
       .map((name) => join(dirname(path), name))
       .sort()
   } catch {

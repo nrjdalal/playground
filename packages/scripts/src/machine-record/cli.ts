@@ -160,7 +160,9 @@ export async function runRecord(words: string[], io: RecordIo): Promise<number> 
       io.now(),
     )
     for (const item of skipped)
-      io.err(`playground record: skipped ${item}: not one plain path on this machine, so add it by hand`)
+      io.err(
+        `playground record: skipped ${item}: not one plain path on this machine, so add it by hand`,
+      )
     if (!entries.length) {
       io.err(`playground record: ${join(notes, FOOTPRINT_NOTE)} lists no path for ${machine}`)
       return 1

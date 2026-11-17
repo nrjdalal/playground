@@ -323,10 +323,7 @@ describe("the seed's notes (PG-2538)", () => {
       "/h/models/hf/ acme/Model-7B",
     ])
     const { entries, skipped } = seedEntries(FOOTPRINT, UNDO, "spark-test", "/h", NOW)
-    expect(skipped).toEqual([
-      "/h/models/hf/ acme/Model-7B",
-      "/h/models/kit/runs/MB-model-1s-*",
-    ])
+    expect(skipped).toEqual(["/h/models/hf/ acme/Model-7B", "/h/models/kit/runs/MB-model-1s-*"])
     for (const { path } of entries) expect(path, path).toMatch(/^(?:docker \S+ \S+|\/[^\s*<>()]+)$/)
   })
 
@@ -406,7 +403,7 @@ describe("what adds a path keeps it where the check looks (PG-2538)", () => {
     expect(watched.some((folder) => folder === "/tmp" || folder.startsWith("/tmp/"))).toBe(false)
   })
 
-  test("ci.sh's run folder on the box is held, and upload records it as it makes it", async () => {
+  test("ci.sh's run folder on the box is held, and every upload hands it to the record", async () => {
     const ci = await Bun.file(
       join(import.meta.dir, "../../../../../scripts/ops/runner-host/ci.sh"),
     ).text()
@@ -414,20 +411,21 @@ describe("what adds a path keeps it where the check looks (PG-2538)", () => {
     expect(folder).toBeDefined()
     expect(held(`${HOME}/${folder}`), folder).toBe(true)
     expect(ci).toContain("CI=$BOXHOME/$BOX_CI_DIR")
-    expect(ci).toMatch(/\[ -d \$CI \] \|\| \{ install -d -m 0700 \$CI && \{ \$record; \}/)
-    expect(ci).toMatch(/local record=".*playground record add \$CI --kind folder /)
+    expect(ci).toMatch(/\/suite\.sh" \|\| exit 255\n {2}record\n {2}git -C "\$1" archive /)
   })
 
-  test("every image suite.sh starts a container from on the box goes into its record as the run starts it", async () => {
-    const suite = await Bun.file(
-      join(import.meta.dir, "../../../../../scripts/ops/runner-host/suite.sh"),
-    ).text()
-    const images = [...suite.matchAll(/docker run -d [^\n]* ([a-z0-9./-]+:[a-z0-9.-]+) >/g)].map(
+  test("every image suite.sh starts a container from on the box is an entry ci.sh's record hands the box", async () => {
+    const [suite, ci] = await Promise.all(
+      ["suite.sh", "ci.sh"].map((name) =>
+        Bun.file(join(import.meta.dir, "../../../../../scripts/ops/runner-host", name)).text(),
+      ),
+    )
+    const images = [...suite!.matchAll(/docker run -d [^\n]* ([a-z0-9./-]+:[a-z0-9.-]+) >/g)].map(
       (m) => m[1]!,
     )
     expect(images).toEqual(["postgres:alpine"])
     for (const image of images)
-      expect(suite).toContain(`playground record add "docker image ${image}" --kind image `)
+      expect(ci).toContain(`"kind":"image","path":"docker image ${image}"`)
   })
 
   test("a peer is reached by one fixed ssh: the key alone, no prompt, no user config, the record CLI in its clone", () => {
