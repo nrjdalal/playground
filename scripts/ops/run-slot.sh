@@ -1788,7 +1788,7 @@ prio_first() {
 prio_waiting() { [ -n "$(prio_first)" ]; }
 
 free() {
-  # give the slot back only while its holder line is still ours
+  # give the slot back only while its holder line is still ours; giveBackSlot (packages/scripts/src/playground/give-back.ts) removes the same files, so a file added here goes there too
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # the holder line goes first, so a waiter whose mkdir loses to the next taker never reads our dead pid and reclaims that taker's slot (reviewer-ops-load-units, 19 Oct)
     rm -f "$SLOT.holder" "$SLOT.child" "$SLOT.preempted"

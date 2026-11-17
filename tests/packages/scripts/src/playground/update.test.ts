@@ -19,6 +19,9 @@ import {
 } from "../../../../../packages/scripts/src/playground/update"
 import { watchTorn } from "../torn-reads"
 
+// a run under run-slot would give its own real lane back from the rows that roll, so every row starts with none
+delete process.env.RUN_SLOT_HELD
+
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "playground-update-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 

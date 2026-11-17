@@ -557,8 +557,42 @@ describe("rollOutcome", () => {
         "Waiting for load: load5 is 18.2, and the roll goes on under 16",
       )
       expect(waitingLine("waiting for a run slot (worker-a 4242)", 3)).toBe(
-        "Waiting for a run slot: waiting for a run slot (worker-a 4242)",
+        "Waiting for a run slot (worker-a 4242)",
       )
+      expect(waitingLine("queued behind 2 waiter(s) ahead of it in the queue's order", 3)).toBe(
+        "Waiting for a run slot: queued behind 2 waiter(s) ahead of it in the queue's order",
+      )
+    })
+
+    // round 1 of #2648: the install's general-queue wait and the build's captured wait still read as Building, then a false Failed at 30 minutes
+    test("an install queued behind other waiters reads as waiting until run-slot gives it a lane", () => {
+      const log = [
+        rolling,
+        "run-slot.sh: ops-dashboard holds run-slot-clone",
+        "run-slot.sh: queued behind 2 waiter(s) ahead of it in the queue's order",
+      ]
+      expect(rollOutcome(log, [])).toEqual({
+        phase: "waiting",
+        why: "queued behind 2 waiter(s) ahead of it in the queue's order",
+      })
+      expect(rollOutcome([...log, "run-slot.sh: ops-dashboard holds run-slot-2"], [])).toEqual({
+        phase: "building",
+      })
+    })
+
+    test("a build whose run-slot lines the supervisor captures reads as waiting once its own still-queued line lands", () => {
+      const log = [
+        rolling,
+        "run-slot.sh: ops-dashboard holds run-slot-clone",
+        "run-slot.sh: ops-dashboard holds run-slot",
+        "2026-11-17T12:02:00Z building abc1234 before the stop, from /ops/dashboard/staging",
+        "2026-11-17T12:22:00Z prebuild build still queued after 1200s; it keeps waiting",
+      ]
+      expect(rollOutcome(log, [])).toEqual({
+        phase: "waiting",
+        why: "prebuild build still queued after 1200s; it keeps waiting",
+      })
+      expect(rollTimedOut(rollOutcome(log, []), 18).ok).toBe(true)
     })
 
     test("still waiting at 30 minutes reads as waiting and passes, never Failed, since the roll goes on by itself", () => {

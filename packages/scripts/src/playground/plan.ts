@@ -405,12 +405,12 @@ export type RollOutcome =
   | { phase: "waiting"; why: string }
   | { done: string; ok: boolean }
 
-// A waiting roll's line: the load it waits on, read now, when run-slot's reason is load5's line, else run-slot's own reason.
+// A waiting roll's line: the load it waits on, read now, when run-slot's reason is load5's line, else run-slot's own reason, said once.
 export const waitingLine = (why: string, load5: number) => {
   const under = why.match(/load5 under (\d+)/)?.[1]
-  return under
-    ? `Waiting for load: load5 is ${load5.toFixed(1)}, and the roll goes on under ${under}`
-    : `Waiting for a run slot: ${why}`
+  if (under)
+    return `Waiting for load: load5 is ${load5.toFixed(1)}, and the roll goes on under ${under}`
+  return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
 // The end of a roll that gave no result in 30 minutes: one still queued in run-slot goes on by itself, so it reads as waiting and passes, and any other is a failure.
@@ -467,11 +467,14 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
   )
   if (rolling >= 0 && starting > rolling) return { phase: "switching" }
-  // a prebuild step queued in run-slot, whose stderr the supervisor logs, waits until run-slot's next line of its own; the supervisor's own lines between leave it waiting
+  // a prebuild step queued in run-slot, whose stderr the supervisor logs, waits until run-slot's next line of its own, the supervisor's own lines between leaving it waiting; the build, whose run-slot lines build_head captures, shows its wait only in the supervisor's still-queued line
   let why: string | undefined
   for (const line of rolling >= 0 ? log.slice(rolling + 1) : []) {
     const said = line.match(/^run-slot\.sh: (.*)$/)?.[1]
-    if (said !== undefined) why = /^(this clone waits|waiting for) /.test(said) ? said : undefined
+    if (said !== undefined)
+      why = /^(this clone waits|waiting for|queued behind) /.test(said) ? said : undefined
+    const queued = line.match(/ (prebuild \w+ still queued after \d+s.*)$/)?.[1]
+    if (queued !== undefined && why === undefined) why = queued
   }
   return why === undefined ? { phase: "building" } : { phase: "waiting", why }
 }
