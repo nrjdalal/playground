@@ -206,7 +206,7 @@ function upToDate(facts: PrFacts): Gate {
         ok: true,
       }
     : {
-        detail: `${behind} and conflicts with it; merge ${BASE} in, then the new head needs its checks and a 5/5`,
+        detail: `${behind} and conflicts with it; merge ${BASE} in, then the new head needs its checks, a 5/5 and each PASS its diff calls for`,
         name,
         ok: false,
       }

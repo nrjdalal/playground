@@ -17,7 +17,8 @@ at that head and the head is up to date with canary:
                 holds every PR
   base          it merges into canary
   up to date    canary has no commit the head lacks, or the head merges with canary clean;
-                a conflict needs canary merged in, then checks and a 5/5 at the new head
+                a conflict needs canary merged in, then checks, a 5/5 and each PASS
+                its diff calls for at the new head
   keeps canary  no merge of canary into the PR dropped a line canary added that git's own
                 merge keeps and the squash still lacks, in a file that merges clean (a
                 merge with -s ours drops them); blank lines, moves and rewrites pass, and
