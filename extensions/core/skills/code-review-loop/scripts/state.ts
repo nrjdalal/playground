@@ -977,9 +977,12 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
 
 const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
 
-// Pure: a red run's red files from its junit report: each file with a failed testcase, and each test file the report leaves out, since bun drops a file that throws as it loads (an import canary broke); a report that is missing names none.
-export const redIn = (xml: string | undefined, files: string[]): string[] => {
-  if (xml === undefined) return []
+// Pure: a red run's junit report read for its files: failed, each with a failed testcase, and leftOut, each test file the report leaves out, as bun leaves out a file that throws as it loads and one that defines no test; a report that is missing names none.
+export const redIn = (
+  xml: string | undefined,
+  files: string[],
+): { failed: string[]; leftOut: string[] } => {
+  if (xml === undefined) return { failed: [], leftOut: [] }
   const listed = new Set(
     [...xml.matchAll(/<test(?:suite|case)\b[^>]*\bfile="([^"]*)"/g)].map((m) => m[1]),
   )
@@ -988,7 +991,10 @@ export const redIn = (xml: string | undefined, files: string[]): string[] => {
       .filter((m) => /<(failure|error)\b/.test(m[2]!))
       .map((m) => m[1]),
   )
-  return files.filter((f) => failed.has(f) || (/\.test\.tsx?$/.test(f) && !listed.has(f)))
+  return {
+    failed: files.filter((f) => failed.has(f)),
+    leftOut: files.filter((f) => !failed.has(f) && /\.test\.tsx?$/.test(f) && !listed.has(f)),
+  }
 }
 
 // Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens. --conflict-only stops after merge-tree, running none of the PR's code, for an outside author's PR.
@@ -1048,7 +1054,7 @@ export const cmdMerge = (...args: string[]): void => {
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
-  // A run's red files, read from its report; a red run whose report names none counts every file it ran as red, and says where.
+  // A run's red files, read from its report, each file the report leaves out red only when it is red alone too, which tells a file that throws as it loads from one that defines no test; a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
   const red = (files: string[], where: string): string[] => {
@@ -1059,7 +1065,9 @@ export const cmdMerge = (...args: string[]): void => {
     try {
       xml = readFileSync(report, "utf8")
     } catch {}
-    const named = redIn(xml, files)
+    const { failed, leftOut } = redIn(xml, files)
+    const alone = files.length > 1 ? leftOut.filter((f) => red([f], where).length) : leftOut
+    const named = files.filter((f) => failed.includes(f) || alone.includes(f))
     if (named.length) return named
     unnamed.push(where)
     return files
