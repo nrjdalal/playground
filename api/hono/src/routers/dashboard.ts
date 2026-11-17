@@ -85,7 +85,7 @@ import {
   type ModeResult,
   type SettingChanging,
 } from "@/lib/dashboard/sdk"
-import { settingRequestSchema, type SessionSetting } from "@/lib/dashboard/setting"
+import { settingRequestSchema, type HostedSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
 import {
   createThread,
@@ -482,9 +482,9 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
-// The setting route's work once the request is through its guards: a model or an effort for a dispatcher or the assistant, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher or the assistant, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(), which alone takes a local model; any other session, and a local model for a typed one, is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
 export async function changeSetting(
-  { id, sessionId, setting }: { id?: string; sessionId: string; setting: SessionSetting },
+  { id, sessionId, setting }: { id?: string; sessionId: string; setting: HostedSetting },
   actor: Delivery["actor"],
   live: () => Promise<Live> = listLive,
   send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
@@ -500,9 +500,13 @@ export async function changeSetting(
       `A model or effort is set on ${[...DISPATCHERS, "the assistant", SDK_PROBE].join(", ")} only`,
     )
   }
-  const result = typed
-    ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
-    : await setHosted({ actor, sessionId, setting })
+  if ("local" in setting && !worker.hosted) {
+    throw new ApiError(403, "FORBIDDEN", `A local model is set on ${SDK_PROBE} only`)
+  }
+  const result =
+    typed && !("local" in setting)
+      ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
+      : await setHosted({ actor, sessionId, setting })
   if (!result.ok) {
     const [status, code] = FAILURE_STATUS[result.code]
     throw new ApiError(status, code, result.reason, { delivery: result.code })
@@ -1035,7 +1039,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/workers/:sessionId/setting",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}), of the session the roster seats as the assistant, or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed, and for a model answers the switch confirm Claude Code may draw and waits for its status line to name the model, refused as BUSY with nothing typed while it works a turn or compacts; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds an effort command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}), of the session the roster seats as the assistant, or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, \`effort\` one of ${SESSION_EFFORTS.join(", ")}, or, for ${SDK_PROBE} alone, \`local\`, the id of a local model PLAYGROUND_LOCAL_MODELS names, which restarts it on that model's server (any other session FORBIDDEN, and refused as BUSY mid-turn or when the server serves another model); one of the three alone. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed, and for a model answers the switch confirm Claude Code may draw and waits for its status line to name the model, refused as BUSY with nothing typed while it works a turn or compacts; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds an effort command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
       responses: {
         200: {
           description:

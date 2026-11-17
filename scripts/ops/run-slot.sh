@@ -1016,7 +1016,9 @@ types_cached() {
   turbo_cached check-types "$(box_dir "$@")" ${vars[@]+"${vars[@]}"}
 }
 # whether turbo's dry run of task $1, in folder $2 with the VAR=x words after them, finds every task it runs cached
-turbo_cached() {
+turbo_cached() { [ "$(turbo_misses "$@")" = 0 ]; }
+# how many tasks turbo's dry run of task $1, in folder $2 with the VAR=x words after them, would run rather than replay; it prints nothing and fails on a dry run that fails, takes over 10 s, holds no task or cannot be read
+turbo_misses() {
   (cd "$2" 2>/dev/null && python3 -I - "$1" "${@:3}" 2>/dev/null <<'PY'
 import json, os, signal, subprocess, sys
 env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[2:]))
@@ -1028,7 +1030,9 @@ except subprocess.TimeoutExpired:
     p.wait()
     sys.exit(1)
 tasks = [t for t in json.loads(out)["tasks"] if t.get("command") != "<NONEXISTENT>"]
-sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" for t in tasks) else 1)
+if p.returncode != 0 or not tasks:
+    sys.exit(1)
+print(sum(t["cache"]["status"] != "HIT" for t in tasks))
 PY
   )
 }
@@ -1078,7 +1082,7 @@ runs_program() {
   esac
   return 1
 }
-# a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
+# a commit whose pre-commit build runs next build, and whose dry run cannot say how many tasks it would run, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
   local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
@@ -1178,9 +1182,13 @@ heavy_build() {
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files" || return 1
-  # a build turbo replays whole from its cache runs in seconds, so only one with a task to run counts big (5 Nov: under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
-  ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
+  # a commit's build ends in seconds whatever turbo would run, so only a dry run that cannot say counts big, failing closed: on 17 Nov each commit build that waited 17 to 27 minutes in the queue held 3 to 9 tasks to run and ran 8 to 23 s, and 3 whole rebuilds of 11 tasks ran 13 to 19 s (5 Nov: under run-slot, commit-slot.ts runs the build bare inside the commit's own slot); the cache folder is lefthook.yml's pre-commit default
+  BUILD_TASKS=$(turbo_misses build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"})
+  [[ "$BUILD_TASKS" =~ ^[0-9]+$ ]] && return 1
+  BUILD_TASKS=unread
 }
+# the tasks a commit's build would run, or unread, which main logs as a why line
+BUILD_TASKS=
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
 # the pieces of a command's words that hold a glob or brace character, one a line, each word split at blanks, quotes, backquotes and the shell's ; | & ( ) < >, its backslashes dropped as an outer shell's quote removal drops them
@@ -1340,6 +1348,8 @@ case "$UNITS" in 1|2|3) ;; *) SIZE=medium UNITS=2 ;; esac
 # a ticket's units come from the run, so a light run from a big session ranks as small; a suite or a full build keeps its session's size
 HEAVY=
 heavy_build "$@" && HEAVY=1
+# a commit's build names its uncached task count, so its lane can be read against its wait and run time
+[ -z "$BUILD_TASKS" ] || [ -n "$KIND_ONLY$CAN_TAKE$REREAD" ] || rlog why "build-tasks=$BUILD_TASKS"
 light_run "$@" && SIZE=small UNITS=1
 DOCKER=$(docker_kind "$@")
 # kind's answer: refuse for a docker run run-slot refuses, docker for one it takes to run-slot-docker, else quick_kind's lane (clone, commit, quick, or nothing for the queue)

@@ -9,10 +9,11 @@ import {
   type CanUseTool,
   type PermissionResult,
   type Query,
-  type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
 import { PERMISSION_MODE_LABELS } from "@packages/config/console"
+import { SDK_PROBE } from "@packages/config/kinds"
+import type { LocalModel } from "@packages/config/org"
 import type { ActivityActor, ActivityEvent } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import { dataDirOf } from "@packages/env/data-dir"
@@ -35,13 +36,19 @@ import {
   type FeedReply,
   type FeedResult,
 } from "@/lib/dashboard/feed"
-import { settingSummary, type SessionEffort, type SessionSetting } from "@/lib/dashboard/setting"
+import {
+  settingSummary,
+  type HostedSetting,
+  type SessionEffort,
+  type SessionSetting,
+} from "@/lib/dashboard/setting"
 import { feedItemOf, hostSessions, type FeedItem, type Worker } from "@/lib/dashboard/workers"
+import { org } from "@/lib/org"
 import { SESSION_FILE } from "@/lib/sessions/own"
 import { dataDir, transcriptPath } from "@/lib/sessions/paths"
 
 // The dashboard's second way to reach a session, beside herdr's: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
-export const SDK_PROBE = "probe-sdk"
+export { SDK_PROBE }
 
 export { SESSION_FILE }
 
@@ -77,16 +84,83 @@ const HOSTED_ENV = [
   "USER",
 ]
 
+// A local model's server and the id it serves the model under, which the hosted session runs on in place of the default endpoint.
+export type LocalEndpoint = { id: string; url: string }
+
+// The token a session on a local model sends its server: a fixed word that is no secret, so the login's own token never goes there.
+export const LOCAL_TOKEN = "playground-local"
+
+// What a session on a local model takes beside the allowlist: its server, the token above, the local id under each alias Claude Code asks for (its own background calls ask for haiku), and few retries, so a server that stops answering shows its error in the chat within seconds rather than retrying for minutes.
+const localEnv = ({ id, url }: LocalEndpoint): Record<string, string> => ({
+  ANTHROPIC_AUTH_TOKEN: LOCAL_TOKEN,
+  ANTHROPIC_BASE_URL: url,
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: id,
+  ANTHROPIC_DEFAULT_OPUS_MODEL: id,
+  ANTHROPIC_DEFAULT_SONNET_MODEL: id,
+  CLAUDE_CODE_MAX_RETRIES: "2",
+})
+
 export const hostedEnv = (
   from: Record<string, string | undefined> = process.env,
   data: string = dataDir(),
+  local: LocalEndpoint | null = null,
 ): Record<string, string> => {
   const env: Record<string, string> = {}
   for (const key of HOSTED_ENV) {
     const value = from[key]
     if (value !== undefined) env[key] = value
   }
-  return { ...env, PLAYGROUND_DATA_DIR: data, PLAYGROUND_ROLE: "probe" }
+  return {
+    ...env,
+    PLAYGROUND_DATA_DIR: data,
+    PLAYGROUND_ROLE: "probe",
+    ...(local && localEnv(local)),
+  }
+}
+
+// How long the local server has to list its models before a pick reads it as not answering.
+export const LOCAL_READ_MS = 5_000
+
+// The model ids the local server serves (vLLM's /v1/models), or null when it does not answer in time.
+export async function servedModels(
+  url: string,
+  timeoutMs = LOCAL_READ_MS,
+): Promise<string[] | null> {
+  try {
+    const response = await fetch(new URL("/v1/models", url), {
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!response.ok) return null
+    const body = (await response.json()) as { data?: { id?: unknown }[] }
+    return (body.data ?? []).flatMap((model) => (typeof model.id === "string" ? [model.id] : []))
+  } catch {
+    return null
+  }
+}
+
+export type LocalPlan = { do: "refuse"; down: boolean; reason: string } | { do: "switch" }
+
+// Pure: what a pick of a local model does, given the ids its server serves now (null when it does not answer): switch when it serves the pick, else refuse in words naming the model loaded and the one picked. The one place a pick's outcome is decided.
+export function localPlan(
+  picked: LocalModel,
+  served: string[] | null,
+  models: LocalModel[],
+): LocalPlan {
+  if (served === null)
+    return {
+      do: "refuse",
+      down: true,
+      reason: `The local model server isn't answering, so the chat stays on its model, not ${picked.label}.`,
+    }
+  if (served.includes(picked.id)) return { do: "switch" }
+  const loaded = served.map((id) => models.find((model) => model.id === id)?.label ?? id)
+  return {
+    do: "refuse",
+    down: false,
+    reason: loaded.length
+      ? `${loaded.join(" and ")} is loaded on the local model server right now, not ${picked.label}.`
+      : `No model is loaded on the local model server right now, so ${picked.label} can't answer.`,
+  }
 }
 
 // Pure: what the session asks, as the card that shows it. A picker is AskUserQuestion's questions; ExitPlanMode is a plan; anything else is a tool it asks to run, shown with its whole input. Clipping and hidden characters follow the Feed's own rules.
@@ -161,6 +235,8 @@ export function hostedSettings(path = FACTORY_SETTINGS): Record<string, unknown>
 
 export type HostDeps = {
   exists: (path: string) => boolean
+  // The local models the composer's menu offers and their server (org.ts).
+  local: { models: LocalModel[]; url: string }
   now: () => Date
   query: typeof query
   timeoutMs: number
@@ -168,10 +244,14 @@ export type HostDeps = {
 
 const hostDeps: HostDeps = {
   exists: existsSync,
+  local: org.local,
   now: () => new Date(),
   query,
   timeoutMs: PROMPT_TIMEOUT_MS,
 }
+
+// How long a closed session has to end before a restart starts its successor anyway.
+const CLOSE_MS = 10_000
 
 // One hosted session: its input stream, its prompts waiting on a card, and whether a turn is running.
 export class SdkHost {
@@ -181,6 +261,10 @@ export class SdkHost {
   private listeners = new Set<() => void>()
   private working = false
   private cwd = ""
+  private claude = ""
+  private local: LocalEndpoint | null = null
+  private reading: Promise<void> = Promise.resolve()
+  private restarting = false
   private startedAt: string | null = null
   private session: Query | null = null
   private mode: HostedMode = "default"
@@ -192,27 +276,36 @@ export class SdkHost {
   constructor(private readonly deps: HostDeps = hostDeps) {}
 
   // Starts the session in dir with the installed claude in the given mode, and says whether it picked up a session an earlier run started, resuming the one SESSION_FILE names once it has a transcript: a session writes none until its first message, and resuming an id with none fails, so until then the id starts afresh. Bypass is allowed from the start whatever the mode, so the picker can switch to it later; only changeHostedMode() switches, behind the owner and PLAYGROUND_APPROVALS_ENABLED.
-  start(dir: string, claude: string, mode: HostedMode): { resumed: boolean } {
+  start(
+    dir: string,
+    claude: string,
+    mode: HostedMode,
+    local: LocalEndpoint | null = null,
+    model: string | null = null,
+  ): { resumed: boolean } {
     const file = join(dir, SESSION_FILE)
     const known = existsSync(file) ? readFileSync(file, "utf8").trim() : ""
     const id = known || randomUUID()
     if (!known) writeFileSync(file, `${id}\n`)
     this.cwd = dir
+    this.claude = claude
+    this.local = local
     this.sessionId = id
     this.transcript = transcriptOf(dir, id)
     const resume = Boolean(known) && this.deps.exists(this.transcript)
     this.startedAt = this.deps.now().toISOString()
     this.mode = mode
-    this.model = null
+    this.model = model
     this.effort = null
     const stream = this.deps.query({
       options: {
         allowDangerouslySkipPermissions: true,
         canUseTool: this.ask,
         cwd: dir,
-        env: hostedEnv(),
+        env: hostedEnv(process.env, dataDir(), local),
         extraArgs: { name: SDK_PROBE },
         includePartialMessages: true,
+        ...(model && { model }),
         pathToClaudeCodeExecutable: claude,
         permissionMode: mode,
         settingSources: ["user", "project", "local"],
@@ -224,8 +317,52 @@ export class SdkHost {
       prompt: this.input(),
     })
     this.session = stream
-    void this.read(stream)
+    this.reading = this.read(stream)
     return { resumed: Boolean(known) }
+  }
+
+  // Starts the session again on another endpoint, its conversation resumed in the same mode and effort: on a local model's server, or with local null on the default one with a cloud model. Only between turns (busy()), since a close mid-turn cuts its answer off, and one at a time.
+  async restart(local: LocalEndpoint | null, model: string): Promise<void> {
+    if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
+    if (this.restarting) throw new Error(`${SDK_PROBE} is already switching its model`)
+    this.restarting = true
+    const effort = this.effort
+    try {
+      this.session.close()
+      await Promise.race([this.reading, Bun.sleep(CLOSE_MS)])
+      this.start(this.cwd, this.claude, this.mode, local, model)
+      if (effort) await this.keepEffort(effort)
+    } finally {
+      this.restarting = false
+    }
+    this.changed()
+  }
+
+  // Puts the effort picked before a restart back on its successor; one it refuses leaves the row on none, as a fresh start has.
+  private async keepEffort(effort: SessionEffort): Promise<void> {
+    try {
+      await this.session?.applyFlagSettings({ effortLevel: effort })
+      this.effort = effort
+    } catch (error) {
+      console.error(
+        `${SDK_PROBE}: could not keep its effort after a restart:`,
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  // Whether a turn runs, a card waits or a restart is under way, when another restart would cut it off.
+  busy(): boolean {
+    return this.restarting || this.working || this.waiting()
+  }
+
+  // The local model the session runs on, or null on the default endpoint.
+  localModel(): string | null {
+    return this.local?.id ?? null
+  }
+
+  localModels(): { models: LocalModel[]; url: string } {
+    return this.deps.local
   }
 
   // Switches the running session's mode as Shift+Tab does in a terminal; the row shows the new mode once the session has taken it.
@@ -271,7 +408,7 @@ export class SdkHost {
   }
 
   // The session's own messages say when a turn runs; its replies reach the dashboard from its transcript. When its process ends, the dashboard lists it no more.
-  private async read(stream: AsyncIterable<SDKMessage>) {
+  private async read(stream: Query) {
     try {
       for await (const message of stream) {
         // the session says its mode at each turn's start and when it changes it itself, as leaving plan mode does
@@ -304,10 +441,13 @@ export class SdkHost {
     } catch (error) {
       console.error(`${SDK_PROBE} stopped:`, error instanceof Error ? error.message : error)
     } finally {
-      this.session = null
-      this.sessionId = null
-      this.working = false
-      this.changed()
+      // a session closed for a restart may end after its successor started, which keeps the host
+      if (this.session === stream) {
+        this.session = null
+        this.sessionId = null
+        this.working = false
+        this.changed()
+      }
     }
   }
 
@@ -380,6 +520,7 @@ export class SdkHost {
       lastActiveAt: null,
       lifecycle: this.working ? "running" : "idle",
       light: this.working ? "working" : "idle",
+      ...(this.deps.local.models.length > 0 && { localModels: this.deps.local.models }),
       model: this.model,
       name: SDK_PROBE,
       permissionMode: this.mode,
@@ -567,25 +708,46 @@ export async function changeHostedMode(
   return { at: deps.now().toISOString(), mode, ok: true }
 }
 
-export type SettingChanging = { actor: ActivityActor; sessionId: string; setting: SessionSetting }
+export type SettingChanging = { actor: ActivityActor; sessionId: string; setting: HostedSetting }
 
-// The owner's pick in the composer's model and effort menu for the hosted session, set through the SDK rather than typed: the dashboard.setting row commits only once the session has taken it, so a value it refuses throws and records nothing.
+export type SettingDeps = Pick<AnswerHostedDeps, "host" | "now" | "record"> & {
+  served: (url: string) => Promise<string[] | null>
+}
+
+const settingDeps: SettingDeps = { ...answerHostedDeps, served: servedModels }
+
+// The owner's pick in the composer's model and effort menu for the hosted session, set through the SDK rather than typed: the dashboard.setting row commits only once the session has taken it, so a value it refuses throws and records nothing. A local model, or a cloud one while it runs on a local model, restarts it on that endpoint instead, between turns alone, and a local pick its server does not serve now is refused as localPlan() words it.
 export async function changeHostedSetting(
   { actor, sessionId, setting }: SettingChanging,
-  deps: Pick<AnswerHostedDeps, "host" | "now" | "record"> = answerHostedDeps,
+  deps: SettingDeps = settingDeps,
 ): Promise<DeliveryResult> {
+  const refused = (code: Extract<DeliveryResult, { ok: false }>["code"], reason: string) =>
+    ({ code, ok: false, reason }) as const
   if (!hosts(sessionId, deps.host)) {
-    return {
-      code: "NOT_FOUND",
-      ok: false,
-      reason: "The dashboard hosts no running session with that id.",
-    }
+    return refused("NOT_FOUND", "The dashboard hosts no running session with that id.")
   }
   const event: ActivityEvent = {
     action: "dashboard.setting",
     actor,
     summary: settingSummary(SDK_PROBE, setting),
   }
-  await deps.record(event, () => deps.host.setSetting(setting))
-  return { at: deps.now().toISOString(), ok: true, sessionId }
+  const done = { at: deps.now().toISOString(), ok: true, sessionId } as const
+  const busy = refused("BUSY", "The chat is answering; switch the model once it's done.")
+  if ("local" in setting) {
+    const { models, url } = deps.host.localModels()
+    const picked = models.find((model) => model.id === setting.local)
+    if (!picked) return refused("NOT_FOUND", "No local model by that id is set up here.")
+    if (deps.host.busy()) return busy
+    const served = await deps.served(url)
+    if (deps.host.busy()) return busy
+    const plan = localPlan(picked, served, models)
+    if (plan.do === "refuse") return refused(plan.down ? "SESSIONS_FAILED" : "BUSY", plan.reason)
+    await deps.record(event, () => deps.host.restart({ id: picked.id, url }, picked.id))
+  } else if ("model" in setting && deps.host.localModel() !== null) {
+    if (deps.host.busy()) return busy
+    await deps.record(event, () => deps.host.restart(null, setting.model))
+  } else {
+    await deps.record(event, () => deps.host.setSetting(setting))
+  }
+  return done
 }

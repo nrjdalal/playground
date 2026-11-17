@@ -18,10 +18,14 @@ import {
   hostedEnv,
   hostedSettings,
   hosts,
+  LOCAL_READ_MS,
+  LOCAL_TOKEN,
+  localPlan,
   resultOf,
   SDK_PROBE,
   SdkHost,
   sendToHosted,
+  servedModels,
   SESSION_FILE,
   startSdkProbe,
   TIMED_OUT,
@@ -29,7 +33,10 @@ import {
   type HostDeps,
   type HostedMode,
 } from "../../../../../../api/hono/src/lib/dashboard/sdk"
-import type { SessionSetting } from "../../../../../../api/hono/src/lib/dashboard/setting"
+import type {
+  HostedSetting,
+  SessionSetting,
+} from "../../../../../../api/hono/src/lib/dashboard/setting"
 import {
   hostedNow,
   hostSessions,
@@ -55,9 +62,15 @@ const question = {
   ],
 }
 
-// A stand-in for the SDK's query(): it records the options it was given, every message put on the input and every mode, model and effort set, and ends a turn for each message. A message `report:<mode>` has the session report that mode itself, as its status message does when it leaves plan mode, and `init:<model>` has it report its model as its init message does.
+// A stand-in for the SDK's query(): it records the options it was given, every message put on the input and every mode, model and effort set, and ends a turn for each message; close() ends its stream, as the SDK's ends the session's process. A message `report:<mode>` has the session report that mode itself, as its status message does when it leaves plan mode, and `init:<model>` has it report its model as its init message does.
 function fakeQuery({ refuseMode = false, refuseSetting = false } = {}) {
-  const calls: { modes: string[]; options: Options; sent: string[]; settings: string[] }[] = []
+  const calls: {
+    closed: boolean
+    modes: string[]
+    options: Options
+    sent: string[]
+    settings: string[]
+  }[] = []
   const run = ({
     options,
     prompt,
@@ -65,9 +78,19 @@ function fakeQuery({ refuseMode = false, refuseSetting = false } = {}) {
     options: Options
     prompt: AsyncIterable<SDKUserMessage>
   }) => {
-    const call = { modes: [] as string[], options, sent: [] as string[], settings: [] as string[] }
+    const call = {
+      closed: false,
+      modes: [] as string[],
+      options,
+      sent: [] as string[],
+      settings: [] as string[],
+    }
     calls.push(call)
-    const stream = (async function* () {
+    let stop = () => {}
+    const stopped = new Promise<IteratorResult<SDKMessage>>(
+      (resolve) => (stop = () => resolve({ done: true, value: undefined })),
+    )
+    const inner = (async function* () {
       for await (const message of prompt) {
         const text = String(message.message.content)
         call.sent.push(text)
@@ -78,11 +101,22 @@ function fakeQuery({ refuseMode = false, refuseSetting = false } = {}) {
         if (text.startsWith("init:")) {
           yield { model: text.slice("init:".length), subtype: "init", type: "system" } as SDKMessage
         }
+        if (text === "hold") continue
         yield { type: "assistant" } as SDKMessage
         yield { type: "result" } as SDKMessage
       }
     })()
+    const stream = {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next: () => Promise.race([inner.next(), stopped]),
+    }
     return Object.assign(stream, {
+      close: () => {
+        call.closed = true
+        stop()
+      },
       setPermissionMode: async (mode: string) => {
         if (refuseMode) throw new Error("the session refused the mode")
         call.modes.push(mode)
@@ -102,8 +136,17 @@ function fakeQuery({ refuseMode = false, refuseSetting = false } = {}) {
 
 const CLAUDE = "/usr/local/bin/claude"
 
+const LOCAL = {
+  models: [
+    { id: "ornith-1.5-122b-nvfp4", label: "M" },
+    { id: "ornith-1.5-35b-a3b-nvfp4", label: "K" },
+  ],
+  url: "http://127.0.0.1:18000",
+}
+
 const deps = (query: HostDeps["query"], timeoutMs = 60_000, transcripts = true): HostDeps => ({
   exists: () => transcripts,
+  local: LOCAL,
   now: () => new Date(AT),
   query,
   timeoutMs,
@@ -551,6 +594,7 @@ describe("changeHostedSetting", () => {
         await run()
         recorded.push(`${event.action}: ${event.summary}`)
       },
+      served: async () => null,
     }
     const changing = (setting: SessionSetting, sessionId = host.sessionId!) => ({
       actor,
@@ -611,6 +655,231 @@ describe("changeHostedSetting", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
+  })
+})
+
+describe("the hosted session on a local model", () => {
+  const M = LOCAL.models[0]!
+  const K = LOCAL.models[1]!
+
+  const started = (served: string[] | null = [M.id]) => {
+    const dir = scratch()
+    const fake = fakeQuery()
+    const host = new SdkHost(deps(fake.query))
+    host.start(dir, CLAUDE, "plan")
+    const recorded: string[] = []
+    const reads: string[] = []
+    const on = {
+      host,
+      now: () => new Date(AT),
+      record: async (event: { action: string; summary: string }, run: () => Promise<void>) => {
+        await run()
+        recorded.push(`${event.action}: ${event.summary}`)
+      },
+      served: async (url: string) => {
+        reads.push(url)
+        return served
+      },
+    }
+    const pick = (setting: HostedSetting) =>
+      changeHostedSetting({ actor, sessionId: host.sessionId!, setting }, on)
+    return { dir, fake, host, on, pick, reads, recorded }
+  }
+
+  test("on a local model the session gets its server, a placeholder token in place of the login's, the model under every alias, and few retries", () => {
+    const env = hostedEnv(
+      { ANTHROPIC_AUTH_TOKEN: "the-api's", HOME: "/h", PATH: "/bin" },
+      "/stack-data",
+      { id: M.id, url: LOCAL.url },
+    )
+    expect(env).toEqual({
+      ANTHROPIC_AUTH_TOKEN: LOCAL_TOKEN,
+      ANTHROPIC_BASE_URL: LOCAL.url,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: M.id,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: M.id,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: M.id,
+      CLAUDE_CODE_MAX_RETRIES: "2",
+      HOME: "/h",
+      PATH: "/bin",
+      PLAYGROUND_DATA_DIR: "/stack-data",
+      PLAYGROUND_ROLE: "probe",
+    })
+    expect(hostedEnv({ HOME: "/h" }, "/d")).not.toHaveProperty("ANTHROPIC_BASE_URL")
+  })
+
+  test("picking a local model closes the session and resumes it on that server in the same mode, and a cloud pick then resumes it on the default endpoint", async () => {
+    const { dir, fake, host, pick, reads, recorded } = started()
+    try {
+      const id = host.sessionId!
+      expect(await pick({ local: M.id })).toMatchObject({ ok: true, sessionId: id })
+      expect(reads).toEqual([LOCAL.url])
+      expect(fake.calls[0]!.closed).toBe(true)
+      expect(fake.calls[1]!.options).toMatchObject({
+        model: M.id,
+        permissionMode: "plan",
+        resume: id,
+      })
+      expect(fake.calls[1]!.options.env).toMatchObject({ ANTHROPIC_BASE_URL: LOCAL.url })
+      expect(host.worker()).toMatchObject({ model: M.id, sessionId: id })
+      expect(host.localModel()).toBe(M.id)
+      expect(await pick({ model: "opus" })).toMatchObject({ ok: true })
+      expect(fake.calls[1]!.closed).toBe(true)
+      expect(fake.calls[2]!.options).toMatchObject({ model: "opus", resume: id })
+      expect(fake.calls[2]!.options.env).not.toHaveProperty("ANTHROPIC_BASE_URL")
+      expect(host.localModel()).toBeNull()
+      expect(recorded).toEqual([
+        `dashboard.setting: Set ${SDK_PROBE}'s model to ${M.id} (local)`,
+        `dashboard.setting: Set ${SDK_PROBE}'s model to opus`,
+      ])
+      // a cloud pick on the default endpoint keeps setModel, with no restart
+      await pick({ model: "sonnet" })
+      expect(fake.calls).toHaveLength(3)
+      expect(fake.calls[2]!.settings).toEqual(["model sonnet"])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("while a turn runs, a switch is refused as BUSY and the session is left running", async () => {
+    const { dir, fake, host, pick, recorded } = started()
+    try {
+      host.send("hold")
+      await Bun.sleep(0)
+      expect(await pick({ local: M.id })).toEqual({
+        code: "BUSY",
+        ok: false,
+        reason: "The chat is answering; switch the model once it's done.",
+      })
+      expect(fake.calls).toHaveLength(1)
+      expect(fake.calls[0]!.closed).toBe(false)
+      expect(recorded).toEqual([])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a second switch while one restarts the session, as from another tab, is refused as BUSY", async () => {
+    const { dir, fake, pick, recorded } = started()
+    try {
+      const results = await Promise.all([pick({ local: M.id }), pick({ local: M.id })])
+      expect(results.map((result) => (result.ok ? "ok" : result.code)).sort()).toEqual([
+        "BUSY",
+        "ok",
+      ])
+      expect(fake.calls).toHaveLength(2)
+      expect(recorded).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a switch keeps the effort picked before it, on the local server and back", async () => {
+    const { dir, fake, host, pick } = started()
+    try {
+      await pick({ effort: "high" })
+      await pick({ local: M.id })
+      expect(fake.calls[1]!.settings).toEqual(["effort high"])
+      expect(host.worker()).toMatchObject({ effort: "high", model: M.id })
+      await pick({ model: "opus" })
+      expect(fake.calls[2]!.settings).toEqual(["effort high"])
+      expect(host.worker()).toMatchObject({ effort: "high", model: "opus" })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a server that does not answer, or serves another model, refuses the pick in plain words and leaves the session where it was", async () => {
+    for (const [served, code, reason] of [
+      [
+        null,
+        "SESSIONS_FAILED",
+        "The local model server isn't answering, so the chat stays on its model, not M.",
+      ],
+      [[K.id], "BUSY", "K is loaded on the local model server right now, not M."],
+      [[], "BUSY", "No model is loaded on the local model server right now, so M can't answer."],
+    ] as const) {
+      const { dir, fake, pick, recorded } = started(served === null ? null : [...served])
+      try {
+        expect(await pick({ local: M.id })).toEqual({ code, ok: false, reason })
+        expect(fake.calls).toHaveLength(1)
+        expect(fake.calls[0]!.closed).toBe(false)
+        expect(recorded).toEqual([])
+      } finally {
+        rmSync(dir, { force: true, recursive: true })
+      }
+    }
+  })
+
+  test("a local id config does not name is NOT_FOUND, and the row lists config's local models", async () => {
+    const { dir, fake, host, pick } = started()
+    try {
+      expect(await pick({ local: "other-model" })).toMatchObject({ code: "NOT_FOUND", ok: false })
+      expect(fake.calls).toHaveLength(1)
+      expect(host.worker()).toMatchObject({ localModels: LOCAL.models })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+})
+
+// The stub local server (tests/local-model-stub.ts) on 127.0.0.1 alone, its port read from its first line; stopped by its own pid.
+async function stubServer(...args: string[]) {
+  const stub = Bun.spawn(
+    ["bun", join(import.meta.dir, "../../../../../local-model-stub.ts"), ...args],
+    {
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  const reader = stub.stdout.getReader()
+  let out = ""
+  while (!out.includes("\n")) {
+    const { done, value } = await reader.read()
+    if (done) break
+    out += new TextDecoder().decode(value)
+  }
+  reader.releaseLock()
+  return { stop: () => stub.kill(), stub, url: `http://127.0.0.1:${out.trim()}` }
+}
+
+describe("servedModels", () => {
+  test("it reads the ids a local server lists, and null when the server is gone or does not answer in time", async () => {
+    const up = await stubServer("ornith-1.5-122b-nvfp4", "0")
+    try {
+      expect(await servedModels(up.url)).toEqual(["ornith-1.5-122b-nvfp4"])
+    } finally {
+      up.stop()
+      await up.stub.exited
+    }
+    expect(await servedModels(up.url, 1_000)).toBeNull()
+    const hung = await stubServer("ornith-1.5-122b-nvfp4", "0", "--silent-models")
+    try {
+      const started = Date.now()
+      expect(await servedModels(hung.url, 200)).toBeNull()
+      expect(Date.now() - started).toBeLessThan(2_000)
+    } finally {
+      hung.stop()
+      await hung.stub.exited
+    }
+    expect(LOCAL_READ_MS).toBe(5_000)
+  })
+})
+
+describe("localPlan", () => {
+  test("it switches when the server serves the pick, and its refusals name the models in words, with no command to type", () => {
+    const [M, K] = LOCAL.models as [(typeof LOCAL.models)[0], (typeof LOCAL.models)[0]]
+    expect(localPlan(M, [M.id], LOCAL.models)).toEqual({ do: "switch" })
+    const refusals = [
+      localPlan(M, [K.id], LOCAL.models),
+      localPlan(M, null, LOCAL.models),
+      localPlan(M, ["x/y"], LOCAL.models),
+    ]
+    expect(refusals.map((plan) => plan.do)).toEqual(["refuse", "refuse", "refuse"])
+    expect(refusals[2]).toMatchObject({
+      reason: "x/y is loaded on the local model server right now, not M.",
+    })
+    for (const plan of refusals)
+      expect(JSON.stringify(plan)).not.toMatch(/playground |`|\bbun\b|ssh/)
   })
 })
 

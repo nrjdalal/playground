@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { SDK_PROBE } from "../../../../../packages/config/src/kinds"
 import {
   boxRoute,
   chaseStale,
@@ -392,6 +393,20 @@ describe("check", () => {
       "down:plain-job",
       "probe-gone-unended:b7k2mq-probe",
       "probe-gone-unended:plain-test",
+      "probe-over-15m:x7mh4d-probe",
+      "probe-unrecorded:x7mh4d-probe",
+    ])
+  })
+
+  // #2597: the dashboard's hosted session runs as a probe for the factory's hooks, but no lead spawns or records it, so it raised probe-unrecorded:probe-sdk
+  test("the dashboard's hosted session raises no probe alert, while an unrecorded probe past 15 minutes raises both", async () => {
+    const { ctx, sweep } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [])
+    session(ctx, SDK_PROBE, process.pid)
+    session(ctx, "x7mh4d-probe", process.pid)
+    const old = NOW / 1000 - 16 * 60
+    write(join(sweep, "probe-first-seen.json"), { [SDK_PROBE]: old, "x7mh4d-probe": old })
+    expect((await check(ctx)).sort()).toEqual([
       "probe-over-15m:x7mh4d-probe",
       "probe-unrecorded:x7mh4d-probe",
     ])

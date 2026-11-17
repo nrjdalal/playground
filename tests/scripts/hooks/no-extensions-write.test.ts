@@ -4002,3 +4002,162 @@ describe("a glob in / is judged by the names / holds", () => {
     },
   )
 })
+
+// #2522: a glob-option switch on a line ssh runs remotely or feeds a remote shell is refused by its own reason, whatever its spelling, rather than read name by name
+describe("a glob-option switch on a remote or fed line", () => {
+  const SWITCH =
+    /refuses a glob-option switch \(.+\) on a line a remote shell runs.*wider than the risk on purpose.*drop the option, or run the line locally/
+
+  test.each([
+    "ssh box 'shopt -s dotglob; touch */extensions/x'",
+    "ssh box 'GLOBIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt g_l_o_b_d_o_t_s; touch ?playground/extensions/y'",
+    `ssh box "shopt -s dot''glob; touch ?playground/extensions/y"`,
+    `ssh box "zsh -4 -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'shopt -s $(echo dot)glob; touch ?playground/extensions/y'",
+    "ssh box 'options[glob${x}dots]=on; touch ?playground/extensions/y'",
+    `ssh box 'bash -O $1 -c "touch ?playground/extensions/y"'`,
+    `ssh box "env BASHOPTS=dotglob bash -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'GLOBIGNOR\\\nE=x; touch ?playground/extensions/y'",
+    "ssh box bash -s <<'EOF'\nGLOBIGNOR\\\nE=x\ntouch ?playground/extensions/y\nEOF",
+    `printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | ssh box bash`,
+    "ssh box 'touch *(D)/extensions/x'",
+    "ssh box 'FIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt EXTENDED_GLOB; ls'",
+    "ssh box 'set -euo pipefail -o globdots; touch ?playground/extensions/y'",
+    "ssh box 'set -o pipefail -o KSH_GLOB; touch ?playground/extensions/y'",
+    "ssh box 'bash -o pipefail -O extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh -o SetEnv=BASHOPTS=dotglob box 'touch */extensions/x'",
+    "ssh -oSetEnv=GLOBIGNORE=x box 'touch ?playground/extensions/y'",
+    "ssh -o 'SetEnv FIGNORE=x' box 'touch ?playground/extensions/y'",
+    "ssh -o setenv=BASHOPTS=dotglob box bash -s <<'EOF'\ntouch */extensions/x\nEOF",
+    "ssh -o SendEnv=BASHOPTS box 'touch */extensions/x'",
+    "ssh box 'touch *1*(D)/extensions/x'",
+  ])("%s is refused as a switch", async (command) => {
+    expect(await bash(command)).toMatch(SWITCH)
+  })
+
+  test.each([
+    "shopt -s dotglob; ssh box uptime",
+    "ssh box 'ls */notes'",
+    "echo 'df -h' | ssh box bash",
+    `ssh spark-9dfb 'python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"'`,
+    "ssh box 'set -euo pipefail; ls */notes'",
+    "ssh box 'set -o pipefail; ls'",
+    "ssh box 'set -e -o nounset -o errexit; uptime'",
+    "ssh box 'bash -o pipefail -c \"ls */notes\"'",
+    "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
+    "echo 'set -euo pipefail; uptime' | ssh box bash",
+    "ssh -o SetEnv=LANG=C box uptime",
+    "ssh -o SendEnv=LANG box 'ls */notes'",
+    "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
+    "ssh box 'set -opipefail; uptime'",
+    "ssh box 'bash --login -c uptime'",
+    "ssh box './run.sh -o out.txt'",
+    "ssh box 'bash deploy.sh --verbose -o x'",
+    `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
+  ])("%s, with no switch on its remote side, runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each(["ssh -o 'SendEnv=BASH*' box 'touch */extensions/x'", "ssh -o SetEnv=$V box uptime"])(
+    "%s, a SetEnv or SendEnv the hook cannot read, is refused",
+    async (command) => {
+      expect(await bash(command)).toMatch(
+        /an ssh -o SetEnv or SendEnv of .+, a value or pattern the hook cannot read/,
+      )
+    },
+  )
+
+  // a qualifier after a * a digit follows is no switch, so its line counts dots as on, and a dot-led link in the home into the root is still judged; this home holds one, ~/.p1 to the data folder
+  describe("a * a digit follows, then a qualifier", () => {
+    const home = mkdtempSync(join(tmpdir(), "no-extensions-write-digit-"))
+    mkdirSync(join(home, ".playground", "extensions", "hooks"), { recursive: true })
+    writeFileSync(join(home, ".playground", "extensions", "policy.json"), "{}\n")
+    symlinkSync(join(home, ".playground"), join(home, ".p1"))
+    afterAll(() => rmSync(home, { force: true, recursive: true }))
+    const at = (command: string) =>
+      check(
+        JSON.stringify({
+          cwd: home,
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+          tool_name: "Bash",
+        }),
+        { HOME: home },
+      )
+
+    test.each(["ssh box 'touch *1/extensions/x(D)'", "ssh box 'touch *1/extensions/x(N)'"])(
+      "%s reaches the root through ~/.p1 and is refused",
+      async (command) => {
+        expect(await at(command)).toMatch(/refuses touch on .+, a glob in/)
+      },
+    )
+
+    test.each([
+      "ssh box 'awk \"{ print (a[2]-a[1])*100/(b[2]-b[1]) }\" f'",
+      "ssh box 'touch *1(D)/notes/x'",
+    ])("%s reaches nothing in the root and runs", async (command) => {
+      expect(await at(command)).toBeUndefined()
+    })
+  })
+
+  test.each([
+    "ssh box 'bash -xO extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh box 'set -Oe; touch ?playground/extensions/y'",
+    "ssh box 'set -oextendedglob; touch ?playground/extensions/y'",
+    `ssh box "zsh --extendedglob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "zsh --extended-glob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "bash --rcfile x -c 'touch ?playground/extensions/y'"`,
+    `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash -c "set -o extendedglob; touch ?playground/extensions/y"'`,
+    `ssh box 'bash -c -O extglob "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh -c -o extendedglob "touch ?playground/extensions/y"'`,
+    `ssh box 'rbash -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'rzsh -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash-5.2 -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set -$o extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set -o dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set globdot; touch ?playground/extensions/y'",
+    `ssh box 'bash >/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash > /dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh 2>&1 -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash >| x -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash &>x -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set >x -o extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash {fd}>/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >>! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh {fd}>/dev/null -4 -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -4 -c "touch ?playground/extensions/y"'`,
+  ])(
+    "%s, an option a shell reads by any of its spellings, is refused as a switch",
+    async (command) => {
+      expect(await bash(command)).toMatch(SWITCH)
+    },
+  )
+
+  test("its reason names the one form of a shell's options that runs", async () => {
+    expect(await bash("ssh box 'zsh --extended-glob -c uptime'")).toEndWith(
+      "a shell's options run there only as a cluster with no O or 4, and a -o or a long option (--login) naming errexit, errtrace, functrace, login, noclobber, noprofile, norc, nounset, pipefail, verbose, xtrace, as in set -euo pipefail",
+    )
+  })
+
+  test.each([
+    "ssh box 'cat /etc/bash-completion.d/git'",
+    "ssh box 'ls ~/zsh-config'",
+    "ssh box 'kubectl config set-context x'",
+    "ssh box 'bash 2>&1 -e -c uptime'",
+    "ssh box 'bash > log -euo pipefail -c uptime'",
+    "ssh box 'bash {fd}>/dev/null -euo pipefail -c uptime'",
+    "ssh box 'zsh >! log -e -c uptime'",
+  ])(
+    "%s, a shell's name inside a longer word or a redirect before strict mode, runs",
+    async (command) => {
+      expect(await bash(command)).toBeUndefined()
+    },
+  )
+})

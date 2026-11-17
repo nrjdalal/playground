@@ -114,10 +114,11 @@ const shipWrite = (raw: string): boolean => {
   }
 }
 
-// Fails closed on its list, which only the store holds (lists.ts), and on a store it cannot read for the repositories (factory.publicRepo and factory.archiveRepo), and, as no-playground-leak, only on a call that may write.
+// Fails closed on its list, which only the store holds (lists.ts), and on a store it cannot read for the repositories (factory.publicRepo and factory.archiveRepo, else the checkout's origin), and, as no-playground-leak, only on a call that may write.
 export async function check(
   raw: string,
   environment: Environment = process.env,
+  checkout?: string,
 ): Promise<string | undefined> {
   const loaded = await guardList(
     "no-public-leak",
@@ -140,7 +141,7 @@ export async function check(
   return inspectAs(
     policy(
       loaded.list ?? EMPTY_LIST,
-      reposOf(read.settings),
+      reposOf(read.settings, checkout),
       shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined,
     ),
     raw,

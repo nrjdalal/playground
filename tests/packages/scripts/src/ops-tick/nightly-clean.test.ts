@@ -608,6 +608,7 @@ describe("one night's run against a fixture data folder", () => {
       temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     }
     return { ctx, deps, inputs, ops, runs, sent, wt }
   }
@@ -715,6 +716,48 @@ describe("one night's run against a fixture data folder", () => {
     expect(inputs).toEqual([])
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
+    })
+  })
+
+  // #2539 item 1
+  test("each machine's unused space is the log line's total and the outbox line's items, and nothing removes it", async () => {
+    const { ctx, deps, ops, runs, sent } = night()
+    const gguf = "/home/me/probe-local-model/gguf/x.gguf"
+    deps.unused = async () => [
+      {
+        items: [{ bytes: 38 * 1024 ** 3, kind: "weights", path: gguf, recorded: true }],
+        machine: "spark-9dfb",
+      },
+      { machine: "spark-a566", why: "exit 255" },
+    ]
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "unused: spark-9dfb unused 38.0 GB (weights 38.0 GB); spark-a566 not read (",
+    )
+    expect(sent.at(-1)?.text).toEndWith(
+      `; spark-9dfb unused: weights ${gguf} 38.0 GB recorded; spark-a566: not read: exit 255`,
+    )
+    expect(runs.flat()).not.toContain(gguf)
+  })
+
+  test("an image of unknown age is kept off the night's lines, its first night written to the state file for the next run", async () => {
+    const { ctx, deps, ops, sent } = night()
+    const path = "docker image pulled:1"
+    deps.unused = async () => [
+      {
+        items: [{ bytes: 2 * 1024 ** 3, kind: "image", path, recorded: false, unknownAge: true }],
+        machine: "spark-9dfb",
+      },
+    ]
+    await nightlyClean(deps)(ctx)
+    expect(readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")).toContain(
+      "unused: spark-9dfb unused 0.0 GB (",
+    )
+    expect(sent.map((s) => s.text).join("\n")).not.toContain(path)
+    expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
+      at: "2026-11-05T03:00:00.000Z",
+      imagesSeen: { [`spark-9dfb ${path}`]: "2026-11-05T03:00:00.000Z" },
     })
   })
 
@@ -836,6 +879,7 @@ describe("one night's run against a fixture data folder", () => {
       temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     }
     await nightlyClean(deps)(ctx)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
@@ -926,6 +970,7 @@ describe("one night's run against a fixture data folder", () => {
       temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     }
     await nightlyClean(deps)(ctx)
     const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
@@ -1014,6 +1059,7 @@ describe("one night's run against a fixture data folder", () => {
       temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     }
     await nightlyClean(deps)(ctx)
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
@@ -1107,6 +1153,7 @@ describe("one night's run against a fixture data folder", () => {
       temps: () => [],
       trashRoots: () => ({ home: "/nowhere", main: "/nowhere", trash: "/nowhere" }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     }
     await nightlyClean(deps)(ctx)
     expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(600_000)
@@ -1728,6 +1775,7 @@ describe("other repos' worktrees", () => {
       temps: () => [],
       trashRoots: () => ({ home: root, main, trash: join(root, "trash") }),
       turbo: join(root, "turbo"),
+      unused: async () => [],
     } as NightDeps
     return { ctx, data, deps, lost, main, ops, runs, sent, site, w }
   }
@@ -2015,6 +2063,7 @@ const goneNight = (agents: object[], live: string[]) => {
     temps: () => [],
     trashRoots: () => roots,
     turbo: join(root, "turbo"),
+    unused: async () => [],
   } as NightDeps
   return {
     roots,
