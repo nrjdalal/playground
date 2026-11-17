@@ -238,6 +238,10 @@ describe("lightOf", () => {
     expect(stateWords("gated", { pr: pull({ gates: ["review", "tester"] }) })).toBe(
       "Gated · review, tester",
     )
+    // a gate its worker must fix holds it too, named the same way, so a gate added to pr:merge needs no list here
+    const scored = pull({ gates: ["review"], score: "3/5" })
+    expect(light({ pr: scored })).toBe("gated")
+    expect(stateWords("gated", { pr: scored })).toBe("Gated · review")
     expect(light({ pr: held, waits: ["checks"] })).toBe("waiting")
     expect(light({ light: "working", pr: held })).toBe("working")
   })

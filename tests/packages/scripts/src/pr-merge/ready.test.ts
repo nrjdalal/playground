@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -99,6 +99,13 @@ describe("pr:train ready", () => {
     const next = join(scratch, "gates-pass", "gates.json")
     await passing.ready(next)
     expect((await Bun.file(next).json()).prs).toEqual({ "o/r#7": { failed: [], head: HEAD } })
+  })
+
+  test("a gates file it cannot write still merges the ready PR", async () => {
+    const w = world(factsOf({ draft: true }))
+    const taken = join(scratch, "gates-taken")
+    mkdirSync(join(taken, "full"), { recursive: true })
+    expect((await w.ready(taken)).merged?.n).toBe(7)
   })
 
   test("the owner's draft whose only failing gate is ready still merges", async () => {

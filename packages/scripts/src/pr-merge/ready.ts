@@ -40,7 +40,14 @@ export async function mergeReady(
     local.merge ??
     ((n: number, typesBudgetMs: number) => prMerge(n, { repo: name }, run, { typesBudgetMs }))
   const { held, order, reads } = await gatedOf(run, name, facts, queue)
-  if (gates) await writeGates(gates, gatesFile(name, reads, new Date().toISOString()))
+  // a file it cannot write costs the Dashboard's read, never this cycle's merge
+  if (gates)
+    await writeGates(gates, gatesFile(name, reads, new Date().toISOString())).catch(
+      (err: unknown) =>
+        console.error(
+          `pr:train ready: gates.json not written: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+    )
   const unreadable = held.filter(({ why }) => why.startsWith("not gated: facts unreadable"))
   const readied: Readied = { refused: [], unreadable }
   for (const { facts: pr, n } of order) {
