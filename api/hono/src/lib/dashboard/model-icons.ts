@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 import { BACKEND_MAKERS, MAKER_NAME } from "@packages/config/console"
@@ -41,6 +41,8 @@ const MAX_BYTES = 1024 * 1024
 const FETCH_TIMEOUT_MS = 10_000
 // How long a maker found to have no icon stays so before it is asked again, so an icon added later still arrives.
 const NONE_FOR_MS = 24 * 60 * 60 * 1000
+// How long a found logo is served before it is fetched again, so a maker's new logo, or a real one in place of models.dev's placeholder, comes in by itself.
+const REFRESH_MS = 7 * 24 * 60 * 60 * 1000
 
 // Only the maker's name leaves the machine, and a redirect is refused, so no answer can send the fetch to another host; a source that does not answer in time counts as out of reach.
 const plainFetch: Fetch = (url) =>
@@ -124,18 +126,20 @@ const fetchIcon = async (maker: string, fetch: Fetch): Promise<ModelIcon | null>
   return bytes && type ? { bytes, type } : null
 }
 
+// A maker's cached icon, with its file and whether it is past REFRESH_MS; null for a none marker under a day old; undefined for nothing kept.
 const cached = async (
   dir: string,
   maker: string,
   now: number,
-): Promise<ModelIcon | null | undefined> => {
+): Promise<(ModelIcon & { file: string; stale: boolean }) | null | undefined> => {
   const names = await readdir(dir).catch(() => [] as string[])
   for (const [type, ext] of Object.entries(EXT) as [IconType, string][])
-    if (names.includes(`${maker}.${ext}`))
-      return {
-        bytes: new Uint8Array(await Bun.file(join(dir, `${maker}.${ext}`)).arrayBuffer()),
-        type,
-      }
+    if (names.includes(`${maker}.${ext}`)) {
+      const file = join(dir, `${maker}.${ext}`)
+      const { mtimeMs } = await stat(file)
+      const bytes = new Uint8Array(await Bun.file(file).arrayBuffer())
+      return { bytes, file, stale: now - mtimeMs >= REFRESH_MS, type }
+    }
   if (!names.includes(`${maker}.none`)) return undefined
   const { mtimeMs } = await stat(join(dir, `${maker}.none`))
   return now - mtimeMs < NONE_FOR_MS ? null : undefined
@@ -143,26 +147,29 @@ const cached = async (
 
 const inFlight = new Map<string, Promise<ModelIcon | null>>()
 
-// A maker's icon, from the cache in dir once fetched (under its MODELS_DEV_IDS id where it has one); the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
+// A maker's icon, from the cache in dir once fetched (under its MODELS_DEV_IDS id where it has one), fetched again once it is past REFRESH_MS, a failed fetch keeping the old one; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
 export const iconFor = async (
   maker: string,
   { dir, fetch = plainFetch, now = Date.now }: { dir: string; fetch?: Fetch; now?: () => number },
 ): Promise<ModelIcon | null> => {
   const id = MODELS_DEV_IDS[maker] ?? maker
   const hit = await cached(dir, id, now())
-  if (hit !== undefined) return hit
+  const kept = hit ? { bytes: hit.bytes, type: hit.type } : null
+  if (hit === null || hit?.stale === false) return kept
   const key = `${dir}\0${id}`
   const running = inFlight.get(key)
   if (running) return running
   const work = (async () => {
     const icon = await fetchIcon(maker, fetch).catch(() => undefined)
-    if (icon === undefined) return null
+    // offline, or no logo found where one was, keeps the old one served
+    if (icon === undefined || (icon === null && kept)) return kept
     await mkdir(dir, { recursive: true })
     // written whole under a name no reader looks for, then renamed, so a read mid-write never serves part of a file
     const name = join(dir, icon ? `${id}.${EXT[icon.type]}` : `${id}.none`)
     const part = `${name}.${process.pid}.${crypto.randomUUID()}.part`
     await writeFile(part, icon ? icon.bytes : "")
     await rename(part, name)
+    if (hit && hit.file !== name) await unlink(hit.file).catch(() => {})
     return icon
   })().finally(() => inFlight.delete(key))
   inFlight.set(key, work)

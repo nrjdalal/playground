@@ -1307,7 +1307,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id) or the org of the repo the local model server serves, fetched once from models.dev (under the id models.dev lists it by, MODELS_DEV_IDS, taken as it is), else its Hugging Face avatar, and served from the data folder's cache after, never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
+        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id) or the org of the repo the local model server serves, fetched once from models.dev (under the id models.dev lists it by, MODELS_DEV_IDS, taken as it is), else its Hugging Face avatar, and served from the data folder's cache after (fetched again once 7 days old, a failed fetch keeping the old one), never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
       responses: {
         200: { description: "The icon" },
         ...authErrorResponses,

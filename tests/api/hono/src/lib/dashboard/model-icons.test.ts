@@ -234,3 +234,42 @@ describe("a maker models.dev lists under another id", () => {
     expect(readdirSync(dir)).toEqual([])
   })
 })
+
+// A found logo is fetched again once a week, so a maker's new logo, or a real one in place of models.dev's placeholder, comes in by itself, while a failed fetch keeps the old one served (PG-2662).
+describe("a cached logo's weekly refresh", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const OLD = '<svg viewBox="0 0 24 24"><path d="M1 1H2"/></svg>\n'
+  const later = (days: number) => () => Date.now() + days * DAY
+
+  test("a logo cached under 7 days ago is served from the cache, with no fetch", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, "anthropic.svg"), OLD)
+    const { asked, fetch } = stub({
+      "https://models.dev/logos/anthropic.svg": () => new Response(LOGO),
+    })
+    expect(await iconFor("anthropic", { dir, fetch, now: later(6) })).toEqual({
+      bytes: new TextEncoder().encode(OLD),
+      type: "image/svg+xml",
+    })
+    expect(asked).toEqual([])
+  })
+
+  test("past 7 days it is fetched again, and the new logo found replaces it, an old file of another type removed", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, "anthropic.png"), PNG)
+    const { fetch } = stub({ "https://models.dev/logos/anthropic.svg": () => new Response(LOGO) })
+    const icon = { bytes: new TextEncoder().encode(LOGO), type: "image/svg+xml" as const }
+    expect(await iconFor("anthropic", { dir, fetch, now: later(8) })).toEqual(icon)
+    expect(readdirSync(dir)).toEqual(["anthropic.svg"])
+    expect(await iconFor("anthropic", { dir, fetch: offline, now: later(8) })).toEqual(icon)
+  })
+
+  test("past 7 days with the fetch failing, offline or with no logo found, the old logo stays and is served", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, "heron-ai.png"), PNG)
+    const old = { bytes: PNG, type: "image/png" as const }
+    expect(await iconFor("heron-ai", { dir, fetch: offline, now: later(8) })).toEqual(old)
+    expect(await iconFor("heron-ai", { dir, fetch: stub().fetch, now: later(8) })).toEqual(old)
+    expect(readdirSync(dir)).toEqual(["heron-ai.png"])
+  })
+})
