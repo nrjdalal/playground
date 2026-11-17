@@ -143,7 +143,7 @@ const commands = {
   // whether the serve.sh is there, then which of SERVE_ENV it takes from its environment, as ${NAME:-default}
   serves: (name: string) =>
     `test -f ~/models/${name}/serve.sh && echo found && grep -o -E '[$][{](${SERVE_ENV.join("|")}):-' ~/models/${name}/serve.sh`,
-  stop: (container: string) => `docker rm -f ${container}`,
+  stop: (container: string) => `docker rm -fv ${container}`,
 }
 
 // Pure: the machine's hold while a swap may still be running; one older than twice the longest swap is what a killed run left behind, and holds nothing.
@@ -212,7 +212,7 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   if (mine) {
     // started by this command and since stopped: its name is freed before the new start
     if (!(await stopOwn(container)))
-      return refuse(`docker rm -f ${container} failed on ${machine}, so nothing started`)
+      return refuse(`docker rm -fv ${container} failed on ${machine}, so nothing started`)
     await save({ ...state, servers: without(name) })
   }
   const readMemory = async () => memOf((await run(commands.memory)).out)
@@ -246,7 +246,7 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
         for (const [model, server] of others) {
           if (!(await stopOwn(server.container)))
             return refuse(
-              `docker rm -f ${server.container} failed on ${machine}, so nothing started`,
+              `docker rm -fv ${server.container} failed on ${machine}, so nothing started`,
             )
           await save({ ...state, servers: without(model) })
         }
@@ -327,7 +327,7 @@ const recordPaths = async (
         by,
         kind: "container",
         path: `docker container ${container}`,
-        undo: `docker rm -f ${container}`,
+        undo: `docker rm -fv ${container}`,
         why: "a local model server playground model use started",
       },
       machine.target ? "peer" : "here",

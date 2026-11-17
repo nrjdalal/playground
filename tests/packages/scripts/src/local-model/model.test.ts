@@ -101,7 +101,7 @@ const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
           ? { code: 0, out: "true\n" }
           : { code: 1, out: "Error: No such object" }
       }
-      if ((found = /^docker rm -f (\S+)$/.exec(command))) {
+      if ((found = /^docker rm -fv (\S+)$/.exec(command))) {
         steps.push(`stop ${found[1]}`)
         return box.containers.delete(found[1]!)
           ? { code: 0, out: `${found[1]}\n` }
