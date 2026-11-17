@@ -49,7 +49,8 @@ Bun-first therefore applies to the Bun-only files: `packages/scripts/src/*.ts` (
 
 ## Bun traps
 
-Check that a Worker module loads in a fresh process, and call `process.exit()` after the import. A module that sets `self.onmessage` keeps a plain `bun -e` import alive forever, so a load check never returns. Bun also keeps a failed package lookup for every later Worker in the same process, so one missed resolve fails every Worker the run starts after it.
+- Call `process.exit()` after the import in a check that a Worker module loads, since a module that sets `self.onmessage` keeps a plain `bun -e` import alive forever and the check never returns.
+- Run each Worker module's load check in a fresh process of its own, since Bun keeps a failed package lookup for every later Worker in the same process, so one missed resolve fails every Worker the run starts after it.
 
 ## Audit
 
