@@ -108,7 +108,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: Call the Skill tool with "writing-for-agents" before you write or edit any agent-facing doc, and follow it (playbook's **writing** rule, which puts it at the core of every agent-facing doc):
   a `SKILL.md` and its sibling files, `AGENTS.md` and `CLAUDE.md`, an `.agents/dashboard` rule, `scripts/README.md` and `scripts/hooks/README.md`, a docs page, a handoff and a brief.
   That means a lean document, reference disclosed into sibling files, a completion criterion on every step, positive phrasing, and leading words.
-  A PR body is written for the owner, in the pr skill's template (Shipping step 1), so it is outside this rule.
+  A PR body is written for the owner, in the pr skill's template ([.agents/shipping.md](./.agents/shipping.md)), so it is outside this rule.
 - ALWAYS: Land everything you learn in this repo, as a PR or a line to your lead (playbook's **memory** rule), so every session works better from what one learned.
   Claude Code's auto-memory stays off in both shared settings files, which `tests/scripts/factory-settings.test.ts` holds, and spawn.sh turns it on for the trial's sessions in the data folder's `memory/<role>/` ([ADR 0022](./.agents/adr/0022-auto-memory-runs-as-a-reviewed-trial.md)).
 - ALWAYS: Track Playground's work as GitHub issues on the repo `factory.repo` names, so every item carries a number: an item's ID is `PG-<issue number>`, its branch `PG-<n>-<slug>`, its PR scope `(PG-<n>)`, and the issue stays open until the PR that says `Closes #<n>` merges.
@@ -212,19 +212,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 The owner does not review Playground PRs: the review loop is the gate ([ADR 0004](./.agents/adr/0004-an-independent-reviewer-is-the-gate.md)), inside ZeroStarter's flow.
 
 1. Make the change on a branch from `origin/canary` in `.claude/worktrees/`, with a test or a red-first check when behaviour changes, and open it as a draft into `canary` whose body paraphrases its ask.
-   The body is written with the [pr](./extensions/core/skills/pr/SKILL.md) skill, called through the Skill tool: a `## TL;DR` of two sentences or more on top, then its Summary, Evidence and Merge Danger, then `## Links` last.
-   Its TL;DR is in plain words: what the owner sees or can do now, in words a person uses, with no factory or code jargon such as pane, slot or jsonb.
-   The body gate (`packages/scripts/src/pr-merge/body.ts`, read by Checks, `pr:merge`, merge-on-ready and the train) takes the template, a TL;DR with no `Outcome:` label, and Evidence with an `A/B:` line, no `TBD`.
-   The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
-   Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read,
-   and fill the template above; the reviewer still judges everything.
-   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members and update each hit: one such grep once found what six rounds had found.
-   As part of that doc-sync pass, write each term as one regex over its spellings (possessive, plural, hyphenated), such as `card('s)? width`, then
-   run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -lE <term>` over the whole repo, code and help text too, then fix each hit on the old meaning, since one PR took 7 rounds, one doc a round; name each kept hit, read in context, by line and reason in Evidence.
-   After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
-   and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since stale lines from a merge once cost two docs-only rounds; done when no line of the PR's docs describes a meaning those commits changed.
-   When the PR moves text out of a file, run `git grep -n <old file name>` over the whole repo too, code comments, `scripts/hooks/README.md` and `.agents/dashboard/` included, and check each hit against the moved text at the old base, since one PR's greps kept to one folder and missed 7 hits, which cost two rounds.
-   Done when the body's Evidence names each touched doc and skill by its full repo path with its check, doc-sync's result and each list grep and changed-term grep with its hits, the moved-text grep's included, before the review's round 1 opens.
+   Read [.agents/shipping.md](./.agents/shipping.md) before you write its body and again before the review's round 1: it holds the body's template and its gate, and the pass that settles docs, skills and the body first.
 2. Have a reviewer agent other than its author (a session started for the review, in its own scratch clone, its brief carrying The factory's signal rule, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
    `Audit, Lint, and Build`, `test` and each PASS pr:merge asks hold there, and only nits are left (SESSIONS.md, Fix pushes and nits).
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
