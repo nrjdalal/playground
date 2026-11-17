@@ -147,7 +147,7 @@ const cached = async (
 
 const inFlight = new Map<string, Promise<ModelIcon | null>>()
 
-// A maker's icon, from the cache in dir once fetched (under its MODELS_DEV_IDS id where it has one), fetched again once it is past REFRESH_MS, a failed fetch keeping the old one; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. Offline, or any source failing, gives null and keeps nothing, so a later ask tries again.
+// A maker's icon, from the cache in dir once fetched (under its MODELS_DEV_IDS id where it has one), fetched again once it is past REFRESH_MS, a failed fetch keeping the old one; the first ask fetches it (one fetch at a time for a maker) and keeps it, or a none marker for a day. With nothing cached, offline or any source failing gives null and keeps nothing, so a later ask tries again.
 export const iconFor = async (
   maker: string,
   { dir, fetch = plainFetch, now = Date.now }: { dir: string; fetch?: Fetch; now?: () => number },

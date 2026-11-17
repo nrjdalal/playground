@@ -18,7 +18,7 @@ import { orgOf } from "../../../../../../packages/config/src/org"
 const FALLBACK = '<svg viewBox="0 0 24 24" fill="none"><path d="M9.8 15.9L9 18.7"/></svg>\n'
 const LOGO = '<svg viewBox="0 0 40 40"><path d="M26.9 9.8H22.1" fill="currentColor"/></svg>\n'
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
-// a maker with no models.dev logo and no mark of ours, so its Hugging Face avatar is fetched
+// a maker with no models.dev logo and no MODELS_DEV_IDS entry, so its Hugging Face avatar is fetched
 const HF = "https://huggingface.co/api/organizations/heron-ai/avatar"
 const CDN = "https://cdn-avatars.huggingface.co/v1/production/uploads/x/heron.png"
 
@@ -77,7 +77,9 @@ describe("iconFor", () => {
     })
     const first = await iconFor("RecursiveSI", { dir, fetch })
     expect(first).toEqual({ bytes: new TextEncoder().encode(LOGO), type: "image/svg+xml" })
-    const again = await iconFor("RecursiveSI", { dir, fetch })
+    // the cached file's own mtime is the clock, so the row holds under a clock set ahead
+    const now = () => statSync(join(dir, "RecursiveSI.svg")).mtimeMs
+    const again = await iconFor("RecursiveSI", { dir, fetch, now })
     expect(again).toEqual(first)
     expect(asked).toEqual([
       "https://models.dev/logos/playground-no-such-maker.svg",
@@ -239,7 +241,11 @@ describe("a maker models.dev lists under another id", () => {
 describe("a cached logo's weekly refresh", () => {
   const DAY = 24 * 60 * 60 * 1000
   const OLD = '<svg viewBox="0 0 24 24"><path d="M1 1H2"/></svg>\n'
-  const later = (days: number) => () => Date.now() + days * DAY
+  // a written file's own mtime, days on, is the clock, so the rows hold under a clock set ahead
+  const aged = (file: string, days: number) => {
+    const at = statSync(file).mtimeMs + days * DAY
+    return () => at
+  }
 
   test("a logo cached under 7 days ago is served from the cache, with no fetch", async () => {
     const dir = scratch()
@@ -247,7 +253,9 @@ describe("a cached logo's weekly refresh", () => {
     const { asked, fetch } = stub({
       "https://models.dev/logos/anthropic.svg": () => new Response(LOGO),
     })
-    expect(await iconFor("anthropic", { dir, fetch, now: later(6) })).toEqual({
+    expect(
+      await iconFor("anthropic", { dir, fetch, now: aged(join(dir, "anthropic.svg"), 6) }),
+    ).toEqual({
       bytes: new TextEncoder().encode(OLD),
       type: "image/svg+xml",
     })
@@ -259,17 +267,19 @@ describe("a cached logo's weekly refresh", () => {
     writeFileSync(join(dir, "anthropic.png"), PNG)
     const { fetch } = stub({ "https://models.dev/logos/anthropic.svg": () => new Response(LOGO) })
     const icon = { bytes: new TextEncoder().encode(LOGO), type: "image/svg+xml" as const }
-    expect(await iconFor("anthropic", { dir, fetch, now: later(8) })).toEqual(icon)
+    const now = aged(join(dir, "anthropic.png"), 8)
+    expect(await iconFor("anthropic", { dir, fetch, now })).toEqual(icon)
     expect(readdirSync(dir)).toEqual(["anthropic.svg"])
-    expect(await iconFor("anthropic", { dir, fetch: offline, now: later(8) })).toEqual(icon)
+    expect(await iconFor("anthropic", { dir, fetch: offline, now })).toEqual(icon)
   })
 
   test("past 7 days with the fetch failing, offline or with no logo found, the old logo stays and is served", async () => {
     const dir = scratch()
     writeFileSync(join(dir, "heron-ai.png"), PNG)
     const old = { bytes: PNG, type: "image/png" as const }
-    expect(await iconFor("heron-ai", { dir, fetch: offline, now: later(8) })).toEqual(old)
-    expect(await iconFor("heron-ai", { dir, fetch: stub().fetch, now: later(8) })).toEqual(old)
+    const now = aged(join(dir, "heron-ai.png"), 8)
+    expect(await iconFor("heron-ai", { dir, fetch: offline, now })).toEqual(old)
+    expect(await iconFor("heron-ai", { dir, fetch: stub().fetch, now })).toEqual(old)
     expect(readdirSync(dir)).toEqual(["heron-ai.png"])
   })
 })
