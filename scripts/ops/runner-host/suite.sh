@@ -1,6 +1,6 @@
 #!/bin/bash
 # suite.sh <run>: runs local CI's steps on the runner host, so a suite takes no slot on the caller's machine (dispatcher, 18 Oct). ci.sh uploads a
-# `git archive` to <ci>/<run>.tar, <ci> being the folder this copy sits in (the box user's ~/.playground/ci), and starts this as that user,
+# `git archive` to <ci>/<run>.tar, <ci> being the folder this copy sits in (the box user's ~/.cache/playground-ci, ci.sh's BOX_CI_DIR), and starts this as that user,
 # never root, in a systemd user unit of its own, so a dropped ssh never ends the run; it unpacks the archive into <ci>/.claude/worktrees/<run>
 # and runs every step beside a Postgres container of its own on loopback, with nothing that reads the keyring (Secret Service). The box gets
 # the code alone: .env comes from .env.example with a secret made here, and no token or key of the caller's machine reaches it. Prints one line per
