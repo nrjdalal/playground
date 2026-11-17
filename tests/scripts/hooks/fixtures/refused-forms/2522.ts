@@ -21,6 +21,14 @@ const controls = (): Row[] => [
     `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
   ],
   [
+    "a shell's name inside a longer word on a remote line, which starts no shell",
+    "ssh box 'cat /etc/bash-completion.d/git; ls ~/zsh-config'",
+  ],
+  [
+    "a strict-mode cluster after a redirect on a remote bash",
+    "ssh box 'bash 2>&1 -euo pipefail -c uptime'",
+  ],
+  [
     "a strict-mode cluster after a remote bash's -c, read on to the command string",
     `ssh box 'bash -c -e "ls */notes"'`,
   ],
@@ -130,6 +138,22 @@ const refused = (): Row[] => [
   [
     "a remote touch through a ? glob after tcsh's set globdot, a reasoned row with no tcsh here to measure",
     "ssh box 'set globdot; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob in a bash whose -O comes after a redirect, as bash reads it",
+    `ssh box 'bash >/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh whose -o comes after a 2>&1",
+    `ssh box 'zsh 2>&1 -o extendedglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob after a set whose -o comes after a redirect and its own target word",
+    "ssh box 'set > x -o extendedglob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a zsh qualifier holding a space, refused by the glob reading rather than as a switch",
+    `ssh box "touch *(D e:'true':)/notes/x"`,
   ],
   [
     "a remote touch through a * glob with BASHOPTS set by ssh's SetEnv",

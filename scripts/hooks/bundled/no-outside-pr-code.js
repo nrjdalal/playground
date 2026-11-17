@@ -5666,10 +5666,16 @@ var NO_GLOB = new Set([
   "xtrace"
 ]);
 function optionSwitch(bare) {
-  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?\b(?=([^;&|\n]*))/gi)) {
+  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?(?=[\s<>;&|)]|$)(?=((?:\d*[<>]+[&|]?|&>>?|[^;&|\n])*))/gi)) {
     const words = rest.split(/\s+/).filter(Boolean);
     for (let i = 0;i < words.length; i++) {
       const word = words[i];
+      const redirect = /^(?:\d*|&)[<>]+[&|]?/.exec(word);
+      if (redirect) {
+        if (redirect[0] === word)
+          i++;
+        continue;
+      }
       if (word === "--" || !/^[-+]/.test(word))
         break;
       const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word);

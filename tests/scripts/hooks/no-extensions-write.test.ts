@@ -4122,6 +4122,12 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh box 'set --dot-glob; touch ?playground/extensions/y'",
     "ssh box 'set -o dot-glob; touch ?playground/extensions/y'",
     "ssh box 'set globdot; touch ?playground/extensions/y'",
+    `ssh box 'bash >/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash > /dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh 2>&1 -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash >| x -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash &>x -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set >x -o extendedglob; touch ?playground/extensions/y'",
   ])(
     "%s, an option a shell reads by any of its spellings, is refused as a switch",
     async (command) => {
@@ -4131,7 +4137,20 @@ describe("a glob-option switch on a remote or fed line", () => {
 
   test("its reason names the one form of a shell's options that runs", async () => {
     expect(await bash("ssh box 'zsh --extended-glob -c uptime'")).toEndWith(
-      "a shell's options run there only as a cluster with no O or 4 and a -o naming errexit, errtrace, functrace, noclobber, nounset, pipefail, verbose or xtrace, as in set -euo pipefail",
+      "a shell's options run there only as a cluster with no O or 4, and a -o or a long option (--login) naming errexit, errtrace, functrace, login, noclobber, noprofile, norc, nounset, pipefail, verbose, xtrace, as in set -euo pipefail",
     )
   })
+
+  test.each([
+    "ssh box 'cat /etc/bash-completion.d/git'",
+    "ssh box 'ls ~/zsh-config'",
+    "ssh box 'kubectl config set-context x'",
+    "ssh box 'bash 2>&1 -e -c uptime'",
+    "ssh box 'bash > log -euo pipefail -c uptime'",
+  ])(
+    "%s, a shell's name inside a longer word or a redirect before strict mode, runs",
+    async (command) => {
+      expect(await bash(command)).toBeUndefined()
+    },
+  )
 })

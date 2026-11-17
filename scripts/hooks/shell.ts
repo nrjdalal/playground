@@ -658,7 +658,7 @@ const DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/
 // A text read as the shell reads a name: its backslash-newline pairs joined, and past quotes, backslashes and underscores (`g_l_o_b_d_o_t_s`, `dot''glob`)
 const bareText = (text: string) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
 // The option names a -o or a long option may give that change no glob, so a strict-mode header (`set -euo pipefail`) and a login shell run
-const NO_GLOB = new Set([
+export const NO_GLOB = new Set([
   "errexit",
   "errtrace",
   "functrace",
@@ -671,14 +671,19 @@ const NO_GLOB = new Set([
   "verbose",
   "xtrace",
 ])
-// A set or a started shell, as a command word (rbash, rzsh and a versioned name such as bash-5.2 too), whose options, read until its first other word or a `--`, past a -c cluster as bash and zsh read them, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
+// A set or a started shell, as a whole command word (rbash, rzsh and a versioned name such as bash-5.2 too, but not bash-completion.d), whose options, read until its first other word or a `--`, past a -c cluster and a redirect (`>x`, `2>&1`, `> x`) as bash and zsh read them, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
 function optionSwitch(bare: string): string | undefined {
   for (const [, head, rest] of bare.matchAll(
-    /(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?\b(?=([^;&|\n]*))/gi,
+    /(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?(?=[\s<>;&|)]|$)(?=((?:\d*[<>]+[&|]?|&>>?|[^;&|\n])*))/gi,
   )) {
     const words = rest!.split(/\s+/).filter(Boolean)
     for (let i = 0; i < words.length; i++) {
       const word = words[i]!
+      const redirect = /^(?:\d*|&)[<>]+[&|]?/.exec(word)
+      if (redirect) {
+        if (redirect[0] === word) i++
+        continue
+      }
       if (word === "--" || !/^[-+]/.test(word)) break
       const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word)
       if (long) {
