@@ -118,9 +118,9 @@ const machine = () => {
     liveBranch: () => "live/dashboard",
     main,
     merged: () => false,
+    mergedHead: () => null,
     notify: (text) => void told.push(text),
     places: () => [],
-    prMerged: () => null,
     prState: async () => null,
     session: async () => "j6rjgy-worker",
   }
@@ -1337,20 +1337,58 @@ test("--worktree takes a review clone a live row holds only by a PR that has mer
       ],
     }),
   )
-  const asked: number[] = []
-  const open: RmDeps = { ...deps, prMerged: (_, n) => (asked.push(n), false) }
-  expect(await rmTold(["--worktree", clone], open)).toEqual({
+  const held = {
     code: 1,
     err: [`playground: ${clone} is held by gkbbch-worker, which the roster lists as working`],
     out: [],
-  })
-  expect(asked).toEqual([2484])
-  expect((await rmTold(["--worktree", clone], { ...deps, prMerged: () => null })).code).toBe(1)
-  const merged: RmDeps = { ...deps, prMerged: (_, n) => n === 2484 }
+  }
+  const asked: string[] = []
+  const open: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), null) }
+  expect(await rmTold(["--worktree", clone], open)).toEqual(held)
+  expect(asked).toEqual(["https://github.com/o/r/pull/2484"])
+  const absent: RmDeps = { ...deps, mergedHead: () => "0".repeat(40) }
+  expect(await rmTold(["--worktree", clone], absent)).toEqual(held)
+  const head = git(clone, "rev-parse", "HEAD")
+  const merged: RmDeps = {
+    ...deps,
+    mergedHead: (_, u) => (u === "https://github.com/o/r/pull/2484" ? head : null),
+  }
   const told = await rmTold(["--worktree", clone], merged)
   expect(told.err).toEqual([])
   expect(told.code).toBe(0)
   expect(existsSync(clone)).toBe(false)
+})
+
+// round 1 of #2520's review: a merged PR's number stopped holding before the past-head check, so --discard took a clone's commit past that PR's head; that number still holds while HEAD has a commit past it, and a row naming the PR alongside its branch never asks gh
+test("--worktree --discard keeps a clone with a commit past a merged PR's head, which the row holds by that PR alone", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-7")
+  const merged = git(own, "rev-parse", "HEAD")
+  git(main, "worktree", "add", "-q", "-b", "PG-7-review", clone, merged)
+  writeFileSync(join(clone, "past.txt"), "past\n")
+  git(clone, "add", "past.txt")
+  git(clone, "commit", "-qm", "past the merged head")
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-9-other" }] }),
+  )
+  const asked: string[] = []
+  const past: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), merged) }
+  expect(await rmTold(["--worktree", clone, "--discard"], past)).toEqual({
+    code: 1,
+    err: [`playground: ${clone} is held by abc123-worker, which the roster lists as working`],
+    out: [],
+  })
+  expect(asked).toEqual(["https://github.com/o/r/pull/7"])
+  expect(existsSync(join(clone, "past.txt"))).toBe(true)
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-7-review" }] }),
+  )
+  asked.length = 0
+  expect((await rmTold(["--worktree", clone, "--discard"], past)).code).toBe(1)
+  expect(asked).toEqual([])
 })
 
 test.each([
@@ -1930,7 +1968,7 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
     expect(deps.merged("HEAD", wt)).toBeNull()
     expect(deps.defaultBranch(wt)).toBeNull()
-    expect(deps.prMerged(wt, 2484)).toBeNull()
+    expect(deps.mergedHead(wt, "https://github.com/o/r/pull/2484")).toBeNull()
     expect(existsSync(called)).toBe(false)
   } finally {
     process.env.PATH = saved.path

@@ -1254,9 +1254,9 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       liveBranch: () => "live/dashboard",
       main,
       merged: () => null,
+      mergedHead: () => null,
       notify: () => {},
       places: () => [],
-      prMerged: () => null,
       prState: async () => ({ head: prHead, number: 1, state: "MERGED" }),
       procs: () => [],
       session: async () => "t",
@@ -1300,6 +1300,59 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(existsSync(over.wt)).toBe(true)
   })
 
+  // round 1 of #2520's review: cleanupHeld always passes --discard, so a row holding the worktree by its own merged PR alone frees it at that PR's head, and keeps it, its commit named, past it
+  test("a live row holding the worktree only by its merged PR frees it at the PR's head, and keeps it with a commit past that head", async () => {
+    const url = "https://github.com/o/r/pull/1"
+    const rmOf = (data: string, main: string, prHead: string): RmDeps => ({
+      clones: () => [],
+      data,
+      defaultBranch: () => null,
+      home: data,
+      liveBranch: () => "live/dashboard",
+      main,
+      merged: () => null,
+      mergedHead: (_, u) => (u === url ? prHead : null),
+      notify: () => {},
+      places: () => [],
+      prState: async () => ({ head: prHead, number: 1, state: "MERGED" }),
+      procs: () => [],
+      session: async () => "t",
+    })
+    const roster = (root: string) =>
+      writeFileSync(
+        join(root, "roster.json"),
+        JSON.stringify({
+          agents: [{ branch: "PG-9-other", name: "abc123-worker", pr: url, status: "working" }],
+        }),
+      )
+    const at = machine()
+    recorded(at.wt)
+    roster(at.root)
+    const head = Bun.spawnSync(["git", "-C", at.wt, "rev-parse", "HEAD"]).stdout.toString().trim()
+    const freed = fakes(at.main, [], undefined, {
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(at.root, at.main, head)),
+    })
+    expect(await cleanWorktree(at.wt, "r ended", freed.deps)).toContain(`removed ${at.wt}`)
+
+    const over = machine()
+    roster(over.root)
+    writeFileSync(join(over.wt, "b.txt"), "b\n")
+    run(over.wt, "git", "add", "b.txt")
+    run(over.wt, "git", "commit", "-qm", "b")
+    const rev = (r: string, short = false) =>
+      Bun.spawnSync(["git", "-C", over.wt, "rev-parse", ...(short ? ["--short"] : []), r])
+        .stdout.toString()
+        .trim()
+    const kept = fakes(over.main, [], undefined, {
+      finished: async () => true,
+      held: (path, pr) => cleanupHeld(path, pr, rmOf(over.root, over.main, rev("HEAD~1"))),
+    })
+    expect(await cleanWorktree(over.wt, "r ended", kept.deps)).toBe(
+      `kept ${over.wt}: ${over.wt} is held by abc123-worker, which the roster lists as working, and its commits past merged PR #1's head stay: ${rev("HEAD", true)}`,
+    )
+    expect(existsSync(over.wt)).toBe(true)
+  })
+
   // #2344: a live row holds a worktree by the worktree's own PR, as removePath's does, so the cleanup's held check keeps it before dev:stop runs in it
   test("a live row listing the worktree's own open PR keeps it at the held check, with no dev:stop", async () => {
     const { main, root, wt } = machine()
@@ -1321,9 +1374,9 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       liveBranch: () => "live/dashboard",
       main,
       merged: () => null,
+      mergedHead: () => null,
       notify: () => {},
       places: () => [],
-      prMerged: () => null,
       prState: async () => ({ head, number: 2435, state: "OPEN" }),
       procs: () => [],
       session: async () => "t",

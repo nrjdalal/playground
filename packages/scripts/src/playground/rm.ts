@@ -89,10 +89,10 @@ export type RmDeps = {
   liveBranch: () => string
   main: string
   merged: (sha: string, at: string) => boolean | null
+  // The head of the PR at url once it reads MERGED, from gh in the worktree, else null.
+  mergedHead: (path: string, url: string) => string | null
   notify: (text: string) => void
   places: () => string[]
-  // Whether PR n of the worktree's repo reads MERGED, from gh in it, null when gh cannot answer.
-  prMerged: (path: string, n: number) => boolean | null
   prState: (path: string, pr?: string) => Promise<PrRead>
   procs: () => Proc[] | null
   session: () => Promise<string>
@@ -207,11 +207,20 @@ export const prStateOf = (
     : null
 }
 
-// Whether PR n reads MERGED, from gh in the worktree through ghRead, so it reads the worktree's own repo; null when gh cannot answer, a skipped or stopped read included.
-const prMerged = (path: string, n: number): boolean | null => {
-  const out = ghOut(["pr", "view", String(n), "--json", "state", "--jq", ".state"], path)
-  return out === null ? null : out === "MERGED"
-}
+// The head of the PR at url once it reads MERGED, from gh in the worktree through ghRead, by the URL so it answers for that PR's own repo; null while it reads open or closed, or when gh cannot answer, a skipped or stopped read included.
+const mergedHead = (path: string, url: string): string | null =>
+  ghOut(
+    [
+      "pr",
+      "view",
+      url,
+      "--json",
+      "state,headRefOid",
+      "--jq",
+      'if .state == "MERGED" then .headRefOid else "" end',
+    ],
+    path,
+  ) || null
 
 // The worktree's own PR number as a holder field, from rm's prState answer, none when it names no PR or gh was unreachable.
 export const ownPrOf = (own: PrRead | undefined): { ownPr?: number } =>
@@ -259,6 +268,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   liveBranch,
   main: mainCheckout(repo),
   merged,
+  mergedHead,
   notify: (text) =>
     void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
       env: { ...process.env, NOTIFY_TO: "dispatcher" },
@@ -266,7 +276,6 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   places: linkPlaces,
-  prMerged,
   prState,
   procs: processes,
   session: sessionName,
@@ -424,10 +433,10 @@ export async function removePath(
             live: STATUSES.live,
             ...(dashboardBranch ? { liveBranch: dashboardBranch } : {}),
             merged: deps.merged,
+            mergedHead: (url: string) => deps.mergedHead(args.path, url),
             note,
             ...ownPrOf(own),
             places: deps.places,
-            prMerged: (n: number) => deps.prMerged(args.path, n),
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),
             roster: join(deps.data, "roster.json"),
