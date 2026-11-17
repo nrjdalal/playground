@@ -193,23 +193,35 @@ export const recordedBy = (entries: Entry[], path: string): boolean =>
     (e) => inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path)),
   )
 
+// Each listed path measured, largest first; a path that is gone by its measure (removed after it was listed, such as by a delete running at the same time) is skipped, counted nowhere. An image keeps the size docker gave it.
+export const measured = (
+  found: { bytes?: number; kind: UnusedKind; path: string }[],
+  entries: Entry[],
+): Unused[] =>
+  found
+    .flatMap(({ bytes, kind, path }) => {
+      const size = bytes ?? sizeOf(path)
+      // read after the walk, so a path removed while it was measured is skipped too
+      if (bytes === undefined && !stat(path)) return []
+      return [{ bytes: size, kind, path, recorded: recordedBy(entries, path) }]
+    })
+    .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
+
 // This machine's unused space, largest first.
 export async function measureUnused(places: Places): Promise<Unused[]> {
   const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
   const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
   const named = await modelTexts(join(places.home, "models"))
-  const of = (kind: UnusedKind, path: string, bytes = sizeOf(path)): Unused => ({
-    bytes,
-    kind,
-    path,
-    recorded: recordedBy(entries, path),
-  })
-  return [
-    ...(await images(places, named)).map((i) => of("image", i.path, i.bytes)),
-    ...rehearsals(places.data).map((path) => of("rehearsal", path)),
-    ...runs(places.home, places.now).map((path) => of("run", path)),
-    ...weights(places.home, folders, places.data, named).map((path) => of("weights", path)),
-  ].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
+  const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
+  return measured(
+    [
+      ...(await images(places, named)).map((i) => ({ ...i, kind: "image" as const })),
+      ...listed("rehearsal", rehearsals(places.data)),
+      ...listed("run", runs(places.home, places.now)),
+      ...listed("weights", weights(places.home, folders, places.data, named)),
+    ],
+    entries,
+  )
 }
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`

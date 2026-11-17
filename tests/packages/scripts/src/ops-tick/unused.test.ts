@@ -13,6 +13,7 @@ import { dirname, join } from "node:path"
 
 import {
   linesOf,
+  measured,
   measureUnused,
   peerUnusedArgv,
   type Unused,
@@ -122,6 +123,31 @@ test("this machine's unused space: an old unused image, the dropped repo, the re
     { kind: "weights", path: at("probe-local-model/gguf/tiny.gguf"), recorded: true },
   ])
   expect(items[0]!.bytes).toBe(1500 * MB)
+})
+
+test("a path removed between its listing and its measure, as by a delete running at once, is skipped and counted nowhere", () => {
+  const { at, models } = setUp()
+  const gone = join(models, "hf/hub/models--gone--Model")
+  const kept = at("probe-local-model/gguf/GLM-Flash.gguf")
+  expect(
+    measured(
+      [
+        { kind: "weights", path: gone },
+        { kind: "weights", path: kept },
+        { bytes: 300 * MB, kind: "image", path: "docker image postgres:18-alpine" },
+      ],
+      [],
+    ),
+  ).toEqual([
+    { bytes: 700 * MB, kind: "weights", path: kept, recorded: false },
+    { bytes: 300 * MB, kind: "image", path: "docker image postgres:18-alpine", recorded: false },
+  ])
+  expect(
+    linesOf({ items: measured([{ kind: "weights", path: gone }], []), machine: "m" }, "/x"),
+  ).toEqual({
+    item: "m unused: none",
+    total: "m unused 0.0 GB",
+  })
 })
 
 test("the record guards and lists nothing itself: ~/.bun and the clone, both recorded, give no line", async () => {
