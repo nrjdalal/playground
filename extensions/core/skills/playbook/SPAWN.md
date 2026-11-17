@@ -287,4 +287,4 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   Its resume record carries the flags, so `spawn.sh restore` leaves it down, naming why, and `spawn.sh resume` refuses it while that record stands, since a resume would run it here without them; start it again instead.
   The live-name check reads this machine's sessions alone, so it misses a name live on the other one.
   Ops' sweep counts it live while any pane labelled with its name, on its resume record's server, still runs `ssh` (`sshLive` in `packages/scripts/src/ops-sweep/sweep.ts`): past 15 minutes it raises `probe-over-15m`, and once no such pane runs `ssh`, `probe-gone-unended`.
-  The Dashboard's live list reads this machine's sessions alone, so it shows the probe as gone.
+  The Dashboard's live list counts it live by the same rule (`packages/config/src/ssh-probe.ts`), as a remote row with no transcript, which it neither types into nor restarts.
