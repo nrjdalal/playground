@@ -19,6 +19,7 @@ import {
   lockRootOf,
   realLockRoot,
   prMerge,
+  runGh,
   shipNowLine,
   takeLock,
   unfoundTokens,
@@ -26,6 +27,7 @@ import {
   type RunResult,
 } from "../../../../../packages/scripts/src/pr-merge/merge"
 import "./scratch-config"
+import { withGhDown } from "../../../../gh-down"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { PR_TEMPLATE, SKILL_BODY } from "./bodies"
 import { greenChecks } from "./suite"
@@ -1083,5 +1085,14 @@ describe("the body gate's token grep at the head", () => {
     expect(await unfoundTokens(git, "HEAD", ["CLOCK_EXEMPT", "SKILLS_LINE", "SUITE_LINE"])).toEqual(
       ["SKILLS_LINE", "SUITE_LINE"],
     )
+  })
+})
+
+// the train's every gh call goes through runGh, so a broken gh is never flooded
+test("runGh skips gh while the gh-auth beat's fresh result reads failed", async () => {
+  expect(await withGhDown(() => runGh(["pr", "list"]))).toEqual({
+    code: 1,
+    stderr: "gh unreachable: gh token invalid",
+    stdout: "",
   })
 })

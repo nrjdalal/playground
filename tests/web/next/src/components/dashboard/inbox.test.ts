@@ -8,6 +8,9 @@ import {
   type Choices,
   choicesOf,
   INSTALL_TEXT,
+  PEER_INSTALL_TEXT,
+  PEER_POLICY,
+  PEER_RULE,
   questionsOf,
   ROOT_DIR,
   ROOT_STEPS,
@@ -2285,6 +2288,30 @@ describe("a root step card (PG-2433)", () => {
     expect(unescape(html)).toContain(ROOT_STEPS["bwrap-userns"].what)
     expect(unescape(html)).toContain(`To undo it: ${ROOT_STEPS["bwrap-userns"].undo}.`)
     expect(html).toContain(">Run bwrap-userns as root<")
+  })
+
+  test("a card for another machine names it, the sudo program byte for byte, the once-used password and the undo (PG-2434)", () => {
+    const peer = {
+      ...install,
+      preview: { ...install.preview, machine: "spark-test" },
+    } as unknown as InboxItem
+    const html = opened(peer)
+    const shown = unescape(html)
+    expect(unescape(/<pre[^>]*>([\s\S]*?)<\/pre>/.exec(html)?.[1] ?? "")).toBe(PEER_INSTALL_TEXT)
+    expect(shown).toContain("runs this program there as root through sudo")
+    expect(shown).toContain("The password is used once, then deleted from this computer")
+    expect(shown).toContain(`through <code class="font-mono">${PEER_RULE}</code>`)
+    expect(shown).toContain(
+      `To undo it: remove <code class="font-mono">${PEER_RULE}</code> and <code class="font-mono">${PEER_POLICY}</code> on spark-test.`,
+    )
+    expect(shown).not.toContain("asks for your password in its own window")
+    const peerStep = {
+      ...step,
+      preview: { ...step.preview, machine: "spark-test" },
+    } as unknown as InboxItem
+    const stepShown = unescape(opened(peerStep))
+    expect(stepShown).toContain("on spark-test, then runs it there as root, with no password")
+    expect(stepShown).toContain(`To undo it: ${ROOT_STEPS["bwrap-userns"].undo}, on spark-test.`)
   })
 
   test("once approved, reads the result, green or red by its exit code", () => {
