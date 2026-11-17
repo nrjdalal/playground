@@ -19,8 +19,12 @@ import { basename, dirname, join } from "node:path"
 import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
 import { dataDir } from "../../../packages/env/src/data-dir"
-import { isUnreachable } from "../../../packages/scripts/src/gh-read"
-import { freedOf, type PrRead, type RmDeps } from "../../../packages/scripts/src/playground/rm"
+import {
+  freedOf,
+  ownPrOf,
+  type PrRead,
+  type RmDeps,
+} from "../../../packages/scripts/src/playground/rm"
 import STATUSES from "../../roster-statuses.json"
 import {
   type CollectInput,
@@ -483,7 +487,8 @@ export const cleanupHeld = async (
       freed: freedOf(own),
       live: STATUSES.live,
       merged: () => null,
-      ...(own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}),
+      mergedHead: (url: string) => rm.mergedHead(path, url),
+      ...ownPrOf(own),
       places: rm.places,
       ...(pr ? { pr } : {}),
       procs: [],
