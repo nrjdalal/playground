@@ -13,6 +13,27 @@ const part = async (label: string) =>
     "**Done when**",
   )
 
+describe("code-review-loop names CI green only from state.ts checks (#2517)", () => {
+  test("step 7, VERIFY.md and the docs page read the gate checks from checks' CHECK lines, not the bare check-runs list", async () => {
+    const step7 = (await skill()).split("7. **Post**")[1]?.split("\n")[0] ?? ""
+    expect(step7).toContain(
+      "name the gate checks green in a 5/5 only from `state.ts checks`' `CHECK` lines for both of them",
+    )
+    const verify = await Bun.file(
+      join(root, "extensions/core/skills/code-review-loop/references/VERIFY.md"),
+    ).text()
+    const read =
+      verify.split("\n").find((l) => l.startsWith("- **Read the head's own checks**")) ?? ""
+    expect(read).toContain(
+      "a verdict names a gate check green only from the `CHECK success <name>` line",
+    )
+    expect(read).toContain("before that gate check exists")
+    expect(await page()).toContain(
+      "A 5/5 calls the gate checks green only from `state.ts checks`' CHECK lines for both",
+    )
+  })
+})
+
 describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
   test("after a 5/5 the reviewer stays up until the PR merges", async () => {
     const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
