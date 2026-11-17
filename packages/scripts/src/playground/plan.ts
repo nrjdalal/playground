@@ -98,6 +98,8 @@ playground ci-wait <pr> [--repo <owner/name>]
                       wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log
+playground model use <name> [--machine <name>]
+                      start the local model server in ~/models/<name>/ on the machine named, else on the machine whose localModels.hereModel or localModels.peerModel names it (the peer when neither does): its memory share and its sessions sized from that machine's free memory above its reserve, beside a running model when both fit, else in its place once that model's requests drain; it stops only a container it started, and refuses saying why, with the memory reading, when not even one session fits
 playground send <name> <text>
                       message a session on the other machine, which SendMessage does not reach: queue one line, {at, from, id, text, to}, in the outbox's ops-peer.jsonl, which the ops-peer-relay job copies to the other machine, where that session's alerts-wait prints it; from is your session's name, and a line over 16 KB is refused`
 
@@ -168,6 +170,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "herdr pin": "rest",
   "herdr stop": 0,
   migrate: 0,
+  "model use": 1,
   ops: 0,
   optimizer: 0,
   "orgs home": 0,

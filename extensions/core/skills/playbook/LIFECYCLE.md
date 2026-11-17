@@ -43,7 +43,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-peer-relay, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-model-tunnel, ops-peer-relay, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -69,6 +69,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   A port another program already answers on starts no ssh.
   It beats `up: <link> through <host>` once the port answers and macOS trusts the certificate served there (checked each minute), else `down: <why>`.
   It posts the link once as an Inbox update whose title opens it, and `playground doctor`'s `tunnel` line reads its beat.
+  ops-model-tunnel (`packages/scripts/src/ops-model-tunnel/`, off by default) holds `ssh -N -L 127.0.0.1:18000:127.0.0.1:8000 -L 127.0.0.1:18001:127.0.0.1:8001` to the peer `localModels.machine` names, where `playground model use` starts its model servers, and starts ssh again on ops-tunnel's waits.
+  ops-tick's `model-keep` beat keeps each machine's kept model (`localModels.hereModel`, `localModels.peerModel`) up.
   ops-peer-relay (`packages/scripts/src/ops-peer-relay/`, off by default) runs on one machine of a pair, from the Dashboard's checkout, whose `.env` names the other machines in `PLAYGROUND_PEERS` and the key in `PLAYGROUND_PEER_KEY` (`~/.ssh/playground_spark` when unset), the cluster the System page reads.
   It holds one ssh to each peer, running `agent.ts` from that machine's own checkout at this one's path, and copies each new `ops-peer.jsonl` line both ways, `playground send`'s queue ([SESSIONS.md](SESSIONS.md#message-a-session)), each line once by its `id`, the copy stamped `relayedAt` and its `at` kept.
   A byte cursor per side, `ops/peer-relay/<peer>.json`, moves only once the far side has written the line, so a line written during a drop arrives once after it; the first link starts each cursor at its queue's end, so only lines written after it cross.
