@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path"
 
 import { peerArgv } from "../../api/hono/src/lib/system/peer"
+import { machineTest, zshMissing } from "../machine"
 import { OLD } from "../session-names"
 import {
   bin,
@@ -164,63 +165,67 @@ describe("--remote-control", () => {
 })
 
 describe("--ssh runs the probe's claude on another machine", () => {
-  test("the pane copies the settings and skills into one remote folder, then runs claude there under ssh -tt", async () => {
-    const email = "spare@example.com"
-    const r = await spawn(
-      [...probe, ...ssh, "--account", email],
-      [],
-      farPath,
-      undefined,
-      undefined,
-      far(),
-    )
-    expect(r.code).toBe(0)
-    expect(r.roster).toContain("kind=probe")
-    const launch = launchOf(r)
-    const remote = launch.match(/mkdir -m 700 (\/tmp\/playground-probe-far\.[A-Za-z0-9]{6})/)?.[1]
-    expect(remote).toBeDefined()
-    expect(launch).not.toContain(TOKEN)
+  machineTest(
+    zshMissing(),
+    "the pane copies the settings and skills into one remote folder, then runs claude there under ssh -tt",
+    async () => {
+      const email = "spare@example.com"
+      const r = await spawn(
+        [...probe, ...ssh, "--account", email],
+        [],
+        farPath,
+        undefined,
+        undefined,
+        far(),
+      )
+      expect(r.code).toBe(0)
+      expect(r.roster).toContain("kind=probe")
+      const launch = launchOf(r)
+      const remote = launch.match(/mkdir -m 700 (\/tmp\/playground-probe-far\.[A-Za-z0-9]{6})/)?.[1]
+      expect(remote).toBeDefined()
+      expect(launch).not.toContain(TOKEN)
 
-    const pane = await paneRun(r, { PATH: `${sshBin}:${bin}:${process.env.PATH}` })
-    expect(pane.code).toBe(0)
-    const calls = sshCalls(r.home)
-    const opts = ["-i", join(r.home, "key"), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"]
-    expect(calls).toHaveLength(2)
-    expect(calls[0]).toEqual([
-      ...opts,
-      "pride@spark-bravo",
-      `mkdir -m 700 ${remote} && tar -xf - -C ${remote}`,
-    ])
-    expect(calls[1]?.slice(0, -1)).toEqual([...opts, "-tt", "pride@spark-bravo"])
-    const command = calls[1]?.at(-1) ?? ""
-    expect(command).toStartWith(`cd ${root} && export TMPDIR=${remote} PLAYGROUND_REPO=`)
-    // ssh's command PATH is the system's alone, so the remote shell adds its own ~/.bun/bin, expanding $HOME there
-    expect(command).toContain(` PATH="$HOME/.bun/bin:$PATH" && (`)
-    expect(command).toContain(
-      `tk="$(security find-generic-password -s playground-claude-oauth -a ${email} -w)"`,
-    )
+      const pane = await paneRun(r, { PATH: `${sshBin}:${bin}:${process.env.PATH}` })
+      expect(pane.code).toBe(0)
+      const calls = sshCalls(r.home)
+      const opts = ["-i", join(r.home, "key"), "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"]
+      expect(calls).toHaveLength(2)
+      expect(calls[0]).toEqual([
+        ...opts,
+        "pride@spark-bravo",
+        `mkdir -m 700 ${remote} && tar -xf - -C ${remote}`,
+      ])
+      expect(calls[1]?.slice(0, -1)).toEqual([...opts, "-tt", "pride@spark-bravo"])
+      const command = calls[1]?.at(-1) ?? ""
+      expect(command).toStartWith(`cd ${root} && export TMPDIR=${remote} PLAYGROUND_REPO=`)
+      // ssh's command PATH is the system's alone, so the remote shell adds its own ~/.bun/bin, expanding $HOME there
+      expect(command).toContain(` PATH="$HOME/.bun/bin:$PATH" && (`)
+      expect(command).toContain(
+        `tk="$(security find-generic-password -s playground-claude-oauth -a ${email} -w)"`,
+      )
 
-    // The copy holds three names, each relative, so nothing lands outside the remote folder: the settings, the skills and the brief, which the prompt names there.
-    const listed = Bun.spawnSync(["tar", "-tf", join(r.home, "ssh.stdin")]).stdout.toString()
-    const entries = listed.split("\n").filter(Boolean)
-    expect(entries.every((e) => !e.startsWith("/") && !e.split("/").includes(".."))).toBe(true)
-    const tops = [...new Set(entries.map((e) => e.split("/")[0]))].sort()
-    expect(tops).toHaveLength(3)
-    expect(tops.some((t) => /^factory-settings-sandbox-.*\.json$/.test(t ?? ""))).toBe(true)
-    expect(tops).toContain("b.md")
+      // The copy holds three names, each relative, so nothing lands outside the remote folder: the settings, the skills and the brief, which the prompt names there.
+      const listed = Bun.spawnSync(["tar", "-tf", join(r.home, "ssh.stdin")]).stdout.toString()
+      const entries = listed.split("\n").filter(Boolean)
+      expect(entries.every((e) => !e.startsWith("/") && !e.split("/").includes(".."))).toBe(true)
+      const tops = [...new Set(entries.map((e) => e.split("/")[0]))].sort()
+      expect(tops).toHaveLength(3)
+      expect(tops.some((t) => /^factory-settings-sandbox-.*\.json$/.test(t ?? ""))).toBe(true)
+      expect(tops).toContain("b.md")
 
-    // The remote shell ran claude with its settings and skills from that folder, the token in no word.
-    const args = readFileSync(join(r.home, "claude.args"), "utf8")
-    expect(args).toContain(`--settings ${remote}/factory-settings-sandbox-`)
-    expect(args).toMatch(new RegExp(`--plugin-dir ${remote}/[0-9a-f]+ `))
-    expect(args).toContain(`Your brief is in ${remote}/b.md: read it in full`)
-    expect(args).not.toContain(TOKEN)
-    expect(readFileSync(join(r.home, "ssh.calls"), "utf8")).not.toContain(TOKEN)
-    expect([r.out, r.err, ...(r.roster ?? [])].join("\n")).not.toContain(TOKEN)
-    expect(execLine(r, "probe-far")).toEndWith(
-      ` --account ${email} --ssh pride@spark-bravo --key ${join(r.home, "key")}`,
-    )
-  })
+      // The remote shell ran claude with its settings and skills from that folder, the token in no word.
+      const args = readFileSync(join(r.home, "claude.args"), "utf8")
+      expect(args).toContain(`--settings ${remote}/factory-settings-sandbox-`)
+      expect(args).toMatch(new RegExp(`--plugin-dir ${remote}/[0-9a-f]+ `))
+      expect(args).toContain(`Your brief is in ${remote}/b.md: read it in full`)
+      expect(args).not.toContain(TOKEN)
+      expect(readFileSync(join(r.home, "ssh.calls"), "utf8")).not.toContain(TOKEN)
+      expect([r.out, r.err, ...(r.roster ?? [])].join("\n")).not.toContain(TOKEN)
+      expect(execLine(r, "probe-far")).toEndWith(
+        ` --account ${email} --ssh pride@spark-bravo --key ${join(r.home, "key")}`,
+      )
+    },
+  )
 
   test("an --ssh probe reports with playground send and waits on its own alerts-wait, and a probe here keeps SendMessage (PG-2444)", async () => {
     const there = await spawn([...probe, ...ssh], [], farPath, undefined, undefined, far())

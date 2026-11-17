@@ -8,6 +8,7 @@ import { atHead, verdictsOf } from "@packages/config/verdicts"
 import { ghSkipped } from "@packages/scripts/gh-read"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
+import { gatesAt, readGates } from "@/lib/dashboard/gates"
 import { heldReason, readHeld } from "@/lib/dashboard/held"
 import { dashboardHub } from "@/lib/dashboard/hub"
 import { readManagersOrder } from "@/lib/dashboard/managers-order"
@@ -46,6 +47,10 @@ export type Pull = {
   // it conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY), so GitHub starts no Actions run on it; UNKNOWN, while GitHub works it out, is no conflict
   conflicts: boolean
   draft: boolean
+  // the pr:merge gates it fails at its head, as the merge train last read them (gates.json, `gatesAt`): none when it would merge, null while no read is at this head
+  gates: string[] | null
+  // its head commit
+  head: string
   number: number
   // in a merge queue, or set to merge itself once it may
   queued: boolean
@@ -507,6 +512,8 @@ export function pullOf(node: unknown, poster?: string): Pull | null {
     ci: ciOf(str(rollup.state)),
     conflicts: node.mergeable === "CONFLICTING" || node.mergeStateStatus === "DIRTY",
     draft: node.isDraft === true,
+    gates: null,
+    head: str(node.headRefOid),
     number: node.number,
     queued: isRecord(node.mergeQueueEntry) || isRecord(node.autoMergeRequest),
     reviewed: reviewedOf(bodies),
@@ -659,6 +666,9 @@ const storedPull = (value: unknown): Pull | null => {
     // an entry stored before the field came reads as no conflict, since a merged PR has none
     conflicts: value.conflicts === undefined || typeof value.conflicts === "boolean",
     draft: typeof value.draft === "boolean",
+    // a merged PR has no gate read, and an entry stored before head came reads as none
+    gates: value.gates === undefined || value.gates === null,
+    head: value.head === undefined || typeof value.head === "string",
     number: intOf(value.number) !== null,
     queued: typeof value.queued === "boolean",
     reviewed: typeof value.reviewed === "boolean",
@@ -672,7 +682,12 @@ const storedPull = (value: unknown): Pull | null => {
     verdict: value.verdict === null || typeof value.verdict === "string",
   }
   return Object.values(ok).every(Boolean)
-    ? ({ ...value, conflicts: value.conflicts === true } as unknown as Pull)
+    ? ({
+        ...value,
+        conflicts: value.conflicts === true,
+        gates: null,
+        head: typeof value.head === "string" ? value.head : "",
+      } as unknown as Pull)
     : null
 }
 
@@ -901,7 +916,7 @@ export async function agentsBoard(
   { readPull = pullFor }: { readPull?: (lookup: string) => Promise<Pull | null> } = {},
 ): Promise<AgentsBoard> {
   const path = rosterPath()
-  const [{ problem, roster }, sockets, read, held, queueRead, managersOrder, workQueue] =
+  const [{ problem, roster }, sockets, read, held, gates, queueRead, managersOrder, workQueue] =
     await Promise.all([
       readRoster(path),
       socketNames(),
@@ -913,6 +928,7 @@ export async function agentsBoard(
         }),
       ),
       readHeld(),
+      readGates(),
       readMergeQueue(),
       readManagersOrder(),
       readWorkQueue(),
@@ -938,7 +954,7 @@ export async function agentsBoard(
       ])
       const work = workOf(match.roster, git, (perCwd.get(cwd) ?? 0) > 1)
       let pullProblem: PullProblem | null = null
-      const pr = work.lookup
+      const pull = work.lookup
         ? await readPull(work.lookup).catch((err: unknown) => {
             pullProblem = {
               reason: err instanceof Error ? err.message : "GitHub could not be read",
@@ -947,6 +963,7 @@ export async function agentsBoard(
             return null
           })
         : null
+      const pr = pull && { ...pull, gates: gatesAt(gates, pull) }
       return agentOf(
         match,
         facts,
