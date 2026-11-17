@@ -93,11 +93,13 @@ playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <fil
 playground add --dispatcher --backend glm
                       start a second dispatcher on GLM
 playground alerts-wait <name>
-                      for a manager's background task: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up, print it and exit, so it wakes without waiting on the relay
+                      for a manager's background task, or a session on another machine's: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up or a playground send from the other machine, led by [ops-peer] and its sender's name, print it and exit, so it wakes without waiting on the relay
 playground ci-wait <pr> [--repo <owner/name>]
-                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
+                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
-                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log`
+                      as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log
+playground send <name> <text>
+                      message a session on the other machine, which SendMessage does not reach: queue one line, {at, from, id, text, to}, in the outbox's ops-peer.jsonl, which the ops-peer-relay job copies to the other machine, where that session's alerts-wait prints it; from is your session's name, and a line over 16 KB is refused`
 
 // The package scripts playground runs as its own verbs.
 export const VERBS = ["ask", "changelog", "dm", "ingest", "queues", "thread", "wa"]
@@ -178,6 +180,7 @@ export const WORDS: Record<string, number | "rest"> = {
   "priority on": 1,
   rm: "rest",
   rules: 1,
+  send: "rest",
   "settings get": 1,
   "settings import-jobs": 1,
   "settings list": 0,
@@ -216,7 +219,7 @@ export const usageOf = (command: string): string =>
     .map((line, i) => `${i ? "       " : "usage: "}${line.split(/ {2,}/)[0]}`)
     .join("\n")
 
-// Why a command's words are refused, or null: a word past what WORDS gives its command or subcommand, with its usage; then the shapes uninstall, update, sweep and alerts-wait take.
+// Why a command's words are refused, or null: a word past what WORDS gives its command or subcommand, with its usage; then the shapes uninstall, update, sweep, alerts-wait and send take.
 export const extraWordRefusal = ([command, ...rest]: string[]): string | null => {
   const named = `${command} ${rest[0]}` in WORDS ? `${command} ${rest[0]}` : command
   const takes = named === undefined ? undefined : WORDS[named]
@@ -238,6 +241,7 @@ export const extraWordRefusal = ([command, ...rest]: string[]): string | null =>
     return rest.length === 1
       ? null
       : "usage: playground alerts-wait <name> (your own session's name)"
+  if (command === "send") return rest.length >= 2 ? null : "usage: playground send <name> <text>"
   return null
 }
 

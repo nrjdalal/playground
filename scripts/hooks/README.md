@@ -96,6 +96,7 @@ A loop runs its body again after the changes its last pass made, so a run of com
 A function the line defines and calls after it sets the variable is outside the list, its own follow-up.
 A `cd`, `pushd` or `popd` reached this way may run or not, so the folder it names joins the folders the shell may be in, as an `||`'s `cd` does, and each command after it is judged in both.
 The typed reading stands beside the empty one, so it adds refusals alone; a variable the line sets to a value the reader cannot read, and a command substitution in the program's place, keep their typed reading on the line itself, while inside a script an eval or a shell builds, their unread part reads as maybe empty, as above.
+A guard that resolves a shell variable reads it through steady.ts's own reader of the closed list above (`steadyNames` in `scripts/hooks/steady.ts`, whose `setterCounts` reads `NAME_SETTERS` and `RUNS_TEXT`), never a regex copy over the line's text, since the shell reads forms a regex misses: one regex copy lost a hook PR's round 1 to five bypass classes (PG-2459).
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
 Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
 Each `withDeadline` call holds its own deadline in its async context (an `AsyncLocalStorage` in `scripts/hooks/shell.ts`), so checks that overlap in one process each time out on their own.
@@ -1428,10 +1429,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A GraphQL query and each of its fields reach it only as text written in the command or a file named by its literal absolute path, so it refuses one held in a shell variable (`Q='…'; gh api graphql -f query="$Q"`), and its refusal then names both ways.
   An `--attach` reads only what gh posts, its alt text after `#`, else its file's name, so a path built from a variable (`"$S/after.png#After"`) passes when the variable sits before the alt's first `#`, or, with no `#`, before the name's last `/`.
   Its refusal gives the way out for a file, rule or patch that holds the word: name the file or rule by what it is ("the ship rule") with its line number, and keep the patch out of the comment.
-  Write the patch to a file in your scratchpad, send its absolute path to the PR's worker by SendMessage, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
+  Write the patch to a file in your scratchpad, send the PR's worker one SendMessage holding its absolute path and, under it, its whole text, since an auto-end moves your scratch folder to the trash, and say in the comment that a patch went to the author, since gh's `--attach` uploads only images and video (gh 2.103.3: "supported: png, jpg, jpeg, gif, webp, svg, mp4, mov, webm").
   It fails closed only on a call that reads as a comment; when it cannot start it refuses, and a timeout acts as [Registered in both settings files](#registered-in-both-settings-files) says.
   A PR body or a commit message is not a comment.
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
+  On a machine with extensions the owners come from the data folder's `extensions/hooks/release-owners.json`, built from each scope's `lists/release-owners.json`, so a search of the checkout finds no owner while the hook still guards one; `bun packages/scripts/src/playground/rendered.ts hooks/release-owners.json` prints that file's path.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
 
 ## no-stash

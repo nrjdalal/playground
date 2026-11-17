@@ -9,8 +9,8 @@ import { liveBranch } from "../playground/probe"
 // ops-tunnel: holds an ssh tunnel from this Mac's loopback to another machine's loopback Dashboard, on the same port at both ends, so the link is that machine's own web origin, which its trusted origins and the URLs its web build holds already name. It runs on the Mac alone, and nothing of it runs on the far machine.
 export const JOB = "ops-tunnel"
 
-// The factory's key for the far machine, by path alone: its text is never read here, only ssh reads it.
-const KEY = "~/.ssh/playground_spark"
+// The factory's key for the far machine, by path alone: its text is never read here, only ssh reads it; ops-peer-relay falls back to it too.
+export const KEY = "~/.ssh/playground_spark"
 
 export type Tunnel = { host: string; key: string; port: number; user: string }
 
