@@ -2029,7 +2029,7 @@ describe("a model test's replay worktree", () => {
 
   test("one under kit/runs at a canary commit goes through git worktree remove, its work written to <name>.diff first", () => {
     const { roots, wt } = replay()
-    expect(removeReplay(wt, { folders: [] }, roots)).toEqual({ diff: `${wt}.diff` })
+    expect(removeReplay(wt, { folders: [], procs: [] }, roots)).toEqual({ diff: `${wt}.diff` })
     expect(existsSync(wt)).toBe(false)
     const diff = readFileSync(`${wt}.diff`, "utf8")
     expect(diff).toContain("+two")
@@ -2040,7 +2040,7 @@ describe("a model test's replay worktree", () => {
   test("the diff is written before the worktree goes: a remove git refuses leaves both, naming the diff", () => {
     const { roots, wt } = replay()
     git(roots.main, "worktree", "lock", wt)
-    expect(removeReplay(wt, { folders: [] }, roots)).toMatchObject({
+    expect(removeReplay(wt, { folders: [], procs: [] }, roots)).toMatchObject({
       refused: expect.stringContaining(`its work is kept in ${wt}.diff`),
     })
     expect(existsSync(wt)).toBe(true)
@@ -2051,19 +2051,32 @@ describe("a model test's replay worktree", () => {
     const { add, roots, wt } = replay()
     const recorded = join(roots.home, "trials")
     const outside = add(join(recorded, "pr0002"))
-    expect(removeReplay(outside, { folders: [recorded] }, roots)).toMatchObject({
+    expect(removeReplay(outside, { folders: [recorded], procs: [] }, roots)).toMatchObject({
       refused: expect.stringContaining("has a tracked edit"),
     })
     git(wt, "commit", "-qam", "test output")
-    expect(removeReplay(wt, { folders: [] }, roots)).toMatchObject({
+    expect(removeReplay(wt, { folders: [], procs: [] }, roots)).toMatchObject({
       refused: expect.stringContaining("a commit origin/canary does not hold"),
     })
     const loose = add(join(roots.home, "elsewhere", "pr0003"))
-    expect(removeReplay(loose, { folders: [] }, roots)).toMatchObject({
+    expect(removeReplay(loose, { folders: [], procs: [] }, roots)).toMatchObject({
       refused: expect.stringContaining("is not a replay worktree's place"),
     })
     for (const path of [outside, wt, loose]) expect(existsSync(path)).toBe(true)
     expect(existsSync(`${outside}.diff`) || existsSync(`${wt}.diff`)).toBe(false)
+  })
+
+  test("a process working in it holds it, as one holds any worktree, and an unreadable process list keeps it", () => {
+    const { roots, wt } = replay()
+    const running = proc(4242, "bun run kit replay", join(wt, "src"))
+    expect(removeReplay(wt, { folders: [], procs: [running] }, roots)).toMatchObject({
+      refused: `${wt} is held by pid 4242 (bun run kit replay) working in ${join(wt, "src")}`,
+    })
+    expect(removeReplay(wt, { folders: [], procs: null }, roots)).toMatchObject({
+      refused: expect.stringContaining("cannot be listed"),
+    })
+    expect(existsSync(wt) || existsSync(`${wt}.diff`)).toBe(true)
+    expect(existsSync(`${wt}.diff`)).toBe(false)
   })
 
   test("a recorded folder outside kit/runs with no tracked edit goes too", () => {
@@ -2072,7 +2085,9 @@ describe("a model test's replay worktree", () => {
     mkdirSync(recorded, { recursive: true })
     git(roots.main, "worktree", "add", "-q", "--detach", join(recorded, "pr0004"), "HEAD")
     file(join(recorded, "pr0004", "out.log"), "graded\n")
-    expect(removeReplay(join(recorded, "pr0004"), { folders: [recorded] }, roots)).toEqual({
+    expect(
+      removeReplay(join(recorded, "pr0004"), { folders: [recorded], procs: [] }, roots),
+    ).toEqual({
       diff: join(recorded, "pr0004.diff"),
     })
   })

@@ -12,6 +12,7 @@ import {
   offered,
   peerCommand,
   questionOf,
+  savedPicks,
 } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 
 const MB = 1024 ** 2
@@ -104,6 +105,29 @@ test("an approval reads back each Remove pick from the card's own words, and non
     { bytes: weights.bytes, machine: "here", path: weights.path },
   ])
   expect(approvedOf({ ...one, answer: { choice: "deny" }, status: "denied" }, "ops")).toEqual([])
+})
+
+test("an edit of the card's words after the owner's answer approves nothing the saved card did not ask", () => {
+  const items = offered([here(weights, image)], HOME, out, {})
+  const answered = {
+    ...cardOf(items),
+    answer: { choice: "approve", options: [0, 0] },
+    from: "ops",
+    status: "approved",
+  }
+  const saved = { id: ID, items }
+  expect(savedPicks(approvedOf(answered, "ops"), saved, ID)).toHaveLength(2)
+  const other = { ...weights, bytes: 9 * GB, path: `${HOME}/models/hf/hub/models--other--Model` }
+  const edited = {
+    ...cardOf(offered([here(other, image)], HOME, out, {})),
+    answer: answered.answer,
+    from: "ops",
+    status: "approved",
+  }
+  expect(approvedOf(edited, "ops").map((p) => p.path)).toContain(other.path)
+  expect(savedPicks(approvedOf(edited, "ops"), saved, ID).map((p) => p.path)).toEqual([image.path])
+  expect(savedPicks(approvedOf(answered, "ops"), { ...saved, id: "another" }, ID)).toEqual([])
+  expect(savedPicks(approvedOf(answered, "ops"), undefined, ID)).toEqual([])
 })
 
 test("a peer's approved item is a command Ops runs by hand, naming the card", () => {

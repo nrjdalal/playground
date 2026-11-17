@@ -2080,6 +2080,16 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
   }
 })
 
+const CARD = "11111111-2222-3333-4444-555555555555"
+
+test("runRm --card takes only an Inbox card id, so no flag reaches ask get", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", "--ack"], deps)
+  expect(code).toBe(2)
+  expect(err.join("\n")).toContain("--ack is not an Inbox card id")
+  expect(existsSync(repo)).toBe(true)
+})
+
 // A machine whose ~/models holds one dropped hf repo the record names, and whose card approves it on spark-a at its size.
 type Picks = (repo: string) => { bytes: number; machine: string; path: string }[] | string
 const approvedMachine = (picks: Picks | null) => {
@@ -2105,9 +2115,9 @@ const approvedMachine = (picks: Picks | null) => {
 
 test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
-  const { code, out } = await rmTold([repo, "--card", "c1", "--reason", "nightly-clean"], deps)
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
   expect(code).toBe(0)
-  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card c1 approved`)
+  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card ${CARD} approved`)
   expect(out.join("\n")).toContain("its machine record entry is dropped")
   expect(existsSync(repo)).toBe(false)
   expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
@@ -2131,25 +2141,51 @@ test.each<[string, Picks | null, string]>([
   ["no Inbox here", null, "no Inbox is read here"],
 ])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
   const { deps, repo } = approvedMachine(picks)
-  const { code, err } = await rmTold([repo, "--card", "c1"], deps)
+  const { code, err } = await rmTold([repo, "--card", CARD], deps)
   expect(code).toBe(1)
   expect(err.join("\n")).toContain(said)
   expect(existsSync(repo)).toBe(true)
 })
 
-test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
-  const { deps, home, main, root } = machine()
-  git(root, "init", "--bare", "-q", join(root, "remote.git"))
-  git(main, "init", "-q", "-b", "canary")
-  file(join(main, "README.md"))
-  git(main, "add", "README.md")
-  git(main, "commit", "-qm", "init")
-  git(main, "remote", "add", "origin", join(root, "remote.git"))
-  git(main, "push", "-q", "origin", "canary")
-  const wt = join(home, "models", "kit", "runs", "MB-1", "pr0001")
+// A main checkout pushed to origin/canary with one replay worktree in a row of ~/models/kit/runs holding an untracked answer.
+const replayMachine = () => {
+  const m = machine()
+  git(m.root, "init", "--bare", "-q", join(m.root, "remote.git"))
+  git(m.main, "init", "-q", "-b", "canary")
+  file(join(m.main, "README.md"))
+  git(m.main, "add", "README.md")
+  git(m.main, "commit", "-qm", "init")
+  git(m.main, "remote", "add", "origin", join(m.root, "remote.git"))
+  git(m.main, "push", "-q", "origin", "canary")
+  const wt = join(m.home, "models", "kit", "runs", "MB-1", "pr0001")
   mkdirSync(dirname(wt), { recursive: true })
-  git(main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+  git(m.main, "worktree", "add", "-q", "--detach", wt, "HEAD")
   file(join(wt, "answer.ts"), "export const a = 1\n")
+  return { ...m, wt }
+}
+
+test("runRm --worktree keeps a replay worktree a model test is running in, and refuses --discard and --pr on one", async () => {
+  const { deps, wt } = replayMachine()
+  const running = {
+    ...deps,
+    procs: () => [{ command: "bun run kit replay", cwd: wt, pid: 4242, sockets: [] }],
+  }
+  const held = await rmTold(["--worktree", wt], running)
+  expect(held.code).toBe(1)
+  expect(held.err.join("\n")).toContain(
+    `${wt} is held by pid 4242 (bun run kit replay) working in ${wt}`,
+  )
+  for (const words of [["--discard"], ["--pr", "https://github.com/o/r/pull/1"]]) {
+    const flagged = await rmTold(["--worktree", wt, ...words], deps)
+    expect(flagged.code).toBe(2)
+    expect(flagged.err.join("\n")).toContain("takes neither --discard nor --pr")
+  }
+  expect(existsSync(wt)).toBe(true)
+  expect(existsSync(`${wt}.diff`)).toBe(false)
+})
+
+test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
+  const { deps, wt } = replayMachine()
   const { code, out } = await rmTold(["--worktree", wt], deps)
   expect(code).toBe(0)
   expect(out.join("\n")).toContain(`its work is kept in ${wt}.diff`)

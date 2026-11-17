@@ -162,6 +162,28 @@ export type CardDeps = {
 
 const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 
+// An Inbox id as ask new prints it, the one form a card id takes.
+export const CARD_ID = /^[0-9a-f-]{36}$/
+
+// One card read by `bun run ask get <id>`, or ask's last line when it did not read.
+export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAnswer | string> => {
+  const read = await ask(["get", id])
+  try {
+    if (read.code === 0) return JSON.parse(read.out.slice(read.out.indexOf("{"))) as CardAnswer
+  } catch {}
+  return lastLine(read.out) || `exit ${read.code}`
+}
+
+// Pure: each Remove pick on card id that the card nightly-clean saved also holds at the same machine, path and size, so an edit of the card's words after the owner answered approves nothing it did not ask.
+export const savedPicks = (
+  picks: CardPick[],
+  saved: CardState | undefined,
+  id: string,
+): CardPick[] =>
+  saved?.id === id
+    ? picks.filter((p) => saved.items.some((i) => keyOf(i) === keyOf(p) && i.bytes === p.bytes))
+    : []
+
 // Pure: the command Ops runs by hand on a peer for one approved item, since nothing approved crosses ssh as a delete.
 export const peerCommand = (item: CardItem, card: string): string =>
   item.kind === "image"
@@ -182,18 +204,14 @@ export async function cardNight(
   const said: string[] = []
   let card = saved.card
   if (card) {
-    const read = await deps.ask(["get", card.id])
-    let item: CardAnswer | undefined
-    try {
-      if (read.code === 0) item = JSON.parse(read.out.slice(read.out.indexOf("{"))) as CardAnswer
-    } catch {}
-    if (!item) {
-      if (/no inbox item/.test(read.out)) card = undefined
+    const item = await readCard(deps.ask, card.id)
+    if (typeof item === "string") {
+      if (/no inbox item/.test(item)) card = undefined
       return {
         ...(card ? { card } : {}),
         kept,
         ops,
-        said: card ? `card ${card.id} unread: ${lastLine(read.out)}` : "card gone",
+        said: card ? `card ${card.id} unread: ${item}` : "card gone",
       }
     }
     if (item.status === "open") {

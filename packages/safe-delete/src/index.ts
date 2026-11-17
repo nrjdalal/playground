@@ -764,7 +764,7 @@ export function restore(
 
 const WEIGHT_FILE = /\.(gguf|safetensors)$/
 
-// Whether path is model weights an approved card deletes outright, since they download again: a .gguf or .safetensors file under ~/models or a recorded weights folder, or a repo folder directly in ~/models/hf/hub; ~/models and each folder itself never.
+// Whether path is model weights an approved card deletes outright (rm.ts reads it to pick deleteWeights, which checks it again as its own guard), since they download again: a .gguf or .safetensors file under ~/models or a recorded weights folder, or a repo folder directly in ~/models/hf/hub; ~/models and each folder itself never.
 export const isWeights = (path: string, home: string, folders: string[]): boolean => {
   const abs = resolve(path)
   const models = join(home, "models")
@@ -819,10 +819,10 @@ export const replayPlace = (path: string, home: string, folders: string[]): bool
   )
 }
 
-// Removes a model test's replay worktree through its own clone's git worktree remove --force, never a plain delete, after it writes the worktree's work beside it as <name>.diff (git diff HEAD with the untracked files), so no graded attempt is lost: only a real folder at replayPlace that is a worktree of the main checkout, detached at a commit origin/canary holds, and outside ~/models/kit/runs one with no tracked edit, since under kit/runs every change is the test's output.
+// Removes a model test's replay worktree through its own clone's git worktree remove --force, never a plain delete, after it writes the worktree's work beside it as <name>.diff (git diff HEAD with the untracked files), so no graded attempt is lost: only a real folder at replayPlace that is a worktree of the main checkout, detached at a commit origin/canary holds, with no process working in it, and outside ~/models/kit/runs one with no tracked edit, since under kit/runs every change is the test's output.
 export function removeReplay(
   path: string,
-  opts: { folders: string[] },
+  opts: { folders: string[]; procs: Proc[] | null },
   roots: Roots,
 ): { diff: string } | Refusal {
   const abs = resolve(path)
@@ -850,6 +850,9 @@ export function removeReplay(
   const sha = git(abs, "rev-parse", "HEAD").out
   if (!git(main, "merge-base", "--is-ancestor", sha, "origin/canary").ok)
     return refused(`${abs} is at ${sha}, a commit origin/canary does not hold`)
+  // a model test still running in it holds it, as a process holds any other worktree
+  const working = procHolder(abs, opts.procs)
+  if (working) return refused(working)
   const underRuns = inside(abs, join(roots.home, "models", "kit", "runs"))
   if (!underRuns && !git(abs, "diff", "HEAD", "--quiet").ok)
     return refused(
@@ -857,7 +860,7 @@ export function removeReplay(
     )
   const diff = `${abs}.diff`
   if (lstat(diff)) return refused(`${diff} already exists; move it aside first`)
-  // intent-to-add puts the untracked files in git diff HEAD; the index it writes goes with the worktree
+  // intent-to-add puts the untracked files in git diff HEAD, the index it writes going with the worktree; an ignored path is left out and goes with it, while the row's grade files sit beside the worktree, outside it
   if (!git(abs, "add", "-A", "--intent-to-add").ok) return refused(`git add -N failed in ${abs}`)
   const work = Bun.spawnSync(["git", "-C", abs, "diff", "HEAD", "--binary"], {
     stderr: "pipe",
@@ -947,6 +950,25 @@ export const rowPullRequests = (row: { pr?: unknown; prs?: unknown }): string[] 
     ),
   ),
 ]
+
+// The process working inside at, as its refusal, an agent-browser one first with the close that frees it; a list that cannot be read keeps at too.
+const procHolder = (at: string, procs: Proc[] | null): string | null => {
+  if (procs === null) return `the processes' folders cannot be listed, so ${at} stays`
+  const held = procs.filter((p) => inside(real(p.cwd), at))
+  const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
+  if (!holder) return null
+  const command =
+    holder.command.length > 120 ? `${holder.command.slice(0, 117)}...` : holder.command
+  const by = `${at} is held by pid ${holder.pid} (${command}) working in ${holder.cwd}`
+  if (!isAgentBrowser(holder.command)) return by
+  const session =
+    /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
+    holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean)
+  // a bare daemon names its session nowhere, and sessions are machine-wide, so a guessed name could close another agent's browser
+  if (!session)
+    return `${by}: an agent-browser session whose name it does not show, so close your own by its name: agent-browser --session <your-name> close`
+  return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
+}
 
 // Why a worktree may not be removed, or null: worktreeRepo takes it, the roster reads, no live session (but a live row holds no more a worktree sitting clean, detached, at a commit its base, origin/canary or another repo's default branch, holds), running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary, or, for another repo's worktree, on that repo's default branch (defaultBase), or, for either, on a branch the remote itself holds now (remoteHolding), or, for another repo's worktree given an archive folder, archiveUnlanded has archived, with every remote read, each of its commits no remote holds.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
@@ -1053,22 +1075,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   if (cloned) return cloned
   const linked = linkHolder(at, roots, holders.places())
   if (linked) return linked
-  if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
-  const held = holders.procs.filter((p) => inside(real(p.cwd), at))
-  const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
-  if (holder) {
-    const command =
-      holder.command.length > 120 ? `${holder.command.slice(0, 117)}...` : holder.command
-    const by = `${at} is held by pid ${holder.pid} (${command}) working in ${holder.cwd}`
-    if (!isAgentBrowser(holder.command)) return by
-    const session =
-      /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
-      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean)
-    // a bare daemon names its session nowhere, and sessions are machine-wide, so a guessed name could close another agent's browser
-    if (!session)
-      return `${by}: an agent-browser session whose name it does not show, so close your own by its name: agent-browser --session <your-name> close`
-    return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
-  }
+  const working = procHolder(at, holders.procs)
+  if (working) return working
   if (holders.discard) return null
   const discard = `playground rm --worktree ${at} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   const changed = git("status", "--porcelain", "-z", "--no-renames", "--untracked-files=all")

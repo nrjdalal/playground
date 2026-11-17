@@ -25,7 +25,14 @@ import STATUSES from "../../../../scripts/roster-statuses.json"
 import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
 import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
-import { approvedOf, type CardAnswer, type CardPick } from "../ops-tick/unused-card"
+import {
+  approvedOf,
+  CARD_ID,
+  type CardPick,
+  type CardState,
+  readCard,
+  savedPicks,
+} from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
 
@@ -298,25 +305,27 @@ export const rmDeps = (repo: string): RmDeps => ({
   prState,
   procs: processes,
   session: sessionName,
-  approvals: async (card) => {
-    const read = Bun.spawnSync(
-      ["bun", "run", "--silent", "--cwd", mainCheckout(repo), "ask", "get", card],
-      {
-        stderr: "pipe",
-        stdout: "pipe",
-      },
-    )
-    if (read.exitCode !== 0)
-      return read.stderr.toString().trim().split("\n").at(-1) || `exit ${read.exitCode}`
+  // the card's picks that nightly-clean's saved card also holds, read from its state file
+  approvals: async (id) => {
+    const item = await readCard(async (args) => {
+      const read = Bun.spawnSync(
+        ["bun", "run", "--silent", "--cwd", mainCheckout(repo), "ask", ...args],
+        {
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      )
+      return { code: read.exitCode, out: `${read.stdout}${read.stderr}` }
+    }, id)
+    if (typeof item === "string") return item
     try {
-      const out = read.stdout.toString()
       const roster = JSON.parse(readFileSync(join(dataDir(), "roster.json"), "utf8")) as {
         agents?: unknown
       }
-      return approvedOf(
-        JSON.parse(out.slice(out.indexOf("{"))) as CardAnswer,
-        managerOf(roster.agents, "ops"),
-      )
+      const state = JSON.parse(
+        readFileSync(join(dataDir(), "ops", "tick", "nightly-clean.json"), "utf8"),
+      ) as { card?: CardState }
+      return savedPicks(approvedOf(item, managerOf(roster.agents, "ops")), state.card, id)
     } catch (error) {
       return (error as Error).message
     }
@@ -423,13 +432,25 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const folders = (await readRecord(deps.data).catch(() => ({ entries: [] }))).entries
     .filter((e) => e.kind === "folder")
     .map((e) => e.path)
-  if (args.card !== undefined) return removeApproved(args, args.card, folders, roots, deps)
+  if (args.card !== undefined) {
+    if (!CARD_ID.test(args.card)) {
+      console.error(`playground: ${args.card} is not an Inbox card id`)
+      return 2
+    }
+    return removeApproved(args, args.card, folders, roots, deps)
+  }
   if (
     args.worktree &&
     !worktreeRepo(args.path, roots) &&
     replayPlace(args.path, deps.home, folders)
   ) {
-    const done = removeReplay(args.path, { folders }, roots)
+    if (args.discard || args.pr !== undefined) {
+      console.error(
+        `playground: ${args.path} is a replay worktree, which takes neither --discard nor --pr: its work is written to ${args.path}.diff first`,
+      )
+      return 2
+    }
+    const done = removeReplay(args.path, { folders, procs: deps.procs() }, roots)
     if ("refused" in done) {
       console.error(`playground: ${done.refused}`)
       return 1
