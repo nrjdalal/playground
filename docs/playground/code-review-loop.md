@@ -60,7 +60,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
   Once it moves a clone, it sends the session it reports to the old and new paths, so the cleanup that clone's last PR handed it to drops the old one.
 - A reviewer reads its clone through `git -C`, `bun --cwd` and absolute paths from the folder its session starts in, as its brief's one-plain-command line says, so its shell's folder stays outside the clone and the cleanup can remove the clone once the review ends.
 - A verdict posts with every blank filled, and a review's sub-agents search inside its clone and the paths its brief names, stopping every background task of theirs before they report.
-  Each sub-agent makes its scratch folder first and writes every probe output to an absolute path inside it.
+  Each sub-agent makes its scratch folder first, inside the reviewer's as `scratch/<name>/std/` or `<name>/spec/` beside the reviewer's own `<name>/probe/`, so `playground rm` and auto-end clear them with `<name>/`, and writes every probe output to an absolute path inside it.
 - No verdict stands on stale CI: the reviewer reads the head's checks again right before it posts, and a check gone red since its earlier read is a blocking finding in that verdict.
 - No verdict answers a stale read either: its post runs behind `state.ts fresh`, which refuses while the PR body has changed since the reviewer's last `state.ts pr`, or a comment, thread reply or review came after it, and names each, so the reviewer drops what the author already answered and scores again before it posts.
 - A reviewer stays up after its 5/5, its waiter on the head, until the PR merges or stays closed a poll later (Checks closes and reopens a PR to rebuild its merge commit), so a canary move after the score gets its merge round from the same session, not a new one.
@@ -150,6 +150,6 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and on a `web/next/` diff for its tester's PASS there.
 The Builder's sweep runs its recovery scan.
 It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.
