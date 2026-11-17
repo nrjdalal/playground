@@ -111,7 +111,7 @@ export const STALE_CYCLES = 3
 
 const EXITED = /^(supervisor exited|loop exited)/
 
-// A job's steady healthy beat that is not `ok` but is not a failure, matching HEALTHY_PREFIXES in packages/scripts/src/ops-sweep/sweep.ts, kept in step with it by a test (tests/api/hono/src/lib/dashboard/ops.test.ts): up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job.
+// A job's steady healthy beat that is not `ok` but is not a failure, up: for the tunnels and idle: for the relay: a copy of HEALTHY_PREFIXES in packages/scripts/src/ops-sweep/sweep.ts, kept in step with it by a test (tests/api/hono/src/lib/dashboard/ops.test.ts).
 export const HEALTHY_PREFIXES: Record<string, string[]> = {
   "ops-model-tunnel": ["up: "],
   "ops-peer-relay": ["idle: "],

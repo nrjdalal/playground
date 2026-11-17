@@ -115,7 +115,7 @@ describe("opsRowOf", () => {
     ["a tunnel job beating up:", "ops-tunnel", "up: 127.0.0.1:18000", "running"],
     ["a model tunnel beating up:", "ops-model-tunnel", "up: 127.0.0.1:18000", "running"],
     ["a peer relay idling:", "ops-peer-relay", "idle: PLAYGROUND_PEERS names no peer", "running"],
-  ] as const)("a %s steady healthy beat", (_label, job, result, status) => {
+  ] as const)("%s reads Running, a steady healthy beat", (_label, job, result, status) => {
     expect(opsRowOf(job, beat({ job, lastResult: result }), true, NOW).status).toBe(status)
   })
 

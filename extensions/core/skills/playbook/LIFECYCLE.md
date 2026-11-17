@@ -49,8 +49,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
 - **Ops jobs** Ops runs as scripts with no session (ops-changelog, ops-dashboard, ops-dm-watch, ops-ext-sync, ops-flow, ops-herdr, ops-machine, ops-merge-train, ops-model-tunnel, ops-peer-relay, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-tunnel, ops-unstick, ops-usage, ops-wa, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
-  The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok`, or a steady healthy beat, and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale,
-  the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
+  The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok`, or a steady healthy beat ops-sweep keeps too (`up: ` for the two tunnels, `idle: ` for the peer relay), and the beat is within three cycles,
+  Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
   Each ops-up pass's render installs and removes the launchd jobs whose label is `com.playground.*`, and leaves any other label alone.
   A launchd job turned on in Settings > Jobs is bootstrapped while `launchctl print` finds it unloaded, so a refused bootstrap is tried again on the next pass.
   Its plist is written into `~/Library/LaunchAgents` only when none is there, and a plist already there stays as it stands.
