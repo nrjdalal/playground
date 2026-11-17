@@ -20,7 +20,6 @@ import { InputGroupButton } from "@/components/ui/input-group"
 import { toast } from "@/components/ui/toast"
 import {
   changeSetting,
-  choiceLabel,
   choiceSetting,
   EFFORT_LABELS,
   heldPick,
@@ -28,6 +27,7 @@ import {
   localChoice,
   MODEL_LABELS,
   modelChoice,
+  pickerWords,
   reportedSetting,
   shownValue,
   type Pending,
@@ -69,10 +69,7 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
     setModel({ from: reported.model, to: next })
     change.mutate(setting)
   }
-  const words = [
-    (shownModel && choiceLabel(shownModel, local)) || "Model",
-    shownEffort ? EFFORT_LABELS[shownEffort] : "Effort",
-  ].join(" · ")
+  const words = pickerWords(worker, shownModel, shownEffort)
   return (
     <DropdownMenu>
       <Hint content="Model and effort">
