@@ -202,7 +202,8 @@
 - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: every Claude Code and Codex session the ingest stores, Playground's own on a stack that reads this machine (above), each transcript line as a `claude_entry`, and how far each file has been read) in the dashboard's local Postgres on 127.0.0.1, never a shared database:
   they hold whatever a session read or ran, secrets and customer data included.
   `api/hono/src/lib/sessions/lines.ts` turns a transcript line into an entry and its session's facts.
-- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the cluster, none by default (`PLAYGROUND_PEERS`, a comma list of `name=user@host`, and `PLAYGROUND_PEER_KEY`, an absolute ssh key path or ssh's own default; dashboard.md's System report reads them, and `playground update` moves each peer's clone over them, `peer-sync.ts`),
+- ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, one zod schema over env with generic defaults: the cluster, none by default (`PLAYGROUND_PEERS`, a comma list of `name=user@host`, each name once in any case, since a peer's password item takes its name lowercased,
+  and `PLAYGROUND_PEER_KEY`, an absolute ssh key path or ssh's own default; dashboard.md's System report reads them, and `playground update` moves each peer's clone over them, `peer-sync.ts`),
   the local models the hosted session can switch to, none by default (`PLAYGROUND_LOCAL_MODELS`, a comma list of `label=model-id`, served at `PLAYGROUND_LOCAL_MODEL_URL`, messages.md),
   the owner (`PLAYGROUND_OWNER_NAME`, Owner) and the work queue,
   off by default (`WORK_GITHUB_ORG`, a GitHub login or none, and `WORK_LABEL`, Work; dashboard.md).

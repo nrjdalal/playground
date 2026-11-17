@@ -69,6 +69,10 @@ describe("cloneOf", () => {
     expect(cloneOf("/home/you", "/home/you")).toBeNull()
     expect(cloneOf("/home/you/my code/playground", "/home/you")).toBeNull()
     expect(cloneOf("/home/you/code/$(x)", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you/code/playground/", "/home/you/")).toBe("~/code/playground")
+    expect(cloneOf("/home/youth/playground", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you/../them/playground", "/home/you")).toBeNull()
+    expect(cloneOf("/home/you/code//playground", "/home/you")).toBeNull()
   })
 
   test("from a worktree, such as the live Dashboard's, the clone is the main checkout's place under home, never the worktree's", () => {

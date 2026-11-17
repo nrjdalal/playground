@@ -156,6 +156,18 @@ A session on another machine keeps one running too, for the lines `playground se
 The [`ops-peer-relay` job](/docs/jobs#carry-messages-to-another-machine) copies it to the other machine, where that session's `playground alerts-wait` prints it.
 The text goes on one line, and a line over 16 KB is refused: send the path of a file that holds the text.
 
+## Start a local model: `playground model use`
+
+`playground model use <name> [--machine <name>]` starts the vLLM server in `~/models/<name>/` on one machine: the one `--machine` names, else the one whose `localModels.hereModel` (this machine) or `localModels.peerModel` (the peer) names that model, else the peer.
+It sizes the server from that machine's free memory as it starts: the share is what is free above the machine's reserve (`localModels.hereReserveGiB` here; on the peer the 15 GiB floor plus `localModels.boxLanes` runs of `localModels.boxRunGiB`), capped at the model's working share in `localModels.models`, and `--max-num-seqs` is the KV cache that share leaves at 64k tokens a session.
+It hands `serve.sh` the size as `CONTAINER`, `PORT`, `GPU_MEMORY_UTILIZATION` and `MAX_NUM_SEQS`, and refuses a `serve.sh` that does not take all four from its environment.
+When the reading holds a session of the new model beside what runs, it starts beside it, under its own container (`local-vllm-<name>`) on the next port, 8000 then 8001.
+Otherwise it swaps: it holds new starts there, waits up to 30 minutes for the running model's requests to finish, stops that model by the container name it started it under, and sizes again.
+It refuses with the memory reading when not even one session fits, stops a server whose load takes the machine under 15 GiB free, and leaves alone any container it did not start.
+Each server it starts is kept in `<data>/models/state.json`, under `machines.<machine>.servers.<model>`: its container, port, share, most sessions and start time.
+The ops-tick beat `model-keep` keeps each machine's kept model up: it starts it when it is down, and brings it back once another model there sits idle `localModels.idleMinutes`.
+The peer's servers reach this machine through the [`ops-model-tunnel` job](/docs/jobs#reach-the-model-servers-on-another-machine).
+
 ## Answer a permission prompt: `playground picker`
 
 `playground picker <session> allow <key>` or `playground picker <session> deny <key> "<reason>"` is how a manager answers the permission prompt a session it runs is stuck on, once that session's alert reaches it with the command and its key.
@@ -206,7 +218,8 @@ When its `git branch` or `git reset` fails after the move, it exits 1 with `rest
 Once the worktree's own pull request (`--pr`'s, else its branch's) reads merged or closed and the worktree sits at that pull request's head, a live session that holds it by its branch or by that pull request's number holds it no more, and the run prints `<path> is freed by #<n>, which reads <state>, past <name>'s roster row (<status>)`; commits past that head keep every hold and the run names them, as does a hold by name, id or another pull request's number, or a clone, link or process, and a state GitHub cannot read keeps every hold.
 A worktree that sits clean (`git status --porcelain` prints nothing, untracked files included), detached, at a commit its base holds (`origin/canary`, or for another repo's worktree that repo's default branch, below) is held by no live roster row, since it reads that base and holds no session's work, and the run prints `<path> sits clean, detached, at a commit <base> holds, so <name>'s roster row (<status>) holds it no more`; a clone, link or process inside it still holds it.
 A process inside it is named in the refusal, `<path> is held by pid <n> (<command>) working in <folder>`, and nothing is signalled, so the session that started it closes it by its own handle.
-When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, else `default`, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
+When that process is agent-browser, the refusal adds its session, from its `--session` argument or its socket's name, and the close that frees the folder: `agent-browser session <name>, which agent-browser --session <name> close frees`.
+For a daemon that shows neither, the refusal names no session, since a guessed name could close another agent's browser, and has you close your own by its name: `an agent-browser session whose name it does not show, so close your own by its name: agent-browser --session <your-name> close`.
 A clone is read from run-slot's clone holder record (`run-slot-clone.holder` in the data folder's `ops`), which names its source and destination while its pid lives, since the clone's `cp` only reads its source and works in whatever folder run-slot was called from, so neither end need be a process's working folder; the refusal reads `<path> is held by <session>'s node_modules clone (pid <n>) from <source> into <destination>`.
 The record is read again right before the move, after the walk that counts the worktree's files for the trash, since a large worktree's walk takes seconds and a clone can start inside it.
 A link is looked for in each other worktree under the main checkout's `.claude/worktrees/` and the worktree's own repo's, each `makeScratch` scratch folder in a temp folder, and each session's scratchpad with the folders directly in it, at their top level and one level into their `node_modules`; the refusal reads `<path> is linked into by <link> -> <target>: repoint or remove each link first`, naming the first three links and counting the rest, and a link whose target is missing or lies outside the worktree does not count.
@@ -225,6 +238,16 @@ The pull request a hold is freed by is the one `--pr` names, else the one whose 
 Discarded files go into the trash with the worktree, so they come back with it, and a restore whose commit is gone names the bundle's `git fetch`.
 A worktree whose trash entry holds no git record, one trashed before the entry kept it or one git could not read, comes back with its files alone, and git does not list it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free, at any load. Each hour it also strips every delete's `node_modules` folders and `web/next/.next`, which a `bun install` or a build rebuilds.
+
+## Keep a record of what the factory adds: `playground record`
+
+Each machine keeps a record of every path the factory put on it: `machine-record.json` in your data folder, one entry a path with why it is there and how to undo it.
+`playground record add <path> --kind <kind> --why "<why>" --undo "<undo>"` adds one, and a path the record holds already changes nothing; `playground record drop <path>` takes one off.
+An Inbox root step that ran, `link-skills.sh`'s links, and the run folder and Postgres image the runner box's heavy runs use add their own paths, so you add by hand only what you made by hand.
+`playground record seed` fills the record once on a machine from your data folder's `bundles/footprint.md` and that machine's undo note, `bundles/<machine>-undo.md`, and keeps what the watched places hold then as its baseline, so the first check names only what came after.
+`playground record check` compares the record with the watched places: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root steps' folders.
+It prints one line a finding: `misplaced` for a new path outside the folders `paths.factoryHomes` names, `unrecorded` for one inside them, `gone` for a recorded path that is not there, and `unreadable` for a place or path it cannot read.
+Ops runs it every night at 3:45 on this machine and on each machine `PLAYGROUND_PEERS` names, and sends each finding to Ops.
 
 ## Read the rules: `playground rules`
 

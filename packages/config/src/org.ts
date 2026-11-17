@@ -21,12 +21,33 @@ export type LocalModel = z.infer<typeof localModelSchema>
 // The loopback port the ops tunnel forwards to the machine that serves the local model.
 export const LOCAL_MODEL_URL = "http://127.0.0.1:18000"
 
+// a path a remote shell reads as itself: no space, quote, $, ; or glob
+const PLAIN_PATH = /^[A-Za-z0-9._/-]+$/
+
+// Pure: where a peer's clone sits, the same place under its home as this checkout under this one's, as a ~ path; null when this checkout is outside home or its path holds a character a remote shell would read.
+export const cloneOf = (repo: string, home: string): string | null => {
+  const base = `${home.replace(/\/+$/, "")}/`
+  const rel = repo.startsWith(base) ? repo.slice(base.length).replace(/\/+$/, "") : ""
+  return rel &&
+    PLAIN_PATH.test(rel) &&
+    rel.split("/").every((part) => part && part !== "." && part !== "..")
+    ? `~/${rel}`
+    : null
+}
+
 // The one place an organisation's own values come from: who owns the dashboard and whose work queue it reads, each read from env with a generic default, so a copy for anyone else names no person, team or workspace. Pure: it reads only the env it is given. The data folder is data-dir.ts's, in packages/env, since it reads the disk.
 export const orgSchema = z.object({
   // The other machines the System panel sums with this one (none by default, so one machine shows alone) and the ssh key it reaches them with (none, ssh's own default).
   cluster: z.object({
     key: z.string().startsWith("/").optional(),
-    peers: z.array(peerSchema).default([]),
+    // each name once in any case, since a peer's password item takes its name lowercased (peerSecret), so two names equal but for case would share one
+    peers: z
+      .array(peerSchema)
+      .default([])
+      .refine(
+        (peers) => new Set(peers.map((peer) => peer.name.toLowerCase())).size === peers.length,
+        "each peer name is listed once, in any case",
+      ),
   }),
   // The local models the hosted session can switch to (none by default, so a copy names no model) and the one server that serves them, the tunnel's loopback port by default.
   local: z.object({
