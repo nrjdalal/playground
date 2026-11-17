@@ -7,6 +7,7 @@ import { site } from "@packages/config/site"
 
 import { chatLabel, homeTitle } from "../../../../web/next/src/lib/agent-label"
 import { VERIFY_VISIT } from "../../../../web/next/src/lib/verify-visit"
+import { networkChangedWait } from "../agent-browser-retry"
 import { portlessCa } from "../portless-ca"
 import type { Shift } from "./cls-observer"
 import { DASHBOARD_MAP, type DashboardPage, driftProblems } from "./map"
@@ -316,6 +317,19 @@ export class Browser {
   }
 
   async run(...args: string[]): Promise<Record<string, unknown>> {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await this.once(args)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const wait = networkChangedWait(args, message, tries)
+        if (wait === null) throw error
+        await Bun.sleep(wait)
+      }
+    }
+  }
+
+  private async once(args: string[]): Promise<Record<string, unknown>> {
     const proc = Bun.spawn(await this.command(args), {
       stderr: "pipe",
       stdout: "pipe",
