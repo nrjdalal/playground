@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  choiceLabel,
+  choiceSetting,
   EFFORT_LABELS,
   heldPick,
   isEffort,
   isModel,
+  localChoice,
   MODEL_LABELS,
   modelAlias,
+  modelChoice,
   reportedSetting,
   shownValue,
 } from "../../../../../web/next/src/lib/session-setting"
@@ -34,6 +38,23 @@ describe("the composer's model and effort picker", () => {
       model: "sonnet",
     })
     expect(reportedSetting({ effort: "auto", model: null })).toEqual({ effort: null, model: null })
+  })
+
+  test("the hosted session's local models read by their label, and a pick of one is a local setting, never a cloud model", () => {
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "M" }]
+    expect(modelChoice({ localModels, model: "ornith-1.5-122b-nvfp4" })).toBe(
+      "local:ornith-1.5-122b-nvfp4",
+    )
+    expect(modelChoice({ localModels, model: "claude-opus-5-5" })).toBe("opus")
+    expect(modelChoice({ model: "ornith-1.5-122b-nvfp4" })).toBeNull()
+    expect(choiceSetting(localChoice("ornith-1.5-122b-nvfp4"))).toEqual({
+      local: "ornith-1.5-122b-nvfp4",
+    })
+    expect(choiceSetting("opus")).toEqual({ model: "opus" })
+    expect(choiceSetting("claude-opus-5-5")).toBeNull()
+    expect(choiceLabel("local:ornith-1.5-122b-nvfp4", localModels)).toBe("M")
+    expect(choiceLabel("local:other", localModels)).toBeNull()
+    expect(choiceLabel("sonnet")).toBe("Sonnet")
   })
 
   test("shows a pick until the row reports a value other than the one it was picked over", () => {

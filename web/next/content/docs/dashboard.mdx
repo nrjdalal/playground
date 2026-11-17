@@ -112,6 +112,11 @@ Its view has a box too: your message goes straight into it, and its questions, p
 A menu beside its attach button shows its permission mode (Default, Accept edits, Plan or Bypass permissions) and changes it while approvals are on (`PLAYGROUND_APPROVALS_ENABLED`), and the model and effort menu directly left of send sets those through the Agent SDK, its row showing the value set.
 It shows no `/` list yet, since it cannot run a skill.
 
+With local models named in `PLAYGROUND_LOCAL_MODELS` (a comma list of `label=model-id`), its model menu lists them under **Local model**, below the cloud models.
+Picking one restarts the session on that model's server, `PLAYGROUND_LOCAL_MODEL_URL` (`http://127.0.0.1:18000` by default), and the conversation carries on there; picking a cloud model brings it back.
+The switch waits for a quiet moment: while the session is answering, the menu says so and changes nothing.
+When the server is not answering, or has another model loaded, the menu says which, and the chat stays as it was.
+
 ## Sidebar
 
 Wherever these pages say hover, the Dashboard shows its own tooltip, never the browser's: it opens once the pointer has rested for a second, so sweeping down the sidebar opens none, and at once when you Tab to a link or a button.
