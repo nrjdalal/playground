@@ -19,6 +19,9 @@ const MB = 1024 ** 2
 const GB = 1024 ** 3
 const HOME = "/home/me"
 const ID = "11111111-2222-3333-4444-555555555555"
+// When nightly-clean's last post or edit landed, and an answer after it.
+const WROTE = "2026-11-17T03:00:00.000Z"
+const LATER = "2026-11-17T09:00:00.000Z"
 
 const weights: Unused = {
   bytes: 2 * GB,
@@ -78,6 +81,14 @@ test("a single item's card is one yes or no with Keep; more are one question eac
   expect(many.questions[0]!.options[0]!.description).toBe(
     "Deleted outright, cannot be restored; it downloads again.",
   )
+  const recorded = (kind: CardItem["kind"]) =>
+    (
+      cardOf([{ ...items[1]!, kind, recorded: true }]).preview as {
+        options: { description: string }[]
+      }
+    ).options[0]!.description
+  expect(recorded("rehearsal")).toContain("its entry there goes too")
+  expect(recorded("image")).not.toContain("its entry there goes too")
   expect(questionOf(items[0]!)).toBe(
     `Remove \`${weights.path}\` on here, ${2 * GB} bytes (2.0 GB)?`,
   )
@@ -92,7 +103,7 @@ test("an approval reads back each Remove pick from the card's own words, and non
     status: "approved",
   }
   expect(approvedOf(many, "ops")).toEqual([
-    { at: 1, bytes: image.bytes, machine: "here", path: image.path },
+    { bytes: image.bytes, machine: "here", path: image.path },
   ])
   expect(approvedOf(many, "builder")).toEqual([])
   const one = {
@@ -102,48 +113,51 @@ test("an approval reads back each Remove pick from the card's own words, and non
     status: "approved",
   }
   expect(approvedOf(one, "ops")).toEqual([
-    { at: 0, bytes: weights.bytes, machine: "here", path: weights.path },
+    { bytes: weights.bytes, machine: "here", path: weights.path },
   ])
   expect(approvedOf({ ...one, answer: { choice: "deny" }, status: "denied" }, "ops")).toEqual([])
 })
 
-test("an edit of the card's words after the owner's answer approves nothing the saved card did not ask", () => {
+type Questions = {
+  questions: { options: { description?: string; label: string }[]; question: string }[]
+  text: string
+  type: string
+}
+
+test("an answer counts only on the card as nightly-clean last wrote it, answered at or after that write", () => {
   const items = offered([here(weights, image)], HOME, out, {})
+  const saved = { at: WROTE, id: ID, items }
   const answered = {
     ...cardOf(items),
-    answer: { choice: "approve", options: [0, 0] },
+    answer: { at: LATER, choice: "approve", options: [0, 1] },
     from: "ops",
     status: "approved",
   }
-  const saved = { id: ID, items }
-  expect(savedPicks(approvedOf(answered, "ops"), saved, ID)).toHaveLength(2)
+  expect(savedPicks(answered, "ops", saved, ID)).toEqual([
+    { bytes: weights.bytes, machine: "here", path: weights.path },
+  ])
   const other = { ...weights, bytes: 9 * GB, path: `${HOME}/models/hf/hub/models--other--Model` }
-  const edited = {
-    ...cardOf(offered([here(other, image)], HOME, out, {})),
-    answer: answered.answer,
-    from: "ops",
-    status: "approved",
+  const changed = `card ${ID} no longer reads as nightly-clean wrote it`
+  const words = cardOf(offered([here(other, image)], HOME, out, {})).preview
+  expect(savedPicks({ ...answered, preview: words }, "ops", saved, ID)).toBe(changed)
+  const reordered = cardOf([...items].reverse()).preview
+  expect(savedPicks({ ...answered, preview: reordered }, "ops", saved, ID)).toBe(changed)
+  const swapped = {
+    ...(answered.preview as Questions),
+    questions: (answered.preview as Questions).questions.map((q) => ({
+      ...q,
+      options: [...q.options].reverse(),
+    })),
   }
-  expect(approvedOf(edited, "ops").map((p) => p.path)).toContain(other.path)
-  expect(savedPicks(approvedOf(edited, "ops"), saved, ID).map((p) => p.path)).toEqual([image.path])
-  expect(savedPicks(approvedOf(answered, "ops"), { ...saved, id: "another" }, ID)).toEqual([])
-  expect(savedPicks(approvedOf(answered, "ops"), undefined, ID)).toEqual([])
-})
-
-test("a card whose questions an edit reordered after the answer removes nothing the owner kept", async () => {
-  const items = offered([here(weights, image)], HOME, out, {})
-  const answer = { choice: "approve", options: [0, 1] }
-  const reordered = { ...cardOf([...items].reverse()), answer, from: "ops", status: "approved" }
-  expect(approvedOf(reordered, "ops").map((p) => p.path)).toEqual([image.path])
-  expect(savedPicks(approvedOf(reordered, "ops"), { id: ID, items }, ID)).toEqual([])
-  const { deps, removed, setPosted } = inbox({ answer, status: "approved" })
-  setPosted({ from: "ops", ...cardOf([...items].reverse()) })
-  const night = await cardNight([here(weights, image)], HOME, { card: { id: ID, items } }, deps)
-  expect(removed).toEqual([])
-  expect(night.kept).toEqual({
-    [`here ${weights.path}`]: weights.bytes,
-    "here docker image old:1": image.bytes,
-  })
+  expect(savedPicks({ ...answered, preview: swapped }, "ops", saved, ID)).toBe(changed)
+  const before = `card ${ID} was answered before nightly-clean's last write`
+  const early = { ...answered, answer: { ...answered.answer, at: "2026-11-17T02:00:00.000Z" } }
+  expect(savedPicks(early, "ops", saved, ID)).toBe(before)
+  expect(savedPicks(answered, "ops", { id: ID, items }, ID)).toBe(before)
+  expect(savedPicks(answered, "ops", { ...saved, id: "another" }, ID)).toBe(
+    `card ${ID} is not the card nightly-clean saved`,
+  )
+  expect(savedPicks(answered, "ops", undefined, ID)).toBeString()
 })
 
 test("a peer's approved item is a command Ops runs by hand, naming the card", () => {
@@ -158,7 +172,10 @@ test("a peer's approved item is a command Ops runs by hand, naming the card", ()
 })
 
 // A fake Inbox holding one card: each ask call kept, get answering with the card as it stands.
-const inbox = (answer?: { answer: { choice: string; options?: number[] }; status: string }) => {
+const inbox = (answer?: {
+  answer: { at?: string; choice: string; options?: number[] }
+  status: string
+}) => {
   const calls: { args: string[]; stdin?: string }[] = []
   const removed: string[] = []
   let posted: Record<string, unknown> | undefined
@@ -172,7 +189,14 @@ const inbox = (answer?: { answer: { choice: string; options?: number[] }; status
       if (args[0] === "edit") posted = JSON.parse(stdin!)
       if (args[0] === "get" && args.length === 2)
         return posted
-          ? { code: 0, out: JSON.stringify({ ...posted, ...(answer ?? { status: "open" }) }) }
+          ? {
+              code: 0,
+              out: JSON.stringify({
+                ...posted,
+                updatedAt: WROTE,
+                ...(answer ?? { status: "open" }),
+              }),
+            }
           : { code: 1, out: `ask: no inbox item ${args[1]}` }
       return { code: 0, out: "" }
     },
@@ -190,8 +214,12 @@ const inbox = (answer?: { answer: { choice: string; options?: number[] }; status
 test("a night with no card posts one from the ops manager's name and keeps its id", async () => {
   const { calls, deps } = inbox()
   const night = await cardNight([here(weights, image)], HOME, {}, deps)
-  expect(night.card).toEqual({ id: ID, items: offered([here(weights, image)], HOME, out, {}) })
-  expect(calls.map((c) => c.args)).toEqual([["new"]])
+  expect(night.card).toEqual({
+    at: WROTE,
+    id: ID,
+    items: offered([here(weights, image)], HOME, out, {}),
+  })
+  expect(calls.map((c) => c.args)).toEqual([["new"], ["get", ID]])
   expect(JSON.parse(calls[0]!.stdin!)).toMatchObject({ from: "ops", kind: "decision" })
 })
 
@@ -199,8 +227,8 @@ test("an open card is edited in place to tonight's items, and settled once none 
   const { calls, deps } = inbox()
   const first = await cardNight([here(weights, image)], HOME, {}, deps)
   const second = await cardNight([here(image)], HOME, { card: first.card }, deps)
-  expect(calls.map((c) => c.args[0])).toEqual(["new", "get", "edit"])
-  expect(second.card).toEqual({ id: ID, items: offered([here(image)], HOME, out, {}) })
+  expect(calls.map((c) => c.args[0])).toEqual(["new", "get", "get", "edit", "get"])
+  expect(second.card).toEqual({ at: WROTE, id: ID, items: offered([here(image)], HOME, out, {}) })
   const third = await cardNight([here()], HOME, { card: second.card }, deps)
   expect(calls.at(-1)!.args.slice(0, 2)).toEqual(["settle", ID])
   expect(third.card).toBeUndefined()
@@ -220,7 +248,7 @@ test("an answered card removes each Remove still listed at its size here, sends 
     peerImage.path,
   ])
   const { calls, deps, removed, setPosted } = inbox({
-    answer: { choice: "approve", options: [0, 0, 1, 0] },
+    answer: { at: LATER, choice: "approve", options: [0, 0, 1, 0] },
     status: "approved",
   })
   setPosted({ from: "ops", ...cardOf(items) })
@@ -228,7 +256,7 @@ test("an answered card removes each Remove still listed at its size here, sends 
     here(weights, image, { ...rehearsal, bytes: rehearsal.bytes + 1 }),
     { items: [peerImage], machine: "peer" },
   ]
-  const night = await cardNight(tonight, HOME, { card: { id: ID, items } }, deps)
+  const night = await cardNight(tonight, HOME, { card: { at: WROTE, id: ID, items } }, deps)
   expect(removed).toEqual([weights.path])
   expect(night.ops).toEqual([`card ${ID} approved on peer: docker image rm sha256:ccc`])
   expect(night.said).toContain(
@@ -277,6 +305,50 @@ test("a kept item stays off the next card, and comes back on one once its size c
   )
   expect(grown.card?.items.map((i) => i.bytes)).toEqual([image.bytes + MB])
   expect(grown.kept).toEqual({})
+})
+
+test("an answer to a card changed after it, or older than the night's last edit, removes nothing and keeps nothing; a clear keeps nothing", async () => {
+  const items = offered([here(weights, image)], HOME, out, {})
+  const night = async (
+    preview: unknown,
+    answer: { at?: string; choice: string; options?: number[] },
+    status = "approved",
+  ) => {
+    const fake = inbox({ answer, status })
+    fake.setPosted({ from: "ops", kind: "decision", preview, title: "Remove 2 unused items?" })
+    const done = await cardNight(
+      [here(weights, image)],
+      HOME,
+      { card: { at: WROTE, id: ID, items } },
+      fake.deps,
+    )
+    return { ...done, removed: fake.removed }
+  }
+  const preview = cardOf(items).preview as Questions
+  const swapped = {
+    ...preview,
+    questions: preview.questions.map((q) => ({ ...q, options: [...q.options].reverse() })),
+  }
+  const swap = await night(swapped, { at: LATER, choice: "approve", options: [1, 1] })
+  expect(swap.removed).toEqual([])
+  expect(swap.said).toContain("no longer reads as nightly-clean wrote it")
+  const reordered = await night(cardOf([...items].reverse()).preview, {
+    at: LATER,
+    choice: "approve",
+    options: [0, 1],
+  })
+  expect(reordered.removed).toEqual([])
+  const raced = await night(preview, {
+    at: "2026-11-17T02:00:00.000Z",
+    choice: "approve",
+    options: [0, 0],
+  })
+  expect(raced.removed).toEqual([])
+  expect(raced.said).toContain("answered before nightly-clean's last write")
+  for (const n of [swap, reordered, raced]) expect(n.kept).toEqual({})
+  const cleared = await night(preview, { at: LATER, choice: "clear" }, "cleared")
+  expect(cleared.kept).toEqual({})
+  expect(cleared.removed).toEqual([])
 })
 
 test("kept stays for a machine not read, and drops an item gone from tonight's list", () => {

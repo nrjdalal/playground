@@ -19,16 +19,14 @@ export type CardItem = {
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }
-// A pick with at, the position of its question on the card, which a saved card's item must hold.
-export type AnsweredPick = CardPick & { at: number }
-// The open card nightly-clean keeps in its state file: its Inbox id and the items it asks about.
-export type CardState = { id: string; items: CardItem[] }
+// The open card nightly-clean keeps in its state file: its Inbox id, the items it asks about, and at, the card's updatedAt read back right after nightly-clean's own last post or edit.
+export type CardState = { at?: string; id: string; items: CardItem[] }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
 export type Kept = Record<string, number>
 
 // An Inbox item as `bun run ask get` prints it: the fields an approval reads.
 export type CardAnswer = {
-  answer?: { choice?: string; options?: number[] }
+  answer?: { at?: string; choice?: string; options?: number[] }
   from?: string
   preview?: {
     deny?: string
@@ -42,6 +40,7 @@ export type CardAnswer = {
     type?: string
   }
   status?: string
+  updatedAt?: string
 }
 
 const GB = 1024 ** 3
@@ -60,7 +59,7 @@ const removeRow = (item: CardItem) => ({
       : item.kind === "image"
         ? "docker image rm removes it; a pull brings it back."
         : "Moved to the trash; playground rm --restore brings it back for 7 days."
-  }${item.recorded ? " The machine record holds it, and its entry there goes too." : ""}`,
+  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}`,
   label: "Remove",
 })
 
@@ -140,20 +139,31 @@ export const cardOf = (items: CardItem[]) => {
 }
 
 // Pure: each item the owner's answer picked Remove for, read back from the card's own words: a single question's Approve, or each question's Remove pick; none while the card is unanswered, denied, or from another poster than from.
-export const approvedOf = (card: CardAnswer, from: string): AnsweredPick[] => {
+export const approvedOf = (card: CardAnswer, from: string): CardPick[] => {
   if (card.from !== from || card.status !== "approved" || card.preview?.type !== "ask") return []
-  const read = (question: string, at: number) => {
+  const read = (question: string) => {
     const m = QUESTION.exec(question)
-    return m ? [{ at, bytes: Number(m[3]), machine: m[2]!, path: m[1]! }] : []
+    return m ? [{ bytes: Number(m[3]), machine: m[2]!, path: m[1]! }] : []
   }
   const { questions, text } = card.preview
   if (!questions)
-    return card.answer?.choice === "approve" ? read((text ?? "").split("\n")[0] ?? "", 0) : []
+    return card.answer?.choice === "approve" ? read((text ?? "").split("\n")[0] ?? "") : []
   const picks = picksOf(card.preview as Parameters<typeof picksOf>[0], card.answer?.options ?? [])
-  return (picks ?? []).flatMap((pick, at) =>
-    pick.label === "Remove" ? read(pick.question, at) : [],
-  )
+  return (picks ?? []).flatMap((pick) => (pick.label === "Remove" ? read(pick.question) : []))
 }
+
+// Pure: what an answer is read against: each question with its options in order, or a single item's question, options and deny; the text's {now} the Inbox fills is left out.
+const shapeOf = (preview: CardAnswer["preview"]) =>
+  JSON.stringify({
+    deny: preview?.deny,
+    options: preview?.options?.map((o) => [o.label, o.description]),
+    question: preview?.questions ? undefined : (preview?.text ?? "").split("\n")[0],
+    questions: preview?.questions?.map((q) => [
+      q.question,
+      q.options.map((o) => [o.label, o.description]),
+      q.recommended,
+    ]),
+  })
 
 // What the card's night reads and runs: ask runs `bun run ask <args>` with stdin, remove takes one of this machine's picks away (docker image rm by its id, else playground rm --card), from is the ops manager's name the card posts under, here this machine's name, and out whether a rehearsal's tag is out.
 export type CardDeps = {
@@ -178,18 +188,27 @@ export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAn
   return lastLine(read.out) || `exit ${read.code}`
 }
 
-// Pure: each Remove pick on card id whose question's position holds the same machine, path and size in the card nightly-clean saved, the order cardOf built its questions in, so an edit of the card's words or order after the owner answered approves nothing it did not ask.
+// Pure: card id's Remove picks, counted only when the card reads as nightly-clean last wrote it, cardOf of the items it saved, questions, order and options alike, and the answer came at or after that write; else why it does not count, so no edit or race after the owner's answer approves what the owner did not pick.
 export const savedPicks = (
-  picks: AnsweredPick[],
+  card: CardAnswer,
+  from: string,
   saved: CardState | undefined,
   id: string,
-): AnsweredPick[] =>
-  saved?.id === id
-    ? picks.filter((p) => {
-        const item = saved.items[p.at]
-        return !!item && keyOf(item) === keyOf(p) && item.bytes === p.bytes
-      })
-    : []
+): CardPick[] | string => {
+  if (saved?.id !== id) return `card ${id} is not the card nightly-clean saved`
+  if (shapeOf(card.preview) !== shapeOf(cardOf(saved.items).preview))
+    return `card ${id} no longer reads as nightly-clean wrote it`
+  const at = card.answer?.at
+  if (!saved.at || !at || at < saved.at)
+    return `card ${id} was answered before nightly-clean's last write`
+  return approvedOf(card, from)
+}
+
+// The card's updatedAt right after nightly-clean's own write, read back with ask get; none when it does not read, so no answer counts.
+const writtenAt = async (ask: CardDeps["ask"], id: string) => {
+  const read = await readCard(ask, id)
+  return typeof read === "string" || !read.updatedAt ? {} : { at: read.updatedAt }
+}
 
 // Pure: the command Ops runs by hand on a peer for one approved item, since nothing approved crosses ssh as a delete.
 export const peerCommand = (item: CardItem, card: string): string =>
@@ -234,13 +253,17 @@ export async function cardNight(
       if (edited.code !== 0)
         return { card, kept, ops, said: `card ${card.id} not edited: ${lastLine(edited.out)}` }
       return {
-        card: { id: card.id, items: tonight },
+        card: { ...(await writtenAt(deps.ask, card.id)), id: card.id, items: tonight },
         kept,
         ops,
         said: `card ${card.id} open, ${tonight.length} items`,
       }
     }
-    const picks = savedPicks(approvedOf(item, deps.from), card, card.id)
+    const counted = item.status === "approved" ? savedPicks(item, deps.from, card, card.id) : []
+    // a clear sets the card aside, and an answer that does not count picks nothing: either keeps no item, so each comes back on a later card
+    const keeps = item.status !== "cleared" && Array.isArray(counted)
+    const picks = Array.isArray(counted) ? counted : []
+    if (typeof counted === "string") said.push(counted)
     const listed = new Map(
       found.flatMap((m) =>
         "why" in m
@@ -253,7 +276,7 @@ export async function cardNight(
       const key = keyOf(asked)
       const picked = picks.some((p) => keyOf(p) === key && p.bytes === asked.bytes)
       if (!picked) {
-        kept[key] = asked.bytes
+        if (keeps) kept[key] = asked.bytes
         continue
       }
       if (listed.get(key) !== asked.bytes) {
@@ -272,8 +295,8 @@ export async function cardNight(
           : `kept ${asked.path}: ${lastLine(done.out)}`,
       )
     }
-    // a deny or a clear reads as read with --ack, which closes it; an approval closes once carried out
-    if (item.status === "approved")
+    // a deny, a clear or an answer that does not count reads as read with --ack, which closes it; a counted approval closes once carried out
+    if (item.status === "approved" && Array.isArray(counted))
       await deps.ask([
         "ack",
         card.id,
@@ -292,9 +315,9 @@ export async function cardNight(
     const id = posted.out
       .split("\n")
       .map((l) => l.trim())
-      .find((l) => /^[0-9a-f-]{36}$/.test(l))
+      .find((l) => CARD_ID.test(l))
     if (posted.code === 0 && id) {
-      card = { id, items: tonight }
+      card = { ...(await writtenAt(deps.ask, id)), id, items: tonight }
       said.push(`card ${id} posted, ${tonight.length} items`)
     } else said.push(`card not posted: ${lastLine(posted.out)}`)
   }

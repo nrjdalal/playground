@@ -26,7 +26,6 @@ import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
 import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import {
-  approvedOf,
   CARD_ID,
   type CardPick,
   type CardState,
@@ -305,7 +304,7 @@ export const rmDeps = (repo: string): RmDeps => ({
   prState,
   procs: processes,
   session: sessionName,
-  // the card's picks that nightly-clean's saved card also holds, read from its state file
+  // the card's picks, counted only on the card as nightly-clean saved it in its state file
   approvals: async (id) => {
     const item = await readCard(async (args) => {
       const read = Bun.spawnSync(
@@ -325,7 +324,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       const state = JSON.parse(
         readFileSync(join(dataDir(), "ops", "tick", "nightly-clean.json"), "utf8"),
       ) as { card?: CardState }
-      return savedPicks(approvedOf(item, managerOf(roster.agents, "ops")), state.card, id)
+      return savedPicks(item, managerOf(roster.agents, "ops"), state.card, id)
     } catch (error) {
       return (error as Error).message
     }

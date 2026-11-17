@@ -10,7 +10,7 @@ import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/re
 import { mainCheckout } from "../main-checkout"
 import { peersOf } from "./peers"
 
-// The unused space nightly-clean lists on each machine and removes none of: model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
+// The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
 
 // Ops' cleanup list, Thresholds (bundles/cleanup-list.md): an image no container uses and not pulled or run in 7 days is unused.
 export const IMAGE_UNUSED_DAYS = 7

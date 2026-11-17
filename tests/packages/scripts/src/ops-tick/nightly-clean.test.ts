@@ -770,13 +770,13 @@ describe("one night's run against a fixture data folder", () => {
     ]
     const answered = {
       ...cardOf(items),
-      answer: { choice: "approve", options: [0, 0] },
+      answer: { at: "2026-11-17T09:00:00.000Z", choice: "approve", options: [0, 0] },
       from: "ops",
       status: "approved",
     }
     const { ctx, deps, ops, runs, sent } = night(
       { "ask get": JSON.stringify(answered), "tag -l": "v0.0.142\n" },
-      () => ({ card: { id: CARD, items } }),
+      () => ({ card: { at: "2026-11-17T03:00:00.000Z", id: CARD, items } }),
     )
     deps.unused = async () => [
       {
