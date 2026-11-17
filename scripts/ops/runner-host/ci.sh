@@ -13,6 +13,11 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 case ${PLAYGROUND_DATA_DIR:-/} in /*) ;; *) echo "ci.sh: PLAYGROUND_DATA_DIR is relative ($PLAYGROUND_DATA_DIR), so each process would read it from its own folder: set it to an absolute path" >&2; exit 1 ;; esac
 HOST_DIR=${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops/runner-host
+# the box's Playground clone, whose record CLI record() runs: RUNNER_HOST_CLONE, else where this main checkout sits under this home, the place peer-sync keeps each peer's clone (cloneOf); none when it is no plain path
+main=$(git -C "$(dirname "$(readlink -f "$HERE/suite.sh")")" rev-parse --path-format=absolute --git-common-dir 2> /dev/null) && main=$(dirname "$main")
+CLONE=${RUNNER_HOST_CLONE:-}
+[ -n "$CLONE" ] || case ${main:-} in "$HOME"/?*) CLONE="~/${main#"$HOME"/}" ;; esac
+[[ "$CLONE" =~ ^(~/|/)[A-Za-z0-9._/-]+$ && ! "$CLONE" =~ (^|/)\.\.?(/|$) ]] || CLONE=
 KEY=${RUNNER_HOST_KEY:-$(cat "$HOST_DIR/key" 2> /dev/null)}
 KEY=${KEY:-$HOME/.ssh/playground_runner}
 IP=${RUNNER_HOST:-$(cat "$HOST_DIR/ip" 2> /dev/null)}
@@ -28,6 +33,7 @@ SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o 
 # the room a run leaves the box's model server, which suite.sh's take() holds too: 15 GiB of MemAvailable past the run's peak, a suite's 4.5 GiB (measured on the old runner box, 24 Oct) or an exec's 2 GiB (estimated)
 FLOOR_KB=$((15 * 1024 * 1024))
 # the box's run folder, under its user's home and outside ~/.playground, which a test sandbox hides from a run's own tests; suite.sh runs from the copy ci.sh puts there
+# record() puts it in the box's machine record, and record.test.ts holds it to the check's watched places
 BOX_CI_DIR=.cache/playground-ci
 SUITE_PEAK_KB=$((4608 * 1024))
 PEAK_KB=$((2 * 1024 * 1024))
@@ -42,9 +48,17 @@ reach() {
   CI=$BOXHOME/$BOX_CI_DIR
 }
 new_run() { RUN=${1:0:12}-$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6); }
+# what a run puts on the box, the run folder and the image suite.sh starts each run's Postgres from, goes into the box's machine record through its clone's record CLI, the remote words peerRecordArgv's add runs (packages/scripts/src/machine-record/record.ts); a path it holds already writes nothing, and a record that fails is one line and leaves the run alone, since the next daily check names the path
+record() {
+  [ -n "$CLONE" ] &&
+    printf '[{"by":"ci.sh","kind":"folder","path":"%s","undo":"remove %s and what it holds","why":"ci.sh runs heavy runs here"},{"by":"ci.sh","kind":"image","path":"docker image postgres:alpine","undo":"docker image rm postgres:alpine","why":"suite.sh starts each run'"'"'s Postgres from it"}]' "$CI" "$CI" |
+    "${SSH[@]}" "cd $CLONE && PATH=\"\$HOME/.bun/bin:\$PATH\" exec bun --no-env-file packages/scripts/src/machine-record/cli.ts add --stdin" > /dev/null 2>&1 ||
+    echo "ci.sh: $CI and docker image postgres:alpine are not in the box's machine record${CLONE:+ (its clone $CLONE)}; its next check names them" >&2
+}
 upload() {
   # a new copy replaces the old by a rename, since bash reads a running script as it goes
   "${SSH[@]}" "install -d -m 0700 $CI && t=\$(mktemp $CI/.suite.XXXXXX) && cat > \"\$t\" && chmod 700 \"\$t\" && mv \"\$t\" $CI/suite.sh" < "$HERE/suite.sh" || exit 255
+  record
   git -C "$1" archive "$2" | "${SSH[@]}" "cat > $CI/$RUN.tar" || exit 255
 }
 # starts the run's unit with its heartbeat, which every poll touches (suite.sh's watch_beat), and says on stderr how to stop it; a TERM,

@@ -5933,10 +5933,15 @@ var answerPayloadSchema = strictObject({
 var CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z";
 var ROOT_STEPS = {
   "bwrap-userns": {
+    adds: ["/etc/apparmor.d/bwrap"],
     undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
     what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace"
   },
   "chromium-ca": {
+    adds: [
+      "/etc/chromium/policies/managed/portless-ca.json",
+      "/etc/opt/chrome_for_testing/policies/managed/portless-ca.json"
+    ],
     undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
     what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart"
   }
