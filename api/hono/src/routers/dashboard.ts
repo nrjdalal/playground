@@ -82,7 +82,7 @@ import {
   type ModeResult,
   type SettingChanging,
 } from "@/lib/dashboard/sdk"
-import { settingRequestSchema, type SessionSetting } from "@/lib/dashboard/setting"
+import { settingRequestSchema, type HostedSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
 import {
   createThread,
@@ -478,9 +478,9 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
-// The setting route's work once the request is through its guards: a model or an effort for a dispatcher or the assistant, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher or the assistant, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(), which alone takes a local model; any other session, and a local model for a typed one, is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
 export async function changeSetting(
-  { id, sessionId, setting }: { id?: string; sessionId: string; setting: SessionSetting },
+  { id, sessionId, setting }: { id?: string; sessionId: string; setting: HostedSetting },
   actor: Delivery["actor"],
   live: () => Promise<Live> = listLive,
   send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
@@ -496,9 +496,13 @@ export async function changeSetting(
       `A model or effort is set on ${[...DISPATCHERS, "the assistant", SDK_PROBE].join(", ")} only`,
     )
   }
-  const result = typed
-    ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
-    : await setHosted({ actor, sessionId, setting })
+  if ("local" in setting && !worker.hosted) {
+    throw new ApiError(403, "FORBIDDEN", `A local model is set on ${SDK_PROBE} only`)
+  }
+  const result =
+    typed && !("local" in setting)
+      ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
+      : await setHosted({ actor, sessionId, setting })
   if (!result.ok) {
     const [status, code] = FAILURE_STATUS[result.code]
     throw new ApiError(status, code, result.reason, { delivery: result.code })

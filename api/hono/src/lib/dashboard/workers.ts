@@ -10,6 +10,7 @@ import {
   seatOf,
   setSessionNames,
 } from "@packages/config/kinds"
+import type { LocalModel } from "@packages/config/org"
 import { env } from "@packages/env/api-hono"
 import { dataDir } from "@packages/env/data-dir"
 import { readSessionNames } from "@packages/settings"
@@ -218,6 +219,8 @@ export type Worker = {
   lastActiveAt: string | null
   lifecycle: string
   light: Light
+  // A hosted session's local models (org.ts), which its composer's menu offers beside the cloud ones; absent when config names none.
+  localModels?: LocalModel[]
   // Set while its Claude login has expired, as its transcript's API error or ops-unstick's read of its pane says: Add account, then a restart, clears it.
   loginExpired?: true
   // The model id its newest reply came from (claude-opus-5-5); null when none is known.
