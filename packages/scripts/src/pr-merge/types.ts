@@ -165,9 +165,9 @@ export async function typesExplained(
 const skipped = (facts: { canary: string; head: string }) =>
   `skipped: ${facts.head.slice(0, 7)} holds ${BASE} ${facts.canary.slice(0, 7)}, so its own checks typed this tree`
 
-const FIX = `Merge ${BASE} into the PR and fix the error; the new head then needs its checks and a 5/5`
+const FIX = `Merge ${BASE} into the PR and fix the error; the new head then needs its checks, a 5/5 and each PASS its diff calls for`
 
-const REBUILD = `Merge ${BASE} into the PR plainly, run \`bun run hooks:bundle\`, and commit the rebuild on its own; the new head then needs its checks and a 5/5`
+const REBUILD = `Merge ${BASE} into the PR plainly, run \`bun run hooks:bundle\`, and commit the rebuild on its own; the new head then needs its checks, a 5/5 and each PASS its diff calls for`
 
 // Removes the worktree and its folder, whatever state a run left them in, for a worktree that cannot be reused.
 async function clear(git: Run, worktree: string): Promise<void> {
