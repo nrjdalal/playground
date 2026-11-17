@@ -22,6 +22,10 @@ const startedAt = new Date()
 await keep({
   data,
   envText: () => peerEnvText(),
+  every: (ms, tick) => {
+    const timer = setInterval(tick, ms)
+    return () => clearInterval(timer)
+  },
   home: process.env.HOME || homedir(),
   machine: () => {
     const read = readPolicyOrDefaults(data)

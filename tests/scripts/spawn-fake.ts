@@ -130,6 +130,14 @@ fake(
 case " $* " in *" -w "*) [ -n "$FAKE_EMPTY_TOKEN" ] || echo "${TOKEN}" ;; *) echo 'keychain: "/fake.keychain-db"' ;; esac
 exit 0`,
 )
+// The local model's server, which no case reaches: curl logs its args to curl.args and answers the model list with FAKE_LOCAL_MODELS (K's served name by default), or fails as a closed port does under FAKE_LOCAL_DOWN.
+fake(
+  "curl",
+  `printf '%s\\n' "$*" >> "$HOME/curl.args"
+[ -n "$FAKE_LOCAL_DOWN" ] && { echo "curl: (7) Failed to connect to 127.0.0.1 port 8000" >&2; exit 7; }
+[ -n "$FAKE_LOCAL_MODELS" ] && { echo "$FAKE_LOCAL_MODELS"; exit 0; }
+echo '{"object":"list","data":[{"id":"local"}]}'`,
+)
 // A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
 fake(
   "bun",
@@ -445,6 +453,7 @@ export async function spawn(
     rosterLog: (await read("roster.log"))?.filter(Boolean),
     rosterAtClose: (await read("roster-at-close.log"))?.filter(Boolean),
     rosterAtRun: (await read("roster-at-run.log"))?.filter(Boolean),
+    curl: (await read("curl.args"))?.filter(Boolean),
     security: (await read("security.args"))?.filter(Boolean),
   }
 }
