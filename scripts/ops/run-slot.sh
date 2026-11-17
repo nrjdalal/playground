@@ -540,28 +540,33 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
 # A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), its steps with exit 3 for a chain with a program word, in any step, written as an unquoted glob or brace that can expand to docker or podman, and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), a program word, or the program word behind a wrapper (every later word past an option its list lacks), written as an unquoted brace or a glob that can expand to a shell or a wrapper, or with a command substitution beside docker, podman or a portless compose
-# the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
+# the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one word (a count, a duration, a lock file or a CPU mask) before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="-||
 builtin||
 busybox||
 caffeinate|-d -i -m -s -u|-t -w
+chrt|-a -b -d -e -f -i -m -o -p -R -r -v --all-tasks --batch --deadline --ext --fifo --idle --max --other --pid --reset-on-fork --rr --verbose|-D -P -T --sched-deadline --sched-period --sched-runtime
 command|-p -V -v|
 doas|-L -n -s|-a -C -u
 env|-0 -i -v --debug --ignore-environment --null|-C -P -S -u --chdir --unset
 exec|-c -l|-a
+flock|-F -n -o -s -u -x --close --exclusive --fcntl --nb --no-fork --nonblocking --shared --unlock --verbose|-E -w --conflict-exit-code --length --start --timeout --wait
+ionice|-t --ignore|-c -n -P -p -u --class --classdata --pgid --pid --uid
 nice||-n --adjustment
 nocorrect||
 noglob||
 nohup||
 pkexec|--disable-internal-agent --help --keep-cwd --version|--user
 repeat||
+setsid|-c -f -w --ctty --fork --wait|
 stdbuf||-e -i -o --error --input --output
 sudo|-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version|-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+taskset|-a -c -p --all-tasks --cpu-list --pid|
 time|-a -h -l -p -q -V -v --append --portability --quiet --verbose|-f -o --format --output
 timeout|-f -p -v --foreground --preserve-status --verbose|-k -s --kill-after --signal
 xargs|-0 -i -o -p -r -t -x --exit --interactive --max-lines --no-run-if-empty --null --open-tty --replace --show-limits --verbose|-a -d -E -I -J -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-procs --process-slot-var
 "
-CHAIN_COUNTED="repeat timeout"
+CHAIN_COUNTED="flock repeat taskset timeout"
 CHAIN_WRAPPERS=
 while IFS='|' read -r CHAIN_NAME _; do [ -n "$CHAIN_NAME" ] && CHAIN_WRAPPERS+="$CHAIN_NAME "; done <<< "$CHAIN_WRAPPER_OPTIONS"
 CHAIN_SHELLS="sh bash zsh dash ksh"

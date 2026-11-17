@@ -318,6 +318,24 @@ function reviewGate(facts: PrFacts): Gate {
   }
 }
 
+// Pure: the newest tester's word on the head, for a diff that touches web/next/ alone, since a UI change merges only once its tester has driven it; null for any other diff.
+function testerGate(facts: PrFacts): Gate | null {
+  if (!facts.files.some((path) => path.startsWith("web/next/"))) return null
+  const tester = verdictsAt(facts).get("tester")
+  if (tester)
+    return {
+      detail: tester.pass ? tester.text : `newest tester verdict is not a pass: ${tester.text}`,
+      name: "tester",
+      ok: tester.pass,
+    }
+  const sha = facts.head.slice(0, 7)
+  return {
+    detail: `a web/next diff waits for its tester's drive: missing ## TesterBot · PASS at ${sha} from ${facts.owner}; spawn or resume the PR's tester, which posts ## TesterBot · PASS at ${sha}`,
+    name: "tester",
+    ok: false,
+  }
+}
+
 // Pure: every gate, in the order a PR meets them, each saying what it found at the head. The PR merges only when every one is ok.
 export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOptions = {}): Gate[] {
   const gates: Gate[] = [
@@ -362,5 +380,7 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
     )
   }
   gates.push(reviewGate(facts))
+  const tester = testerGate(facts)
+  if (tester) gates.push(tester)
   return gates
 }

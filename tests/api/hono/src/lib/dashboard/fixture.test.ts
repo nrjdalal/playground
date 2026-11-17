@@ -800,6 +800,18 @@ describe("writeFixture", () => {
     expect(roster.find((agent) => agent.name === "q7w8f2-reviewer")?.worker).toBe("k3m9px-worker")
   })
 
+  test("the shipped fixture holds an idle worker whose open pull request conflicts, so its row reads Conflicts (#2457)", () => {
+    const { files, herdr, pulls } = shipped()
+    const pane = herdr.panes.find((p) =>
+      ((p.processes[0]?.argv ?? []) as string[]).includes("m5v8qd-worker"),
+    )
+    expect(pane?.agent_status).toBe("idle")
+    const roster = (files["playground/roster.json"] as { agents: { name: string; pr?: string }[] })
+      .agents
+    const url = roster.find((agent) => agent.name === "m5v8qd-worker")?.pr ?? ""
+    expect(pulls[url]).toMatchObject({ mergeable: "CONFLICTING", state: "OPEN" })
+  })
+
   test("the shipped fixture's 7 threads span 2 pages, one pinned and one archived, each message a line of its own session's transcript, their times moved with the rest", () => {
     const { threads = [], files } = shipped()
     expect(threads).toHaveLength(7)
@@ -923,6 +935,19 @@ const answered = await answerFeed(
   { ...answerDeps, approvals: false, record: async (_event, replying) => replying(), settle: { attempts: 3, delayMs: 20 } },
 )
 const transcript = await Bun.file(live.transcripts.get(sloth.sessionId)).text()
+const { restartSession } = await import(\`\${API}/lib/dashboard/restart\`)
+const probe = named("s8hk2v-probe")
+const restartRuns = []
+const remote = {
+  delivered: await deliver({ actor, text: "hi", to: probe.name }, { ...deliverDeps, record: async (_event, typing) => typing() }),
+  flag: probe.remote ?? null,
+  restarted: await restartSession(
+    { cwd: probe.cwd, name: probe.name, ...(probe.remote && { remote: probe.remote }), sessionId: probe.sessionId },
+    { live: true, root: "/nowhere", run: async (argv) => (restartRuns.push(argv), { code: 0, stderr: "", stdout: "" }) },
+  ),
+  restartRuns,
+  transcript: live.transcripts.get(probe.sessionId) ?? null,
+}
 console.log(JSON.stringify({
   account: readings.account,
   answered,
@@ -944,6 +969,7 @@ console.log(JSON.stringify({
   picker: picker.requestId,
   problems: readings.problems,
   pulls: readings.pulls,
+  remote,
   screen,
   sent: transcript.trim().split("\\n").at(-1),
   update: readings.update,
@@ -1029,9 +1055,22 @@ describe.skipIf(onLiveDashboard())("a fixture stack", () => {
     expect(out.home).toBe(home)
     expect(dashboard()).toEqual(before)
 
-    // every read answered from the fixture, the id-named pair and the Codex worker live with the rest
-    expect(out.workers).toBe(22)
+    // every read answered from the fixture, the id-named pair, the Codex worker, the conflicting worker and the --ssh probe live with the rest
+    expect(out.workers).toBe(24)
     expect(out.names).toContain("c4dx7n-worker")
+    expect(out.names).toContain("m5v8qd-worker")
+    expect(out.names).toContain("s8hk2v-probe")
+    // the --ssh probe's row is remote, with no transcript here; a message to it and a restart are refused, nothing typed and spawn.sh never run
+    expect(out.remote).toMatchObject({
+      delivered: { code: "NOT_FOUND", ok: false },
+      flag: true,
+      restarted: { status: "refused" },
+      restartRuns: [],
+      transcript: null,
+    })
+    expect((out.remote as { delivered: { reason: string } }).delivered.reason).toContain(
+      "runs on another machine over ssh",
+    )
     // the stale record, whose pid another process holds now, is no session
     expect(out.names).not.toContain("gluttony")
     expect(out.frame).toBe(out.workers)

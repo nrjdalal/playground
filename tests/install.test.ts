@@ -49,6 +49,7 @@ const SOURCE_FILES = withImports(
     "install.sh",
     "package.json",
     "packages/scripts/src/ops-herdr/pin.json",
+    "packages/scripts/src/playground/claude-trust.ts",
     "packages/scripts/src/playground/doctor.ts",
     "packages/scripts/src/playground/orgs.ts",
     "packages/scripts/src/playground/unlinked.ts",
@@ -184,7 +185,17 @@ const setup = ({
   for (const file of SOURCE_FILES) cpSync(join(root, file), join(source, file))
   write(
     join(source, "packages/scripts/src/playground/cli.ts"),
-    '#!/usr/bin/env bun\nconsole.log(process.argv[2] ? `playground ${process.argv.slice(2).join(" ")}` : "playground started")\n',
+    // bare, it first prints the folders Claude Code's config trusts as it starts, which the installer's trust step wrote before it
+    [
+      "#!/usr/bin/env bun",
+      'import { existsSync, readFileSync } from "node:fs"',
+      "const config = `${process.env.HOME}/.claude.json`",
+      'const projects = existsSync(config) ? (JSON.parse(readFileSync(config, "utf8")).projects ?? {}) : {}',
+      "const trusted = Object.keys(projects).filter((path) => projects[path]?.hasTrustDialogAccepted === true)",
+      'if (!process.argv[2]) console.log(`trusted at start: ${trusted.join(", ")}`)',
+      'console.log(process.argv[2] ? `playground ${process.argv.slice(2).join(" ")}` : "playground started")',
+      "",
+    ].join("\n"),
     0o755,
   )
   write(
@@ -405,6 +416,15 @@ const bunCache = (path: string) => /^(\.bun\/install|\.cache|Library)(\/|$)/.tes
 const written = (home: string) =>
   Object.fromEntries(Object.entries(snapshot(home)).filter(([path]) => !bunCache(path)))
 
+// spawn.sh's own trust walk, run as claude_trusts() runs it: whether config's yes covers folder, read up to the checkout top and no further
+const WALK =
+  /^claude_trusts\(\) \{\n  python3 -I - "\$\(own_config\)" "\$1" "\$2" <<'PY'\n([\s\S]*?)\nPY$/m.exec(
+    readFileSync(join(root, "scripts/spawn.sh"), "utf8"),
+  )![1]!
+const spawnTrusts = (config: string, folder: string, top: string) =>
+  Bun.spawnSync(["python3", "-I", "-", config, folder, top], { stdin: Buffer.from(WALK) })
+    .exitCode === 0
+
 const ALL: Tool[] = ["brew", "bun", "claude", "docker", "gh", "git", "node", "python3", "uv"]
 const BREW_LINE = (prefix: string) => `eval "$(${prefix}/bin/brew shellenv)"`
 const PATH_LINE = (dir: string) => `export PATH="${dir}:$PATH"`
@@ -439,10 +459,37 @@ describe("install.sh", () => {
     )
   }, 60_000)
 
+  // A fresh install starts the dispatcher in the leads worktree, which spawn.sh refuses until Claude Code trusts the checkout, so the installer records that yes for the folder it cloned alone, before playground starts.
+  test("trusts the checkout it cloned for Claude Code before playground starts, and no other folder", () => {
+    const { dir, home, run } = setup()
+    const { code, left, out } = run()
+    expect(code).toBe(0)
+    expect(left).toEqual([])
+    expect(out).toContain(`Claude Code trusts ${dir}\n`)
+    expect(out).toEndWith(`trusted at start: ${dir}\nplayground started\n`)
+    const config = join(home, ".claude.json")
+    expect(Object.keys(JSON.parse(readFileSync(config, "utf8")).projects)).toEqual([dir])
+    expect(lstatSync(config).mode & 0o777).toBe(0o600)
+    expect(spawnTrusts(config, join(dir, ".claude/worktrees/leads"), dir)).toBe(true)
+    expect(spawnTrusts(config, join(home, "elsewhere"), join(home, "elsewhere"))).toBe(false)
+  }, 60_000)
+
+  test("when Claude Code's config cannot take the trust, it says why, lists Trust this folder and does not start playground", () => {
+    const { home, run } = setup()
+    const config = join(home, ".claude.json")
+    writeFileSync(config, "not json\n")
+    const { code, left, out } = run()
+    expect(code).toBe(1)
+    expect(out).toContain(`${config} does not read as Claude Code's config, so it is left as it is`)
+    expect(left.some((item) => item.includes("Trust this folder"))).toBe(true)
+    expect(out).not.toContain("playground started")
+    expect(readFileSync(config, "utf8")).toBe("not json\n")
+  }, 60_000)
+
   test("names every place outside its folder before it writes, and writes nowhere else", () => {
     const { home, plist, run } = setup()
     const { out } = run()
-    const places = [".bun/bin", ".playground"]
+    const places = [".bun/bin", ".claude.json", ".playground"]
     for (const place of places)
       expect(out.indexOf(join(home, place))).toBeLessThan(out.indexOf("linked "))
     expect(out.indexOf("Claude Code's user settings")).toBeLessThan(out.indexOf("linked "))

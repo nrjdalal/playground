@@ -7,9 +7,12 @@ import {
   type Env,
   GIT_TAKES,
   lex,
+  parse,
+  type Parsed,
   pastDeadline,
   places,
   run,
+  runsScript,
   stdinShell,
   type StdinKind,
   UNKNOWN,
@@ -465,5 +468,65 @@ describe("a wrapper's group word keeps the command list and carries the glob rea
     ['nice (a|")") ; ls x', [["nice"], ["a"], [")"], [], ["ls", "x"]], [["nice", '(a|")")']]],
   ])("%s", (line, commands, glob) => {
     expect(read(line)).toEqual({ commands, glob })
+  })
+})
+
+// #2397: a package runner's program is one more reading beside the runner's own, marked with the runner it runs through
+describe("a package runner's program reads beside the runner", () => {
+  const readings = (p: Parsed): Parsed[] => [p, ...p.also.flatMap(readings)]
+  const via = (line: string) =>
+    readings(parse(lex(line).commands[0]))
+      .filter((r) => r.via)
+      .map((r) => [r.via, r.name, r.args.map((a) => a.value).join(" ")])
+  test.each([
+    ["npx -y inscope@0.18.0 check", [["npx", "inscope", "check"]]],
+    ["npx --call='tsc -v'", [["npx", "sh", "-c tsc -v"]]],
+    ["pnpm --filter app exec -c tsc -v", [["pnpm exec", "sh", "-c tsc -v"]]],
+    ["pnpm tsc -v", [["pnpm", "tsc", "-v"]]],
+    [
+      "corepack pnpm@9 exec tsc",
+      [
+        ["corepack", "pnpm", "exec tsc"],
+        ["pnpm exec", "tsc", ""],
+      ],
+    ],
+    ["deno run -A npm:portless@0.15.11 get", [["deno run", "portless", "get"]]],
+    ["mise x node@20 -- tsc -v", [["mise x", "tsc", "-v"]]],
+    ["yarn exec tsc --noEmit", [["yarn exec", "sh", "-c tsc --noEmit"]]],
+    ["bun --silent exec 'tsc -v'", [["bun exec", "sh", "-c tsc -v"]]],
+    ["deno -A npm:portless get", [["deno", "portless", "get"]]],
+    ["deno x npm:portless get", [["deno x", "portless", "get"]]],
+    ["pnpm -r exec -yc tsc -v", [["pnpm exec", "sh", "-c tsc -v"]]],
+    ["pnpm exec --shell-mode=false tsc -v", [["pnpm exec", "sh", "-c tsc -v"]]],
+    ["pnpm exec -r tsc -v", [["pnpm exec", "tsc", "-v"]]],
+    ["yarn workspace app exec tsc", [["yarn exec", "sh", "-c tsc"]]],
+    ["yarn workspaces foreach -A -j 2 exec tsc", [["yarn exec", "sh", "-c tsc"]]],
+    ["yarn workspace app build", []],
+    ["deno -A main.ts", []],
+    ["pnpm rm lodash", []],
+    ["bun run scripts/x.ts", []],
+    ["deno run -A main.ts", []],
+    ["npx", []],
+  ])("%s", (line, want) => {
+    expect(via(line)).toEqual(want)
+  })
+
+  test("bun run's name reads as no program where the nearest package.json above names its script", () => {
+    const root = mkdtempSync(join(tmpdir(), "runs-script-"))
+    mkdirSync(join(root, "sub"))
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { del: "echo del" } }))
+    const reading = (line: string) =>
+      readings(parse(lex(line).commands[0])).find((r) => r.via) as Parsed
+    const at = (cwd: string): Env => ({
+      cwd,
+      files: new Map(),
+      known: {},
+      process: {},
+      vars: new Map(),
+    })
+    expect(runsScript(reading("bun run del"), at(join(root, "sub")))).toBe(true)
+    expect(runsScript(reading("pnpm del"), at(root))).toBe(true)
+    expect(runsScript(reading("bun run rmx"), at(root))).toBe(false)
+    expect(runsScript(reading("bun run del"), { ...at(root), cwdUnread: true })).toBe(false)
   })
 })

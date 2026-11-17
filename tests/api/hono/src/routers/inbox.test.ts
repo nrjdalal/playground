@@ -172,6 +172,16 @@ describe("an Approve the dashboard carries out: an accept, an apps change, a gra
     expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
+
+  // the one place pkexec is wired: a test or fixture stack reads no live machine, so no test reaches the password window on the owner's screen
+  test("a root step's Approve gets pkexec only on a Linux stack that reads this machine (PG-2433)", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
+    ).text()
+    expect(source).toContain('readsLive() && process.platform === "linux"')
+    expect(source).toContain("? (argv, input) => runArgv(argv, ROOT_TIMEOUT_MS, input)")
+    expect(source.match(/runArgv\(argv, ROOT_TIMEOUT_MS, input\)/g)).toHaveLength(1)
+  })
 })
 
 describe("a secret's two routes refuse the agent sign-in (PG-1023)", () => {

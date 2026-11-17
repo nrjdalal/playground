@@ -2,7 +2,7 @@
 import { mkdir, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 
-import { tagged } from "../ops-outbox/drain"
+import { said, tagged } from "../ops-outbox/drain"
 import { ALERT_JOB, WAITER_GRACE_MS, waiterPidPath } from "../stuck-alert"
 
 const ALERTS = `ops-${ALERT_JOB}.jsonl`
@@ -37,7 +37,7 @@ const readCursor = async (
   return { at: {}, whole: false }
 }
 
-// An alert queued WAITER_GRACE_MS before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).
+// An alert queued WAITER_GRACE_MS before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov). A line ops-peer-relay copied in counts from its relayedAt, its arrival here, so one sent while the link was down still prints once it arrives.
 
 export async function alertsWait(
   name: string,
@@ -64,14 +64,14 @@ export async function alertsWait(
       let offset = from
       for (const line of whole.split("\n").slice(0, -1)) {
         offset += Buffer.byteLength(line) + 1
-        let entry: { at?: string; text?: string; to?: string }
+        let entry: { at?: string; from?: string; relayedAt?: string; text?: string; to?: string }
         try {
           entry = JSON.parse(line)
         } catch {
           continue
         }
         if (entry.to !== name) continue
-        if (began.getTime() - Date.parse(entry.at ?? "") > WAITER_GRACE_MS) {
+        if (began.getTime() - Date.parse(entry.relayedAt ?? entry.at ?? "") > WAITER_GRACE_MS) {
           skipped++
           continue
         }
@@ -81,7 +81,7 @@ export async function alertsWait(
         const note = skipped
           ? `(skipped ${skipped} older alert${skipped === 1 ? "" : "s"}, queued over ${WAITER_GRACE_MS / 60_000} minutes before this wait began; the relay sent each) `
           : ""
-        return tagged(file, `${note}${entry.at ?? ""} ${entry.text ?? ""}`)
+        return tagged(file, `${note}${entry.at ?? ""} ${said(entry)}`)
       }
       at[file] = offset
       if (skipped) await Bun.write(cursorPath, JSON.stringify(at))

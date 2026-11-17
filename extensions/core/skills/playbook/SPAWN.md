@@ -68,7 +68,9 @@ A **just-closed resume** below is a resume within 15 minutes of `spawn.sh close`
    A login whose `usage.accounts` row sets `parkedUntil` to a later time counts as over, `it is parked until <time> (usage.accounts parkedUntil)`, so neither the split nor the lowest week picks it, and an `--account` naming it is refused with that line, a past time read as none.
    When this machine reads one login alone and it is parked, the refusal also names each `usage.accounts` Claude row neither parked nor read here, and says to sign one in with Add account in the Dashboard's Settings; with none, it stays that one line.
    A bare start runs on the login in Claude Code's config (`.claude.json`'s `oauthAccount.emailAddress`), so while `usage.json` reads another account, the factory's, that login is judged by `ops/usage/stored-login.json` (ops-usage's full reading of it, written in the last 15 minutes and naming that login, else it fails), and the factory account counts as another login, reached by `--account`.
-   `--account` naming another login skips the checks, since that login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room, the lowest `week` under 100, as ops-unstick's limit alert names it.
+   `--account X` naming another login is judged by X's own `usage-<local part>.json`, which ops-tick's `other-logins` beat writes every 30 minutes for each Claude row of `usage.accounts` but the stored login: the same 5-hour cap and week pace as a bare start, or the 98% backup while the pace is off, refused as `--account X: <reading>`.
+   The check skips only while this machine holds no such file naming X under 60 minutes old, its pass line naming the beat, and the beat tells ops once when a login's read fails twice in a row, so a skip never lasts unseen.
+   Either way `--account` refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room, the lowest `week` under 100, as ops-unstick's limit alert names it.
    GLM's from `zai-usage.json`: the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again, only while the ops-zai-usage job's last beat is ok and within 3 cycles, so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once.
 
 An `--ssh` probe's gates 1 and 2 read its target in place of this machine, through the System view's peer read (`peerArgv` in `api/hono/src/lib/system/peer.ts`, run with its `--key` by `packages/scripts/src/spawn/peer-gate.ts`), since its claude runs there:
@@ -200,7 +202,7 @@ It labels the session's pane with its name, and that label is where the session 
 The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
 It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you (the picker by enabling its servers, when `~/.mcp.json` alone defines them) only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards;
 anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
-In the main checkout and its worktrees it answers no folder trust prompt: it refuses a Claude start there until Claude Code's config holds the owner's yes for the checkout, which first run's **Trust this folder** on Claude Code's card records.
+In the main checkout and its worktrees it answers no folder trust prompt: it refuses a Claude start there until Claude Code's config holds the owner's yes for the checkout, which install.sh records for the checkout it cloned and first run's **Trust this folder** on Claude Code's card records.
 An `--ssh` probe skips that check, since its claude runs on the other machine and reads that machine's config.
 Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
 With no `--runtime`, every start and resume opens in herdr, from any terminal, and spawn.sh refuses a `--runtime` other than herdr and a column anchored on anything but a herdr pane id.
@@ -277,6 +279,7 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   The prompt names the brief's copy there, `<folder>/<brief's file name>`, since this machine's data folder is not on that one.
   Its settings file is one of its own, `factory-settings-sandbox-400k-<name>.json` (`-closed-` with `--sandbox`), whose sandbox writes that folder, its TMPDIR there.
   With `--account`, the other machine's own shell reads the token from its own store, as [--account](#--account)'s launch does here, so no token crosses from this machine.
+  Its prompt's report line names `playground send <reports-to> <text>` and a background `playground alerts-wait <name>` in place of SendMessage, which reaches no other machine ([SESSIONS.md](SESSIONS.md#message-a-session)); a probe started here keeps SendMessage.
 - The probe keeps a probe's roster row, kind `probe`, written here.
   Its load and memory gates read that machine ([Capacity gate](#capacity-gate)), and the other gates read this one, where its roster row and usage live.
   Before the pane opens, one more `ssh` with the same options reads that machine under the launch's PATH, its `~/.bun/bin` first:
@@ -285,4 +288,4 @@ Both take a probe's own start alone, `spawn.sh probe <name> <reports-to> <brief>
   Its resume record carries the flags, so `spawn.sh restore` leaves it down, naming why, and `spawn.sh resume` refuses it while that record stands, since a resume would run it here without them; start it again instead.
   The live-name check reads this machine's sessions alone, so it misses a name live on the other one.
   Ops' sweep counts it live while any pane labelled with its name, on its resume record's server, still runs `ssh` (`sshLive` in `packages/scripts/src/ops-sweep/sweep.ts`): past 15 minutes it raises `probe-over-15m`, and once no such pane runs `ssh`, `probe-gone-unended`.
-  The Dashboard's live list reads this machine's sessions alone, so it shows the probe as gone.
+  The Dashboard's live list counts it live by the same rule (`packages/config/src/ssh-probe.ts`), as a remote row with no transcript, which it neither types into nor restarts.

@@ -2,6 +2,7 @@ import { appendFile, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
 import { kindOf, placedKindOf } from "@packages/config/kinds"
+import { type SshLaunch, sshLaunchOf, sshProcessOf } from "@packages/config/ssh-probe"
 import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
@@ -113,16 +114,17 @@ export async function registry(ctx: Context): Promise<Map<string, string>> {
   return live
 }
 
-// An --ssh probe's claude runs on the far box, out of this machine's registry, so it counts live while any pane labelled with its name still runs ssh; one pane list a server, read only when such a probe is unended.
+// An --ssh probe's claude runs on the far box, out of this machine's registry, so it counts live while any pane labelled with its name still runs ssh, by the rule the Dashboard's live list shares (sshLaunchOf, sshProcessOf); one pane list a server, read only when such a probe is unended.
 export async function sshLive(ctx: Context, names: string[]): Promise<string[]> {
-  const byServer = new Map<string, string[]>()
+  const byServer = new Map<string, SshLaunch[]>()
   for (const name of names) {
-    const record = await Bun.file(join(ctx.data, "resume", `${name}.sh`))
-      .text()
-      .catch(() => "")
-    if (!/^exec .* --ssh /m.test(record)) continue
-    const server = record.match(/^# server: (.+)$/m)?.[1] ?? "playground"
-    byServer.set(server, [...(byServer.get(server) ?? []), name])
+    const launch = sshLaunchOf(
+      await Bun.file(join(ctx.data, "resume", `${name}.sh`))
+        .text()
+        .catch(() => ""),
+    )
+    if (launch?.name === name)
+      byServer.set(launch.server, [...(byServer.get(launch.server) ?? []), launch])
   }
   if (!ctx.herdr || !byServer.size) return []
   const herdr = ctx.herdr
@@ -134,17 +136,18 @@ export async function sshLive(ctx: Context, names: string[]): Promise<string[]> 
     }
   }
   const out: string[] = []
-  for (const [server, wanted] of byServer) {
+  for (const [server, launches] of byServer) {
     const result = (await read(server, ["pane", "list"])).result as Json | undefined
     const panes = (Array.isArray(result?.panes) ? result.panes : []) as Json[]
-    for (const name of wanted) {
+    for (const launch of launches) {
       for (const { label, pane_id: pane } of panes) {
-        if (label !== name || typeof pane !== "string") continue
+        if (label !== launch.name || typeof pane !== "string") continue
         const info = (await read(server, ["pane", "process-info", "--pane", pane])).result as
-          | { process_info?: { foreground_processes?: { name?: string }[] } }
+          | { process_info?: { foreground_processes?: { argv?: string[] }[] } }
           | undefined
-        if (info?.process_info?.foreground_processes?.some((p) => p.name === "ssh")) {
-          out.push(name)
+        const processes = info?.process_info?.foreground_processes ?? []
+        if (sshProcessOf(launch, server, { label: launch.name, processes })) {
+          out.push(launch.name)
           break
         }
       }

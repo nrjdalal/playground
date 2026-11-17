@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { homedir } from "node:os"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-raw-delete"
@@ -95,7 +96,6 @@ describe("a delete the hook lets run", () => {
     "git diff | delta",
     "redis-cli del lock",
     "docker exec playground-x-redis redis-cli del k",
-    "bun run del",
     "bun add -d del-cli",
     "sudo -s <<< 'ls'",
     "su <<< 'echo hi'",
@@ -118,6 +118,24 @@ describe("a delete the hook lets run", () => {
     'cat "$F"',
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
+  })
+
+  // bun run runs the nearest package.json's script of that name in place of a program, from a subfolder too (#2397)
+  test("bun run del, where the package.json above the folder names a del script", async () => {
+    const root = mkdtempSync(join(tmpdir(), "raw-delete-script-"))
+    mkdirSync(join(root, "sub"))
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { del: "echo del" } }))
+    expect(await check(input("bun run del", {}, root))).toBeUndefined()
+    expect(await check(input("bun run del", {}, join(root, "sub")))).toBeUndefined()
+    expect(await check(input(`bun run --cwd ${root} del`, {}, tmpdir()))).toBeUndefined()
+  })
+
+  // a runner's folder option is a folder, never a program word, even in a variable (#2397's 7-day replay)
+  test("bunx's --cwd in a variable, before files under it", async () => {
+    const w = join(tmpdir(), "raw-delete-w")
+    expect(
+      await check(input(`W=${w}; bunx --cwd $W oxfmt $W/tests/a.test.ts $W/b.ts`)),
+    ).toBeUndefined()
   })
 })
 

@@ -1,4 +1,4 @@
-// The verdicts a Playground PR's gates and the Dashboard read, in one module both import, so a format change or a stricter reading cannot leave one reader behind. Every verdict comment is posted as the repo's owner. Two kinds, each a comment's first line: the reviewer's score, which pr:merge gates on, and the tester's word on its drive, which the Dashboard shows.
+// The verdicts a Playground PR's gates and the Dashboard read, in one module both import, so a format change or a stricter reading cannot leave one reader behind. Every verdict comment is posted as the repo's owner. Two kinds, each a comment's first line: the reviewer's score, which pr:merge gates on, and the tester's word on its drive, which pr:merge gates a web/next diff on and the Dashboard shows.
 
 export type GateName = "review" | "tester"
 
