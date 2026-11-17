@@ -16,6 +16,8 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
+import { peerRecordArgv } from "../../../../packages/scripts/src/machine-record/record"
+
 // The runner host is a small rented machine of about 4 GB.
 const DIR = join(import.meta.dir, "../../../../scripts/ops/runner-host")
 // each test spawns scripts and a scratch git repo, which runs past bun's 5s default under load (44 on 19 Oct)
@@ -323,6 +325,7 @@ esac`,
     PATH: `${b}:/usr/bin:/bin`,
     PLAYGROUND_DATA_DIR: join(root, "data"),
     RUNNER_HOST: "203.0.113.7",
+    RUNNER_HOST_CLONE: "~/code/playground",
     RUNNER_HOST_POLL: "0",
   }
   writeFileSync(join(repo, "web", "kept.ts"), "committed")
@@ -948,12 +951,22 @@ esac`,
 // free memory past the floor, systemd-run runs the unit in place, and the unit runs a stand-in suite that records its mode and need and prints the given output
 const fakeBox = (
   output: string,
-  { argv = (repo: string) => ["exec", repo, "--", "true"], code = 0 } = {},
+  { argv = (repo: string) => ["exec", repo, "--", "true"], code = 0, clone = true } = {},
 ) => {
   const root = mkdtempSync(join(tmpdir(), "runner-fake-"))
   dirs.push(root)
   const b = join(root, "bin")
   mkdirSync(b)
+  // the box's clone, whose record CLI a stand-in bun on the box's ~/.bun/bin answers, keeping where it ran, its words and its stdin
+  if (clone) {
+    mkdirSync(join(root, "clone"))
+    mkdirSync(join(root, ".bun", "bin"), { recursive: true })
+    bin(
+      join(root, ".bun", "bin"),
+      "bun",
+      `{ printf '%s\\n' "$PWD" "$*"; cat; } > "${root}/recorded"`,
+    )
+  }
   writeFileSync(
     join(root, "fake-suite.sh"),
     `echo "$2" > "${root}/mode"; echo "$3" > "${root}/need"; printf '%s' '${output}'; exit ${code}\n`,
@@ -964,6 +977,7 @@ const fakeBox = (
     String.raw`case "${"$"}{@: -1}" in *"/proc/meminfo"*) printf 'ROOT
 BIG
 '; exit 0 ;; esac
+printf '%s\n' "${"$"}{@: -1}" >> ROOT/argv
 c=$(printf '%s' "${"$"}{@: -1}" | sed -e 's#ROOT/${BOX_CI_DIR}/suite.sh #ROOT/fake-suite.sh #g')
 exec bash -c "$c"`
       .replaceAll("ROOT", root)
@@ -977,6 +991,7 @@ exec bash -c "$c"`
     HOME: root,
     PATH: `${b}:/usr/bin:/bin`,
     RUNNER_HOST: "203.0.113.7",
+    RUNNER_HOST_CLONE: join(root, "clone"),
     RUNNER_HOST_POLL: "0",
   }
   for (const args of [
@@ -989,15 +1004,59 @@ exec bash -c "$c"`
     env,
   })
   const read = (name: string) =>
-    existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8").trim() : ""
+    existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : ""
   return {
+    argv: read("argv"),
     code: p.exitCode,
     err: p.stderr.toString(),
-    mode: read("mode"),
-    need: read("need"),
+    mode: read("mode").trim(),
+    need: read("need").trim(),
     out: p.stdout.toString(),
+    recorded: read("recorded"),
+    root,
   }
 }
+
+describe("what a run puts on the box goes into the box's machine record (PG-2538)", () => {
+  test("each upload hands the box clone's record CLI the run folder and the Postgres image, by peerRecordArgv's own remote words", () => {
+    const r = fakeBox("done")
+    expect(r.code).toBe(0)
+    const clone = join(r.root, "clone")
+    expect(r.argv.split("\n")).toContain(peerRecordArgv(undefined, "box", clone, "add").at(-1)!)
+    const [where, words, stdin] = r.recorded.split("\n")
+    expect([where, words]).toEqual([
+      clone,
+      "--no-env-file packages/scripts/src/machine-record/cli.ts add --stdin",
+    ])
+    const ci = join(r.root, BOX_CI_DIR)
+    expect(JSON.parse(stdin!)).toEqual([
+      {
+        by: "ci.sh",
+        kind: "folder",
+        path: ci,
+        undo: `remove ${ci} and what it holds`,
+        why: "ci.sh runs heavy runs here",
+      },
+      {
+        by: "ci.sh",
+        kind: "image",
+        path: "docker image postgres:alpine",
+        undo: "docker image rm postgres:alpine",
+        why: "suite.sh starts each run's Postgres from it",
+      },
+    ])
+  })
+
+  test("a box whose clone cannot take the record still runs, with one line saying what is not in it", () => {
+    const r = fakeBox("done", { clone: false })
+    expect(r.code).toBe(0)
+    expect(r.out).toBe("done\n")
+    expect(r.err.split("\n")[0]).toBe(
+      `ci.sh: ${r.root}/${BOX_CI_DIR} and docker image postgres:alpine are not in the box's machine record (its clone ${r.root}/clone); its next check names them`,
+    )
+    expect(r.err.split("\n")[1]).toMatch(/^ci\.sh: ci-\S+ started on the box; /)
+  })
+})
 
 describe("ci.sh exec", () => {
   test("a command whose output has no final newline still ends green, its output whole", () => {
@@ -1315,6 +1374,7 @@ const box = (
     HOME: root,
     PATH: `${b}:/usr/bin:/bin`,
     RUNNER_HOST: "203.0.113.7",
+    RUNNER_HOST_CLONE: "~/code/playground",
     ...(linuxOnly === null ? {} : { RUNNER_HOST_LINUX_ONLY: linuxOnly }),
     RUNNER_HOST_POLL: active ? "1" : "0",
     ...(progress === undefined ? {} : { RUNNER_HOST_PROGRESS: progress }),
