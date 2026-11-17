@@ -22,6 +22,8 @@ export type MachineState = {
   hold?: { for: string; since: string }
   refused?: string
   servers?: Record<string, ModelServer>
+  // each entry the keep beat skips, with the line ops was told, so each is told once
+  skipped?: Record<string, string>
 }
 
 // What playground model use did, kept in this machine's data folder, by machine: this one by its short hostname, a peer by its PLAYGROUND_PEERS name. The local-worker gate and the Dashboard's chat read it.
