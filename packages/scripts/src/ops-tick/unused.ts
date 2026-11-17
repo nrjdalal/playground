@@ -29,12 +29,15 @@ export type UnusedKind = (typeof KINDS)[number]
 // unknownAge: an image with no last tag time, listed by nightly-clean only once its own first-seen date is IMAGE_UNUSED_DAYS old.
 export type Unused = {
   bytes: number
+  id?: string
   kind: UnusedKind
   path: string
   recorded: boolean
   unknownAge?: true
 }
-export type Machine = { items: Unused[]; machine: string } | { machine: string; why: string }
+// What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights.
+export type Measured = { imagesUnread?: true; items: Unused[] }
+export type Machine = (Measured & { machine: string }) | { machine: string; why: string }
 
 // What a measure reads: the data folder (its record and scratchpads), the home folder (~/models), the clock and docker through run.
 export type Places = { data: string; home: string; now: number; run: Run }
@@ -123,7 +126,7 @@ export const unusedImages = (
   inspect: string,
   named: string,
   cutoff: number,
-): { bytes: number; path: string; unknownAge?: true }[] => {
+): { bytes: number; id: string; path: string; unknownAge?: true }[] => {
   const usedBy = new Set(lines(used).map((ref) => ref.trim()))
   const facts = new Map(
     lines(inspect).map((l) => {
@@ -148,8 +151,8 @@ export const unusedImages = (
     const path = `docker image ${[...refs].sort()[0]}`
     return [
       fact.at > 0
-        ? { bytes: fact.bytes, path }
-        : { bytes: fact.bytes, path, unknownAge: true as const },
+        ? { bytes: fact.bytes, id, path }
+        : { bytes: fact.bytes, id, path, unknownAge: true as const },
     ]
   })
 }
@@ -164,7 +167,9 @@ const images = async (places: Places, named: string) => {
     "{{.ID}}\t{{.Repository}}:{{.Tag}}",
   ])
   const used = await places.run(["docker", "ps", "-a", "--no-trunc", "--format", "{{.Image}}"])
-  if (listed.code !== 0 || used.code !== 0) return []
+  // no docker at all is no images; docker that does not answer is unread
+  if (listed.code === 127) return []
+  if (listed.code !== 0 || used.code !== 0) return null
   const ids = [...new Set(lines(listed.out).map((l) => l.split("\t")[0]!))]
   if (!ids.length) return []
   const inspect = await places.run([
@@ -176,7 +181,7 @@ const images = async (places: Places, named: string) => {
     ...ids,
   ])
   const cutoff = places.now - IMAGE_UNUSED_DAYS * 86_400_000
-  return inspect.code === 0 ? unusedImages(listed.out, used.out, inspect.out, named, cutoff) : []
+  return inspect.code === 0 ? unusedImages(listed.out, used.out, inspect.out, named, cutoff) : null
 }
 
 // Each row in ~/models/kit/runs whose newest result file is past RUN_WORKTREE_AGE_MS, as its worktree folders alone, so its grade.log, stream.jsonl and stderr stay out of the list.
@@ -210,34 +215,42 @@ export const recordedBy = (entries: Entry[], path: string): boolean =>
 
 // Each listed path measured, largest first; a path that is gone by its measure (removed after it was listed, such as by a delete running at the same time) is skipped, counted nowhere. An image keeps the size docker gave it.
 export const measured = (
-  found: { bytes?: number; kind: UnusedKind; path: string; unknownAge?: true }[],
+  found: { bytes?: number; id?: string; kind: UnusedKind; path: string; unknownAge?: true }[],
   entries: Entry[],
 ): Unused[] =>
   found
-    .flatMap(({ bytes, kind, path, unknownAge }) => {
+    .flatMap(({ bytes, id, kind, path, unknownAge }) => {
       const size = bytes ?? sizeOf(path)
       // read after the walk, so a path removed while it was measured is skipped too
       if (bytes === undefined && !stat(path)) return []
-      const item: Unused = { bytes: size, kind, path, recorded: recordedBy(entries, path) }
+      const item: Unused = {
+        bytes: size,
+        ...(id ? { id } : {}),
+        kind,
+        path,
+        recorded: recordedBy(entries, path),
+      }
       return [unknownAge ? { ...item, unknownAge } : item]
     })
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
 
 // This machine's unused space, largest first.
-export async function measureUnused(places: Places): Promise<Unused[]> {
+export async function measureUnused(places: Places): Promise<Measured> {
   const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
   const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
   const named = await modelTexts(join(places.home, "models"))
   const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
-  return measured(
+  const found = await images(places, named)
+  const items = measured(
     [
-      ...(await images(places, named)).map((i) => ({ ...i, kind: "image" as const })),
+      ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
       ...listed("rehearsal", rehearsals(places.data)),
       ...listed("run", runs(places.home, places.now)),
       ...listed("weights", weights(places.home, folders, places.data, named)),
     ],
     entries,
   )
+  return found ? { items } : { imagesUnread: true, items }
 }
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
@@ -278,7 +291,7 @@ export const aged = (
 ): { found: Machine[]; seen: Record<string, string> } => {
   const next: Record<string, string> = {}
   for (const m of found)
-    if ("why" in m)
+    if ("why" in m || m.imagesUnread)
       for (const [key, at] of Object.entries(seen))
         if (key.startsWith(`${m.machine} `)) next[key] = at
   const judged = found.map((m) => {
@@ -286,7 +299,10 @@ export const aged = (
     const items = m.items.flatMap(({ unknownAge, ...item }) => {
       if (!unknownAge) return [item]
       const key = `${m.machine} ${item.path}`
-      next[key] = seen[key] ?? new Date(now).toISOString()
+      // a first night that does not read as a date (a hand edit) starts tonight
+      next[key] = Number.isNaN(Date.parse(seen[key] ?? ""))
+        ? new Date(now).toISOString()
+        : seen[key]!
       return now - Date.parse(next[key]) >= IMAGE_UNUSED_DAYS * 86_400_000 ? [item] : []
     })
     return { ...m, items }
@@ -308,7 +324,7 @@ export async function unusedEverywhere(
   checkout?: (repo: string) => string | null,
 ): Promise<Machine[]> {
   const found: Machine[] = [
-    { items: await measureUnused(places), machine: hostname().split(".")[0]! },
+    { ...(await measureUnused(places)), machine: hostname().split(".")[0]! },
   ]
   const cluster = await peersOf(repo, places.home, checkout)
   if ("why" in cluster) return found
@@ -321,7 +337,11 @@ export async function unusedEverywhere(
     const ran = await run(peerUnusedArgv(cluster.key, peer.target, clone), PEER_MS)
     try {
       if (ran.code !== 0) throw new Error()
-      found.push({ items: JSON.parse(ran.out) as Unused[], machine: peer.name })
+      // a peer on the older array output still reads, until its clone updates
+      const read = JSON.parse(ran.out) as Measured | Unused[]
+      const measure = Array.isArray(read) ? { items: read } : read
+      if (!Array.isArray(measure?.items)) throw new Error()
+      found.push({ ...measure, machine: peer.name })
     } catch {
       found.push({ machine: peer.name, why: ran.out.trim().split("\n")[0] || `exit ${ran.code}` })
     }
