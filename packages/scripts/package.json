@@ -25,6 +25,7 @@
     "@types/node": "catalog:",
     "@viz-js/viz": "catalog:",
     "baileys": "catalog:",
+    "dotenv": "catalog:",
     "fontkit": "catalog:",
     "globby": "catalog:",
     "nanoid": "catalog:",
