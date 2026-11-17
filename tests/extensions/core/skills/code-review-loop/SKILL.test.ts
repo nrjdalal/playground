@@ -240,7 +240,7 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     )
     expect(step).toContain("the other links that issue, so a test never gets two")
     expect(step).toContain("each `BATCH-RED` test has its one issue")
-    expect(step).toContain("with the issue named in its Merge Danger")
+    expect(step).toContain("the PR merges on that green with the issue named in its Merge Danger")
     expect(await page()).toContain("never a second rerun")
   })
 })
