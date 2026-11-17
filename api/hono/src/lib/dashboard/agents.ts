@@ -5,6 +5,7 @@ import { dirname, join } from "node:path"
 
 import { getSessionNames, managerOf, type RosterKind } from "@packages/config/kinds"
 import { atHead, verdictsOf } from "@packages/config/verdicts"
+import { ghSkipped } from "@packages/scripts/gh-read"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
 import { heldReason, readHeld } from "@/lib/dashboard/held"
@@ -618,8 +619,10 @@ export function pullFromAnswer(out: string): Pull | null {
   return pullOf(repository.pullRequest ?? nodes(repository.pullRequests)[0], viewer || undefined)
 }
 
-// One `gh api graphql` read: its answer's body, `notFound` when GitHub answered that it holds no such repository or pull request, which reads as none, as an empty branch does. Any other failure throws, naming why, when GitHub's budget opens again and whether only a setup fixes it.
+// One `gh api graphql` read, skipped with ghSkipped's line while the gh sign-in probe reads failed: its answer's body, `notFound` when GitHub answered that it holds no such repository or pull request, which reads as none, as an empty branch does. Any other failure throws, naming why, when GitHub's budget opens again and whether only a setup fixes it.
 export async function ghGraphql(args: string[]): Promise<{ body: string; notFound: boolean }> {
+  const skipped = ghSkipped()
+  if (skipped) throw new Error(skipped)
   const { code, err, out } = await run(["gh", "api", "graphql", "-i", ...args], 10_000).catch(
     (error: unknown) => {
       throw isRecord(error) && error.code === "ENOENT"

@@ -1,6 +1,6 @@
 // The Bash reader the PreToolUse hooks share: it lexes a command and walks it as the shell would run it, reading the heredocs, files and substitutions it can see and marking the rest unknown.
 import { AsyncLocalStorage } from "node:async_hooks"
-import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs"
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
@@ -260,21 +260,32 @@ export const WRAPPERS = new Map<string, Options>(
     builtin: ["", ""],
     busybox: ["", ""],
     caffeinate: ["-d -i -m -s -u", "-t -w"],
+    chrt: [
+      "-a -b -d -e -f -i -m -o -p -R -r -v --all-tasks --batch --deadline --ext --fifo --idle --max --other --pid --reset-on-fork --rr --verbose",
+      "-D -P -T --sched-deadline --sched-period --sched-runtime",
+    ],
     command: ["-p -V -v", ""],
     doas: ["-L -n -s", "-a -C -u"],
     env: ["-0 -i -v --debug --ignore-environment --null", "-P -S -u --unset"],
     exec: ["-c -l", "-a"],
+    flock: [
+      "-F -n -o -s -u -x --close --exclusive --fcntl --nb --no-fork --nonblocking --shared --unlock --verbose",
+      "-E -w --conflict-exit-code --length --start --timeout --wait",
+    ],
+    ionice: ["-t --ignore", "-c -n -P -p -u --class --classdata --pgid --pid --uid"],
     nice: ["", "-n --adjustment"],
     nocorrect: ["", ""],
     noglob: ["", ""],
     nohup: ["", ""],
     pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
     repeat: ["", ""],
+    setsid: ["-c -f -w --ctty --fork --wait", ""],
     stdbuf: ["", "-e -i -o --error --input --output"],
     sudo: [
       "-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version",
       "-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user",
     ],
+    taskset: ["-a -c -p --all-tasks --cpu-list --pid", ""],
     time: [
       "-a -h -l -p -q -V -v --append --portability --quiet --verbose",
       "-f -o --format --output",
@@ -288,6 +299,123 @@ export const WRAPPERS = new Map<string, Options>(
     name,
     { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
   ]),
+)
+
+// A package runner's options before its program, as a wrapper's are, with those whose value is a shell script it runs (`script`), the flags that run its words joined as one script (`joined`, true for a runner that always does), whether its program word is a package name a version may follow (`spec`), whether tool names sit before a `--` and the program (`tools`), and the options naming the folder it runs its program in (`folder`, `bunx --cwd`, `pnpm -C`), which move the program's reading as env -C does
+type Runner = Options & {
+  folder: Set<string>
+  joined: Set<string> | true
+  script: Set<string>
+  spec: boolean
+  tools: boolean
+}
+const runner = (
+  flags: string,
+  values: string,
+  more: {
+    always?: true
+    folder?: string
+    joined?: string
+    script?: string
+    spec?: true
+    tools?: true
+  } = {},
+): Runner => ({
+  flags: new Set(flags.split(" ")),
+  folder: new Set(more.folder?.split(" ")),
+  joined: more.always ?? new Set(more.joined?.split(" ")),
+  script: new Set(more.script?.split(" ")),
+  spec: !!more.spec,
+  tools: !!more.tools,
+  values: new Set(values.split(" ")),
+})
+// Each runner's options, measured from its --help (npm 11.20, bun 1.4.4, pnpm 12.21) or, for one not installed here, from its docs: yarnpkg.com/cli/dlx, /cli/exec, /cli/workspace and /cli/workspaces/foreach, mise.jdx.dev/cli/exec, docs.volta.sh/reference/run, docs.deno.com's run reference, github.com/nodejs/corepack; an option missing here is read both ways, as a wrapper's is
+const NPM = runner(
+  "-y --dangerously-allow-all-scripts --include-workspace-root --no --strict-allow-scripts --workspaces --yes",
+  "-c -w --allow-scripts --call --package --workspace",
+  { script: "-c --call", spec: true },
+)
+const BUNX = runner(
+  "--bun --ignore-scripts --no-install --silent --trust --verbose",
+  "-p --ca --cafile --cwd --env-file --minimum-release-age --package --registry",
+  { folder: "--cwd", spec: true },
+)
+const PNPM_FLAGS =
+  "-c -r -w -y --aggregate-output --color --fail-if-no-match --ignore-workspace --include-workspace-root --no-fail-if-no-match --no-include-workspace-root --no-progress --no-sort --parallel --recursive --reverse --shell-mode --sort --stream --use-stderr --workspace-root --yes"
+const PNPM_VALUES =
+  "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages"
+const PNPM_DLX = runner(
+  `${PNPM_FLAGS} -v --version`,
+  `${PNPM_VALUES} --allow-build --cpu --libc --os --package`,
+  { folder: "-C --dir", joined: "-c --shell-mode", spec: true },
+)
+const MISE = runner(
+  "--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all",
+  "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets",
+  { script: "-c --command", tools: true },
+)
+const BUN_FLAGS =
+  "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
+const BUN_VALUES =
+  "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell"
+const DENO = runner(
+  "-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch",
+  "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude",
+  { spec: true },
+)
+export const RUNNERS = new Map<string, Runner>([
+  ["bun exec", runner(BUN_FLAGS, BUN_VALUES, { always: true, folder: "--cwd" })],
+  ["bun run", runner(BUN_FLAGS, BUN_VALUES, { folder: "--cwd" })],
+  ["bun x", BUNX],
+  ["bunx", BUNX],
+  ["corepack", runner("", "", { spec: true })],
+  ["deno run", DENO],
+  ["deno x", DENO],
+  ["mise exec", MISE],
+  ["mise x", MISE],
+  ["npm exec", NPM],
+  ["npm x", NPM],
+  ["npx", NPM],
+  ["pnpm dlx", PNPM_DLX],
+  ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
+  ["pnpx", PNPM_DLX],
+  ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
+  ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
+  ["yarn exec", runner("", "", { always: true })],
+])
+// The package managers whose subcommand names a runner, each with the runner whose options it reads before that subcommand (`pnpm -r exec`, `npm -w app exec`)
+const MANAGERS = new Map([
+  ["bun", "bun run"],
+  ["deno", "deno run"],
+  ["mise", "mise exec"],
+  ["npm", "npm exec"],
+  ["pnpm", "pnpm exec"],
+  ["volta", "volta run"],
+  ["yarn", "yarn dlx"],
+])
+// A manager's scoping words, read past before its runner's subcommand (`yarn workspace app exec`, `yarn workspaces foreach -A exec`), with the names that follow them and their own options
+const SCOPES = new Map<string, { names: number; options: Options }>([
+  ["yarn workspace", { names: 1, options: { flags: new Set(), values: new Set() } }],
+  [
+    "yarn workspaces foreach",
+    {
+      names: 0,
+      options: {
+        flags: new Set(
+          "-A -i -n -p -R -t -v -W --all --dry-run --interlaced --no-private --parallel --recursive --topological --topological-dev --verbose --worktree".split(
+            " ",
+          ),
+        ),
+        values: new Set("-j --exclude --from --include --jobs".split(" ")),
+      },
+    },
+  ],
+])
+// pnpm 12.21's own commands and their aliases (`pnpm help --all`); pnpm runs any other name as `pnpm exec` runs it, a script of that name first
+const PNPM_COMMANDS = new Set(
+  "access add adduser approve approve-builds audit bin bugs c cache cat-file cat-index change ci clean clean-install completion config create dedupe deploy deprecate dislink dist-tag dist-tags dlx docs doctor edit env exec fetch find find-hash fund get help home i ic ignored-builds import info init install install-clean install-test issues it la lane licences licenses link list ll ln login logout ls m multi outdated owner owners pack pack-app patch patch-commit patch-remove peers permissions ping pipeline pkg prefix profile prune publish purge rb rebuild recursive remove repo restart rm root rt run run-script runtime s sbom se search self-update set set-script setup shim show ss stage star stars start stop store t tasks team test token tst un undeprecate uni uninstall unlink unpublish unstar up update upgrade v version view whoami why with xmas".split(
+    " ",
+  ),
 )
 
 // A case statement's opener, `case <word> in <pattern>`, its reserved words before it skipped
@@ -752,8 +880,10 @@ function bodyOf(commands: Command[], k: number): Command[] {
   return []
 }
 
-// Wrappers that take one positional argument (a count or a duration) before the command.
-export const COUNTED = new Set(["repeat", "timeout"])
+// Wrappers that take one positional argument (a count, a duration, a lock file or a CPU mask) before the command; chrt's priority, which may be left out, is taken only when it is digits.
+export const COUNTED = new Set(["flock", "repeat", "taskset", "timeout"])
+// The counted wrappers whose count or duration manyTimes reads
+const REPEATS = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
 // A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@`, `$*` or a default's or alternate's text holding an `@` is none
 const QUOTED_ONE_WORD =
@@ -1773,6 +1903,8 @@ export type Parsed = {
   name: string
   // Set by examine on a reading whose program word, or whose eval's or shell -c's script, is built from an expansion no reading of the command resolves, so each guard applies its own rule for a command it cannot read
   unread?: boolean
+  // the package runner (a RUNNERS key, "pnpm" for the name pnpm runs as exec does, or "deno" for an npm: package deno runs with no subcommand) whose program this reading is, beside the reading of the runner itself
+  via?: string
   xargs: Xargs
 }
 
@@ -1914,6 +2046,8 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       ),
     )
   }
+  // a spec runner's program word is a package name, read as the program it names
+  let spec = false
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
       const word = peek()
@@ -1934,10 +2068,16 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       if (wrapper === "xargs") state.xargs ??= {}
       take()
     }
-    const options = WRAPPERS.get(wrapper) as Options
+    const runs = RUNNERS.get(wrapper)
+    const options = (WRAPPERS.get(wrapper) ?? runs) as Options
+    spec = !!runs?.spec
+    let joined = runs?.joined === true
     for (let w = peek(); w; w = peek()) {
       const v = w.value
+      const script = runs && namedOption(v, runs, runs.script)
+      const folder = runs && namedOption(v, runs, runs.folder)
       if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
+      if (runs && runs.joined !== true && joinsWords(v, runs.joined)) joined = true
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -1964,6 +2104,16 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       } else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
+      } else if (folder !== undefined) {
+        // a runner's folder option is where its program runs, read as env -C's folder is, with no reading of its value as the program
+        take()
+        state.chdir = chdirOf(state, folder === -1 ? take() : slice(w, folder))
+      } else if (script !== undefined) {
+        // a runner's script option runs its value in a shell, read as `sh -c` reads it
+        take()
+        const text = script === -1 ? take() : slice(w, script)
+        if (text) rest.push(text, ...SH_C)
+        break
       } else if (v === "--") {
         take()
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
@@ -1982,14 +2132,32 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
           fork(wrapper, 3)
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
-      } else break
+      } else if (runs?.tools && rest.some((r) => !r.quoted && r.value === "--")) take()
+      else break
+    }
+    // pnpm's shell mode and yarn exec run the words left joined by spaces as one shell script
+    if (joined && rest.length > 0) {
+      const text = rest
+        .toReversed()
+        .map((r) => r.value)
+        .join(" ")
+      rest.length = 0
+      rest.push({ quoted: true, value: text }, ...SH_C)
     }
     if (COUNTED.has(wrapper)) take()
+    if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? "")) take()
+    // flock's -c or --command after its file runs the next word in a shell
+    if (wrapper === "flock" && !peek()?.quoted && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
+      take()
+      const text = take()
+      if (text) rest.push(text, ...SH_C)
+    }
     // zsh's `repeat N do … done` and `repeat N { … }` run their body's first command after the do or the brace
     if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
-  const first = take()
-  return {
+  const typed = take()
+  const first = spec && typed ? packageName(typed) : typed
+  const parsed: Parsed = {
     also,
     args: rest.reverse(),
     chdir: state.chdir,
@@ -1997,6 +2165,153 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     local,
     name: first ? program(first.value) : "",
     xargs: state.xargs,
+  }
+  const via = viaRunner(parsed, state, budget)
+  if (via) also.push(via)
+  return parsed
+}
+
+// The words a runner's script option, flock's -c and a joined script become, pushed after the script's own word so the stack reads `sh -c <script>`
+const SH_C: Word[] = [
+  { quoted: false, value: "-c" },
+  { quoted: false, value: "sh" },
+]
+const FLOCK_SCRIPT = new Set(["-c", "--command"])
+
+// Where a runner's option word names one of `names`, an option that takes a value: the offset of its value attached (`--call=x`, `-cx`), -1 for a value in the next word, or undefined for an option word naming none of them
+function namedOption(v: string, { values }: Options, names: Set<string>): number | undefined {
+  if (!v.startsWith("-") || v === "-" || v === "--") return
+  if (v.startsWith("--")) {
+    const eq = v.indexOf("=")
+    if (!names.has(eq === -1 ? v : v.slice(0, eq))) return
+    return eq === -1 ? -1 : eq + 1
+  }
+  for (let k = 1; k < v.length; k++) {
+    const option = `-${v[k]}`
+    if (values.has(option)) return names.has(option) ? (k === v.length - 1 ? -1 : k + 1) : undefined
+  }
+}
+
+// Whether a runner's option word turns on the mode that runs its words joined: the flag itself, a short cluster holding its letter (`-rc`), or the long flag with any value attached (`--shell-mode=true`), each read as on
+function joinsWords(v: string, joined: Set<string>): boolean {
+  if (v.startsWith("--")) return joined.has(v.split("=")[0])
+  return v.startsWith("-") && [...v.slice(1)].some((letter) => joined.has(`-${letter}`))
+}
+
+// A runner's package word as the program it names: deno's npm: prefix and a trailing @<version or tag> read past (`npm:portless@0.15.11`, `inscope@0.18.0`), its typed source cut the same way when it is spelled plain
+function packageName(word: Word): Word {
+  const from = word.value.startsWith("npm:") ? 4 : 0
+  const name = word.value.slice(from).replace(/(?<=.)@[^@/]*$/, "")
+  if (from === 0 && name === word.value) return word
+  const cut = slice(word, from)
+  return { ...cut, source: word.source === word.value ? name : word.source, value: name }
+}
+
+// The index of a manager's subcommand in its words, past the options it reads before it (`pnpm -r exec`); an option its runner's lists lack is read as a flag, unless the word after its next names the subcommand
+function subcommandAt(manager: string, args: Word[], options: Options): number {
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k].value
+    if (!v.startsWith("-") || v === "-" || v === "--") return k
+    const end = optionValue(v, options)
+    if (end === "next") k++
+    else if (
+      end === undefined &&
+      !RUNNERS.has(`${manager} ${args[k + 1]?.value}`) &&
+      RUNNERS.has(`${manager} ${args[k + 2]?.value}`)
+    )
+      k++
+  }
+  return args.length
+}
+
+// The reading of the program a package runner runs (`npx oxfmt`, `pnpm exec sh -c …`, `bun run x`), its `via` the runner, judged beside the reading of the runner itself, so a hook that reads the runner by its name reads it as before; pnpm runs a name none of its commands takes as `pnpm exec` does (`via` "pnpm"), and deno runs an `npm:` package with no subcommand as `deno run` does (`via` "deno"); a file bun run or deno run runs (`bun run scripts/x.ts`, `deno run main.ts`) is no program, while deno's `npm:` package is
+function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undefined {
+  const { args, name } = parsed
+  let key = RUNNERS.has(name) ? name : undefined
+  let words = args
+  let implicit = false
+  const manager = MANAGERS.get(name)
+  if (!key && manager) {
+    let at = subcommandAt(name, args, RUNNERS.get(manager) as Options)
+    const from = at
+    for (let scope = scopeAt(name, args, at); scope; scope = scopeAt(name, args, at)) {
+      const after = at + scope.words + scope.names
+      at = after + subcommandAt(name, args.slice(after), scope.options)
+    }
+    const sub = args[at]?.value
+    if (sub === undefined) return
+    if (RUNNERS.has(`${name} ${sub}`)) {
+      key = `${name} ${sub}`
+      words = args.toSpliced(from, at + 1 - from)
+    } else if (
+      (name === "pnpm" && !PNPM_COMMANDS.has(sub)) ||
+      (name === "deno" && sub.startsWith("npm:"))
+    ) {
+      key = manager
+      implicit = true
+    }
+  }
+  if (!key) return
+  tick()
+  if (budget.left-- <= 0) {
+    budget.capped = true
+    return
+  }
+  const reading = unwrap(
+    {
+      chdir: parsed.chdir,
+      local: new Map(parsed.local),
+      moved: state.moved,
+      rest: words.toReversed(),
+      xargs: parsed.xargs && { ...parsed.xargs },
+    },
+    key,
+    budget,
+  )
+  if (!reading.first) return
+  const file = reading.first.value
+  if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file))) return
+  if (key === "deno run" && words.includes(reading.first)) return
+  return { ...reading, via: implicit ? name : key }
+}
+
+const SCRIPT_FILE = /\.[cm]?[jt]sx?$/
+
+// The scope a manager's words name at `at`, with how many words name it (`workspaces foreach` two)
+function scopeAt(name: string, args: Word[], at: number) {
+  const two = `${name} ${args[at]?.value} ${args[at + 1]?.value}`
+  const one = `${name} ${args[at]?.value}`
+  const scope = SCOPES.get(two) ?? SCOPES.get(one)
+  return scope && { ...scope, words: SCOPES.has(two) ? 2 : 1 }
+}
+
+// Whether bun run's or pnpm's name is a script of the nearest package.json at or above the folder it runs in (readingEnv), which each runs in place of a program of that name (measured: `bun run echo` and `pnpm echo` run a script named echo, from a subfolder too); false wherever the folder is unread
+export function runsScript({ first, via }: Parsed, env: Env): boolean {
+  if (via !== "bun run" && via !== "pnpm") return false
+  const name = first?.value
+  const unsure = env.cwdUnread || env.cwdAnywhere || (env.cwdMaybe?.length ?? 0) > 0
+  const start = env.cwdSure ?? (unsure ? undefined : env.cwd)
+  if (!name || marked(name) || !start) return false
+  for (let dir = start; ; dir = dirname(dir)) {
+    const scripts = packageScripts(`${dir}/package.json`)
+    if (scripts) return Object.hasOwn(scripts, name)
+    if (dirname(dir) === dir) return false
+  }
+}
+
+// A package.json's scripts, an empty set of them for one the hook cannot parse, or undefined where no package.json is
+function packageScripts(path: string): Record<string, unknown> | undefined {
+  let text: string
+  try {
+    text = readFileSync(path, "utf8")
+  } catch {
+    return
+  }
+  try {
+    const scripts = (JSON.parse(text) as { scripts?: unknown }).scripts
+    return scripts && typeof scripts === "object" ? (scripts as Record<string, unknown>) : {}
+  } catch {
+    return {}
   }
 }
 
@@ -2732,6 +3047,7 @@ export async function examine(
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
   if (verdict) return verdict
   for (const parsed of others) {
+    if (runsScript(parsed, readingEnv(cmd, parsed, before))) continue
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
@@ -3119,6 +3435,20 @@ const apart = (env: Env): Env => ({
   vars: new Map(env.vars),
 })
 
+// The folder a reading runs in: env -C's or a runner's folder option runs the command in the folder it names, wherever the shell is, so its own reading of the folder, or the literal absolute path a steady variable there holds, replaces every other; a runner's program whose folder the reader cannot place is judged in the shell's own folder, as the runner's own reading is
+function readingEnv(cmd: Command, { chdir, via }: Parsed, env: Env): Env {
+  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
+  if (!chdir || (via && into === undefined)) return env
+  return {
+    ...env,
+    cwd: into,
+    cwdHeld: [],
+    cwdMaybe: [],
+    cwdSure: into,
+    cwdUnread: into === undefined,
+  }
+}
+
 async function examineReading(
   cmd: Command,
   parsed: Parsed,
@@ -3126,19 +3456,8 @@ async function examineReading(
   visit: Visit,
   builtins: boolean,
 ): Promise<string | undefined> {
-  const { args, chdir, local, name } = parsed
-  // env -C runs the command in the folder it names, wherever the shell is, so its own reading of the folder, or the literal absolute path a steady variable there holds, replaces every other
-  const into = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env)
-  const here: Env = chdir
-    ? {
-        ...env,
-        cwd: into,
-        cwdHeld: [],
-        cwdMaybe: [],
-        cwdSure: into,
-        cwdUnread: into === undefined,
-      }
-    : env
+  const { args, local, name } = parsed
+  const here = readingEnv(cmd, parsed, env)
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
@@ -3273,7 +3592,7 @@ const manyTimes = (cmd: Command, { first }: Parsed): boolean =>
   !!cmd.repeated ||
   cmd.words
     .slice(0, first ? cmd.words.indexOf(first) : 0)
-    .some((w) => !w.quoted && COUNTED.has(program(w.value)))
+    .some((w) => !w.quoted && REPEATS.has(program(w.value)))
 
 // The folders the shell may be in before a command runs: the one the reader proved, else each one a cd it could not be sure of may have reached.
 const startFolders = (env: Env): string[] => [

@@ -1040,6 +1040,9 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env --chdir='s folder | env --chdir, no folder",
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's attached folder | env -C, no folder",
       "#2198 ext add by a program xargs puts in place of a typed word, read from -a's file in env -C's folder | env -C, no folder",
+      // each row's --cwd names a folder the scratch checkout lacks, so no spelling of it finds one
+      "#2397 a kill by name in bun exec's script after bun's folder | bun --cwd, no folder",
+      "#2397 bun run running a script in a folder | bun --cwd, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
