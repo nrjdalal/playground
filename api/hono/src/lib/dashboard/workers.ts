@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 
-import { folderName } from "@packages/config/console"
+import { folderName, LOCAL_SERVED } from "@packages/config/console"
 import {
   getSessionNames,
   isEndedStatus,
@@ -27,6 +27,7 @@ import {
   sshLaunches,
   withHerdrState,
 } from "@/lib/dashboard/herdr"
+import { localModel, withLocalModel } from "@/lib/dashboard/local-model"
 import {
   readRegistry,
   registeredSessionsOf,
@@ -223,6 +224,8 @@ export type Worker = {
   light: Light
   // A hosted session's load of a local model a pick started: loading until its server serves it and the session switches, or failed in plain words; absent when none, and the next model pick clears it.
   localLoad?: LocalLoad
+  // The repo id the local model server serves as local (its /v1/models root, local-model.ts), set on a session whose model is local while that server names one.
+  localModel?: string
   // A hosted session's local models (org.ts), which its composer's menu offers beside the cloud ones; absent when config names none.
   localModels?: LocalModel[]
   // Set while its Claude login has expired, as its transcript's API error or ops-unstick's read of its pane says: Add account, then a restart, clears it.
@@ -790,7 +793,7 @@ export async function listLive(): Promise<Live> {
   const sessions = withHerdrState(proven, states, (id) => reads.get(id)?.turnAt ?? null)
   const facts = rosterFacts(roster?.roster ?? null)
   const names = new Map([...reads].map(([id, read]) => [id, read?.name ?? null]))
-  const live = composeWorkers(
+  const composed = composeWorkers(
     sessions,
     workspaces,
     tasks,
@@ -799,6 +802,10 @@ export async function listLive(): Promise<Live> {
     reads,
     Date.now(),
     activity,
+  )
+  const live = withLocalModel(
+    composed,
+    composed.workers.some((w) => w.model === LOCAL_SERVED) ? await localModel() : null,
   )
   const held = live.workers.map((w) => ({
     name: w.name,
