@@ -60,6 +60,16 @@ test("rm takes one path, or --worktree's with an optional --discard and --pr, wi
   })
 })
 
+test("rm takes a path with --card <id>, the card that approved its removal", () => {
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--reason", "nightly-clean"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    reason: "nightly-clean",
+    worktree: false,
+  })
+})
+
 test("rm takes --list or --restore <id> alone", () => {
   expect(rmArgs(["--list"])).toEqual({ list: true })
   expect(rmArgs(["--restore", "20261102T120000Z-s/1"])).toEqual({ restore: "20261102T120000Z-s/1" })
@@ -79,6 +89,8 @@ test.each([
   [["--worktree", "wt", "--discard", "--decision", "#i9"]],
   [["a", "--pr", "https://github.com/o/r/pull/1"]],
   [["--worktree", "wt", "--pr"]],
+  [["--worktree", "wt", "--card", "c1"]],
+  [["a", "--card"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -1976,4 +1988,81 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
     else process.env.PLAYGROUND_DATA_DIR = saved.data
   }
+})
+
+// A machine whose ~/models holds one dropped hf repo the record names, and whose card approves it on spark-a at its size.
+type Picks = (repo: string) => { bytes: number; machine: string; path: string }[] | string
+const approvedMachine = (picks: Picks | null) => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  file(join(repo, "blobs", "b"), "weights")
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  const deps: RmDeps = {
+    ...m.deps,
+    ...(picks === null ? {} : { approvals: async () => picks(repo) }),
+    machine: "spark-a",
+  }
+  return { ...m, deps, repo }
+}
+
+test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, out } = await rmTold([repo, "--card", "c1", "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card c1 approved`)
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test.each<[string, Picks | null, string]>([
+  ["no Remove answer on the card", () => [], "holds no Remove answer from the owner"],
+  [
+    "a Remove for another machine",
+    (path) => [{ bytes: 7, machine: "spark-b", path }],
+    "holds no Remove answer",
+  ],
+  [
+    "a size other than the card's",
+    (path) => [{ bytes: 6, machine: "spark-a", path }],
+    "its size changed",
+  ],
+  ["a card that does not read", () => "ERR_POSTGRES_CONNECTION_REFUSED", "did not read"],
+  ["no Inbox here", null, "no Inbox is read here"],
+])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
+  const { deps, repo } = approvedMachine(picks)
+  const { code, err } = await rmTold([repo, "--card", "c1"], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(said)
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
+  const { deps, home, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  file(join(main, "README.md"))
+  git(main, "add", "README.md")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(home, "models", "kit", "runs", "MB-1", "pr0001")
+  mkdirSync(dirname(wt), { recursive: true })
+  git(main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+  file(join(wt, "answer.ts"), "export const a = 1\n")
+  const { code, out } = await rmTold(["--worktree", wt], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`its work is kept in ${wt}.diff`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readFileSync(`${wt}.diff`, "utf8")).toContain("+export const a = 1")
 })
