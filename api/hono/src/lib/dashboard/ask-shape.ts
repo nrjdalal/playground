@@ -1,4 +1,4 @@
-import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
+import { ASK_CODE_COLUMNS, PROGRESS_LANGUAGE, progressItems } from "@packages/config/inbox"
 
 // An Inbox ask reads the way chat talks to the owner: a picture of the point first, with a one-sentence note under it (the plain-words skill), then short bullets, then its options, in its `options` and `deny` labels.
 
@@ -18,17 +18,17 @@ export type ShapeHint =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one; a diff block is skipped, since the card wraps it.
+// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one; a diff block is skipped, since the card wraps it, and a progress block, which the card draws at its own width.
 const longestCodeLine = (text: string): number => {
   let inside = false
-  let diff = false
+  let skipped = false
   let longest = 0
   for (const line of text.split("\n")) {
     const fence = line.match(/^\s*```\s*(\S*)/)
     if (fence) {
-      diff = !inside && fence[1]!.toLowerCase() === "diff"
+      skipped = !inside && (fence[1]!.toLowerCase() === "diff" || fence[1] === PROGRESS_LANGUAGE)
       inside = !inside
-    } else if (inside && !diff) longest = Math.max(longest, [...line].length)
+    } else if (inside && !skipped) longest = Math.max(longest, [...line].length)
   }
   return longest
 }
@@ -83,6 +83,43 @@ export function shapeHints(input: unknown): ShapeHint[] {
   const longest = longestCodeLine(text)
   if (longest > ASK_CODE_COLUMNS) hints.push({ kind: "wide", longest })
   return hints
+}
+
+// Pure: the text's progress blocks, each its lines between its fences, in order.
+const progressBlocks = (text: string): string[] => {
+  const blocks: string[] = []
+  let block: string[] | null = null
+  let inside = false
+  for (const line of text.split("\n")) {
+    const fence = line.match(/^\s*```\s*(\S*)/)
+    if (fence) {
+      if (inside && block) blocks.push(block.join("\n"))
+      block = !inside && fence[1] === PROGRESS_LANGUAGE ? [] : null
+      inside = !inside
+    } else if (block) block.push(line)
+  }
+  return blocks
+}
+
+// Pure: why bun run ask refuses an ask's or a read-only update's text, whose card would draw a progress block it cannot read as plain code: the first line with other than 4 fields or a percent outside 0 to 100, named by its block and line; null when every block reads.
+export function progressRefusal(input: unknown): string | null {
+  const preview = isRecord(input) ? input.preview : undefined
+  if (!isRecord(preview) || typeof preview.text !== "string") return null
+  if (preview.type !== "ask" && !(isRecord(input) && input.kind === "update")) return null
+  for (const [index, block] of progressBlocks(preview.text).entries()) {
+    const read = progressItems(block)
+    if (read.ok) continue
+    const { fault } = read
+    const where = `progress block ${index + 1}`
+    const shape =
+      "write each line as name | percent | what's going on | ETA, the percent 0 to 100 (to-inbox's PROGRESS.md)"
+    return fault.kind === "empty"
+      ? `${where} holds no line; ${shape}`
+      : fault.kind === "fields"
+        ? `${where}, line ${fault.line}, holds ${fault.count} fields, not 4: "${fault.text}"; ${shape}`
+        : `${where}, line ${fault.line}, has a percent outside 0 to 100: "${fault.text}"; ${shape}`
+  }
+  return null
 }
 
 // A template for each shape the docs work through, each picture with its one-sentence note under it: a code change led by a diff, a plain decision led by an ASCII flow, a UI change, whose before and after pictures join it as attachments once the card takes attachments, and a Slack message led by its thread so far.

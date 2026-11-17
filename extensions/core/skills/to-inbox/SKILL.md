@@ -33,7 +33,7 @@ On an update, Done types you `done`: edit the same card for more, which brings i
 ## Steps
 
 1. **Already open?** Run `playground ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the drawing width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's block is its picture, and the block's first line, the job and its done/total, is its note ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
+2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the drawing width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it, and a `progress` block, which the card draws at its own width. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's `progress` block is its picture, and its note names the steps done of the total ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
@@ -43,7 +43,7 @@ On an update, Done types you `done`: edit the same card for more, which brings i
    | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
    | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)    |
    | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
-   | A job of several steps (a plan, a lane, a PR series) | the **work status** block, built by [PROGRESS.md](references/PROGRESS.md)                 |
+   | A job of several steps (a plan, a lane, a PR series) | the **work status** `progress` block, by [PROGRESS.md](references/PROGRESS.md)            |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
@@ -100,6 +100,7 @@ Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbo
 The card shows a drawing at its 12px code size, and on a card narrower than its widest line shrinks the font to fit, down to 10px, before it scrolls sideways.
 Keep a drawing compact: several items or events go in a table, one row per item, over a tall chain of one event per line.
 A picture that still runs past the width becomes a table of three columns or fewer, or bullets.
+A `progress` block's lines are free of the width, since the card draws its bars at the card's own width ([PROGRESS.md](references/PROGRESS.md)).
 
 ## Example
 
