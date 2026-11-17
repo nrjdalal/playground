@@ -2,17 +2,20 @@ import { hostname } from "node:os"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
+import type { Snapshot, Speed } from "./speed"
 
 // The loopback ports a model server takes on its machine, the first free one first; on the peer, ops-model-tunnel forwards each to this machine's loopback at 10000 more.
 export const PORTS = [8000, 8001] as const
 
-// One server playground model use started: the container it started it under, the only name it ever stops; its port on its machine; the memory share and the most sessions it was sized for; when it started, and when it last had a request, which the keep beat reads.
+// One server playground model use started: the container it started it under, the only name it ever stops; its port on its machine; the memory share and the most sessions it was sized for; when it started, and when it last had a request, which the keep beat reads; the beat's last /metrics snapshot and the speed since the one before, which the local gate reads.
 export type ModelServer = {
   busyAt: string
   container: string
   maxSessions: number
+  metrics?: Snapshot
   port: number
   share: number
+  speed?: Speed
   startedAt: string
 }
 
