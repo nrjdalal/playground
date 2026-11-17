@@ -413,17 +413,42 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
-// The end of a roll that gave no result in 30 minutes: one still queued in run-slot goes on by itself, so it reads as waiting and passes, and any other is a failure.
-export const rollTimedOut = (last: RollOutcome, load5: number): { done: string; ok: boolean } =>
-  "phase" in last && last.phase === "waiting"
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+export const stepQueued = (
+  pid: string | undefined,
+  alive: (pid: number) => boolean,
+  runs: string[],
+) => {
+  const n = Number(pid?.trim() || Number.NaN)
+  if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  return !runs.some((line) => {
+    const words = line.split(" ")
+    return words[1] === "start" && words[3] === String(n)
+  })
+}
+
+// The end of a roll that gave no result in 30 minutes: one still queued in run-slot, by its log or by its step's own run (`queued`, stepQueued), goes on by itself, so it reads as waiting and passes, and any other is a failure.
+export const rollTimedOut = (
+  last: RollOutcome,
+  load5: number,
+  queued = false,
+): { done: string; ok: boolean } => {
+  const why =
+    "phase" in last && last.phase === "waiting"
+      ? last.why
+      : queued
+        ? "the roll's next step is still queued in run-slot"
+        : undefined
+  return why !== undefined
     ? {
-        done: `${waitingLine(last.why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
         ok: true,
       }
     : {
         done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
         ok: false,
       }
+}
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
@@ -473,7 +498,7 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     const said = line.match(/^run-slot\.sh: (.*)$/)?.[1]
     if (said !== undefined)
       why = /^(this clone waits|waiting for|queued behind) /.test(said) ? said : undefined
-    const queued = line.match(/ (prebuild \w+ still queued after \d+s.*)$/)?.[1]
+    const queued = line.match(/^\S+ (prebuild \w+ still queued after \d+s.*)$/)?.[1]
     if (queued !== undefined && why === undefined) why = queued
   }
   return why === undefined ? { phase: "building" } : { phase: "waiting", why }

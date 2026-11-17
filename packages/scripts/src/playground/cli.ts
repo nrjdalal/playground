@@ -48,6 +48,7 @@ import {
   liveSessions,
   NO_CHECKOUT,
   opsDashboard,
+  prebuildQueued,
   probe,
   supervisorRunning,
 } from "./probe"
@@ -343,7 +344,7 @@ const roll = async (): Promise<number> => {
     }
     await pause(2000)
   }
-  return end(rollTimedOut(outcome, loadavg()[1]!))
+  return end(rollTimedOut(outcome, loadavg()[1]!, prebuildQueued()))
 }
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads, at the main checkout's place under home whichever worktree runs it (peer-sync.ts), then the roll.

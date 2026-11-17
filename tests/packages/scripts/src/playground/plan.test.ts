@@ -15,6 +15,7 @@ import {
   VIEW_HINT,
   dashboardBeatOf,
   startFailure,
+  stepQueued,
   waitingLine,
   waitOutcome,
   wantsHelp,
@@ -602,6 +603,32 @@ describe("rollOutcome", () => {
         ok: true,
       })
       expect(end.done).not.toContain("Failed")
+    })
+
+    // round 2 of #2648: a build queued under 20 minutes logs no wait at all, since build_head captures its run-slot lines and slot_step says it still queues only at 1200 s
+    test("at 30 minutes, a prebuild step whose run-slot has not started yet reads as waiting and passes", () => {
+      expect(rollTimedOut({ phase: "building" }, 18, true)).toEqual({
+        done: "Waiting for a run slot: the roll's next step is still queued in run-slot: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log",
+        ok: true,
+      })
+    })
+
+    test("a prebuild step queues while its run-slot pid lives and run-slot.runs.log holds no start line for it, as slot_step reads it", () => {
+      const live = (pid: number) => pid === 4242
+      const runs = [
+        "2026-11-17T12:00:00Z ask ops-dashboard 4242 bun run build",
+        "2026-11-17T12:00:01Z start worker-a 4243 run-slot waited=0s",
+      ]
+      expect(stepQueued("4242\n", live, runs)).toBe(true)
+      expect(
+        stepQueued("4242\n", live, [
+          ...runs,
+          "2026-11-17T12:16:00Z start ops-dashboard 4242 run-slot waited=959s",
+        ]),
+      ).toBe(false)
+      expect(stepQueued("4243\n", live, runs)).toBe(false)
+      expect(stepQueued(undefined, live, runs)).toBe(false)
+      expect(stepQueued("", live, runs)).toBe(false)
     })
 
     test("a roll that gave no result and waits on nothing still reads Failed with its reason", () => {
