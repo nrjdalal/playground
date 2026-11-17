@@ -14,7 +14,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
 import { MARKER, removeScratch } from "../../../../packages/safe-delete/src"
-import { rootFiles, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
+import { insideBox, rootFiles, sandbox, wrap } from "../../../../packages/scripts/src/sandbox"
 
 // Builds the sandbox while the parent reads Asia/Kolkata, as the Mac does, and returns the zone a Python child reports with that env plus the given overrides
 const childZone = (overrides: Record<string, string> = {}) => {
@@ -149,15 +149,58 @@ test("the sandbox drops the caller's CLAUDECODE, so a test sees what CI sees", (
   }
 })
 
+// GitHub's runner refuses a user namespace inside the box, so a nested runner (test-sandbox.test.ts, a test:skills step's test:file) failed to start
+test("a sandbox built inside the box runs argv as it is, keeping the outermost runner's pid", () => {
+  if (!process.env.TEST_SANDBOX_HOME)
+    throw new Error("run the suite through bun run test: the sandbox wraps it")
+  const { env, scratch, wrap: boxed } = sandbox()
+  try {
+    expect(boxed(["bun", "test"])).toEqual(["bun", "test"])
+    expect(env.TEST_SANDBOX_OUTER_PID).toBe(process.env.TEST_SANDBOX_OUTER_PID ?? "")
+  } finally {
+    rmSync(scratch, { force: true, recursive: true })
+  }
+})
+
+// a box folder named by a variable alone, as a script outside the box could set it, holds no tmpfs in this process's mounts
+test.skipIf(process.platform !== "linux")(
+  "a TEST_SANDBOX_BOX set to a folder the box never mounted still boxes, or still refuses",
+  () => {
+    const fake = mkdtempSync(join(tmpdir(), "sandbox-fake-box-"))
+    const was = process.env.TEST_SANDBOX_BOX
+    process.env.TEST_SANDBOX_BOX = fake
+    try {
+      const { scratch, wrap: boxed } = sandbox()
+      rmSync(scratch, { force: true, recursive: true })
+      expect(boxed(["bun", "test"])[0]).toBe("bwrap")
+    } catch (error) {
+      expect(String(error)).toContain("the test sandbox could not start bwrap")
+    } finally {
+      if (was === undefined) delete process.env.TEST_SANDBOX_BOX
+      else process.env.TEST_SANDBOX_BOX = was
+      rmSync(fake, { force: true, recursive: true })
+    }
+  },
+)
+
+test("insideBox takes a tmpfs at the box folder alone as proof", () => {
+  const line = (point: string, type: string) =>
+    `41 30 0:52 / ${point} rw,nosuid,nodev - ${type} ${type} rw`
+  expect(insideBox("/s/box", () => line("/s/box", "tmpfs"))).toBe(true)
+  expect(insideBox("/s/box", () => line("/s/other", "tmpfs"))).toBe(false)
+  expect(insideBox("/s/box", () => line("/s/box", "ext4"))).toBe(false)
+  expect(insideBox(undefined, () => line("/s/box", "tmpfs"))).toBe(false)
+})
+
 test("on macOS wrap runs argv as it is", () => {
-  expect(wrap(["bun", "test"], "/r", "darwin")).toEqual(["bun", "test"])
+  expect(wrap(["bun", "test"], "/r", "/b", "darwin")).toEqual(["bun", "test"])
 })
 
 test("on Linux wrap runs argv under bwrap in a pid view, over each live folder that exists, ~/.ssh read-only and each root tool", () => {
   const home = mkdtempSync(join(tmpdir(), "sandbox-wrap-"))
   try {
     for (const dir of [".claude", ".playground", ".ssh", "elsewhere"]) mkdirSync(join(home, dir))
-    const argv = wrap(["bun", "test"], "/r", "linux", home, 4242, {
+    const argv = wrap(["bun", "test"], "/r", "/b", "linux", home, 4242, {
       PLAYGROUND_DATA_DIR: join(home, "elsewhere"),
     })
     expect(argv.slice(0, 11)).toEqual([
@@ -174,6 +217,8 @@ test("on Linux wrap runs argv under bwrap in a pid view, over each live folder t
       "--die-with-parent",
     ])
     expect(argv.slice(11)).toEqual([
+      "--tmpfs",
+      "/b",
       "--tmpfs",
       join(home, ".claude"),
       "--tmpfs",

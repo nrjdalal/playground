@@ -1,5 +1,12 @@
 // The sandbox test-sandbox.ts and test-skills.ts run their children in: HOME and CLAUDE_CONFIG_DIR in a fresh scratch folder, PLAYGROUND_DATA_DIR unset so the data folder is the scratch HOME's ~/.playground, and a fake claude, gh, herdr, launchctl, loginctl, portless and systemctl first on PATH and a .gitconfig refusing git's network transports, so no test or check can start a real session, reach GitHub (make a repo, post a comment, read a remote with a real credential), close a live herdr pane, start or stop a live ops job or the live proxy, or write the real ~/.claude or ~/.playground; a test isolates through PLAYGROUND_DATA_DIR or a scratch HOME, since CLAUDE_CONFIG_DIR never places the data folder. TMPDIR is the scratch folder's short t folder, so every temp folder a test or its child makes with tmpdir() or a Python tempfile goes with the scratch, where those it left behind once held 24,008 entries in the caller's temp folder (issue 1306), and the short name keeps a Unix socket under it within macOS's 104-byte path cap. TZ=UTC, so a child reads the same zone on the Mac and the runner box; a child env that sets its own TZ keeps it. uv's Pythons and cache stay the real home's. PLAYGROUND_PROC names a folder that does not exist, so a machine reading a test leaves to Linux's /proc (packages/scripts/src/ops-machine/readings.ts) reads nothing on the Linux runner rather than its real load; a test of a Linux reading points it at recorded text. PYTHONDONTWRITEBYTECODE=1 keeps a Python child from leaving `__pycache__` in the worktree, where an ignored stale `.pyc` outlives its source. PORTLESS_STATE_DIR, XDG_RUNTIME_DIR, HERDR_CONFIG_PATH and HERDR_SOCKET_PATH name folders in the scratch, so a call that gets past a fake still finds no user bus or herdr server and writes none of portless's live state, though a real stop of portless's proxy still finds a proxy by its port; tests/live-tools-scan.test.ts fails on such a call in a test, and on Linux wrap (below) runs each child in a pid view of its own, which leaves it no live pid to signal. TEST_SANDBOX_HOME names the folder; each fake exits non-zero and names the sandbox, so a child that reaches one by mistake fails loudly, and a test that needs a tool's output puts its own fake ahead of it. Every other variable comes from the caller through SANDBOX_KEYS alone (boxEnv), so one naming live state by an absolute path, such as a herdr session, the user's DBUS_SESSION_BUS_ADDRESS or the data folder, never reaches a test, nor does a git hook's GIT_DIR or GIT_INDEX_FILE, which would turn a test's scratch git init or commit onto the real repository. The folder is a makeScratch folder, which the caller removes with removeScratch when its run ends.
-import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
 
@@ -79,8 +86,14 @@ export const sandbox = () => {
     },
     SANDBOX_KEYS,
   )
-  // the runner's own pid, which tests/sandbox.test.ts tries to signal, to show a test cannot reach a process outside the suite
-  env.TEST_SANDBOX_OUTER_PID = String(process.pid)
+  // a sandbox built inside the box (a test of the runner, a test:skills step's own test:file) adds no second one, since the outer box already holds its children and GitHub's runner refuses a user namespace inside one (measured); it keeps the caller's box folder, the proof insideBox reads
+  const nested = process.platform === "linux" && insideBox()
+  const box = nested ? process.env.TEST_SANDBOX_BOX! : join(scratch, "box")
+  mkdirSync(box, { recursive: true })
+  env.TEST_SANDBOX_BOX = box
+  const boxed = process.platform === "linux" && !nested
+  // the outermost runner's pid, which tests/sandbox.test.ts tries to signal, to show a test cannot reach a process outside the suite
+  env.TEST_SANDBOX_OUTER_PID = process.env.TEST_SANDBOX_OUTER_PID ?? String(process.pid)
   // off PATH, since wrap binds it over each root tool's own path
   const refused = join(scratch, "root-refused")
   writeFileSync(
@@ -88,11 +101,25 @@ export const sandbox = () => {
     `#!/bin/sh\necho "the test sandbox stopped a real root call: no test may run a command as root (sandbox.ts)" >&2\nexit 99\n`,
   )
   chmodSync(refused, 0o755)
-  if (process.platform === "linux") {
+  if (boxed) {
     const why = bwrapRefusal()
     if (why) throw new Error(why)
   }
-  return { env, scratch, wrap: (argv: string[]) => wrap(argv, refused) }
+  return { env, scratch, wrap: (argv: string[]) => (boxed ? wrap(argv, refused, box) : argv) }
+}
+
+// Whether this process runs inside the box, by proof a variable alone never gives: its own mounts hold the tmpfs wrap mounts at TEST_SANDBOX_BOX, which no process outside the box sees, so a TEST_SANDBOX_HOME or TEST_SANDBOX_BOX set outside it still boxes, or still refuses
+export const insideBox = (
+  box = process.env.TEST_SANDBOX_BOX,
+  mounts = () => readFileSync("/proc/self/mountinfo", "utf8"),
+): boolean => {
+  if (!box) return false
+  return mounts()
+    .split("\n")
+    .some((line) => {
+      const fields = line.split(" ")
+      return fields[4] === box && fields[fields.indexOf("-") + 1] === "tmpfs"
+    })
 }
 
 // The live state a full path reaches past a scratch HOME: the user's bus and keyring, Claude's own config, herdr's default server, the data folder with the factory's herdr sockets, and portless's folder
@@ -117,6 +144,7 @@ export const rootFiles = (tools = ROOT_TOOLS) => [
 export const wrap = (
   argv: string[],
   refused: string,
+  box: string,
   platform: NodeJS.Platform = process.platform,
   home = homedir(),
   uid = userInfo().uid,
@@ -137,6 +165,8 @@ export const wrap = (
     "/proc",
     "--unshare-pid",
     "--die-with-parent",
+    "--tmpfs",
+    box,
     ...over.flatMap((dir) => ["--tmpfs", dir]),
     ...(existsSync(ssh) ? ["--ro-bind", ssh, ssh] : []),
     ...rootFiles().flatMap((file) => ["--ro-bind", refused, file]),
