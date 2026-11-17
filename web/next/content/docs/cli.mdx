@@ -147,6 +147,13 @@ Run it as a background task, and read the head's checks once more yourself befor
 `playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
 Each name keeps its own place in each queue, so a printed line is not printed again, and a line addressed to another session waits for that session.
 A manager keeps it running as a background task and starts it again after each line, so it hears in a second or two rather than waiting for the relay.
+A session on another machine keeps one running too, for the lines `playground send` brings it, which print led by `[ops-peer]` and the sender's name.
+
+## Message a session on another machine: `playground send`
+
+`playground send <name> <text>` queues one line, `{at, from, id, text, to}`, in the outbox's `ops-peer.jsonl`, where `from` is your session's name, and prints `queued <id> for <name>`.
+The [`ops-peer-relay` job](/docs/jobs#carry-messages-to-another-machine) copies it to the other machine, where that session's `playground alerts-wait` prints it.
+The text goes on one line, and a line over 16 KB is refused: send the path of a file that holds the text.
 
 ## Answer a permission prompt: `playground picker`
 

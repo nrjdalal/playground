@@ -43,6 +43,7 @@ import {
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
 import { scratchEnv } from "../../../../scratch-env"
 import { procDir } from "../../../../scripts/fixtures/proc"
 
@@ -364,6 +365,20 @@ describe("the box on this host's OS (#2374)", () => {
       : ""
     expect({ calls, code: ran.exitCode }).toEqual({ calls: "", code: 0 })
     expect(realpathSync(join(box, "tools", "uv"))).toBe(uv)
+  })
+})
+
+describe("the gate's browser", () => {
+  test("tries an open again after a network change, through networkChangedWait", () => {
+    const cli = join(import.meta.dir, "../../../../../packages/scripts/src/new-user-gate/cli.ts")
+    const run = withFakeAgentBrowser(
+      1,
+      "net::ERR_NETWORK_CHANGED at http://dashboard/",
+      `import { Browser } from ${JSON.stringify(cli)}; new Browser("/nowhere").cmd("open", "http://dashboard/")`,
+    )
+    expect(run.err).toContain("net::ERR_NETWORK_CHANGED, retry 1 of 2")
+    expect(run.code).toBe(0)
+    expect(run.calls).toHaveLength(2)
   })
 })
 

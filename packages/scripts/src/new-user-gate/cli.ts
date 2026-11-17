@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path"
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
 
+import { networkChangedWait } from "../agent-browser-retry"
 import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
@@ -404,7 +405,7 @@ export const databaseCheck = async (
 export class Browser {
   readonly session = `pg-gate-${process.pid}`
   constructor(readonly shots: string) {}
-  // One command, tried again up to twice when the daemon took it but sent no reply (os error 35 while the browser starts).
+  // One command, tried again up to twice when the daemon took it but sent no reply (os error 35 while the browser starts), and an open as networkChangedWait allows.
   cmd(...args: string[]) {
     for (let tries = 0; ; tries++) {
       const out = run(["agent-browser", "--session", this.session, "--json", ...args])
@@ -414,9 +415,11 @@ export class Browser {
       } catch {}
       if (reply.success) return reply.data ?? {}
       const error = reply.error ?? out.err.trim()
-      if (tries >= 2 || !/no response came back|Resource temporarily unavailable/.test(error))
-        throw new Error(`agent-browser ${args[0]}: ${error}`)
-      Bun.sleepSync(3_000)
+      const noReply =
+        tries < 2 && /no response came back|Resource temporarily unavailable/.test(error)
+      const wait = networkChangedWait(args, error, tries) ?? (noReply ? 3_000 : null)
+      if (wait === null) throw new Error(`agent-browser ${args[0]}: ${error}`)
+      Bun.sleepSync(wait)
     }
   }
   text(): string {
