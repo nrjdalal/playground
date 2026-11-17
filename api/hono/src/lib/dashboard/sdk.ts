@@ -35,13 +35,20 @@ import {
   type FeedReply,
   type FeedResult,
 } from "@/lib/dashboard/feed"
+import { keptLocalModel, startModel, type Started } from "@/lib/dashboard/local-load"
 import {
   settingSummary,
   type HostedSetting,
   type SessionEffort,
   type SessionSetting,
 } from "@/lib/dashboard/setting"
-import { feedItemOf, hostSessions, type FeedItem, type Worker } from "@/lib/dashboard/workers"
+import {
+  feedItemOf,
+  hostSessions,
+  type FeedItem,
+  type LocalLoad,
+  type Worker,
+} from "@/lib/dashboard/workers"
 import { org } from "@/lib/org"
 import { SESSION_FILE } from "@/lib/sessions/own"
 import { dataDir, transcriptPath } from "@/lib/sessions/paths"
@@ -137,14 +144,19 @@ export async function servedModels(
   }
 }
 
-export type LocalPlan = { do: "refuse"; down: boolean; reason: string } | { do: "switch" }
+export type LocalPlan =
+  | { do: "load" }
+  | { do: "refuse"; down: boolean; reason: string }
+  | { do: "switch" }
 
-// Pure: what a pick of a local model does, given the ids its server serves now (null when it does not answer): switch when it serves the pick, else refuse in words naming the model loaded and the one picked. The one place a pick's outcome is decided.
+// Pure: what a pick of a local model does, given the ids its server serves now (null when it does not answer) and whether a kept model is set to start there: switch when it serves the pick, load when it does not answer and one can start, else refuse in words naming the model loaded and the one picked. The one place a pick's outcome is decided.
 export function localPlan(
   picked: LocalModel,
   served: string[] | null,
   models: LocalModel[],
+  canStart = false,
 ): LocalPlan {
+  if (served === null && canStart) return { do: "load" }
   if (served === null)
     return {
       do: "refuse",
@@ -264,6 +276,8 @@ export class SdkHost {
   private local: LocalEndpoint | null = null
   private reading: Promise<void> = Promise.resolve()
   private restarting = false
+  private load: LocalLoad | null = null
+  private loadTicket = 0
   private startedAt: string | null = null
   private session: Query | null = null
   private mode: HostedMode = "default"
@@ -322,9 +336,8 @@ export class SdkHost {
 
   // Starts the session again on another endpoint, its conversation resumed in the same mode and effort: on a local model's server, or with local null on the default one with a cloud model. Only between turns (busy()), since a close mid-turn cuts its answer off, and one at a time.
   async restart(local: LocalEndpoint | null, model: string): Promise<void> {
+    if (!this.restarting) throw new Error(`${SDK_PROBE} switches its model only under claim()`)
     if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
-    if (this.restarting) throw new Error(`${SDK_PROBE} is already switching its model`)
-    this.restarting = true
     const effort = this.effort
     try {
       this.session.close()
@@ -348,6 +361,49 @@ export class SdkHost {
         error instanceof Error ? error.message : error,
       )
     }
+  }
+
+  // Takes the one restart that may run at a time, before the activity row is written, so a second pick from another tab reads BUSY rather than failing mid-switch; false when another holds it. restart() lets it go.
+  claim(): boolean {
+    if (this.restarting) return false
+    this.restarting = true
+    return true
+  }
+
+  release(): void {
+    this.restarting = false
+  }
+
+  // The local model loading for a pick, by its label, or null.
+  loading(): string | null {
+    return this.load?.state === "loading" ? this.load.label : null
+  }
+
+  // Starts showing a load of label on the row, and gives back the ticket that load holds; a later pick's dropLoad() takes it away.
+  beginLoad(label: string): number {
+    this.load = { label, state: "loading" }
+    this.changed()
+    return ++this.loadTicket
+  }
+
+  // Whether the load ticket names is still the one shown loading.
+  holds(ticket: number): boolean {
+    return ticket === this.loadTicket && this.load?.state === "loading"
+  }
+
+  // Ends the load ticket names: cleared once the switch is done, or shown failed in reason's words; one a later pick dropped stays dropped.
+  endLoad(ticket: number, reason?: string): void {
+    if (!this.holds(ticket) || !this.load) return
+    this.load = reason ? { label: this.load.label, reason, state: "failed" } : null
+    this.changed()
+  }
+
+  // Drops whatever load the row shows, so the next model pick clears a failed line and a cloud pick cancels a switch still waiting on its server, which goes on starting.
+  dropLoad(): void {
+    this.loadTicket++
+    if (!this.load) return
+    this.load = null
+    this.changed()
   }
 
   // Whether a turn runs, a card waits or a restart is under way, when another restart would cut it off.
@@ -519,6 +575,7 @@ export class SdkHost {
       lastActiveAt: null,
       lifecycle: this.working ? "running" : "idle",
       light: this.working ? "working" : "idle",
+      ...(this.load && { localLoad: this.load }),
       ...(this.deps.local.models.length > 0 && { localModels: this.deps.local.models }),
       model: this.model,
       name: SDK_PROBE,
@@ -710,10 +767,84 @@ export async function changeHostedMode(
 export type SettingChanging = { actor: ActivityActor; sessionId: string; setting: HostedSetting }
 
 export type SettingDeps = Pick<AnswerHostedDeps, "host" | "now" | "record"> & {
+  // The model the local server's machine keeps up (localModels.peerModel), which a pick starts when the server is down; empty, none.
+  keptModel: () => string
   served: (url: string) => Promise<string[] | null>
+  sleep: (ms: number) => Promise<void>
+  start: (model: string) => Promise<Started>
 }
 
-const settingDeps: SettingDeps = { ...answerHostedDeps, served: servedModels }
+const settingDeps: SettingDeps = {
+  ...answerHostedDeps,
+  keptModel: keptLocalModel,
+  served: servedModels,
+  sleep: (ms) => Bun.sleep(ms),
+  start: startModel,
+}
+
+// How long a pick waits for the model it started to be served, and how often it reads the server meanwhile.
+export const LOAD_WAIT_MS = 15 * 60_000
+export const LOAD_POLL_MS = 5_000
+
+// Restarts the session on the local server under the one claim a switch takes, the activity row written as it does.
+async function switchTo(
+  deps: SettingDeps,
+  event: ActivityEvent,
+  local: LocalEndpoint | null,
+  model: string,
+): Promise<boolean> {
+  if (!deps.host.claim()) return false
+  try {
+    await deps.record(event, () => deps.host.restart(local, model))
+  } finally {
+    deps.host.release()
+  }
+  return true
+}
+
+// A pick's load, run past the request: starts the kept model through `playground model use`, then reads the server until it serves the pick and the chat is between turns, and switches; a refused start, an error or LOAD_WAIT_MS passing shows its plain words on the row instead, the chat left on its model.
+export async function loadLocal(
+  picked: LocalModel,
+  url: string,
+  event: ActivityEvent,
+  deps: SettingDeps,
+): Promise<void> {
+  const { host } = deps
+  const ticket = host.beginLoad(picked.label)
+  const until = deps.now().getTime() + LOAD_WAIT_MS
+  try {
+    const started = await deps.start(deps.keptModel())
+    if (!host.holds(ticket)) return
+    if (started.code !== 0)
+      return host.endLoad(
+        ticket,
+        `The local model server couldn't start ${picked.label}, so the chat stays on its model: ${started.line}`,
+      )
+    for (;;) {
+      const served = await deps.served(url)
+      if (!host.holds(ticket)) return
+      if (served?.includes(picked.id) && !host.busy()) {
+        if (await switchTo(deps, event, { id: picked.id, url }, picked.id))
+          return host.endLoad(ticket)
+      }
+      if (deps.now().getTime() >= until) {
+        const plan = localPlan(picked, served, host.localModels().models)
+        return host.endLoad(
+          ticket,
+          plan.do === "refuse" && !plan.down
+            ? plan.reason
+            : `${picked.label} didn't come up on the local model server within 15 minutes, so the chat stays on its model.`,
+        )
+      }
+      await deps.sleep(LOAD_POLL_MS)
+    }
+  } catch (error) {
+    host.endLoad(
+      ticket,
+      `${picked.label} couldn't load: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
 
 // The owner's pick in the composer's model and effort menu for the hosted session, set through the SDK rather than typed: the dashboard.setting row commits only once the session has taken it, so a value it refuses throws and records nothing. A local model, or a cloud one while it runs on a local model, restarts it on that endpoint instead, between turns alone, and a local pick its server does not serve now is refused as localPlan() words it.
 export async function changeHostedSetting(
@@ -732,20 +863,35 @@ export async function changeHostedSetting(
   }
   const done = { at: deps.now().toISOString(), ok: true, sessionId } as const
   const busy = refused("BUSY", "The chat is answering; switch the model once it's done.")
+  const loading = () => {
+    const label = deps.host.loading()
+    return label && refused("BUSY", `${label} is still loading on the local model server.`)
+  }
   if ("local" in setting) {
     const { models, url } = deps.host.localModels()
     const picked = models.find((model) => model.id === setting.local)
     if (!picked) return refused("NOT_FOUND", "No local model by that id is set up here.")
     if (deps.host.busy()) return busy
+    const held = loading()
+    if (held) return held
     const served = await deps.served(url)
     if (deps.host.busy()) return busy
-    const plan = localPlan(picked, served, models)
+    const plan = localPlan(picked, served, models, deps.keptModel() !== "")
     if (plan.do === "refuse") return refused(plan.down ? "SESSIONS_FAILED" : "BUSY", plan.reason)
-    await deps.record(event, () => deps.host.restart({ id: picked.id, url }, picked.id))
+    const late = loading()
+    if (late) return late
+    deps.host.dropLoad()
+    if (plan.do === "load") {
+      void loadLocal(picked, url, event, deps)
+      return done
+    }
+    if (!(await switchTo(deps, event, { id: picked.id, url }, picked.id))) return busy
   } else if ("model" in setting && deps.host.localModel() !== null) {
     if (deps.host.busy()) return busy
-    await deps.record(event, () => deps.host.restart(null, setting.model))
+    deps.host.dropLoad()
+    if (!(await switchTo(deps, event, null, setting.model))) return busy
   } else {
+    if ("model" in setting) deps.host.dropLoad()
     await deps.record(event, () => deps.host.setSetting(setting))
   }
   return done
