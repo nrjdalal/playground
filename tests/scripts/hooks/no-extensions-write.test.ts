@@ -4112,10 +4112,26 @@ describe("a glob-option switch on a remote or fed line", () => {
     `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
     "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
     `ssh box 'bash -c "set -o extendedglob; touch ?playground/extensions/y"'`,
+    `ssh box 'bash -c -O extglob "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh -c -o extendedglob "touch ?playground/extensions/y"'`,
+    `ssh box 'rbash -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'rzsh -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash-5.2 -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set -$o extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set -o dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set globdot; touch ?playground/extensions/y'",
   ])(
     "%s, an option a shell reads by any of its spellings, is refused as a switch",
     async (command) => {
       expect(await bash(command)).toMatch(SWITCH)
     },
   )
+
+  test("its reason names the one form of a shell's options that runs", async () => {
+    expect(await bash("ssh box 'zsh --extended-glob -c uptime'")).toEndWith(
+      "a shell's options run there only as a cluster with no O or 4 and a -o naming errexit, errtrace, functrace, noclobber, nounset, pipefail, verbose or xtrace, as in set -euo pipefail",
+    )
+  })
 })

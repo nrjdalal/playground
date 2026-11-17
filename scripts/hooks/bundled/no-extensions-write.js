@@ -6803,7 +6803,7 @@ function staticLine(line) {
 }
 var GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
-  /bashopts|dotglob|fignore|globdots|globignore/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
   /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
 ];
 var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
@@ -6822,7 +6822,7 @@ var NO_GLOB = new Set([
   "xtrace"
 ]);
 function optionSwitch(bare) {
-  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi)) {
+  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?\b(?=([^;&|\n]*))/gi)) {
     const words = rest.split(/\s+/).filter(Boolean);
     for (let i = 0;i < words.length; i++) {
       const word = words[i];
@@ -6843,8 +6843,6 @@ function optionSwitch(bare) {
           return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
         i++;
       }
-      if (word.includes("c"))
-        break;
     }
   }
 }
@@ -10686,7 +10684,7 @@ var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWit
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
-var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally`;
+var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally; a shell's options run there only as a cluster with no O or 4 and a -o naming errexit, errtrace, functrace, noclobber, nounset, pipefail, verbose or xtrace, as in set -euo pipefail`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",

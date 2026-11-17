@@ -647,10 +647,10 @@ function staticLine(line: string): boolean {
     (w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()),
   )
 }
-// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but after a `*` a digit follows (awk's `*100/(…)`), which is DIGIT_QUALIFIER's; a set or a started shell's options are optionSwitch's
+// A shell feature that changes what a glob matches, any spelling of which the hook refuses on a remote line rather than reads, since reading it name by name kept missing one: a shopt, setopt, unsetopt, emulate or zsh options key, a name that turns dot matching on (dotglob, GLOB_DOTS, tcsh's globdot, GLOBIGNORE, BASHOPTS, ksh93's FIGNORE), or a zsh qualifier or ksh group after a glob character (`*(D)`, `?x(#qN)`), but after a `*` a digit follows (awk's `*100/(…)`), which is DIGIT_QUALIFIER's; a set or a started shell's options are optionSwitch's
 const GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
-  /bashopts|dotglob|fignore|globdots|globignore/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
   /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/,
 ]
 // A qualifier after a `*` a digit follows, which awk's arithmetic (`*100/(…)`) is spelled as: no switch, so it runs, but its line counts dots as on (remoteDots), so a dot-led link such a glob could match is still judged
@@ -671,10 +671,10 @@ const NO_GLOB = new Set([
   "verbose",
   "xtrace",
 ])
-// A set or a started shell, as a command word, whose options, read until its first other word, `--` or its -c cluster, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
+// A set or a started shell, as a command word (rbash, rzsh and a versioned name such as bash-5.2 too), whose options, read until its first other word or a `--`, past a -c cluster as bash and zsh read them, hold a switch: a cluster holding O or zsh's 4, one holding o with a name off NO_GLOB (zsh's, the rest of the cluster after its o, and bash's, the next word), a long option off NO_GLOB past case and dashes (`--extended-glob`), or any other -/+ word, which it does not read; each head is read on its own, so a set inside a -c script is read too; else undefined
 function optionSwitch(bare: string): string | undefined {
   for (const [, head, rest] of bare.matchAll(
-    /(?<=^|[\s;&|(/])(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi,
+    /(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?\b(?=([^;&|\n]*))/gi,
   )) {
     const words = rest!.split(/\s+/).filter(Boolean)
     for (let i = 0; i < words.length; i++) {
@@ -693,7 +693,6 @@ function optionSwitch(bare: string): string | undefined {
           return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`
         i++
       }
-      if (word.includes("c")) break
     }
   }
 }

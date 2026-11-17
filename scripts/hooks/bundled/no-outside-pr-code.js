@@ -5647,7 +5647,7 @@ function staticLine(line) {
 }
 var GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
-  /bashopts|dotglob|fignore|globdots|globignore/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
   /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
 ];
 var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
@@ -5666,7 +5666,7 @@ var NO_GLOB = new Set([
   "xtrace"
 ]);
 function optionSwitch(bare) {
-  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi)) {
+  for (const [, head, rest] of bare.matchAll(/(?<=^|[\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\d.]*\d)?\b(?=([^;&|\n]*))/gi)) {
     const words = rest.split(/\s+/).filter(Boolean);
     for (let i = 0;i < words.length; i++) {
       const word = words[i];
@@ -5687,8 +5687,6 @@ function optionSwitch(bare) {
           return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
         i++;
       }
-      if (word.includes("c"))
-        break;
     }
   }
 }

@@ -134,7 +134,7 @@ const EVALUATES_ROOT =
   "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
 // a shell feature that changes what a glob matches, on a line a remote shell runs, which the hook refuses in any spelling rather than reads (globSwitch in shell.ts)
 const GLOB_SWITCH = (found: string) =>
-  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally`
+  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally; a shell's options run there only as a cluster with no O or 4 and a -o naming errexit, errtrace, functrace, noclobber, nounset, pipefail, verbose or xtrace, as in set -euo pipefail`
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 

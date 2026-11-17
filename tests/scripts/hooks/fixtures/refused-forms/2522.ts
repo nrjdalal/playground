@@ -21,6 +21,10 @@ const controls = (): Row[] => [
     `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
   ],
   [
+    "a strict-mode cluster after a remote bash's -c, read on to the command string",
+    `ssh box 'bash -c -e "ls */notes"'`,
+  ],
+  [
     "awk's *100/(…) in a heredoc fed to a remote bash, which a * before a digit keeps from reading as a qualifier",
     "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
   ],
@@ -86,6 +90,46 @@ const refused = (): Row[] => [
   [
     "a remote touch through a ? glob after a set whose -o is mid-cluster, bash's name the next word",
     "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob in a bash whose -O comes after its -c, as bash reads it",
+    `ssh box 'bash -c -O extglob "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a zsh whose -o comes after its -c",
+    `ssh box 'zsh -c -o extendedglob "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a restricted bash started with -O",
+    `ssh box 'rbash -O extglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a restricted zsh started with -o",
+    `ssh box 'rzsh -o extendedglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob in a versioned bash started with -O",
+    `ssh box 'bash-5.2 -O extglob -c "touch ?playground/extensions/y"'`,
+  ],
+  [
+    "a remote touch through a ? glob after a set whose cluster the hook cannot read",
+    "ssh box 'set -$o extendedglob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a set with zsh's long option",
+    "ssh box 'set --extendedglob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a set with yash's long dot option",
+    "ssh box 'set --dot-glob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after a set -o naming yash's dot option",
+    "ssh box 'set -o dot-glob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob after tcsh's set globdot, a reasoned row with no tcsh here to measure",
+    "ssh box 'set globdot; touch ?playground/extensions/y'",
   ],
   [
     "a remote touch through a * glob with BASHOPTS set by ssh's SetEnv",
