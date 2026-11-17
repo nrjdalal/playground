@@ -1847,7 +1847,7 @@ if [ -n "$OFF_CLAUDE" ]; then
     [ -z "$named" ] || refuse "$BRIEF names $named, a source glm-refused-sources keeps off $OFF_CLAUDE, so it runs on Claude: start it with --backend claude, closing a $BACKEND-pinned session first"
   fi
 fi
-# The local model answers on this machine's one model server port; a start checks it lists the served name, which also tells the model is up.
+# The local model answers on this machine's one model server port; a start checks it lists the served name, which also tells the model is up. Both values are packages/config/src/console.ts's, which a test holds these to.
 LOCAL_URL=http://127.0.0.1:8000
 # The name serve.sh gives every local model (--served-model-name local), so a swap changes no launch.
 LOCAL_SERVED=local
