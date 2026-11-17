@@ -7,6 +7,7 @@ import {
   HELP,
   planStart,
   rollOutcome,
+  rollTimedOut,
   runStart,
   runStatus,
   statusLines,
@@ -14,6 +15,7 @@ import {
   VIEW_HINT,
   dashboardBeatOf,
   startFailure,
+  waitingLine,
   waitOutcome,
   wantsHelp,
   type DashboardBeat,
@@ -506,6 +508,80 @@ describe("rollOutcome", () => {
   test("ignores an unrelated result line", () => {
     expect(rollOutcome([], ["2026-10-18T02:01:00Z RESTART follower follower=running"])).toEqual({
       phase: "building",
+    })
+  })
+
+  // #2644: v0.0.151's roll queued about 30 minutes for load5 to drop under its clone's line, and update printed a false "Failed"
+  describe("a roll whose prebuild queues in run-slot", () => {
+    const rolling = "2026-11-17T12:00:00Z roll-now: rolling to abc1234 at once"
+    const held =
+      "run-slot.sh: this clone waits for load5 under 16, the brake's 20 less 4 and never under half of it"
+
+    test("reads as waiting with run-slot's reason, the supervisor's own queued line included, until run-slot lets it start", () => {
+      const waiting = {
+        phase: "waiting" as const,
+        why: "this clone waits for load5 under 16, the brake's 20 less 4 and never under half of it",
+      }
+      expect(rollOutcome([rolling, held], [])).toEqual(waiting)
+      expect(
+        rollOutcome(
+          [
+            rolling,
+            held,
+            "2026-11-17T12:20:00Z prebuild clone still queued after 1200s; it keeps waiting",
+            held,
+          ],
+          [],
+        ),
+      ).toEqual(waiting)
+      expect(
+        rollOutcome([rolling, held, "run-slot.sh: ops-dashboard holds run-slot-clone"], []),
+      ).toEqual({ phase: "building" })
+      expect(
+        rollOutcome(
+          [
+            rolling,
+            "run-slot.sh: waiting for a run slot (worker-a 4242 2026-11-17T12:00:01Z 2 medium)",
+          ],
+          [],
+        ),
+      ).toEqual({
+        phase: "waiting",
+        why: "waiting for a run slot (worker-a 4242 2026-11-17T12:00:01Z 2 medium)",
+      })
+      expect(rollOutcome([held], [])).toEqual({ phase: "building" })
+    })
+
+    test("prints the load it waits on, or run-slot's own reason", () => {
+      expect(waitingLine("this clone waits for load5 under 16, the brake's 20 less 4", 18.24)).toBe(
+        "Waiting for load: load5 is 18.2, and the roll goes on under 16",
+      )
+      expect(waitingLine("waiting for a run slot (worker-a 4242)", 3)).toBe(
+        "Waiting for a run slot: waiting for a run slot (worker-a 4242)",
+      )
+    })
+
+    test("still waiting at 30 minutes reads as waiting and passes, never Failed, since the roll goes on by itself", () => {
+      const end = rollTimedOut({ phase: "waiting", why: held.replace("run-slot.sh: ", "") }, 18)
+      expect(end).toEqual({
+        done: "Waiting for load: load5 is 18.0, and the roll goes on under 16: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log",
+        ok: true,
+      })
+      expect(end.done).not.toContain("Failed")
+    })
+
+    test("a roll that gave no result and waits on nothing still reads Failed with its reason", () => {
+      for (const phase of ["building", "switching", "going back"] as const)
+        expect(rollTimedOut({ phase }, 18)).toEqual({
+          done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+          ok: false,
+        })
+      expect(
+        rollOutcome(
+          [rolling, held, "run-slot.sh: ops-dashboard holds run-slot-clone"],
+          ["2026-11-17T12:40:00Z ROLL roll-now abc1234 FAIL build before the stop: tsc failed"],
+        ),
+      ).toEqual({ done: "Failed: build before the stop: tsc failed", ok: false })
     })
   })
 })

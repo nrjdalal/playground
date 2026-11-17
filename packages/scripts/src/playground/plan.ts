@@ -42,7 +42,7 @@ playground page <file.html> --title "<title>" --by <session> [--for <session>]
 playground page --remove <file.html>
                       take one kept page off the Pages tab: drop its line from pages.jsonl and move its HTML, caption and PDF to the trash, printing each trash id for playground rm --restore; it refuses, moving nothing, a page pages.jsonl does not list, a path outside the previews folder, a previews folder that is a symlink, a page file or pages.jsonl that is a symlink or hard link, a file over 20 MiB, and a page whose moves the trash's per-minute cap has no room for
 playground update [--to <tag>]
-                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
+                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then give its run slot back and roll the Dashboard to the newest build: Building (Waiting while its steps queue in run-slot), Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd, or on Linux systemd, should hold
 playground herdr pin [--check | --asset <file>]
                       put the pinned herdr's release asset for this machine (macOS or Linux, on arm64 or x64) at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
@@ -402,7 +402,28 @@ export const addCommand = (
 
 export type RollOutcome =
   | { phase: "building" | "going back" | "switching" }
+  | { phase: "waiting"; why: string }
   | { done: string; ok: boolean }
+
+// A waiting roll's line: the load it waits on, read now, when run-slot's reason is load5's line, else run-slot's own reason.
+export const waitingLine = (why: string, load5: number) => {
+  const under = why.match(/load5 under (\d+)/)?.[1]
+  return under
+    ? `Waiting for load: load5 is ${load5.toFixed(1)}, and the roll goes on under ${under}`
+    : `Waiting for a run slot: ${why}`
+}
+
+// The end of a roll that gave no result in 30 minutes: one still queued in run-slot goes on by itself, so it reads as waiting and passes, and any other is a failure.
+export const rollTimedOut = (last: RollOutcome, load5: number): { done: string; ok: boolean } =>
+  "phase" in last && last.phase === "waiting"
+    ? {
+        done: `${waitingLine(last.why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+        ok: true,
+      }
+    : {
+        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+        ok: false,
+      }
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
@@ -445,7 +466,14 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   const starting = log.findIndex(
     (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
   )
-  return { phase: rolling >= 0 && starting > rolling ? "switching" : "building" }
+  if (rolling >= 0 && starting > rolling) return { phase: "switching" }
+  // a prebuild step queued in run-slot, whose stderr the supervisor logs, waits until run-slot's next line of its own; the supervisor's own lines between leave it waiting
+  let why: string | undefined
+  for (const line of rolling >= 0 ? log.slice(rolling + 1) : []) {
+    const said = line.match(/^run-slot\.sh: (.*)$/)?.[1]
+    if (said !== undefined) why = /^(this clone waits|waiting for) /.test(said) ? said : undefined
+  }
+  return why === undefined ? { phase: "building" } : { phase: "waiting", why }
 }
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.

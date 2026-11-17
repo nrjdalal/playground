@@ -422,6 +422,60 @@ describe("runUpdate", () => {
     const { run } = fakeRun()
     expect(await runUpdate(repo, run, async () => 3, quiet)).toBe(3)
   })
+
+  // #2644: the roll only waits on the supervisor, whose own clone queues in run-slot, so an update run through run-slot gives its lane back first, and the queue behind it moves while the roll waits
+  describe("under run-slot (RUN_SLOT_HELD)", () => {
+    const slot = join(scratch, "ops", "run-slot")
+    const hold = (pid: number) => {
+      mkdirSync(slot, { recursive: true })
+      writeFileSync(`${slot}.holder`, `ops-ship ${pid} 2026-11-17T12:00:00Z 2 medium\n`)
+      writeFileSync(`${slot}.child`, "4243\n")
+    }
+    const update = async (roll: () => Promise<number>, said: string[] = [], to?: string) => {
+      const was = process.env.RUN_SLOT_HELD
+      process.env.RUN_SLOT_HELD = `${slot} 4242`
+      try {
+        const { run } = fakeRun({ "rev-parse": { out: "old\n" } })
+        return await runUpdate(repo, run, roll, (line) => said.push(line), to)
+      } finally {
+        if (was === undefined) delete process.env.RUN_SLOT_HELD
+        else process.env.RUN_SLOT_HELD = was
+      }
+    }
+
+    test("the lane is given back before the roll starts", async () => {
+      hold(4242)
+      const said: string[] = []
+      let held: boolean | undefined
+      expect(
+        await update(
+          async () => ((held = existsSync(slot) || existsSync(`${slot}.holder`)), 0),
+          said,
+        ),
+      ).toBe(0)
+      expect(held).toBe(false)
+      expect(existsSync(`${slot}.child`)).toBe(false)
+      expect(said).toContain(
+        "playground update: gave its run slot back for the Dashboard roll, whose own steps queue in run-slot",
+      )
+    })
+
+    test("a lane another run has taken since stays that run's", async () => {
+      hold(9999)
+      let held: boolean | undefined
+      await update(async () => ((held = existsSync(slot)), 0))
+      expect(held).toBe(true)
+      expect(readFileSync(`${slot}.holder`, "utf8")).toStartWith("ops-ship 9999 ")
+      rmSync(slot, { force: true, recursive: true })
+    })
+
+    test("--to rolls nothing, so it keeps its lane to the end", async () => {
+      hold(4242)
+      await update(async () => 0, [], "v1.0.0")
+      expect(existsSync(slot)).toBe(true)
+      rmSync(slot, { force: true, recursive: true })
+    })
+  })
 })
 
 test("runUpdate fast-forwards a real checkout onto origin/main and runs its own link-skills and ops-restart", async () => {

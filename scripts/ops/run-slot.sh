@@ -4,7 +4,8 @@
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
 # (a quick lane writes "<who> <pid> <iso>", the clone lane adding its two checkouts, clone_ends); runs the command as its
-# child, in a new session and process group; and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
+# child, in a new session and process group, which RUN_SLOT_HELD tells "<slot> <pid>" so it can give the slot back early (giveBackSlot);
+# and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
 # pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old, or while its age reads back empty. It prints the slot
 # it took to stderr and exits with the command's code.
 set -u
@@ -1915,6 +1916,8 @@ run_command() {
     export BUILDX_BUILDER=$DOCKER_BUILDER DOCKER_BUILDKIT=1
   fi
   [ "${DOCKER:-}" = each ] && set -- "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" each -- "$@"
+  # the lane and this pid, so a command whose last step only waits can give the lane back while it waits, as free() would (giveBackSlot in packages/scripts/src/playground/give-back.ts; issue 2644)
+  [ -z "$SLOT" ] || export RUN_SLOT_HELD="$SLOT $$"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
