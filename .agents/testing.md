@@ -87,7 +87,7 @@ A spelling stays refused when the row's own guard refuses it, or when no-hidden-
 Each case seeds from its own key, so every run, CI's included, tries the same spellings and prints no new one.
 A failure prints `{ seed, path }` and the shrunk spelling; replay it with `REFUSED_FORMS_SEED=<seed> bun run test:file tests/scripts/hooks/refused-forms.test.ts`, which the sandbox passes through `SANDBOX_KEYS`.
 Any other seed explores the same way, every case then taking that seed.
-A spelling that passes is a guard hole: send your lead its spelling, seed and guard, and keep it off GitHub until its fix merges ([scripts/hooks/README.md](../scripts/hooks/README.md)).
+A spelling a guard lets through is a guard hole: send your lead its spelling, seed and guard, and keep it off GitHub until its fix merges ([scripts/hooks/README.md](../scripts/hooks/README.md)).
 The fix's PR adds its rewrite to `refused-spellings.ts` with its refused-forms rows, so the property holds the fix; it is done when the default seed runs green with the rewrite in.
 
 ## Traps
