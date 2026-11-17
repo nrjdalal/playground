@@ -2401,7 +2401,15 @@ export async function endLostRoots(
     )
     .returning()
   const ended: InboxItem[] = []
-  for (const item of rows.map(toItem)) ended.push(await forgetLostPassword(db, item, secret, now))
+  // each card on its own, so a delete whose write throws leaves the later cut-off installs' passwords deleted
+  for (const item of rows.map(toItem)) {
+    try {
+      ended.push(await forgetLostPassword(db, item, secret, now))
+    } catch (error) {
+      console.error(`inbox: deleting #i${item.ref}'s cut-off install password failed:`, error)
+      ended.push(item)
+    }
+  }
   if (!telling) return ended
   const told: InboxItem[] = []
   // each card on its own, so a send that throws (a database write) leaves the other posters told

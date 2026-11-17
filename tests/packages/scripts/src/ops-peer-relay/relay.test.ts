@@ -91,6 +91,9 @@ const until = async (check: () => boolean, ms = 10_000) => {
   }
 }
 
+const beatOf = (data: string) =>
+  JSON.parse(readFileSync(join(data, "ops", "ops-peer-relay.json"), "utf8"))
+
 const cursorOf = (data: string) =>
   JSON.parse(readFileSync(join(data, "ops", "peer-relay", `${PEER.name}.json`), "utf8"))
 
@@ -354,7 +357,35 @@ describe("the relay job's loop (PG-2444)", () => {
     expect(told[0]).toEndWith("; it retries")
     expect(told[1]).toBe(`spark-b: up again: copying ${PEER_QUEUE} both ways`)
     expect(rows(there).map((r) => r.text)).toEqual(["first", "after the drop"])
-    const beat = JSON.parse(readFileSync(join(here, "ops", "ops-peer-relay.json"), "utf8"))
-    expect(beat.lastResult).toContain("spark-b: ")
+    expect(beatOf(here).lastResult).toBe("ok")
+  })
+
+  test("beats ok while every peer is up, and each peer's state once one is down (PG-2546)", async () => {
+    const { here, there } = machines("beat")
+    const key = join(scratch, "beat", "key")
+    writeFileSync(key, "fake\n")
+    const stop = new AbortController()
+    const running = keep({
+      checkout: "/c",
+      data: here,
+      envText: async () =>
+        `PLAYGROUND_PEERS=spark-b=me@spark-b,spark-c=me@spark-c\nPLAYGROUND_PEER_KEY=${key}\n`,
+      home: "/h",
+      maxWaitMs: 200,
+      minWaitMs: 20,
+      notify: async () => {},
+      open: (_key, peer, from) =>
+        peer.name === "spark-b" ? agentFar(there, from) : shFar("exit 255"),
+      pollMs: 20,
+      replyMs: 5_000,
+      signal: stop.signal,
+      wait: (ms) => Bun.sleep(ms),
+    })
+    const said = () =>
+      existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
+    await until(() => said().includes("spark-b: up: ") && said().includes("spark-c: down: "))
+    stop.abort()
+    await running
+    expect(said()).not.toBe("ok")
   })
 })
