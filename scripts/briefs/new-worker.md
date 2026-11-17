@@ -30,6 +30,7 @@ Run every command under the factory's **signal** and **slots** rules.
 **Program names**: spell each command's program word out as its name or path, a `$HOME/` or `$PLAYGROUND_REPO/` folder before it included, never a variable or a substitution as the program, since no-hidden-program refuses one; to look a program up, name it literally or test with `type`; put text holding a `<N-M>` range in a file and pass the file (`git commit -F <file>`).
 A worker's commands leave the owner's running factory alone: a test stubs the live dashboard, its database, a live session's pane and a real token, and a kill form goes to a hook's `check()` as data alone, since each of those reaches it.
 On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refused, so stop and report to your lead, who staffs it by brief-rush's GLM rule (`scripts/briefs/brief-rush.md`).
+On the local model (`--backend local`), put each line of a long agent doc exactly where the brief's file:line says, as its own line, and ask your lead when the spot doesn't match.
 Your worktree's Python venv is its own, made with `uv sync --frozen` through run-slot; a run never borrows another worktree's, since cleanup can remove a borrowed one mid-run.
 After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
 
