@@ -1,5 +1,3 @@
-import { isAbsolute, relative } from "node:path"
-
 import { z } from "zod"
 
 type Env = Record<string, string | undefined>
@@ -17,8 +15,11 @@ const PLAIN_PATH = /^[A-Za-z0-9._/-]+$/
 
 // Pure: where a peer's clone sits, the same place under its home as this checkout under this one's, as a ~ path; null when this checkout is outside home or its path holds a character a remote shell would read.
 export const cloneOf = (repo: string, home: string): string | null => {
-  const rel = relative(home, repo)
-  return rel && !isAbsolute(rel) && PLAIN_PATH.test(rel) && !rel.split("/").includes("..")
+  const base = `${home.replace(/\/+$/, "")}/`
+  const rel = repo.startsWith(base) ? repo.slice(base.length).replace(/\/+$/, "") : ""
+  return rel &&
+    PLAIN_PATH.test(rel) &&
+    rel.split("/").every((part) => part && part !== "." && part !== "..")
     ? `~/${rel}`
     : null
 }
