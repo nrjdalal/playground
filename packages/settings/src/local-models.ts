@@ -30,18 +30,6 @@ export const localModelSettings = defineSettings({
       "Estimated: the memory one box test run takes, half the 4.5 GiB peak of a suite across both lanes, measured on the old runner box on 24 Oct, not on the peer.",
     schema: z.number().min(0).max(64),
   },
-  "localModels.container": {
-    default: "local-vllm",
-    description:
-      "The name each server's container starts with, then its model's folder (local-vllm-<folder>); playground model use stops only a container it started under such a name.",
-    schema: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, "a Docker container name"),
-  },
-  "localModels.drainMinutes": {
-    default: 30,
-    description:
-      "The longest a swap waits for the running model's requests to finish before it refuses and leaves that model serving.",
-    schema: z.number().int().min(1).max(240),
-  },
   "localModels.hereModel": {
     default: "",
     description:
@@ -69,12 +57,6 @@ export const localModelSettings = defineSettings({
       z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name"),
     ]),
   },
-  "localModels.minFreeGiB": {
-    default: 15,
-    description:
-      "The free memory a server never takes its machine under: a server whose load takes it under this is stopped, and on the peer it is part of the reserve a share leaves free, with the box-run reserve.",
-    schema: z.number().min(0).max(512),
-  },
   "localModels.models": {
     default: {
       // Measured in the local-model test of 2026-11-17: 72.38 GiB loaded; 908,567 KV tokens in 15.99 GiB at 0.75, 18.45 KiB a token (estimated from those two); overhead estimated as 0.75 of 121 GiB less weights and KV; capped at 0.75, since 0.80 logged an out-of-memory line once.
@@ -101,11 +83,5 @@ export const localModelSettings = defineSettings({
     description:
       "The model the peer keeps up, such as M for the Dashboard's chat; empty, the default, keeps none. Another model loads there on request, and this one comes back after localModels.idleMinutes.",
     schema: z.union([z.literal(""), folder]),
-  },
-  "localModels.sessionTokens": {
-    default: 65536,
-    description:
-      "The KV cache one session takes, in tokens: a server's --max-num-seqs is its KV cache left over this many tokens.",
-    schema: z.number().int().min(1024).max(1_048_576),
   },
 })

@@ -291,6 +291,21 @@ describe("playground model use (PG-2543)", () => {
     expect(await modelHold(data, PEER.name)).toBeNull()
   })
 
+  test("a call that set no hold leaves another run's hold standing", async () => {
+    const data = scratch()
+    const other = { for: "k-model", since: "2026-11-17T06:00:01.000Z" }
+    const run = stub(box({ memory: [60] }), data, {
+      // another swap sets its hold while this start waits for memory
+      sleep: async (ms) => {
+        if (!(await modelHold(data, PEER.name)))
+          await writeMachineState(data, PEER.name, { hold: other })
+        run.advance(ms)
+      },
+    })
+    expect((await useModel("m-model", run.deps)).code).toBe(1)
+    expect(await modelHold(data, PEER.name)).toEqual(other)
+  })
+
   test("refuses a name with no serve.sh, one with no sizing figures, and one that could name a path, running nothing", async () => {
     const data = scratch()
     const { deps, steps } = stub(box(), data)
@@ -332,7 +347,7 @@ describe("playground model use (PG-2543)", () => {
     expect((await useModel("m-model", handStart.deps)).code).toBe(1)
     expect(handStart.steps.some((step) => step.startsWith("stop"))).toBe(false)
     expect(hand.containers.has("local-vllm")).toBe(true)
-    expect(await readModelState(data)).toEqual({ machines: { "spark-test": {} } })
+    expect(await readModelState(data)).toEqual({})
   })
 
   test("stops the server it just started when free memory falls under 15 GiB while it loads", async () => {
@@ -500,7 +515,7 @@ describe("playground model use (PG-2543)", () => {
       const text = argv.join(" ")
       expect(text).not.toMatch(/(^|[\s;&|(])gh(\s|$)/)
       expect(text).not.toMatch(
-        /credential|docker login|secret-tool|keyring|keychain|security find|git /,
+        /credential|docker login|secret-tool|keyring|keychain|DBUS|security find|git /,
       )
     }
   })

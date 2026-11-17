@@ -127,12 +127,12 @@ export const JOBS: Record<string, Job> = {
       schedule: { every: 60 },
     },
   ),
-  // It runs from the Dashboard's checkout, whose .env names the peers (PLAYGROUND_PEERS) the System page reads.
   "ops-model-tunnel": terminal("ops-model-tunnel", `${bunJob("ops-model-tunnel")} --data {data}`, {
     description:
       "Holds an ssh tunnel from this machine's loopback ports 18000 and 18001 to the model servers on the peer's 8000 and 8001, loopback at both ends.",
     schedule: { always: true },
   }),
+  // It runs from the Dashboard's checkout, whose .env names the peers (PLAYGROUND_PEERS) the System page reads.
   "ops-peer-relay": terminal(
     "ops-peer-relay",
     `${bunJob("ops-peer-relay", "{dashboard}")} --data {data}`,

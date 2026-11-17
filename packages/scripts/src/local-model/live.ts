@@ -1,15 +1,18 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
 
+import { addEntries, peerRecordArgv } from "../machine-record/record"
 import { REPO, run } from "../ops-job/job"
-import { keepUp, type Machine, type ModelDeps, useModel } from "./model"
+import { dashboardCheckout } from "../playground/probe"
+import { FIXED, keepUp, type Machine, type ModelDeps, useModel } from "./model"
 import { peerOf } from "./peer"
 import { thisMachine } from "./state"
 
-// The live seams of playground model use and the keep beat: the settings, this machine and the peer from the repo's .env, commands through ops-job's run.
+// The live seams of playground model use and the keep beat: the settings, this machine and the peer from the Dashboard's .env, commands through ops-job's run, and the machine record here and on the peer.
 
 const settingsOf = (data: string) => {
   const read = readPolicyOrDefaults(data)
@@ -19,18 +22,31 @@ const settingsOf = (data: string) => {
   return {
     boxLanes: get("localModels.boxLanes"),
     boxRunGiB: get("localModels.boxRunGiB"),
-    container: get("localModels.container"),
-    drainMinutes: get("localModels.drainMinutes"),
     hereModel: get("localModels.hereModel"),
     hereReserveGiB: get("localModels.hereReserveGiB"),
     idleMinutes: get("localModels.idleMinutes"),
     machine: get("localModels.machine"),
-    minFreeGiB: get("localModels.minFreeGiB"),
     models: get("localModels.models"),
     peerModel: get("localModels.peerModel"),
-    sessionTokens: get("localModels.sessionTokens"),
   }
 }
+
+// The .env that names the peers: the Dashboard's checkout's, where PLAYGROUND_PEERS lives, else this checkout's, as playground update's peer sync reads it; the dashboard argument is a test's seam.
+export const peerEnvPath = (
+  repo: string,
+  dashboard: () => string | null = () => dashboardCheckout(repo),
+): string => {
+  let checkout: string | null = null
+  try {
+    checkout = dashboard()
+  } catch {}
+  return join(checkout ?? repo, ".env")
+}
+
+export const peerEnvText = (repo = REPO): Promise<string> =>
+  Bun.file(peerEnvPath(repo))
+    .text()
+    .catch(() => "")
 
 // The deps for one machine: this one when named by its own name, else the peer, named or the one localModels.machine picks.
 const depsFor = async (
@@ -39,14 +55,12 @@ const depsFor = async (
   say: (line: string) => void,
 ): Promise<ModelDeps | { why: string }> => {
   const settings = settingsOf(data)
+  const home = process.env.HOME || homedir()
   let machine: Machine
   let key: string | undefined
   if ("here" in where) machine = { name: thisMachine() }
   else {
-    const envText = await Bun.file(join(REPO, ".env"))
-      .text()
-      .catch(() => "")
-    const peer = peerOf(envText, process.env.HOME || homedir(), where.peer || settings.machine)
+    const peer = peerOf(await peerEnvText(), home, where.peer || settings.machine)
     if ("why" in peer) return peer
     machine = { name: peer.name, target: peer.target }
     key = peer.key
@@ -54,24 +68,32 @@ const depsFor = async (
   const here = !machine.target
   return {
     config: {
-      container: settings.container,
-      drainMinutes: settings.drainMinutes,
+      ...FIXED,
       idleMinutes: settings.idleMinutes,
       keep: here ? settings.hereModel : settings.peerModel,
-      minFreeGiB: settings.minFreeGiB,
       models: settings.models,
       reserveGiB: here
         ? settings.hereReserveGiB
-        : settings.minFreeGiB + settings.boxLanes * settings.boxRunGiB,
-      sessionTokens: settings.sessionTokens,
+        : FIXED.minFreeGiB + settings.boxLanes * settings.boxRunGiB,
     },
     data,
     key,
     machine,
     now: () => new Date(),
-    // the machine record's add is not on this branch yet, so each start says what it did not record
-    record: async () => {
-      throw new Error("the machine record is not in place yet")
+    // this machine's entries go straight in its record; the peer's through its own clone's record CLI, over one ssh
+    record: async (entries, where) => {
+      if (where === "here") return void (await addEntries(data, entries))
+      const clone = cloneOf(REPO, home)
+      if (!clone || !machine.target)
+        throw new Error(
+          "this checkout is not a plain path under home, so the peer's clone is not known",
+        )
+      const ran = await run(
+        peerRecordArgv(key, machine.target, clone, "add"),
+        60_000,
+        JSON.stringify(entries),
+      )
+      if (ran.code !== 0) throw new Error(ran.out.trim().split("\n")[0] || `exit ${ran.code}`)
     },
     run: (argv, timeoutMs) => run(argv, timeoutMs),
     say,

@@ -159,11 +159,11 @@ The text goes on one line, and a line over 16 KB is refused: send the path of a 
 ## Start a local model: `playground model use`
 
 `playground model use <name> [--machine <name>]` starts the vLLM server in `~/models/<name>/` on one machine: the one `--machine` names, else the one whose `localModels.hereModel` (this machine) or `localModels.peerModel` (the peer) names that model, else the peer.
-It sizes the server from that machine's free memory as it starts: the share is what is free above the machine's reserve (`localModels.hereReserveGiB` here; on the peer the `localModels.minFreeGiB` floor plus `localModels.boxLanes` runs of `localModels.boxRunGiB`), capped at the model's working share in `localModels.models`, and `--max-num-seqs` is the KV cache that share leaves at `localModels.sessionTokens` a session.
+It sizes the server from that machine's free memory as it starts: the share is what is free above the machine's reserve (`localModels.hereReserveGiB` here; on the peer the 15 GiB floor plus `localModels.boxLanes` runs of `localModels.boxRunGiB`), capped at the model's working share in `localModels.models`, and `--max-num-seqs` is the KV cache that share leaves at 64k tokens a session.
 It hands `serve.sh` the size as `CONTAINER`, `PORT`, `GPU_MEMORY_UTILIZATION` and `MAX_NUM_SEQS`, and refuses a `serve.sh` that does not take all four from its environment.
 When the reading holds a session of the new model beside what runs, it starts beside it, under its own container (`local-vllm-<name>`) on the next port, 8000 then 8001.
-Otherwise it swaps: it holds new starts there, waits up to `localModels.drainMinutes` for the running model's requests to finish, stops that model by the container name it started it under, and sizes again.
-It refuses with the memory reading when not even one session fits, stops a server whose load takes the machine under `localModels.minFreeGiB`, and leaves alone any container it did not start.
+Otherwise it swaps: it holds new starts there, waits up to 30 minutes for the running model's requests to finish, stops that model by the container name it started it under, and sizes again.
+It refuses with the memory reading when not even one session fits, stops a server whose load takes the machine under 15 GiB free, and leaves alone any container it did not start.
 Each server it starts is kept in `<data>/models/state.json`, under `machines.<machine>.servers.<model>`: its container, port, share, most sessions and start time.
 The ops-tick beat `model-keep` keeps each machine's kept model up: it starts it when it is down, and brings it back once another model there sits idle `localModels.idleMinutes`.
 The peer's servers reach this machine through the [`ops-model-tunnel` job](/docs/jobs#reach-the-model-servers-on-another-machine).

@@ -810,13 +810,13 @@ export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
-// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 // The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.
 const modelKeep = async (ctx: Context) => {
   const { keepBeat } = await import("../local-model/live")
   for (const line of await keepBeat(dirname(ctx.ops))) await ctx.send("ops", line)
 }
 
+// Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
   const list = await ctx.run(["git", "-C", ctx.repo, "worktree", "list", "--porcelain"])
   const trees = list.out

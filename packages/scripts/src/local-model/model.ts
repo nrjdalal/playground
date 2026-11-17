@@ -7,7 +7,7 @@ import {
   writeMachineState,
 } from "./state"
 
-// playground model use <name>: a local model server on one machine, this one or the peer, sized from that machine's free memory as it starts. Its share is what is free above the machine's reserve, capped at the model's working share, and its --max-num-seqs the KV cache that share leaves over localModels.sessionTokens. It starts beside a running model when the reading fits both, each under its own container name and port, and swaps otherwise: hold, drain, stop by name, size again, start. Every step is one fixed command, over ssh on the peer.
+// playground model use <name>: a local model server on one machine, this one or the peer, sized from that machine's free memory as it starts. Its share is what is free above the machine's reserve, capped at the model's working share, and its --max-num-seqs the KV cache that share leaves at 64k tokens a session. It starts beside a running model when the reading fits both, each under its own container name and port, and swaps otherwise: hold, drain, stop by name, size again, start. Every step is one fixed command, over ssh on the peer.
 
 export type Ran = { code: number; out: string }
 // A machine the servers run on: the peer is reached at target over ssh; this machine has none.
@@ -58,6 +58,14 @@ export type ModelDeps = {
 
 // started: whether this call started a server, so the keep beat stays quiet on one already serving
 export type Result = { code: number; line: string; started?: boolean }
+
+// What the issue fixes: each container's name before its model's folder, the longest wait for a swap's drain, the free memory a load never takes a machine under, and a session's KV cache in tokens.
+export const FIXED = {
+  container: "local-vllm",
+  drainMinutes: 30,
+  minFreeGiB: 15,
+  sessionTokens: 65536,
+}
 
 // A model's folder under ~/models: a letter or digit first, then lowercase, digits, dots and dashes, so it can name no path or flag.
 export const MODEL_NAME = /^[a-z0-9][a-z0-9.-]*$/
@@ -223,10 +231,12 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   const freePort = () =>
     PORTS.find((port) => !Object.values(servers()).some((server) => server.port === port))
   const beside = size.maxSessions >= 1 && freePort() !== undefined
+  let held: MachineState["hold"]
   try {
     if (!beside) {
       if (others.length) {
-        await save({ ...state, hold: { for: name, since: now().toISOString() } })
+        held = { for: name, since: now().toISOString() }
+        await save({ ...state, hold: held })
         say(
           `${others.map(([model]) => model).join(" and ")} cannot run beside ${name} on ${machine}; holding new starts there and waiting for their requests`,
         )
@@ -306,10 +316,10 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
       await sleep(POLL_MS)
     }
   } finally {
-    if (!beside) {
-      const { hold: _, ...rest } = await machineState(data, machine)
+    // lifts only the hold this call set, so another run's stands
+    const { hold, ...rest } = await machineState(data, machine)
+    if (held && hold?.for === held.for && hold.since === held.since)
       await writeMachineState(data, machine, rest)
-    }
   }
 }
 

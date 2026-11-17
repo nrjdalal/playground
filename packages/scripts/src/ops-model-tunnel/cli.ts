@@ -3,7 +3,9 @@ import { join } from "node:path"
 
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
 
-import { engineData, REPO } from "../ops-job/job"
+import { peerEnvText } from "../local-model/live"
+import { addEntries } from "../machine-record/record"
+import { engineData } from "../ops-job/job"
 import { beat } from "../ops-tick/tick"
 import { JOB, keep } from "./tunnel"
 
@@ -19,10 +21,7 @@ for (const name of ["SIGHUP", "SIGINT", "SIGTERM"] as const)
 const startedAt = new Date()
 await keep({
   data,
-  envText: () =>
-    Bun.file(join(REPO, ".env"))
-      .text()
-      .catch(() => ""),
+  envText: () => peerEnvText(),
   home: process.env.HOME || homedir(),
   machine: () => {
     const read = readPolicyOrDefaults(data)
@@ -30,9 +29,7 @@ await keep({
       ? localModelSettings.get(read.settings, "localModels.machine")
       : ""
   },
-  record: async () => {
-    throw new Error("the machine record is not in place yet")
-  },
+  record: async (entries) => void (await addEntries(data, entries)),
   signal: stop.signal,
   spawn: (argv) => {
     const child = Bun.spawn(argv, { stderr: "pipe", stdin: "ignore", stdout: "ignore" })
