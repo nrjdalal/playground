@@ -802,7 +802,7 @@ async function switchTo(
   return true
 }
 
-// A pick's load, run past the request: starts the kept model through `playground model use`, then reads the server until it serves the pick and the chat is between turns, and switches; a refused start, an error or LOAD_WAIT_MS passing shows its plain words on the row instead, the chat left on its model.
+// A pick's load, run past the request: starts the kept model through `playground model use`, then reads the server until it serves the pick and the chat is between turns, and switches; a refused start, an error, the server answering with another model or LOAD_WAIT_MS passing with no answer shows its plain words on the row instead, the chat left on its model.
 export async function loadLocal(
   picked: LocalModel,
   url: string,
@@ -823,17 +823,17 @@ export async function loadLocal(
     for (;;) {
       const served = await deps.served(url)
       if (!host.holds(ticket)) return
-      if (served?.includes(picked.id) && !host.busy()) {
-        if (await switchTo(deps, event, { id: picked.id, url }, picked.id))
+      // served, it waits for the turn to end however long; answering with another model ends the load at once, since nothing this load started will change that; not answering waits up to LOAD_WAIT_MS
+      if (served?.includes(picked.id)) {
+        if (!host.busy() && (await switchTo(deps, event, { id: picked.id, url }, picked.id)))
           return host.endLoad(ticket)
-      }
-      if (deps.now().getTime() >= until) {
+      } else if (served !== null) {
         const plan = localPlan(picked, served, host.localModels().models)
+        return host.endLoad(ticket, plan.do === "refuse" ? plan.reason : undefined)
+      } else if (deps.now().getTime() >= until) {
         return host.endLoad(
           ticket,
-          plan.do === "refuse" && !plan.down
-            ? plan.reason
-            : `${picked.label} didn't come up on the local model server within 15 minutes, so the chat stays on its model.`,
+          `${picked.label} didn't come up on the local model server within 15 minutes, so the chat stays on its model.`,
         )
       }
       await deps.sleep(LOAD_POLL_MS)

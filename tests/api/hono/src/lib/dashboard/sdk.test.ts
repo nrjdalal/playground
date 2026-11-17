@@ -879,13 +879,14 @@ describe("the hosted session on a local model", () => {
     }
   })
 
-  test("a model the server never serves within LOAD_WAIT_MS fails in plain words, naming another model the server loaded", async () => {
-    for (const [served, reason] of [
+  test("a server that answers with another model ends the load at once in plain words, and one that never answers fails after LOAD_WAIT_MS", async () => {
+    for (const [served, reason, waited] of [
+      [[K.id], "K is loaded on the local model server right now, not M.", [0, LOAD_POLL_MS]],
       [
         null,
         "M didn't come up on the local model server within 15 minutes, so the chat stays on its model.",
+        [LOAD_WAIT_MS, LOAD_WAIT_MS + LOAD_POLL_MS],
       ],
-      [[K.id], "K is loaded on the local model server right now, not M."],
     ] as const) {
       const { clock, dir, fake, host, loaded, pick, server } = started(null, { kept: "m-folder" })
       try {
@@ -893,13 +894,36 @@ describe("the hosted session on a local model", () => {
         server.served = served === null ? null : [...served]
         await loaded()
         expect(host.worker()!.localLoad).toEqual({ label: "M", reason, state: "failed" })
-        expect(clock.at - Date.parse(AT)).toBeGreaterThanOrEqual(LOAD_WAIT_MS)
+        // one read of the server may land before the test sets what it serves
+        const elapsed = clock.at - Date.parse(AT)
+        expect(elapsed).toBeGreaterThanOrEqual(waited[0])
+        expect(elapsed).toBeLessThanOrEqual(waited[1])
         expect(fake.calls).toHaveLength(1)
       } finally {
         rmSync(dir, { force: true, recursive: true })
       }
     }
     expect([LOAD_WAIT_MS, LOAD_POLL_MS]).toEqual([15 * 60_000, 5_000])
+  })
+
+  test("a model served while a turn runs past LOAD_WAIT_MS waits for the turn to end, then switches", async () => {
+    const { clock, dir, fake, host, loaded, pick, server } = started(null, { kept: "m-folder" })
+    try {
+      await pick({ local: M.id })
+      host.send("hold")
+      server.served = [M.id]
+      for (let i = 0; i < 2_000 && clock.at - Date.parse(AT) <= LOAD_WAIT_MS; i++)
+        await Bun.sleep(0)
+      expect(clock.at - Date.parse(AT)).toBeGreaterThan(LOAD_WAIT_MS)
+      expect(host.worker()!.localLoad).toEqual({ label: "M", state: "loading" })
+      host.send("done")
+      await loaded()
+      expect(host.worker()!.localLoad).toBeUndefined()
+      expect(host.localModel()).toBe(M.id)
+      expect(fake.calls).toHaveLength(2)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 
   test("a server that does not answer, or serves another model, refuses the pick in plain words and leaves the session where it was", async () => {

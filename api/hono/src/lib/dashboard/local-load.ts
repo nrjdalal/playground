@@ -21,7 +21,7 @@ export function loadArgv(model: string, root: string, bun: string = process.exec
 
 const lastLine = (text: string) => text.trim().split("\n").at(-1)?.slice(0, 300) || "no output"
 
-// Starts model on the machine `playground model use` picks for it, killed by its own handle past timeoutMs, and gives back its exit code and last line; a fixture stack starts nothing, so no ssh leaves the machine.
+// Starts model on the machine `playground model use` picks for it, and gives back its exit code and last line; a fixture stack starts nothing, so no ssh leaves the machine.
 export async function startModel(
   model: string,
   root: string | null = checkoutRoot(),
@@ -29,8 +29,13 @@ export async function startModel(
 ): Promise<Started> {
   if (!readsLive()) return { code: 0, line: "a fixture stack starts no model" }
   if (!root) return { code: 1, line: "this build has no checkout to run playground model use from" }
-  const proc = Bun.spawn(loadArgv(model, root), {
-    cwd: root,
+  return runStart(loadArgv(model, root), root, timeoutMs)
+}
+
+// Runs one start's argv in cwd with no shell, killed by its own handle past timeoutMs: its exit code and the last line it printed, stdout's on success and stderr's on a failure, or that it ran too long.
+export async function runStart(argv: string[], cwd: string, timeoutMs: number): Promise<Started> {
+  const proc = Bun.spawn(argv, {
+    cwd,
     env: process.env,
     killSignal: "SIGTERM",
     stderr: "pipe",
@@ -43,5 +48,7 @@ export async function startModel(
     new Response(proc.stderr).text(),
     proc.exited,
   ])
+  if (proc.signalCode)
+    return { code: code || 1, line: "playground model use ran too long and was stopped" }
   return { code, line: lastLine(code === 0 ? out : err || out) }
 }
