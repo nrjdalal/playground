@@ -1011,3 +1011,67 @@ test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute
     expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (d)")
   }
 })
+
+// #2613: on a Mac the host start comes from sysctl's `{ sec = N, usec = U }` line, so boot_time parses N out of it instead of falling through to 0 or the Linux /proc/stat read.
+const BOOTSYSCTL = `${LOAD}import subprocess
+class _R:
+    returncode = 0
+    stdout = """{ sec = 1700000000, usec = 500 } Tue Nov 14 10:00:00 2026"""
+subprocess.run = lambda *a, **k: _R()
+print(up.boot_time())
+`
+
+test("boot_time reads the macOS boot epoch out of sysctl's sec value", () => {
+  const child = Bun.spawnSync(["python3", "-I", "-c", BOOTSYSCTL, upPy], {
+    env: {
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(1700000000)
+})
+
+// #2613: a heartbeat startedAt is a UTC (Z) stamp, so beat_started must read it as its UTC epoch, not a zone-bent one that is off under DST.
+test("beat_started reads a summer heartbeat start as its UTC epoch", () => {
+  const config = mkdtempSync(join(scratch, "beat-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 4101,
+      lastBeatAt: "2026-07-01T10:00:00Z",
+      startedAt: "2026-07-01T10:00:00Z",
+    }),
+  )
+  const expected = Math.floor(Date.parse("2026-07-01T10:00:00Z") / 1000)
+  const child = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}print(up.beat_started({"heartbeat": "ops-dashboard"}))\n`,
+      upPy,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: SYS_PATH,
+        // a zone that observes DST in summer, so the old mktime/time.timezone read is one hour early
+        TZ: "America/New_York",
+        ...SYSTEMD_ENV,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(expected)
+})

@@ -20,7 +20,7 @@ executable an update deleted, or whose heartbeat pid does while a holder or laun
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
 """
-import fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
+import calendar, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -143,9 +143,9 @@ def boot_time():
     try:
         r = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=5)
         if r.returncode == 0:
-            for line in r.stdout.splitlines():
-                if "sec" in line:
-                    return int(line.split("=")[1].strip())
+            m = re.search(r"\bsec = (\d+)", r.stdout)
+            if m:
+                return int(m.group(1))
     except Exception:
         pass
     try:
@@ -162,7 +162,7 @@ def beat_started(job):
     """The heartbeat's startedAt as epoch seconds, else 0: the moment the job recorded, so a start at or after the recorded one ends the grace and the job is restarted."""
     try:
         b = json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json")))
-        return time.mktime(time.strptime(b["startedAt"][:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+        return calendar.timegm(time.strptime(b["startedAt"][:19], "%Y-%m-%dT%H:%M:%S"))
     except Exception:
         return 0
 
