@@ -11,6 +11,7 @@ import {
   servedIconHeaders,
   serveModelIcon,
 } from "../../../../../../api/hono/src/lib/dashboard/model-icons"
+import { orgOf } from "../../../../../../packages/config/src/org"
 
 // models.dev's fallback, as measured: one SVG it answers every unknown provider id with, at 200
 const FALLBACK = '<svg viewBox="0 0 24 24" fill="none"><path d="M9.8 15.9L9 18.7"/></svg>\n'
@@ -48,6 +49,14 @@ describe("makersOf", () => {
       ]),
     ).toEqual(new Set(["anthropic", "zai", "ornith-ai", "RecursiveSI"]))
     expect(makersOf([])).toEqual(new Set(["anthropic", "zai"]))
+  })
+
+  test("the local models PLAYGROUND_LOCAL_MODELS names, as the route reads them through orgOf, give each org/repo id's org", () => {
+    const { local } = orgOf({
+      PLAYGROUND_LOCAL_MODELS: "M=ornith-ai/Ornith-1.5-122B-NVFP4,K=ornith-1.5-35b-a3b-nvfp4",
+    })
+    expect(makersOf(local.models)).toEqual(new Set(["anthropic", "zai", "ornith-ai"]))
+    expect(makersOf(orgOf({}).local.models)).toEqual(new Set(["anthropic", "zai"]))
   })
 
   test("a maker is a plain name, never a path or a URL", () => {

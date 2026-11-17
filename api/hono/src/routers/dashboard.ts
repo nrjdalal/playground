@@ -116,6 +116,7 @@ import {
   validationErrorResponses,
   type ErrorCode,
 } from "@/lib/error"
+import { org } from "@/lib/org"
 import { upgradeWebSocket } from "@/lib/server"
 import { dataDir } from "@/lib/sessions/paths"
 import { listAccounts } from "@/lib/store/accounts"
@@ -1313,7 +1314,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
       },
     }),
-    (c) => serveModelIcon(c.req.param("maker"), { dir: join(dataDir(), "model-icons"), local: [] }),
+    (c) =>
+      serveModelIcon(c.req.param("maker"), {
+        dir: join(dataDir(), "model-icons"),
+        local: org.local.models,
+      }),
   )
   .get(
     "/ws",
