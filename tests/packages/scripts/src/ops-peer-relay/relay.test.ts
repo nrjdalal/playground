@@ -416,4 +416,45 @@ describe("the relay job's loop (PG-2444)", () => {
     await running
     expect(said()).toBe("idle: PLAYGROUND_PEERS names no peer")
   })
+
+  // An unreadable peers value beats the job down, then the value turns to no peer; the stale down: entry must be dropped, so the 60 s timer re-emits nothing and the beat stays idle: bare. (PG-2637)
+  test("drops a stale down beat when the value turns to no peer, so the timer re-emits nothing (PG-2637)", async () => {
+    const { here, there } = machines("stale")
+    const key = join(scratch, "stale", "key")
+    writeFileSync(key, "fake\n")
+    let phase = "down"
+    const stop = new AbortController()
+    const running = keep({
+      checkout: "/c",
+      data: here,
+      envText: async () =>
+        phase === "down" ? 'PLAYGROUND_PEERS="b=me@x;rm"\n' : `PLAYGROUND_PEER_KEY=${key}\n`,
+      home: "/h",
+      maxWaitMs: 80,
+      minWaitMs: 20,
+      notify: async () => {},
+      open: () => agentFar(there),
+      pollMs: 20,
+      replyMs: 5_000,
+      signal: stop.signal,
+      timerMs: 30,
+      wait: (ms) => Bun.sleep(ms),
+    })
+    const said = () =>
+      existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
+    // the first down beat, from the unreadable value, before the value turns to no peer
+    await until(() => said().includes("down: "))
+    phase = "idle"
+    // the first bare idle: beat, from the no-peer branch
+    await until(() => said().startsWith("idle: "))
+    // sample several timer ticks; each must read the bare idle: alone
+    const samples: string[] = []
+    for (let i = 0; i < 12; i++) {
+      await Bun.sleep(15)
+      samples.push(said())
+    }
+    stop.abort()
+    await running
+    expect(samples.every((s) => s === "idle: PLAYGROUND_PEERS names no peer")).toBe(true)
+  })
 })

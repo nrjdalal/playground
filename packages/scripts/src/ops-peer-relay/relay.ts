@@ -260,6 +260,8 @@ export type KeepOptions = {
   signal: AbortSignal
   // a link up this long starts the next wait from minWaitMs again
   steadyMs?: number
+  // the timer that re-emits the first state each cycle, a row runs it in milliseconds
+  timerMs?: number
   wait?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
@@ -295,6 +297,7 @@ export async function keep({
   replyMs,
   signal,
   steadyMs = 60_000,
+  timerMs = 60_000,
   wait = sleep,
 }: KeepOptions): Promise<void> {
   const startedAt = new Date()
@@ -302,7 +305,7 @@ export async function keep({
   let writes = Promise.resolve()
   const say = (peer: string, state: string) => {
     states.set(peer, state)
-    // ok while every peer is up, the sweep reads it healthy; else each state, naming the peer that is down
+    // ok while every peer is up, which the sweep reads as healthy; else each state, naming the peer that is down
     const line = [...states.values()].every((said) => said.startsWith("up: "))
       ? "ok"
       : [...states].map(([name, said]) => `${name}: ${said}`).join("; ")
@@ -312,7 +315,7 @@ export async function keep({
   const timer = setInterval(() => {
     const [first] = states
     if (first) void say(first[0], first[1])
-  }, 60_000)
+  }, timerMs)
   const ssh = Bun.which("ssh")
   const far = open ?? (ssh ? sshFar(ssh, checkout) : undefined)
   const running = new Map<string, Promise<void>>()
@@ -371,11 +374,12 @@ export async function keep({
   while (!signal.aborted) {
     const cluster = clusterOf(envKeysOf(await envText()), home)
     if ("why" in cluster) await say(JOB, `down: ${cluster.why}`)
-    else if (!cluster.peers.length)
+    else if (!cluster.peers.length) {
+      states.delete(JOB)
       writes = writes
         .then(() => beat(path, startedAt, new Date(), "idle: PLAYGROUND_PEERS names no peer", JOB))
         .catch(console.error)
-    else {
+    } else {
       states.delete(JOB)
       for (const peer of cluster.peers)
         if (!running.has(peer.name))
