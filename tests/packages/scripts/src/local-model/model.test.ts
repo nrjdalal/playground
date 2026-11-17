@@ -432,12 +432,15 @@ describe("playground model use (PG-2543)", () => {
       container: "local-vllm-k-model;true",
     }
     await writeMachineState(data, PEER.name, { servers: { "k-model": odd } })
-    const { deps, steps } = stub(box({ memory: [32.4] }), data)
+    // a silent /metrics, so the drain would ask docker whether that container runs
+    const { calls, deps, steps } = stub(box({ busy: { 8000: [null] }, memory: [32.4] }), data)
     expect((await useModel("m-model", deps)).line).toBe(
-      "docker rm -fv local-vllm-k-model;true failed on spark-test, so nothing started",
+      `the state file's container name for k-model on spark-test, local-vllm-k-model;true, is not one playground model use starts, so nothing changed: fix or remove its entry in ${statePath(data)}`,
     )
+    expect(await modelHold(data, PEER.name)).toBeNull()
     deps.config = { ...PEER_CONFIG, keep: "m-model" }
     await keepUp(deps)
+    expect(calls.some((argv) => argv.at(-1)!.includes(odd.container))).toBe(false)
     expect(steps.some((step) => step.startsWith("stop"))).toBe(false)
     expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
   })
@@ -569,10 +572,7 @@ describe("playground model use (PG-2543)", () => {
     expect((await useModel("m-model", deps)).code).toBe(0)
     expect(calls.length).toBeGreaterThan(10)
     // a peer start's machine record entry goes over its own ssh, past the stub's record seam
-    for (const argv of [
-      ...calls,
-      peerRecordArgv("<key>", "box@peer", "~/Desktop/playground", "add"),
-    ]) {
+    for (const argv of [...calls, peerRecordArgv("<key>", "box@peer", "~/playground", "add")]) {
       expect(argv[0]).toBe("ssh")
       const text = argv.join(" ")
       expect(text).not.toMatch(/(^|[\s;&|(])gh(\s|$)/)

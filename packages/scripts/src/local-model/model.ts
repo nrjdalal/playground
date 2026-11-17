@@ -240,6 +240,12 @@ export async function useModel(name: string, deps: ModelDeps): Promise<Result> {
   try {
     if (!beside) {
       if (others.length) {
+        // each container name the swap sends is read back from the state file, so each is checked once, before any is sent
+        const odd = others.find(([, server]) => !MODEL_NAME.test(server.container))
+        if (odd)
+          return refuse(
+            `the state file's container name for ${odd[0]} on ${machine}, ${odd[1].container}, is not one playground model use starts, so nothing changed: fix or remove its entry in ${statePath(data)}`,
+          )
         held = { for: name, since: now().toISOString() }
         await save({ ...state, hold: held })
         say(
