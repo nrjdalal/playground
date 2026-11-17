@@ -57,7 +57,7 @@ else
   echo "linked factory settings -> $REPO/scripts/factory-settings.json"
 fi
 
-# Links the brief templates and the `playground` command (into ~/.bun/bin, on a login shell's PATH), leaving a real file alone
+# Links the brief templates and the `playground` command (into ~/.bun/bin, on a login shell's PATH), leaving a real file alone; a link outside the data folder goes into the machine record (packages/scripts/src/machine-record/), and a record that fails leaves the run's status alone, since the next daily check names the link
 link_file() {
   local src="$1" target="$2"
   mkdir -p "$(dirname "$target")"
@@ -67,6 +67,10 @@ link_file() {
   else
     ln -sfn "$src" "$target"
     echo "linked $target -> $src"
+    case "$target" in
+      "$DATA"/*) ;;
+      *) "$BUN" --no-env-file "$REPO/packages/scripts/src/machine-record/cli.ts" add "$target" --kind link --why "link-skills.sh links it to $src" --undo "rm $target" --by link-skills.sh >/dev/null || echo "link-skills.sh: $target is not in the machine record; its next check names it" >&2 ;;
+    esac
   fi
 }
 for brief in new-research-worker new-reviewer new-tester new-worker; do

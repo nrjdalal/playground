@@ -227,6 +227,16 @@ Discarded files go into the trash with the worktree, so they come back with it, 
 A worktree whose trash entry holds no git record, one trashed before the entry kept it or one git could not read, comes back with its files alone, and git does not list it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free, at any load. Each hour it also strips every delete's `node_modules` folders and `web/next/.next`, which a `bun install` or a build rebuilds.
 
+## Keep a record of what the factory adds: `playground record`
+
+Each machine keeps a record of every path the factory put on it: `machine-record.json` in your data folder, one entry a path with why it is there and how to undo it.
+`playground record add <path> --kind <kind> --why "<why>" --undo "<undo>"` adds one, and a path the record holds already changes nothing; `playground record drop <path>` takes one off.
+An Inbox root step that ran, `link-skills.sh`'s links, and the run folder and Postgres image the runner box's heavy runs use add their own paths, so you add by hand only what you made by hand.
+`playground record seed` fills the record once on a machine from your data folder's `bundles/footprint.md` and that machine's undo note, `bundles/<machine>-undo.md`, and keeps what the watched places hold then as its baseline, so the first check names only what came after.
+`playground record check` compares the record with the watched places: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root steps' folders.
+It prints one line a finding: `misplaced` for a new path outside the folders `paths.factoryHomes` names, `unrecorded` for one inside them, `gone` for a recorded path that is not there, and `unreadable` for a place or path it cannot read.
+Ops runs it every night at 3:45 on this machine and on each machine `PLAYGROUND_PEERS` names, and sends each finding to Ops.
+
 ## Read the rules: `playground rules`
 
 `playground rules` prints the standing rules a factory session starts with, each by its first line, with your settings' values in place of each `{key}`.

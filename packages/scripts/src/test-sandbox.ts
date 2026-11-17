@@ -18,7 +18,7 @@ const SERIAL = [
   "tests/check-types-env.test.ts",
 ]
 
-const { env, scratch } = sandbox()
+const { env, scratch, wrap } = sandbox()
 // a worktree .env set for a hosted stack would turn the hosted build's gates on in every test, and bun test fills only a key its env leaves unset, so both flags go in empty, which the env schemas read as unset; a test that wants the hosted build sets the flag itself
 Object.assign(env, { NEXT_PUBLIC_PLAYGROUND_HOSTED: "", PLAYGROUND_HOSTED: "" })
 const dropScratch = () => {
@@ -46,12 +46,12 @@ const held = () =>
     }
   })
 let interrupted: NodeJS.Signals | undefined
-// each pass runs bun test in a process group of its own, which ends whole as the pass ends: a child a test left running, after it passed or bun timed it out, once spun with parent pid 1 until a reboot; sh leads the group and ends it from inside with kill 0 once bun test exits, so the signal reaches this group alone, where a pid already reaped can name a new process within a second; its trap outlives a forwarded Ctrl-C, which bun test takes, so the group still ends
+// each pass runs bun test in a process group of its own, which ends whole as the pass ends: a child a test left running, after it passed or bun timed it out, once spun with parent pid 1 until a reboot; sh leads the group and ends it from inside with kill 0 once bun test exits, so the signal reaches this group alone, where a pid already reaped can name a new process within a second; its trap outlives a forwarded Ctrl-C, which bun test takes, so the group still ends; on Linux the group is bwrap's, outside the pid view, so a forwarded signal ends bwrap and --die-with-parent ends the whole view at once, bun test and the trap included
 let passes = 0
 const runPass = async (argv: string[], deadline?: number) => {
   const status = join(scratch, `pass-${++passes}`)
   const child = Bun.spawn(
-    [
+    wrap([
       "sh",
       "-c",
       'f=$1; shift; trap : INT TERM; bun test "$@"; echo $? > "$f"; kill -KILL 0',
@@ -59,7 +59,7 @@ const runPass = async (argv: string[], deadline?: number) => {
       status,
       ...clock,
       ...argv,
-    ],
+    ]),
     { detached: true, env, stdio: ["inherit", "inherit", "inherit"] },
   )
   const stop = (signal: NodeJS.Signals) => {

@@ -280,7 +280,7 @@ const sshFar =
     }
   }
 
-// The job's loop until signal: one link per peer, each beating its state into the job's heartbeat, and on a drop telling Ops once per down spell, and once when it is up again, then starting again after a wait that doubles from minWaitMs to maxWaitMs, from minWaitMs again once a link held steadyMs.
+// The job's loop until signal: one link per peer, each beating its state into the job's heartbeat, which reads ok while every peer is up, and on a drop telling Ops once per down spell, and once when it is up again, then starting again after a wait that doubles from minWaitMs to maxWaitMs, from minWaitMs again once a link held steadyMs.
 export async function keep({
   checkout,
   data,
@@ -302,7 +302,10 @@ export async function keep({
   let writes = Promise.resolve()
   const say = (peer: string, state: string) => {
     states.set(peer, state)
-    const line = [...states].map(([name, said]) => `${name}: ${said}`).join("; ")
+    // ok while every peer is up, as the sweep and opsRowOf read ok alone as healthy; else each state, naming the peer that is down
+    const line = [...states.values()].every((said) => said.startsWith("up: "))
+      ? "ok"
+      : [...states].map(([name, said]) => `${name}: ${said}`).join("; ")
     writes = writes.then(() => beat(path, startedAt, new Date(), line, JOB)).catch(console.error)
     return writes
   }

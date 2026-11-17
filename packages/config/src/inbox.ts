@@ -272,13 +272,18 @@ export function picksOf(
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
 
-// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with what it does and how to undo it in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
+// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with the paths it writes (which the machine record takes once it runs), what it does and how to undo it in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
 export const ROOT_STEPS = {
   "bwrap-userns": {
+    adds: ["/etc/apparmor.d/bwrap"],
     undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
     what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace",
   },
   "chromium-ca": {
+    adds: [
+      "/etc/chromium/policies/managed/portless-ca.json",
+      "/etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
+    ],
     undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
     what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart",
   },
