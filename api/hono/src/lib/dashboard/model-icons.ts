@@ -1,7 +1,7 @@
 import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { BACKEND_MAKERS } from "@packages/config/console"
+import { BACKEND_MAKERS, MAKER_NAME } from "@packages/config/console"
 
 import { ApiError } from "@/lib/error"
 
@@ -15,8 +15,8 @@ export const makersOf = (local: readonly { id: string }[]): Set<string> =>
     }),
   ])
 
-// A maker's name as models.dev and Hugging Face spell one: a plain name, never a path, so it can name a cache file and a URL segment.
-const MAKER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/
+// A maker's name as models.dev and Hugging Face spell one (MAKER_NAME).
+const MAKER = new RegExp(`^${MAKER_NAME}$`)
 export const isMaker = (maker: string): boolean => MAKER.test(maker)
 
 export type Fetch = (url: string) => Promise<Response>
@@ -90,7 +90,7 @@ const body = async (answer: Response): Promise<Uint8Array<ArrayBuffer> | null> =
   return bytes
 }
 
-// A maker's icon from its source: models.dev's logo unless its answer is the fallback, else its Hugging Face org's avatar from huggingface.co's hosts alone, else null. Throws when a source cannot be reached, so offline is not mistaken for no icon.
+// A maker's icon from its source: models.dev's logo unless its answer is the fallback, else its Hugging Face org's avatar from huggingface.co's hosts alone, else null. Throws when a source cannot be reached, or when models.dev's fallback does not read (its sentinel's answer is no SVG, a 404 included), so offline is not mistaken for no icon.
 const fetchIcon = async (maker: string, fetch: Fetch): Promise<ModelIcon | null> => {
   const fallback = new TextDecoder().decode(
     (await body(await fetch(`${MODELS_DEV}/${SENTINEL}.svg`))) ?? new Uint8Array(),
@@ -167,7 +167,7 @@ export const servedIconHeaders = (type: string): Record<string, string> => ({
   "x-content-type-options": "nosniff",
 })
 
-// The serve route's work: the icon of a maker config names, from the cache or fetched once, with servedIconHeaders; a 404 for any other name, a maker with none, or one not yet fetched while offline, which the web draws as its fallback.
+// The serve route's work: the icon of a maker local names (config's, and the served local model's, iconModels), from the cache or fetched once, with servedIconHeaders; a 404 for any other name, a maker with none, or one not yet fetched while offline, which the web draws as its initials chip.
 export async function serveModelIcon(
   maker: string,
   { dir, fetch, local }: { dir: string; fetch?: Fetch; local: readonly { id: string }[] },

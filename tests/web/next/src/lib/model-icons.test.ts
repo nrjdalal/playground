@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import {
   drawingOf,
-  FALLBACK_PROVIDER_ICON,
+  initialsIcon,
   keepMakerIcon,
   readMakerIcon,
   useMakerIcon,
@@ -18,19 +18,15 @@ const { createElement } = (await import(Bun.resolveSync("react", web))) as {
 const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server", web))) as {
   renderToStaticMarkup: (node: Node) => string
 }
-const { RiRobot2Line } = (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
-  "RiRobot2Line",
-  unknown
->
 
 const LOGO = '<svg viewBox="0 0 40 40"><path d="M26.9 9.8H22.1" fill="currentColor"/></svg>'
 const svgData = `data:image/svg+xml;base64,${Buffer.from(LOGO).toString("base64")}`
 
 const html = (type: unknown, props: unknown) => renderToStaticMarkup(createElement(type, props))
 
-// What a row draws for a maker: the icon, or an empty mark while it is read.
+// What a row draws for a maker: the icon, or an empty mark while it is read; a maker with no icon draws its model's initials.
 const Row = ({ maker }: { maker: string | null }) => {
-  const Icon = useMakerIcon(maker)
+  const Icon = useMakerIcon(maker, "Or")
   return Icon ? createElement(Icon, { className: "size-4" }) : "reading"
 }
 
@@ -58,10 +54,20 @@ describe("drawingOf", () => {
 })
 
 describe("useMakerIcon", () => {
-  test("no maker draws the fallback robot; a maker not yet read keeps its place empty", () => {
-    expect(FALLBACK_PROVIDER_ICON).toBe(RiRobot2Line as typeof FALLBACK_PROVIDER_ICON)
-    expect(html(Row, { maker: null })).toBe(html(RiRobot2Line, { className: "size-4" }))
+  test("no maker draws the model's initials in a chip, never a robot; a maker not yet read keeps its place empty", () => {
+    expect(html(Row, { maker: null })).toBe(html(initialsIcon("Or"), { className: "size-4" }))
+    expect(html(Row, { maker: null })).not.toContain("<path")
     expect(html(Row, { maker: "never-read" })).toBe("reading")
+  })
+
+  test("the initials chip draws its two letters in the text colour on a faint square of it, in one size with the logos, and keeps one drawing for each initials", () => {
+    const chip = html(initialsIcon("Or"), { className: "size-4" })
+    expect(chip).toContain('data-initials="Or"')
+    expect(chip).toContain(">Or</text>")
+    expect(chip).toContain('fill="currentColor"')
+    expect(chip).toContain('viewBox="0 0 24 24"')
+    expect(chip).toContain('class="size-4"')
+    expect(initialsIcon("Or")).toBe(initialsIcon("Or"))
   })
 
   test("a maker the API serves draws its icon, read once a page", async () => {
@@ -77,7 +83,7 @@ describe("useMakerIcon", () => {
     expect(html(Row, { maker: "RecursiveSI" })).toContain(`href="${svgData}"`)
   })
 
-  test("a 404, or the API out of reach, draws the fallback robot", async () => {
+  test("a 404, or the API out of reach, draws the initials chip", async () => {
     globalThis.fetch = (async () => new Response("", { status: 404 })) as unknown as typeof fetch
     await readMakerIcon("nobody")
     globalThis.fetch = (async () => {
@@ -85,7 +91,7 @@ describe("useMakerIcon", () => {
     }) as unknown as typeof fetch
     await readMakerIcon("offline-maker")
     for (const maker of ["nobody", "offline-maker"])
-      expect(html(Row, { maker })).toBe(html(RiRobot2Line, { className: "size-4" }))
+      expect(html(Row, { maker })).toBe(html(initialsIcon("Or"), { className: "size-4" }))
   })
 
   test("a kept icon redraws every row that reads it", () => {

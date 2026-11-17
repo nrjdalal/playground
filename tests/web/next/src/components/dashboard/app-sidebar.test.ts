@@ -497,7 +497,7 @@ describe("SessionRow", () => {
     ])
     expect(shownText(html)).toBe("Message dispatcher from the dashboard")
     expect(shape(html)).toEqual(stock)
-    // a GLM model draws Z.ai's logo, a local org/repo model its org's image, a bare id or a maker none knows the fallback, a maker still read an empty place, and a row with no model or effort draws neither
+    // a GLM model draws Z.ai's logo, a local org/repo model its org's image, a bare id or a maker none knows its name's initials in a chip and never the robot, a maker still read an empty place, and a row with no model or effort draws neither
     const glm = row("worker-greed", "worker", [], { model: "glm-5.3-flash" })
     expect(glm).toContain(logoOf("zai"))
     expect(tipsOf(glm)).toContain("GLM 5.3 Flash")
@@ -506,17 +506,42 @@ describe("SessionRow", () => {
     expect(ornith).toContain("<clipPath")
     expect(tipsOf(ornith)).toContain("ornith-ai/Ornith-1.5-122B-NVFP4")
     const bareLocal = row("worker-greed", "worker", [], { model: "Ornith-1.5-122B-NVFP4" })
-    expect(bareLocal).toContain(pathOf(RiRobot2Line))
+    expect(bareLocal).toContain('data-initials="Or"')
+    expect(bareLocal).not.toContain(pathOf(RiRobot2Line))
     const reading = row("worker-greed", "worker", [], { model: "NotReadYet/Model-1" })
     expect(reading).not.toContain(pathOf(RiRobot2Line))
     expect(reading).not.toContain("<image")
     const unknown = row("worker-greed", "worker", [], { model: "gpt-9" })
-    expect(unknown).toContain(pathOf(RiRobot2Line))
+    expect(unknown).toContain('data-initials="Gp"')
+    expect(unknown).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(unknown)).toContain("gpt-9")
     const bare = row("worker-greed", "worker")
     expect(bare).not.toContain(ANTHROPIC)
     expect(bare).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(bare)).toHaveLength(1)
+  })
+
+  test("a local session's row draws its served model's maker and names it, Ornith 122B, local, where a Claude row draws its effort; with no served repo known, its initials chip (PG-2642)", () => {
+    const local = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+      model: "local",
+    })
+    expect(local).toContain(logoOf("ornith-ai"))
+    expect(local).not.toContain(pathOf(RiSignalCellular3Fill))
+    expect(local).not.toContain(pathOf(RiRobot2Line))
+    expect(tipsOf(local)).toEqual([
+      "worker-greed\nMessage dispatcher from the dashboard\nOrnith 122B, local · Working",
+      "Ornith 122B, local",
+    ])
+    expect(shape(local)).toEqual(stock)
+    const unknown = row("worker-greed", "worker", [], { effort: "high", model: "local" })
+    expect(unknown).toContain('data-initials="Lo"')
+    expect(unknown).not.toContain(pathOf(RiSignalCellular3Fill))
+    expect(unknown).not.toContain(pathOf(RiRobot2Line))
+    expect(tipsOf(unknown)).toContain("local")
+    const claude = row("worker-greed", "worker", [], { effort: "high", model: "claude-opus-5-5" })
+    expect(claude).toContain(pathOf(RiSignalCellular3Fill))
   })
 
   for (const [name, role] of [
