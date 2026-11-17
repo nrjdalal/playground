@@ -288,6 +288,18 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
+## After a power cut
+
+- A boot with no clean shutdown can leave a torn loose object in the shared git store, which breaks every `git fetch`, and a merge lock its dead pr:merge run held.
+  ops-tick's `boot-check` beat takes both on, once per boot or wake, on a minute inside gh-auth's first 10 minutes (`BOOT_MS` in `packages/scripts/src/ops-tick/tick.ts`), keeping the boot it finished in `ops/tick/boot-check.json`.
+- First it lets go of a merge lock whose `pr` file is older than the boot, into `merge-locks/<pr>-<epoch ms>-boot`, with one line to Ops: every process of the old boot is dead, and a pid from then can name a live process now.
+- Then it runs `git fsck --no-dangling` on the shared store through run-slot (3 s measured on the main checkout's store), which stops at the first torn loose object, so it runs again after each repair, 10 passes at most.
+  A torn object that only a gate-owned worktree's HEAD or HEAD reflog names (`GATE_WORKTREES`, `merge-types` today) is repaired under the merge lock: the object moved into `ops/git-torn/<sha>-<epoch ms>`, the worktree's HEAD re-pointed with `git update-ref --no-deref` to the newest commit its reflog holds that reads whole, and one line to Ops.
+  While a live merge holds the lock the repair waits for the next minute.
+  The `invalid reflog entry` fsck then names for a moved object counts as repaired.
+- Every other break gets one line to Ops' waiter queue and one Inbox alert naming the path, and the beat changes nothing there.
+  The logic lives in `packages/scripts/src/ops-tick/boot-check.ts`; tests: `bun run test:file tests/packages/scripts/src/ops-tick/boot-check.test.ts`.
+
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
