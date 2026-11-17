@@ -680,10 +680,25 @@ var NO_GLOB = new Set([
   "xtrace"
 ]);
 function optionSwitch(bare) {
-  for (const [head, rest] of bare.matchAll(/\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi))
-    for (const [found, cluster, name] of rest.matchAll(/\s([-+](?:[a-zA-Z0-9]*[O4][a-zA-Z0-9]*|[a-zA-Z0-9]*o))(?=\s|$)(?:\s+([a-zA-Z]+))?/g))
-      if (/[O4]/.test(cluster) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
-        return `${head.slice(0, head.length - rest.length).trim()} ${found.trim()}`;
+  for (const [, head, rest] of bare.matchAll(/\b(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi)) {
+    const words = rest.split(/\s+/).filter(Boolean);
+    for (let i = 0;i < words.length; i++) {
+      const word = words[i];
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word))
+        continue;
+      if (/[O4]/.test(word))
+        return `${head} ${word}`;
+      const o = word.indexOf("o");
+      if (o >= 0) {
+        const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean);
+        if (names.length === 0 || names.some((name) => !NO_GLOB.has(name.toLowerCase())))
+          return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
+        i++;
+      }
+      if (word.includes("c"))
+        break;
+    }
+  }
 }
 function globSwitch(text) {
   const bare = bareText(text);

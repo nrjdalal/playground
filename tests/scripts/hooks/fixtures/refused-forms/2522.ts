@@ -13,6 +13,10 @@ const controls = (): Row[] => [
     "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
   ],
   [
+    "a tar -xOf inside a remote bash -c, past the shell's own options",
+    `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
+  ],
+  [
     "awk's *100/(…) in a heredoc fed to a remote bash, which a * before a digit keeps from reading as a qualifier",
     "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
   ],
@@ -62,6 +66,18 @@ const refused = (): Row[] => [
   [
     "a remote touch through a ? glob after FIGNORE piped to a remote bash",
     "echo 'FIGNORE=x; touch ?playground/extensions/y' | ssh box bash",
+  ],
+  [
+    "a remote touch through a ? glob after a set naming zsh's option inside its -o cluster",
+    "ssh box 'set -oextendedglob; touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a ? glob in a zsh started with its option inside its -o cluster",
+    `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
+  ],
+  [
+    "a remote touch through a ? glob after a set whose -o is mid-cluster, bash's name the next word",
+    "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
   ],
   [
     "a remote touch through a * glob with BASHOPTS set by ssh's SetEnv",

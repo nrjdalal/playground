@@ -4051,6 +4051,8 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh -o SetEnv=LANG=C box uptime",
     "ssh -o SendEnv=LANG box 'ls */notes'",
     "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
+    "ssh box 'set -opipefail; uptime'",
+    `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
   ])("%s, with no switch on its remote side, runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -4100,7 +4102,14 @@ describe("a glob-option switch on a remote or fed line", () => {
   test.each([
     "ssh box 'bash -xO extglob -c \"touch ?playground/extensions/y\"'",
     "ssh box 'set -Oe; touch ?playground/extensions/y'",
-  ])("%s, a cluster holding O before its end, is refused as a switch", async (command) => {
-    expect(await bash(command)).toMatch(SWITCH)
-  })
+    "ssh box 'set -oextendedglob; touch ?playground/extensions/y'",
+    `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash -c "set -o extendedglob; touch ?playground/extensions/y"'`,
+  ])(
+    "%s, an option a shell reads by any of its spellings, is refused as a switch",
+    async (command) => {
+      expect(await bash(command)).toMatch(SWITCH)
+    },
+  )
 })

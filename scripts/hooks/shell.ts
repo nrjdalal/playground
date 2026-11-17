@@ -668,16 +668,26 @@ const NO_GLOB = new Set([
   "verbose",
   "xtrace",
 ])
-// A set or a started shell given an option cluster holding O or zsh's 4 anywhere, or ending in o before a name off NO_GLOB, else undefined
+// A set or a started shell given, before its -c script, an option cluster holding O or zsh's 4, or one holding o with a name off NO_GLOB: zsh's, the rest of the cluster after its o, and bash's, the next word; each head is read on its own, so a set inside a -c script is read too; else undefined
 function optionSwitch(bare: string): string | undefined {
-  for (const [head, rest] of bare.matchAll(
-    /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi,
-  ))
-    for (const [found, cluster, name] of rest!.matchAll(
-      /\s([-+](?:[a-zA-Z0-9]*[O4][a-zA-Z0-9]*|[a-zA-Z0-9]*o))(?=\s|$)(?:\s+([a-zA-Z]+))?/g,
-    ))
-      if (/[O4]/.test(cluster!) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
-        return `${head.slice(0, head.length - rest!.length).trim()} ${found.trim()}`
+  for (const [, head, rest] of bare.matchAll(
+    /\b(bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b(?=([^;&|\n]*))/gi,
+  )) {
+    const words = rest!.split(/\s+/).filter(Boolean)
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]!
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word)) continue
+      if (/[O4]/.test(word)) return `${head} ${word}`
+      const o = word.indexOf("o")
+      if (o >= 0) {
+        const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean)
+        if (names.length === 0 || names.some((name) => !NO_GLOB.has(name.toLowerCase())))
+          return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`
+        i++
+      }
+      if (word.includes("c")) break
+    }
+  }
 }
 // The first glob-option switch a text holds, read bare (bareText) and past case, else undefined
 export function globSwitch(text: string): string | undefined {
