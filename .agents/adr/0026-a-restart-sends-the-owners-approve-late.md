@@ -9,7 +9,7 @@ A restart of that process, such as the live dashboard rolling to a new head, end
 - **At API start, `api/hono/src/local.ts` sends each lost card's Approve answer.** On a stack that reads this machine, `endLostRoots` records every approved root card with no result, answered before this process started, as failed with `ROOT_LOST_LINE`: the Dashboard restarted while it ran, so check before approving again.
   It then sends the poster the answer the owner's Approve would have sent, in the same shape, with that outcome.
 - **It stays inside `deliver()`'s rule.** It carries only the owner's own click, already given on the card, and puts no new words in the owner's voice: the outcome line is the Dashboard's report of its own run, as every root step's result is.
-- **Each card is sent once.** The record and the send follow one write that holds only while the card still has no result, so a second start finds nothing to send.
+- **Each card is sent at most once.** The send follows one write that holds only while the card still has no result, so a second start finds nothing to send, and a send that fails or a stop between the write and the send leaves that poster untold.
 
 ## Consequences
 
