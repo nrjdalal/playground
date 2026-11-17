@@ -148,6 +148,6 @@ EOF
 systemctl enable --now unattended-upgrades
 
 for i in $(seq 1 "$RUNNERS"); do say "runner-$i: $(systemctl is-active "$(cat "$HOME_DIR/runner-$i/.service")")"; done
-# what ci.sh's runs need, as the runner user sees it: tools.sh names each one missing and exits 1
+# what suite.sh's steps need, as this VPS's runner user sees it: tools.sh names each one missing and exits 1
 bash "$(dirname "$0")/tools.sh" || die "a tool the suite needs is missing"
 
