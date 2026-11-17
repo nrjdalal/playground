@@ -167,6 +167,8 @@ It refuses with the memory reading when not even one session fits, stops a serve
 Each server it starts is kept in `<data>/models/state.json`, under `machines.<machine>.servers.<model>`: its container, port, share, most sessions and start time.
 The ops-tick beat `model-keep` keeps each machine's kept model up: it starts it when it is down, and brings it back once another model there sits idle `localModels.idleMinutes`.
 The peer's servers reach this machine through the [`ops-model-tunnel` job](/docs/jobs#reach-the-model-servers-on-another-machine).
+To copy a model's folder to the other machine, use `rsync -a --copy-unsafe-links` (or `-L`), since a Hugging Face repo's files are links into its shared `hf/hub/blobs/` folder, which a plain `rsync -a` copies as links that point nowhere.
+Then check the copy: `find <dir> -xtype l` prints nothing once every link resolves.
 
 ## Answer a permission prompt: `playground picker`
 
