@@ -62,18 +62,39 @@ describe("on Linux the capacity gate reads /proc", () => {
     expect(r.err).toContain("the memory gate holds it: free is 7% (/proc/meminfo), 8% is the floor")
   })
 
-  // a fresh worker's start reads run-slot's room first, whose gauges take the first two second reads
-  test("pswpin's rise over a second holds a fresh worker start", async () => {
+  // a fresh worker's start reads run-slot's room first, whose gauges take the first two second reads, then the gate's three
+  test("pswpin's rise at 150 a second holds a fresh worker start", async () => {
     const r = await spawn(
       worker,
       [],
-      linux({ free: 62, swapins: 150 }, [], [["stat"], ["vmstat"], ["vmstat"]]),
+      linux(
+        { free: 62, swapins: 150 },
+        [],
+        [["stat"], ["vmstat"], ["vmstat"], ["vmstat"], ["vmstat"]],
+      ),
     )
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
       "the memory gate holds it: swap-ins are 150/s (/proc/vmstat), 100/s is the line, while free reads 62% (/proc/meminfo), which counts compressible pages",
     )
   })
+
+  // a GLM worker reads run-slot's room first too, whose gauges take the first two second reads (its swap-ins at 0), then the gate's three
+  test.each([
+    ["one second at 8403 between seconds at 5 passes, reading 5", [0, 5, 8403, 5], 5],
+    ["two of the three seconds over 100 refuse, reading 150", [0, 150, 8403, 120], 150],
+  ])(
+    "PG-2659 a GLM start takes pswpin's median rise over 3 seconds: %s",
+    async (_, swapins, median) => {
+      const r = await spawn(
+        glm,
+        [],
+        linux({ swapins }, [], [["stat"], ["vmstat"], ["vmstat"], ["vmstat"], ["vmstat"]]),
+      )
+      expect(r.code === 0, r.err).toBe(median < 100)
+      expect(capacityLog(r).at(-1).readings.swapins).toBe(median)
+    },
+  )
 
   test("a GLM start reads its load and pressure from /proc", async () => {
     const load = await spawn(glm, [], linux({ load5: 30 }))
@@ -116,7 +137,7 @@ describe("on Linux a reading /proc does not give holds the start, never reading 
       "meminfo",
       "it cannot read the free share (sysctl kern.memorystatus_level), nor Linux's /proc/meminfo",
     ],
-    ["vmstat", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat"],
+    ["vmstat", "it cannot read the swap-ins (vm_stat -c 4 1), nor Linux's /proc/vmstat"],
   ])("with no /proc/%s", async (file, line) => {
     const r = await spawn(worker, [], linux({}, [file]))
     expect(r.code).not.toBe(0)
