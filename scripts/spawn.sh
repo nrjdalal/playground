@@ -649,24 +649,35 @@ except Skip:
 # 4 sessions (SPAWN.md's gate 4)
 CAPPED = re.compile(r"(worker|reviewer|tester)-.+|.+-(worker|reviewer|tester)")
 LIVE = ("starting", "waiting", "working")
+
+# The roster's named rows, [] with no roster, None when it does not read.
+def roster_rows():
+    try:
+        with open(roster_path) as f:
+            agents = json.load(f).get("agents") or []
+    except FileNotFoundError:
+        agents = []
+    except (OSError, ValueError, AttributeError):
+        return None
+    return [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
+
+# A resume of the session's own live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back work already running.
+def resumes_live(rows):
+    own = next((a for a in rows if a["name"] == session), {})
+    return mode == "resume" and (own.get("status") in LIVE or bool(just_closed))
+
 try:
     cap = gates["sessionCap"]
     if cap and role in ("worker", "reviewer", "tester"):
-        try:
-            with open(roster_path) as f:
-                agents = json.load(f).get("agents") or []
-        except FileNotFoundError:
-            agents = []
-        except (OSError, ValueError, AttributeError):
+        rows = roster_rows()
+        if rows is None:
             refuse("sessions", f"it cannot read {roster_path} (does not read)")
-        rows = [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
-        own = next((a for a in rows if a["name"] == session), {})
         live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and a.get("priority") != "1" and CAPPED.fullmatch(a["name"]))
         readings.update(session_cap=cap, sessions=len(live))
-        # priority work comes first, as at the load and slots gates, and a resume of a live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back a session the count held
+        # priority work comes first, as at the load and slots gates, and a live resume (resumes_live) brings back a session the count held
         if priority:
             readings["priority"] = priority
-        elif mode == "resume" and (own.get("status") in LIVE or just_closed):
+        elif resumes_live(rows):
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("sessions", f"{len(live)} live {'worker or checker' if len(live) == 1 else 'workers and checkers'} in the roster ({', '.join(live)}), and gates.sessionCap is {cap}. Wait for one to end, or close a session that is done, and run it again.")
@@ -694,6 +705,9 @@ try:
             pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     except (OSError, ValueError):
         pass
+    # A live resume (resumes_live) adds no work, so the 98% backstop holds it in place of the pace line; a roster that does not read leaves the pace on.
+    resumed = resumes_live(roster_rows() or [])
+    pace_skip = f"skipped until {pace_off} (usage-pace-off-until)" if pace_off else "skipped (a resume of a live session: the 98% backstop alone)" if resumed else None
 
     # One login's reading: what it read, and why it is over the gate (None when it passes).
     def judge(name, usage, limit, writer):
@@ -728,9 +742,10 @@ try:
                 reset = "later"
             return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
         seen["week"] = week_pct
-        if pace_off:
+        if pace_skip:
             if week_pct >= 98:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+                why = f"while the pace check is off until {pace_off} (usage-pace-off-until)" if pace_off else "for a resume of a live session"
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup {why}"
         else:
             days_in = 7 - (resets - now).total_seconds() / 86400
             pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
@@ -787,8 +802,8 @@ try:
         else:
             seen, detail = judge(name, other, 60, "")
             readings.update(seen)
-            if pace_off:
-                readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+            if pace_skip:
+                readings["pace"] = pace_skip
             if detail:
                 refuse("usage", f"--account {account}: {detail}. Name another account, or none, so it starts on the login with the most room")
     elif backend == "glm":
@@ -830,12 +845,8 @@ try:
         # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes (local-cap.ts read it before the gate)
         cap, cap_from = local_cap.split("\t", 1)
         cap = int(cap)
-        try:
-            with open(roster_path) as f:
-                agents = json.load(f).get("agents") or []
-        except FileNotFoundError:
-            agents = []
-        except (OSError, ValueError, AttributeError):
+        rows = roster_rows()
+        if rows is None:
             refuse("usage", f"it cannot read {roster_path} (does not read), so it cannot count the local sessions")
         def pinned_local(name):
             try:
@@ -843,17 +854,15 @@ try:
                     return f.read().split() == ["claude-code", "local"]
             except OSError:
                 return False
-        rows = [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
-        own = next((a for a in rows if a["name"] == session), {})
         live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and pinned_local(a["name"]))
         readings.update(local_cap=cap, local_sessions=len(live))
-        if mode == "resume" and (own.get("status") in LIVE or just_closed):
+        if resumes_live(rows):
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("usage", f"{len(live)} live local sessions ({', '.join(live)}), and the local model here serves {cap} at once ({cap_from}). Wait for one to end, close a session that is done, or start it on --backend glm or claude.")
     else:
-        if pace_off:
-            readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+        if pace_skip:
+            readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
         usage, detail = load("usage.json")

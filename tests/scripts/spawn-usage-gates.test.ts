@@ -1,11 +1,14 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { mkdirSync, writeFileSync } from "node:fs"
 
 import {
   capacityLog,
+  lw,
   minutesAgo,
   offUntil,
   offUntilUtc,
   placing,
+  root,
   spawn,
   usage,
   weekAt,
@@ -215,6 +218,63 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(at.err).toContain(
       `the usage gate holds it: the week is at 98% (usage.json seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until ${offUntilUtc} (usage-pace-off-until)`,
     )
+  })
+
+  // A resume of a live row, or of one spawn.sh closed live in the last 15 minutes, brings back work already running, so the 98% backstop alone holds it; an ended row's resume and a fresh start still meet the pace line.
+  const ID = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
+  const RESUMED = "t4n7vx-worker"
+  const roster = (status: string) =>
+    JSON.stringify({ agents: [{ name: RESUMED, role: "worker", status, task: "t" }] })
+  const resume = (status: string, week: number, setup?: (home: string) => void) =>
+    spawn(
+      ["resume", RESUMED, root, ID],
+      [],
+      { ROSTER_JSON: roster(status), USAGE_JSON: weekAt(week) },
+      undefined,
+      { name: RESUMED, backend: "claude" },
+      setup,
+    )
+  const closedMinutesAgo = (minutes: number) => (home: string) => {
+    mkdirSync(lw(home, "closes"), { recursive: true })
+    const at = new Date(Date.now() - minutes * 60_000)
+    writeFileSync(
+      lw(home, "closes", RESUMED),
+      `${Math.floor(at.getTime() / 1000)} ${at.toISOString().slice(0, 19)}Z working\n`,
+    )
+  }
+  const RESUME_PACE = "skipped (a resume of a live session: the 98% backstop alone)"
+
+  test.each([
+    ["a live row", () => resume("working", 29)],
+    ["a row spawn.sh closed live 2 minutes ago", () => resume("ended", 29, closedMinutesAgo(2))],
+  ])("Claude usage: a resume of %s passes a week past its pace", async (_, run) => {
+    const r = await run()
+    expect(r.err).not.toContain("the usage gate holds it")
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({ pace: RESUME_PACE, week: 29 }),
+        verdict: "pass",
+      }),
+    ])
+  })
+
+  test("Claude usage: a resume of a live row at 98% meets the backstop", async () => {
+    const r = await resume("working", 98)
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "the usage gate holds it: the week is at 98% (usage.json seven_day.used_percentage), and 98% is the sanity backup for a resume of a live session",
+    )
+  })
+
+  test.each([
+    ["a resume of an ended row", () => resume("ended", 29)],
+    ["a fresh start", () => spawn(["worker", RESUMED, "b.md"], [], { USAGE_JSON: weekAt(29) })],
+  ])("Claude usage: %s still meets the pace line", async (_, run) => {
+    const r = await run()
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(paceMessage)
   })
 
   test("a session on --account skips usage.json, whose readings name another login", async () => {
