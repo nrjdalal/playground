@@ -57,6 +57,12 @@ On the other machine it runs a small script from that machine's own Playground c
 Lines carry from the job's first connection on, so a line written before it stays where it was written.
 After a drop it starts ssh again within 2 seconds, waiting up to a minute between tries, tells Ops once, and a line written meanwhile still arrives once, keeping the time it was sent.
 
+## Reach the model servers on another machine
+
+The `ops-model-tunnel` job brings the peer's local model servers, which [`playground model use`](/docs/cli#start-a-local-model-playground-model-use) starts on its loopback, to this machine's loopback: one ssh connection forwards `127.0.0.1:18000` here to the peer's `127.0.0.1:8000`, and `18001` to `8001`, with nothing listening off loopback at either end.
+The peer is the one `localModels.machine` names in `PLAYGROUND_PEERS`, or the only one it names, reached with the key `PLAYGROUND_PEER_KEY` names (`~/.ssh/playground_spark` by default).
+After a drop it starts ssh again within 2 seconds, waiting up to a minute between tries while it keeps failing.
+
 ## Restore now
 
 The ops-restore row in Settings > Jobs holds Restore now, your way back when the main checkout's guards are gone and no session can repair it, with the job on or off.

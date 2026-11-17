@@ -619,7 +619,11 @@ const code =
                                                         ? await verb(command, rest)
                                                         : command === "ci-wait"
                                                           ? await ciWaitFor(rest)
-                                                          : fail(
-                                                              `no command ${command}; playground --help lists them`,
-                                                            )
+                                                          : command === "model"
+                                                            ? await (
+                                                                await import("../local-model/live")
+                                                              ).runModel(rest)
+                                                            : fail(
+                                                                `no command ${command}; playground --help lists them`,
+                                                              )
 process.exit(code)

@@ -99,8 +99,12 @@ A branch whose issue is open and that is no copy stays.
 Any other unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
 A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made or re-pointed to the branch's head.
 A re-point that would drop an old head, one no ancestor of the new head, first keeps it at a tag of its own, `archive/<branch>-<old7>` (its first 7 characters), so `git branch <name> archive/<branch>-<old7>` brings it back; when that tag cannot be made, the old tag stays as it is and the log names why.
-Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
-The log line also holds the free disk before and after, which the System page shows too.
+Last, it lists each machine's unused space with its size, and removes none of it: model weights no model folder in `~/models` names, Docker images no container uses by any of their tags and unused for 7 days, model-test worktrees in `~/models/kit/runs/` a day after their row ended, and ship rehearsal folders in a scratchpad.
+It reads each other machine `PLAYGROUND_PEERS` names in the Dashboard's `.env` the same way, over one fixed ssh that only reads.
+An item under 100 MB joins one small leftovers total, and an item the machine record holds is marked recorded.
+`bun packages/scripts/src/ops-tick/unused.ts` runs the same list by hand, a dry run that removes nothing.
+Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch, with each machine's unused items.
+The log line also holds the free disk before and after, which the System page shows too, and each machine's unused total.
 It asks no decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
 Each machine keeps a record of every path the factory put on it, `machine-record.json` in the data folder, written by `playground record add` and the steps that make such a path: an Inbox root card that ran, `link-skills.sh`'s links outside the data folder, and the run folder and Postgres image the runner box's heavy runs use (`ci.sh`).
 Every night at 3:45 a check compares it with the watched places here and on each peer: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root-step folders.
