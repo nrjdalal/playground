@@ -295,15 +295,15 @@ export const RETIRED: Record<string, string> = {
   ci: "https://github.com/nrjdalal/playground/pull/2567",
 }
 
-// The retired folder path is, when it is that real folder (not a symlink) directly in the data folder.
+// A retired folder's own place: directly in the data folder, under a name RETIRED lists; removal and restore both read it.
+const retiredPlace = (own: string, home: string): boolean =>
+  dirname(own) === real(join(home, ".playground")) && Object.hasOwn(RETIRED, basename(own))
+
+// The retired folder path is, when it is that real folder (not a symlink) at its own place.
 const retiredOf = (path: string, home: string): string | undefined => {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
-  return dirname(own) === real(join(home, ".playground")) &&
-    Object.hasOwn(RETIRED, basename(own)) &&
-    lstat(own)?.isDirectory()
-    ? own
-    : undefined
+  return retiredPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
 }
 
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
@@ -564,7 +564,7 @@ export function quarantine(
       `refused a ${recent.length + 1}th removal: ${opts.session} moved ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratch or scratchpad folder, the session's own temp folder, a path inside the session's own scratchpad folder (a ship rehearsal's two clones), or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratch or scratchpad folder, the session's own temp folder, a path inside the session's own scratchpad folder (a ship rehearsal's two clones), a retired data folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
   const own = join(real(dirname(abs)), basename(abs))
   const temp = ownTempOf(own, opts.session, io.tmp ?? "/tmp")
   const ownPad = join(real(join(roots.home, ".playground", "scratchpad")), opts.session)
@@ -681,12 +681,13 @@ export function restore(
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)
-    const retired =
-      dirname(entry.ended) === real(join(roots.home, ".playground")) &&
-      Object.hasOwn(RETIRED, basename(entry.ended)) &&
-      at === entry.ended
-    if (
-      (!retired && !pads.includes(dirname(entry.ended))) ||
+    if (retiredPlace(entry.ended, roots.home)) {
+      if (at !== entry.ended)
+        return refused(
+          `${entry.path} came from ${entry.ended}, a retired data folder, which no longer reaches it as that real folder directly in ${real(join(roots.home, ".playground"))}`,
+        )
+    } else if (
+      !pads.includes(dirname(entry.ended)) ||
       !inside(at, entry.ended) ||
       (at !== entry.ended && stands && !stands.isDirectory())
     )
