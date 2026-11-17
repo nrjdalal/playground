@@ -137,6 +137,7 @@ The HTML moves first and the record drops second, so a refused move leaves the p
 `playground ci-wait <pr>` waits until each check `pr:merge` needs, `Audit, Lint, and Build` and `test`, exists at the PR's head and has finished, then prints each result and exits 0 when all passed, else 1.
 It reads GitHub every 5 minutes, waits out a rate limit, and starts over when a push moves the head.
 When a check's workflow run ends without creating the check, it exits 1 and names the `gh run rerun` that brings it.
+When the PR conflicts with its base, it exits 1 at once with `#<n> conflicts with <base>: no CI runs until <base> is merged in`, since GitHub starts no CI on such a PR; while GitHub has not yet worked out whether an open PR merges, it waits, and a merged or closed PR, whose answer stays unknown, has its checks read as they stand.
 When GitHub does not know the PR or repo, or refuses your login, it exits 2 at once.
 `--repo <owner/name>` points it at another repo; it reads the factory's own by default.
 Run it as a background task, and read the head's checks once more yourself before you call it green.
@@ -146,6 +147,13 @@ Run it as a background task, and read the head's checks once more yourself befor
 `playground alerts-wait <name>` waits until the next line in the outbox addressed to `<name>`, prints it, and exits: a stuck session's alert or the relay watch's late-stop line first, else any job's line, such as a firefighting heads-up to the Builder.
 Each name keeps its own place in each queue, so a printed line is not printed again, and a line addressed to another session waits for that session.
 A manager keeps it running as a background task and starts it again after each line, so it hears in a second or two rather than waiting for the relay.
+A session on another machine keeps one running too, for the lines `playground send` brings it, which print led by `[ops-peer]` and the sender's name.
+
+## Message a session on another machine: `playground send`
+
+`playground send <name> <text>` queues one line, `{at, from, id, text, to}`, in the outbox's `ops-peer.jsonl`, where `from` is your session's name, and prints `queued <id> for <name>`.
+The [`ops-peer-relay` job](/docs/jobs#carry-messages-to-another-machine) copies it to the other machine, where that session's `playground alerts-wait` prints it.
+The text goes on one line, and a line over 16 KB is refused: send the path of a file that holds the text.
 
 ## Answer a permission prompt: `playground picker`
 
@@ -180,6 +188,7 @@ The ops runner's render takes `jobs`: the plist of a job `jobs.json` no longer h
 It also takes `jobs-installed`: the plist of a launchd job turned off, out of `~/Library/LaunchAgents`, one `com.playground.*.plist` file of at most 64 KB, so no other app's agent can move.
 On Linux it takes `jobs-units` in its place: the systemd user unit of a job turned off, out of `~/.config/systemd/user`, one `com.playground.*.service` file of at most 64 KB, so no other user unit can move.
 `playground page --remove` takes `page`: a kept page's HTML, caption or PDF, out of `previews`, one plain `.html`, `.txt` or `.pdf` file of at most 20 MiB, so `pages.jsonl` and every image stay; each move names only the one file of a page `pages.jsonl` lists, and the trash records the calling session.
+An invitee rehearsal's scratch folder, about 140,000 entries, never reaches the trash: `bun run ship:rehearsal new` makes it and `bun run ship:rehearsal clear <dir>` removes it whole, only a folder holding safe-delete's marker, directly in the caller's temp folder and named `ops-r` (`removeScratch`), and the nightly clean removes such a folder left over a day (`removeStale`).
 The nightly clean takes quarantine's `gone` option, which `playground rm` never takes: an entry directly in the data folder's `scratch/`, a real file or folder whose session it has found gone, moves whole, past the 5,000-file count and under the 2 GB cap, and `--restore` puts it back there.
 
 `playground rm --worktree <path>` removes a worktree under `.claude/worktrees/`, the main checkout's or another repo's: it refuses the main checkout's worktree on the `live.branch` branch (the live Dashboard's checkout) outright, `--discard` included, since it moves only by `.agents/dashboard/live.md`'s roll, and every worktree while that setting cannot be read; it refuses when the roster cannot be read, when a live session on the roster holds it by its branch, its name (but a manager's, below) or a pull request its row lists as its `pr` or in its `prs`, by that number in the worktree's folder or branch name or as the worktree's own pull request (the one GitHub finds for its branch), when a running `node_modules` clone reads from it or copies into it, when a symlink outside it points into it, when a process works inside it, when `git status --porcelain` lists an uncommitted change in it (the refusal names the count and the first three paths), or when its HEAD's work has not landed on `origin/canary` (for another repo's worktree, on that repo's default branch) or on a remote branch that still holds it (below), then moves it to the trash and runs `git worktree prune` in its own repo.

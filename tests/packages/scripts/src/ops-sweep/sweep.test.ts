@@ -111,7 +111,7 @@ const sshRecord = (
   mkdirSync(join(ctx.data, "resume"), { recursive: true })
   writeFileSync(
     join(ctx.data, "resume", `${name}.sh`),
-    `#!/bin/bash\n# server: ${server}\nexec /main/scripts/spawn.sh resume ${name} /main sid${ssh}\n`,
+    `#!/bin/bash\n# server: ${server}\nexec /main/scripts/spawn.sh resume ${name} /main 6aafeb8a-bce0-4ceb-92cf-97f92cece832${ssh}\n`,
   )
 }
 
@@ -320,7 +320,7 @@ describe("check", () => {
         })
       const name = args.at(-1) === "w1:p3" ? "bash" : "ssh"
       return JSON.stringify({
-        result: { process_info: { foreground_processes: [{ name, pid: 1 }] } },
+        result: { process_info: { foreground_processes: [{ argv: [name], name, pid: 1 }] } },
       })
     }
     expect((await check(ctx)).sort()).toEqual([
@@ -352,7 +352,7 @@ describe("check", () => {
         })
       const name = args.at(-1) === "w1:p1" ? "bash" : "ssh"
       return JSON.stringify({
-        result: { process_info: { foreground_processes: [{ name, pid: 1 }] } },
+        result: { process_info: { foreground_processes: [{ argv: [name], name, pid: 1 }] } },
       })
     }
     expect(await check(ctx)).toEqual([])

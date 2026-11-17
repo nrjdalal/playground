@@ -1,4 +1,4 @@
-// playground ci-wait <pr> [--repo <owner/name>]: one wait on a PR's CI for every session, so none writes its own loop, which once read a required check GitHub had not yet created as done. It waits until each of pr:merge's REQUIRED_CHECKS exists at the PR's current head and has concluded, then prints each conclusion and exits 0 when all passed, 1 when any did not, and 2 on a PR or repo GitHub does not know; it reads over REST every POLL_SECONDS (the github rule), waits out a rate limit's reset, and waits afresh on a head that moves.
+// playground ci-wait <pr> [--repo <owner/name>]: one wait on a PR's CI for every session, so none writes its own loop, which once read a required check GitHub had not yet created as done. It waits until each of pr:merge's REQUIRED_CHECKS exists at the PR's current head and has concluded, then prints each conclusion and exits 0 when all passed, 1 when any did not, 1 at once on a PR GitHub reads as conflicting with its base (it starts no pull_request run on one), and 2 on a PR or repo GitHub does not know; it reads over REST every POLL_SECONDS (the github rule), waits out a rate limit's reset, and waits afresh on a head that moves.
 import { PASSED, REQUIRED_CHECKS, REQUIRED_WORKFLOWS } from "../pr-merge/gates"
 
 export const POLL_SECONDS = 300
@@ -58,8 +58,21 @@ export const newestRequired = (runs: Run[]): (Run | undefined)[] =>
 export async function ciWait(repo: string, n: string, deps: CiWaitDeps): Promise<number> {
   let head = ""
   for (;;) {
-    const pr = await read<{ sha: string }>(deps, `repos/${repo}/pulls/${n}`, "{sha: .head.sha}")
+    const pr = await read<{ base: string; mergeable: boolean | null; sha: string; state: string }>(
+      deps,
+      `repos/${repo}/pulls/${n}`,
+      "{base: .base.ref, mergeable, sha: .head.sha, state}",
+    )
     if (!pr) continue
+    if (pr.mergeable === false) {
+      deps.out(`#${n} conflicts with ${pr.base}: no CI runs until ${pr.base} is merged in`)
+      return 1
+    }
+    // GitHub works mergeable out after a read asks for it, so an open PR's null is read again a poll on, before any check counts; a closed or merged PR reads null for good, so its checks are read as they stand
+    if (pr.mergeable === null && pr.state === "open") {
+      await deps.sleep(POLL_SECONDS)
+      continue
+    }
     if (pr.sha !== head) {
       deps.out(
         `${head ? "head moved: waiting afresh" : "waiting"} on ${REQUIRED_CHECKS.join(" and ")} at ${pr.sha.slice(0, 7)}`,

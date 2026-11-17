@@ -23,6 +23,7 @@ import {
   readHerdr,
   readStates,
   restoring,
+  sshLaunches,
   withHerdrState,
 } from "@/lib/dashboard/herdr"
 import {
@@ -225,6 +226,8 @@ export type Worker = {
   // A hosted session's permission mode, as its composer's picker shows it and the owner changes it.
   permissionMode?: HostedMode
   questions: Question[]
+  // Set on a probe spawn.sh started with --ssh, whose claude runs on another machine: its transcript is there, so its view shows none, and the dashboard neither types into it (deliver()) nor restarts it.
+  remote?: true
   role: Role
   sessionId: string
   startedAt: string | null
@@ -491,6 +494,8 @@ export function isLiveRecord(record: Json, proof: LiveProof | null): boolean {
   if (!sessionId || record.stored_pid_exists !== true) return false
   // A Codex record's harness comes from its launch record (codexLaunches), and its proof is the codex process herdr found in its pane's foreground this read.
   if (record.agent === "codex") return true
+  // An --ssh probe's claude registers on the other machine, so its proof is the ssh its launch record names, which herdr found in its pane's foreground this read (sshProcessOf).
+  if (record.remote === true) return true
   if (record.agent !== "claude") return false
   if (!proof || proof.registry === null) return true
   const transcript = str(record.transcript_path)
@@ -604,6 +609,7 @@ export function composeWorkers(
       model: read.model,
       name,
       questions: [],
+      ...(record.remote === true && { remote: true as const }),
       role,
       sessionId,
       startedAt: str(record.started_at) || null,
@@ -745,7 +751,13 @@ export async function listLive(): Promise<Live> {
   const [files, servers] = await Promise.all([readRegistry(), readHerdr()])
   const registry = registryOf(files)
   const records = {
-    sessions: herdrRecords(servers, registry, new Date().toISOString(), codexLaunches()),
+    sessions: herdrRecords(
+      servers,
+      registry,
+      new Date().toISOString(),
+      codexLaunches(),
+      sshLaunches(servers.flatMap((read) => read.panes.flatMap((pane) => pane.label ?? []))),
+    ),
   }
   const workspaces = { workspaces: herdrWorkspaces(servers) }
   const starts = await registeredStarts(
