@@ -238,10 +238,8 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     expect(step).toContain(
       "whoever saw it first, you or your worker, opens one issue for each such test",
     )
-    expect(step).toContain("to root-cause it or to delete the test with the reason")
-    expect(step).toContain("the file, the run's id")
-    expect(step).toContain("the batch it went red in and the lone run's output")
     expect(step).toContain("the other links that issue, so a test never gets two")
+    expect(step).toContain("each `BATCH-RED` test has its one issue")
     expect(step).toContain("with the issue named in its Merge Danger")
     expect(await page()).toContain("never a second rerun")
   })

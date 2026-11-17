@@ -1111,7 +1111,7 @@ export const cmdMerge = (...args: string[]): void => {
   } else if (!together.length) console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
   if (together.length)
     console.log(
-      `BATCH-RED on ${c7}: ${together.join(" ")}; open one issue for each, never a second rerun: the file, this run (the merge of ${headSha.slice(0, 7)} with ${c7}), the batch of ${tests.length} touched tests it went red in, and its lone run's output`,
+      `BATCH-RED on ${c7}: ${together.join(" ")} (the merge of ${headSha.slice(0, 7)} with ${c7}); open one issue for each by code-review-loop's step 2, never a second rerun`,
     )
   if (atHead.length) console.log(`HEAD-RED: ${atHead.join(" ")}`)
   if (atBase.length) console.log(`BASE-RED on ${c7}: ${atBase.join(" ")}`)

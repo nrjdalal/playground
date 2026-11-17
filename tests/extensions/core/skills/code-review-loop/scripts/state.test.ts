@@ -2146,7 +2146,7 @@ test("12j merge: a red only beside the other files, green when it runs again alo
     files.includes(t(3)) ? files.filter((f) => f === t(1)) : [],
   )
   expect(out.lines).toEqual([
-    `BATCH-RED on ${canary}: ${t(1)}; open one issue for each, never a second rerun: the file, this run (the merge of ${head.slice(0, 7)} with ${canary}), the batch of 8 touched tests it went red in, and its lone run's output`,
+    `BATCH-RED on ${canary}: ${t(1)} (the merge of ${head.slice(0, 7)} with ${canary}); open one issue for each by code-review-loop's step 2, never a second rerun`,
   ])
   expect(out.code).toBe(0)
 })
