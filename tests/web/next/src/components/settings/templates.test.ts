@@ -128,7 +128,8 @@ describe("how a new default appears, in the dialog and the docs", () => {
   })
 })
 
-test("the form's backends are Claude Code's, as the settings package lists them", () => {
+// The local model starts through spawn.sh's --backend local alone, so a template offers every other Claude Code backend.
+test("the form's backends are Claude Code's but local, as the settings package lists them", () => {
   const claudeCode = HARNESSES.filter((h) => h.id === "claude-code").flatMap((h) => h.backends)
-  expect(BACKENDS.map((option) => option.value)).toEqual(claudeCode)
+  expect(BACKENDS.map((option) => option.value)).toEqual(claudeCode.filter((b) => b !== "local"))
 })

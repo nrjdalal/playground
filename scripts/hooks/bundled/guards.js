@@ -10888,7 +10888,7 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["claude", "glm", "local"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
@@ -15134,7 +15134,10 @@ var MCP_RESOURCE_TOOLS = new Set([
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
 async function onGlm(raw, environment = process.env) {
-  if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? ""))
+  const base = environment.ANTHROPIC_BASE_URL ?? "";
+  if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(base))
+    return true;
+  if (/^https?:\/\/(?:127\.0\.0\.1|localhost):8000(?:\/|$)/.test(base))
     return true;
   const id = sessionOf(raw);
   if (typeof id !== "string")
@@ -15144,7 +15147,8 @@ async function onGlm(raw, environment = process.env) {
     if (!name || name.includes("/"))
       return false;
     const pin = join14(dataDir(environment), "backends", name);
-    return readPin(await Bun.file(pin).text())?.backend === "glm";
+    const backend = readPin(await Bun.file(pin).text())?.backend;
+    return backend === "glm" || backend === "local";
   } catch {
     return false;
   }
