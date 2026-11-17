@@ -9,10 +9,10 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## spawn.sh
 
 - While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
-  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, a session's own window or a job's own start file, `priority-start.json`, each writer keeping its own file.
+  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, a session's own window for that session's own start or a job's own start file, `priority-start.json`, each writer keeping its own file.
   Each one passes focus, and the gates SPAWN.md's Capacity gate names for a priority start.
 - A session opens a priority window only with `playground priority on <session> --reason "<why>"`, which writes `priority-<session>.json` naming the session, who opened it, the reason and the time, and lifts it with `playground priority off <session> --reason "<why>"`; a window written by hand passes no review of who opened it or why.
-  spawn.sh reads no window's content, so while one stands every `--priority` start passes, not only the start of the session it names: lift it once that start is done.
+  spawn.sh reads a window through `run-slot.sh window`, the queue's own reader, so it passes only the `--priority` start of the session it names, and a priority file that is no JSON object passes none: lift it once that start is done.
   A lead opens one only on the owner's or the dispatcher's word, never on its own.
   Each `on`, `off` and lapse is a line in the data folder's `ops/priority.log`, and ops-tick's `priority-lapse` beat lifts a window still standing after `LAPSE_HOURS` (`packages/scripts/src/playground/priority.ts`), telling ops, so a forgotten window stops passing starts by itself.
   Tests: `bun run test:file tests/packages/scripts/src/playground/priority.test.ts`.
@@ -268,6 +268,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
   `<name>` is the session's name, which run-slot refuses with a one-line reason when it starts with `-`, so the guards and run-slot agree that the command starts after the `--` past it (`slotWords`, [hooks/README.md](hooks/README.md)).
+- A commit queued through run-slot takes the paths you staged by name before you queue it, committed without `-a`, since `commit -a` takes whatever the worktree holds when the queued run starts, and edits made while a commit waited once landed in the wrong commit.
+  Leave every staged file unedited until the commit's hooks finish, since pre-commit's lint-staged runs with `--no-stash` (`lefthook.yml`) and stages each staged file's working-tree content as its hooks run, so an edit made during a slow, queued pre-commit lands in that commit.
 - In single-slot mode (`run-slot.single`) the machine holds 4 units across slots 1 and 2, so beside a big run's 3 units only a 1-unit run fits, by design, and a 2-unit waiter waits for the big to end (measured: it started 22.2 s after it arrived, when the big's 20 s hold ended, and the free slot stood idle the whole hold);
   the rule and its 7 Nov window are written in [ops/README.md](ops/README.md#run-slot).
 - A backlog drains spaced: a small run that has waited past `BACKLOG_WAIT` waits for `burst_held` as medium and big runs do, since load5 shows a draining queue's starts only about a minute later, while a fresh small run starts at once; the rule and its 7 Nov burst are in [ops/README.md](ops/README.md#run-slot).
@@ -280,16 +282,16 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
 - A test's child a reaper adopted is ended the same way once its run's sandbox is gone and its session has ended: `orphansOf` also selects such a process whose working folder, read with `lsof` (`CWDS`) for those rows alone, sits under a `test-sandbox-*` folder that no longer exists, so a live run's child is left alone.
   When the sandbox sits in a session's own temp folder, `/tmp/playground-<name>.<random>` on Linux, a sandbox nested in another run's included, that session's roster row must read `ended`, so a live session's daemon its test run left is kept; a missing row or an unreadable roster keeps it too, and macOS's per-user temp folder names no session.
-  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn.
+  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
-  Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
+  Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing; on Linux each step runs under `bwrap`, as the suite does (`.agents/testing.md`).
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
 - Lefthook's pre-push `test-skills` job runs it when the branch changed a file on its glob since it forked from the local `origin/canary`: every file a step names and the files those load first, the sandbox, a skill's `SKILL.md`, and the code under `scripts/` (`.js`, `.json`, `.py`, `.sh`, `.ts`).
-  The files loaded first are `packages/safe-delete`, test-sandbox's `clock-exempt.ts` and `verify/prebuild.ts`, `state.test.ts`'s `pr-merge/gates.ts`, and the ops jobs test's `render-set.ts` and `session-names.ts` with what they import.
+  The files loaded first are the sandbox's `packages/env/src/data-dir.ts` and `packages/safe-delete`, test-sandbox's `clock-exempt.ts` and `verify/prebuild.ts`, `state.test.ts`'s `pr-merge/gates.ts`, and the ops jobs test's `render-set.ts` and `session-names.ts` with what they import.
   A file one hop further in, such as what `verify/prebuild.ts` imports, is off the glob, and so is a file only a whole-tree step reads (links, em-dashes, kill by name, loopback Postgres, container volumes): a push changing only such a file meets its step in CI.
   It runs through `packages/scripts/src/commit-slot.ts`, so parallel pushes from several worktrees take the commit slot, where it ran 102 s on 16 Nov (measured); a push of docs or briefs alone, no `SKILL.md` among them, skips it, since no file on the glob changed.
   `tests/lefthook.test.ts` reads the `steps` list, so a step's new file fails there until the glob holds it.

@@ -13,6 +13,7 @@ import { factoryRepoOf } from "../playground/setting"
 import { bareTokens, ownerAsk, templatePlaceholders } from "./body"
 import {
   BASE,
+  GATE_CODE,
   gatesOf,
   marksReady,
   mergeLine,
@@ -168,6 +169,15 @@ async function mergeOf(
   }
 }
 
+// Each GATE_CODE file whose working copy in this checkout, uncommitted edits included, differs from canary's tip, after mergeOf fetched it, each path read from the checkout's top (`:(top)`) whatever folder git runs in; a diff that cannot run throws, as a failed fetch does.
+export async function gateCodeOf(git: Run, canary: string): Promise<string[]> {
+  const paths = GATE_CODE.map((path) => `:(top)${path}`)
+  const diff = await git(["diff", "--name-only", canary, "--", ...paths])
+  if (diff.code !== 0)
+    throw new Error(`git diff of the gate code exited ${diff.code}: ${diff.stderr.trim()}`)
+  return diff.stdout.split("\n").filter(Boolean)
+}
+
 // The gate's own folders, whose code, docs and tests name sample tokens (SUITE_LINE), so the grep leaves them out and a sample stays unfound.
 export const GATE_OWN = ["packages/scripts/src/pr-merge", "tests/packages/scripts/src/pr-merge"]
 
@@ -303,6 +313,7 @@ export async function factsOf(
     })),
   )
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid, view.headRefName)
+  const gateCode = await gateCodeOf(git, canary)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
   const template = await git(["show", `${view.headRefOid}:${PR_TEMPLATE}`])
   const placeholders = template.code === 0 ? templatePlaceholders(template.stdout) : []
@@ -322,6 +333,7 @@ export async function factsOf(
     conflicts,
     draft: view.isDraft,
     files,
+    gateCode,
     head: view.headRefOid,
     held,
     labels: (view.labels ?? []).map((label) => label.name),

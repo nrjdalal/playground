@@ -504,7 +504,7 @@
   `127` that no window could ask and `143` that the window got no answer in 5 minutes,
   and its poster is told.
   The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
-  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
+  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, each card's delete on its own so one that throws leaves the rest deleted, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
   `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
   The constraint means even a swapped CA vouches for `*.localhost` alone.
@@ -573,7 +573,7 @@
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
-  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
+  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`, never a version such as `GLM-4.7`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
   or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 

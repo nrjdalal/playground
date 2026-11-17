@@ -65,6 +65,19 @@ describe("orgOf", () => {
     expect(() => orgOf({ PLAYGROUND_PEER_KEY: "~/.ssh/cluster" })).toThrow()
   })
 
+  // a peer's password item takes its name lowercased, so two names equal but for case would share one (#2535)
+  test("two peers whose names differ only in case are refused, and so is a name listed twice", () => {
+    expect(() =>
+      orgOf({ PLAYGROUND_PEERS: "Spark-9DFB=you@10.0.0.2, spark-9dfb=me@10.0.0.3" }),
+    ).toThrow("each peer name is listed once, in any case")
+    expect(() =>
+      orgOf({ PLAYGROUND_PEERS: "machine-b=you@10.0.0.2, machine-b=me@10.0.0.3" }),
+    ).toThrow()
+    expect(
+      orgOf({ PLAYGROUND_PEERS: "machine-b=you@10.0.0.2, machine-c=you@10.0.0.2" }).cluster.peers,
+    ).toHaveLength(2)
+  })
+
   test("a work org that is not a GitHub login is refused, so it adds nothing to the search", () => {
     expect(() => orgOf({ WORK_GITHUB_ORG: "example is:closed" })).toThrow()
   })
