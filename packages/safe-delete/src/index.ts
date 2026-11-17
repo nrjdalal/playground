@@ -1087,6 +1087,27 @@ export function removeScratch(dir: string, tmp = tmpdir()): string | null {
   return null
 }
 
+// Each folder makeScratch made directly in tmp whose name starts with prefix and whose mtime is olderThanMs before now, removed through removeScratch, so an unmarked folder stays whatever its name or age: each removed path with its bytes.
+export function removeStale(
+  prefix: string,
+  tmp: string,
+  olderThanMs: number,
+  now: Date,
+): { bytes: number; path: string }[] {
+  const root = real(tmp)
+  const removed: { bytes: number; path: string }[] = []
+  for (const entry of entriesOf(root)) {
+    const at = join(root, entry.name)
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue
+    const st = lstat(at)
+    if (!st || st.mtimeMs >= now.getTime() - olderThanMs) continue
+    if (!lstat(join(at, MARKER))?.isFile()) continue
+    const { size } = measure(at)
+    if (removeScratch(at, root) === null) removed.push({ bytes: size, path: at })
+  }
+  return removed
+}
+
 // The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB; deleting the trash is cheap, so no load holds either, and a batch whose real path is not a folder directly in the trash root is skipped.
 export function purgeTrash(
   trash: string,

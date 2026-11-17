@@ -27,7 +27,7 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 ```
 
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
-A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again.
+A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again, and clears its rehearsal's scratch folder (the rehearsal's **Clear**).
 
 Run the new-user gate on it through run-slot as `ops-ship`, `~/.playground/ops/run-slot.sh ops-ship -- bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus. Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 A ship the owner approves past a FAIL takes the dispatcher's Inbox decision whose title or text names `vX.Y.Z` and whose approved row reads `Ship everything now, skip the new-user check this once` verbatim (`WAIVER_LABEL`), the label the dispatcher offers for it: write `New-user gate at <sha>: waived by Inbox <id>` in place of the FAIL line, the failing lines still named below it, since `ship:merge` refuses a FAIL line beside a waiver too and reads the decision through `playground ask get` ([pr-merge's README, ship:merge](../../../packages/scripts/src/pr-merge/README.md#shipmerge)).
@@ -36,7 +36,7 @@ Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (st
 
 ## Rehearse an invitee's update
 
-When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, and nothing outside it changes but the real data folder's `ops/run-slot*` files, which its own run-slot calls write. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs. The rehearsal's install, build and `playground update` each run through run-slot as `ops-ship`, by run-slot's real absolute path (`<real home>/.playground/ops/run-slot.sh ops-ship -- <command>`), since the throwaway `HOME` holds no ops folder; the containment of step b, written `env -i ...` in the blocks below, stays on the command after `--`.
+When the candidate changes the update path anything in the ship's step 5 runs (`update.ts` itself, `link-skills.sh`, an ops job, the Dashboard roll), rehearse the update an invitee runs, from the last tag to the candidate, before the ship's step 3: a machine whose own checkout cannot take the update yet still gets the proof. The whole rehearsal lives in one scratch folder, which `bun run --silent ship:rehearsal new` makes in your temp folder and prints, named `ops-r<suffix>` with safe-delete's marker in it, and nothing outside it changes but the real data folder's `ops/run-slot*` files, which its own run-slot calls write. A `--to` run stops before the Dashboard roll, which `playground update` reaches only without a tag, and with no `jobs.json` in the throwaway data folder its ops-restart step restarts nothing, so the rehearsal proves the checkout-side path: the fetch, the tag checkout, `link-skills.sh`, the install and the build. The roll proves itself on a dashboard stack of its own; an ops job's restart proves itself in the ship's step 5, on the machine that holds the jobs. The rehearsal's install, build and `playground update` each run through run-slot as `ops-ship`, by run-slot's real absolute path (`<real home>/.playground/ops/run-slot.sh ops-ship -- <command>`), since the throwaway `HOME` holds no ops folder; the containment of step b, written `env -i ...` in the blocks below, stays on the command after `--`.
 
 a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bare into the scratch folder, then clone that mirror and, in the clone, fetch the pinned `$CANARY` from the repository, merge it into `main` with `--no-ff` (the merge commit a ship makes), and tag the merge with the tag this ship will cut.
    Clone the mirror with `-b main`, since the mirror's HEAD is `canary`, where the merge is a no-op (`Already up to date.`) and the tag lands on the candidate itself (the v0.0.29 rehearsal).
@@ -101,6 +101,10 @@ d. **Update.** Run the update, then `playground doctor`, still contained:
 
 The rehearsal's result goes into the ship PR's body beside the new-user gate's line, as `Invitee rehearsal at <sha>: PASS` on a line of its own, `<sha>` the full `$CANARY`; a candidate that changes no update path writes `Invitee rehearsal at <sha>: not needed` there, since step 3's `ship:merge` reads one of the two.
 
+**Clear.** Clear the scratch folder with `bun run ship:rehearsal clear <scratch>` once step 3's `ship:merge` has merged, since the ship PR's body cites its before and after files and a held ship reruns from it; a ship that fails or stops clears it as its freeze ends.
+The clear removes the whole folder, about 140,000 entries, past `playground rm`'s cap of 5,000 files or 2 GB, and keeps any folder without the marker, outside your temp folder or not named `ops-r` (`packages/scripts/src/ship/rehearsal.ts`); nightly-clean removes a marked one left over a day, so a rehearsal that dies frees its disk by the next night.
+Done when `ship:rehearsal clear` printed `removed <scratch>`, or kept it as `is not a folder`, since a clear or the nightly clean already removed it, or as `not a folder made in the temp folder`, since on Linux a session started again since `new` has a new temp folder, and the nightly clean removes that folder after a day.
+
 ## 2. Open the ship PR
 
 Write the body to a file first. It opens with two or three plain sentences the owner reads first, then `## What ships`, one line per PR since the last tag (`gh release view --json tagName --jq .tagName` names it).
@@ -128,7 +132,9 @@ Fix each reason it names, then run it again, at most every 5 minutes while a che
 - A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`, its id from `gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,conclusion`.
 - A second red, or a FAIL gate line, holds the ship: name the failing test (`gh run view <run id> --log-failed`; `gh api --allow-escape-sequences repos/<owner>/<repo>/actions/jobs/<job id>/logs` reads a job's whole log, where `--log-failed` cuts it) or step in the ship PR and up the chain, and end the freeze by step 1's line for a ship that stops.
 
-Done when `ship:merge` printed `merged #<n> at <sha>` and `MERGE` holds that commit.
+Then clear the rehearsal's scratch folder (the rehearsal's **Clear**).
+
+Done when `ship:merge` printed `merged #<n> at <sha>`, `MERGE` holds that commit and, when a rehearsal ran, its **Clear** is done.
 
 ## 4. Tag and publish
 
