@@ -26,14 +26,16 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
-import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
+import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { lockRootOf } from "../pr-merge/merge"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
+import { bootCheckPass } from "./boot-check"
 import { dashboardWatch } from "./dashboard-watch"
 import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
@@ -1133,6 +1135,22 @@ export const ghAuth =
     await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
   }
 
+// boot-check: once per boot, never a wake, inside BOOT_MS (bootCheckPass in boot-check.ts): a merge lock taken before the boot let go, git fsck on the shared store, a gate-owned worktree's torn object repaired, and every other break one line to Ops' waiter queue and one Inbox alert; a check that never finished inside BOOT_MS is one line to Ops after it.
+export const bootCheck = (lockRoot?: string) => async (ctx: Context) => {
+  const boot = await readBootTime(ctx.run)
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  const ops = managerOf(roster?.agents, "ops")
+  await bootCheckPass(ctx, boot, ctx.now.getTime() - boot < BOOT_MS, {
+    alert: async (title, text) => {
+      await postAlert(ctx, title, text)
+    },
+    lockRoot: lockRoot ?? lockRootOf(),
+    tell: (text) => queueWaiterLine(ctx, ops, text),
+  })
+}
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -1173,6 +1191,12 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
   { cron: "* * * * *", name: "gh-auth", run: ghAuth(), to: "ops and the Inbox, once a failure" },
+  {
+    cron: "* * * * *",
+    name: "boot-check",
+    run: bootCheck(),
+    to: "ops, and the Inbox for a break it leaves",
+  },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

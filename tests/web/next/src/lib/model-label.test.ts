@@ -44,15 +44,15 @@ describe("dispatcherLabel", () => {
 })
 
 describe("providerOf", () => {
-  test("a model is its maker's by the vendored map: Claude Anthropic's, GLM Z.ai's, Qwen Alibaba's, Ornith Ornith's, and anything else has no maker", () => {
+  test("a Claude model is Anthropic's and a GLM model Z.ai's, by their backends; an org/repo id is its org's; a bare id or anything else has no maker", () => {
     expect(providerOf("claude-opus-5-5")).toBe("anthropic")
     expect(providerOf("claude-haiku-4-5-20251001")).toBe("anthropic")
     expect(providerOf("claude-opus-5-5[1m]")).toBe("anthropic")
     expect(providerOf("glm-5.3-flash")).toBe("zai")
-    expect(providerOf("Ornith-1.5-122B-NVFP4")).toBe("ornith")
-    expect(providerOf("ornith-ai/Ornith-1.5-35B")).toBe("ornith")
-    expect(providerOf("Qwen/Qwen3-30B-A3B")).toBe("alibaba")
-    expect(providerOf("qwen3-coder")).toBe("alibaba")
+    expect(providerOf("ornith-ai/Ornith-1.5-122B-NVFP4")).toBe("ornith-ai")
+    expect(providerOf("RecursiveSI/Thing-7B")).toBe("RecursiveSI")
+    expect(providerOf("Ornith-1.5-122B-NVFP4")).toBeNull()
+    expect(providerOf("../x/y")).toBeNull()
     expect(providerOf("gpt-9")).toBeNull()
     expect(providerOf(null)).toBeNull()
   })

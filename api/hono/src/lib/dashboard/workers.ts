@@ -10,6 +10,7 @@ import {
   seatOf,
   setSessionNames,
 } from "@packages/config/kinds"
+import type { LocalModel } from "@packages/config/org"
 import { env } from "@packages/env/api-hono"
 import { dataDir } from "@packages/env/data-dir"
 import { readSessionNames } from "@packages/settings"
@@ -198,6 +199,8 @@ const rankOf = (worker: { name: string; role: Role }): number => {
   return worker.role === "manager" ? 0 : 1
 }
 
+export type LocalLoad = { label: string; reason?: string; state: "failed" | "loading" }
+
 export type Worker = {
   // Set on the session the roster seats as the assistant (rosterFacts), whose view gets a chat as a dispatcher's does.
   assistant?: true
@@ -218,6 +221,10 @@ export type Worker = {
   lastActiveAt: string | null
   lifecycle: string
   light: Light
+  // A hosted session's load of a local model a pick started: loading until its server serves it and the session switches, or failed in plain words; absent when none, and the next model pick clears it.
+  localLoad?: LocalLoad
+  // A hosted session's local models (org.ts), which its composer's menu offers beside the cloud ones; absent when config names none.
+  localModels?: LocalModel[]
   // Set while its Claude login has expired, as its transcript's API error or ops-unstick's read of its pane says: Add account, then a restart, clears it.
   loginExpired?: true
   // The model id its newest reply came from (claude-opus-5-5); null when none is known.
