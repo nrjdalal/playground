@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file
 import { existsSync, realpathSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, loadavg } from "node:os"
 import { join } from "node:path"
 
 import { getSessionNames, type NamedKind, setSessionNames } from "@packages/config/kinds"
@@ -23,6 +23,8 @@ import {
   leftLines,
   planStart,
   rollOutcome,
+  type RollOutcome,
+  rollTimedOut,
   runStart,
   runStatus,
   startFailure,
@@ -31,6 +33,7 @@ import {
   VERBS,
   verbArgv,
   VIEW_SERVER,
+  waitingLine,
   waitOutcome,
   wantsHelp,
 } from "./plan"
@@ -45,6 +48,7 @@ import {
   liveSessions,
   NO_CHECKOUT,
   opsDashboard,
+  prebuildQueued,
   probe,
   supervisorRunning,
 } from "./probe"
@@ -317,25 +321,30 @@ const roll = async (): Promise<number> => {
   const from = { log: Bun.file(log).size, results: Bun.file(results).size }
   await Bun.write(join(state, "roll-now"), "")
   console.log("Building…")
-  let shown = "building"
+  let shown = "Building"
+  let outcome: RollOutcome = { phase: "building" }
+  const end = (done: { done: string; ok: boolean }) => {
+    ;(done.ok ? console.log : console.error)(done.done)
+    return done.ok ? 0 : 1
+  }
   const until = Date.now() + ROLL_MS
   while (Date.now() < until) {
-    const outcome = rollOutcome(
-      await linesSince(log, from.log),
-      await linesSince(results, from.results),
-    )
-    if ("done" in outcome) {
-      ;(outcome.ok ? console.log : console.error)(outcome.done)
-      return outcome.ok ? 0 : 1
-    }
-    if (outcome.phase !== shown) {
-      shown = outcome.phase
-      console.log(outcome.phase === "switching" ? "Switching…" : "Going back…")
+    outcome = rollOutcome(await linesSince(log, from.log), await linesSince(results, from.results))
+    if ("done" in outcome) return end(outcome)
+    const line =
+      outcome.phase === "waiting"
+        ? waitingLine(outcome.why, loadavg()[1]!)
+        : { building: "Building", "going back": "Going back", switching: "Switching" }[
+            outcome.phase
+          ]
+    // a waiting line whose load figure alone moved is the same wait, so it prints once
+    if (line.replace(/load5 is [\d.]+/, "") !== shown.replace(/load5 is [\d.]+/, "")) {
+      shown = line
+      console.log(`${line}…`)
     }
     await pause(2000)
   }
-  console.error("Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log")
-  return 1
+  return end(rollTimedOut(outcome, loadavg()[1]!, prebuildQueued()))
 }
 
 // playground update [--to <tag>]: the release skill's step 5 on this checkout (update.ts), each peer's clone to the same commit by the Dashboard's .env, which names the peers the System panel reads, at the main checkout's place under home whichever worktree runs it (peer-sync.ts), then the roll.
