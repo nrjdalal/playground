@@ -130,13 +130,26 @@ describe("cloneState", () => {
 })
 
 describe("syncPeers", () => {
-  test("a clean clone on main reads, then fetches, checks out the sha detached and installs, each a fixed ssh argv, and prints at <sha7>", async () => {
+  test("a clean clone on main reads, then fetches, finds no commit of its own, checks out the sha detached and installs, each a fixed ssh argv, and prints at <sha7>", async () => {
     const { calls, run } = stubSsh()
     expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
     expect(calls).toEqual([
       [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "status", "--porcelain", "--branch"],
       [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "worktree", "list", "--porcelain"],
       [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "fetch", "-q", "origin", "--tags"],
+      [
+        ...SSH,
+        "you@10.0.0.2",
+        "git",
+        "-C",
+        CLONE,
+        "rev-list",
+        "-n",
+        "1",
+        "HEAD",
+        "--not",
+        "--remotes",
+      ],
       [...SSH, "you@10.0.0.2", "git", "-C", CLONE, "checkout", "-q", "--detach", SHA],
       [
         ...SSH,
@@ -157,7 +170,7 @@ describe("syncPeers", () => {
   test("a clone a sync left on a detached HEAD moves again", async () => {
     const { calls, run } = stubSsh({ status: { out: "## HEAD (no branch)\n" } })
     expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
-    expect(calls).toHaveLength(5)
+    expect(calls).toHaveLength(6)
   })
 
   test("a clone with local changes is left as it is: the read alone, never a fetch, checkout or reset", async () => {
@@ -167,6 +180,24 @@ describe("syncPeers", () => {
     expect(await sync(ONE, run)).toEqual(["peer spark-b: local changes, left as it is"])
     expect(calls).toHaveLength(1)
     expect(calls.flat()).not.toContain("reset")
+  })
+
+  test("a detached clone holding a commit no remote branch holds is left as it is, which its clean status never shows: no checkout, no install", async () => {
+    const { calls, run } = stubSsh({
+      status: { out: "## HEAD (no branch)\n" },
+      "rev-list": { out: "fedcba9876543210fedcba9876543210fedcba98\n" },
+    })
+    expect(await sync(ONE, run)).toEqual([
+      "peer spark-b: commits of its own at fedcba9, left as it is",
+    ])
+    expect(calls).toHaveLength(4)
+    expect(calls.flat()).not.toContain("checkout")
+    expect(calls.flat()).not.toContain("install")
+    const failed = stubSsh({ "rev-list": { code: 128, out: "fatal: bad revision 'HEAD'\n" } })
+    expect(await sync(ONE, failed.run)).toEqual([
+      "peer spark-b: commit read failed: fatal: bad revision 'HEAD'",
+    ])
+    expect(failed.calls).toHaveLength(4)
   })
 
   test("a clone on another branch is left as it is", async () => {
@@ -235,7 +266,7 @@ describe("syncPeers", () => {
       },
     })
     expect(await sync(ONE, run)).toEqual(["peer spark-b: at 0123456"])
-    expect(calls).toHaveLength(5)
+    expect(calls).toHaveLength(6)
   })
 
   test("a peer ssh cannot reach prints why, and the next peer still moves", async () => {

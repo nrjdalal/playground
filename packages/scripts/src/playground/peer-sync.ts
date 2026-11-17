@@ -39,6 +39,7 @@ const ssh = (key: string | undefined, target: string, words: string[]) => [
   "-o",
   "BatchMode=yes",
   "-o",
+  // 5 where peerArgv waits 3, since the System panel reads every few seconds and an update reaches a peer once
   "ConnectTimeout=5",
   target,
   ...words,
@@ -48,9 +49,22 @@ const read = (clone: string) => ["git", "-C", clone, "status", "--porcelain", "-
 // a worktree cut from the clone (a replay run) reads its hooks through the clone's git dir, so a move under it changes what its later runs see
 const worktrees = (clone: string) => ["git", "-C", clone, "worktree", "list", "--porcelain"]
 
+const fetch = (clone: string) => ["git", "-C", clone, "fetch", "-q", "origin", "--tags"]
+// a commit on the clone's HEAD that no remote branch holds, which a detached HEAD's status never shows and a checkout would drop
+const ownCommit = (clone: string) => [
+  "git",
+  "-C",
+  clone,
+  "rev-list",
+  "-n",
+  "1",
+  "HEAD",
+  "--not",
+  "--remotes",
+]
+
 // The move, a step at a time, so a failure names its step; each touches the clone alone, bun's own cache aside, which the clone's first install made.
 const steps = (clone: string, sha: string): [string, string[]][] => [
-  ["fetch", ["git", "-C", clone, "fetch", "-q", "origin", "--tags"]],
   ["checkout", ["git", "-C", clone, "checkout", "-q", "--detach", sha]],
   // no run slot: no factory run shares a peer yet, so nice lets the peer's own work go first; a worker placed on a peer brings run-slot, and this install takes a slot then
   [
@@ -109,6 +123,12 @@ const syncPeer = async (
       .filter((block) => /^worktree /m.test(block) && !/^prunable/m.test(block)).length - 1
   if (others > 0)
     return `${others} ${others === 1 ? "worktree uses" : "worktrees use"} the clone, left as it is`
+  const fetched = await run(ssh(key, target, fetch(clone)), STEP_MS)
+  if (fetched.code !== 0) return `fetch failed: ${firstLine(fetched.out, fetched.code)}`
+  const own = await run(ssh(key, target, ownCommit(clone)), READ_MS)
+  if (own.code !== 0) return `commit read failed: ${firstLine(own.out, own.code)}`
+  const ownSha = own.out.trim()
+  if (ownSha) return `commits of its own at ${ownSha.slice(0, 7)}, left as it is`
   for (const [name, words] of steps(clone, sha)) {
     const done = await run(ssh(key, target, words), STEP_MS)
     if (done.code === 0) continue
