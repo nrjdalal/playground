@@ -166,6 +166,20 @@ describe("a direct write into the extensions root is refused, naming the owner's
     ],
     ["through bash -c", `bash -c "rm ${LIST}"`],
     ["through env", `env FOO=1 rm ${LIST}`],
+    // #2397: a runner's folder option hides no delete, since its program reads in the folder the option names
+    ["a relative path past bun run's --cwd", `bun run --cwd ${DATA} rm -rf extensions`],
+    [
+      "a relative path past bun run's --cwd in a variable",
+      `D=${DATA}; bun run --cwd $D rm -rf extensions`,
+    ],
+    ["a relative path past bunx's --cwd", `bunx --cwd=${DATA} rm -rf extensions`],
+    ["a relative path past bun exec's --cwd", `bun exec --cwd ${DATA} 'rm -rf extensions'`],
+    ["a relative path past bun run's --cwd attached", `bun run --cwd=${DATA} rm -rf extensions`],
+    ["a relative path past pnpm's --dir", `pnpm --dir ${DATA} exec rm -rf extensions`],
+    ["a relative path past pnpm's --dir attached", `pnpm --dir=${DATA} exec rm -rf extensions`],
+    ["a relative path past pnpm exec's own -C", `pnpm exec -C ${DATA} rm -rf extensions`],
+    ["a relative path past pnpm dlx's -C", `pnpm dlx -C ${DATA} rm -rf extensions`],
+    ["a relative path past pnpm's -C", `pnpm -C ${DATA} exec rm -rf extensions`],
   ])("%s", async (_, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-extensions-write hook refuses")

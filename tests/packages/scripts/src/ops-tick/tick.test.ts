@@ -12,23 +12,27 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
 import { setSessionNames } from "../../../../../packages/config/src/kinds"
+import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
 import {
   autoEnd,
   BEATS,
   type Context,
   cronMatches,
   cycle,
+  ghAuth,
   idleCompact,
+  KEYRING_LOCKED,
   leadOf,
   nextDue,
   resultOf,
   runSlotHold,
   runner,
   switchAccount,
+  TOKEN_INVALID,
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { NO_CHECKOUT } from "../../../../../packages/scripts/src/playground/probe"
@@ -2338,5 +2342,134 @@ describe("other-logins", () => {
     const again = fake(ops, at(15, 51), failing)
     await expect(beat("other-logins").run(again.ctx)).rejects.toThrow()
     expect(again.sent.map((m) => m.to)).toEqual(["ops"])
+  })
+})
+
+// gh's sign-in probe (#2526): a fake gh in a scratch folder first on PATH, run as the real run does, a hang stopped by its timeout.
+describe("gh-auth", () => {
+  const ID = "f167b6b9-f570-4f15-a4b4-eb15b8c4876f"
+  const ME = userInfo().username
+  const bin = mkdtempSync(join(tmpdir(), "gh-auth-bin-"))
+  dirs.push(bin)
+  const DAY_AGO = new Date(2026, 9, 18, 9, 0)
+  // gh auth status's lines for a token that does not read, as measured, its store in brackets
+  const failing = (store: string) =>
+    `echo "github.com" >&2; echo "  X Failed to log in to github.com account ${ME} (${store})" >&2; echo "  - The token in ${store} is invalid." >&2; exit 1`
+  const PASSING = `echo "  ✓ Logged in to github.com account ${ME} (keyring)"; exit 0`
+  const HANGING = "exec sleep 30"
+
+  const kernAt = (date: Date) =>
+    `{ sec = ${Math.floor(date.getTime() / 1000)}, usec = 0 } Sat Nov 14 05:25:54 2026\n`
+
+  // One beat run against a gh whose script is body, the machine up since boot; gh's calls are counted, and every other run answers by answers.
+  const probe = async (
+    ops: string,
+    now: Date,
+    body: string,
+    answers: Answers = {},
+    boot = DAY_AGO,
+  ) => {
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\n${body}\n`)
+    chmodSync(join(bin, "gh"), 0o755)
+    const made = fake(ops, now, { ...ASKED, "kern.boottime": kernAt(boot), ...answers })
+    const others = made.ctx.run
+    let calls = 0
+    made.ctx.run = async (argv, timeoutMs, stdin) => {
+      if (argv[0] !== "gh") return others(argv, timeoutMs, stdin)
+      calls++
+      const proc = Bun.spawn(argv, {
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        stderr: "pipe",
+        stdout: "pipe",
+        timeout: timeoutMs,
+      })
+      const [out, err] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      return { code: await proc.exited, out: out + err }
+    }
+    await ghAuth(300)(made.ctx)
+    return { ...made, calls }
+  }
+
+  const waiter = (ops: string): string[] =>
+    existsSync(join(ops, "outbox", "ops-stuck-alert.jsonl"))
+      ? readFileSync(join(ops, "outbox", "ops-stuck-alert.jsonl"), "utf8")
+          .trimEnd()
+          .split("\n")
+          .map((l) => JSON.parse(l).text)
+      : []
+  const result = (ops: string) =>
+    JSON.parse(readFileSync(join(ops, "tick", "gh-auth.json"), "utf8"))
+  const resolves = (runs: string[][]) => runs.filter((argv) => argv.includes("resolve"))
+
+  test("runs each minute as a beat", () => {
+    expect(beat("gh-auth").cron).toBe("* * * * *")
+  })
+
+  test("a failing gh, a hanging one, then a passing one raise one alert, then clear it", async () => {
+    const ops = scratch()
+    const failed = await probe(ops, at(10, 0), failing("/home/me/.config/gh/hosts.yml"))
+    expect(waiter(ops)).toEqual([`gh cannot read GitHub: ${TOKEN_INVALID}`])
+    expect(alertTitles(failed.inputs)).toEqual([`gh cannot read GitHub: ${TOKEN_INVALID}`])
+    expect(result(ops)).toMatchObject({ by: OLD.ops, id: ID, ok: false, reason: TOKEN_INVALID })
+
+    const hung = await probe(ops, at(10, 1), HANGING)
+    expect(hung.calls).toBe(1)
+    expect(waiter(ops)).toHaveLength(1)
+    expect(hung.inputs).toEqual([])
+    expect(result(ops)).toMatchObject({ id: ID, ok: false, reason: GH_HANGS })
+
+    const passed = await probe(ops, at(10, 2), PASSING)
+    expect(waiter(ops)).toEqual([
+      `gh cannot read GitHub: ${TOKEN_INVALID}`,
+      "gh reads GitHub again",
+    ])
+    expect(resolves(passed.runs)).toHaveLength(1)
+    expect(resolves(passed.runs)[0]).toContain(ID)
+    expect(result(ops)).toEqual({ at: at(10, 2).toISOString(), ok: true })
+  })
+
+  test("probes hourly while gh reads, and each minute in the first 10 after boot", async () => {
+    const ops = scratch()
+    await probe(ops, at(10, 0), PASSING)
+    expect((await probe(ops, at(10, 1), PASSING)).calls).toBe(0)
+    expect((await probe(ops, at(11, 0), PASSING)).calls).toBe(1)
+    expect((await probe(ops, at(11, 1), PASSING, {}, new Date(2026, 9, 19, 10, 55))).calls).toBe(1)
+  })
+
+  test("a failed probe that cannot post its alert posts it at the next one", async () => {
+    const ops = scratch()
+    const unposted = await probe(ops, at(10, 0), failing("keyring"), {
+      "ask new": { code: 1, err: "down\n" },
+    }).catch((error: Error) => error)
+    expect(unposted).toBeInstanceOf(Error)
+    expect(result(ops)).toMatchObject({ ok: false })
+    const posted = await probe(ops, at(10, 1), failing("keyring"))
+    expect(alertTitles(posted.inputs)).toHaveLength(1)
+    expect(waiter(ops)).toHaveLength(1)
+  })
+
+  test("a keyring store with no desktop session names the desktop sign-in, else the token", async () => {
+    const seated = JSON.stringify([{ seat: "seat0", user: ME }])
+    const greeter = JSON.stringify([
+      { seat: "seat0", user: "gdm" },
+      { seat: null, user: ME },
+    ])
+    const cases: [string, Answers, string][] = [
+      ["default", { loginctl: greeter }, KEYRING_LOCKED],
+      ["keyring", { loginctl: greeter }, KEYRING_LOCKED],
+      ["default", { loginctl: seated }, TOKEN_INVALID],
+      ["/home/me/.config/gh/hosts.yml", { loginctl: greeter }, TOKEN_INVALID],
+      ["default", { loginctl: { code: 99 }, who: `${ME} ttys001 Nov 17 09:00` }, KEYRING_LOCKED],
+      ["default", { loginctl: { code: 99 }, who: `${ME} console Nov 17 09:00` }, TOKEN_INVALID],
+      ["default", { loginctl: { code: 99 }, who: { code: 1 } }, TOKEN_INVALID],
+    ]
+    for (const [store, answers, reason] of cases) {
+      const ops = scratch()
+      await probe(ops, at(10, 0), failing(store), answers)
+      expect([store, result(ops).reason]).toEqual([store, reason])
+    }
   })
 })

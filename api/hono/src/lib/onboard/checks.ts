@@ -5,7 +5,7 @@ import { site } from "@packages/config/site"
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { type DashboardSource, currentSource, readFixtureMachine } from "@/lib/dashboard/fixture"
-import { chromiumSteps, readCaTrust } from "@/lib/dev/ca-trust"
+import { CA_POLICY, chromiumSteps, readCaTrust, trustedWhere } from "@/lib/dev/ca-trust"
 import { FALLBACK_PORT, isFallback, portlessDir, proxyDown, proxyPort } from "@/lib/dev/proxy"
 import { type FixId, fixtureFixed } from "@/lib/onboard/fix-ids"
 import { machine, type Reader } from "@/lib/onboard/machine"
@@ -209,11 +209,16 @@ const portlessCheck = async (
   return okRow("portless", need, "ready")
 }
 
-// Linux's browsers, which trust portless's CA only from their own stores (ca-trust.ts): MISSING while a Firefox profile does not, with the ca-trust fix; optional with no certutil to read it, which the app cannot install, so first run never waits on a tool for a browser the owner may not use; optional while a Chromium-family browser is on PATH, whose own import no file shows, so the row names it.
+// Linux's browsers, which trust portless's CA only from their own stores (ca-trust.ts): MISSING while a Firefox profile does not, with the ca-trust fix; optional with no certutil to read it, which the app cannot install, so first run never waits on a tool for a browser the owner may not use; optional while a Chromium-family browser is on PATH that the chromium-ca policy does not cover, whose own import no file shows, so the row names it.
 const certificateCheck = async (reader: Reader, env: Env): Promise<Check | null> => {
   const ca = join(portlessDir(env), "ca.pem")
   if (env.PORTLESS === "0" || !reader.exists(ca)) return null
-  const read = await readCaTrust(ca, env.HOME || homedir(), reader)
+  const read = await readCaTrust(
+    ca,
+    env.HOME || homedir(),
+    reader,
+    reader.exists(CA_POLICY) ? CA_POLICY : null,
+  )
   const need = "the Dashboard in your browser"
   const chromium = read.chromium.length > 0 ? ` ${chromiumSteps(read.chromium, ca)}` : ""
   const row = (
@@ -237,11 +242,7 @@ const certificateCheck = async (reader: Reader, env: Env): Promise<Check | null>
     )
   if (read.chromium.length > 0)
     return row("optional", "check your browser", chromiumSteps(read.chromium, ca))
-  return okRow(
-    "Certificate",
-    need,
-    read.firefox.length > 0 ? "trusted in Firefox" : "no browser found",
-  )
+  return okRow("Certificate", need, trustedWhere(read))
 }
 
 // Settings: a login named by Set up settings, whose step comes after these checks, so its row never holds them back.

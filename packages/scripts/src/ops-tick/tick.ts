@@ -1,5 +1,6 @@
 import { realpathSync, statfsSync } from "node:fs"
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
+import { userInfo } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -24,6 +25,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
 import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
@@ -1051,6 +1053,79 @@ const relayWatch = async (ctx: Context) => {
   }
 }
 
+export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
+export const TOKEN_INVALID = "gh token invalid"
+const BOOT_MS = 10 * 60_000
+const HOUR_MS = 60 * 60_000
+
+// Whether the owner is signed in at the desktop: loginctl lists a session of this user's on a seat, else, with no loginctl (macOS), who lists this user on the console or a display; true when neither reads, so an unread desktop never blames the keyring.
+const desktopUp = async (ctx: Context): Promise<boolean> => {
+  const me = userInfo().username
+  const sessions = await ctx.run(["loginctl", "list-sessions", "-o", "json"]).catch(() => null)
+  if (sessions?.code === 0)
+    try {
+      const list = JSON.parse(sessions.out) as { seat?: unknown; user?: unknown }[]
+      return list.some((s) => s.user === me && typeof s.seat === "string" && s.seat !== "")
+    } catch {
+      // not loginctl's JSON: who reads it instead
+    }
+  const who = await ctx.run(["who"]).catch(() => null)
+  if (who?.code !== 0) return true
+  return lines(who.out).some((line) => {
+    const [user, tty = ""] = line.split(/\s+/)
+    return user === me && /^(?:console|seat\d+|:\d+)$/.test(tty)
+  })
+}
+
+// One probe of gh's sign-in, null when it reads, else why not: past timeoutMs gh hangs, and a failure whose account line names the keyring as its store ("default" when the keyring gave no token, as a locked one gives none) with no desktop session up is the locked keyring's. ctx.run is async, so a hang holds no other beat.
+const ghProbe = async (ctx: Context, timeoutMs: number): Promise<string | null> => {
+  const start = performance.now()
+  const probe = await ctx
+    .run(["gh", "auth", "status", "-h", "github.com"], timeoutMs)
+    .catch(() => ({ code: 1, out: "" }))
+  if (performance.now() - start >= timeoutMs) return GH_HANGS
+  if (probe.code === 0) return null
+  return /account \S+ \((?:default|keyring)\)/.test(probe.out) && !(await desktopUp(ctx))
+    ? KEYRING_LOCKED
+    : TOKEN_INVALID
+}
+
+// gh-auth: probes gh's sign-in each minute for BOOT_MS after boot or wake and while it fails, else hourly, its last result in tick/gh-auth.json, which ghRead reads so no caller floods a broken gh. The first failure sends one line to Ops' waiter queue and posts one Inbox alert naming the fix; it stays quiet while gh keeps failing, and once gh reads again says so to Ops and resolves the alert.
+export const ghAuth =
+  (timeoutMs = GH_TIMEOUT_MS) =>
+  async (ctx: Context) => {
+    const path = join(ctx.ops, "tick", "gh-auth.json")
+    const last = (await readJson(path).catch(() => null)) as GhAuth | null
+    const now = ctx.now.getTime()
+    const booting = now - (await readUpSince(ctx.run)) < BOOT_MS
+    if (last?.ok && !last.id && !booting && now - Date.parse(last.at) < HOUR_MS) return
+    const reason = await ghProbe(ctx, timeoutMs)
+    const at = ctx.now.toISOString()
+    const alert = last?.id && last.by ? { by: last.by, id: last.id } : null
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    const ops = managerOf(roster?.agents, "ops")
+    if (reason === null) {
+      await writeAtomic(path, JSON.stringify({ at, ok: true, ...alert }))
+      if (last?.ok === false) await queueWaiterLine(ctx, ops, "gh reads GitHub again")
+      if (!alert) return
+      await resolveOwn(ctx, alert.id, alert.by, "gh reads GitHub again")
+      await writeAtomic(path, JSON.stringify({ at, ok: true }))
+      return
+    }
+    const failing: GhAuth = { at, ok: false, reason, ...alert }
+    await writeAtomic(path, JSON.stringify(failing))
+    if (last?.ok !== false) await queueWaiterLine(ctx, ops, `gh cannot read GitHub: ${reason}`)
+    if (alert) return
+    const posted = await postAlert(
+      ctx,
+      `gh cannot read GitHub: ${reason}`,
+      "- 🔑 Every gh read waits until gh reads again, and this clears by itself then.",
+    )
+    await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
+  }
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -1088,6 +1163,7 @@ export const BEATS: Beat[] = [
   { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
+  { cron: "* * * * *", name: "gh-auth", run: ghAuth(), to: "ops and the Inbox, once a failure" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

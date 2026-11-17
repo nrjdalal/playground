@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
+  CA_MAX_BYTES,
   HEX64,
   INSTALL_TEXT,
   ROOT_DIR,
@@ -9,6 +10,8 @@ import {
   ROOT_STEPS,
   type RootStep,
 } from "@packages/config/inbox"
+
+import { portlessDir } from "../dev/proxy"
 
 // This checkout's copies, which the install copies from and a step's stale check reads.
 export const SCRIPTS_DIR = join(import.meta.dir, "root")
@@ -28,10 +31,26 @@ const sha256Of = async (path: string): Promise<string> =>
 export const repoScripts = async (dir: string = SCRIPTS_DIR): Promise<RootScript[]> =>
   Promise.all(ROOT_NAMES.map(async (name) => ({ name, sha256: await sha256Of(join(dir, name)) })))
 
-// Pure: the install's argv, or a refusal: every listed script once in order, each hash 64 lowercase hex, the scripts folder this checkout's, and nothing else.
+// The Dashboard's CA, the one portless serves under: what an install card pins and its Approve copies.
+export const caFile = (): string => join(portlessDir(), "ca.pem")
+
+const PEM_BLOCK = /-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----/g
+
+// The sha256 of a CA file's one certificate as DER, the fingerprint a browser shows and the install checks; undefined when the file is missing, over CA_MAX_BYTES or holds other than one certificate, as the install would refuse it.
+export const caPin = async (path: string = caFile()): Promise<string | undefined> => {
+  const file = Bun.file(path)
+  if (!(await file.exists()) || file.size > CA_MAX_BYTES) return undefined
+  const blocks = [...(await file.text()).matchAll(PEM_BLOCK)]
+  if (blocks.length !== 1) return undefined
+  const der = Buffer.from(blocks[0]![1]!.replace(/\s/g, ""), "base64")
+  return new Bun.CryptoHasher("sha256").update(der).digest("hex")
+}
+
+// Pure: the install's argv, or a refusal: every listed script once in order, each hash 64 lowercase hex, the scripts folder this checkout's, then the CA's path and hash when the card pinned one, and nothing else.
 export const installArgv = (
   scripts: readonly RootScript[],
   src: string = SCRIPTS_DIR,
+  ca?: { path: string; sha256: string },
 ): string[] => {
   const names = scripts.map((script) => script.name)
   if (names.join(" ") !== ROOT_NAMES.join(" "))
@@ -39,6 +58,8 @@ export const installArgv = (
   const bad = scripts.find((script) => !HEX64.test(script.sha256))
   if (bad) throw new Error(`${bad.name}'s hash is not 64 lowercase hex`)
   if (!src.startsWith("/")) throw new Error("The scripts folder is not an absolute path")
+  if (ca && !HEX64.test(ca.sha256)) throw new Error("The CA's hash is not 64 lowercase hex")
+  if (ca && !ca.path.startsWith("/")) throw new Error("The CA's path is not absolute")
   return [
     ...PKEXEC,
     "/bin/sh",
@@ -47,6 +68,7 @@ export const installArgv = (
     "sh",
     src,
     ...scripts.map((script) => script.sha256),
+    ...(ca ? [ca.path, ca.sha256] : []),
   ]
 }
 

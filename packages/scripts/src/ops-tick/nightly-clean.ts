@@ -1,4 +1,4 @@
-import { existsSync, statfsSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, statfsSync } from "node:fs"
 import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -8,6 +8,7 @@ import {
   archiveUnlanded,
   bundleToTrash,
   quarantine,
+  removeStale,
   type Roots,
   unpushed,
 } from "@packages/safe-delete"
@@ -19,12 +20,13 @@ import {
   cleanWorktree,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { reapersOf } from "../orphan-reapers"
+import { REHEARSAL_PREFIX } from "../ship/rehearsal"
 import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line with the free disk before and after, which the System page also shows, and one outbox line to ops naming each removal. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear); then one log line with the free disk before and after, which the System page also shows, and one outbox line to ops naming each removal. It asks no decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
@@ -42,7 +44,7 @@ export type Prs = {
 export type Ref = { name: string; sha: string; subject?: string }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the clock the cap's pacing reads, and the sleep it waits on.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the temp folders a rehearsal is made in, the clock the cap's pacing reads, and the sleep it waits on.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
@@ -57,6 +59,7 @@ export type NightDeps = {
   ) => Promise<Prs | null>
   roots: (data: string, checkout: string) => Promise<string[]>
   sleep: (ms: number) => Promise<void>
+  temps: () => string[]
   trashRoots: () => Roots
   turbo: string
 }
@@ -289,6 +292,27 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
     freed += info.size
   }
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
+}
+
+// Each folder ship:rehearsal made in a temp folder that has stood over a day, removed whole, so a rehearsal that died before its clear frees its disk by the next night; the line saying how many and their size, and each removed path.
+export function pruneRehearsals(temps: string[], now: Date): { gone: string[]; line: string } {
+  const removed = temps.flatMap((tmp) => removeStale(REHEARSAL_PREFIX, tmp, 86_400_000, now))
+  const bytes = removed.reduce((sum, r) => sum + r.bytes, 0)
+  return {
+    gone: removed.map((r) => r.path),
+    line: `removed ${removed.length} (${gbOf(bytes)} GB)`,
+  }
+}
+
+// The temp folders a session makes a rehearsal in: macOS's per-user one, which every session shares; else on Linux each real /tmp/playground-<name>.<suffix> folder this user owns, since spawn.sh makes one at each launch.
+export function tempFolders(tmp = "/tmp"): string[] {
+  const mac = Bun.spawnSync(["getconf", "DARWIN_USER_TEMP_DIR"], { stderr: "ignore" })
+  if (mac.exitCode === 0 && mac.stdout.toString().trim()) return [mac.stdout.toString().trim()]
+  const uid = process.getuid?.()
+  return readdirSync(tmp, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && /^playground-[^/]+\.[^/.]+$/.test(e.name))
+    .map((e) => join(tmp, e.name))
+    .filter((dir) => lstatSync(dir, { throwIfNoEntry: false })?.uid === uid)
 }
 
 // rm quarantines at most 3 paths a session per minute; the beat paces every move its worktree step makes under that cap, cleanWorktree's own included, waiting before a 4th inside the minute so rm's tripwire stays quiet, retries a refused move once the minute is out, and names what a bound on the total wait leaves for the next run. Other beats run beside this one (tick.ts starts each due beat on its own), so the wait holds up nothing.
@@ -779,6 +803,11 @@ export const nightlyClean =
       return `removed ${gone.length} containers${gone.length ? ` (${gone.join(", ")})` : ""}; ${left.length ? left.join("; ") : "none kept"}; image prune ${images.code === 0 ? "ran" : "failed"}, build cache prune ${cache.code === 0 ? "ran" : "failed"}`
     })
     await step("turbo", () => pruneTurbo(deps.turbo, ctx.now))
+    await step("rehearsals", async () => {
+      const pruned = pruneRehearsals(deps.temps(), ctx.now)
+      removed.push(...pruned.gone.map((path) => `rehearsal ${path}`))
+      return pruned.line
+    })
     const purged = trashSince(
       await Bun.file(join(ctx.ops, "log", "trash-purge.log"))
         .text()
@@ -834,7 +863,7 @@ export const readPrs = (
   return true
 }
 
-// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, the shared turbo cache, and a real sleep.
+// This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, the shared turbo cache, its temp folders, and a real sleep.
 const liveNight: NightDeps = {
   cleanup: cleanupDeps,
   free: (dir) => {
@@ -878,6 +907,7 @@ const liveNight: NightDeps = {
     return read.refusal === undefined ? rootsOf(read.settings, checkout, homedir()) : []
   },
   sleep: (ms) => Bun.sleep(ms),
+  temps: tempFolders,
   trashRoots: machineRoots,
   turbo: TURBO_CACHE,
 }

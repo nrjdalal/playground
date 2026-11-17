@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 
-import { POLL_SECONDS, runCiWait } from "../../../../../packages/scripts/src/playground/ci-wait"
+import {
+  machineGh,
+  POLL_SECONDS,
+  runCiWait,
+} from "../../../../../packages/scripts/src/playground/ci-wait"
+import { withGhDown } from "../../../../gh-down"
 
 const REPO = "acme/factory"
 const A = "a".repeat(40)
@@ -227,5 +232,14 @@ describe("playground ci-wait (PG-2113)", () => {
       ["7"],
     )
     expect(code).toBe(0)
+  })
+})
+
+// a waiter polls every 5 minutes for each worker, so it skips gh while ops-tick's gh sign-in probe reads failed
+test("machineGh answers gh unreachable while the gh sign-in probe reads failed", async () => {
+  expect(await withGhDown(() => machineGh(["api", "user"]))).toEqual({
+    code: 1,
+    stderr: "gh unreachable: gh token invalid",
+    stdout: "",
   })
 })

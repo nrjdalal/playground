@@ -180,7 +180,7 @@
   A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
   A page loaded with a card's anchor in its URL (`#needs-you-<id>`, a link or a reload) leaves every shelf shut, so only a click on a chip or a sidebar row opens one for its card (`shelfToOpen` in `web/next/src/lib/inbox.ts`, the hook's `TargetSource`).
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
-  Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
+  Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`, an `--ssh` probe's `runs on another machine over ssh`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, herdr.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `SESSIONS_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
   The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `playground ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
@@ -480,20 +480,37 @@
   EOF
   ```
 
-- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule); `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs), and `why` (`rootSchema`).
+- A `root` decision asks the owner to run a step that needs root on this Linux machine, so the owner answers the desktop's own password window and never types a command (the **terminal** rule), or on a peer, whose password a secret card carries (below);
+  `step` is `install` or a name from `ROOT_STEPS` (`packages/config/src/inbox.ts`, today `bwrap-userns`, the AppArmor profile Claude Code's sandbox needs, and `chromium-ca`, the browser policy below),
+  and `why` (`rootSchema`).
+  Each entry holds what the step does and how to undo it, and its card shows both.
   Every listed step is one fixed script in `api/hono/src/lib/system/root/`, and the card takes no argument, path or command: every other key is refused, so no text from a card reaches root.
-  An `install` card is posted with no `scripts`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it (`rootScripts`), and refuse a poster's own list that differs, or any list on a step card, so the card shows the very bytes its Approve installs.
+  An `install` card is posted with no `scripts` and no `ca`: `postItem` and `editItem` fill each script's name and sha256 as this checkout holds it, and `ca`, the sha256 of the DER inside the Dashboard's CA (`caFile()`, `ca.pem` in portless's folder) when it has one (`caPin`, `rootScripts`).
+  They refuse a poster's own list or `ca` that differs, and either one on a step card, so the card shows the very bytes its Approve installs; an install card with no `ca` says the browser step refuses until a later one carries it.
   Its card shows `INSTALL_TEXT` (`packages/config/src/inbox.ts`) whole beside each script's hash, and Approve runs `pkexec --disable-internal-agent /bin/sh -c <INSTALL_TEXT> sh <this checkout's root/ folder> <each hash>` (`installArgv`, `api/hono/src/lib/system/root.ts`):
   the text refuses a hash that is not 64 lowercase hex, copies each script into a root-owned staging folder, checks each copy against its hash, and moves them into `/usr/local/lib/playground/root/` (root, 0755), or refuses with nothing moved, so a source changed after approval never installs.
+  With a `ca`, the argv adds the CA's path, read from this machine at Approve and never from the card, and the card's hash: the text reads at most 16 KB of that file once (`CA_MAX_BYTES`), refuses a file over it or holding other than one certificate before openssl reads it,
+  turns that copy into DER with `openssl x509` and keeps it at `/usr/local/lib/playground/data/portless-ca.der` (`ROOT_CA`, root, 0644) only if its sha256 matches the card's, or refuses with nothing moved.
   A step card's Approve first checks the installed script, its folder and the folder above are owned by root, changed by root alone and no link, and that the script matches this checkout's copy (`installedRefusal`), so a stale install refuses with `approve a new install card`; then it runs `pkexec --disable-internal-agent /usr/local/lib/playground/root/<step>` (`stepArgv`).
+  A card with `machine`, a name from org.ts's cluster (`PLAYGROUND_PEERS`) and never a host, runs on that machine over ssh instead (`api/hono/src/lib/system/peer-root.ts`, [ADR 0027](../adr/0027-a-peer-runs-its-listed-root-steps-with-no-password.md)); a name the cluster does not hold, or one no secret store item can take (`peerSecret`), is refused at post.
+  Its install keeps no CA. It reads the machine's admin password from `playground-<machine>-sudo`, the item a `secret` card with a keychain sink writes, refusing with nothing run when it is not there.
+  It copies the scripts to `~/.cache/playground-root/` there as the ssh user, then runs `ssh … sudo -k -S -p '' /bin/sh -c <PEER_INSTALL_TEXT> sh <stage> <each hash>` with the password on stdin alone (`peerInstallArgv`).
+  It deletes the item on every path, the result line ending `deleted <item>`, and cuts the value out of every line it keeps.
+  `PEER_INSTALL_TEXT` reads no stdin, refuses when sudo names no user but root, runs `INSTALL_TEXT`, then writes one polkit action per listed script, pinned to its installed path (`PEER_POLICY`), and a rule that answers yes to those actions alone for that user (`PEER_RULE`).
+  A peer step reads the script's owner, mode, kind and sha256 there first (`peerReadArgv`, `peerInstalledRefusal`), then runs `ssh -o BatchMode=yes <target> pkexec --disable-internal-agent <path>` with no password; `126` and `127` read that the rule did not let it run, and `255` that ssh could not reach the machine.
   Approve takes `seen`, as a guard's does, and Edit is refused.
   It runs only on a Linux stack that reads this machine (`routers/inbox.ts`); a stack showing test data refuses it, running nothing.
   The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window,
   `127` that no window could ask and `143` that the window got no answer in 5 minutes,
   and its poster is told.
   The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
+  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
-  A password window here cannot answer for a peer machine (`org.cluster.peers`), so no card runs a root step on one yet.
+  `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
+  The constraint means even a swapped CA vouches for `*.localhost` alone.
+  It refuses when no DER is kept, and when another file in either folder already sets the same policy, naming that file, since two files setting it conflict.
+  A new CA means a new install card, then the step again: until then every `.localhost` page in those browsers fails with `ERR_CERT_AUTHORITY_INVALID`.
+  Helium takes the policy at its next start, and may show Managed by your organization in its menu.
 
   ```bash
   bun run ask new <<'EOF'

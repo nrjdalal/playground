@@ -1,4 +1,5 @@
 // playground ci-wait <pr> [--repo <owner/name>]: one wait on a PR's CI for every session, so none writes its own loop, which once read a required check GitHub had not yet created as done. It waits until each of pr:merge's REQUIRED_CHECKS exists at the PR's current head and has concluded, then prints each conclusion and exits 0 when all passed, 1 when any did not, 1 at once on a PR GitHub reads as conflicting with its base (it starts no pull_request run on one), and 2 on a PR or repo GitHub does not know; it reads over REST every POLL_SECONDS (the github rule), waits out a rate limit's reset, and waits afresh on a head that moves.
+import { ghSkipped } from "../gh-read"
 import { PASSED, REQUIRED_CHECKS, REQUIRED_WORKFLOWS } from "../pr-merge/gates"
 
 export const POLL_SECONDS = 300
@@ -12,6 +13,14 @@ export type CiWaitDeps = {
   out: (line: string) => void
   repo: () => Promise<string>
   sleep: (seconds: number) => Promise<void>
+}
+
+// gh on this machine, skipped while ghSkipped names why, so a waiter polls a broken gh no more than the gh sign-in probe does.
+export const machineGh: CiWaitDeps["gh"] = (args) => {
+  const skipped = ghSkipped()
+  if (skipped) return { code: 1, stderr: skipped, stdout: "" }
+  const run = Bun.spawnSync(["gh", ...args], { stderr: "pipe", stdout: "pipe" })
+  return { code: run.exitCode, stderr: run.stderr.toString(), stdout: run.stdout.toString() }
 }
 
 type Run = { conclusion: string | null; id: number; name: string; status: string }

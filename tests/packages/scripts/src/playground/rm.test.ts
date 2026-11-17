@@ -17,6 +17,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
+import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
 import {
   clonesOf,
   processesOf,
@@ -1893,4 +1894,46 @@ test("removePath charges the name it is given: an ended checker's set spends its
   expect(await runRm([path], deps)).toBe(0)
   expect(existsSync(path)).toBe(false)
   expect(told.filter((line) => !line.startsWith(`${checker}:`))).toEqual([])
+})
+
+// a removal once sat 308 s on gh's PR list against a locked keyring (#2526)
+test("--worktree refuses while gh is unreachable, and keeps the worktree", async () => {
+  const { deps, home, root } = machine()
+  const { wt } = otherRepo(root, home)
+  const session = { ...deps, prState: async () => ({ unreachable: GH_HANGS }) }
+  expect(await rmSaid(["--worktree", wt], session)).toEqual({
+    code: 1,
+    said: [
+      `playground: gh unreachable: can't check the branch's PR; retry once gh answers (${GH_HANGS})`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result reads failed", async () => {
+  const { home, root } = machine()
+  const { wt } = otherRepo(root, home)
+  const bin = join(root, "bin")
+  const called = join(root, "called")
+  file(join(bin, "gh"), `#!/bin/sh\ntouch "${called}"\n`)
+  chmodSync(join(bin, "gh"), 0o755)
+  const data = join(root, "data")
+  file(
+    join(data, "ops", "tick", "gh-auth.json"),
+    JSON.stringify({ at: new Date().toISOString(), ok: false, reason: "gh token invalid" }),
+  )
+  const saved = { data: process.env.PLAYGROUND_DATA_DIR, path: process.env.PATH }
+  process.env.PATH = `${bin}:${process.env.PATH}`
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    const deps = rmDeps(wt)
+    expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
+    expect(deps.merged("HEAD", wt)).toBeNull()
+    expect(deps.defaultBranch(wt)).toBeNull()
+    expect(existsSync(called)).toBe(false)
+  } finally {
+    process.env.PATH = saved.path
+    if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = saved.data
+  }
 })
