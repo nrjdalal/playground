@@ -19,9 +19,8 @@ import { dirname, join } from "node:path"
 import { costOf } from "../../../api/hono/src/lib/usage/prices"
 import { kindOf } from "../../../packages/config/src/kinds"
 import { verdictsOf } from "../../../packages/config/src/verdicts"
-import { dataDirOf } from "../../../packages/env/src/data-dir"
+import { dataDirOf, herdrDir } from "../../../packages/env/src/data-dir"
 import { GH_TIMEOUT_MS, ghDown } from "../../../packages/scripts/src/gh-read"
-import { herdrDir } from "../../../packages/scripts/src/ops-herdr/herdr"
 import STATUSES from "../../roster-statuses.json"
 
 const CACHE_TTL_S = 300
