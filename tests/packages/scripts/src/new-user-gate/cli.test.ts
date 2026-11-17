@@ -38,6 +38,8 @@ import {
   type Step,
   strayStandIns,
   usageWords,
+  verdictLine,
+  verdictPost,
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
@@ -509,6 +511,50 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
     )
     expect(resultLine(SHA, [])).toBe(`New-user gate at ${SHA}: FAIL`)
     expect(resultLine(SHA, all().slice(1))).toBe(`New-user gate at ${SHA}: FAIL`)
+  })
+
+  // a PR touching the installer or first run merges only on this word at its head, and INCONCLUSIVE waits like FAIL there (PG-2496).
+  test("the PR's verdict reads PASS, FAIL or INCONCLUSIVE at the sha7, naming each step that did not pass", () => {
+    expect(verdictLine(SHA, all())).toBe(`## NewUserGate · PASS at a11fb88 · 7 of 7 passed`)
+    expect(
+      verdictLine(SHA, [
+        ...all().slice(1),
+        { ...step("Usage", false, true), detail: "spawn refused" },
+      ]),
+    ).toBe(
+      `## NewUserGate · INCONCLUSIVE at a11fb88 · 6 of 7 passed, 1 inconclusive; 7. Usage: spawn refused`,
+    )
+    expect(
+      verdictLine(SHA, [
+        ...all().slice(2),
+        step("Usage", false, true),
+        { ...step("Scripts", false), detail: "no group" },
+      ]),
+    ).toBe(
+      `## NewUserGate · FAIL at a11fb88 · 5 of 7 passed, 1 inconclusive; 6. Usage; 7. Scripts: no group`,
+    )
+    expect(verdictLine(SHA, all().slice(1))).toBe(
+      `## NewUserGate · FAIL at a11fb88 · 6 of 7 passed; stopped after 6 of 7 steps`,
+    )
+  })
+
+  test("--pr posts the verdict from a file, its literal path passed to gh pr comment --body-file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "gate-verdict-"))
+    try {
+      const line = verdictLine(SHA, all())
+      const argv = verdictPost(2496, line, dir)
+      expect(argv).toEqual([
+        "gh",
+        "pr",
+        "comment",
+        "2496",
+        "--body-file",
+        join(dir, "new-user-verdict-2496.md"),
+      ])
+      expect(readFileSync(join(dir, "new-user-verdict-2496.md"), "utf8")).toBe(`${line}\n`)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 
   test("STEP_COUNT is the number of steps main checks", async () => {
