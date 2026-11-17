@@ -1844,13 +1844,19 @@ LOCAL_URL=http://127.0.0.1:8000
 LOCAL_SERVED=local
 if [ "$BACKEND" = local ]; then
   listed=$(curl -sS --max-time 5 "$LOCAL_URL/v1/models" 2>&1) || refuse "the local model at $LOCAL_URL did not answer in 5 s ($listed): ask Ops to bring it up, or start it on --backend glm or claude"
-  python3 -I -c 'import json, sys
+  LOCAL_LEN=$(python3 -I -c 'import json, sys
 try:
-    ids = [m.get("id") for m in json.loads(sys.argv[1]).get("data", [])]
+    card = [m for m in json.loads(sys.argv[1]).get("data", []) if m.get("id") == sys.argv[2]]
 except (ValueError, AttributeError, TypeError):
-    ids = []
-sys.exit(0 if sys.argv[2] in ids else 1)' "$listed" "$LOCAL_SERVED" ||
+    card = []
+if not card:
+    sys.exit(1)
+n = card[0].get("max_model_len")
+print(n if type(n) is int and n > 16384 else "")' "$listed" "$LOCAL_SERVED") ||
     refuse "the local model at $LOCAL_URL serves no model named $LOCAL_SERVED: ask Ops which model is up, or start it on --backend glm or claude"
+  # Claude Code assumes 1M for a model name it does not know, so the session declares the server's own window, its card's max_model_len, less 8192 for the reply that shares it; a card without a number above twice that takes 120000, K's 131072 less that room and more.
+  LOCAL_CONTEXT=120000
+  [ -n "$LOCAL_LEN" ] && LOCAL_CONTEXT=$((LOCAL_LEN - 8192))
   LOCAL_CAP=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/local-cap.ts" "${LOCAL_URL##*:}") 2>&1) || refuse "$LOCAL_CAP"
 fi
 if [ "$BACKEND" = glm ]; then
@@ -2029,9 +2035,9 @@ if [ "$BACKEND" = glm ]; then
 fi
 # The local model maps every model Claude Code asks for to the served name, on its loopback port and a placeholder token, the tool search deferred as on GLM. Its chat template switches thinking on or off alone, so the launch line labels the effort it passes.
 if [ "$BACKEND" = local ]; then
-  LAUNCH=": effort ${EFFORT:-high}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=$LOCAL_URL ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_SONNET_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_HAIKU_MODEL=$LOCAL_SERVED ENABLE_TOOL_SEARCH=true $LAUNCH"
+  LAUNCH=": effort ${EFFORT:-high}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=$LOCAL_URL ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_SONNET_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_HAIKU_MODEL=$LOCAL_SERVED CLAUDE_CODE_MAX_CONTEXT_TOKENS=$LOCAL_CONTEXT ENABLE_TOOL_SEARCH=true $LAUNCH"
   MODEL=$LOCAL_SERVED
-  # K serves a 131072-token context (its max-model-len), so a local session compacts well inside it.
+  # The compact window, capped at the declared one above, so a session on a smaller server compacts at its window instead.
   WINDOW=120000
 fi
 # Every kind compacts in one window, context.window (400k by default), GLM's included (a local session's is 120k, set above), the window the factory's settings give a session spawn.sh did not start; it was read with the model settings above.
