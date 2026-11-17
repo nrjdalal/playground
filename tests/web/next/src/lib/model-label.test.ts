@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 
-import { dispatcherLabel, modelName, providerOf } from "../../../../../web/next/src/lib/model-label"
+import {
+  dispatcherLabel,
+  initialsOf,
+  localName,
+  modelName,
+  providerOf,
+  rowModelName,
+  rowProvider,
+  showsEffort,
+} from "../../../../../web/next/src/lib/model-label"
 
 describe("modelName", () => {
   test("a model id as people say it, with its date and context suffix dropped, else the id as written", () => {
@@ -44,16 +53,55 @@ describe("dispatcherLabel", () => {
 })
 
 describe("providerOf", () => {
-  test("a model is its maker's by the vendored map: Claude Anthropic's, GLM Z.ai's, Qwen Alibaba's, Ornith Ornith's, and anything else has no maker", () => {
+  test("a Claude model is Anthropic's and a GLM model Z.ai's, by their backends; an org/repo id is its org's; a bare id or anything else has no maker", () => {
     expect(providerOf("claude-opus-5-5")).toBe("anthropic")
     expect(providerOf("claude-haiku-4-5-20251001")).toBe("anthropic")
     expect(providerOf("claude-opus-5-5[1m]")).toBe("anthropic")
     expect(providerOf("glm-5.3-flash")).toBe("zai")
-    expect(providerOf("Ornith-1.5-122B-NVFP4")).toBe("ornith")
-    expect(providerOf("ornith-ai/Ornith-1.5-35B")).toBe("ornith")
-    expect(providerOf("Qwen/Qwen3-30B-A3B")).toBe("alibaba")
-    expect(providerOf("qwen3-coder")).toBe("alibaba")
+    expect(providerOf("ornith-ai/Ornith-1.5-122B-NVFP4")).toBe("ornith-ai")
+    expect(providerOf("RecursiveSI/Thing-7B")).toBe("RecursiveSI")
+    expect(providerOf("Ornith-1.5-122B-NVFP4")).toBeNull()
+    expect(providerOf("../x/y")).toBeNull()
     expect(providerOf("gpt-9")).toBeNull()
     expect(providerOf(null)).toBeNull()
+  })
+})
+
+// A local session's model is served as the bare name local (spawn.sh's LOCAL_SERVED); the API gives the repo id that server serves as its localModel (PG-2642).
+describe("a local session's row", () => {
+  const local = { localModel: "ornith-ai/Ornith-1.5-122B-NVFP4", model: "local" }
+  const claude = { model: "claude-opus-5-5" }
+
+  test("localName reads a repo id as its family and size, else its family, else the name as written", () => {
+    expect(localName("ornith-ai/Ornith-1.5-122B-NVFP4")).toBe("Ornith 122B")
+    expect(localName("ornith-ai/Ornith-1.5-35B-A3B-NVFP4")).toBe("Ornith 35B")
+    expect(localName("Qwen/Qwen3-30B-A3B")).toBe("Qwen3 30B")
+    expect(localName("RecursiveSI/Thing")).toBe("Thing")
+  })
+
+  test("the row names a local model by its served repo and local, local alone while none is known, and any other model by modelName", () => {
+    expect(rowModelName(local)).toBe("Ornith 122B, local")
+    expect(rowModelName({ model: "local" })).toBe("local")
+    expect(rowModelName(claude)).toBe("Opus 5.5")
+    expect(rowModelName({ model: null })).toBeNull()
+  })
+
+  test("a local row's maker is its served repo's org, none while no repo is known, and any other row's is providerOf's", () => {
+    expect(rowProvider(local)).toBe("ornith-ai")
+    expect(rowProvider({ model: "local" })).toBeNull()
+    expect(rowProvider(claude)).toBe("anthropic")
+  })
+
+  test("a local row shows no effort, since its chat template turns thinking on or off itself; a Claude row does", () => {
+    expect(showsEffort(local)).toBe(false)
+    expect(showsEffort(claude)).toBe(true)
+  })
+
+  test("initialsOf gives a chip's two letters from a model's name, its first capitalised", () => {
+    expect(initialsOf("Ornith 122B, local")).toBe("Or")
+    expect(initialsOf("local")).toBe("Lo")
+    expect(initialsOf("GLM 5.3 Flash")).toBe("GL")
+    expect(initialsOf("gpt-9")).toBe("Gp")
+    expect(initialsOf(null)).toBe("")
   })
 })

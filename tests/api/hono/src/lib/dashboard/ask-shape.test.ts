@@ -4,6 +4,7 @@ import { join } from "node:path"
 import {
   ASK_EXAMPLES,
   isAskExampleKind,
+  progressRefusal,
   PROSE_LIMIT,
   shapeHints,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
@@ -100,6 +101,14 @@ describe("shapeHints", () => {
       ])
     expect(shapeHints(ask(`\`\`\`diff\n${wide}\n\`\`\`\n\n\`\`\`\n${wide}\n\`\`\``))).toEqual([
       { kind: "wide", longest: ASK_CODE_COLUMNS + 2 },
+    ])
+  })
+
+  test("skips a progress block's lines, which the card draws at its own width (PG-2617)", () => {
+    const wide = `Sign-in | 40 | ${"x".repeat(ASK_CODE_COLUMNS)} | 1:00 am`
+    expect(shapeHints(ask(`\`\`\`progress\n${wide}\n\`\`\`\n\n- One line.`))).toEqual([])
+    expect(shapeHints(ask(`\`\`\`progress\n${wide}\n\`\`\`\n\n\`\`\`\n${wide}\n\`\`\``))).toEqual([
+      { kind: "wide", longest: [...wide].length },
     ])
   })
 
@@ -262,4 +271,40 @@ test("asks.md shows each template's text as it is", async () => {
       )
     }
   }
+})
+
+describe("progressRefusal", () => {
+  const update = (text: string) => ({ kind: "update", preview: { outcome: "merged", text } })
+  const block = (...lines: string[]) =>
+    ["```progress", ...lines, "```", "", "- One line."].join("\n")
+
+  test("passes a block whose every line reads, on an ask and a read-only update (PG-2617)", () => {
+    const good = block("Mac reads | 100 | Reads every Mac | 9:10 pm", "Sign-in | 0 | Next | ")
+    expect(progressRefusal(ask(good))).toBeNull()
+    expect(progressRefusal(update(good))).toBeNull()
+    expect(progressRefusal(ask("```\nA | 500 | not a progress block\n```"))).toBeNull()
+  })
+
+  test("names the block and line with other than 4 fields, and the line itself", () => {
+    const refusal = progressRefusal(update(block("A | 10 | x | y", "B | 20 | no eta")))
+    expect(refusal).toContain('progress block 1, line 2, holds 3 fields, not 4: "B | 20 | no eta"')
+    expect(refusal).toContain("name | percent | what's going on | ETA")
+  })
+
+  test("names a percent outside 0 to 100, in the second block", () => {
+    const text = `${block("A | 10 | x | y")}\n\n${block("A | 10 | x | y", "B | 140 | x | y")}`
+    expect(progressRefusal(ask(text))).toContain(
+      'progress block 2, line 2, has a percent outside 0 to 100: "B | 140 | x | y"',
+    )
+  })
+
+  test("refuses an empty block, and leaves a draft's plain words alone", () => {
+    expect(progressRefusal(ask("```progress\n```"))).toContain("progress block 1 holds no line")
+    expect(
+      progressRefusal({
+        kind: "draft",
+        preview: { text: block("B | 140 | x | y"), type: "draft" },
+      }),
+    ).toBeNull()
+  })
 })

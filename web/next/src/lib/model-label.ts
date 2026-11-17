@@ -1,7 +1,6 @@
 // Pure, with no app import, so verify's checks read the same labels the dashboard draws.
+import { BACKEND_MAKERS, LOCAL_SERVED, MAKER_NAME } from "@packages/config/console"
 import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
-
-import MODEL_ICONS from "./model-icons.json"
 
 type ModelFacts = { effort: string | null; model: string | null }
 
@@ -33,14 +32,52 @@ export const modelName = (model: string | null): string | null => {
 // Pure: whether a model id is one of Z.ai's GLM models, whose usage the Claude windows do not reflect.
 export const isGlmModel = (model: string | null): boolean => Boolean(model && GLM_ID.test(model))
 
-// A model's maker, by its models.dev provider id (anthropic, zai), whose logo its row draws (PROVIDER_ICONS).
+// A model's maker, whose icon its row draws (useMakerIcon): its backend's for a Claude or GLM model, else the Hugging Face org of a local model's repo id.
 export type Provider = string
 
-const MAKERS = MODEL_ICONS.makers.map(({ id, match }) => ({ id, pattern: new RegExp(match, "i") }))
+const REPO_ORG = new RegExp(`^(${MAKER_NAME})/`)
 
-// Pure: who makes a model, for its row's logo, by the vendored map's first pattern it matches (bun run model-icons writes it), else null.
+// Pure: who makes a model, for its row's icon: Anthropic for a Claude id, Z.ai for a GLM one, the org of an org/repo id (a local model's, as config or the local server names it), else null, which draws the initials chip.
 export const providerOf = (model: string | null): Provider | null =>
-  (model && MAKERS.find(({ pattern }) => pattern.test(model))?.id) || null
+  !model
+    ? null
+    : model.startsWith("claude-")
+      ? BACKEND_MAKERS.claude
+      : isGlmModel(model)
+        ? BACKEND_MAKERS.glm
+        : (REPO_ORG.exec(model)?.[1] ?? null)
+
+// A row's model, and for a session on the local model the repo its server serves (the API's localModel).
+type RowModel = { localModel?: string; model: string | null }
+
+// Pure: a local model's name as people say it, from its repo id: its family and size (ornith-ai/Ornith-1.5-122B-NVFP4 reads Ornith 122B), else its family alone.
+export const localName = (repo: string): string => {
+  const name = repo.split("/").at(-1) ?? repo
+  const [family = name, ...rest] = name.split(/[-_]/)
+  const size = rest.find((part) => /^\d+(\.\d+)?[bm]$/i.test(part))
+  return size ? `${family} ${size.toUpperCase()}` : family
+}
+
+// Pure: the name a row and its tooltip give its model: a local session's served repo and local (Ornith 122B, local), local alone while its server names none, else modelName's.
+export const rowModelName = ({ localModel, model }: RowModel): string | null =>
+  model === LOCAL_SERVED
+    ? localModel
+      ? `${localName(localModel)}, ${LOCAL_SERVED}`
+      : LOCAL_SERVED
+    : modelName(model)
+
+// Pure: whose icon a row draws: a local session's served repo's maker, none while its server names none, else its model's.
+export const rowProvider = ({ localModel, model }: RowModel): Provider | null =>
+  providerOf(model === LOCAL_SERVED ? (localModel ?? null) : model)
+
+// Pure: whether a row shows its effort: a local model's chat template turns thinking on or off itself, so the effort its launch passes claims nothing.
+export const showsEffort = ({ model }: RowModel): boolean => model !== LOCAL_SERVED
+
+// Pure: the two letters a maker with no icon draws in its chip, the first two of its model's name as people say it, the first capitalised (Or for Ornith 122B, local); none with no name.
+export const initialsOf = (name: string | null): string => {
+  const letters = (name ?? "").replace(/[^A-Za-z0-9]/g, "").slice(0, 2)
+  return `${letters.charAt(0).toUpperCase()}${letters.slice(1)}`
+}
 
 // Pure: a dispatcher no label names (chatLabel's fallback), from its newest reply alone: that reply's model and effort, each word capitalised (Opus 5.5 High, GLM 5.3 Flash High). With no reply read yet, or its session down, the slot's label: Alpha for the primary, Bravo for the other.
 export const dispatcherLabel = (facts: ModelFacts | null, primary: boolean): string => {

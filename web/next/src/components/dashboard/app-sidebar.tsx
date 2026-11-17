@@ -154,12 +154,16 @@ import {
 } from "@/lib/dashboard"
 import { useDrafted } from "@/lib/drafts"
 import { inboxWaitOf, inboxWaiting, useInbox } from "@/lib/inbox"
+import { useMakerIcon } from "@/lib/model-icons"
 import {
   dispatcherLabel,
+  initialsOf,
   isGlmModel,
   modelName,
-  providerOf,
   type Provider,
+  rowModelName,
+  rowProvider,
+  showsEffort,
 } from "@/lib/model-label"
 import { needsYouAnchor, sessionWaiting, targetNeedsYou } from "@/lib/needs-you"
 import {
@@ -182,7 +186,7 @@ import {
   useGroupOpen,
   useGroupOrder,
 } from "@/lib/sidebar-groups"
-import { effortIcon, PR_TONES, providerIcon, prTone } from "@/lib/status-icons"
+import { effortIcon, PR_TONES, prTone } from "@/lib/status-icons"
 import {
   glanceReadings,
   isStale,
@@ -474,8 +478,6 @@ function ReadingItem({ reading }: { reading: Reading }) {
 
 const USAGE_READINGS: readonly ReadingKey[] = ["week", "fiveHour"]
 
-const ZaiIcon = providerIcon("zai")
-
 // A provider's usage windows after its dispatcher's title, before its logo: the week, then the 5-hour window, each its icon and number in its level's colour, a stale one gray and dimmed (ReadingItem); their outlines with no numbers before a sample, after a failed read or once sampling has stopped. Their words are each one's tooltip and, once, the screen reader's. GLM's on a row that is not GLM's own lead with Z.ai's mark (logo). Expanded only, as the row's title is.
 export function DispatcherUsage({
   logo = false,
@@ -489,6 +491,7 @@ export function DispatcherUsage({
   read: SystemRead
 }) {
   const glm = provider === "zai"
+  const ZaiIcon = useMakerIcon("zai")
   const stale = report ? isStale(report.sampledAt, now) : false
   const readings =
     report && !stale ? (glm ? zaiReadings(report.zai, now) : systemReadings(report, now)) : []
@@ -509,7 +512,7 @@ export function DispatcherUsage({
       data-usage
       className="text-2xs flex shrink-0 items-center gap-1.5 font-mono tabular-nums group-data-[collapsible=icon]:hidden [&_svg]:size-3!"
     >
-      {logo && <ZaiIcon aria-hidden className="size-3 shrink-0" />}
+      {logo && ZaiIcon && <ZaiIcon aria-hidden className="text-muted-foreground size-3 shrink-0" />}
       {known.map((reading, i) => {
         if (reading) return <ReadingItem key={reading.key} reading={reading} />
         const Icon = READING_ICONS[USAGE_READINGS[i]!].line
@@ -807,7 +810,7 @@ function MemberRow({
         <Hint content={info.join("\n")} description={null} side="right">
           <span className="min-w-0 flex-1 truncate">{rowLabel(lines) ?? first}</span>
         </Hint>
-        <ModelIcons effort={worker.effort} model={worker.model} />
+        <ModelIcons effort={worker.effort} localModel={worker.localModel} model={worker.model} />
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   )
@@ -826,24 +829,28 @@ const PLUS_EFFORT_HIDDEN =
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
-// A row's right end, ZeroSDK's: its provider's logo (the fallback for a maker with none, nothing with no model), naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
+// A row's right end, ZeroSDK's: its provider's logo (its model's initials in a chip for a maker with none, nothing with no model), naming its model on hover, then its effort's level, naming itself, which a local model's row leaves out (showsEffort); with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
 function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
+  localModel,
   model,
   toggles = false,
 }: {
   effort: string | null
   effortHidden?: string
+  localModel?: string
   model: string | null
   toggles?: boolean
 }) {
-  const Logo = model ? providerIcon(providerOf(model)) : null
-  const Effort = effortIcon(effort)
+  const name = rowModelName({ localModel, model })
+  const Logo = useMakerIcon(rowProvider({ localModel, model }), initialsOf(name))
+  const Effort = showsEffort({ model }) ? effortIcon(effort) : null
   return (
     <>
-      {Logo && (
-        <Hint content={modelName(model)}>
+      {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
+      {model && Logo && (
+        <Hint content={name}>
           <span className={MODEL_ICON}>
             <Logo aria-hidden className="size-4" />
           </span>
@@ -1063,6 +1070,7 @@ function SessionRowView({
       <ModelIcons
         effort={worker.effort}
         effortHidden={action ? PLUS_EFFORT_HIDDEN : undefined}
+        localModel={worker.localModel}
         model={worker.model}
         toggles={expandable || Boolean(action)}
       />

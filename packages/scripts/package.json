@@ -9,6 +9,7 @@
   "exports": {
     "./gh-read": "./src/gh-read.ts",
     "./local-model": "./src/local-model/state.ts",
+    "./local-model/model": "./src/local-model/model.ts",
     "./machine-record/record": "./src/machine-record/record.ts",
     "./ops-machine/readings": "./src/ops-machine/readings.ts",
     "./orphan-reapers": "./src/orphan-reapers.ts"

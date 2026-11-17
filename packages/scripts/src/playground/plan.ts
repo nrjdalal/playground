@@ -42,7 +42,7 @@ playground page <file.html> --title "<title>" --by <session> [--for <session>]
 playground page --remove <file.html>
                       take one kept page off the Pages tab: drop its line from pages.jsonl and move its HTML, caption and PDF to the trash, printing each trash id for playground rm --restore; it refuses, moving nothing, a page pages.jsonl does not list, a path outside the previews folder, a previews folder that is a symlink, a page file or pages.jsonl that is a symlink or hard link, a file over 20 MiB, and a page whose moves the trash's per-minute cap has no room for
 playground update [--to <tag>]
-                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then roll the Dashboard to the newest build: Building, Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
+                      fast-forward this checkout onto origin/main, re-run link-skills.sh, keep each manager's unedited brief copy on its template and send an edited one's manager the template's diff, install when a lockfile or package.json changed, build packages/* when one with a dist changed, restart the ops jobs whose source changed, move each peer PLAYGROUND_PEERS names to the same commit over ssh (its clone at the same place under its home as the main checkout fetched, checked out detached and installed, one peer <name>: line each, a clone with changes of its own, committed or not, off main or with another worktree cut from it left as it is), then give its run slot back and roll the Dashboard to the newest build: Building (Waiting while its steps queue in run-slot), Switching, then Updated to <sha7> or Failed: <reason>; --to moves the checkout to that release instead, back or on, and leaves the Dashboard as it is
 playground doctor     one line per need, as ok, MISSING with its fix, or optional: the tools, the data folder, the pinned herdr, the links into this checkout, the release it is at, and each ops job launchd, or on Linux systemd, should hold
 playground herdr pin [--check | --asset <file>]
                       put the pinned herdr's release asset for this machine (macOS or Linux, on arm64 or x64) at the data folder's bin/herdr, after checking its SHA-256 against the pin, refusing a mismatch with both sums; --check reads the copy alone, exit 1 when it is missing or changed; --asset installs from a file instead of downloading
@@ -74,8 +74,8 @@ playground orgs resolve [--repo <dir>]
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
 playground record add <path> --kind <container|file|folder|image|link> --why "<why>" --undo "<undo>" [--by <who>] | add --stdin | drop <path> | seed [--machine <name>] [--notes <folder>] | check
                       the machine record, the data folder's machine-record.json, of every path the factory put on this machine: add records one (a path it holds already writes nothing; --stdin takes a JSON list, a peer's form over ssh), drop takes one off, seed takes the data folder's bundles/footprint.md and the machine's undo note, bundles/<machine>-undo.md, for this machine and what the watched places hold now as its baseline, and check prints one line a finding: misplaced or unrecorded for a new path the record lacks (outside or inside paths.factoryHomes), gone for a recorded path that is not there, unreadable for a place or path it cannot read; ops-tick's machine-record beat runs check daily here and on each peer
-playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/, its own loose regular file directly in scratch/ named <name>-* or <name>.*, its own factory-settings-400k-memory-<name>.json, an ended session's whole scratchpad/<folder>/ or scratch/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), and a retired data folder whole (safe-delete's RETIRED list, ci today), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ or scratch/<folder>/, a retired data folder, a folder inside the caller's own scratchpad/<name>/ and the caller's own /tmp/playground-<name>.* folder skip the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed, and a row whose one hold is the number of a PR gh reads as merged, by the row's PR URL, holds it no more while the worktree sits at or behind that PR's head; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit its base holds, origin/canary or another repo's default branch; the main checkout's worktree on the live.branch branch, the live Dashboard's checkout, is never taken, --discard included, nor any while that setting cannot be read), with no uncommitted change and its work landed on canary (another repo's on that repo's default branch, origin/HEAD's else gh's) or, for either, on a remote branch that git ls-remote still reads as holding HEAD, which it prints (every read of which commits a remote holds asks the remote live with git ls-remote, never a remote-tracking ref, and a remote it cannot read holds none), or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first, while every remote reads, since a remote it cannot read keeps the tree and names that remote (--discard lets those two go, with no decision, its commits no remote holds first written to a git bundle beside it in the trash (<name>.bundle and <name>.shas), which git -C <repo> fetch <bundle> HEAD brings back; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more, with --discard only once that PR reads MERGED or CLOSED), and prunes it from git; --list prints what the trash holds and --restore puts one item back
+playground rm <path> [--card <id>] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/, its own loose regular file directly in scratch/ named <name>-* or <name>.*, its own factory-settings-400k-memory-<name>.json, an ended session's whole scratchpad/<folder>/ or scratch/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), and a retired data folder whole (safe-delete's RETIRED list, ci today), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ or scratch/<folder>/, a retired data folder, a folder inside the caller's own scratchpad/<name>/ and the caller's own /tmp/playground-<name>.* folder skip the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed, and a row whose one hold is the number of a PR gh reads as merged, by the row's PR URL, holds it no more while the worktree sits at or behind that PR's head; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit its base holds, origin/canary or another repo's default branch; the main checkout's worktree on the live.branch branch, the live Dashboard's checkout, is never taken, --discard included, nor any while that setting cannot be read), with no uncommitted change and its work landed on canary (another repo's on that repo's default branch, origin/HEAD's else gh's) or, for either, on a remote branch that git ls-remote still reads as holding HEAD, which it prints (every read of which commits a remote holds asks the remote live with git ls-remote, never a remote-tracking ref, and a remote it cannot read holds none), or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first, while every remote reads, since a remote it cannot read keeps the tree and names that remote (--discard lets those two go, with no decision, its commits no remote holds first written to a git bundle beside it in the trash (<name>.bundle and <name>.shas), which git -C <repo> fetch <bundle> HEAD brings back; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more, with --discard only once that PR reads MERGED or CLOSED), and prunes it from git; --worktree also takes a model test's replay worktree in a row of ~/models/kit/runs or in a recorded folder, detached at a commit origin/canary holds, with no process working in it, outside kit/runs with no tracked edit, and neither --discard nor --pr, writing its work to <name>.diff beside it, then removing it through the main checkout's own forced git worktree remove; --card <id> removes the path only as the owner's Remove on that nightly-clean card names it on this machine at its size, while the card reads as nightly-clean last wrote it and was answered after that write, past the caps: weights (a .gguf or .safetensors under ~/models or a recorded folder, or a repo folder in ~/models/hf/hub) deleted outright and logged in trash/deleted.jsonl, anything else to the trash whole, a rehearsal in a session's scratchpad included, its machine record entry dropped; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -402,7 +402,53 @@ export const addCommand = (
 
 export type RollOutcome =
   | { phase: "building" | "going back" | "switching" }
+  | { phase: "waiting"; why: string }
   | { done: string; ok: boolean }
+
+// A waiting roll's line: the load it waits on, read now, when run-slot's reason is load5's line, else run-slot's own reason, said once.
+export const waitingLine = (why: string, load5: number) => {
+  const under = why.match(/load5 under (\d+)/)?.[1]
+  if (under)
+    return `Waiting for load: load5 is ${load5.toFixed(1)}, and the roll goes on under ${under}`
+  return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
+}
+
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+export const stepQueued = (
+  pid: string | undefined,
+  alive: (pid: number) => boolean,
+  runs: string[],
+) => {
+  const n = Number(pid?.trim() || Number.NaN)
+  if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  return !runs.some((line) => {
+    const words = line.split(" ")
+    return words[1] === "start" && words[3] === String(n)
+  })
+}
+
+// The end of a roll that gave no result in 30 minutes: one still queued in run-slot, by its log or by its step's own run (`queued`, stepQueued), goes on by itself, so it reads as waiting and passes, and any other is a failure.
+export const rollTimedOut = (
+  last: RollOutcome,
+  load5: number,
+  queued = false,
+): { done: string; ok: boolean } => {
+  const why =
+    "phase" in last && last.phase === "waiting"
+      ? last.why
+      : queued
+        ? "the roll's next step is still queued in run-slot"
+        : undefined
+  return why !== undefined
+    ? {
+        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+        ok: true,
+      }
+    : {
+        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+        ok: false,
+      }
+}
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
@@ -445,7 +491,17 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   const starting = log.findIndex(
     (line, at) => at > rolling && / (built \w+ in |dev started)/.test(line),
   )
-  return { phase: rolling >= 0 && starting > rolling ? "switching" : "building" }
+  if (rolling >= 0 && starting > rolling) return { phase: "switching" }
+  // a prebuild step queued in run-slot, whose stderr the supervisor logs, waits until run-slot's next line of its own, the supervisor's own lines between leaving it waiting; the build, whose run-slot lines build_head captures, shows its wait only in the supervisor's still-queued line
+  let why: string | undefined
+  for (const line of rolling >= 0 ? log.slice(rolling + 1) : []) {
+    const said = line.match(/^run-slot\.sh: (.*)$/)?.[1]
+    if (said !== undefined)
+      why = /^(this clone waits|waiting for|queued behind) /.test(said) ? said : undefined
+    const queued = line.match(/^\S+ (prebuild \w+ still queued after \d+s.*)$/)?.[1]
+    if (queued !== undefined && why === undefined) why = queued
+  }
+  return why === undefined ? { phase: "building" } : { phase: "waiting", why }
 }
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.

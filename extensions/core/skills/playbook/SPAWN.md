@@ -62,6 +62,7 @@ A **just-closed resume** below is a resume within 15 minutes of `spawn.sh close`
 5. **usage**, the launching backend's own window, which a priority start still meets.
    Claude's from `usage.json`: written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
    or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on.
+   A resume of a session whose own roster row reads live, or a just-closed resume, is judged against the 98% backstop alone in place of the pace, on every login and `--account` reading, since it brings back work already running; its row's `readings.pace` names the skip.
    A `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits.
    Each other login's `usage-<name>.json`, and each account login-flip probes by its reading in `login-flip.json`'s `seen`, takes the same checks, its reading valid for 60 minutes, a missing 5-hour window reading as no 5-hour limit, never 0%.
    A start with no `--account` runs on the passing login next in login-flip.py's account split, else the one with the lowest week, naming it, and refuses only when every login is over, naming each one's reading, a stale one's file and age included ([--account](#--account) holds the pick).
@@ -134,7 +135,7 @@ After a resume, restart any dev stack you served, then re-arm your watches: run 
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
 Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-A just-closed resume passes the load and sessions gates (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
+A just-closed resume passes the load and sessions gates and meets the usage gate's 98% backstop in place of its pace (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
 ## What it records
 
@@ -205,8 +206,10 @@ The `no-glm-heavy-path` hook fences it as a GLM session, its pin or its base URL
 spawn.sh refuses it where it refuses GLM (a reviewer or tester, an org's checkout, a brief naming a `glm-refused-sources` word) and also for a planner and a researcher, since Claude plans and researches; it refuses `--account`, `--model` and an `--ssh` probe beside it, since the model listens on this machine's loopback alone.
 Before the gate it GETs `http://127.0.0.1:8000/v1/models` (`LOCAL_URL`) with a 5 s timeout and refuses when the server is silent or lists no model named `local`, the name `serve.sh` gives each model (`LOCAL_SERVED`).
 Its gate (Capacity gate, gate 5) admits at most the `maxSessions` the model switch's state gives this machine's server, else 6; M runs on the other machine, so no M swap holds a local start.
-The launch starts with a no-op label, `: effort <effort>, which the local model reads as thinking on or off alone;`, since K's chat template switches thinking on or off alone, then `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder: no Keychain read), every model mapped to `local` and `ENABLE_TOOL_SEARCH=true`,
-and runs `--model local --effort <effort>` with `--settings ~/.playground/factory-settings-local-120k.json`, GLM's file with the telemetry off, in a 120k window, since K serves 131,072 tokens.
+The launch starts with a no-op label, `: effort <effort>, which the local model reads as thinking on or off alone;`, since K's chat template switches thinking on or off alone, then `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder: no Keychain read), every model mapped to `local`, `CLAUDE_CODE_MAX_CONTEXT_TOKENS` and `ENABLE_TOOL_SEARCH=true`,
+and runs `--model local --effort <effort>` with `--settings ~/.playground/factory-settings-local-120k.json`, GLM's file with the telemetry off, in a 120k window.
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` declares the server's own window, since Claude Code assumes 1M for a model name it does not know and so never compacted before the server refused: the `local` card's `max_model_len` from that GET, less 8192 for the reply, which shares the window; a card with no number above 16384 takes 120000.
+The 120k compact window is capped at the declared one, so a session on a smaller server compacts inside it.
 A start records `claude-code local`, which a resume runs on.
 
 ## --runtime herdr and restore

@@ -92,6 +92,7 @@ describe("the dashboard routes", () => {
       "/workers/s-1/transcript",
       "/workers/s-1/skills",
       "/attachments/11111111-2222-4333-8444-555555555555.png",
+      "/model-icons/anthropic",
       "/threads",
       "/threads?page=2",
       "/threads/k7mq/messages",
@@ -1199,6 +1200,33 @@ describe("the setting route", () => {
     ).catch((thrown) => thrown)
     expect(sent).toEqual([{ actor, id, setting: { model: "opus" }, text: "", to: DISPATCHER }])
     expect(held).toMatchObject({ extra: { delivery: "QUEUED" }, status: 409 })
+  })
+
+  test("a local model goes to the hosted session alone: a dispatcher or the assistant gets FORBIDDEN, with nothing typed", async () => {
+    const sent: { via: string; delivery: unknown }[] = []
+    const send = (via: string) => async (delivery: Delivery | SettingChanging) => {
+      sent.push({ delivery, via })
+      return ok("s-h")()
+    }
+    const live = board([
+      { name: DISPATCHER, sessionId: "s-d" },
+      { assistant: true, name: "errands", sessionId: "s-a" },
+      { hosted: true, name: SDK_PROBE, sessionId: "s-h" },
+    ])
+    const setting = { local: "ornith-1.5-122b-nvfp4" }
+    for (const sessionId of ["s-d", "s-a"]) {
+      const refused = await changeSetting(
+        { sessionId, setting },
+        actor,
+        live,
+        send("deliver"),
+        send("hosted"),
+      ).catch((thrown) => thrown)
+      expect(refused).toMatchObject({ code: "FORBIDDEN", status: 403 })
+    }
+    expect(sent).toEqual([])
+    await changeSetting({ sessionId: "s-h", setting }, actor, live, send("deliver"), send("hosted"))
+    expect(sent).toEqual([{ delivery: { actor, sessionId: "s-h", setting }, via: "hosted" }])
   })
 
   test("any other session is FORBIDDEN and an unknown one NOT_FOUND, before anything is sent; a delivery's refusal keeps its code under delivery", async () => {

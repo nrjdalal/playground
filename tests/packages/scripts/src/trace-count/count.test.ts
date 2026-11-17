@@ -229,9 +229,9 @@ describe("the ratchet", () => {
     expect(risen({ emails: 2 }, { emails: 3 })).toEqual([])
   })
 
-  test("a risen issueRefs count names its fix, and another kind keeps the plain reason", () => {
+  test("a risen issueRefs count names its fix and where the number goes, and another kind keeps the plain reason", () => {
     expect(refusal(risen({ emails: 2, issueRefs: 4 }, { emails: 3, issueRefs: 3 }))).toBe(
-      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number:\nissueRefs: 4 in the tree, counts.json allows 3",
+      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number, and the PR body's Merge Danger or Links carry it:\nissueRefs: 4 in the tree, counts.json allows 3",
     )
     expect(refusal(risen({ emails: 4 }, { emails: 3 }))).toBe(
       "trace-count: a count rose; write the new text in plain words:\nemails: 4 in the tree, counts.json allows 3",

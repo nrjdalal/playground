@@ -57,7 +57,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A machine with extensions whose `ext.links` or list cannot be read refuses every GLM start, naming the fix.
   A GLM start's prompt, and a resume's given `--brief`, adds that Skill, Read, Bash, Edit and Write are already loaded and ToolSearch lists only deferred tools, since two GLM workers read ToolSearch's list as their whole toolset and stopped.
   `--backend local` runs the session on this machine's local model (K) through Claude Code under GLM's limits, the launch and its checks in `LOCAL_URL` and `LOCAL_SERVED`: `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder, with no Keychain read), every model mapped to the served name `local`, `--model local`, `ENABLE_TOOL_SEARCH=true`,
-  and `factory-settings-local-120k.json`, GLM's file with the telemetry off in a 120k window, since K serves 131,072 tokens; the launch line opens on a no-op label naming the `--effort` it passes, since K's chat template switches thinking on or off alone.
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` at the `local` card's `max_model_len` less 8192 (120000 for a card with no number above 16384), since Claude Code assumes 1M for a name it does not know,
+  and `factory-settings-local-120k.json`, GLM's file with the telemetry off in a 120k window, capped at that declared one; the launch line opens on a no-op label naming the `--effort` it passes, since K's chat template switches thinking on or off alone.
   It is refused where GLM is (a reviewer or tester, an org's checkout, a brief naming a `glm-refused-sources` word), for a planner or a researcher, and beside `--account`, `--model` or `--ssh`; it is refused too when a GET of `/v1/models` on that port, 5 s at most, lists no `local`.
   Its gate counts the live roster rows pinned `claude-code local` against the `maxSessions` the model switch's `models/state.json` gives this machine's server on that port (`packages/scripts/src/spawn/local-cap.ts`), else 6, K's measured limit (`LOCAL_SESSION_CAP`), in place of the Claude usage gate, and it takes GLM's load and memory gate; `no-glm-heavy-path` fences it as a GLM session.
   A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm`, `claude-code local`, `claude-code claude` or `codex openai` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness with its backends), and a resume runs that backend,
@@ -294,6 +295,21 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
+## After a power cut
+
+- A boot with no clean shutdown can leave a torn loose object in the shared git store, which breaks every `git fetch`, and a merge lock its dead pr:merge run held.
+  ops-tick's `boot-check` beat takes both on, once per boot, on a minute inside gh-auth's first 10 minutes (`BOOT_MS` in `packages/scripts/src/ops-tick/tick.ts`), keeping the boot it finished in `ops/tick/boot-check.json`.
+  It reads the boot alone (`readBootTime` in `packages/scripts/src/ops-machine/readings.ts`: macOS's `kern.boottime`, Linux's `/proc/stat` btime), never a wake, since every process from before a sleep lives on.
+- First it lets go of a merge lock whose `pr` file is older than the boot, into `merge-locks/<pr>-<epoch ms>-boot`, with one line to Ops: every process of the old boot is dead, and a pid from then can name a live process now.
+- Then it runs `git fsck --no-dangling` on the shared store through run-slot (3 s measured on the main checkout's store), which stops at the first torn loose object, so it runs again after each repair, 10 passes at most.
+  A torn object that only a gate-owned worktree's HEAD or HEAD reflog names (`GATE_WORKTREES`, `merge-types` today) is repaired under the merge lock: the object moved into `ops/git-torn/<sha>-<epoch ms>`, the worktree's HEAD re-pointed with `git update-ref --no-deref` to the newest commit its reflog holds that reads whole, and one line to Ops.
+  While a live merge holds the lock the repair waits for the next minute.
+  The `invalid reflog entry` fsck then names for a moved object counts as repaired.
+  fsck names a torn object two ways, both read: a `fatal: loose object <sha> ... is corrupt` stop for one a HEAD reaches, and an `error: <sha>: object corrupt or missing` line for one only a reflog names.
+- Every other break gets one line to Ops' waiter queue and one Inbox alert naming the path, and the beat changes nothing there.
+- A check that a live merge's lock or a failure kept unfinished through the window gets the same line and alert once the window ends, naming why, so a dropped check is never silent.
+  The logic lives in `packages/scripts/src/ops-tick/boot-check.ts`; tests: `bun run test:file tests/packages/scripts/src/ops-tick/boot-check.test.ts`.
+
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
@@ -335,7 +351,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A test walks that graph through relative, `@packages/*`, a package's own `@/` and dynamic imports, and fails on a new such read until `ROOT_READS` places it.
   Canary's hooks load from canary's whole tree at the sha, unpacked by `git archive` and installed from its own lockfile (`bun install --frozen-lockfile --ignore-scripts`), so every hook loads canary's packages, `extensions/core` and dependencies, and the install leaves the shared git hooks alone.
   Each run builds its tree in a folder of its own and renames it to `hook-differential/<sha>` in the temp folder, so two runs against one sha share the finished tree alone; the tree, `node_modules` included, stays there for the next run against that sha, beside any folder a run that lost the rename left.
-  macOS's daily temp cleaner (03:35 local) empties an installed package by its files' age and leaves `.installed`, so before the run each measured hook and each `scripts/hooks/*-worker.ts` in the tree loads in a fresh `bun` process (`unloaded`), and a tree where one fails moves aside as `<sha>.pruned-<ms>` and builds again; one that still fails ends the run.
+  macOS's daily temp cleaner (03:35 local) empties an installed package by its files' age and leaves `.installed`, so before the run each measured hook and each `scripts/hooks/*-worker.ts` in the tree loads in a fresh `bun` process (`unloaded`; the runtime-apis skill's `## Bun traps` says why),
+  and a tree where one fails moves aside as `<sha>.pruned-<ms>` and builds again; one that still fails ends the run.
   After the run they load once more, and a tree emptied mid-run exits 1 and stores nothing, since a hook's Worker resolves its packages again at each call and its `onerror` allows the call, so canary's side would read every later call as allowed.
 - A replay of a hook that reads the network (the push scans' live read, `heldBy` in `packages/safe-delete/src/live-refs.ts`) runs that read for real, with this Mac's own git credentials, against each remote a replayed push names.
   Replay it only where the run is allowed to read every such remote, and write in the Evidence that the replay read them with this Mac's credentials, printing no token and no remote URL.

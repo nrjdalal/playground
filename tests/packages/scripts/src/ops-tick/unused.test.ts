@@ -118,12 +118,18 @@ const setUp = (dashboard = false) => {
 
 test("this machine's unused space: an old unused image, one of unknown age, the dropped repo, the recorded gguf, the old row's worktree and the rehearsal, largest first", async () => {
   const { at, data, models, places } = setUp()
-  const items = await measureUnused(places)
+  const { items } = await measureUnused(places)
   expect(items.map(({ bytes: _, ...rest }) => rest)).toEqual([
     { kind: "weights", path: join(models, "hf/hub/models--nvidia--Qwen-27B"), recorded: false },
     { kind: "weights", path: at("probe-local-model/gguf/GLM-Flash.gguf"), recorded: true },
-    { kind: "image", path: "docker image old:1", recorded: false },
-    { kind: "image", path: "docker image pulled:1", recorded: false, unknownAge: true },
+    { id: "sha256:aaa", kind: "image", path: "docker image old:1", recorded: false },
+    {
+      id: "sha256:fff",
+      kind: "image",
+      path: "docker image pulled:1",
+      recorded: false,
+      unknownAge: true,
+    },
     { kind: "run", path: join(models, "kit/runs/MB-old/pr0001"), recorded: false },
     { kind: "rehearsal", path: join(data, "scratchpad/ops/rehearse142"), recorded: false },
     { kind: "weights", path: at("probe-local-model/gguf/tiny.gguf"), recorded: true },
@@ -135,11 +141,11 @@ test("an image's tags are one image: a container using postgres:alpine keeps pos
   const listed = "sha256:bbb\tpostgres:18-alpine\nsha256:bbb\tpostgres:alpine\nsha256:aaa\told:1"
   const inspect = `sha256:bbb\t1\t"2026-01-01T00:00:00Z"\nsha256:aaa\t2\t"2026-01-01T00:00:00Z"`
   expect(unusedImages(listed, "postgres:alpine\n", inspect, "", NOW)).toEqual([
-    { bytes: 2, path: "docker image old:1" },
+    { bytes: 2, id: "sha256:aaa", path: "docker image old:1" },
   ])
   expect(unusedImages(listed, "", inspect, "", NOW)).toEqual([
-    { bytes: 1, path: "docker image postgres:18-alpine" },
-    { bytes: 2, path: "docker image old:1" },
+    { bytes: 1, id: "sha256:bbb", path: "docker image postgres:18-alpine" },
+    { bytes: 2, id: "sha256:aaa", path: "docker image old:1" },
   ])
 })
 
@@ -176,6 +182,42 @@ test("an image with no tag time, as a pull leaves it, has an unknown age: nightl
   })
 })
 
+test("a night that cannot read an image's first night keeps it: docker not answering and a peer not read keep their keys, and a value no date reads starts tonight", async () => {
+  const { places } = setUp()
+  const down = await measureUnused({
+    ...places,
+    run: async (argv) =>
+      argv[0] === "docker"
+        ? { code: 1, out: "Cannot connect to the Docker daemon" }
+        : { code: 127, out: "" },
+  })
+  expect(down.imagesUnread).toBe(true)
+  expect(down.items.some((i) => i.kind === "image")).toBe(false)
+  const gone = await measureUnused({ ...places, run: async () => ({ code: 127, out: "" }) })
+  expect(gone.imagesUnread).toBeUndefined()
+  const seen = {
+    "m docker image a:1": "2026-11-01T00:00:00.000Z",
+    "n docker image b:1": "not a date",
+    "peer docker image c:1": "2026-11-02T00:00:00.000Z",
+  }
+  const night = aged(
+    [
+      { imagesUnread: true, items: [], machine: "m" },
+      {
+        items: [
+          { bytes: MB, kind: "image", path: "docker image b:1", recorded: false, unknownAge: true },
+        ],
+        machine: "n",
+      },
+      { machine: "peer", why: "exit 255" },
+    ],
+    seen,
+    NOW,
+  )
+  expect(night.seen).toEqual({ ...seen, "n docker image b:1": new Date(NOW).toISOString() })
+  expect(night.found[1]).toEqual({ items: [], machine: "n" })
+})
+
 test("a path removed between its listing and its measure, as by a delete running at once, is skipped and counted nowhere", () => {
   const { at, models } = setUp()
   const gone = join(models, "hf/hub/models--gone--Model")
@@ -200,7 +242,7 @@ test("a path removed between its listing and its measure, as by a delete running
 
 test("the record guards and lists nothing itself: ~/.bun and the clone, both recorded, give no line", async () => {
   const { at, places, repo } = setUp()
-  const paths = (await measureUnused(places)).map((i) => i.path)
+  const paths = (await measureUnused(places)).items.map((i) => i.path)
   expect(paths.filter((p) => p.startsWith(at(".bun")) || p.startsWith(repo))).toEqual([])
 })
 
@@ -269,6 +311,32 @@ test.each([
     expect(found[1]).toEqual({ items: peer, machine: "spark-test" })
   },
 )
+
+test.each([
+  ["an object with no items", '{"x":1}'],
+  ["null", "null"],
+])("a peer whose --json prints %s is not read", async (_, out) => {
+  const { checkout, home, places, repo } = setUp()
+  const found = await unusedEverywhere(
+    { ...places, home },
+    repo,
+    async () => ({ code: 0, out }),
+    checkout,
+  )
+  expect(found[1]).toEqual({ machine: "spark-test", why: out })
+})
+
+test("a peer's --json gives its items and whether its images were read", async () => {
+  const { checkout, home, places, repo } = setUp()
+  const out = JSON.stringify({ imagesUnread: true, items: [] })
+  const found = await unusedEverywhere(
+    { ...places, home },
+    repo,
+    async () => ({ code: 0, out }),
+    checkout,
+  )
+  expect(found[1]).toEqual({ imagesUnread: true, items: [], machine: "spark-test" })
+})
 
 test("a peer that does not answer is named with its first line", async () => {
   const { checkout, home, places, repo } = setUp()
