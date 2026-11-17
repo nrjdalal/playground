@@ -11,7 +11,7 @@ import {
   ROOT_STEPS,
   type RootStep,
 } from "@packages/config/inbox"
-import { writeAtomically } from "@packages/settings"
+import { factoryHomes, readPolicyOrDefaults, writeAtomically } from "@packages/settings"
 
 // This file imports node and the workspace packages alone, since the API imports it (@packages/scripts/machine-record/record) and its type build emits no file a relative import reaches.
 
@@ -62,6 +62,14 @@ export const watchedFolders = (home: string, system: string[] = ROOT_FOLDERS): s
   ),
   ...system,
 ]
+
+// The allowed homes on this machine: paths.factoryHomes as the data folder's policy sets it, else its default.
+export const homesOf = (data: string, checkout: string, home: string): string[] =>
+  factoryHomes(readPolicyOrDefaults(data).settings ?? { schemaVersion: 1, values: {} }, {
+    checkout,
+    data,
+    home,
+  })
 
 export const recordPath = (data: string): string => join(data, RECORD_FILE)
 

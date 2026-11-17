@@ -268,6 +268,8 @@ export EMAIL=ci@localhost
 git init -q && git add -A && git -c user.name=ci commit -qm ci > /dev/null
 PW=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 timeout 600 docker run -d --name "$DB" -e POSTGRES_PASSWORD="$PW" -p 127.0.0.1::5432 postgres:alpine > /dev/null 2>&1 || { echo "fail db: the container did not start"; [ "$MODE" = exec ] && exit 255; exit 1; }
+# the image that run pulled goes into the box's machine record, held already after the first run, and a record that fails leaves the run alone, since the next daily check names it
+playground record add "docker image postgres:alpine" --kind image --why "suite.sh starts each run's Postgres from it" --undo "docker image rm postgres:alpine" --by suite.sh > /dev/null 2>&1 || echo "suite.sh: docker image postgres:alpine is not in the machine record; its next check names it" >&2
 PORT=$(timeout 30 docker port "$DB" 5432 | head -1 | sed 's/.*://')
 # over TCP: postgres:alpine's first start answers on its Unix socket from a temporary initdb server it then stops, and that takes no TCP
 for _ in $(seq 60); do timeout 10 docker exec "$DB" pg_isready -h 127.0.0.1 -U postgres > /dev/null 2>&1 && break; sleep 1; done

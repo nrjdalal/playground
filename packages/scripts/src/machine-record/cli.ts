@@ -2,15 +2,15 @@ import { homedir, hostname } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
-import { factoryHomes, readPolicyOrDefaults } from "@packages/settings"
 
 import { mainCheckout } from "../main-checkout"
-import { FOOTPRINT_NOTE, seedEntries, UNDO_NOTE } from "./notes"
+import { FOOTPRINT_NOTE, seedEntries, undoNote } from "./notes"
 import {
   addEntries,
   check,
   dropPaths,
   type Entry,
+  homesOf,
   KINDS,
   type Kind,
   type Places,
@@ -59,11 +59,7 @@ export const recordIo = (): RecordIo => {
     out: console.log,
     places: () => ({
       home,
-      homes: factoryHomes(readPolicyOrDefaults(data).settings ?? { schemaVersion: 1, values: {} }, {
-        checkout: mainCheckout(),
-        data,
-        home,
-      }),
+      homes: homesOf(data, mainCheckout(), home),
       run,
     }),
     stdin: () => Bun.stdin.text(),
@@ -154,14 +150,17 @@ export async function runRecord(words: string[], io: RecordIo): Promise<number> 
     if (bare.length) return usage(io, "seed takes no path")
     const notes = named.get("notes") ?? join(io.data, "bundles")
     const machine = named.get("machine") ?? io.machine
-    const read = (name: string) => Bun.file(join(notes, name)).text()
-    const entries = seedEntries(
-      await read(FOOTPRINT_NOTE),
-      await read(UNDO_NOTE),
+    // a machine with no undo note of its own takes each undo as a pointer to the notes
+    const undo = Bun.file(join(notes, undoNote(machine)))
+    const { entries, skipped } = seedEntries(
+      await Bun.file(join(notes, FOOTPRINT_NOTE)).text(),
+      (await undo.exists()) ? await undo.text() : "",
       machine,
       io.home,
       io.now(),
     )
+    for (const item of skipped)
+      io.err(`playground record: skipped ${item}: not one plain path on this machine, so add it by hand`)
     if (!entries.length) {
       io.err(`playground record: ${join(notes, FOOTPRINT_NOTE)} lists no path for ${machine}`)
       return 1

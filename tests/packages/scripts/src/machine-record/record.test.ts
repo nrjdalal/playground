@@ -240,12 +240,18 @@ describe("playground record (PG-2538)", () => {
     const notes = join(root, "bundles")
     mkdirSync(notes)
     writeFileSync(join(notes, "footprint.md"), FOOTPRINT)
-    writeFileSync(join(notes, "spark-9dfb-undo.md"), UNDO)
+    writeFileSync(join(notes, "spark-test-undo.md"), UNDO)
     const owner = join(home, ".config", "owner-tool")
     mkdirSync(owner)
+    const run = join(home, "models", "kit", "runs", "MB-model-1s-2555")
+    mkdirSync(run, { recursive: true })
     const lines: string[] = []
     expect(await runRecord(["seed", "--notes", notes], io(lines))).toBe(0)
-    expect(lines).toEqual(["seeded 7 of 7 paths for spark-test, and the baseline"])
+    expect(lines).toEqual([
+      `err: playground record: skipped ${home}/models/hf/ acme/Model-7B: not one plain path on this machine, so add it by hand`,
+      "seeded 12 of 12 paths for spark-test, and the baseline",
+    ])
+    expect((await readRecord(data)).entries.map((e) => e.path)).toContain(run)
     const record = await readRecord(data)
     expect(record.baseline).toContain(owner)
     expect(
@@ -264,11 +270,15 @@ const FOOTPRINT = `# The factory's footprint
 \`\`\`
 spark-test (bravo, 10.0.0.2)
 ├── /etc/apparmor.d/bwrap
-├── docker: vllm/vllm-openai:v0.32.0, probe-vllm
+├── docker: vllm/vllm-openai:v0.32.0 (no container now), probe-vllm, postgres:alpine (#2542's runs)
 └── ~/
     ├── .ssh/playground_spark, playground_spark.pub        # 🔶
     ├── .local/bin/socat                                   # test only
-    └── .playground/
+    ├── .playground/
+    └── models/
+        ├── hf/ acme/Model-7B
+        ├── kit/serve-mb.sh, kit/scratch/sh-before-wxzmmr/  # the bench kit
+        └── kit/runs/MB-model-1s-<pr>/
 
 spark-other (alpha, 10.0.0.1)
 └── ~/
@@ -288,31 +298,49 @@ const UNDO = `# undo
 
 describe("the seed's notes (PG-2538)", () => {
   test("reads one machine's tree: ~/ under home, a comma list sharing its folder, docker items by kind, the comment as why", () => {
-    expect(treePaths(FOOTPRINT, "spark-test", "/h")).toEqual([
+    expect(treePaths(FOOTPRINT, "spark-test", "/h").paths).toEqual([
       { comment: "", folder: false, path: "/etc/apparmor.d/bwrap" },
       { comment: "", folder: false, path: "docker image vllm/vllm-openai:v0.32.0" },
       { comment: "", folder: false, path: "docker container probe-vllm" },
+      { comment: "", folder: false, path: "docker image postgres:alpine" },
       { comment: "🔶", folder: false, path: "/h/.ssh/playground_spark" },
       { comment: "🔶", folder: false, path: "/h/.ssh/playground_spark.pub" },
       { comment: "test only", folder: false, path: "/h/.local/bin/socat" },
       { comment: "", folder: true, path: "/h/.playground" },
+      { comment: "", folder: true, path: "/h/models" },
+      { comment: "the bench kit", folder: false, path: "/h/models/kit/serve-mb.sh" },
+      { comment: "the bench kit", folder: true, path: "/h/models/kit/scratch/sh-before-wxzmmr" },
+      { comment: "", folder: true, path: "/h/models/kit/runs/MB-model-1s-*" },
     ])
-    expect(treePaths(FOOTPRINT, "spark-other", "/h")).toEqual([
-      { comment: "", folder: true, path: "/h/.portless" },
+    expect(treePaths(FOOTPRINT, "spark-other", "/h")).toEqual({
+      paths: [{ comment: "", folder: true, path: "/h/.portless" }],
+      skipped: [],
+    })
+  })
+
+  test("an item the seed cannot take as written is skipped and named, never recorded: an aside, a space, a placeholder nothing matches", () => {
+    expect(treePaths(FOOTPRINT, "spark-test", "/h").skipped).toEqual([
+      "/h/models/hf/ acme/Model-7B",
     ])
+    const { entries, skipped } = seedEntries(FOOTPRINT, UNDO, "spark-test", "/h", NOW)
+    expect(skipped).toEqual([
+      "/h/models/hf/ acme/Model-7B",
+      "/h/models/kit/runs/MB-model-1s-*",
+    ])
+    for (const { path } of entries) expect(path, path).toMatch(/^(?:docker \S+ \S+|\/[^\s*<>()]+)$/)
   })
 
   test("takes each path's undo from the first step that names it, else points at both notes", () => {
-    expect(undoOf(UNDO, "/h/.ssh/playground_spark", "/h")).toBe(
+    expect(undoOf(UNDO, "/h/.ssh/playground_spark", "/h", "spark-test")).toBe(
       "Undo: on spark-test `rm ~/.ssh/playground_spark`.",
     )
-    expect(undoOf(UNDO, "/h/.portless", "/h")).toBe(
-      "see bundles/footprint.md and bundles/spark-9dfb-undo.md",
+    expect(undoOf(UNDO, "/h/.portless", "/h", "spark-test")).toBe(
+      "see bundles/footprint.md and bundles/spark-test-undo.md",
     )
   })
 
   test("the seed's entries carry the data folder's own path too, which check never names", () => {
-    const paths = seedEntries(FOOTPRINT, UNDO, "spark-test", "/h", NOW).map((e) => e.path)
+    const paths = seedEntries(FOOTPRINT, UNDO, "spark-test", "/h", NOW).entries.map((e) => e.path)
     expect(paths).toContain("/h/.playground")
   })
 })
@@ -382,12 +410,24 @@ describe("what adds a path keeps it where the check looks (PG-2538)", () => {
     const ci = await Bun.file(
       join(import.meta.dir, "../../../../../scripts/ops/runner-host/ci.sh"),
     ).text()
-    const folder = /^RUN_FOLDER=([A-Za-z0-9._/-]+)$/m.exec(ci)?.[1]
+    const folder = /^BOX_CI_DIR=([A-Za-z0-9._/-]+)$/m.exec(ci)?.[1]
     expect(folder).toBeDefined()
     expect(held(`${HOME}/${folder}`), folder).toBe(true)
-    expect(ci).toContain("CI=$BOXHOME/$RUN_FOLDER")
+    expect(ci).toContain("CI=$BOXHOME/$BOX_CI_DIR")
     expect(ci).toMatch(/\[ -d \$CI \] \|\| \{ install -d -m 0700 \$CI && \{ \$record; \}/)
     expect(ci).toMatch(/local record=".*playground record add \$CI --kind folder /)
+  })
+
+  test("every image suite.sh starts a container from on the box goes into its record as the run starts it", async () => {
+    const suite = await Bun.file(
+      join(import.meta.dir, "../../../../../scripts/ops/runner-host/suite.sh"),
+    ).text()
+    const images = [...suite.matchAll(/docker run -d [^\n]* ([a-z0-9./-]+:[a-z0-9.-]+) >/g)].map(
+      (m) => m[1]!,
+    )
+    expect(images).toEqual(["postgres:alpine"])
+    for (const image of images)
+      expect(suite).toContain(`playground record add "docker image ${image}" --kind image `)
   })
 
   test("a peer is reached by one fixed ssh: the key alone, no prompt, no user config, the record CLI in its clone", () => {

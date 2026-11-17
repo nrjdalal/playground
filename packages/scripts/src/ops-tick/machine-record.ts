@@ -2,9 +2,8 @@ import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
 import { cloneOf } from "@packages/config/org"
-import { factoryHomes, readPolicyOrDefaults } from "@packages/settings"
 
-import { check, peerRecordArgv } from "../machine-record/record"
+import { check, homesOf, peerRecordArgv } from "../machine-record/record"
 import type { Context } from "./tick"
 
 const PEER_MS = 120_000
@@ -22,14 +21,7 @@ export const machineRecord =
   async (ctx: Context) => {
     const data = dirname(ctx.ops)
     const here = hostname().split(".")[0]!
-    const homes = factoryHomes(
-      readPolicyOrDefaults(data).settings ?? { schemaVersion: 1, values: {} },
-      {
-        checkout: ctx.repo,
-        data,
-        home,
-      },
-    )
+    const homes = homesOf(data, ctx.repo, home)
     const lines = (await check(data, { home, homes, run: ctx.run, system })).map(
       (line) => `${here}: ${line}`,
     )
