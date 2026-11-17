@@ -12,6 +12,7 @@ import {
   MODEL_LABELS,
   modelAlias,
   modelChoice,
+  pickerWords,
   reportedSetting,
   shownValue,
 } from "../../../../../web/next/src/lib/session-setting"
@@ -56,6 +57,25 @@ describe("the composer's model and effort picker", () => {
     expect(choiceLabel("local:ornith-1.5-122b-nvfp4", localModels)).toBe("M")
     expect(choiceLabel("local:other", localModels)).toBeNull()
     expect(choiceLabel("sonnet")).toBe("Sonnet")
+  })
+
+  test("the picker on a local model reads its short name with no effort word, as its row does, while a Claude session keeps its effort (PG-2651)", () => {
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }]
+    const served = { localModel: "ornith-ai/Ornith-1.5-122B-NVFP4", model: "local" }
+    expect(pickerWords(served, null, "high")).toBe("Ornith 122B, local")
+    expect(pickerWords({ model: "local" }, null, "high")).toBe("local")
+    expect(
+      pickerWords(
+        { localModels, model: "ornith-1.5-122b-nvfp4" },
+        "local:ornith-1.5-122b-nvfp4",
+        "high",
+      ),
+    ).toBe("Ornith 122B")
+    expect(pickerWords({ model: "claude-opus-5-5" }, "opus", "high")).toBe("Opus · High")
+    expect(pickerWords({ model: "claude-opus-5-5" }, "opus", null)).toBe("Opus · Effort")
+    expect(pickerWords({ model: null }, null, null)).toBe("Model · Effort")
+    // a pick of a cloud model off the local one reads as that model's, effort and all
+    expect(pickerWords(served, "sonnet", "high")).toBe("Sonnet · High")
   })
 
   test("shows a pick until the row reports a value other than the one it was picked over", () => {

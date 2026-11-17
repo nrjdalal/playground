@@ -544,6 +544,23 @@ describe("SessionRow", () => {
     expect(claude).toContain(pathOf(RiSignalCellular3Fill))
   })
 
+  test("the hosted session's row on a local model it picked, which reports that model's id, draws no effort bars and its tooltip names no effort (PG-2651)", () => {
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }]
+    const picked = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModels,
+      model: "ornith-1.5-122b-nvfp4",
+    })
+    expect(picked).not.toContain(pathOf(RiSignalCellular3Fill))
+    expect(tipsOf(picked).join("\n")).not.toContain("high")
+    const claude = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModels,
+      model: "claude-opus-5-5",
+    })
+    expect(claude).toContain(pathOf(RiSignalCellular3Fill))
+  })
+
   for (const [name, role] of [
     ["ops", "manager"],
     ["runner-pride", "runner"],

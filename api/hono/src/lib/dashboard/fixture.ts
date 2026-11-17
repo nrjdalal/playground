@@ -267,10 +267,10 @@ export const fixtureSchema = z.object({
     screens: z.record(z.string(), z.string()),
     workspaces: z.array(json),
   }),
-  // Each repo's merged PullRequest nodes, as the Usage app's query reads them (lib/usage/prs.ts).
-  merged: z.record(z.string(), z.array(json)).optional(),
   // The repo id the made-up machine's local model server serves as local (local-model.ts), which a local session's row names and draws the maker of.
   localModel: z.string().optional(),
+  // Each repo's merged PullRequest nodes, as the Usage app's query reads them (lib/usage/prs.ts).
+  merged: z.record(z.string(), z.array(json)).optional(),
   // The made-up checkout's origin remote, which the sidebar's GitHub icon links to as its pull requests page.
   origin: z.string().optional(),
   // The processes the made-up machine runs, by pid: what `ps` would say of each.

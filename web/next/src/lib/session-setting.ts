@@ -2,7 +2,7 @@ import type { Worker } from "@api/hono"
 import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
 
 import { apiClient, unwrap } from "@/lib/api/client"
-import { MODEL_FAMILIES } from "@/lib/model-label"
+import { MODEL_FAMILIES, rowModelName, showsEffort } from "@/lib/model-label"
 
 export type SessionModel = (typeof SESSION_MODELS)[number]
 export type SessionEffort = (typeof SESSION_EFFORTS)[number]
@@ -82,6 +82,20 @@ export const choiceLabel = (
     : isModel(choice)
       ? MODEL_LABELS[choice]
       : null
+
+// Pure: the picker's words, the shown model then its effort, which a local model leaves out as its row does (showsEffort), since it turns thinking on or off by itself; a session on the served local model reads its row's name for it.
+export const pickerWords = (
+  worker: Pick<Worker, "localModel" | "localModels" | "model">,
+  model: string | null,
+  effort: SessionEffort | null,
+): string => {
+  const served = model === null && !showsEffort(worker)
+  const name =
+    (model && choiceLabel(model, worker.localModels)) || (served && rowModelName(worker)) || "Model"
+  return model?.startsWith(LOCAL) || served
+    ? name
+    : `${name} · ${effort ? EFFORT_LABELS[effort] : "Effort"}`
+}
 
 // A pick not yet on the session's row: the value picked, and the value the row showed when it was picked; a dispatcher's row takes a new model or effort only from its next reply, while the hosted session's shows it at once.
 export type Pending<T> = { from: T | null; to: T }
