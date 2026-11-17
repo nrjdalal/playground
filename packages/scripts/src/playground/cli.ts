@@ -506,6 +506,12 @@ const rm = async (words: string[]): Promise<number> => {
   return runRm(words, rmDeps(REPO))
 }
 
+// playground record: the machine record (machine-record/cli.ts), loaded only for this command.
+const record = async (words: string[]): Promise<number> => {
+  const { recordIo, runRecord } = await import("../machine-record/cli")
+  return runRecord(words, recordIo())
+}
+
 // playground migrate: the switch's one-time move (migrate.ts), loaded only for this command.
 const migrateMachine = async (words: string[]): Promise<number> => {
   const { runMigrate } = await import("./migrate")
@@ -585,33 +591,39 @@ const code =
                                             ? await (
                                                 await import("./priority")
                                               ).runPriority(rest, await priorityDeps())
-                                            : command === "rm"
-                                              ? await rm(rest)
-                                              : command === "yard"
-                                                ? await (
-                                                    await import("./yard")
-                                                  ).runYard(
-                                                    rest,
-                                                    await (
+                                            : command === "record"
+                                              ? await record(rest)
+                                              : command === "rm"
+                                                ? await rm(rest)
+                                                : command === "yard"
+                                                  ? await (
                                                       await import("./yard")
-                                                    ).yardIo(
-                                                      REPO,
-                                                      accountsIo(dataDir()).readSecret,
-                                                    ),
-                                                  )
-                                                : command === "herdr" && rest[0] === "stop"
-                                                  ? (await opsHerdr(["stop-all"]).exited) === 0
-                                                    ? 0
-                                                    : 1
-                                                  : command === "herdr" && rest[0] === "pin"
-                                                    ? await (
-                                                        await import("./herdr-pin")
-                                                      ).runHerdrPin(rest.slice(1))
-                                                    : VERBS.includes(command)
-                                                      ? await verb(command, rest)
-                                                      : command === "ci-wait"
-                                                        ? await ciWaitFor(rest)
-                                                        : fail(
-                                                            `no command ${command}; playground --help lists them`,
-                                                          )
+                                                    ).runYard(
+                                                      rest,
+                                                      await (
+                                                        await import("./yard")
+                                                      ).yardIo(
+                                                        REPO,
+                                                        accountsIo(dataDir()).readSecret,
+                                                      ),
+                                                    )
+                                                  : command === "herdr" && rest[0] === "stop"
+                                                    ? (await opsHerdr(["stop-all"]).exited) === 0
+                                                      ? 0
+                                                      : 1
+                                                    : command === "herdr" && rest[0] === "pin"
+                                                      ? await (
+                                                          await import("./herdr-pin")
+                                                        ).runHerdrPin(rest.slice(1))
+                                                      : VERBS.includes(command)
+                                                        ? await verb(command, rest)
+                                                        : command === "ci-wait"
+                                                          ? await ciWaitFor(rest)
+                                                          : command === "model"
+                                                            ? await (
+                                                                await import("../local-model/live")
+                                                              ).runModel(rest)
+                                                            : fail(
+                                                                `no command ${command}; playground --help lists them`,
+                                                              )
 process.exit(code)

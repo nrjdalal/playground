@@ -345,6 +345,8 @@ describe("pull requests", () => {
       ci: "passing",
       conflicts: false,
       draft: true,
+      gates: null,
+      head,
       number: 33,
       queued: false,
       reviewed: false,

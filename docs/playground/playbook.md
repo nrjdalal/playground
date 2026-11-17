@@ -102,6 +102,9 @@ A re-point that would drop an old head, one no ancestor of the new head, first k
 Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
 The log line also holds the free disk before and after, which the System page shows too.
 It asks no decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
+Each machine keeps a record of every path the factory put on it, `machine-record.json` in the data folder, written by `playground record add` and the steps that make such a path: an Inbox root card that ran, `link-skills.sh`'s links outside the data folder, and the run folder and Postgres image the runner box's heavy runs use (`ci.sh`).
+Every night at 3:45 a check compares it with the watched places here and on each peer: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root-step folders.
+It sends ops one line a finding: a new path the record lacks (misplaced outside `paths.factoryHomes`, unrecorded inside), a recorded path that is gone, or one it cannot read.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
@@ -261,8 +264,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
 - Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there.
-  A merge of `canary` makes a new head, which needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there, nor, for an installer or first-run diff, without the new-user gate's PASS there.
+  A merge of `canary` makes a new head, which needs its own checks and 5/5, and its own tester's or new-user gate's PASS where its diff calls for one.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
 - Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.

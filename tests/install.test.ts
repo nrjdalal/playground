@@ -48,6 +48,7 @@ const SOURCE_FILES = withImports(
     ".gitignore",
     "install.sh",
     "package.json",
+    "packages/scripts/src/machine-record/cli.ts",
     "packages/scripts/src/ops-herdr/pin.json",
     "packages/scripts/src/playground/claude-trust.ts",
     "packages/scripts/src/playground/doctor.ts",

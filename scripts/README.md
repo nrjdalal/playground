@@ -212,6 +212,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
   all pointing into the main checkout, so a pull there updates the factory's hooks and the command.
+  Each link it makes outside the data folder goes into the machine record (`playground record add`, GLOSSARY.md's **Machine record**), and a link the record holds already writes nothing, so every run records only what is new.
+  A record that fails prints one line on stderr and leaves the run's status alone, since the next daily check names the link.
 - Before it links, it removes each link into the checkout whose file a pull removed, in the folders `playground doctor` reads (`linksInto` in `packages/scripts/src/playground/links.ts`), so a link doctor names MISSING clears on the next run; a live link, and every link that points elsewhere, stays.
 - Beside its links, `scripts/link-skills.sh` sets `rerere.enabled false` in the checkout's config, which every worktree reads.
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
@@ -273,6 +275,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - Heavy runs go through `~/.playground/ops/run-slot.sh <name> -- <command>`; the load rules, the lanes and the switches are written in [ops/README.md](ops/README.md#run-slot).
   `<name>` is the session's name, which run-slot refuses with a one-line reason when it starts with `-`, so the guards and run-slot agree that the command starts after the `--` past it (`slotWords`, [hooks/README.md](hooks/README.md)).
+- A commit's pre-commit build takes `run-slot-commit` whenever turbo's dry run reads, whatever it would run, since such a build ran 8 to 23 s, a whole rebuild included, where a heavy lane's wait ran 17 to 27 minutes; a dry run that fails, times out or cannot be read waits as a big run ([ops/README.md](ops/README.md#run-slot)'s size bullet).
 - A commit queued through run-slot takes the paths you staged by name before you queue it, committed without `-a`, since `commit -a` takes whatever the worktree holds when the queued run starts, and edits made while a commit waited once landed in the wrong commit.
   Leave every staged file unedited until the commit's hooks finish, since pre-commit's lint-staged runs with `--no-stash` (`lefthook.yml`) and stages each staged file's working-tree content as its hooks run, so an edit made during a slow, queued pre-commit lands in that commit.
 - In single-slot mode (`run-slot.single`) the machine holds 4 units across slots 1 and 2, so beside a big run's 3 units only a 1-unit run fits, by design, and a 2-unit waiter waits for the big to end (measured: it started 22.2 s after it arrived, when the big's 20 s hold ended, and the free slot stood idle the whole hold);
