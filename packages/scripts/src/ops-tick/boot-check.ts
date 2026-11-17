@@ -183,6 +183,7 @@ export const bootCheckPass = async (ctx: Context, boot: number, deps: BootDeps) 
   let result = await pass(ctx, deps)
   for (let i = 1; i < PASSES && result === "again"; i++) result = await pass(ctx, deps)
   if (result === "held") return
-  if (result === "again") await report(deps, [`still broken after ${PASSES} repairs`])
+  if (result === "again")
+    await report(deps, [`git fsck found a torn object on each of ${PASSES} passes`])
   await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString(), boot }))
 }
