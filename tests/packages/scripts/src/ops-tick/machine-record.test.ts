@@ -9,16 +9,17 @@ import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tic
 
 const HERE = hostname().split(".")[0]!
 
-// A scratch home with its data folder, a clone at ~/code/playground whose .env names one peer, and an empty root-step folder; a run that answers docker as absent and ssh as given, recording each argv, and the lines sent.
-const setUp = async (ssh: { code: number; out: string }) => {
+// A scratch home with its data folder, a clone at ~/code/playground whose .env names one peer (or, with dashboard, no .env and a Dashboard checkout at ~/code/desk whose .env does), and an empty root-step folder; a run that answers docker as absent and ssh as given, recording each argv, and the lines sent.
+const setUp = async (ssh: { code: number; out: string }, dashboard = false) => {
   const home = mkdtempSync(join(tmpdir(), "machine-record-beat-"))
   const data = join(home, ".playground")
   const repo = join(home, "code", "playground")
   const system = join(home, "root-steps")
-  for (const dir of [join(data, "ops"), repo, system, join(home, ".cache")])
+  const desk = join(home, "code", "desk")
+  for (const dir of [join(data, "ops"), repo, desk, system, join(home, ".cache")])
     mkdirSync(dir, { recursive: true })
   writeFileSync(
-    join(repo, ".env"),
+    join(dashboard ? desk : repo, ".env"),
     "PLAYGROUND_PEERS=spark-test=me@spark-test\nPLAYGROUND_PEER_KEY=/k/playground_spark\n",
   )
   const runs: string[][] = []
@@ -38,7 +39,13 @@ const setUp = async (ssh: { code: number; out: string }) => {
   }
   const places = { home, homes: [data, repo], run: ctx.run, system: [system] }
   await seed(data, [], places)
-  return { beat: machineRecord(home, [system]), ctx, home, runs, sent }
+  return {
+    beat: machineRecord(home, [system], () => (dashboard ? desk : null)),
+    ctx,
+    home,
+    runs,
+    sent,
+  }
 }
 
 test("the machine-record beat runs daily, sending ops each finding here and on the peer, each led by its machine", async () => {
@@ -54,6 +61,14 @@ test("the machine-record beat runs daily, sending ops each finding here and on t
     { text: `machine record: ${HERE}: misplaced: ${join(home, ".cache", "by-hand")}`, to: "ops" },
     { text: "machine record: spark-test: misplaced: /home/me/.cache/hand", to: "ops" },
     { text: "machine record: spark-test: unreadable: /etc/polkit-1/rules.d", to: "ops" },
+  ])
+})
+
+test("the peers come from the Dashboard checkout's .env when the main checkout keeps none, and the ssh still enters the main checkout's clone", async () => {
+  const { beat, ctx, runs } = await setUp({ code: 0, out: "" }, true)
+  await beat(ctx)
+  expect(runs.filter((argv) => argv[0] === "ssh")).toEqual([
+    peerRecordArgv("/k/playground_spark", "me@spark-test", "~/code/playground", "check"),
   ])
 })
 

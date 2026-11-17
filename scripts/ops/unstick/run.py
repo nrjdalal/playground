@@ -93,7 +93,7 @@ LIMIT_DIALOG = re.compile(r"What do you want to do\?", re.I)
 DIALOG_HINT = re.compile(r"Enter to confirm · Esc|Space to select · Esc|Esc to reject all")
 # The factory's herdr servers: each name's socket is <dir>/<name>.sock beside one config.toml, reached through HERDR_SOCKET_PATH (the CLI's
 # --session ignores it). A refused or missing socket is that server down, not a fault; `pane list` starts no server. The sockets follow HOME, never
-# CLAUDE_CONFIG_DIR, as ops-herdr puts them (herdrDir in packages/scripts/src/ops-herdr/herdr.ts), so every Claude login reads the same servers.
+# CLAUDE_CONFIG_DIR, as ops-herdr puts them (herdrDir in packages/env/src/data-dir.ts), so every Claude login reads the same servers.
 # herdr runs by the copy ops-herdr installs and pins, under the data folder of HOME alone (herdrPath in packages/scripts/src/ops-herdr/pin.ts).
 HERDR = os.environ.get("HERDR_BIN_PATH") or os.path.expanduser("~/.playground/bin/herdr")
 HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")

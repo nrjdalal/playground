@@ -33,6 +33,9 @@ at that head and the head is up to date with canary:
   body          the PR body is the PR template the Changelog reads, and its Evidence names
                 each changed *.md path by its full path
   review        ## ReviewBot · round <n>: 5/5 at <sha7>, at the head
+  checks        a PR changing a check (CI's workflows or actions, the gate code, the
+                refused-forms harness) or deleting a refused-forms line has that 5/5 name
+                each such path: Reviewed check change: <path>
   tester        on a diff under web/next/: ## TesterBot · PASS at <sha7>, at the head
   new-user      on an installer or first-run diff (NEW_USER_PATHS): ## NewUserGate · PASS
                 at <sha7>, at the head

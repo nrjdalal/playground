@@ -32,11 +32,12 @@ set -euo pipefail
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore, close or read, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close, read or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
+#   --backend local    the places glm takes but a planner's or a researcher's, and with no --account, --model or --ssh: the session runs on this machine's local model (K) through Claude Code, at http://127.0.0.1:8000, under the served name local with a placeholder token, in a 120k window, its --effort labelled on the launch line, since K's chat template switches thinking on or off alone; refused while that port lists no served name local, and while this machine's maxSessions local sessions are live (models/state.json, else 6)
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
 #   --harness claude-code  the default: the session runs in Claude Code.
-#     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
-#   --model <id>       with any mode but restore, close or read, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
+#     The harness and backend are recorded at the start in ~/.playground/backends/<name> (claude-code glm, claude-code local, codex openai), and carried on its resume, which also reads a pin of the backend alone: a resume takes no --backend or --harness while a pin stands, and refuses with no pin and none given, or with a pin that reads as none of those.
+#   --model <id>       with any mode but restore, close or read, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM or the local model, which map every model themselves, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore, close or read, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
 #   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
@@ -49,7 +50,7 @@ set -euo pipefail
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
 # <brief> is a file under ~/.playground. Every session runs at high effort unless --effort names another,
-# on models.default unless --model names another of models.claude, or on models.glm with --backend glm. The first dispatcher reports to no one: its <reports-to> is the lead that briefs it.
+# on models.default unless --model names another of models.claude, on models.glm with --backend glm, or on the local model with --backend local. The first dispatcher reports to no one: its <reports-to> is the lead that briefs it.
 # Each start lands in the roster.
 
 REPO="$(cd -P "$(dirname "$0")/.." && pwd -P)"
@@ -284,7 +285,7 @@ gate_capacity() {
   target=
   [ -z "$SSH_HOST" ] || target=$("$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/peer-gate.ts" "$SSH_HOST" "$SSH_KEY") || target="{\"problem\": \"peer-gate.ts failed\"}"
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" "$SSH_HOST" "$target" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" "$SSH_HOST" "$target" "${LOCAL_CAP:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -294,7 +295,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick, reads_only, roster_path, mode, host, target = sys.argv[1:22]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed, session, own_pick, reads_only, roster_path, mode, host, target, local_cap = sys.argv[1:23]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -486,27 +487,28 @@ def manager_room():
     readings["cpu_idle"] = cpu_idle()
     return readings["cpu_idle"] is not None and readings["cpu_idle"] >= MANAGER_IDLE_MIN
 
-if backend == "glm" and not host:
+if backend in ("glm", "local") and not host:
+    starts = "a GLM session" if backend == "glm" else "a local session"
     try:
-        # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second, here; an --ssh one takes the target's load and memory gates below
+        # a GLM or local session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second, here; an --ssh one takes the target's load and memory gates below
         loads = loadavg()
         if loads is None:
             refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime), nor Linux's /proc/loadavg")
         readings["load5"] = loads[1]
         if readings["load5"] >= gates["glmLoad5Max"]:
-            refuse("load", f"load5 is {readings['load5']:.2f} ({source['load5']}), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
+            refuse("load", f"load5 is {readings['load5']:.2f} ({source['load5']}), and {starts} starts under {fmt(gates['glmLoad5Max'])}")
         readings["pressure"] = pressure_level()
         if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
             readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
         elif readings["pressure"] is None:
             refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level), nor Linux's /proc/pressure/memory")
         elif readings["pressure"] != 1:
-            refuse("memory", f"pressure level is {readings['pressure']} ({source['pressure']}), and a GLM session starts at 1 alone")
+            refuse("memory", f"pressure level is {readings['pressure']} ({source['pressure']}), and {starts} starts at 1 alone")
         readings["swapins"] = swapins()
         if readings["swapins"] is None:
             refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1), nor Linux's /proc/vmstat")
         if readings["swapins"] >= gates["glmSwapinsMax"]:
-            refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
+            refuse("memory", f"swap-ins are {readings['swapins']}/s ({source['swapins']}), and {starts} starts under {fmt(gates['glmSwapinsMax'])}/s")
     except Skip:
         pass
 else:
@@ -647,24 +649,35 @@ except Skip:
 # 4 sessions (SPAWN.md's gate 4)
 CAPPED = re.compile(r"(worker|reviewer|tester)-.+|.+-(worker|reviewer|tester)")
 LIVE = ("starting", "waiting", "working")
+
+# The roster's named rows, [] with no roster, None when it does not read.
+def roster_rows():
+    try:
+        with open(roster_path) as f:
+            agents = json.load(f).get("agents") or []
+    except FileNotFoundError:
+        agents = []
+    except (OSError, ValueError, AttributeError):
+        return None
+    return [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
+
+# A resume of the session's own live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back work already running.
+def resumes_live(rows):
+    own = next((a for a in rows if a["name"] == session), {})
+    return mode == "resume" and (own.get("status") in LIVE or bool(just_closed))
+
 try:
     cap = gates["sessionCap"]
     if cap and role in ("worker", "reviewer", "tester"):
-        try:
-            with open(roster_path) as f:
-                agents = json.load(f).get("agents") or []
-        except FileNotFoundError:
-            agents = []
-        except (OSError, ValueError, AttributeError):
+        rows = roster_rows()
+        if rows is None:
             refuse("sessions", f"it cannot read {roster_path} (does not read)")
-        rows = [a for a in agents if isinstance(a, dict) and isinstance(a.get("name"), str)] if isinstance(agents, list) else []
-        own = next((a for a in rows if a["name"] == session), {})
         live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and a.get("priority") != "1" and CAPPED.fullmatch(a["name"]))
         readings.update(session_cap=cap, sessions=len(live))
-        # priority work comes first, as at the load and slots gates, and a resume of a live row, or of one spawn.sh closed live in the last 15 minutes (JUST_CLOSED), brings back a session the count held
+        # priority work comes first, as at the load and slots gates, and a live resume (resumes_live) brings back a session the count held
         if priority:
             readings["priority"] = priority
-        elif mode == "resume" and (own.get("status") in LIVE or just_closed):
+        elif resumes_live(rows):
             readings["counted"] = True
         elif len(live) >= cap:
             refuse("sessions", f"{len(live)} live {'worker or checker' if len(live) == 1 else 'workers and checkers'} in the roster ({', '.join(live)}), and gates.sessionCap is {cap}. Wait for one to end, or close a session that is done, and run it again.")
@@ -692,6 +705,9 @@ try:
             pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     except (OSError, ValueError):
         pass
+    # A live resume (resumes_live) adds no work, so the 98% backstop holds it in place of the pace line; a roster that does not read leaves the pace on.
+    resumed = resumes_live(roster_rows() or [])
+    pace_skip = f"skipped until {pace_off} (usage-pace-off-until)" if pace_off else "skipped (a resume of a live session: the 98% backstop alone)" if resumed else None
 
     # One login's reading: what it read, and why it is over the gate (None when it passes).
     def judge(name, usage, limit, writer):
@@ -726,9 +742,10 @@ try:
                 reset = "later"
             return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
         seen["week"] = week_pct
-        if pace_off:
+        if pace_skip:
             if week_pct >= 98:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+                why = f"while the pace check is off until {pace_off} (usage-pace-off-until)" if pace_off else "for a resume of a live session"
+                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup {why}"
         else:
             days_in = 7 - (resets - now).total_seconds() / 86400
             pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
@@ -785,8 +802,8 @@ try:
         else:
             seen, detail = judge(name, other, 60, "")
             readings.update(seen)
-            if pace_off:
-                readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+            if pace_skip:
+                readings["pace"] = pace_skip
             if detail:
                 refuse("usage", f"--account {account}: {detail}. Name another account, or none, so it starts on the login with the most room")
     elif backend == "glm":
@@ -824,9 +841,28 @@ try:
         except (KeyError, TypeError):
             week_pct = None
         readings["week"] = week_pct
+    elif backend == "local":
+        # a local session draws no Claude usage: its own window is the sessions this machine's model server takes at once, which the model switch sizes (local-cap.ts read it before the gate)
+        cap, cap_from = local_cap.split("\t", 1)
+        cap = int(cap)
+        rows = roster_rows()
+        if rows is None:
+            refuse("usage", f"it cannot read {roster_path} (does not read), so it cannot count the local sessions")
+        def pinned_local(name):
+            try:
+                with open(os.path.join(data_dir, "backends", name)) as f:
+                    return f.read().split() == ["claude-code", "local"]
+            except OSError:
+                return False
+        live = sorted(a["name"] for a in rows if a["name"] != session and a.get("status") in LIVE and pinned_local(a["name"]))
+        readings.update(local_cap=cap, local_sessions=len(live))
+        if resumes_live(rows):
+            readings["counted"] = True
+        elif len(live) >= cap:
+            refuse("usage", f"{len(live)} live local sessions ({', '.join(live)}), and the local model here serves {cap} at once ({cap_from}). Wait for one to end, close a session that is done, or start it on --backend glm or claude.")
     else:
-        if pace_off:
-            readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+        if pace_skip:
+            readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
         usage, detail = load("usage.json")
@@ -1628,7 +1664,7 @@ case "$MODE" in
 esac
 [ -z "$SANDBOX_ARG" ] || [[ $ROLE =~ ^(worker|reviewer|probe)$ ]] || usage "$SANDBOX_ONLY, not a $ROLE's"
 # A worker or checker names its login while usage.accounts lists a Claude row, since the account split ranks logins by week left per hour and cannot follow which login takes which work; a fresh install lists none, so its bare start stays on this machine's own login.
-if [ -z "$ACCOUNT" ] && [ "$MODE" != resume ] && [ "$BACKEND" != glm ] && [[ $ROLE =~ ^(worker|reviewer|tester)$ ]]; then
+if [ -z "$ACCOUNT" ] && [ "$MODE" != resume ] && [[ ! $BACKEND =~ ^(glm|local)$ ]] && [[ $ROLE =~ ^(worker|reviewer|tester)$ ]]; then
   ORDER=$(python3 -I -c 'import datetime as dt, json, sys
 now = dt.datetime.now(dt.timezone.utc)
 def named(row):
@@ -1689,9 +1725,10 @@ if [ "$MODE" = resume ]; then
     # A pin names its harness, then its backend (HARNESSES in packages/settings/src/harnesses.ts); one written before the harness split names its backend alone.
     case "$pin" in
       glm | "claude-code glm") BACKEND=glm ;;
+      "claude-code local") BACKEND=local ;;
       claude | "claude-code claude") ;;
       "codex openai") HARNESS=codex ;;
-      *) refuse "the backend pin for $NAME reads none of claude-code claude, claude-code glm, codex openai, glm or claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
+      *) refuse "the backend pin for $NAME reads none of claude-code claude, claude-code glm, claude-code local, codex openai, glm or claude: it cannot know how $NAME ran. Fix or remove $SHOWN/backends/$NAME, then resume." ;;
     esac
   elif [ -n "$BACKEND$HARNESS" ]; then
     PIN_GIVEN=1
@@ -1699,7 +1736,7 @@ if [ "$MODE" = resume ]; then
     if [ "$ROLE" = reviewer ] || [ "$ROLE" = tester ]; then
       refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend claude, which records the pin."
     fi
-    refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
+    refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm, --backend local or --backend claude, whichever it ran on, which records the pin."
   fi
 fi
 # Codex runs the first dispatcher alone, on the one login its CODEX_HOME holds, with the model and effort its own config names.
@@ -1748,6 +1785,8 @@ check_account() {
 }
 # --account naming this machine's own login starts on it with no token, as a bare start does, its usage judged by that login's reading and the split skipped.
 OWN_LOGIN=
+# A local session runs on a placeholder token, so no login of either kind reaches it.
+[ "$BACKEND" != local ] || [ -z "$ACCOUNT" ] || refuse "a session on a local model takes no --account: it runs on a placeholder token"
 if [ -n "$ACCOUNT" ] && [ "$BACKEND" != glm ] && own_login; then
   OWN_LOGIN=$ACCOUNT
   ACCOUNT=
@@ -1756,15 +1795,23 @@ fi
 [ -z "$ACCOUNT" ] || [ "$BACKEND" = glm ] || check_account
 if [ -n "$BACKEND" ]; then
   case "$BACKEND" in
-    glm | claude) ;;
-    *) refuse "--backend takes glm or claude, not $BACKEND" ;;
+    glm | local | claude) ;;
+    *) refuse "--backend takes glm, local or claude, not $BACKEND" ;;
   esac
   # A checker's verdict gates a merge, so it stays on Claude.
-  case "$ROLE" in reviewer | tester) [ "$BACKEND" = glm ] && refuse "a $ROLE runs on Claude, so it takes no --backend glm" ;; esac
+  case "$ROLE" in reviewer | tester) [ "$BACKEND" != claude ] && refuse "a $ROLE runs on Claude, so it takes no --backend $BACKEND" ;; esac
+fi
+# Claude plans and researches (the glm rule), and spawn.sh holds that for the local model by kind.
+if [ "$BACKEND" = local ]; then
+  case "$(kind_of "$NAME")" in
+    planner) refuse "a planner plans on Claude, so it takes no --backend local" ;;
+    researcher) refuse "a researcher researches on Claude, so it takes no --backend local" ;;
+  esac
+  [ -z "$SSH_HOST" ] || refuse "the local model listens on this machine's loopback alone, so an --ssh probe takes no --backend local"
 fi
 # Inbox #i520: the second dispatcher (a manager start, a dispatcher's name with -2, or a roster slot of 2) never shares the first's login, so it keeps answering when the first runs out.
 if [ "$KIND" = dispatcher ] && { { [ "$MODE" = manager ] && [ -z "$FIRST" ]; } || second_dispatcher "$NAME" || [ "$(roster_field "$NAME" slot)" = 2 ]; } && [ "$BACKEND" != glm ] && [ -z "$ACCOUNT" ]; then
-  refuse "$NAME, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account: on this machine's own login it would run out with the first"
+  refuse "$NAME, the second dispatcher, runs on --backend glm, or on Claude with --account <email>, a second account: on this machine's own login it would run out with the first, and --backend local takes no dispatcher, since a dispatcher plans"
 fi
 case "${EFFORT:-high}" in
   low | medium | high | xhigh | max) ;;
@@ -1779,22 +1826,43 @@ case "$ROLE" in
   reviewer | tester) [ -z "$CLAUDE_MODEL" ] || [ "$CLAUDE_MODEL" = "$CHECKER_MODEL" ] ||
     refuse "a $ROLE runs on $CHECKER_MODEL, since its verdict gates a merge, so it takes no --model $CLAUDE_MODEL" ;;
 esac
-if [ "$BACKEND" = glm ]; then
-  # The GLM launch maps every model Claude Code asks for to GLM, so a Claude model asked for here would never run; a resume reads glm from its pin first.
-  [ -z "$CLAUDE_MODEL" ] || refuse "a session on GLM takes no --model: GLM maps every model itself"
-  # No guarded org's data reaches GLM: a session in a folder named for an org ext.links guards, or on a brief naming a word glm-refused-sources lists, runs on Claude.
+OFF_CLAUDE=
+[ "$BACKEND" = glm ] && OFF_CLAUDE=GLM
+[ "$BACKEND" = local ] && OFF_CLAUDE="the local model"
+if [ -n "$OFF_CLAUDE" ]; then
+  # The GLM and local launches map every model Claude Code asks for to their own, so a Claude model asked for here would never run; a resume reads the backend from its pin first.
+  [ "$BACKEND" != glm ] || [ -z "$CLAUDE_MODEL" ] || refuse "a session on GLM takes no --model: GLM maps every model itself"
+  [ "$BACKEND" != local ] || [ -z "$CLAUDE_MODEL" ] || refuse "a session on a local model takes no --model: the launch maps every model to the served name"
+  # No guarded org's data reaches GLM or the local model: a session in a folder named for an org ext.links guards, or on a brief naming a word glm-refused-sources lists, runs on Claude.
   # A failed read of the guarded orgs refuses.
   orgs=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/setting.ts" --guarded-orgs) 2>&1) ||
     refuse "it cannot read the orgs ext.links guards, so it cannot tell a guarded org's checkout: $orgs"
   origin=$(git -C "${DIR:-/}" remote get-url origin 2>/dev/null) || origin=
   # A guarded org, as a folder on the session's path or as the owner of that folder's GitHub origin, in any case.
   org=$(python3 -I -c 'import json, re, sys; parts = sys.argv[1].lower().split("/"); m = re.search(r"github\.com[:/]([\w.-]+)/", sys.argv[3]); owner = m.group(1).lower() if m else ""; print(next((o for o in json.loads(sys.argv[2]) if o in parts or o == owner), ""))' "${DIR:-}" "$orgs" "$origin") || refuse "it cannot read the orgs ext.links guards"
-  [ -z "$org" ] || refuse "$NAME runs in a checkout of $org, an org ext.links guards, so it runs on Claude: start it with --backend claude, closing a GLM-pinned session first"
+  [ -z "$org" ] || refuse "$NAME runs in a checkout of $org, an org ext.links guards, so it runs on Claude: start it with --backend claude, closing a $BACKEND-pinned session first"
   if [ -n "${BRIEF:-}" ]; then
     words=$(guard_list glm-refused-sources 2>&1) || refuse "$words"
     named=$(python3 -I -c 'import json, sys; text = open(sys.argv[1], encoding="utf-8", errors="replace").read().lower(); print(next((w for w in json.loads(sys.argv[2]) if w and w.lower() in text), ""))' "$DATA/$BRIEF" "$words") || refuse "it cannot read $SHOWN/$BRIEF for glm-refused-sources' words"
-    [ -z "$named" ] || refuse "$BRIEF names $named, a source glm-refused-sources keeps off GLM, so it runs on Claude: start it with --backend claude, closing a GLM-pinned session first"
+    [ -z "$named" ] || refuse "$BRIEF names $named, a source glm-refused-sources keeps off $OFF_CLAUDE, so it runs on Claude: start it with --backend claude, closing a $BACKEND-pinned session first"
   fi
+fi
+# The local model answers on this machine's one model server port; a start checks it lists the served name, which also tells the model is up.
+LOCAL_URL=http://127.0.0.1:8000
+# The name serve.sh gives every local model (--served-model-name local), so a swap changes no launch.
+LOCAL_SERVED=local
+if [ "$BACKEND" = local ]; then
+  listed=$(curl -sS --max-time 5 "$LOCAL_URL/v1/models" 2>&1) || refuse "the local model at $LOCAL_URL did not answer in 5 s ($listed): ask Ops to bring it up, or start it on --backend glm or claude"
+  python3 -I -c 'import json, sys
+try:
+    ids = [m.get("id") for m in json.loads(sys.argv[1]).get("data", [])]
+except (ValueError, AttributeError, TypeError):
+    ids = []
+sys.exit(0 if sys.argv[2] in ids else 1)' "$listed" "$LOCAL_SERVED" ||
+    refuse "the local model at $LOCAL_URL serves no model named $LOCAL_SERVED: ask Ops which model is up, or start it on --backend glm or claude"
+  LOCAL_CAP=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/local-cap.ts" "${LOCAL_URL##*:}") 2>&1) || refuse "$LOCAL_CAP"
+fi
+if [ "$BACKEND" = glm ]; then
   # The GLM key is a usage.accounts row of provider glm: the one --account labels, else the first; ACCOUNT then empties, since it names a Claude login everywhere below.
   GLM_LABELS=$(setting usage.accounts | python3 -I -c 'import json, sys; [print(a["label"]) for a in json.load(sys.stdin) if a.get("provider") == "glm"]' 2>/dev/null) || GLM_LABELS=
   if [ -n "$ACCOUNT" ]; then
@@ -1922,7 +1990,7 @@ MEMORY=off
 ARM=
 if [ -n "$MEMORY_DIR" ]; then
   MEMORY=on
-elif [ -z "$MEMORY_OFF" ] && [ "$BACKEND" != glm ]; then
+elif [ -z "$MEMORY_OFF" ] && [ -z "$OFF_CLAUDE" ]; then
   case "$ROLE:$KIND" in
     dispatcher:* | lead:builder | lead:ops | lead:planner)
       # a resume keeps a row --memory off left off, as a worker's keeps its arm
@@ -1968,10 +2036,17 @@ if [ "$BACKEND" = glm ]; then
   LAUNCH='tk="$(security find-generic-password -s '"$GLM_KEYCHAIN"' -a '"$GLM_ACCOUNT"' -w)" || exit 1; [ -n "$tk" ] || { echo "The '"$GLM_KEYCHAIN"' item for '"$GLM_ACCOUNT"' holds an empty token; save it again with playground accounts add --provider glm --label '"$GLM_ACCOUNT"', then respawn." >&2; exit 1; }; ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic ANTHROPIC_AUTH_TOKEN="$tk" ANTHROPIC_DEFAULT_OPUS_MODEL='"$GLM_MODEL"' ANTHROPIC_DEFAULT_SONNET_MODEL='"$GLM_MODEL"' ANTHROPIC_DEFAULT_HAIKU_MODEL='"$GLM_ID"' ENABLE_TOOL_SEARCH=true '"$LAUNCH"
   MODEL=$GLM_MODEL
 fi
-# Every kind compacts in one window, context.window (400k by default), GLM's included, the window the factory's settings give a session spawn.sh did not start; it was read with the model settings above.
+# The local model maps every model Claude Code asks for to the served name, on its loopback port and a placeholder token, the tool search deferred as on GLM. Its chat template switches thinking on or off alone, so the launch line labels the effort it passes.
+if [ "$BACKEND" = local ]; then
+  LAUNCH=": effort ${EFFORT:-high}, which the local model reads as thinking on or off alone; ANTHROPIC_BASE_URL=$LOCAL_URL ANTHROPIC_AUTH_TOKEN=local ANTHROPIC_DEFAULT_OPUS_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_SONNET_MODEL=$LOCAL_SERVED ANTHROPIC_DEFAULT_HAIKU_MODEL=$LOCAL_SERVED ENABLE_TOOL_SEARCH=true $LAUNCH"
+  MODEL=$LOCAL_SERVED
+  # K serves a 131072-token context (its max-model-len), so a local session compacts well inside it.
+  WINDOW=120000
+fi
+# Every kind compacts in one window, context.window (400k by default), GLM's included (a local session's is 120k, set above), the window the factory's settings give a session spawn.sh did not start; it was read with the model settings above.
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings may turn on telemetry to an org's usage collector, which counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
-[ "$BACKEND" = glm ] && TAG=glm-
+[ -n "$OFF_CLAUDE" ] && TAG=$BACKEND-
 # A manager hands every build, read or research to a worker session (playbook's **workers**), so its file of its own denies the Agent and Workflow tools, which a bare deny takes out of its tools; every other session keeps both, a reviewer's code-review sub-agents among them.
 MANAGER=
 case "$ROLE" in dispatcher | lead) MANAGER=manager- ;; esac
@@ -2045,7 +2120,7 @@ if manager:
     settings["permissions"] = {**permissions, "deny": sorted({*permissions.get("deny", []), "Agent", "Workflow"})}
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
-if backend == "glm":
+if backend in ("glm", "local"):
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
 if sandbox:
     # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
@@ -2123,7 +2198,7 @@ BRIEF_AT=$SHOWN/$BRIEF
 [ -z "$REMOTE" ] || BRIEF_AT="$REMOTE/$(basename "$BRIEF")"
 READ="Load the playbook skill first. Your brief is in $BRIEF_AT: read it in full and follow it."
 # Two GLM workers searched ToolSearch for Read, Bash and Skill, found none since it lists only deferred tools, and stopped as if they had none.
-[ "$BACKEND" = glm ] && READ="$READ Skill, Read, Bash, Edit and Write are already loaded; ToolSearch lists only deferred tools."
+[ -n "$OFF_CLAUDE" ] && READ="$READ Skill, Read, Bash, Edit and Write are already loaded; ToolSearch lists only deferred tools."
 # A herdr start names its session id up front, so its resume record can resume exactly that session.
 SID=${SESSION:-}
 if [ "$RUNTIME" = herdr ] && [ "$MODE" != resume ]; then
@@ -2162,7 +2237,7 @@ if [ "$MODE" = resume ]; then
   [ -z "$PROMPT" ] || COMMAND="$COMMAND \"$PROMPT\""
 else
   BINDS=
-  [ "$ROLE" = worker ] && [ "$BACKEND" != glm ] && [ -f "$DATA/brief-rush.md" ] && BINDS=" $SHOWN/brief-rush.md binds you too, on this Claude lane."
+  [ "$ROLE" = worker ] && [ -z "$OFF_CLAUDE" ] && [ -f "$DATA/brief-rush.md" ] && BINDS=" $SHOWN/brief-rush.md binds you too, on this Claude lane."
   WHO="a $ROLE in the Playground factory; you report to $TO"
   REPORT=" Report to $TO with SendMessage (to: $TO)."
   # SendMessage reaches no session on another machine, so a start over --ssh reports through the outbox, which ops-peer-relay copies across, and waits on its own queue for the answers.

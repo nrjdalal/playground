@@ -60,6 +60,16 @@ test("rm takes one path, or --worktree's with an optional --discard and --pr, wi
   })
 })
 
+test("rm takes a path with --card <id>, the card that approved its removal", () => {
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--reason", "nightly-clean"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    reason: "nightly-clean",
+    worktree: false,
+  })
+})
+
 test("rm takes --list or --restore <id> alone", () => {
   expect(rmArgs(["--list"])).toEqual({ list: true })
   expect(rmArgs(["--restore", "20261102T120000Z-s/1"])).toEqual({ restore: "20261102T120000Z-s/1" })
@@ -79,6 +89,8 @@ test.each([
   [["--worktree", "wt", "--discard", "--decision", "#i9"]],
   [["a", "--pr", "https://github.com/o/r/pull/1"]],
   [["--worktree", "wt", "--pr"]],
+  [["--worktree", "wt", "--card", "c1"]],
+  [["a", "--card"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -119,6 +131,7 @@ const machine = () => {
     liveBranch: () => "live/dashboard",
     main,
     merged: () => false,
+    mergedHead: () => null,
     notify: (text) => void told.push(text),
     places: () => [],
     prState: async () => null,
@@ -851,6 +864,22 @@ test("a worktree whose PR merged or closed passes a working roster row naming it
   }
 })
 
+// PG-2498: a row holding the worktree by its own merged PR's number alone is the freed check's, which names the PR that freed it, so the merged-head read asks gh nothing for it
+test("a worktree freed by its own merged PR, held by a row naming that PR alone, says which PR freed it and asks gh for no merged head", async () => {
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const asked: string[] = []
+  const head = git(wt, "rev-parse", "HEAD")
+  const merged: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), head) }
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  const { code, out } = await heldRun(merged, ["--worktree", wt, "--discard"], "MERGED", row, 7)
+  expect({ asked, code, said: out[0] }).toEqual({
+    asked: [],
+    code: 0,
+    said: `playground: ${wt} is freed by #7, which reads MERGED, past abc123-worker's roster row (working)`,
+  })
+})
+
 // PG-1419: the freed removal goes through the 7-day trash like any other, and --restore brings the worktree back, the work --discard let go with it
 test("a freed worktree's removal is restorable: --restore brings it back on its branch, at its commit, listed, its discarded work back as untracked", async () => {
   const { deps, main } = machine()
@@ -1392,6 +1421,78 @@ const ownPushed = () => {
   const discard = `playground rm --worktree ${own} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   return { ...m, discard, own }
 }
+
+// #2498: #2484's review clone stayed "held by gkbbch-worker" after #2484 merged, since the worker's row still named it as its pr; a row's hold by a PR that reads merged no longer counts, as SESSIONS.md's End says, while one on an open PR still keeps the clone
+test("--worktree takes a review clone a live row holds only by a PR that has merged, and keeps it while that PR is open", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-2484")
+  git(main, "worktree", "add", "-q", "--detach", clone, git(own, "rev-parse", "HEAD"))
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        {
+          branch: "PG-2475-other",
+          name: "gkbbch-worker",
+          pr: "https://github.com/o/r/pull/2484",
+          status: "working",
+        },
+      ],
+    }),
+  )
+  const held = {
+    code: 1,
+    err: [`playground: ${clone} is held by gkbbch-worker, which the roster lists as working`],
+    out: [],
+  }
+  const asked: string[] = []
+  const open: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), null) }
+  expect(await rmTold(["--worktree", clone], open)).toEqual(held)
+  expect(asked).toEqual(["https://github.com/o/r/pull/2484"])
+  const absent: RmDeps = { ...deps, mergedHead: () => "0".repeat(40) }
+  expect(await rmTold(["--worktree", clone], absent)).toEqual(held)
+  const head = git(clone, "rev-parse", "HEAD")
+  const merged: RmDeps = {
+    ...deps,
+    mergedHead: (_, u) => (u === "https://github.com/o/r/pull/2484" ? head : null),
+  }
+  const told = await rmTold(["--worktree", clone], merged)
+  expect(told.err).toEqual([])
+  expect(told.code).toBe(0)
+  expect(existsSync(clone)).toBe(false)
+})
+
+// PG-2498: a merged PR's number still holds while HEAD has a commit past that PR's head, so --discard cannot take it, and a row naming the PR alongside its branch never asks gh
+test("--worktree --discard keeps a clone with a commit past a merged PR's head, which the row holds by that PR alone", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-7")
+  const merged = git(own, "rev-parse", "HEAD")
+  git(main, "worktree", "add", "-q", "-b", "PG-7-review", clone, merged)
+  writeFileSync(join(clone, "past.txt"), "past\n")
+  git(clone, "add", "past.txt")
+  git(clone, "commit", "-qm", "past the merged head")
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-9-other" }] }),
+  )
+  const asked: string[] = []
+  const past: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), merged) }
+  expect(await rmTold(["--worktree", clone, "--discard"], past)).toEqual({
+    code: 1,
+    err: [`playground: ${clone} is held by abc123-worker, which the roster lists as working`],
+    out: [],
+  })
+  expect(asked).toEqual(["https://github.com/o/r/pull/7"])
+  expect(existsSync(join(clone, "past.txt"))).toBe(true)
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-7-review" }] }),
+  )
+  asked.length = 0
+  expect((await rmTold(["--worktree", clone, "--discard"], past)).code).toBe(1)
+  expect(asked).toEqual([])
+})
 
 test.each([
   ["an open PR", openPr],
@@ -1970,10 +2071,124 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
     expect(deps.merged("HEAD", wt)).toBeNull()
     expect(deps.defaultBranch(wt)).toBeNull()
+    expect(deps.mergedHead(wt, "https://github.com/o/r/pull/2484")).toBeNull()
     expect(existsSync(called)).toBe(false)
   } finally {
     process.env.PATH = saved.path
     if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
     else process.env.PLAYGROUND_DATA_DIR = saved.data
   }
+})
+
+const CARD = "11111111-2222-3333-4444-555555555555"
+
+test("runRm --card takes only an Inbox card id, so no flag reaches ask get", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", "--ack"], deps)
+  expect(code).toBe(2)
+  expect(err.join("\n")).toContain("--ack is not an Inbox card id")
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A machine whose ~/models holds one dropped hf repo the record names, and whose card approves it on spark-a at its size.
+type Picks = (repo: string) => { bytes: number; machine: string; path: string }[] | string
+const approvedMachine = (picks: Picks | null) => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  file(join(repo, "blobs", "b"), "weights")
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  const deps: RmDeps = {
+    ...m.deps,
+    ...(picks === null ? {} : { approvals: async () => picks(repo) }),
+    machine: "spark-a",
+  }
+  return { ...m, deps, repo }
+}
+
+test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card ${CARD} approved`)
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test.each<[string, Picks | null, string]>([
+  ["no Remove answer on the card", () => [], "holds no Remove answer from the owner"],
+  [
+    "a Remove for another machine",
+    (path) => [{ bytes: 7, machine: "spark-b", path }],
+    "holds no Remove answer",
+  ],
+  [
+    "a size other than the card's",
+    (path) => [{ bytes: 6, machine: "spark-a", path }],
+    "its size changed",
+  ],
+  ["a card that does not read", () => "ERR_POSTGRES_CONNECTION_REFUSED", "did not read"],
+  ["no Inbox here", null, "no Inbox is read here"],
+])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
+  const { deps, repo } = approvedMachine(picks)
+  const { code, err } = await rmTold([repo, "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(said)
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A main checkout pushed to origin/canary with one replay worktree in a row of ~/models/kit/runs holding an untracked answer.
+const replayMachine = () => {
+  const m = machine()
+  git(m.root, "init", "--bare", "-q", join(m.root, "remote.git"))
+  git(m.main, "init", "-q", "-b", "canary")
+  file(join(m.main, "README.md"))
+  git(m.main, "add", "README.md")
+  git(m.main, "commit", "-qm", "init")
+  git(m.main, "remote", "add", "origin", join(m.root, "remote.git"))
+  git(m.main, "push", "-q", "origin", "canary")
+  const wt = join(m.home, "models", "kit", "runs", "MB-1", "pr0001")
+  mkdirSync(dirname(wt), { recursive: true })
+  git(m.main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+  file(join(wt, "answer.ts"), "export const a = 1\n")
+  return { ...m, wt }
+}
+
+test("runRm --worktree keeps a replay worktree a model test is running in, and refuses --discard and --pr on one", async () => {
+  const { deps, wt } = replayMachine()
+  const running = {
+    ...deps,
+    procs: () => [{ command: "bun run kit replay", cwd: wt, pid: 4242, sockets: [] }],
+  }
+  const held = await rmTold(["--worktree", wt], running)
+  expect(held.code).toBe(1)
+  expect(held.err.join("\n")).toContain(
+    `${wt} is held by pid 4242 (bun run kit replay) working in ${wt}`,
+  )
+  for (const words of [["--discard"], ["--pr", "https://github.com/o/r/pull/1"]]) {
+    const flagged = await rmTold(["--worktree", wt, ...words], deps)
+    expect(flagged.code).toBe(2)
+    expect(flagged.err.join("\n")).toContain("takes neither --discard nor --pr")
+  }
+  expect(existsSync(wt)).toBe(true)
+  expect(existsSync(`${wt}.diff`)).toBe(false)
+})
+
+test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
+  const { deps, wt } = replayMachine()
+  const { code, out } = await rmTold(["--worktree", wt], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`its work is kept in ${wt}.diff`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readFileSync(`${wt}.diff`, "utf8")).toContain("+export const a = 1")
 })

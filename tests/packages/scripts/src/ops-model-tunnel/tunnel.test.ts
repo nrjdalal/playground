@@ -10,6 +10,7 @@ import {
   keep,
   tunnelArgv,
 } from "../../../../../packages/scripts/src/ops-model-tunnel/tunnel"
+import { CYCLE_SECONDS } from "../../../../../packages/scripts/src/ops-tick/tick"
 
 const ENV = "PLAYGROUND_PEERS=spark-test=me@spark-test\nPLAYGROUND_PEER_KEY=/home/me/.ssh/k\n"
 
@@ -72,6 +73,50 @@ describe("ops-model-tunnel (PG-2543)", () => {
     })
   })
 
+  test("beats up each cycle while ssh holds, so the sweep never reads a held tunnel as stale, and stops beating once ssh exits", async () => {
+    const data = mkdtempSync(join(tmpdir(), "model-tunnel-"))
+    const path = join(data, "ops", `${JOB}.json`)
+    const stop = new AbortController()
+    let drop = (_code: number) => {}
+    const timers: { cleared: boolean; ms: number; tick: () => unknown }[] = []
+    const kept = keep({
+      data,
+      envText: async () => ENV,
+      every: (ms, tick) => {
+        const timer = { cleared: false, ms, tick }
+        timers.push(timer)
+        return () => void (timer.cleared = true)
+      },
+      home: "/home/me",
+      machine: () => "",
+      record: async () => {},
+      signal: stop.signal,
+      spawn: () => ({
+        exited: new Promise<number>((done) => (drop = done)),
+        kill: () => drop(143),
+        stderr: Promise.resolve(""),
+      }),
+      ssh: "/usr/bin/ssh",
+      wait: async () => void stop.abort(),
+    })
+    for (let tries = 0; !timers.length && tries < 200; tries++) await Bun.sleep(1)
+    expect(timers).toHaveLength(1)
+    const [timer] = timers
+    expect(timer!.ms).toBe(CYCLE_SECONDS * 1000)
+    // three cycles of a link that holds: each one writes the up line again
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await Bun.write(path, `${JSON.stringify({ lastResult: "stale" })}\n`)
+      await timer!.tick()
+      expect((await Bun.file(path).json()).lastResult).toBe(
+        "up: 127.0.0.1:18000 to spark-test:8000, 127.0.0.1:18001 to spark-test:8001",
+      )
+    }
+    drop(255)
+    await kept
+    expect(timer!.cleared).toBe(true)
+    expect(timers).toHaveLength(1)
+  })
+
   test("starts ssh again after it drops, records its heartbeat once, and stops by its own handle", async () => {
     const data = mkdtempSync(join(tmpdir(), "model-tunnel-"))
     const started: string[][] = []
@@ -82,6 +127,7 @@ describe("ops-model-tunnel (PG-2543)", () => {
     await keep({
       data,
       envText: async () => ENV,
+      every: () => () => {},
       home: "/home/me",
       machine: () => "",
       record: async (entries) => void recorded.push(...entries.map((entry) => entry.path)),
