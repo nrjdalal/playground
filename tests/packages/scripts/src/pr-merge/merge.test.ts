@@ -135,7 +135,7 @@ function stub({
   draft = false,
   ready = ok(""),
   comments = PASSING,
-  files = ["AGENTS.md", "packages/scripts/src/pr-merge/cli.ts"],
+  files = ["AGENTS.md", "packages/scripts/src/ship/cli.ts"],
   labels = [] as string[],
   merges = [ok("")],
   parents = {},
@@ -396,6 +396,47 @@ describe("prMerge", () => {
       name: "code",
       ok: true,
     })
+  })
+
+  // a PR could change a check that judges it, and the same review passed it like any other diff (PG-2576).
+  test("a PR deleting a refused-forms row, read from the files call's deletion count, refuses on the checks gate until its 5/5 names the file", async () => {
+    const row = "tests/scripts/hooks/fixtures/refused-forms/2522.ts"
+    const { calls, run } = stub({ files: ["AGENTS.md", `${row}\t\t2`] })
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.filter((gate) => !gate.ok)).toEqual([
+      {
+        detail: `the PR changes a check that judges it (${row}): its 5/5 at 69a6a4c does not name ${row} in a \`Reviewed check change: <path>\` line`,
+        name: "checks",
+        ok: false,
+      },
+    ])
+    expect(merges(calls)).toEqual([])
+    const explained = await prMerge(112, { explain: true, repo: REPO }, run, local())
+    expect(explained.gates.find((gate) => gate.name === "checks")?.ok).toBe(false)
+    const named = comment(
+      `## ReviewBot · round 1: 5/5 at 69a6a4c · 0 blocking\n\nReviewed check change: \`${row}\``,
+      "2026-10-06T19:00:00Z",
+    )
+    const passed = stub({ comments: named, files: ["AGENTS.md", `${row}\t\t2`] })
+    expect((await prMerge(112, { repo: REPO }, passed.run, local())).kind).toBe("merged")
+  })
+
+  test("a refused-forms file the PR only adds to, and a renamed file's old path, read as the files call gives them", async () => {
+    const added = stub({ files: ["tests/scripts/hooks/fixtures/refused-forms/2522.ts\t\t0"] })
+    const outcome = await prMerge(112, { explain: true, repo: REPO }, added.run, local())
+    expect(outcome.gates.find((gate) => gate.name === "checks")).toEqual({
+      detail: "the PR changes no check that judges it",
+      name: "checks",
+      ok: true,
+    })
+    const moved = stub({
+      files: ["tests/scripts/hooks/rows.ts\ttests/scripts/hooks/fixtures/refused-forms/2522.ts\t0"],
+    })
+    const read = await prMerge(112, { explain: true, repo: REPO }, moved.run, local())
+    expect(read.gates.find((gate) => gate.name === "checks")?.detail).toContain(
+      "(tests/scripts/hooks/fixtures/refused-forms/2522.ts)",
+    )
   })
 
   test("refuses a PR the held list names, saying why, and never calls gh pr merge", async () => {

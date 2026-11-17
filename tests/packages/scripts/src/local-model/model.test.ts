@@ -505,6 +505,31 @@ describe("playground model use (PG-2543)", () => {
     expect((await machineState(data, HERE.name)).refused).toBe(refused)
   })
 
+  test("an entry the keep beat skips is no model asked for: the kept model starts, and ops hears of the entry once", async () => {
+    const data = scratch()
+    const odd = { ...kServer, container: "local-vllm-m-model", port: "8000;true" }
+    await writeMachineState(data, PEER.name, {
+      servers: { "m-model": odd as unknown as typeof kServer },
+    })
+    const { calls, deps, steps } = stub(box(), data)
+    const skipped = `the state file's entry for m-model on spark-test (container local-vllm-m-model, port 8000;true) is not one playground model use starts, so the keep beat skips it: fix or remove it in ${statePath(data)}`
+    const first = await keepUp(deps)
+    expect(first).toStartWith(`${skipped}; `)
+    expect(steps).toContain("serve k-model as local-vllm-k-model on 8000 at 0.7 for 70")
+    expect(await keepUp(deps)).toBeNull()
+    expect(calls.some((argv) => argv.at(-1)!.includes("8000;true"))).toBe(false)
+    // once the entry is fixed and broken again, ops hears of it again
+    const told = await machineState(data, PEER.name)
+    const { "m-model": _, ...fixed } = told.servers!
+    await writeMachineState(data, PEER.name, { ...told, servers: fixed })
+    expect(await keepUp(deps)).toBeNull()
+    await writeMachineState(data, PEER.name, {
+      ...(await machineState(data, PEER.name)),
+      servers: { ...fixed, "m-model": odd as unknown as typeof kServer },
+    })
+    expect(await keepUp(deps)).toBe(skipped)
+  })
+
   test("the state file keeps each machine's servers under its name, the shape the local-worker gate reads", async () => {
     const data = scratch()
     const { deps } = stub(box({ memory: [103] }), data, {

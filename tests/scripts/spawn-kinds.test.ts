@@ -286,7 +286,7 @@ describe("the backend pin carries a start onto its resume", () => {
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain(
-      "reads none of claude-code claude, claude-code glm, codex openai, glm or claude",
+      "reads none of claude-code claude, claude-code glm, claude-code local, codex openai, glm or claude",
     )
   })
 
