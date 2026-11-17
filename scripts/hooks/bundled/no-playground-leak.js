@@ -10359,6 +10359,11 @@ var pathsSettings = defineSettings({
     default: "",
     description: "The folder that holds your code, the folder that holds the checkout when unset: spawn.sh answers Claude's folder trust prompt there and moves a session off the Desktop into it.",
     schema: string2().regex(/^(?:\/.*)?$/, "an absolute path, or empty for unset")
+  },
+  "paths.factoryHomes": {
+    default: ["{data}", "{checkout}", "~/models"],
+    description: "The folders the factory may put things in, each an absolute path, a ~/ path, {data} (the data folder) or {checkout} (the Playground clone): the machine record's daily check names a new path outside them as misplaced.",
+    schema: array(string2().regex(/^(?:\/.+|~\/.+|\{data\}|\{checkout\})$/, "a path, {data} or {checkout}")).min(1)
   }
 });
 // packages/settings/src/rules.ts
