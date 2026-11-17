@@ -41,6 +41,9 @@ export const SESSION_MODELS = ["fable", "haiku", "opus", "sonnet"] as const
 
 export const SESSION_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
+// Each Claude Code backend's model maker, whose icon a session on it draws: the one map the API's icon route, a row's maker and Settings' accounts all read; a local model's maker is its repo id's org.
+export const BACKEND_MAKERS = { claude: "anthropic", glm: "zai" } as const
+
 // A session nothing names, as people read it (the owner's ask: give the random ids a name): `session <folder>`, from the folder it runs in, since its first ask already shows beside its name wherever it is listed. Leading with the word keeps it from matching a role by name or prefix (a folder named dispatcher, worker-x or probe-x), so it is always other. null with no folder.
 export const folderName = (cwd: string | null): string | null => {
   const folder = (cwd ?? "").split("/").filter(Boolean).at(-1)

@@ -62,6 +62,7 @@ A **just-closed resume** below is a resume within 15 minutes of `spawn.sh close`
 5. **usage**, the launching backend's own window, which a priority start still meets.
    Claude's from `usage.json`: written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
    or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which ops-sweep writes and renews while an account the split can pick projects under 100% at its week reset (`scripts/ops/README.md`'s Usage forecasts), or a person writes by hand, and the pass line names, a missing, empty, past or unreadable time leaving the pace on.
+   A resume of a session whose own roster row reads live, or a just-closed resume, is judged against the 98% backstop alone in place of the pace, on every login and `--account` reading, since it brings back work already running; its row's `readings.pace` names the skip.
    A `usage.json` never written, as on a fresh install before the ops-usage job first runs, passes every start, its pass line reading `unread (usage.json not yet written)`, while one that exists still has to read, be fresh and be under its limits.
    Each other login's `usage-<name>.json`, and each account login-flip probes by its reading in `login-flip.json`'s `seen`, takes the same checks, its reading valid for 60 minutes, a missing 5-hour window reading as no 5-hour limit, never 0%.
    A start with no `--account` runs on the passing login next in login-flip.py's account split, else the one with the lowest week, naming it, and refuses only when every login is over, naming each one's reading, a stale one's file and age included ([--account](#--account) holds the pick).
@@ -134,7 +135,7 @@ After a resume, restart any dev stack you served, then re-arm your watches: run 
 Done when the restarted stack answers its `/api/health` and each watch is armed once.
 Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
 Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-A just-closed resume passes the load and sessions gates (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
+A just-closed resume passes the load and sessions gates and meets the usage gate's 98% backstop in place of its pace (the capacity gate, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
 ## What it records
 
