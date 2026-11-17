@@ -127,6 +127,15 @@ describe("a delete the hook lets run", () => {
     writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { del: "echo del" } }))
     expect(await check(input("bun run del", {}, root))).toBeUndefined()
     expect(await check(input("bun run del", {}, join(root, "sub")))).toBeUndefined()
+    expect(await check(input(`bun run --cwd ${root} del`, {}, tmpdir()))).toBeUndefined()
+  })
+
+  // a runner's folder option is a folder, never a program word, even in a variable (#2397's 7-day replay)
+  test("bunx's --cwd in a variable, before files under it", async () => {
+    const w = join(tmpdir(), "raw-delete-w")
+    expect(
+      await check(input(`W=${w}; bunx --cwd $W oxfmt $W/tests/a.test.ts $W/b.ts`)),
+    ).toBeUndefined()
   })
 })
 
