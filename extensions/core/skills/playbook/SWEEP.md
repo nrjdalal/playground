@@ -46,6 +46,7 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
   Ask it why, then record its answer in the roster or redirect it.
 - **Off scope**: a worker chasing a bug outside its chore.
   Have it send you the bug as a count and a one-line class, by new-worker.md's gap line, and go back to its chore, unless the bug blocks its PR; then file it as its own issue at once (an issue in the repo where the bug's work lives, by [ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md); a work-org ticket goes up the chain under **tickets**).
+  A guard's refusal or pass goes in the issue once measured against `origin/canary` by [scripts/hooks/README.md](../../../../scripts/hooks/README.md#no-extensions-write)'s fresh-worktree line, with the commit measured named.
 - **Down**: `ListAgents` lists no session by that name.
   Close what is left of it ([End](SESSIONS.md#end): by its surface, or by its workspace when it is the last one there), end it in the roster with the reason, and re-dispatch its chore when one is unfinished.
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.
