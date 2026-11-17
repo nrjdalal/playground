@@ -251,12 +251,15 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
 // What tells an ended session's scratch or scratchpad folder: the roster's path and the statuses it counts as live.
 export type Ended = { live: string[]; roster: string }
 
+// The two folders an ended session's folder sits directly in, which removal and restore both read.
+const PADS = ["scratchpad", "scratch"] as const
+
 // The folder directly in dir (scratchpad/ or scratch/) that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
 const endedPadOf = (
   path: string,
   home: string,
   ended: Ended,
-  dir: "scratch" | "scratchpad",
+  dir: (typeof PADS)[number],
 ): string | undefined => {
   const pad = real(join(home, ".playground", dir))
   const abs = resolve(path)
@@ -293,7 +296,7 @@ const goneScratchOf = (path: string, home: string): string | undefined => {
 }
 
 // The top-level data folders a merged PR retired, A to Z, each with that PR: playground rm removes one whole on any machine, through the trash.
-export const RETIRED: Record<string, string> = {
+const RETIRED: Record<string, string> = {
   ci: "https://github.com/nrjdalal/playground/pull/2567",
 }
 
@@ -534,10 +537,13 @@ export function quarantine(
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
+  const endedBy = opts.ended
   const ended =
-    (opts.ended &&
-      (endedPadOf(abs, roots.home, opts.ended, "scratchpad") ||
-        endedPadOf(abs, roots.home, opts.ended, "scratch"))) ||
+    (endedBy &&
+      PADS.reduce<string | undefined>(
+        (found, dir) => found || endedPadOf(abs, roots.home, endedBy, dir),
+        undefined,
+      )) ||
     (opts.gone && goneScratchOf(abs, roots.home)) ||
     retiredOf(abs, roots.home)
   const carve = carveOutOf(
@@ -679,7 +685,7 @@ export function restore(
   // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, a gone session's entry directly in scratch/ or a retired data folder back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
-    const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
+    const pads = PADS.map((dir) => real(join(roots.home, ".playground", dir)))
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)

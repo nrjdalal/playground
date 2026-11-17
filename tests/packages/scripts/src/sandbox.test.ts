@@ -180,7 +180,7 @@ test.skipIf(process.platform !== "linux")(
       rmSync(scratch, { force: true, recursive: true })
       expect(boxed(["bun", "test"])[0]).toBe("bwrap")
     } catch (error) {
-      expect(String(error)).toContain("the test sandbox could not start bwrap")
+      expect(String(error)).toContain("the test sandbox's bwrap refused the box")
     } finally {
       if (was === undefined) delete process.env.TEST_SANDBOX_BOX
       else process.env.TEST_SANDBOX_BOX = was
@@ -211,7 +211,7 @@ test.skipIf(process.platform !== "linux" || !existsSync("/dev/shm"))(
       rmSync(scratch, { force: true, recursive: true })
       expect(boxed(["bun", "test"])[0]).toBe("bwrap")
     } catch (error) {
-      expect(String(error)).toContain("the test sandbox could not start bwrap")
+      expect(String(error)).toContain("the test sandbox's bwrap refused the box")
     } finally {
       if (was === undefined) delete process.env.TEST_SANDBOX_BOX
       else process.env.TEST_SANDBOX_BOX = was
@@ -342,7 +342,7 @@ test("bwrapRefusal names the package only when bwrap is missing, and words a ref
   )
   const mount = "bwrap: Can't mount tmpfs on /newroot/x: No such file or directory"
   const refused = refusal(["bwrap", "true"], 1, mount)
-  expect(refused).toContain(`the test sandbox could not start bwrap (${mount})`)
+  expect(refused).toContain(`the test sandbox's bwrap refused the box (${mount})`)
   expect(refused).not.toContain("install the bubblewrap package")
 })
 

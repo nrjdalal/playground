@@ -190,5 +190,5 @@ export const bwrapRefusal = (probe: string[]): string | null => {
   })
   if (run.exitCode === 0) return null
   const line = run.stderr.toString().trim().split("\n").at(-1) ?? ""
-  return `the test sandbox could not start bwrap (${line}): bwrap ran and refused the box, so where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them, else fix the mount its line names (sandbox.ts)`
+  return `the test sandbox's bwrap refused the box (${line}): where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them, else fix the mount its line names (sandbox.ts)`
 }
