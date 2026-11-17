@@ -44,6 +44,8 @@ export type Holders = {
   // The live Dashboard's branch (the live.branch setting): the main checkout's worktree on it is never removed, --discard included.
   liveBranch?: string
   merged: (sha: string, at: string) => boolean | null
+  // The head of the PR at a URL a live row names once it reads MERGED, else null (open, closed or unreadable), asked only for a URL whose number matches the worktree and is the row's one hold: a merged PR's hold no longer counts while HEAD holds no commit past that head, as SESSIONS.md's End says, since its worker or checker is only finishing up.
+  mergedHead?: (url: string) => string | null
   note?: (line: string) => void
   // The number of the worktree's own pull request, as GitHub names it by the worktree's branch, in any state: a live row listing it holds the worktree whatever the worktree's folder and branch are named.
   ownPr?: number
@@ -246,12 +248,17 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
   ]
 }
 
-// What tells an ended session's scratchpad folder: the roster's path and the statuses it counts as live.
+// What tells an ended session's scratch or scratchpad folder: the roster's path and the statuses it counts as live.
 export type Ended = { live: string[]; roster: string }
 
-// The folder directly in scratchpad/ that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
-const endedPadOf = (path: string, home: string, ended: Ended): string | undefined => {
-  const pad = real(join(home, ".playground", "scratchpad"))
+// The folder directly in dir (scratchpad/ or scratch/) that path is or sits in, when it is a real folder (not a symlink) no live roster row names, as its own name or as `<folder>-<role>` (a bare id's folder while any of that id's sessions runs); none while the roster cannot be read.
+const endedPadOf = (
+  path: string,
+  home: string,
+  ended: Ended,
+  dir: "scratch" | "scratchpad",
+): string | undefined => {
+  const pad = real(join(home, ".playground", dir))
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   if (own === pad || !inside(own, pad)) return undefined
@@ -285,6 +292,22 @@ const goneScratchOf = (path: string, home: string): string | undefined => {
     : undefined
 }
 
+// The top-level data folders a merged PR retired, A to Z, each with that PR: playground rm removes one whole on any machine, through the trash.
+export const RETIRED: Record<string, string> = {
+  ci: "https://github.com/nrjdalal/playground/pull/2567",
+}
+
+// A retired folder's own place: directly in the data folder, under a name RETIRED lists; removal and restore both read it.
+const retiredPlace = (own: string, home: string): boolean =>
+  dirname(own) === real(join(home, ".playground")) && Object.hasOwn(RETIRED, basename(own))
+
+// The retired folder path is, when it is that real folder (not a symlink) at its own place.
+const retiredOf = (path: string, home: string): string | undefined => {
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  return retiredPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
+}
+
 const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
@@ -300,7 +323,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratchpad folders (endedPadOf) and gone sessions' entries directly in scratch/ (goneScratchOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,
@@ -512,8 +535,11 @@ export function quarantine(
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
   const ended =
-    (opts.ended && endedPadOf(abs, roots.home, opts.ended)) ||
-    (opts.gone && goneScratchOf(abs, roots.home))
+    (opts.ended &&
+      (endedPadOf(abs, roots.home, opts.ended, "scratchpad") ||
+        endedPadOf(abs, roots.home, opts.ended, "scratch"))) ||
+    (opts.gone && goneScratchOf(abs, roots.home)) ||
+    retiredOf(abs, roots.home)
   const carve = carveOutOf(
     abs,
     opts.carveOut,
@@ -540,10 +566,11 @@ export function quarantine(
       `refused a ${recent.length + 1}th removal: ${opts.session} moved ${recent.length} paths in the last minute, the most one session may`,
       firstOfBurst(trash, opts.session, recent) ? "tripwire" : "refused",
     )
-  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratchpad folder, the session's own temp folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
+  // The measure skips the tree's rebuildable folders, so the tripwire judges what the trash will hold and a refused rm keeps its tree whole; the strip runs on the moved tree, once every refusal is past. A carve-out's move keeps its tree whole, and an ended session's whole scratch or scratchpad folder, the session's own temp folder, a path inside the session's own scratchpad folder (a ship rehearsal's two clones), a retired data folder, or with gone a gone session's entry directly in scratch/, skips the file count, keeping the byte cap.
   const own = join(real(dirname(abs)), basename(abs))
   const temp = ownTempOf(own, opts.session, io.tmp ?? "/tmp")
-  const whole = (ended && own === ended) || temp
+  const ownPad = join(real(join(roots.home, ".playground", "scratchpad")), opts.session)
+  const whole = (ended && own === ended) || temp || (own !== ownPad && inside(own, ownPad))
   const cap = carve ?? (whole ? { ...LIMITS, files: Infinity } : LIMITS)
   const { files, size } = measure(abs, {
     limits: opts.worktree ? undefined : cap,
@@ -649,14 +676,19 @@ export function restore(
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  // an ended session's item comes back only into its folder directly in scratchpad/, or a gone session's entry directly in scratch/ back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
+  // an ended session's item comes back only into its folder directly in scratchpad/ or scratch/, a gone session's entry directly in scratch/ or a retired data folder back to its own place, reached through no symlink (at the folder or between), and is refused anywhere else
   let back: string[] = []
   if (entry.ended) {
     const pads = ["scratchpad", "scratch"].map((dir) => real(join(roots.home, ".playground", dir)))
     const parent = dirname(entry.path)
     const at = existsSync(parent) ? join(real(parent), basename(entry.path)) : entry.path
     const stands = lstat(entry.ended)
-    if (
+    if (retiredPlace(entry.ended, roots.home)) {
+      if (at !== entry.ended)
+        return refused(
+          `${entry.path} came from ${entry.ended}, a retired data folder, which no longer reaches it as that real folder directly in ${real(join(roots.home, ".playground"))}`,
+        )
+    } else if (
       !pads.includes(dirname(entry.ended)) ||
       !inside(at, entry.ended) ||
       (at !== entry.ended && stands && !stands.isDirectory())
@@ -785,6 +817,13 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const where = `${folder} ${branch.toLowerCase()}`
   // Each name's slug, after its PG-<n>- prefix: lint holds PG-12-lint-job, not PG-5-splint.
   const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
+  const heads = new Map<string, string | null>()
+  // Whether the merged PR at url holds all of HEAD, read once per URL: HEAD is its head or behind it, so no commit past it goes; an unreadable or open PR, or a head this clone lacks, reads false
+  const atMergedHead = (url: string) => {
+    if (!heads.has(url)) heads.set(url, holders.mergedHead?.(url) ?? null)
+    const merged = heads.get(url)
+    return !!merged && git("merge-base", "--is-ancestor", "HEAD", merged).ok
+  }
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
@@ -797,12 +836,23 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr); --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
+    // a row holds by its pr and every PR in its prs, each matched by its number in the folder or branch name or as the worktree's own PR (ownPr), but, where those PRs are its one hold, not by another PR that reads merged with HEAD at or behind its head (mergedHead), so commits past it keep the hold, the worktree's own freed PR left to the freed check below; --pr lifts its own PR's hold, but under --discard only once that PR reads MERGED or CLOSED, so a live checker's clone of an open PR stays
     const liftable = !holders.discard || holders.freed !== undefined
-    const prs = rowPullRequests(agent)
+    const matched = rowPullRequests(agent)
       .filter((u) => !(liftable && u === holders.pr))
-      .flatMap((u) => /\/pull\/(\d+)$/.exec(u)?.[1] ?? [])
-      .filter((n) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where))
+      .flatMap((u) => {
+        const n = /\/pull\/(\d+)$/.exec(u)?.[1]
+        return n ? [{ n, u }] : []
+      })
+      .filter(
+        ({ n }) => n === String(holders.ownPr) || new RegExp(`(^|\\D)${n}(\\D|$)`).test(where),
+      )
+    const byPrAlone = !byBranch && !byName && !byId
+    const prs = (
+      byPrAlone
+        ? matched.filter(({ n, u }) => n === String(holders.freed?.number) || !atMergedHead(u))
+        : matched
+    ).map(({ n }) => n)
     const byPr = prs.length > 0
     if (!byBranch && !byPr && !byName && !byId) continue
     // a clean detached checkout at a commit its base holds (origin/canary, or another repo's default branch) is a reader of that base, not the row's work, so a live row holds it no more

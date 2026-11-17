@@ -1,9 +1,10 @@
 import { homedir, hostname } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 
 import { cloneOf } from "@packages/config/org"
 
 import { check, homesOf, peerRecordArgv } from "../machine-record/record"
+import { peersOf } from "./peers"
 import type { Context } from "./tick"
 
 const PEER_MS = 120_000
@@ -15,9 +16,13 @@ const firstLine = (out: string, code: number) =>
     .map((line) => line.trim())
     .find(Boolean) ?? `exit ${code}`
 
-// machine-record: the machine record's daily check, here and on each peer the checkout's .env names (PLAYGROUND_PEERS, through ops-peer-relay's clusterOf), each peer reached by peerRecordArgv's one ssh; every finding is one line to ops, led by its machine's name, and a peer the check cannot reach is one line too. home and the root-step folders (record.ts's ROOT_FOLDERS when unset) are a test's seams.
+// machine-record: the machine record's daily check, here and on each peer peersOf names, each peer reached by peerRecordArgv's one ssh; every finding is one line to ops, led by its machine's name, and a peer the check cannot reach is one line too. home, the root-step folders (record.ts's ROOT_FOLDERS when unset) and the Dashboard's checkout are a test's seams.
 export const machineRecord =
-  (home: string = process.env.HOME || homedir(), system?: string[]) =>
+  (
+    home: string = process.env.HOME || homedir(),
+    system?: string[],
+    checkout?: (repo: string) => string | null,
+  ) =>
   async (ctx: Context) => {
     const data = dirname(ctx.ops)
     const here = hostname().split(".")[0]!
@@ -25,10 +30,7 @@ export const machineRecord =
     const lines = (await check(data, { home, homes, run: ctx.run, system })).map(
       (line) => `${here}: ${line}`,
     )
-    // loaded here, since the relay imports this beat's tick.ts for its heartbeat
-    const { clusterOf, envKeysOf } = await import("../ops-peer-relay/relay")
-    const env = Bun.file(join(ctx.repo, ".env"))
-    const cluster = clusterOf(envKeysOf((await env.exists()) ? await env.text() : ""), home)
+    const cluster = await peersOf(ctx.repo, home, checkout)
     if ("why" in cluster) lines.push(`peers not checked: ${cluster.why}`)
     else {
       const clone = cloneOf(ctx.repo, home)

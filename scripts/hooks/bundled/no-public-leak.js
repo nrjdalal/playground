@@ -6429,7 +6429,7 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm", "local"], id: "claude-code" },
+  { backends: ["claude", "glm"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
@@ -6526,16 +6526,6 @@ var localModelSettings = defineSettings({
       literal(""),
       string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
     ])
-  },
-  "localModels.maxFirstTokenSeconds": {
-    default: 10,
-    description: "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
-    schema: number2().positive().max(600)
-  },
-  "localModels.minTps": {
-    default: 15,
-    description: "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
-    schema: number2().min(0).max(1000)
   },
   "localModels.models": {
     default: {
@@ -12505,14 +12495,14 @@ var shipWrite = (raw) => {
     return false;
   }
 };
-async function check(raw, environment = process.env) {
+async function check(raw, environment = process.env, checkout) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
     return refusedList(raw, `${loaded.refusal} The list is a JSON object with an array of strings under each of ${LIST_KEYS.join(", ")}.`);
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
+  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings, checkout), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await input("no-public-leak", "guard");

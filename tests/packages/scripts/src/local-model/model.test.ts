@@ -431,25 +431,28 @@ describe("playground model use (PG-2543)", () => {
     )
   })
 
-  test("a container name in the state file of any other shape is never sent to a shell", async () => {
-    const data = scratch()
-    const odd = {
-      ...kServer,
-      busyAt: "2026-11-17T05:00:00.000Z",
-      container: "local-vllm-k-model;true",
+  test("a container name or port in the state file of any other shape is never sent to a shell", async () => {
+    for (const [field, value] of [
+      ["container", "local-vllm-k-model;true"],
+      ["port", "8000;true"],
+    ] as const) {
+      const data = scratch()
+      const odd = { ...kServer, [field]: value } as unknown as typeof kServer
+      await writeMachineState(data, PEER.name, { servers: { "k-model": odd } })
+      // a silent /metrics, so the drain would ask docker whether that container runs
+      const { calls, deps, steps } = stub(box({ busy: { 8000: [null] }, memory: [32.4] }), data)
+      expect((await useModel("m-model", deps)).line).toBe(
+        `the state file's entry for k-model on spark-test (container ${odd.container}, port ${odd.port}) is not one playground model use starts, so nothing changed: fix or remove it in ${statePath(data)}`,
+      )
+      expect(await modelHold(data, PEER.name)).toBeNull()
+      deps.config = { ...PEER_CONFIG, keep: "m-model" }
+      await keepUp(deps)
+      expect(calls.some((argv) => argv.at(-1)!.includes(value))).toBe(false)
+      expect(steps.some((step) => /^(stop|metrics|inspect local-vllm-k-model)/.test(step))).toBe(
+        false,
+      )
+      expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
     }
-    await writeMachineState(data, PEER.name, { servers: { "k-model": odd } })
-    // a silent /metrics, so the drain would ask docker whether that container runs
-    const { calls, deps, steps } = stub(box({ busy: { 8000: [null] }, memory: [32.4] }), data)
-    expect((await useModel("m-model", deps)).line).toBe(
-      `the state file's container name for k-model on spark-test, local-vllm-k-model;true, is not one playground model use starts, so nothing changed: fix or remove its entry in ${statePath(data)}`,
-    )
-    expect(await modelHold(data, PEER.name)).toBeNull()
-    deps.config = { ...PEER_CONFIG, keep: "m-model" }
-    await keepUp(deps)
-    expect(calls.some((argv) => argv.at(-1)!.includes(odd.container))).toBe(false)
-    expect(steps.some((step) => step.startsWith("stop"))).toBe(false)
-    expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
   })
 
   test("a swap already running holds every other start, and a hold a killed run left behind is lifted", async () => {

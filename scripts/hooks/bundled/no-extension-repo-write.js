@@ -10089,7 +10089,7 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm", "local"], id: "claude-code" },
+  { backends: ["claude", "glm"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
@@ -10186,16 +10186,6 @@ var localModelSettings = defineSettings({
       literal(""),
       string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
     ])
-  },
-  "localModels.maxFirstTokenSeconds": {
-    default: 10,
-    description: "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
-    schema: number2().positive().max(600)
-  },
-  "localModels.minTps": {
-    default: 15,
-    description: "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
-    schema: number2().min(0).max(1000)
   },
   "localModels.models": {
     default: {

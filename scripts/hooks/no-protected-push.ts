@@ -505,7 +505,11 @@ async function judgeApi(
 
 const isPush = (args: Word[]) => gitCommand(args).sub?.value === "push"
 
-async function inspect(raw: string, environment: Environment): Promise<string | undefined> {
+async function inspect(
+  raw: string,
+  environment: Environment,
+  checkout?: string,
+): Promise<string | undefined> {
   let payload: unknown
   try {
     payload = JSON.parse(raw)
@@ -516,7 +520,7 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
   const { cwd, tool_input: input, tool_name: tool } = payload as Record<string, unknown>
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment))
-    return read.refusal === undefined ? factoryRepo(read.settings) : ""
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : ""
   }
   if (typeof tool === "string" && MCP_TOOL.test(tool))
     return judgeTool(tool, (input ?? {}) as Record<string, unknown>, factoryOf())
@@ -592,9 +596,10 @@ async function inspect(raw: string, environment: Environment): Promise<string | 
 export async function check(
   raw: string,
   environment: Environment = process.env,
+  checkout?: string,
 ): Promise<string | undefined> {
   try {
-    return await inspect(raw, environment)
+    return await inspect(raw, environment, checkout)
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw)) return
     return `no-protected-push hook could not read this call (${error}), which names a route onto main or canary, so it refuses it. ${FIX}`

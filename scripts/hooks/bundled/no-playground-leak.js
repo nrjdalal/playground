@@ -10238,7 +10238,7 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm", "local"], id: "claude-code" },
+  { backends: ["claude", "glm"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
@@ -10335,16 +10335,6 @@ var localModelSettings = defineSettings({
       literal(""),
       string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
     ])
-  },
-  "localModels.maxFirstTokenSeconds": {
-    default: 10,
-    description: "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
-    schema: number2().positive().max(600)
-  },
-  "localModels.minTps": {
-    default: 15,
-    description: "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
-    schema: number2().min(0).max(1000)
   },
   "localModels.models": {
     default: {
@@ -10978,7 +10968,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
-async function inspect(raw, environment) {
+async function inspect(raw, environment, checkout) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -10990,7 +10980,7 @@ async function inspect(raw, environment) {
   const { cwd, tool_input: input, tool_name: tool } = payload;
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment));
-    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : "";
   };
   if (typeof tool === "string" && MCP_TOOL2.test(tool))
     return judgeTool(tool, input ?? {}, factoryOf());
@@ -11057,9 +11047,9 @@ async function inspect(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit);
 }
-async function check2(raw, environment = process.env) {
+async function check2(raw, environment = process.env, checkout) {
   try {
-    return await inspect(raw, environment);
+    return await inspect(raw, environment, checkout);
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;
