@@ -41,6 +41,7 @@ import {
   examine,
   filled,
   GIT_TAKES,
+  globSwitch,
   isFolder,
   knownVariables,
   lex,
@@ -133,7 +134,7 @@ const EVALUATES_ROOT =
   "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
 // a shell feature that changes what a glob matches, on a line a remote shell runs, which the hook refuses in any spelling rather than reads (globSwitch in shell.ts)
 const GLOB_SWITCH = (found: string) =>
-  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook does not read, since it can let a glob in the home match the data folder: write it as plain words or run it locally`
+  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally`
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -412,7 +413,7 @@ function alternatives(word: string): string[] {
   const [before, after] = [word.slice(0, group.index), word.slice(group.index + group[0].length)]
   return group[1].split("|").flatMap((alt) => alternatives(before + alt + after))
 }
-// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with `dots` off (a fully static remote line, which holds no glob-option switch once visit has refused one), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group or a zsh qualifier follows
+// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with `dots` off (a fully static remote line, which holds no glob-option switch once visit has refused one), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group holding `|` follows, since visit refused any other group or zsh qualifier as a switch
 function globMatches(segment: string, name: string, dots: boolean): boolean {
   const words = braceWords(segment)?.flatMap(alternatives)
   if (!words || words.length > 64) return true
@@ -2418,6 +2419,15 @@ async function inspect(
     if (fedText && (fedText.unknown || marked(fedText.value)))
       return refuse(
         "an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally",
+      )
+    // a SetEnv or SendEnv value starts the remote shell with its variable, whatever its line says
+    const envSwitch = globSwitch((ssh?.env ?? []).map((w) => w.value).join(" "))
+    if (envSwitch) return GLOB_SWITCH(`ssh -o ${envSwitch}`)
+    // a SendEnv pattern (`SendEnv=BASH*`) sends whichever of this shell's variables it matches, so it is a name the hook cannot read
+    const envUnread = ssh?.env.find((w) => marked(w.value) || /[*?]/.test(w.value))
+    if (envUnread)
+      return refuse(
+        `an ssh -o SetEnv or SendEnv of ${shown(envUnread)}, a value or pattern the hook cannot read, which may start the remote shell with a glob-option switch; name each variable literally`,
       )
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))

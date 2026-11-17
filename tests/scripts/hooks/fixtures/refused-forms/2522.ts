@@ -7,6 +7,11 @@ const controls = (): Row[] => [
   ["a dotglob on the local side before a remote uptime", "shopt -s dotglob; ssh box uptime"],
   ["a remote star glob with no switch on the line", "ssh box 'ls */notes'"],
   ["a script with no switch piped to a remote bash", "echo 'df -h' | ssh box bash"],
+  ["a strict-mode header on a remote line", "ssh box 'set -euo pipefail; ls */notes'"],
+  [
+    "a strict-mode header in a heredoc fed to a remote bash",
+    "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
+  ],
 ]
 
 const refused = (): Row[] => [
@@ -53,6 +58,26 @@ const refused = (): Row[] => [
   [
     "a remote touch through a ? glob after FIGNORE piped to a remote bash",
     "echo 'FIGNORE=x; touch ?playground/extensions/y' | ssh box bash",
+  ],
+  [
+    "a remote touch through a * glob with BASHOPTS set by ssh's SetEnv",
+    "ssh -o SetEnv=BASHOPTS=dotglob box 'touch */extensions/x'",
+  ],
+  [
+    "a remote touch through a ? glob with GLOBIGNORE set by an attached SetEnv",
+    "ssh -oSetEnv=GLOBIGNORE=x box 'touch ?playground/extensions/y'",
+  ],
+  [
+    "a remote touch through a * glob with BASHOPTS sent by ssh's SendEnv",
+    "ssh -o SendEnv=BASHOPTS box 'touch */extensions/x'",
+  ],
+  [
+    "a remote touch through a * glob with a SendEnv pattern",
+    "ssh -o 'SendEnv=BASH*' box 'touch */extensions/x'",
+  ],
+  [
+    "a heredoc fed to a remote bash with BASHOPTS set by SetEnv",
+    "ssh -o SetEnv=BASHOPTS=dotglob box bash -s <<'EOF'\ntouch */extensions/x\nEOF",
   ],
 ]
 

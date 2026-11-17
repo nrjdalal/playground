@@ -6740,7 +6740,7 @@ var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
 function sshCall({ args, first }) {
   if (program(first?.value ?? "") !== "ssh")
     return;
-  const call = { local: [], noStdin: false, remote: [], unread: false };
+  const call = { env: [], local: [], noStdin: false, remote: [], unread: false };
   let remoteCommand;
   const option = (word) => {
     const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
@@ -6751,6 +6751,8 @@ function sshCall({ args, first }) {
       call.local.push({ ...word, value: m?.[2] ?? "" });
     else if (key === "remotecommand")
       remoteCommand = { ...word, value: m?.[2] ?? "" };
+    else if (key === "sendenv" || key === "setenv")
+      call.env.push({ ...word, value: m?.[2] ?? "" });
   };
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -6801,10 +6803,25 @@ function staticLine(line) {
 }
 var GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
-  /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*[o4](?=\s|$)/i,
   /bashopts|dotglob|fignore|globdots|globignore/i,
   /[*?[][^\s;&|()]*\([^()\s|]*\)/
 ];
+var NO_GLOB = new Set([
+  "errexit",
+  "errtrace",
+  "functrace",
+  "noclobber",
+  "nounset",
+  "pipefail",
+  "verbose",
+  "xtrace"
+]);
+function optionSwitch(bare) {
+  for (const [head, rest] of bare.matchAll(/\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi))
+    for (const [found, cluster, name] of rest.matchAll(/\s([-+][a-z0-9]*[o4])(?=\s|$)(?:\s+([a-z]+))?/gi))
+      if (/[O4]/.test(cluster) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
+        return `${head.slice(0, head.length - rest.length).trim()} ${found.trim()}`;
+}
 function globSwitch(text) {
   const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
   for (const pattern of GLOB_SWITCHES) {
@@ -6812,6 +6829,7 @@ function globSwitch(text) {
     if (found)
       return found[0].trim();
   }
+  return optionSwitch(bare);
 }
 function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
@@ -10642,7 +10660,7 @@ var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWit
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
-var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook does not read, since it can let a glob in the home match the data folder: write it as plain words or run it locally`;
+var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -12540,6 +12558,12 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const fedText = ssh && stdinShell(cmd) ? sshInput(cmd)?.body : undefined;
     if (fedText && (fedText.unknown || marked(fedText.value)))
       return refuse("an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally");
+    const envSwitch = globSwitch((ssh?.env ?? []).map((w) => w.value).join(" "));
+    if (envSwitch)
+      return GLOB_SWITCH(`ssh -o ${envSwitch}`);
+    const envUnread = ssh?.env.find((w) => marked(w.value) || /[*?]/.test(w.value));
+    if (envUnread)
+      return refuse(`an ssh -o SetEnv or SendEnv of ${shown(envUnread)}, a value or pattern the hook cannot read, which may start the remote shell with a glob-option switch; name each variable literally`);
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))
         return refuse(`an ssh -o of ${shown(local)}, a value the hook cannot read, which may name a command ssh runs on this machine through a shell; write the option literally`);

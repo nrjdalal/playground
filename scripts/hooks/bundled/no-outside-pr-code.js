@@ -5584,7 +5584,7 @@ var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
 function sshCall({ args, first }) {
   if (program(first?.value ?? "") !== "ssh")
     return;
-  const call = { local: [], noStdin: false, remote: [], unread: false };
+  const call = { env: [], local: [], noStdin: false, remote: [], unread: false };
   let remoteCommand;
   const option = (word) => {
     const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
@@ -5595,6 +5595,8 @@ function sshCall({ args, first }) {
       call.local.push({ ...word, value: m?.[2] ?? "" });
     else if (key === "remotecommand")
       remoteCommand = { ...word, value: m?.[2] ?? "" };
+    else if (key === "sendenv" || key === "setenv")
+      call.env.push({ ...word, value: m?.[2] ?? "" });
   };
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -5645,10 +5647,25 @@ function staticLine(line) {
 }
 var GLOB_SWITCHES = [
   /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
-  /\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*[o4](?=\s|$)/i,
   /bashopts|dotglob|fignore|globdots|globignore/i,
   /[*?[][^\s;&|()]*\([^()\s|]*\)/
 ];
+var NO_GLOB = new Set([
+  "errexit",
+  "errtrace",
+  "functrace",
+  "noclobber",
+  "nounset",
+  "pipefail",
+  "verbose",
+  "xtrace"
+]);
+function optionSwitch(bare) {
+  for (const [head, rest] of bare.matchAll(/\b(?:bash|dash|ksh|ksh93|mksh|set|sh|yash|zsh)\b([^;&|\n]*)/gi))
+    for (const [found, cluster, name] of rest.matchAll(/\s([-+][a-z0-9]*[o4])(?=\s|$)(?:\s+([a-z]+))?/gi))
+      if (/[O4]/.test(cluster) || !NO_GLOB.has(name?.toLowerCase() ?? ""))
+        return `${head.slice(0, head.length - rest.length).trim()} ${found.trim()}`;
+}
 function globSwitch(text) {
   const bare = text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
   for (const pattern of GLOB_SWITCHES) {
@@ -5656,6 +5673,7 @@ function globSwitch(text) {
     if (found)
       return found[0].trim();
   }
+  return optionSwitch(bare);
 }
 function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;

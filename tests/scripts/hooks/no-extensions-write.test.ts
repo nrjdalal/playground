@@ -4006,7 +4006,7 @@ describe("a glob in / is judged by the names / holds", () => {
 // #2522: a glob-option switch on a line ssh runs remotely or feeds a remote shell is refused by its own reason, whatever its spelling, rather than read name by name
 describe("a glob-option switch on a remote or fed line", () => {
   const SWITCH =
-    /refuses a glob-option switch \(.+\) on a line a remote shell runs.*write it as plain words or run it locally/
+    /refuses a glob-option switch \(.+\) on a line a remote shell runs.*wider than the risk on purpose.*drop the option, or run the line locally/
 
   test.each([
     "ssh box 'shopt -s dotglob; touch */extensions/x'",
@@ -4024,6 +4024,14 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh box 'touch *(D)/extensions/x'",
     "ssh box 'FIGNORE=x; touch ?playground/extensions/y'",
     "ssh box 'setopt EXTENDED_GLOB; ls'",
+    "ssh box 'set -euo pipefail -o globdots; touch ?playground/extensions/y'",
+    "ssh box 'set -o pipefail -o KSH_GLOB; touch ?playground/extensions/y'",
+    "ssh box 'bash -o pipefail -O extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh -o SetEnv=BASHOPTS=dotglob box 'touch */extensions/x'",
+    "ssh -oSetEnv=GLOBIGNORE=x box 'touch ?playground/extensions/y'",
+    "ssh -o 'SetEnv FIGNORE=x' box 'touch ?playground/extensions/y'",
+    "ssh -o setenv=BASHOPTS=dotglob box bash -s <<'EOF'\ntouch */extensions/x\nEOF",
+    "ssh -o SendEnv=BASHOPTS box 'touch */extensions/x'",
   ])("%s is refused as a switch", async (command) => {
     expect(await bash(command)).toMatch(SWITCH)
   })
@@ -4033,7 +4041,24 @@ describe("a glob-option switch on a remote or fed line", () => {
     "ssh box 'ls */notes'",
     "echo 'df -h' | ssh box bash",
     `ssh spark-9dfb 'python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"'`,
+    "ssh box 'set -euo pipefail; ls */notes'",
+    "ssh box 'set -o pipefail; ls'",
+    "ssh box 'set -e -o nounset -o errexit; uptime'",
+    "ssh box 'bash -o pipefail -c \"ls */notes\"'",
+    "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
+    "echo 'set -euo pipefail; uptime' | ssh box bash",
+    "ssh -o SetEnv=LANG=C box uptime",
+    "ssh -o SendEnv=LANG box 'ls */notes'",
   ])("%s, with no switch on its remote side, runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
+
+  test.each(["ssh -o 'SendEnv=BASH*' box 'touch */extensions/x'", "ssh -o SetEnv=$V box uptime"])(
+    "%s, a SetEnv or SendEnv the hook cannot read, is refused",
+    async (command) => {
+      expect(await bash(command)).toMatch(
+        /an ssh -o SetEnv or SendEnv of .+, a value or pattern the hook cannot read/,
+      )
+    },
+  )
 })
