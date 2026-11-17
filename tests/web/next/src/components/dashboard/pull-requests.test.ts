@@ -25,6 +25,8 @@ const queued: PullSection = {
           ci: "none",
           conflicts: false,
           draft: false,
+          gates: null,
+          head: "",
           etaMerge: null,
           number: 50,
           place: 1,

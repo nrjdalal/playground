@@ -78,6 +78,7 @@ describe("defineSettings", () => {
       "owner.names",
       "owner.voice",
       "paths.codeRoot",
+      "paths.factoryHomes",
       "release.hours",
       "release.merges",
       "sessions.aliases",

@@ -556,6 +556,7 @@ export const SHOWN_RANK: Record<ShownState, number> = {
   approval: 7,
   approvals: 7,
   ready: 8,
+  gated: 8,
   parked: 9,
   "usage-limit": 10,
   unknown: 10,

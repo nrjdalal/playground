@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { logoOf } from "../../../../../web/next/src/components/dashboard/model-logo"
 import { StatusIcon } from "../../../../../web/next/src/components/dashboard/worker-light"
+import MODEL_ICONS from "../../../../../web/next/src/lib/model-icons.json"
 import {
   checkedOf,
   DOWN_ICON,
@@ -16,6 +18,8 @@ import {
   STATUS_TONES,
   statusIcon,
   effortIcon,
+  FALLBACK_PROVIDER_ICON,
+  providerIcon,
   taskIcon,
   type LightFacts,
 } from "../../../../../web/next/src/lib/status-icons"
@@ -50,6 +54,7 @@ const SET = [
   ["approval", "RiUserLine", "text-caution", "Waiting on approvals", false],
   ["approvals", "RiGroupLine", "text-caution", "Waiting on approvals", false],
   ["ready", "RiZzzLine", "text-success", "Ready", false],
+  ["gated", "RiShieldLine", "text-caution", "Gated", false],
   ["parked", "RiPauseCircleLine", "text-inactive", "Parked", false],
   ["unknown", "RiQuestionLine", "text-inactive", "State unknown", false],
   ["idle", "RiCheckboxBlankCircleLine", "text-inactive", "Idle", false],
@@ -88,6 +93,8 @@ const pull = (fields: Partial<Pull> = {}): Pull => ({
   ci: "passing",
   conflicts: false,
   draft: false,
+  gates: null,
+  head: "abc1234def",
   number: 97,
   queued: false,
   reviewed: false,
@@ -134,7 +141,7 @@ describe("lightOf", () => {
     expect(light({ light: "unknown" })).toBe("unknown")
     expect(light({ light: "unknown", parked: "held" })).toBe("parked")
     expect(light({ light: "unknown", waits: ["inbox"] })).toBe("waiting")
-    expect(light({ light: "unknown", pr: pull({ score: "5/5" }) })).toBe("ready")
+    expect(light({ light: "unknown", pr: pull({ gates: [] }) })).toBe("ready")
     expect(light({ light: "unknown", pr: pull({ approvals: 1 }) })).toBe("approval")
     expect(light({ checked: true, light: "unknown" })).toBe("done")
     expect(light({ light: "unknown", pr: pull({ state: "merged" }) })).toBe("merged")
@@ -219,16 +226,35 @@ describe("lightOf", () => {
     expect(light({ pr: pull({ approvals: 2 }) })).toBe("approvals")
   })
 
-  test("Ready: idle at 5/5 on its head, CI green or none, no approval missing", () => {
-    expect(light({ pr: pull({ score: "5/5" }) })).toBe("ready")
-    expect(light({ pr: pull({ ci: "none", score: "5/5" }) })).toBe("ready")
-    expect(light({ pr: pull({ ci: "failing", score: "5/5" }) })).toBe("idle")
-    expect(light({ pr: pull({ score: "4/5" }) })).toBe("idle")
+  test("Ready: idle while the merge train read every pr:merge gate passing at its head (#2499)", () => {
+    expect(light({ pr: pull({ gates: [], score: "5/5" }) })).toBe("ready")
+    expect(light({ pr: pull({ ci: "none", gates: [], score: "5/5" }) })).toBe("ready")
+    expect(light({ pr: pull({ gates: ["ci"], score: "5/5" }) })).toBe("gated")
+    // no train read at this head: a 5/5 and green CI alone are not pr:merge's gates
+    expect(light({ pr: pull({ score: "5/5" }) })).toBe("idle")
+    expect(light({ pr: pull({ ci: "none", score: "5/5" }) })).toBe("idle")
   })
 
-  test("Parked: its pull request is on the held list", () => {
+  test("Gated: idle on a pull request a pr:merge gate holds, each gate it fails named (#2499)", () => {
+    const held = pull({ gates: ["tester"], score: "5/5" })
+    expect(light({ pr: held })).toBe("gated")
+    expect(stateWords("gated", { pr: held })).toBe("Gated · tester")
+    expect(stateWords("gated", { pr: pull({ gates: ["review", "tester"] }) })).toBe(
+      "Gated · review, tester",
+    )
+    // a gate its worker must fix holds it too, named the same way, so a gate added to pr:merge needs no list here
+    const scored = pull({ gates: ["review"], score: "3/5" })
+    expect(light({ pr: scored })).toBe("gated")
+    expect(stateWords("gated", { pr: scored })).toBe("Gated · review")
+    expect(light({ pr: held, waits: ["checks"] })).toBe("waiting")
+    expect(light({ light: "working", pr: held })).toBe("working")
+  })
+
+  test("Parked: its pull request is on the held list, which pr:merge's held gate reads too", () => {
     expect(light({ parked: "held for the weekly reset" })).toBe("parked")
-    expect(light({ parked: "held", pr: pull({ score: "5/5" }) })).toBe("ready")
+    expect(light({ parked: "held", pr: pull({ gates: ["held"], score: "5/5" }) })).toBe("parked")
+    expect(light({ parked: "held", pr: pull({ gates: ["held", "tester"] }) })).toBe("parked")
+    expect(light({ parked: "held", pr: pull({ score: "5/5" }) })).toBe("parked")
   })
 
   test("Idle: nothing running and nothing waiting; a closed pull request is not work", () => {
@@ -353,13 +379,34 @@ describe("taskIcon", () => {
 })
 
 describe("PROVIDER_ICONS", () => {
-  test("Anthropic draws Remix's Anthropic mark, and Z.ai ZeroSDK's Z, not Zhipu's badge", () => {
-    expect(PROVIDER_ICONS.anthropic).toBe(icons.RiAnthropicFill!)
-    expect(PROVIDER_ICONS.zai).not.toBe(icons.RiZhipuAiFill!)
-    const zai = html(PROVIDER_ICONS.zai, { className: "size-4" })
-    expect(zai).toContain('viewBox="0 0 40 40"')
-    expect(zai).toContain('d="M20.1312 7.50002L17.4088 11.1913H5.81625')
-    expect(zai).toContain('class="size-4"')
+  const vendored = (id: string) => MODEL_ICONS.makers.find((maker) => maker.id === id)!.icon!
+
+  test("a one-colour logo draws as a mask over the text colour, so it stays muted in light and dark", () => {
+    for (const id of ["anthropic", "zai"]) {
+      const logo = html(providerIcon(id), { className: "size-4" })
+      expect(logo).toContain(`href="${vendored(id).data}"`)
+      expect(logo).toContain("<mask")
+      expect(logo).toContain('fill="currentColor"')
+      expect(logo).toContain('class="size-4"')
+    }
+  })
+
+  test("an avatar draws whole, clipped round", () => {
+    const data = "data:image/png;base64,AAAA"
+    const logo = html(logoOf({ data, mono: false }), { className: "size-4" })
+    expect(logo).toContain(`href="${data}"`)
+    expect(logo).toContain("<clipPath")
+    expect(logo).not.toContain("<mask")
+  })
+
+  test("a maker with no vendored icon, or none known, draws the one fallback icon", () => {
+    expect(providerIcon(null)).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("no-such-maker")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("ornith")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(providerIcon("constructor")).toBe(FALLBACK_PROVIDER_ICON)
+    expect(FALLBACK_PROVIDER_ICON).toBe(icons.RiRobot2Line!)
+    for (const { icon, id } of MODEL_ICONS.makers)
+      expect(PROVIDER_ICONS[id] === undefined).toBe(icon === null)
   })
 })
 

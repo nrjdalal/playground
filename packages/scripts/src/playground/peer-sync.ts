@@ -1,5 +1,4 @@
 // playground update's last step: each peer's Playground clone moves to the commit this checkout reached, so a job that runs from a peer's clone (the relay) runs the same code.
-import { isAbsolute, relative } from "node:path"
 
 import { orgOf } from "@packages/config/org"
 import { parse } from "dotenv"
@@ -18,18 +17,11 @@ export const spawnPeerRun: PeerRun = async (argv, timeout) => {
 }
 
 const SHA = /^[0-9a-f]{40}$/
-// a path a remote shell reads as itself: no space, quote, $, ; or glob
-const PLAIN_PATH = /^[A-Za-z0-9._/-]+$/
 const READ_MS = 30_000
 const STEP_MS = 15 * 60_000
 
-// Pure: where a peer's clone sits, the same place under its home as this checkout under this one's, as a ~ path; null when this checkout is outside home or its path holds a character a remote shell would read.
-export const cloneOf = (repo: string, home: string): string | null => {
-  const rel = relative(home, repo)
-  return rel && !isAbsolute(rel) && PLAIN_PATH.test(rel) && !rel.split("/").includes("..")
-    ? `~/${rel}`
-    : null
-}
+// where a peer's clone sits, kept beside the peer's config, since the machine record's peer add reads it too
+export { cloneOf } from "@packages/config/org"
 
 // ssh's argv to one peer as the System panel's peer read builds it (peerArgv, api/hono/src/lib/system/peer.ts): no prompt, a short connect, and remote words fixed here but the clone's path and the sha, each checked before it gets here
 const ssh = (key: string | undefined, target: string, words: string[]) => [

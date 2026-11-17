@@ -207,6 +207,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and each ops script it names into `~/.playground/ops/`;
   for the rename it links `~/.playground` to the old data folder where only that exists,
   all pointing into the main checkout, so a pull there updates the factory's hooks and the command.
+  Each link it makes outside the data folder goes into the machine record (`playground record add`, GLOSSARY.md's **Machine record**), and a link the record holds already writes nothing, so every run records only what is new.
+  A record that fails prints one line on stderr and leaves the run's status alone, since the next daily check names the link.
 - Before it links, it removes each link into the checkout whose file a pull removed, in the folders `playground doctor` reads (`linksInto` in `packages/scripts/src/playground/links.ts`), so a link doctor names MISSING clears on the next run; a live link, and every link that points elsewhere, stays.
 - Beside its links, `scripts/link-skills.sh` sets `rerere.enabled false` in the checkout's config, which every worktree reads.
   Every worktree shares one `.git/rr-cache`, and git runs rerere wherever that folder exists while the setting is unset, so a merge in one worktree replayed a resolution another had recorded, printing `using previous resolution` over a file its author never read.
@@ -283,16 +285,16 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   never a dependency's binary under `node_modules` such as the shared portless proxy, nor an app opened on a folder or a reader of a log, and `endOrphans` sends KILL only to a pid `ps` still lists with the same command.
 - A test's child a reaper adopted is ended the same way once its run's sandbox is gone and its session has ended: `orphansOf` also selects such a process whose working folder, read with `lsof` (`CWDS`) for those rows alone, sits under a `test-sandbox-*` folder that no longer exists, so a live run's child is left alone.
   When the sandbox sits in a session's own temp folder, `/tmp/playground-<name>.<random>` on Linux, a sandbox nested in another run's included, that session's roster row must read `ended`, so a live session's daemon its test run left is kept; a missing row or an unreadable roster keeps it too, and macOS's per-user temp folder names no session.
-  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn.
+  A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
-  Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
+  Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing; on Linux each step runs under `bwrap`, as the suite does (`.agents/testing.md`).
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
 - Lefthook's pre-push `test-skills` job runs it when the branch changed a file on its glob since it forked from the local `origin/canary`: every file a step names and the files those load first, the sandbox, a skill's `SKILL.md`, and the code under `scripts/` (`.js`, `.json`, `.py`, `.sh`, `.ts`).
-  The files loaded first are `packages/safe-delete`, test-sandbox's `clock-exempt.ts` and `verify/prebuild.ts`, `state.test.ts`'s `pr-merge/gates.ts`, and the ops jobs test's `render-set.ts` and `session-names.ts` with what they import.
+  The files loaded first are the sandbox's `packages/env/src/data-dir.ts` and `packages/safe-delete`, test-sandbox's `clock-exempt.ts` and `verify/prebuild.ts`, `state.test.ts`'s `pr-merge/gates.ts`, and the ops jobs test's `render-set.ts` and `session-names.ts` with what they import.
   A file one hop further in, such as what `verify/prebuild.ts` imports, is off the glob, and so is a file only a whole-tree step reads (links, em-dashes, kill by name, loopback Postgres, container volumes): a push changing only such a file meets its step in CI.
   It runs through `packages/scripts/src/commit-slot.ts`, so parallel pushes from several worktrees take the commit slot, where it ran 102 s on 16 Nov (measured); a push of docs or briefs alone, no `SKILL.md` among them, skips it, since no file on the glob changed.
   `tests/lefthook.test.ts` reads the `steps` list, so a step's new file fails there until the glob holds it.
