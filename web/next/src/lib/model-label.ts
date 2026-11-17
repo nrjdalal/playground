@@ -1,5 +1,5 @@
 // Pure, with no app import, so verify's checks read the same labels the dashboard draws.
-import { BACKEND_MAKERS, LOCAL_SERVED } from "@packages/config/console"
+import { BACKEND_MAKERS, LOCAL_SERVED, MAKER_NAME } from "@packages/config/console"
 import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 
 type ModelFacts = { effort: string | null; model: string | null }
@@ -35,7 +35,7 @@ export const isGlmModel = (model: string | null): boolean => Boolean(model && GL
 // A model's maker, whose icon its row draws (useMakerIcon): its backend's for a Claude or GLM model, else the Hugging Face org of a local model's repo id.
 export type Provider = string
 
-const REPO_ORG = /^([A-Za-z0-9][A-Za-z0-9._-]{0,95})\//
+const REPO_ORG = new RegExp(`^(${MAKER_NAME})/`)
 
 // Pure: who makes a model, for its row's icon: Anthropic for a Claude id, Z.ai for a GLM one, the org of an org/repo id (a local model's, as config names it), else null, which draws the fallback.
 export const providerOf = (model: string | null): Provider | null =>

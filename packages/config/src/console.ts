@@ -44,6 +44,9 @@ export const SESSION_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as cons
 // Each Claude Code backend's model maker, whose icon a session on it draws: the one map the API's icon route, a row's maker and Settings' accounts all read; a local model's maker is its repo id's org.
 export const BACKEND_MAKERS = { claude: "anthropic", glm: "zai" } as const
 
+// A maker's name as models.dev and Hugging Face spell one, a repo id's org: a plain name, never a path, so it can name a cache file and a URL segment; the one pattern the API's icon route and the web's providerOf build from.
+export const MAKER_NAME = "[A-Za-z0-9][A-Za-z0-9._-]{0,95}"
+
 // The name every local model is served under (scripts/spawn.sh's LOCAL_SERVED, serve.sh's --served-model-name), so a local session's transcript records it as its model whatever the server loaded.
 export const LOCAL_SERVED = "local"
 

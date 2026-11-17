@@ -55,6 +55,7 @@ import {
 } from "@/lib/dashboard/feed"
 import { boardFrame, dashboardHub } from "@/lib/dashboard/hub"
 import { recordReply as recordReplyItem, REPLY_RE } from "@/lib/dashboard/inbox"
+import { iconModels, localModel } from "@/lib/dashboard/local-model"
 import {
   clearManagersOrder,
   managersOrderSchema,
@@ -1306,7 +1307,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id), fetched once from models.dev, else its Hugging Face avatar, and served from the data folder's cache after, never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
+        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id) or the org of the repo the local model server serves, fetched once from models.dev, else its Hugging Face avatar, and served from the data folder's cache after, never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
       responses: {
         200: { description: "The icon" },
         ...authErrorResponses,
@@ -1314,10 +1315,10 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
       },
     }),
-    (c) =>
+    async (c) =>
       serveModelIcon(c.req.param("maker"), {
         dir: join(dataDir(), "model-icons"),
-        local: org.local.models,
+        local: iconModels(org.local.models, await localModel()),
       }),
   )
   .get(

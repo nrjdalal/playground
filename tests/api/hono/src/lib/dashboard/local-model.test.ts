@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  iconModels,
   localModel,
   servedRoot,
   withLocalModel,
 } from "../../../../../../api/hono/src/lib/dashboard/local-model"
+import { makersOf } from "../../../../../../api/hono/src/lib/dashboard/model-icons"
 
 // vLLM's answer for the one model it serves as local, its root the repo the weights came from (measured on this machine's server, 2026-11-17).
 const VLLM = {
@@ -70,5 +72,17 @@ describe("localModel", () => {
       throw new DOMException("timed out", "TimeoutError")
     }) as unknown as typeof fetch
     expect(await localModel(down, true, at + 61_000)).toBeNull()
+  })
+})
+
+describe("iconModels", () => {
+  test("the served repo joins config's local models, so its maker's logo is served though config names none", () => {
+    const served = "ornith-ai/Ornith-1.5-122B-NVFP4"
+    expect(makersOf(iconModels([], served))).toEqual(new Set(["anthropic", "zai", "ornith-ai"]))
+    expect(iconModels([{ id: "Qwen/Qwen3-30B-A3B" }], served)).toEqual([
+      { id: "Qwen/Qwen3-30B-A3B" },
+      { id: served },
+    ])
+    expect(iconModels([{ id: "Qwen/Qwen3-30B-A3B" }], null)).toEqual([{ id: "Qwen/Qwen3-30B-A3B" }])
   })
 })

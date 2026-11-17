@@ -1,4 +1,4 @@
-import { LOCAL_SERVED } from "@packages/config/console"
+import { LOCAL_SERVED, MAKER_NAME } from "@packages/config/console"
 
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
 
@@ -11,7 +11,7 @@ const READ_MS = 1_000
 // How long a read stands, since a model swap takes minutes and every board asks.
 const KEEP_MS = 60_000
 
-const REPO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/
+const REPO_ID = new RegExp(`^${MAKER_NAME}/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // Pure: the repo id the server gives as the root of the model it serves as local (vLLM's /v1/models), else null.
 export const servedRoot = (body: unknown): string | null => {
@@ -57,3 +57,9 @@ export const withLocalModel = <
         ),
       }
     : live
+
+// Pure: the local models whose makers' icons the dashboard serves (makersOf): config's, then the repo the local server serves, so a local session's row draws its maker's logo though config names none.
+export const iconModels = (
+  models: readonly { id: string }[],
+  served: string | null,
+): { id: string }[] => [...models, ...(served ? [{ id: served }] : [])]
