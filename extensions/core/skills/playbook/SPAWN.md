@@ -74,7 +74,7 @@ A **just-closed resume** below is a resume within 15 minutes of `spawn.sh close`
    Either way `--account` refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room, the lowest `week` under 100, as ops-unstick's limit alert names it.
    GLM's from `zai-usage.json`: the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again, only while the ops-zai-usage job's last beat is ok and within 3 cycles, so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once.
    The local model's: fewer live local sessions (roster rows live, each pinned `claude-code local`) than the `maxSessions` the model switch's `models/state.json` gives this machine's server on port 8000 (`packages/scripts/src/spawn/local-cap.ts`), 6 when the file, the machine's entry or that server is missing (K's measured limit, `LOCAL_SESSION_CAP`),
-   and while that server's speed from the keep beat, under 15 minutes old, holds samples: no request waiting, each live local session's `decodeTps` times n/(n+1) at or over `localModels.minTps` with n of them live, and `ttftMean` under `localModels.maxFirstTokenSeconds`;
+   and while that server's speed from the keep beat is under 15 minutes old: no request waiting, and where its window holds samples, `ttftMean` under `localModels.maxFirstTokenSeconds` and, beside n live local sessions (n of 1 or more), `decodeTps` times n/(n+1) at or over `localModels.minTps`;
    a resume of a live row passes the count, as at gate 4, and a file that exists but does not read refuses.
 
 An `--ssh` probe's gates 1 and 2 read its target in place of this machine, through the System view's peer read (`peerArgv` in `api/hono/src/lib/system/peer.ts`, run with its `--key` by `packages/scripts/src/spawn/peer-gate.ts`), since its claude runs there:
@@ -238,7 +238,7 @@ The first dispatcher's record runs first, past every gate, so the owner's dispat
 A skip line takes `kind_of_name` alone and a run line takes `kind_of`, since a full `kind_of` on every skip line (608 on the live log) adds about 20 s.
 A restore whose only misses wait exits 0, since ops-herdr runs it again each cycle while a session waits; a `not restored` line exits 1.
 It is safe to run again, one at a time:
-while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
+while another restore holds `resume/.restore.lock` it prints `a restore is already running (pid <n>), so this one stops; nothing is wrong` and exits 1.
 A readable record on another server gets no line, since that server's own restore reads it.
 A session that never took its first turn has no transcript, so its resume starts it afresh under its name, with the prompt its start recorded in `resume/<name>.prompt`: a Claude Code session under its own id, a Codex one under the new thread its beat names.
 Done when each line reads `restored`, `waiting`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a gate that cannot read its input or reads a bad setting: fix it and run it again; a broken record or a missing backend pin: resume the session by hand).

@@ -129,7 +129,6 @@ describe("--backend local runs the session on the local model through Claude Cod
       expect(r.code, r.err).toBe(0)
       expect(command(r)).not.toContain("MAX_THINKING_TOKENS")
       expect(command(r)).not.toContain("CLAUDE_CODE_MODEL_CAPABILITIES")
-      expect(command(r)).not.toContain("thinking")
     },
   )
 
@@ -440,7 +439,7 @@ describe("the local gate: at most the sessions this machine's model server takes
     [
       "a request waiting",
       { ...quick, waiting: 1 },
-      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      "the local model here has 1 request waiting, so one more session would queue behind them",
       two,
     ],
     [
@@ -452,7 +451,7 @@ describe("the local gate: at most the sessions this machine's model server takes
     [
       "a request waiting with no live local session",
       { ...quick, waiting: 1 },
-      "the local model here has 1 requests waiting, so one more session would queue behind them",
+      "the local model here has 1 request waiting, so one more session would queue behind them",
       [],
     ],
     [

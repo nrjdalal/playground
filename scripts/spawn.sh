@@ -32,7 +32,7 @@ set -euo pipefail
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore, close or read, anywhere among its words, and on a worker's, reviewer's or tester's Claude start while usage.accounts lists a Claude row, which the refusal lists in order: the session logs in as that Claude account, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; this machine's own login starts on its config with no token, past the account split, its usage judged as a bare start's; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close, read or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
-#   --backend local    the places glm takes but a planner's or a researcher's, and with no --account, --model or --ssh: the session runs on this machine's local model (K) through Claude Code, at http://127.0.0.1:8000, under the served name local with a placeholder token, in a 120k window, its --effort set as thinking and named on the launch line, since the model's chat template reads no effort: low turns thinking off, medium caps it at 8192 tokens, and high, xhigh and max leave it uncapped; refused while that port lists no served name local, and while this machine's maxSessions local sessions are live (models/state.json, else 6)
+#   --backend local    the places glm takes but a planner's or a researcher's, and with no --account, --model or --ssh: the session runs on this machine's local model (K) through Claude Code, at http://127.0.0.1:8000, under the served name local with a placeholder token, in the window its server card declares (max_model_len less 8192, else 120000), its --effort set as thinking and named on the launch line, since the model's chat template reads no effort: low turns thinking off, medium caps it at 8192 tokens, and high, xhigh and max leave it uncapped; refused while that port lists no served name local, and while this machine's maxSessions local sessions are live (models/state.json, else 6)
 #   --backend claude   the same places: the session runs on Claude (the default; named to set its pin on a fresh start)
 #   --harness codex    with the first dispatcher's manager start or its resume alone, on a scratch data folder (PLAYGROUND_DATA_DIR naming one) until phase 3 lifts that, and no --backend, --account, --model or --effort: the session runs in Codex (the codex on PATH), its CODEX_HOME the data folder's codex/, whose config.toml, hooks.json (the factory's guards and the beat) and app-server-daemon/settings.json each launch writes; its hooks always run trusted (--dangerously-bypass-hook-trust), and it fails closed: a session whose SessionStart hook writes no beat within 60 seconds has its pane closed and the start refused, with no new pin, record or roster row (a resume keeps its earlier ones), and a pane herdr will not close is named for you to close; a Codex start also stops when PowerShell is installed (a pwsh or powershell on PATH, or /usr/local/bin/pwsh), which the beat names. The beat names its thread, which takes the session's name through codex app-server's thread/name/set.
 #   --harness claude-code  the default: the session runs in Claude Code.
@@ -861,12 +861,12 @@ try:
         elif len(live) >= cap:
             refuse("usage", f"{len(live)} live local sessions ({', '.join(live)}), and the local model here serves {cap} at once ({cap_from}). Wait for one to end, close a session that is done, or start it on --backend glm or claude.")
         elif speed:
-            # a window with no samples admits on the cap alone; the speed term reads only beside live local sessions, whose share of the server it is
+            # a request waiting refuses at any n; the decode and first-token terms need samples, and the decode term reads only beside live local sessions, whose share of the server it is
             n, tps, ttft = len(live), speed["decodeTps"], speed["ttftMean"]
             readings.update(local_speed=speed)
             later = "Wait for the next keep beat, close a session that is done, or start it on --backend glm or claude."
             if speed["waiting"] > 0:
-                refuse("usage", f"the local model here has {speed['waiting']} requests waiting, so one more session would queue behind them. {later}")
+                refuse("usage", f"the local model here has {speed['waiting']} request{'' if speed['waiting'] == 1 else 's'} waiting, so one more session would queue behind them. {later}")
             if n and tps is not None and tps * n / (n + 1) < gate["minTps"]:
                 refuse("usage", f"each of the {n} live local sessions decodes {tps:.1f} tokens a second, so one more would leave about {tps * n / (n + 1):.1f}, under the speed floor of {gate['minTps']} (localModels.minTps). {later}")
             if ttft is not None and ttft >= gate["maxFirstTokenSeconds"]:
@@ -1278,11 +1278,11 @@ if [ "$MODE" = restore ]; then
   if ! ln -s "$ME" "$LOCK" 2>/dev/null; then
     HELD=$(readlink "$LOCK")
     if [ -n "$HELD" ] && [ "$HELD" = "$(started "${HELD%% *}")" ]; then
-      echo "another restore is running (pid ${HELD%% *})"
+      echo "a restore is already running (pid ${HELD%% *}), so this one stops; nothing is wrong"
       exit 1
     fi
     rm -f "$LOCK"
-    ln -s "$ME" "$LOCK" 2>/dev/null || { echo "another restore is running"; exit 1; }
+    ln -s "$ME" "$LOCK" 2>/dev/null || { echo "a restore is already running, so this one stops; nothing is wrong"; exit 1; }
   fi
   trap '[ "$(readlink "$LOCK")" = "$ME" ] && rm -f "$LOCK"' EXIT
   # A function holds the heredoc, since macOS bash 3.2 misreads the # in a heredoc inside $( ). The roster is roster.ts's own, which runs without CLAUDE_CONFIG_DIR under inscope, as the TITLE read below does.
@@ -1863,6 +1863,8 @@ LOCAL_URL=http://127.0.0.1:8000
 # The name serve.sh gives every local model (--served-model-name local), so a swap changes no launch.
 LOCAL_SERVED=local
 if [ "$BACKEND" = local ]; then
+  # The room kept for the reply, which shares the server's window.
+  LOCAL_MARGIN=8192
   listed=$(curl -sS --max-time 5 "$LOCAL_URL/v1/models" 2>&1) || refuse "the local model at $LOCAL_URL did not answer in 5 s ($listed): ask Ops to bring it up, or start it on --backend glm or claude"
   LOCAL_LEN=$(python3 -I -c 'import json, sys
 try:
@@ -1872,11 +1874,11 @@ except (ValueError, AttributeError, TypeError):
 if not card:
     sys.exit(1)
 n = card[0].get("max_model_len")
-print(n if type(n) is int and n > 16384 else "")' "$listed" "$LOCAL_SERVED") ||
+print(n if type(n) is int and n > 2 * int(sys.argv[3]) else "")' "$listed" "$LOCAL_SERVED" "$LOCAL_MARGIN") ||
     refuse "the local model at $LOCAL_URL serves no model named $LOCAL_SERVED: ask Ops which model is up, or start it on --backend glm or claude"
-  # Claude Code assumes 1M for a model name it does not know, so the session declares the server's own window, its card's max_model_len, less 8192 for the reply that shares it; a card without a number above twice that takes 120000, K's 131072 less that room and more.
+  # Claude Code assumes 1M for a model name it does not know, so the session declares the server's own window, its card's max_model_len, less 8192 for the reply that shares it; a card without a number above twice that takes 120000, a round default under K's 131072 less 8192, which is 122880.
   LOCAL_CONTEXT=120000
-  [ -n "$LOCAL_LEN" ] && LOCAL_CONTEXT=$((LOCAL_LEN - 8192))
+  [ -n "$LOCAL_LEN" ] && LOCAL_CONTEXT=$((LOCAL_LEN - LOCAL_MARGIN))
   LOCAL_CAP=$( (cd / && env $UNSET "$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/local-cap.ts" "${LOCAL_URL##*:}") 2>&1) || refuse "$LOCAL_CAP"
 fi
 if [ "$BACKEND" = glm ]; then

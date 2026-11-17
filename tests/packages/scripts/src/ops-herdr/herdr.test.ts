@@ -534,7 +534,7 @@ describe("cycle", () => {
 
   test("a restore that tried no session, another's lock or an unreadable roster, is named and stays owed", async () => {
     for (const said of [
-      "another restore is running (pid 4242)\n",
+      "a restore is already running (pid 4242), so this one stops; nothing is wrong\n",
       "spawn.sh refuses restore: it cannot read the roster or the resume files\n",
     ]) {
       const { value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
