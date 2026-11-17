@@ -1,6 +1,8 @@
 // Pure, with no app import, so verify's checks read the same labels the dashboard draws.
 import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 
+import MODEL_ICONS from "./model-icons.json"
+
 type ModelFacts = { effort: string | null; model: string | null }
 
 export const MODEL_FAMILIES: Record<string, string> = {
@@ -31,12 +33,14 @@ export const modelName = (model: string | null): string | null => {
 // Pure: whether a model id is one of Z.ai's GLM models, whose usage the Claude windows do not reflect.
 export const isGlmModel = (model: string | null): boolean => Boolean(model && GLM_ID.test(model))
 
-// A model's maker, whose logo its row draws (PROVIDER_ICONS).
-export type Provider = "anthropic" | "zai"
+// A model's maker, by its models.dev provider id (anthropic, zai), whose logo its row draws (PROVIDER_ICONS).
+export type Provider = string
 
-// Pure: who makes a model, for its row's logo: Anthropic for a Claude id, Z.ai for a GLM one, else null.
+const MAKERS = MODEL_ICONS.makers.map(({ id, match }) => ({ id, pattern: new RegExp(match, "i") }))
+
+// Pure: who makes a model, for its row's logo, by the vendored map's first pattern it matches (bun run model-icons writes it), else null.
 export const providerOf = (model: string | null): Provider | null =>
-  model?.startsWith("claude-") ? "anthropic" : isGlmModel(model) ? "zai" : null
+  (model && MAKERS.find(({ pattern }) => pattern.test(model))?.id) || null
 
 // Pure: a dispatcher no label names (chatLabel's fallback), from its newest reply alone: that reply's model and effort, each word capitalised (Opus 5.5 High, GLM 5.3 Flash High). With no reply read yet, or its session down, the slot's label: Alpha for the primary, Bravo for the other.
 export const dispatcherLabel = (facts: ModelFacts | null, primary: boolean): string => {

@@ -56,6 +56,8 @@ describe("AgentStatus", () => {
         ci: "failing",
         conflicts: false,
         draft: false,
+        gates: null,
+        head: "",
         number: 97,
         queued: false,
         reviewed: true,
