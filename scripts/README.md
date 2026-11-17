@@ -151,7 +151,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A row that names none leaves the manager the prompt its start recorded in `~/.playground/resume/<name>.prompt` names.
   A brief for a role with a template in `scripts/briefs/` (`new-reviewer.md`, `new-tester.md`, `new-worker.md`) is refused, before any gate or launch, while it still holds a slot that template holds, the refusal naming each slot left and the brief, so a checker never starts on a bare slot; a slot another role's template holds, or one spelled in words, passes.
   A resume of a reviewer or tester whose roster row's `worker=` names a session the roster has ended refuses before any pane opens, naming `bun scripts/roster.ts assign <checker> "<title>" review worker=<live worker> pr=<url>`,
-  or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) ends it again on its next pass unless a live worker serves one of its open PRs (the rule: [ops/README.md](ops/README.md)'s `optimizer/` entry).
+  or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) ends it again on its next pass unless a live worker serves one of its open PRs,
+  and an ended worker never reads as coming back, which takes a live row with a resume record or a `waiting` line in the latest restore (the rule: [ops/README.md](ops/README.md)'s `optimizer/` entry).
   Every reviewer's or tester's start, a resume or a column, names the pull request it serves now with `--pr <pull url>` (its number alone, and a comma list for more than one, where an issue's URL may stand beside a pull request for a PR not yet opened), or the extension item it scores as `<scope>/<kind>/<key>`, whose kind is one of `packages/settings`' `KINDS`.
   A start naming neither refuses before any pane opens, naming `--pr`; an item alone leaves the row with no `pr`, which holds the checker in no-outside-pr-code's read mode, as reading an item needs.
   A checker's roster row is written before its pane opens, every other row once its session has started, since no-outside-pr-code reads the checker's PR at its first tool call; a checker's failed write refuses its start, and any other's warns.
@@ -293,6 +294,21 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   When the sandbox sits in a session's own temp folder, `/tmp/playground-<name>.<random>` on Linux, a sandbox nested in another run's included, that session's roster row must read `ended`, so a live session's daemon its test run left is kept; a missing row or an unreadable roster keeps it too, and macOS's per-user temp folder names no session.
   A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
+
+## After a power cut
+
+- A boot with no clean shutdown can leave a torn loose object in the shared git store, which breaks every `git fetch`, and a merge lock its dead pr:merge run held.
+  ops-tick's `boot-check` beat takes both on, once per boot, on a minute inside gh-auth's first 10 minutes (`BOOT_MS` in `packages/scripts/src/ops-tick/tick.ts`), keeping the boot it finished in `ops/tick/boot-check.json`.
+  It reads the boot alone (`readBootTime` in `packages/scripts/src/ops-machine/readings.ts`: macOS's `kern.boottime`, Linux's `/proc/stat` btime), never a wake, since every process from before a sleep lives on.
+- First it lets go of a merge lock whose `pr` file is older than the boot, into `merge-locks/<pr>-<epoch ms>-boot`, with one line to Ops: every process of the old boot is dead, and a pid from then can name a live process now.
+- Then it runs `git fsck --no-dangling` on the shared store through run-slot (3 s measured on the main checkout's store), which stops at the first torn loose object, so it runs again after each repair, 10 passes at most.
+  A torn object that only a gate-owned worktree's HEAD or HEAD reflog names (`GATE_WORKTREES`, `merge-types` today) is repaired under the merge lock: the object moved into `ops/git-torn/<sha>-<epoch ms>`, the worktree's HEAD re-pointed with `git update-ref --no-deref` to the newest commit its reflog holds that reads whole, and one line to Ops.
+  While a live merge holds the lock the repair waits for the next minute.
+  The `invalid reflog entry` fsck then names for a moved object counts as repaired.
+  fsck names a torn object two ways, both read: a `fatal: loose object <sha> ... is corrupt` stop for one a HEAD reaches, and an `error: <sha>: object corrupt or missing` line for one only a reflog names.
+- Every other break gets one line to Ops' waiter queue and one Inbox alert naming the path, and the beat changes nothing there.
+- A check that a live merge's lock or a failure kept unfinished through the window gets the same line and alert once the window ends, naming why, so a dropped check is never silent.
+  The logic lives in `packages/scripts/src/ops-tick/boot-check.ts`; tests: `bun run test:file tests/packages/scripts/src/ops-tick/boot-check.test.ts`.
 
 ## bun run test:skills
 

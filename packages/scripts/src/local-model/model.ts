@@ -389,7 +389,7 @@ const recordPaths = async (
     )
 }
 
-// The keep beat, once per machine: each server's /metrics snapshot and speed are kept for the local gate; a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read, or a silent one while its container runs, stamping busyAt, then the kept model is started when it is not serving and no other model is left there. Null when it did nothing new, else the one line for ops; a refusal the last beat already said stays quiet. With a swap's hold set it does nothing.
+// The keep beat, once per machine: each server's /metrics snapshot and speed are kept for the local gate; a server other than the kept model's with no request for idleMinutes is stopped by its own name, a busy read, or a silent one while its container runs, stamping busyAt, then the kept model is started when it is not serving and no other model asked for is left there; an entry no start would give is skipped, never asked for, and named to ops once. Null when it did nothing new, else the one line for ops; a refusal or skip the last beat already said stays quiet. With a swap's hold set it does nothing.
 export async function keepUp(deps: ModelDeps): Promise<string | null> {
   const { config, data, now } = deps
   const machine = deps.machine.name
@@ -398,9 +398,14 @@ export async function keepUp(deps: ModelDeps): Promise<string | null> {
   const run = (command: string) => deps.run(commandArgv(deps.machine, deps.key, command))
   const servers = { ...state.servers }
   const stopped: string[] = []
+  // an entry whose name or port no start gives is never sent to a shell nor counted as asked for; ops hears of each once
+  const skipped: Record<string, string> = {}
+  for (const [model, server] of Object.entries(servers))
+    if (!sendable(server))
+      skipped[model] =
+        `the state file's entry for ${model} on ${machine} (container ${server.container}, port ${server.port}) is not one playground model use starts, so the keep beat skips it: fix or remove it in ${statePath(data)}`
   for (const [model, server] of Object.entries(servers)) {
-    // a port or container name read back from the state file reaches a shell only once a start could have given it
-    if (!sendable(server)) continue
+    if (skipped[model]) continue
     const text = (await run(commands.metrics(server.port))).out
     const snapshot = parseMetrics(text, now().toISOString())
     // a /metrics that does not read leaves no snapshot and no speed, which the local gate reads as a window with no samples
@@ -425,14 +430,24 @@ export async function keepUp(deps: ModelDeps): Promise<string | null> {
     delete servers[model]
     stopped.push(model)
   }
-  await writeMachineState(data, machine, { ...state, servers })
-  const lines = stopped.length
-    ? [
-        `${stopped.join(" and ")} sat idle ${config.idleMinutes} minutes on ${machine}, so playground model use stopped ${stopped.length > 1 ? "them" : "it"}`,
-      ]
-    : []
+  const { skipped: told, ...rest } = state
+  await writeMachineState(data, machine, {
+    ...rest,
+    servers,
+    ...(Object.keys(skipped).length ? { skipped } : {}),
+  })
+  const lines = [
+    ...Object.entries(skipped)
+      .filter(([model, line]) => told?.[model] !== line)
+      .map(([, line]) => line),
+    ...(stopped.length
+      ? [
+          `${stopped.join(" and ")} sat idle ${config.idleMinutes} minutes on ${machine}, so playground model use stopped ${stopped.length > 1 ? "them" : "it"}`,
+        ]
+      : []),
+  ]
   // another model still serving here was asked for and is busy, so the kept one waits for its idle stop
-  const asked = Object.keys(servers).some((model) => model !== config.keep)
+  const asked = Object.keys(servers).some((model) => model !== config.keep && !skipped[model])
   if (config.keep && (servers[config.keep] || !asked)) {
     const kept = await useModel(config.keep, deps)
     const { refused, ...after } = await machineState(data, machine)
