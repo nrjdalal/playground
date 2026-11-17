@@ -94,12 +94,15 @@ export function abLine(body: string): boolean {
     })
 }
 
+// An inline code span, which the gate reads past as code, never as prose.
+const CODE_SPAN = /(`+)[^`\n]*?\1/g
+
 // Pure: the first Evidence line whose prose, outside a code fence and inline code, holds the word TBD in any case, trimmed, else null.
 export function tbdLine(body: string): string | null {
   let fenced = false
   for (const line of evidenceOf(body).split(/\r?\n/)) {
     if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
-    else if (!fenced && /\btbd\b/i.test(line.replace(/(`+)[^`\n]*?\1/g, " "))) return line.trim()
+    else if (!fenced && /\btbd\b/i.test(line.replace(CODE_SPAN, " "))) return line.trim()
   }
   return null
 }
@@ -123,7 +126,7 @@ function proseOf(body: string): string {
       return !fenced
     })
     .join("\n")
-    .replace(/(`+)[^`\n]*?\1/g, " ")
+    .replace(CODE_SPAN, " ")
 }
 
 const BARE_TOKEN = /(?<![\w-])[A-Z][A-Z0-9]*_[A-Z0-9_]*[A-Z0-9](?![\w-])/g
