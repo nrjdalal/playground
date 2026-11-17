@@ -17,6 +17,13 @@ describe("sshLaunchOf", () => {
     // spawn.sh writes the exec line with %q, so a folder may hold an escaped space
     const spaced = `exec /x/scripts/spawn.sh resume p-probe /x/my\\ leads ${SID} --ssh u@h --key /k`
     expect(sshLaunchOf(record(spaced))?.sessionId).toBe(SID)
+    // spawn.sh writes its own path with %q too, so a checkout under a folder with a space reads whole
+    const checkout = `exec /Users/me/My\\ Code/playground/scripts/spawn.sh resume p1-probe /Users/me/My\\ Code/playground ${SID} --ssh me@far --key /k`
+    expect(sshLaunchOf(record(checkout))).toEqual({
+      name: "p1-probe",
+      server: "playground-probes",
+      sessionId: SID,
+    })
     // a record with no server line ran on playground, as spawn.sh's restore reads it
     expect(sshLaunchOf(record(exec, ""))?.server).toBe("playground")
   })
@@ -25,6 +32,10 @@ describe("sshLaunchOf", () => {
     expect(sshLaunchOf(record(`exec /x/scripts/spawn.sh resume w-worker /x ${SID}`))).toBeNull()
     expect(
       sshLaunchOf(record(`exec /x/scripts/spawn.sh resume p /x not-a-session --ssh u@h --key /k`)),
+    ).toBeNull()
+    // --ssh counts only as a flag after the session, never as part of an escaped folder name
+    expect(
+      sshLaunchOf(record(`exec /x/scripts/spawn.sh resume w-worker /x/a\\ --ssh\\ b ${SID}`)),
     ).toBeNull()
     expect(sshLaunchOf("")).toBeNull()
   })
