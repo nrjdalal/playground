@@ -1112,14 +1112,14 @@ describe("ci.sh exec", () => {
     expect(shut.reduce((s, cut) => s.replace(cut, ""), code("suite.sh"))).not.toMatch(keyring)
   })
 
-  test("a box with no /usr/bin/node gives the steps bun as node, and one with it drops that link", () => {
+  test("a box with no node on the steps' own PATH gives them bun as node, and one with its own node drops that link", () => {
     const root = mkdtempSync(join(tmpdir(), "runner-node-"))
     dirs.push(root)
     mkdirSync(join(root, "ci", "bin"), { recursive: true })
     const suite = readFileSync(join(DIR, "suite.sh"), "utf8")
     const line = suite.split("\n").find((l) => l.includes('"$CI/bin/node"')) ?? ""
     const run = () =>
-      Bun.spawnSync(["bash", "-c", line.replaceAll("/usr/bin/node", join(root, "node"))], {
+      Bun.spawnSync(["bash", "-c", line.replace(":/usr/bin:/bin", "")], {
         env: {
           CI: join(root, "ci"),
           HOME: root,
@@ -1130,8 +1130,9 @@ describe("ci.sh exec", () => {
     expect(run()).toBe(0)
     expect(readlinkSync(join(root, "ci", "bin", "node"))).toBe(join(root, ".bun", "bin", "bun"))
     expect(readdirSync(join(root, "ci", "bin"))).toEqual(["node"])
-    writeFileSync(join(root, "node"), "")
-    chmodSync(join(root, "node"), 0o755)
+    mkdirSync(join(root, ".local", "bin"), { recursive: true })
+    writeFileSync(join(root, ".local", "bin", "node"), "")
+    chmodSync(join(root, ".local", "bin", "node"), 0o755)
     expect(run()).toBe(0)
     expect(readdirSync(join(root, "ci", "bin"))).toEqual([])
   })

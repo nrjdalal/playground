@@ -158,8 +158,8 @@ esac
 exec /usr/bin/docker "$@"
 SHIM
 chmod 0755 "$CI/bin/.docker.$RUN" && mv "$CI/bin/.docker.$RUN" "$CI/bin/docker"
-# a box with no Node of its own gives the steps bun as node, which runs as Node by that name, as `bun run` does for its scripts (turbo's launcher calls node)
-if [ -x /usr/bin/node ]; then rm -f "$CI/bin/node"; else ln -sfn "$HOME/.bun/bin/bun" "$CI/bin/.node.$RUN" && mv "$CI/bin/.node.$RUN" "$CI/bin/node"; fi
+# a box with no Node on the steps' own PATH gives them bun as node, which runs as Node by that name, as `bun run` does for its scripts (turbo's launcher calls node)
+if PATH="$HOME/.local/bin:/usr/bin:/bin" command -v node > /dev/null; then rm -f "$CI/bin/node"; else ln -sfn "$HOME/.bun/bin/bun" "$CI/bin/.node.$RUN" && mv "$CI/bin/.node.$RUN" "$CI/bin/node"; fi
 
 # the subshell closes the slot locks before the steps start, so a daemon a step leaves behind cannot keep a slot once this run ends
 (
