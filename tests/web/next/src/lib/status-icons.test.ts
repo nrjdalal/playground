@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
-import { logoOf } from "../../../../../web/next/src/components/dashboard/model-logo"
 import { StatusIcon } from "../../../../../web/next/src/components/dashboard/worker-light"
-import MODEL_ICONS from "../../../../../web/next/src/lib/model-icons.json"
 import {
   checkedOf,
   DOWN_ICON,
@@ -11,15 +9,12 @@ import {
   lightOf,
   NO_PROGRESS_MS,
   PR_TONES,
-  PROVIDER_ICONS,
   prTone,
   stateWords,
   STATES,
   STATUS_TONES,
   statusIcon,
   effortIcon,
-  FALLBACK_PROVIDER_ICON,
-  providerIcon,
   taskIcon,
   type LightFacts,
 } from "../../../../../web/next/src/lib/status-icons"
@@ -353,38 +348,6 @@ describe("taskIcon", () => {
     for (const kind of ["dispatcher", "planner", "runner", "probe", "ops"] as const)
       expect(taskIcon(kind, "working")).toBeNull()
     expect(taskIcon(null, "working")).toBeNull()
-  })
-})
-
-describe("PROVIDER_ICONS", () => {
-  const vendored = (id: string) => MODEL_ICONS.makers.find((maker) => maker.id === id)!.icon!
-
-  test("a one-colour logo draws as a mask over the text colour, so it stays muted in light and dark", () => {
-    for (const id of ["anthropic", "zai"]) {
-      const logo = html(providerIcon(id), { className: "size-4" })
-      expect(logo).toContain(`href="${vendored(id).data}"`)
-      expect(logo).toContain("<mask")
-      expect(logo).toContain('fill="currentColor"')
-      expect(logo).toContain('class="size-4"')
-    }
-  })
-
-  test("an avatar draws whole, clipped round", () => {
-    const data = "data:image/png;base64,AAAA"
-    const logo = html(logoOf({ data, mono: false }), { className: "size-4" })
-    expect(logo).toContain(`href="${data}"`)
-    expect(logo).toContain("<clipPath")
-    expect(logo).not.toContain("<mask")
-  })
-
-  test("a maker with no vendored icon, or none known, draws the one fallback icon", () => {
-    expect(providerIcon(null)).toBe(FALLBACK_PROVIDER_ICON)
-    expect(providerIcon("no-such-maker")).toBe(FALLBACK_PROVIDER_ICON)
-    expect(providerIcon("ornith")).toBe(FALLBACK_PROVIDER_ICON)
-    expect(providerIcon("constructor")).toBe(FALLBACK_PROVIDER_ICON)
-    expect(FALLBACK_PROVIDER_ICON).toBe(icons.RiRobot2Line!)
-    for (const { icon, id } of MODEL_ICONS.makers)
-      expect(PROVIDER_ICONS[id] === undefined).toBe(icon === null)
   })
 })
 

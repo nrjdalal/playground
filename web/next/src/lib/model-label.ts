@@ -1,8 +1,6 @@
 // Pure, with no app import, so verify's checks read the same labels the dashboard draws.
 import { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 
-import MODEL_ICONS from "./model-icons.json"
-
 type ModelFacts = { effort: string | null; model: string | null }
 
 export const MODEL_FAMILIES: Record<string, string> = {
@@ -33,14 +31,20 @@ export const modelName = (model: string | null): string | null => {
 // Pure: whether a model id is one of Z.ai's GLM models, whose usage the Claude windows do not reflect.
 export const isGlmModel = (model: string | null): boolean => Boolean(model && GLM_ID.test(model))
 
-// A model's maker, by its models.dev provider id (anthropic, zai), whose logo its row draws (PROVIDER_ICONS).
+// A model's maker, whose icon its row draws (useMakerIcon): its backend's for a Claude or GLM model, else the Hugging Face org of a local model's repo id.
 export type Provider = string
 
-const MAKERS = MODEL_ICONS.makers.map(({ id, match }) => ({ id, pattern: new RegExp(match, "i") }))
+const REPO_ORG = /^([A-Za-z0-9][A-Za-z0-9._-]{0,95})\//
 
-// Pure: who makes a model, for its row's logo, by the vendored map's first pattern it matches (bun run model-icons writes it), else null.
+// Pure: who makes a model, for its row's icon: Anthropic for a Claude id, Z.ai for a GLM one, the org of an org/repo id (a local model's, as config names it), else null, which draws the fallback.
 export const providerOf = (model: string | null): Provider | null =>
-  (model && MAKERS.find(({ pattern }) => pattern.test(model))?.id) || null
+  !model
+    ? null
+    : model.startsWith("claude-")
+      ? "anthropic"
+      : isGlmModel(model)
+        ? "zai"
+        : (REPO_ORG.exec(model)?.[1] ?? null)
 
 // Pure: a dispatcher no label names (chatLabel's fallback), from its newest reply alone: that reply's model and effort, each word capitalised (Opus 5.5 High, GLM 5.3 Flash High). With no reply read yet, or its session down, the slot's label: Alpha for the primary, Bravo for the other.
 export const dispatcherLabel = (facts: ModelFacts | null, primary: boolean): string => {

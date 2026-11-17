@@ -46,7 +46,6 @@
         "$TURBO_ROOT$/web/next/src/lib/agent-label.ts",
         "$TURBO_ROOT$/web/next/src/lib/blog-policy.ts",
         "$TURBO_ROOT$/web/next/src/lib/docs.ts",
-        "$TURBO_ROOT$/web/next/src/lib/model-icons.json",
         "$TURBO_ROOT$/web/next/src/lib/model-label.ts",
         "$TURBO_ROOT$/web/next/src/lib/tooltip.ts",
         "$TURBO_ROOT$/web/next/src/lib/verify-visit.ts"

@@ -24,11 +24,17 @@ import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { ACCOUNTS_QUERY_KEY, type AccountRow, accountWords, readAccounts } from "@/lib/accounts"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { useMakerIcon } from "@/lib/model-icons"
 import { markOwn } from "@/lib/own-account"
-import { providerIcon } from "@/lib/status-icons"
 import { useAccount } from "@/lib/system"
 
-const ICONS = { claude: providerIcon("anthropic"), glm: providerIcon("zai") }
+const MAKERS = { claude: "anthropic", glm: "zai" } as const
+
+// An account's maker's icon, its place kept empty while it is read.
+function AccountIcon({ provider }: { provider: keyof typeof MAKERS }) {
+  const Icon = useMakerIcon(MAKERS[provider])
+  return Icon ? <Icon /> : <span className="size-4" />
+}
 
 const KEY = "usage.accounts"
 
@@ -120,11 +126,10 @@ export function Accounts() {
         <ItemGroup className="gap-2">
           {accounts.map((row) => {
             const words = accountWords(row, login?.email)
-            const Icon = ICONS[row.provider]
             return (
               <Item key={`${row.provider}:${row.key}`} variant="outline" size="sm">
                 <ItemMedia variant="icon">
-                  <Icon />
+                  <AccountIcon provider={row.provider} />
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{words.title}</ItemTitle>

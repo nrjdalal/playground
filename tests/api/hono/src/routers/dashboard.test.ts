@@ -92,6 +92,7 @@ describe("the dashboard routes", () => {
       "/workers/s-1/transcript",
       "/workers/s-1/skills",
       "/attachments/11111111-2222-4333-8444-555555555555.png",
+      "/model-icons/anthropic",
       "/threads",
       "/threads?page=2",
       "/threads/k7mq/messages",

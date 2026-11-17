@@ -1,7 +1,7 @@
 import type { RemixiconComponentType } from "@remixicon/react"
 import { useId } from "react"
 
-// A vendored maker icon (model-icons.json): a one-colour logo as a mask over the text colour, so it stays muted as Remix's marks do; an avatar whole, its corners rounded.
+// A maker's icon as a data URI (useMakerIcon): an SVG logo as a mask over the text colour, so it stays muted as Remix's marks do, a multi-colour one flattened to it; a full-colour image, such as a Hugging Face avatar, whole with its corners rounded.
 export const logoOf = ({ data, mono }: { data: string; mono: boolean }): RemixiconComponentType =>
   function ModelLogo({ color = "currentColor", size = 24, ...props }) {
     const id = useId()

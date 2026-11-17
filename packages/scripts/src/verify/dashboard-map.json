@@ -16,6 +16,7 @@
         "POST /api/v1/messages",
         "POST /api/v1/attachments",
         "GET /api/v1/attachments/:id",
+        "GET /api/v1/model-icons/:maker",
         "POST /api/v1/debug/paste",
         "POST /api/v1/inbox/:id/answer",
         "POST /api/v1/inbox/dismiss",
