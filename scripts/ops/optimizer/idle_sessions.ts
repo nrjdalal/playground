@@ -3,7 +3,7 @@
 // Ported from ~/.playground/ops/optimizer/idle_sessions.py; a session's PRs are its roster pr and prs list, its worker's, every open one on its branch and every one its transcript links, so a checker serving a second PR is never listed while that one is open.
 // Flags, from Claude's session registry (live pid, status, statusUpdatedAt), roster.json and GitHub REST reads per PR (an open PR cached 5 minutes, a merged or closed one for good):
 // Every flag needs 10+ minutes not busy, so a session finishing a step is never listed. ops-tick's auto-end beat ends what auto_end.ts takes of it.
-//   checker-worker-gone  a reviewer or tester whose worker has no live session, with no open PR a live worker serves among its PRs
+//   checker-worker-gone  a reviewer or tester whose worker has no live session and is not coming back (comingBack), with no open PR a live worker serves among its PRs
 //   checker-pr-done      a reviewer or tester whose PRs are all merged or closed
 //   checker-nothing      a reviewer or tester not busy for 30+ minutes whose every PR head carries its verdict or is closed
 //   worker-prs-done      a worker whose roster holds a pr, whose PRs are all merged or closed, and whose /pull/ PR that closed last merged
@@ -21,6 +21,8 @@ import { kindOf } from "../../../packages/config/src/kinds"
 import { verdictsOf } from "../../../packages/config/src/verdicts"
 import { dataDirOf } from "../../../packages/env/src/data-dir"
 import { GH_TIMEOUT_MS, ghDown } from "../../../packages/scripts/src/gh-read"
+import { herdrDir } from "../../../packages/scripts/src/ops-herdr/herdr"
+import STATUSES from "../../roster-statuses.json"
 
 const CACHE_TTL_S = 300
 
@@ -82,9 +84,20 @@ export type CollectInput = {
   now: number
   prState: (url: string) => Promise<PrState | null>
   projectsDir?: string
+  // the names each herdr server's latest spawn.sh restore printed as waiting, held by a gate or focus (restore_waits)
+  restoreWaiting?: Set<string>
+  // the names a resume record stands for in the data folder's resume/, which spawn.sh restore brings back
+  resumable?: Set<string>
   roster: Record<string, RosterEntry>
   sessions: Record<string, RegistryEntry>
   workerPrs: (worker: string) => Promise<string[]>
+}
+
+// A worker with no live session yet is coming back while its roster row reads live and a resume record stands for it or the latest restore printed it as waiting, so a reboot's held resume keeps its checkers; an ended, done or parked row is gone whatever the last restore log says.
+export function comingBack(input: CollectInput, worker: string): boolean {
+  const status = input.roster[worker]?.status
+  if (!status || !STATUSES.live.includes(status)) return false
+  return Boolean(input.resumable?.has(worker) || input.restoreWaiting?.has(worker))
 }
 
 // A session's PRs: its roster prs list, its roster pr and open branch PRs, its worker's, and every PR its own or its worker's transcript links.
@@ -225,6 +238,7 @@ export async function collect(input: CollectInput): Promise<Row[]> {
         worker &&
         !(worker in sessions) &&
         !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker)) &&
+        !comingBack(input, worker) &&
         !(await servesLiveWorker(input, open))
       )
         why.push(`checker-worker-gone (${worker})`)
@@ -320,6 +334,37 @@ export async function liveSessions(dir: string): Promise<Record<string, Registry
     } catch {}
   }
   return out
+}
+
+// The names a resume record stands for: each <name>.sh spawn.sh writes in the resume folder.
+export function resumeNames(dir: string): Set<string> {
+  try {
+    return new Set(
+      [...new Bun.Glob("*.sh").scanSync({ cwd: dir, onlyFiles: true })].map((f) => f.slice(0, -3)),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+// The names each herdr server's latest restore printed as waiting: ops-herdr writes each run's lines whole to <server>.restore.log in the herdr folder, a held session's as `waiting <name>: <why>` (spawn.sh restore).
+export async function restoreWaitingIn(dir: string): Promise<Set<string>> {
+  const names = new Set<string>()
+  let logs: string[] = []
+  try {
+    logs = [...new Bun.Glob("*.restore.log").scanSync({ cwd: dir, onlyFiles: true })]
+  } catch {
+    return names
+  }
+  for (const log of logs) {
+    try {
+      for (const line of (await Bun.file(join(dir, log)).text()).split("\n")) {
+        const name = /^waiting (\S+?):/.exec(line)?.[1]
+        if (name) names.add(name)
+      }
+    } catch {}
+  }
+  return names
 }
 
 export async function readRoster(path: string): Promise<Record<string, RosterEntry>> {
@@ -468,7 +513,7 @@ export async function linkedPrsLive(sessionId: string, projectsDir: string): Pro
   return [...new Set(urls)]
 }
 
-// The live machine's inputs: Claude's registry, the roster, GitHub through the PR cache and the transcripts.
+// The live machine's inputs: Claude's registry, the roster, the resume records, each herdr server's latest restore log, GitHub through the PR cache and the transcripts.
 export async function liveInput(hours: number, now: number): Promise<CollectInput> {
   const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
   const lw = dataDirOf(process.env)
@@ -482,6 +527,8 @@ export async function liveInput(hours: number, now: number): Promise<CollectInpu
     now,
     prState: (url) => prStateLive(url, now, cachePath),
     projectsDir,
+    restoreWaiting: await restoreWaitingIn(herdrDir(process.env)),
+    resumable: resumeNames(join(lw, "resume")),
     roster,
     sessions,
     workerPrs: (worker) => workerPrsLive(worker, sessions, roster),
