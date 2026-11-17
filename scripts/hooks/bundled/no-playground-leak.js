@@ -10968,7 +10968,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
-async function inspect(raw, environment) {
+async function inspect(raw, environment, checkout) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -10980,7 +10980,7 @@ async function inspect(raw, environment) {
   const { cwd, tool_input: input, tool_name: tool } = payload;
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment));
-    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : "";
   };
   if (typeof tool === "string" && MCP_TOOL2.test(tool))
     return judgeTool(tool, input ?? {}, factoryOf());
@@ -11047,9 +11047,9 @@ async function inspect(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit);
 }
-async function check2(raw, environment = process.env) {
+async function check2(raw, environment = process.env, checkout) {
   try {
-    return await inspect(raw, environment);
+    return await inspect(raw, environment, checkout);
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;
