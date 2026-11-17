@@ -791,7 +791,7 @@ describe("liveSessions", () => {
       // A pid from this test's own process tree that has already exited, so no other process is ever probed.
       const gone = Bun.spawnSync(["true"]).pid
       writeFileSync(join(dir, `${gone}.json`), JSON.stringify({ pid: gone, sessionId: "gone" }))
-      // a pid neither file above holds, since the test sandbox's pid view on Linux gives small pids, and a fixed 12.json once overwrote the live file of a test running as pid 12
+      // a pid neither file above holds, since the test sandbox's pid view on Linux gives small pids, and a fixed 12.json once overwrote the live file of a test running as pid 12; three, since the two pids rule out two at most
       const broken = [12, 13, 14].find((pid) => pid !== process.pid && pid !== gone)
       writeFileSync(join(dir, `${broken}.json`), "{ not json")
       writeFileSync(

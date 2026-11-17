@@ -70,7 +70,13 @@ describe.skipIf(process.platform !== "linux")("the test sandbox on Linux", () =>
   test("a test cannot signal a process outside the suite", () => {
     const outer = Number(process.env.TEST_SANDBOX_OUTER_PID)
     expect(outer).toBeGreaterThan(0)
-    expect(() => process.kill(outer, 0)).toThrow()
+    let code: string | undefined
+    try {
+      process.kill(outer, 0)
+    } catch (error) {
+      code = (error as { code?: string }).code
+    }
+    expect(code).toBe("ESRCH")
   })
 
   // a test's own child (test-skills.test.ts's step) builds a sandbox again, which needs the box's proof, since the runner refuses a box inside one

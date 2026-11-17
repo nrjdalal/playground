@@ -183,14 +183,35 @@ test.skipIf(process.platform !== "linux")(
   },
 )
 
-test("insideBox takes a tmpfs at the box folder alone as proof", () => {
+test("insideBox takes a tmpfs at the box folder of a marked scratch alone as proof", () => {
   const line = (point: string, type: string) =>
     `41 30 0:52 / ${point} rw,nosuid,nodev - ${type} ${type} rw`
-  expect(insideBox("/s/box", () => line("/s/box", "tmpfs"))).toBe(true)
-  expect(insideBox("/s/box", () => line("/s/other", "tmpfs"))).toBe(false)
-  expect(insideBox("/s/box", () => line("/s/box", "ext4"))).toBe(false)
-  expect(insideBox(undefined, () => line("/s/box", "tmpfs"))).toBe(false)
+  const marked = () => true
+  expect(insideBox("/s/box", () => line("/s/box", "tmpfs"), marked)).toBe(true)
+  expect(insideBox("/s/box", () => line("/s/other", "tmpfs"), marked)).toBe(false)
+  expect(insideBox("/s/box", () => line("/s/box", "ext4"), marked)).toBe(false)
+  expect(insideBox(undefined, () => line("/s/box", "tmpfs"), marked)).toBe(false)
+  expect(insideBox("/dev/shm", () => line("/dev/shm", "tmpfs"))).toBe(false)
 })
+
+// /dev/shm is a tmpfs the system mounts outside any box, so a variable naming it alone must not read as the box
+test.skipIf(process.platform !== "linux" || !existsSync("/dev/shm"))(
+  "a TEST_SANDBOX_BOX naming a tmpfs the system mounted still boxes, or still refuses",
+  () => {
+    const was = process.env.TEST_SANDBOX_BOX
+    process.env.TEST_SANDBOX_BOX = "/dev/shm"
+    try {
+      const { scratch, wrap: boxed } = sandbox()
+      rmSync(scratch, { force: true, recursive: true })
+      expect(boxed(["bun", "test"])[0]).toBe("bwrap")
+    } catch (error) {
+      expect(String(error)).toContain("the test sandbox could not start bwrap")
+    } finally {
+      if (was === undefined) delete process.env.TEST_SANDBOX_BOX
+      else process.env.TEST_SANDBOX_BOX = was
+    }
+  },
+)
 
 test("on macOS wrap runs argv as it is", () => {
   expect(wrap(["bun", "test"], "/r", "/b", "darwin")).toEqual(["bun", "test"])

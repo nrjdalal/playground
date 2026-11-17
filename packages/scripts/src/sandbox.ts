@@ -8,10 +8,10 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, userInfo } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
-import { makeScratch } from "@packages/safe-delete"
+import { MARKER, makeScratch } from "@packages/safe-delete"
 
 import { BOX_ENV_KEYS, boxEnv } from "./box-env"
 
@@ -102,18 +102,19 @@ export const sandbox = () => {
   )
   chmodSync(refused, 0o755)
   if (boxed) {
-    const why = bwrapRefusal()
+    const why = bwrapRefusal(wrap(["true"], refused, box))
     if (why) throw new Error(why)
   }
   return { env, scratch, wrap: (argv: string[]) => (boxed ? wrap(argv, refused, box) : argv) }
 }
 
-// Whether this process runs inside the box, by proof a variable alone never gives: its own mounts hold the tmpfs wrap mounts at TEST_SANDBOX_BOX, which no process outside the box sees, so a TEST_SANDBOX_HOME or TEST_SANDBOX_BOX set outside it still boxes, or still refuses
+// Whether this process runs inside the box, by proof a variable alone never gives: its own mounts hold the tmpfs wrap mounts at TEST_SANDBOX_BOX, in a scratch folder makeScratch marked, which no process outside the box sees, since only a namespace lets a user mount there; a TEST_SANDBOX_BOX naming a tmpfs the system mounted, such as /dev/shm, sits in no marked folder, so it and a TEST_SANDBOX_HOME set outside the box still box, or still refuse
 export const insideBox = (
   box = process.env.TEST_SANDBOX_BOX,
   mounts = () => readFileSync("/proc/self/mountinfo", "utf8"),
+  marked = (dir: string) => existsSync(join(dirname(dir), MARKER)),
 ): boolean => {
-  if (!box) return false
+  if (!box || !marked(box)) return false
   return mounts()
     .split("\n")
     .some((line) => {
@@ -176,12 +177,12 @@ export const wrap = (
   ]
 }
 
-// Why bwrap cannot start a pid view here, or null: missing, or refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap), so a Linux run fails at its start rather than running any test unsandboxed
-export const bwrapRefusal = (): string | null => {
+// Why bwrap cannot start the box here, or null, tried as wrap's own argv around a no-op: missing, or refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap) or one of wrap's mounts, so a Linux run fails at its start with this line rather than running any test unsandboxed
+export const bwrapRefusal = (probe: string[]): string | null => {
   const tool = Bun.which("bwrap")
   if (!tool)
     return "the test sandbox needs bwrap on Linux: install the bubblewrap package (sandbox.ts)"
-  const run = Bun.spawnSync([tool, "--bind", "/", "/", "--unshare-pid", "true"], {
+  const run = Bun.spawnSync([tool, ...probe.slice(1)], {
     stderr: "pipe",
     stdout: "ignore",
   })
