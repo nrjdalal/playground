@@ -75,6 +75,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   The agent says hello with its protocol version first, and a far checkout without it reads `down: peer checkout lacks agent.ts v1`, which Ops answers by moving that clone to the shipped tag; nothing else runs or installs on the far machine.
   A far end that stays silent reads `said no hello within <n>s`, and one that ends first `ended with code <n> before its hello`.
   It tells Ops one line per down spell and one when it is up again, starts ssh again on ops-tunnel's waits, and tells Ops how many lines it passed over, each not a peer line or over 16 KB.
+  Its beat reads `ok` while every peer is up, so Scripts shows it Running and Ops' sweep raises nothing, and otherwise each peer's state (`spark-b: up: …; spark-c: down: …`), which reads Failing and names the peer that is down.
   ops-session-resume is `bun run ops:session-resume` in a checkout of `canary`: every 60 seconds it reads the state each session's hooks write (`session-state/<session id>.json` in the data folder),
   and to each live factory session (never a probe, nor one of the owner's own) at its usage limit whose reset passed a minute ago, unless Claude Code announced it carries on by itself (the **unstick** rule),
   it queues one resume line in the ops outbox, which the relay sends with `SendMessage` (**voice**), and one carry-on line to each such session whose turn a restart lost (its newest state `working`, written before its process started, 2 minutes on, with no Escape after it in the transcript),
