@@ -1,3 +1,5 @@
+import { join } from "node:path"
+
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
 import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
@@ -59,6 +61,7 @@ import {
   unknownManager,
   writeManagersOrder,
 } from "@/lib/dashboard/managers-order"
+import { serveModelIcon } from "@/lib/dashboard/model-icons"
 import { readOps } from "@/lib/dashboard/ops"
 import {
   PASTE_REPORT_BYTES,
@@ -113,7 +116,9 @@ import {
   validationErrorResponses,
   type ErrorCode,
 } from "@/lib/error"
+import { org } from "@/lib/org"
 import { upgradeWebSocket } from "@/lib/server"
+import { dataDir } from "@/lib/sessions/paths"
 import { listAccounts } from "@/lib/store/accounts"
 import { systemReport } from "@/lib/system/sampler"
 import {
@@ -1035,7 +1040,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/workers/:sessionId/setting",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}), of the session the roster seats as the assistant, or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, \`effort\` one of ${SESSION_EFFORTS.join(", ")}, or, for ${SDK_PROBE} alone, \`local\`, the id of a local model PLAYGROUND_LOCAL_MODELS names, which restarts it on that model's server (any other session FORBIDDEN, and refused as BUSY mid-turn or when the server serves another model); one of the three alone. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed, and for a model answers the switch confirm Claude Code may draw and waits for its status line to name the model, refused as BUSY with nothing typed while it works a turn or compacts; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds an effort command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}), of the session the roster seats as the assistant, or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, \`effort\` one of ${SESSION_EFFORTS.join(", ")}, or, for ${SDK_PROBE} alone, \`local\`, the id of a local model PLAYGROUND_LOCAL_MODELS names, which restarts it on that model's server, or, while that server is down, answers at once and starts the model its machine keeps, switching once it is served (any other session FORBIDDEN, and refused as BUSY mid-turn, while a model loads or when the server serves another model); one of the three alone. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed, and for a model answers the switch confirm Claude Code may draw and waits for its status line to name the model, refused as BUSY with nothing typed while it works a turn or compacts; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds an effort command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
       responses: {
         200: {
           description:
@@ -1295,6 +1300,25 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       },
     }),
     (c) => serveAttachment(c.req.param("id")),
+  )
+  .get(
+    "/model-icons/:maker",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "One model maker's icon, for a session row's logo: a maker config names (each backend's, and the Hugging Face org of each local model's repo id), fetched once from models.dev, else its Hugging Face avatar, and served from the data folder's cache after, never able to run a script; 404 for a maker with none, one config does not name, or one not yet fetched while offline",
+      responses: {
+        200: { description: "The icon" },
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    (c) =>
+      serveModelIcon(c.req.param("maker"), {
+        dir: join(dataDir(), "model-icons"),
+        local: org.local.models,
+      }),
   )
   .get(
     "/ws",

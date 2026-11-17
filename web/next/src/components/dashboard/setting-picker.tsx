@@ -60,7 +60,8 @@ export function SettingPicker({ label, worker }: { label: string; worker: Worker
   // a pick is forgotten once the row has moved off the value it was picked over, so a later change the session makes itself shows
   if (model && reported.model !== model.from) setModel(null)
   if (effort && reported.effort !== effort.from) setEffort(null)
-  const shownModel = shownValue(model, reported.model)
+  // while a pick loads its model the menu shows the model the chat still runs, and the composer's line says what loads
+  const shownModel = worker.localLoad ? reported.model : shownValue(model, reported.model)
   const shownEffort = shownValue(effort, reported.effort)
   const pickModel = (next: string) => {
     const setting = choiceSetting(next)

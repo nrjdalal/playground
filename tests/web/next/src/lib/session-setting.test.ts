@@ -8,6 +8,7 @@ import {
   isEffort,
   isModel,
   localChoice,
+  localLoadLine,
   MODEL_LABELS,
   modelAlias,
   modelChoice,
@@ -71,5 +72,19 @@ describe("the composer's model and effort picker", () => {
     expect(heldPick({ code: "CONFLICT", delivery: "INTERRUPTED", message: "typed" })).toBe(false)
     expect(heldPick({ code: "NETWORK_ERROR", message: "Network request failed" })).toBe(false)
     expect(heldPick(null)).toBe(false)
+  })
+})
+
+describe("the composer's line for a local model's load", () => {
+  test("while it loads it says what loads and about how long; once failed it shows the API's words; with none, nothing", () => {
+    expect(localLoadLine(undefined)).toBeNull()
+    expect(localLoadLine({ label: "M", state: "loading" })).toEqual({
+      failed: false,
+      text: "Loading M on the local model server, about 10 minutes. The chat switches to it once it answers.",
+    })
+    expect(localLoadLine({ label: "M", reason: "M didn't come up.", state: "failed" })).toEqual({
+      failed: true,
+      text: "M didn't come up.",
+    })
   })
 })

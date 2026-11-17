@@ -154,6 +154,7 @@ import {
 } from "@/lib/dashboard"
 import { useDrafted } from "@/lib/drafts"
 import { inboxWaitOf, inboxWaiting, useInbox } from "@/lib/inbox"
+import { useMakerIcon } from "@/lib/model-icons"
 import {
   dispatcherLabel,
   isGlmModel,
@@ -182,7 +183,7 @@ import {
   useGroupOpen,
   useGroupOrder,
 } from "@/lib/sidebar-groups"
-import { effortIcon, PR_TONES, providerIcon, prTone } from "@/lib/status-icons"
+import { effortIcon, PR_TONES, prTone } from "@/lib/status-icons"
 import {
   glanceReadings,
   isStale,
@@ -474,8 +475,6 @@ function ReadingItem({ reading }: { reading: Reading }) {
 
 const USAGE_READINGS: readonly ReadingKey[] = ["week", "fiveHour"]
 
-const ZaiIcon = providerIcon("zai")
-
 // A provider's usage windows after its dispatcher's title, before its logo: the week, then the 5-hour window, each its icon and number in its level's colour, a stale one gray and dimmed (ReadingItem); their outlines with no numbers before a sample, after a failed read or once sampling has stopped. Their words are each one's tooltip and, once, the screen reader's. GLM's on a row that is not GLM's own lead with Z.ai's mark (logo). Expanded only, as the row's title is.
 export function DispatcherUsage({
   logo = false,
@@ -489,6 +488,7 @@ export function DispatcherUsage({
   read: SystemRead
 }) {
   const glm = provider === "zai"
+  const ZaiIcon = useMakerIcon("zai")
   const stale = report ? isStale(report.sampledAt, now) : false
   const readings =
     report && !stale ? (glm ? zaiReadings(report.zai, now) : systemReadings(report, now)) : []
@@ -509,7 +509,7 @@ export function DispatcherUsage({
       data-usage
       className="text-2xs flex shrink-0 items-center gap-1.5 font-mono tabular-nums group-data-[collapsible=icon]:hidden [&_svg]:size-3!"
     >
-      {logo && <ZaiIcon aria-hidden className="size-3 shrink-0" />}
+      {logo && ZaiIcon && <ZaiIcon aria-hidden className="text-muted-foreground size-3 shrink-0" />}
       {known.map((reading, i) => {
         if (reading) return <ReadingItem key={reading.key} reading={reading} />
         const Icon = READING_ICONS[USAGE_READINGS[i]!].line
@@ -838,11 +838,12 @@ function ModelIcons({
   model: string | null
   toggles?: boolean
 }) {
-  const Logo = model ? providerIcon(providerOf(model)) : null
+  const Logo = useMakerIcon(providerOf(model))
   const Effort = effortIcon(effort)
   return (
     <>
-      {Logo && (
+      {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
+      {model && Logo && (
         <Hint content={modelName(model)}>
           <span className={MODEL_ICON}>
             <Logo aria-hidden className="size-4" />

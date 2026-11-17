@@ -15,7 +15,7 @@ import {
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { ROW_BOX } from "../../../../../../web/next/src/components/shell/row-box"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
-import MODEL_ICONS from "../../../../../../web/next/src/lib/model-icons.json"
+import { drawingOf, keepMakerIcon } from "../../../../../../web/next/src/lib/model-icons"
 import { calm, FIVE, glm, NOW } from "../../lib/system.test"
 import { tipsOf } from "../../tooltips"
 
@@ -335,7 +335,8 @@ describe("DispatcherUsage", () => {
 })
 
 // Z.ai's vendored logo, as the GLM windows lead with it.
-const zaiMark = MODEL_ICONS.makers.find((maker) => maker.id === "zai")!.icon!.data
+const zaiMark = `data:image/svg+xml;base64,${Buffer.from('<svg><path fill="currentColor" d="M0 0"/></svg>').toString("base64")}`
+keepMakerIcon("zai", drawingOf(zaiMark))
 
 // GLM usage shows as Claude usage does.
 describe("DispatcherUsage for GLM", () => {
@@ -382,6 +383,8 @@ describe("DispatcherUsage for GLM", () => {
   test("on a row not GLM's own, the GLM windows lead with Z.ai's mark; on GLM's own row its logo already says so", () => {
     const read = fresh((r) => void (r.zai = glm(5, 41)))
     expect(glmUsage(read, true)).toContain(zaiMark)
+    // muted as the row's other logos are, not the text's own colour
+    expect(glmUsage(read, true)).toMatch(/<svg[^>]*class="text-muted-foreground size-3 shrink-0"/)
     expect(glmUsage(read)).not.toContain(zaiMark)
     expect(render(createElement(DispatcherUsage, { now: NOW, read }))).not.toContain(zaiMark)
   })

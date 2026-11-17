@@ -48,6 +48,19 @@ export const modelChoice = (worker: Pick<Worker, "localModels" | "model">): stri
     ? `${LOCAL}${worker.model}`
     : modelAlias(worker.model)
 
+// Pure: the composer's line for the hosted session's load of a local model: while it loads, what it waits on and about how long; once failed, the API's own words; null with none.
+export const localLoadLine = (
+  load: Worker["localLoad"],
+): { failed: boolean; text: string } | null =>
+  !load
+    ? null
+    : load.state === "failed"
+      ? { failed: true, text: load.reason ?? `${load.label} couldn't load.` }
+      : {
+          failed: false,
+          text: `Loading ${load.label} on the local model server, about 10 minutes. The chat switches to it once it answers.`,
+        }
+
 // Pure: the menu value of one local model.
 export const localChoice = (id: string): string => `${LOCAL}${id}`
 
