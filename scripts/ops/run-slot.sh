@@ -182,6 +182,35 @@ if issue:
 done("medium")
 PY
 }
+WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)"(,?)$'
+# whether file $1 is a session's window, WIN_SESSION and WIN_SINCE its session and since, read only in the shape playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: `{` first and `}` last, every line between one of by, reason, session and since with a string value and a comma on each but the last, all four there, the session naming its file and not start; window_holder and spawn.sh's --priority (run-slot.sh window) read a window through it alone
+window_session() {
+  local l s= since= by= why= open= close= bad= sep=
+  WIN_SESSION= WIN_SINCE=
+  while IFS= read -r l || [ -n "$l" ]; do
+    [ -z "$close" ] || { bad=1; break; }
+    if [ -z "$open" ]; then
+      [ "$l" = '{' ] || { bad=1; break; }
+      open=1
+    elif [ "$l" = '}' ]; then
+      [ "$sep" = none ] || { bad=1; break; }
+      close=1
+    else
+      [[ $l =~ $WIN_LINE ]] && [ "$sep" != none ] || { bad=1; break; }
+      case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
+      [ -n "${BASH_REMATCH[4]}" ] && sep=, || sep=none
+    fi
+  done 2>/dev/null < "$1"
+  [ -z "$bad" ] && [ -n "$open" ] && [ -n "$close" ] && [ -n "$by" ] && [ -n "$why" ] && [[ $s =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [[ $since =~ ^[0-9][0-9TZ:.-]*$ ]] || return 1
+  [ "$s" != start ] && [ "${1##*/}" = "priority-$s.json" ] || return 1
+  WIN_SESSION=$s WIN_SINCE=$since
+}
+# run-slot.sh window <file>: print the session whose window file is, exit 1 when it is not one (window_session), so spawn.sh's --priority reads a window as the queue does
+if [ "${1:-}" = window ]; then
+  [ -f "${2:-}" ] && window_session "$2" || exit 1
+  printf '%s\n' "$WIN_SESSION"
+  exit 0
+fi
 # run-slot.sh box-off: print, one word a line, each precondition of the runner-box route (below) that fails, for ops-sweep's box-route-off finding, since a run otherwise falls back to this Mac without a word; nothing when the route can fire
 if [ "${1:-}" = box-off ]; then
   [ -x "$OPS/runner-host/ci.sh" ] || echo no-ci-sh
@@ -1455,7 +1484,8 @@ ordered_waiters() {
     [ -n "$t" ] || continue
     pid=${t#*-}; pid=${pid%%-*}
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
-    if [ "$name" != "$t" ]; then mt=$(stat "${ST[0]}" "${ST[1]}" "$QUEUE/$t" 2>/dev/null); name=$t; fi
+    # ST's format prints "<mtime> <path>", so the time alone is kept, since the path read as arithmetic ended the walk under set -u (issue 2508)
+    if [ "$name" != "$t" ]; then mt=$(stat "${ST[0]}" "${ST[1]}" "$QUEUE/$t" 2>/dev/null); mt=${mt%% *}; name=$t; fi
     [ -n "$mt" ] || continue
     m=$mt
     rank="" ask=""
@@ -1699,31 +1729,13 @@ session_waiting() {
   done
   return 1
 }
-WIN_LINE='^[[:space:]]*"(by|reason|session|since)":[[:space:]]*"(([^"\\]|\\.)*)"(,?)$'
-# the session of the oldest window, by its since, whose session has a run waiting, read only from a file shaped as playground priority on writes it, which priority.ts's readWindow takes and so off and the lapse can lift: `{` first and `}` last, every line between one of by, reason, session and since with a string value and a comma on each but the last, all four there, the session naming its file and not start
+# the session of the oldest window, by its since, whose session has a run waiting (window_session)
 window_holder() {
-  local f l s since by why open close bad sep best= bs=
+  local f best= bs=
   for f in "$PDATA"/priority-*.json; do
-    [ -f "$f" ] || continue
-    s= since= by= why= open= close= bad= sep=
-    while IFS= read -r l || [ -n "$l" ]; do
-      [ -z "$close" ] || { bad=1; break; }
-      if [ -z "$open" ]; then
-        [ "$l" = '{' ] || { bad=1; break; }
-        open=1
-      elif [ "$l" = '}' ]; then
-        [ "$sep" = none ] || { bad=1; break; }
-        close=1
-      else
-        [[ $l =~ $WIN_LINE ]] && [ "$sep" != none ] || { bad=1; break; }
-        case "${BASH_REMATCH[1]}" in by) by=1 ;; reason) why=1 ;; session) s=${BASH_REMATCH[2]} ;; since) since=${BASH_REMATCH[2]} ;; esac
-        [ -n "${BASH_REMATCH[4]}" ] && sep=, || sep=none
-      fi
-    done 2>/dev/null < "$f"
-    [ -z "$bad" ] && [ -n "$open" ] && [ -n "$close" ] && [ -n "$by" ] && [ -n "$why" ] && [[ $s =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [[ $since =~ ^[0-9][0-9TZ:.-]*$ ]] || continue
-    [ "$s" != start ] && [ "${f##*/}" = "priority-$s.json" ] || continue
-    [ -z "$bs" ] || [[ $since < $bs ]] || continue
-    session_waiting "$s" && best=$s bs=$since
+    [ -f "$f" ] && window_session "$f" || continue
+    [ -z "$bs" ] || [[ $WIN_SINCE < $bs ]] || continue
+    session_waiting "$WIN_SESSION" && best=$WIN_SESSION bs=$WIN_SINCE
   done
   [ -n "$best" ] && printf '%s\n' "$best"
 }

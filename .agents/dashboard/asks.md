@@ -573,7 +573,7 @@
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
-  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
+  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`, never a version such as `GLM-4.7`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
   or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
