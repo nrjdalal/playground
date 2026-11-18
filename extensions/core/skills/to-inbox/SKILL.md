@@ -10,6 +10,7 @@ Every message to the owner is read in seconds, an Inbox card in the aside's narr
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 7 and 10. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
+- A card that offers a new Claude start, or a resume, first runs that start with `spawn.sh --check`, states the measured result on the card, a pass or the gate's refusal line, and checks `--priority`'s order: open the priority window (`playground priority on`) before a `--check --priority`, or check without `--priority`.
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 5, then steps 8 and 9.
 - An `accept`, `apps`, `budget`, `clone`, `delete`, `grant`, `guard`, `own` or `root` decision's `why` is free text, shown as written: it takes steps 3 and 5 as plain lines, one fact each, then steps 8 and 9; a `delete`'s `why` renders as markdown, so it takes step 4 too.
 - A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), so the owner approves the very path that goes, and `ask new` refuses a short name.
