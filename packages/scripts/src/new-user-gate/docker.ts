@@ -58,11 +58,11 @@ export const narrow = (
   const words = rest.flatMap((a) =>
     a.startsWith("-") ? (a.includes("=") ? [a.slice(a.indexOf("=") + 1)] : []) : [a],
   )
-  // docker resolves a word to a container by its name, with or without a leading slash, or by any unique id prefix, and reads one inside name:ro, container:name and name:alias
+  // docker resolves a word to a container by its name, with or without slashes at either end, or by any unique id prefix, and reads one inside name:ro, container:name and name:alias
   const resolved = (w: string) =>
     w
       .split(":")
-      .map((part) => part.replace(/^\/+/, ""))
+      .map((part) => part.replace(/^\/+|\/+$/g, ""))
       .filter(Boolean)
       .flatMap((part) =>
         listed.filter(

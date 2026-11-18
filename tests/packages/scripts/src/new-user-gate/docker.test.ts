@@ -97,6 +97,10 @@ describe("the gate box's docker", () => {
       ["run", `--pid=container:${live}`, "alpine"],
       ["run", `--ipc=container:${live}`, "alpine"],
       ["run", "--link", `${live}:db`, "alpine"],
+      ["inspect", `${live}/`],
+      ["inspect", `/${live}/`],
+      ["inspect", "aaaa/"],
+      ["run", "--volumes-from", `${live}/:ro`, "postgres:alpine"],
     ])
       expect(narrow(argv, box, listed)).toHaveProperty("refused")
     expect(
