@@ -283,7 +283,8 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     await until(
       () => {
         const hereRows = rows(here).length
-        return hereRows === 1 && held.told.length === 2 ? true : { there: hereRows }
+        const toldLines = held.told.length
+        return hereRows === 1 && toldLines === 2 ? true : { here: hereRows, told: toldLines }
       },
       10_000,
       "copied and told",
@@ -394,7 +395,7 @@ describe("the relay job's loop (PG-2444)", () => {
       wait: (ms) => Bun.sleep(ms),
     })
     await until(
-      () => (existsSync(join(here, "ops", "peer-relay", `${PEER.name}.json`)) ? true : false),
+      () => existsSync(join(here, "ops", "peer-relay", `${PEER.name}.json`)),
       10_000,
       "link written",
     )
@@ -408,7 +409,7 @@ describe("the relay job's loop (PG-2444)", () => {
       "copied up",
     )
     fars[0]!.kill()
-    await until(() => fars.length === 3, 10_000, "links restarted")
+    await until(() => (fars.length === 3 ? true : fars.length), 10_000, "links restarted")
     write(here, line("after the drop"))
     await until(
       () => {
@@ -418,7 +419,7 @@ describe("the relay job's loop (PG-2444)", () => {
       10_000,
       "copied again",
     )
-    await until(() => told.length === 2, 10_000, "two tells")
+    await until(() => (told.length === 2 ? true : told.length), 10_000, "two tells")
     stop.abort()
     await running
     expect(told[0]).toStartWith("spark-b: down: ")
