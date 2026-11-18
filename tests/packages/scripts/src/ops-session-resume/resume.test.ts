@@ -672,8 +672,7 @@ describe("a stuck or quiet session (PG-2184)", () => {
     const run = (
       n: number,
       options: {
-        metrics?: () => Promise<string | null>
-        servedByLocal?: (name: string) => Promise<boolean>
+        localBusy?: (name: string) => Promise<boolean>
       } = {},
     ) =>
       cycle({
@@ -795,52 +794,31 @@ describe("a stuck or quiet session (PG-2184)", () => {
     expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
   })
 
-  // A working session the local model serves is not quiet: the quiet judge reads its /metrics, where running and waiting above 0 means the model is working, and skips it; one the model is idle on is still quiet, and a /metrics that does not read falls back to the idle timer, so none of these three change when /metrics is unavailable. A session the local model does not serve (Claude or GLM) is judged only by its idle, so it is still flagged while the model reads busy.
+  // A working session the local model serves is not quiet while the model is busy (localBusy true), so its flag is held back; it is quiet once localBusy reads false, which metricsBusy gives for an idle model and an unreadable /metrics alike (model.test.ts). A session the local model does not serve (Claude or GLM) is judged only by its idle, so localBusy is false there even while another model reads busy.
   test("a working session the model serves (running and waiting above 0) is not quiet, even after 15 minutes", async () => {
     const { run, sent } = setup("working")
-    await run(15, {
-      metrics: async () => "vllm:num_requests_running 3\nvllm:num_requests_waiting 1\n",
-      servedByLocal: async () => true,
-    })
+    await run(15, { localBusy: async () => true })
     expect(await sent()).toEqual([])
   })
 
   test("a working session the model serves is quiet once 45 minutes pass, so a stuck one is flagged while others are served", async () => {
     const { run, sent } = setup("working")
-    await run(45, {
-      metrics: async () => "vllm:num_requests_running 3\nvllm:num_requests_waiting 1\n",
-      servedByLocal: async () => true,
-    })
+    await run(45, { localBusy: async () => true })
     expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
   })
 
   test("a working session the model is idle on (running and waiting at 0) still is quiet after 15 minutes", async () => {
     const { run, sent } = setup("working")
-    await run(15, {
-      metrics: async () => "vllm:num_requests_running 0\nvllm:num_requests_waiting 0\n",
-      servedByLocal: async () => true,
-    })
+    await run(15, { localBusy: async () => false })
     const lines = await sent()
     expect(lines.map(({ to }) => to)).toEqual(["m4n7pq-builder"])
     expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
   })
 
-  test("a working session the /metrics cannot read falls back to the idle timer", async () => {
-    const { run, sent } = setup("working")
-    await run(15, {
-      metrics: async () => null,
-      servedByLocal: async () => true,
-    })
-    expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
-  })
-
-  // A session the local model does not serve is judged only by its idle, so a quiet Claude or GLM session is still flagged while the local model still reads busy.
+  // A session the local model does not serve is judged only by its idle, so localBusy is false there even while the model reads busy.
   test("a session the model does not serve is still flagged while the model reads busy", async () => {
     const { run, sent } = setup("working")
-    await run(15, {
-      metrics: async () => "vllm:num_requests_running 3\nvllm:num_requests_waiting 1\n",
-      servedByLocal: async () => false,
-    })
+    await run(15, { localBusy: async () => false })
     expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
   })
 
