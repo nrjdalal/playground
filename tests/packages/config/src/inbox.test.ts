@@ -85,7 +85,7 @@ describe("progressItems", () => {
       ),
     ).toEqual({
       items: [
-        { eta: "9:10 pm", name: "Mac reads", percent: 100, text: "Reads every Mac" },
+        { eta: "9:10 pm", name: "Mac reads", percent: 100, state: "done", text: "Reads every Mac" },
         { eta: "", name: "Yard channel", percent: 40, text: "Posts land" },
       ],
       ok: true,
@@ -96,13 +96,48 @@ describe("progressItems", () => {
     })
   })
 
-  test("names the first line with other than 4 fields, counting from 1 inside the block", () => {
+  test("a 4-field line reads as before, with no state", () => {
+    expect(progressItems("Sign-in | 40 | Next | 2:00 pm")).toEqual({
+      items: [{ eta: "2:00 pm", name: "Sign-in", percent: 40, text: "Next" }],
+      ok: true,
+    })
+  })
+
+  test("an optional 5th field is the row's state, one of active, done, held or waiting (PG-2730)", () => {
+    for (const state of ["active", "done", "held", "waiting"] as const)
+      expect(progressItems(`Sign-in | 40 | Next | 2:00 pm | ${state}`)).toEqual({
+        items: [{ eta: "2:00 pm", name: "Sign-in", percent: 40, state, text: "Next" }],
+        ok: true,
+      })
+    expect(progressItems("Sign-in | 40 | Next | 2:00 pm | ")).toEqual({
+      items: [{ eta: "2:00 pm", name: "Sign-in", percent: 40, text: "Next" }],
+      ok: true,
+    })
+  })
+
+  test("a row at 100 that names no state reads as done, and one that names a state keeps it", () => {
+    expect(progressItems("A | 100 | x | y")).toMatchObject({ items: [{ state: "done" }] })
+    expect(progressItems("A | 100% | x | y | ")).toMatchObject({ items: [{ state: "done" }] })
+    expect(progressItems("A | 100 | x | y | active")).toMatchObject({
+      items: [{ state: "active" }],
+    })
+  })
+
+  test("names a line whose state is none of the four, and the state itself", () => {
+    expect(progressItems("A | 10 | x | y\nB | 20 | x | y | busy")).toEqual({
+      fault: { kind: "state", line: 2, state: "busy", text: "B | 20 | x | y | busy" },
+      ok: false,
+    })
+  })
+
+  test("names the first line with other than 4 or 5 fields, counting from 1 inside the block", () => {
     expect(progressItems("A | 10 | x | y\nB | 20 | no eta")).toEqual({
       fault: { count: 3, kind: "fields", line: 2, text: "B | 20 | no eta" },
       ok: false,
     })
-    expect(progressItems("A | 10 | x | y | z")).toMatchObject({
-      fault: { count: 5, kind: "fields", line: 1 },
+    expect(progressItems("A | 10 | x | y | active | z")).toEqual({
+      fault: { count: 6, kind: "fields", line: 1, text: "A | 10 | x | y | active | z" },
+      ok: false,
     })
   })
 

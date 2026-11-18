@@ -1,12 +1,16 @@
 "use client"
 
 import type { ProgressItem } from "@packages/config/inbox"
+import { cn } from "cn"
 import { Fragment } from "react"
 
 import { Hint } from "@/components/hint"
 import { Progress } from "@/components/ui/progress"
 
-// A progress fenced block, drawn at the width of whatever holds it, so its bars fill an Inbox card on a phone and a wide screen alike: each item is its name, a bar and its percent on one line, the names in one column of at most 6rem so the bars start at one x and a long name never narrows them, a name past it cut short with its whole name on hover, then what is going on with its ETA at the right.
+// A bar whose row is not in progress now (waiting, held or done) draws its fill muted, so the active rows stand out in the primary colour.
+export const MUTED_BAR = "**:data-[slot=progress-indicator]:bg-muted-foreground/40"
+
+// A progress fenced block, drawn at the width of whatever holds it, so its bars fill an Inbox card on a phone and a wide screen alike: each item is its name, a bar and its percent on one line, the names in one column of at most 6rem so the bars start at one x and a long name never narrows them, a name past it cut short with its whole name on hover, then what is going on with its ETA at the right; an active row's bar, and a row with no state's, keep the primary colour.
 export function ProgressBlock({ items }: { items: ProgressItem[] }) {
   return (
     <div
@@ -18,7 +22,11 @@ export function ProgressBlock({ items }: { items: ProgressItem[] }) {
           <Hint content={item.name} description={null}>
             <span className="min-w-0 truncate font-medium">{item.name}</span>
           </Hint>
-          <Progress aria-label={item.name} value={item.percent} />
+          <Progress
+            aria-label={item.state ? `${item.name}, ${item.state}` : item.name}
+            className={cn(item.state && item.state !== "active" && MUTED_BAR)}
+            value={item.percent}
+          />
           <span className="text-right font-mono tabular-nums">{`${item.percent}%`}</span>
           <div className="text-muted-foreground col-span-3 mt-1 flex gap-3 not-last:mb-3">
             <span className="min-w-0 wrap-anywhere">{item.text}</span>
