@@ -145,7 +145,7 @@ export function isDispatcher(from: string | null | undefined): boolean {
 // The dispatcher's one open in-flight card, its newest item it may still edit that holds a progress block, so a second card or another poster's names it (PG-2720).
 export type InflightCard = { ref: number; title: string } | null
 
-// Pure: why bun run ask refuses an ask's or a read-only update's progress card, the block the dispatcher draws as its one card, one a poster may not start: the dispatcher's first card passes, a twin of the open one (same title) still edits, a second, a different title, is refused, and a card another poster starts is refused, naming the open card when one is.
+// Pure: why bun run ask refuses a progress card: only the dispatcher's first card or its same-title twin passes.
 export function progressCardRefusal(input: unknown, inFlight: InflightCard): string | null {
   if (!isRecord(input)) return null
   const preview = input.preview
