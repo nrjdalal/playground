@@ -63,6 +63,9 @@ playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
 playground wa send <file>
                       send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa alert <file>
+                      send the alert in <file>, named by its absolute path, once to the owner's WhatsApp and once to the alert-only wa.alert number, each inside its own 24 hours (bun run wa)
+playground wa status  print what is left of the owner's and the alert number's 24 hours, each number masked (bun run wa)
 playground wa relink
                       after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
