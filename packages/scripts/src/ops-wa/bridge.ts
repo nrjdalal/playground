@@ -431,10 +431,10 @@ export const guestRefusal = (body: string): string | undefined => {
   if (phoneIn(body)) return "a guest's reply holds a phone number, personal data a guest never gets"
 }
 
-// A phone number's shapes: a + and 8 or more digits, a bare 10 digits, or 10 to 13 digits split into groups by spaces, dashes, dots or brackets; a date, a time, a #-numbered PR and a bare 11 or 12 digit run id still go.
+// A phone number's shapes: a + and 8 or more digits, a bare 10 digits, or 10 to 13 digits split into groups by spaces, dashes, dots or brackets; a number at a sentence's end too; a date, a time, a #-numbered PR and a bare 11 or 12 digit run id still go.
 const phoneIn = (body: string): boolean =>
-  /\+\d[\d ().-]{6,}\d|(?<![\w.:-])\d{10}(?![\w.:-])/.test(body) ||
-  [...body.matchAll(/(?<![\w.:/#-])\(?\d[\d ().-]{7,22}\d(?![\w.:/-])/g)].some(([run]) => {
+  /\+\d[\d ().-]{6,}\d|(?<![\w.:-])\d{10}(?![\w/]|[.:-]\w)/.test(body) ||
+  [...body.matchAll(/(?<![\w.:/#-])\(?\d[\d ().-]{7,22}\d(?![\w/]|[.:-]\w)/g)].some(([run]) => {
     const digits = run.replace(/\D/g, "").length
     return /[ ().-]/.test(run) && digits >= 10 && digits <= 13
   })

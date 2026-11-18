@@ -35,7 +35,7 @@ A number alone or an id alone reaches you only while no card that went out waits
 
 ## The alert number
 
-`wa.alert`, empty unless the owner set it, is a second number that gets alerts alone ([ADR 0028](../../../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)).
+`wa.alert`, empty unless the owner set it, is a second number that gets urgent alerts ([ADR 0028](../../../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)) and chats as a guest (below).
 It is a guard key: to set it, post the owner a guard decision (`type: "guard"`, `key: "wa.alert"`, `scope` the owner's login, `value` the number) whose text says Approve also counts as that number's first message, then, once it is approved, send that number a short hello with `playground wa send --to alert <absolute path>`.
 Done when it prints `wa send: sent`, or, when that number has not written in the last 24 hours, you have told the owner the hello waits for its first message.
 `playground wa alert <absolute path>` carries an urgent alert alone, one the owner must act on now: it sends the file's body once to the owner and once to that number, each once it has ever written to the spare number (the owner's Approve of its guard card counts as its first message), and prints `wa alert: sent`, or whom it missed.

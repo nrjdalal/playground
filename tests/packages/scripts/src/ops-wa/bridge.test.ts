@@ -324,7 +324,7 @@ describe("ops-wa's bridge", () => {
   })
 })
 
-describe("the alert-only second number (#2748)", () => {
+describe("the alert number (#2748)", () => {
   // both numbers have written, so each is inside its 24 hours
   const both = async () => {
     const h = harness(undefined, undefined, ALERT)
@@ -1094,6 +1094,9 @@ describe("the alert number as a guest (#2756)", () => {
       ["call 555.010.0999", "a phone number"],
       ["call 98765 43210", "a phone number"],
       ["call 0098765 43210", "a phone number"],
+      ["call 555 010 0999.", "a phone number"],
+      ["call 5550100999.", "a phone number"],
+      ["their number is 555-010-0999: call after six", "a phone number"],
     ])
       await expect(h.send(leak!, "guest")).rejects.toThrow(why)
     const plain =

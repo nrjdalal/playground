@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events"
 
-// Made-up numbers alone: the owner's, a stranger's, the spare phone's and the alert-only second number's, none a real one.
+// Made-up numbers alone: the owner's, a stranger's, the spare phone's and the alert number's, none a real one.
 export const ALERT = "+15550100003"
 export const OWNER = "+15550100001"
 export const STRANGER = "+15550100777"
