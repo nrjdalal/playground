@@ -238,6 +238,16 @@ describe("locate", () => {
     }
   })
 
+  test("the exposed refusal names the fix, so an existing install keeps starting after re-publish", () => {
+    const every = { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "55432" }] }
+    const refusal = failure(() =>
+      locate(URL_55432, scripted([["a"]], [], { a: container("playground-db", every) }).run),
+    )
+    expect(refusal.failure).toBe("exposed")
+    expect(refusal.message).toContain("re-publish it on 127.0.0.1 alone")
+    expect(refusal.message).toContain("127.0.0.1::5432")
+  })
+
   test("a loopback-only named container passes, first run's own container included", () => {
     const loopback = { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55432" }] }
     for (const name of ["playground-db", "playground-db-a1B2", "playground-pg-306-inbox-db-x9Kq"]) {

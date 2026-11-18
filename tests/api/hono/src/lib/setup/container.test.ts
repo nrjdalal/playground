@@ -108,7 +108,9 @@ describe("withDatabase and setupName", () => {
     expect(withDatabase("NODE_ENV=local\nPOSTGRES_URL=old\n", URL)).toBe(
       "NODE_ENV=local\nPOSTGRES_URL=" + URL + "\n",
     )
-    expect(setupName("/repo/.claude/worktrees/pg-x-db", "feature", live)).toBe("playground-pg-x-db")
+    expect(setupName("/repo/.claude/worktrees/pg-x-db", "feature", live)).toBe(
+      "playground-pg-x-db-db",
+    )
     expect(setupName("/repo", "live/dashboard", live)).toBe("playground-dashboard-db")
   })
 })

@@ -43,10 +43,10 @@ const runner =
     return { code, stderr, stdout }
   }
 
-// Pure: the container's name, playground-db for a checkout of its own and playground-<worktree> in a worktree under .claude/worktrees/, the worktree's name already carrying its database's name.
+// Pure: the container's name, playground-db for a checkout of its own and playground-<worktree>-db in a worktree under .claude/worktrees/, as AGENTS.md names a worktree's database.
 export const containerName = (root: string): string => {
   const worktree = /\/\.claude\/worktrees\/([^/]+)\/?$/.exec(root)?.[1]
-  return worktree ? `playground-${worktree.replace(/[^a-zA-Z0-9_.-]/g, "-")}` : "playground-db"
+  return worktree ? `playground-${worktree.replace(/[^a-zA-Z0-9_.-]/g, "-")}-db` : "playground-db"
 }
 
 // Pure: the name setup starts, the live dashboard's database on its own branch (a fresh install's dashboard checkout), else the checkout's own.

@@ -966,8 +966,8 @@ describe("preflight", () => {
     if (checked.ok) expect(checked.proof).toContain("first run")
   })
 
-  // pglaunch reuses only a running container it named itself, so setup there would start a second, empty database beside one it cannot reuse; a running one it named is reused, as Try again does.
-  test("a missing POSTGRES_URL on the live dashboard's checkout is refused while its database exists where pglaunch cannot reuse it", async () => {
+  // startLocal reuses only a running container it named itself, so setup there would start a second, empty database beside one it cannot reuse; a running one it named is reused, as Try again does.
+  test("a missing POSTGRES_URL on the live dashboard's checkout is refused while its database exists where startLocal cannot reuse it", async () => {
     const cases = [
       { name: LIVE_DASHBOARD.database, state: "running" },
       { name: LIVE_DASHBOARD.database, state: "exited" },
@@ -1243,7 +1243,7 @@ describe("othersLiveDashboard", () => {
     expect(othersLiveDashboard("playground-pg-306-inbox-db", "pg-306-inbox")).toBe(false)
   })
 
-  test("is also the one first run started on the live checkout, which pglaunch names with a 4-character suffix", () => {
+  test("is also the one first run started on the live checkout, which startLocal names with a 4-character suffix", () => {
     const started = `${LIVE_DASHBOARD.database}-Ab12`
     expect(othersLiveDashboard(started, "pg-306-inbox")).toBe(true)
     expect(othersLiveDashboard(started, LIVE_DASHBOARD.branch)).toBe(false)

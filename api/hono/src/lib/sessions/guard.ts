@@ -156,7 +156,7 @@ export const locate = (url: string, run: Docker = docker): Located => {
     const where = owner.addresses.map((address) => address || "every interface").join(", ")
     throw new GuardError(
       "exposed",
-      `${owner.name} publishes port ${target.port} beyond loopback (${where})`,
+      `${owner.name} publishes port ${target.port} beyond loopback (${where}); re-publish it on 127.0.0.1 alone, e.g. \`docker run -p 127.0.0.1::5432 postgres:alpine\``,
     )
   }
   return { owner, target }
