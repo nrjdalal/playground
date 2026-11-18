@@ -162,6 +162,7 @@ Every other check on the head, and, on `factory.repo`, a `GitGuardian` check amo
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and for each PASS its diff calls for there: the tester's on a `web/next/` diff, the new-user gate's on an installer or first-run diff.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for every check on the head green (`Audit, Lint, and Build`, `test` and, on `factory.repo`, `GitGuardian`), which run on every push to the pull request, and for each PASS its diff calls for there:
+the tester's on a `web/next/` diff, the new-user gate's on an installer or first-run diff.
 The Builder's sweep runs its recovery scan.
 It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.
