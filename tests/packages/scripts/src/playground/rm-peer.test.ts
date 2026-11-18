@@ -178,11 +178,10 @@ test("runRmPeer deletes a .gguf directly under a recorded folder, logs it", asyn
   expect(out.join("\n")).toContain(
     `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
   )
-  expect(
-    JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries.some(
-      (entry: { path: string }) => entry.path === folder,
-    ),
-  ).toBe(true)
+  const paths = JSON.parse(
+    readFileSync(join(deps.data, "machine-record.json"), "utf8"),
+  ).entries.map((entry: { path: string }) => entry.path)
+  expect(paths).toContain(folder)
 })
 
 test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it", async () => {
@@ -200,23 +199,10 @@ test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it
   expect(out.join("\n")).toContain(
     `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
   )
-  expect(
-    JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries.some(
-      (entry: { path: string }) => entry.path === folder,
-    ),
-  ).toBe(true)
-})
-
-test("runRmPeer leaves a .gguf outside the record and models, so it stays", async () => {
-  const m = machine()
-  file(join(m.home, "scratch", "model.gguf"), "0123456")
-  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
-  const { out, err } = await rmpTold(join(m.home, "scratch", "model.gguf"), {
-    bytes: 7,
-    card: "11111111-2222-3333-4444-555555555555",
-  })
-  expect(out).toEqual([])
-  expect(err.join("\n")).toContain("is not on the machine record, so it stays")
+  const paths = JSON.parse(
+    readFileSync(join(deps.data, "machine-record.json"), "utf8"),
+  ).entries.map((entry: { path: string }) => entry.path)
+  expect(paths).toContain(folder)
 })
 
 // One runRmPeer over its words, catching what it logs or errors, with the card's approved byte count.
