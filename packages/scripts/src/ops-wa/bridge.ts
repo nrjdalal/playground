@@ -363,7 +363,7 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   )
 }
 
-// The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting line, sent when the cards it counts change.
+// The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting message, a 📥 line per card by its title, sent when the cards it names change.
 async function cards(io: Io & Mode, inbox: Inbox) {
   const now = io.now()
   const state = await readOwn<Cards>(cardsFile(io.dir), {})
@@ -373,10 +373,10 @@ async function cards(io: Io & Mode, inbox: Inbox) {
   let held = state.held
   try {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
-    const kept: string[] = []
+    const kept: Card[] = []
     for (const card of open) {
       if (!terms || !goesOut(card, terms)) {
-        if (waits(card, now)) kept.push(card.id)
+        if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
         const { poll, rows, text } = cardOf(card, terms)
         await io.reply(text)
@@ -390,8 +390,11 @@ async function cards(io: Io & Mode, inbox: Inbox) {
           }
       }
     }
-    const key = kept.sort().join(",")
-    if (kept.length > 0 && key !== held) await io.reply(waitingLine(kept.length))
+    const key = kept
+      .map((card) => card.id)
+      .sort()
+      .join(",")
+    if (kept.length > 0 && key !== held) await io.reply(waitingLine(kept, terms))
     held = key
   } finally {
     await writeOwn(cardsFile(io.dir), { held, sent })

@@ -141,9 +141,23 @@ export function cardOf(
   }
 }
 
-// Pure: the one line that stands for the cards kept in the Inbox, with no title or detail.
-export const waitingLine = (n: number): string =>
-  `${n} ${n === 1 ? "card waits" : "cards wait"} in the Inbox.`
+export const WAITING_SHOWN = 5
+
+// Pure: the lines that stand for the cards kept in the Inbox: one 📥 line per card by its title alone, redacted, never its text or files, at most WAITING_SHOWN, then one line counting the rest and every card whose title holds a term goesOut() keeps back; while the terms cannot be read, that count alone.
+export const waitingLine = (cards: Pick<Card, "title">[], terms: Terms | undefined): string => {
+  const shown = terms
+    ? cards
+        .filter((card) => !holds(card.title, terms.org))
+        .slice(0, WAITING_SHOWN)
+        .map((card) => `📥 ${redact(card.title, terms)}`)
+    : []
+  const rest = cards.length - shown.length
+  if (rest === 0) return shown.join("\n")
+  const count = shown.length
+    ? `📥 +${rest} more in the Inbox`
+    : `📥 ${rest} ${rest === 1 ? "card" : "cards"} in the Inbox`
+  return [...shown, count].join("\n")
+}
 
 // What a message is, read as an answer to a card: a number and a card's id in either order, a number alone, or an id alone; null for any other message, which goes to the dispatcher.
 export type Reply = { number?: number; ref?: number }

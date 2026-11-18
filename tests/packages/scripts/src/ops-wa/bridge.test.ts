@@ -27,7 +27,6 @@ import {
   noRow,
   notSent,
   termsOf,
-  waitingLine,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
@@ -831,7 +830,7 @@ describe("Inbox cards on WhatsApp", () => {
       card(12, {}, { scope: undefined }),
       card(13, {}, { scope: "zyx-org" }),
     ])
-    expect(h.texts()).toEqual([waitingLine(2)])
+    expect(h.texts()).toEqual(["📥 Card 12\n📥 Card 13"])
     expect(await say(h, "1 #i13")).toEqual([notSent(13)])
     expect(h.answers).toEqual([])
   })
@@ -842,7 +841,7 @@ describe("Inbox cards on WhatsApp", () => {
       card(13, { answer: { choice: "replied" } }, { scope: undefined }),
       card(14, { answer: { snoozedUntil: "2026-11-12T00:00:00Z" } }, { scope: undefined }),
     ])
-    expect(h.texts()).toEqual([waitingLine(1)])
+    expect(h.texts()).toEqual(["📥 Card 12"])
   })
 
   test("no card goes before the owner has written, since ops-wa never starts a chat", async () => {
@@ -917,7 +916,16 @@ describe("Inbox cards on WhatsApp", () => {
       card(25, {}, { key: "wa.owner", type: "guard", value: "15550000000" } as never),
     ]
     const h = await withCards(kept)
-    expect(h.texts()).toEqual([waitingLine(6)])
+    expect(h.texts()).toEqual([
+      [
+        "📥 Card 20",
+        "📥 Card 21",
+        "📥 Card 22",
+        "📥 Card 23",
+        "📥 Card 24",
+        "📥 +1 more in the Inbox",
+      ].join("\n"),
+    ])
     expect(h.texts().join("\n")).not.toContain("15550000000")
     for (const ref of [20, 21, 22, 23, 24, 25])
       expect(await say(h, `1 #i${ref}`)).toEqual([notSent(ref)])
@@ -953,14 +961,14 @@ describe("Inbox cards on WhatsApp", () => {
       card(41, {}, { text: "for Acmeworks" }),
     ]
     const h = await withCards(open)
-    expect(h.texts()).toEqual([expect.stringContaining("#i12"), waitingLine(2)])
+    expect(h.texts()).toEqual([expect.stringContaining("#i12"), "📥 Card 40\n📥 Card 41"])
     await h.pass()
     expect(h.texts()).toHaveLength(2)
     open.push(
       card(42, { kind: "draft" }, { text: "a reply", to: "a thread", type: undefined } as never),
     )
     await h.pass()
-    expect(h.texts().at(-1)).toBe(waitingLine(3))
+    expect(h.texts().at(-1)).toBe("📥 Card 40\n📥 Card 41\n📥 Card 42")
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
   })
 
@@ -973,7 +981,7 @@ describe("Inbox cards on WhatsApp", () => {
 
   test("while no-public-leak's list cannot be read, no card goes, and the waiting line counts them all", async () => {
     const h = await withCards([card(12), card(13)], null)
-    expect(h.texts()).toEqual([waitingLine(2)])
+    expect(h.texts()).toEqual(["📥 2 cards in the Inbox"])
   })
 
   test("while WhatsApp mode is off, a reply is no answer and gets the off line", async () => {
