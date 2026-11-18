@@ -14,7 +14,7 @@ import { keptMessage, wordHashes } from "./alert-set"
 import { readOwn, writeOwn } from "./habits"
 import { seedAlert } from "./seed"
 
-// confirm.json, ops-wa's alone: the one setting a guarded key waits to apply on, until the owner's reply 1 within CONFIRM_MS (ADR 0035)
+// confirm.json, ops-wa's alone: the one setting a guarded key waits to apply on, until the owner's yes within CONFIRM_MS (ADR 0035)
 export const confirmFile = (dir: string) => join(dir, "confirm.json")
 export const CONFIRM_MS = 10 * 60_000
 type Pending = { at: number; id: string; key: string; value: string }
@@ -35,7 +35,11 @@ export const holds = (words: string[], value: string) => {
 }
 
 const quoted = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
-const shown = (key: string, value: unknown) => JSON.stringify(shownValue(key, value) ?? null)
+// A value as the owner reads it: a string as it stands, masked to its last 4 where the setting is masked, anything else as JSON.
+const shown = (key: string, value: unknown) => {
+  const seen = shownValue(key, value) ?? null
+  return typeof seen === "string" ? seen : JSON.stringify(seen)
+}
 
 // Sets a key at the login's scope as the owner's act, as the Inbox's Approve writes it, and gives the undo: the old value's set, or a reset when the scope held none.
 export function applyOwnerSetting(data: string, key: string, text: string, id: string) {
@@ -76,32 +80,47 @@ async function applied(io: SettingSetIo, key: string, value: string, id: string)
   const { log, undo } = io.apply(key, value, id)
   io.log(log)
   await io
-    .tell(`Set ${key} from your message. To undo: ${undo}`)
+    .tell(`set ${key} from your message. to undo: ${undo}`)
     .catch((error: Error) => io.log(`ops-wa: the set line: ${error.message}`))
   return `set ${key} from the owner's message ${id}; to undo: ${undo}`
 }
 
-// settings set --from-owner-msg: the owner's own kept message of that id must hold the value; a guarded key then waits for the owner's reply 1 on WhatsApp, and any other key applies at once.
+// settings set --from-owner-msg: the owner's own kept message of that id must hold the value; a guarded key then waits for the owner's yes on WhatsApp, and any other key applies at once.
 export async function settingSet(io: SettingSetIo, id: string, key: string, value: string) {
   const hit = await keptMessage(io.dir, id, io.now())
   if (!hit) throw new Error(`no message of the owner's in the last 24 hours has the id ${id}`)
   if (!holds(hit.words, value)) throw new Error(`the owner's message ${id} does not hold the value`)
   if (!guarded(key)) return applied(io, key, value, id)
-  await io.tell(`Set ${key} to ${shown(key, valueOf(value))}? Reply 1 to apply, within 10 minutes.`)
+  await io.tell(`set ${key} to ${shown(key, valueOf(value))}? yes or no`)
   await writeOwn(confirmFile(io.dir), { at: io.now(), id, key, value } satisfies Pending)
-  return `${key} is a key a guard reads: asked the owner on WhatsApp to confirm, and it applies on their reply 1 within 10 minutes`
+  return `${key} is a key a guard reads: asked the owner on WhatsApp to confirm, and it applies on their yes within 10 minutes`
 }
 
-// The owner's reply 1 within 10 minutes applies the waiting setting; any other text leaves it, and says false so the message goes on as before.
+// The owner's answers to the question: these apply, "no" drops it, and so does any other message
+const YES = new Set(["1", "y", "yes", "yes do it"])
+const answer = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/, "")
+
+// The owner's next message after the question settles it: a yes within 10 minutes applies the waiting setting, and anything else, or a yes after 10 minutes, drops it; true when the message was a yes or a no, which goes no further, and false for any other, which goes on as before.
 export async function confirm(io: SettingSetIo, text: string): Promise<boolean> {
-  if (text.trim() !== "1") return false
   const pending = await readOwn<Partial<Pending>>(confirmFile(io.dir), {})
   if (!pending.key || !pending.id || pending.value === undefined) return false
-  if (io.now() - (pending.at ?? 0) >= CONFIRM_MS) return false
   await writeOwn(confirmFile(io.dir), {})
+  const said = answer(text)
+  const late = io.now() - (pending.at ?? 0) >= CONFIRM_MS
+  if (late || (!YES.has(said) && said !== "no")) return false
+  if (said === "no") {
+    await io
+      .tell(`left ${pending.key} as it was.`)
+      .catch((error: Error) => io.log(`ops-wa: the no line: ${error.message}`))
+    return true
+  }
   await applied(io, pending.key, pending.value, pending.id).catch((error: Error) =>
     io
-      .tell(`Did not set ${pending.key}: ${error.message}`)
+      .tell(`did not set ${pending.key}: ${error.message}`)
       .catch(() => io.log(`ops-wa: ${pending.key} was not set: ${error.message}`)),
   )
   return true

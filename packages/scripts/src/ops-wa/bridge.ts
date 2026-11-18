@@ -67,7 +67,7 @@ export type Mode = {
   inbox?: Inbox
   // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
   media?: Media
-  // the owner's reply 1 to a setting waiting on it, applied: true when the text was that reply (setting-set.ts's confirm)
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
   confirm?: (text: string) => Promise<boolean>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>

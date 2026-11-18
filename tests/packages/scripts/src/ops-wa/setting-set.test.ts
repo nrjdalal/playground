@@ -93,10 +93,10 @@ describe("settings set from the owner's message", () => {
     expect(said).toContain("set factory.repo from the owner's message own1")
     expect(stored(o.data)["factory.repo"]).toBe("made-up-me/new")
     expect(o.logged).toEqual([
-      'ops-wa: factory.repo set from the owner\'s message own1; it was "made-up-me/old"',
+      "ops-wa: factory.repo set from the owner's message own1; it was made-up-me/old",
     ])
     expect(o.told).toHaveLength(1)
-    expect(o.told[0]).toContain("To undo: playground settings set factory.repo")
+    expect(o.told[0]).toContain("to undo: playground settings set factory.repo")
   })
 
   test("a value the message does not hold refuses, and nothing is set", async () => {
@@ -138,7 +138,7 @@ describe("settings set from the owner's message", () => {
     expect(stored(o.data)).not.toHaveProperty("live.container")
   })
 
-  test("a guarded key waits for the owner's reply 1, and applies on it within 10 minutes", async () => {
+  test("a guarded key asks the owner yes or no, and applies on a yes within 10 minutes", async () => {
     const o = owned()
     await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
     expect(guarded("wa.replyPolicy")).toBe(true)
@@ -146,25 +146,49 @@ describe("settings set from the owner's message", () => {
     expect(guarded("factory.repo")).toBe(false)
     const said = await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
     expect(said).toContain("asked the owner on WhatsApp to confirm")
-    expect(o.told).toEqual([
-      'Set wa.replyPolicy to "factory status only"? Reply 1 to apply, within 10 minutes.',
-    ])
-    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
-    expect(await confirm(o.io, "ok")).toBe(false)
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? yes or no"])
     expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
     o.advance(CONFIRM_MS - 1)
-    expect(await confirm(o.io, " 1 ")).toBe(true)
+    expect(await confirm(o.io, " Yes ")).toBe(true)
     expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
-    expect(o.told[1]).toContain("To undo: playground settings reset wa.replyPolicy")
-    expect(await confirm(o.io, "1")).toBe(false)
+    expect(o.told[1]).toContain("to undo: playground settings reset wa.replyPolicy")
+    expect(await confirm(o.io, "yes")).toBe(false)
   })
 
-  test("a guarded key with no confirm, or a late one, applies nothing", async () => {
+  test.each(["yes", "Y", "yes do it", "1", "YES."])("%s applies the waiting key", async (yes) => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "guest policy: status only", START, OWNER)
+    await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
+    expect(await confirm(o.io, yes)).toBe(true)
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+  })
+
+  test("a masked key's question shows its last 4 alone", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "second number +15550100123", START, OWNER)
+    await settingSet(o.io, "own1", "wa.alert", "+15550100123")
+    expect(o.told).toEqual(["set wa.alert to ••••0123? yes or no"])
+  })
+
+  test("a no drops it and says so, and any other reply drops it and goes on", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
+    await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
+    expect(await confirm(o.io, "No")).toBe(true)
+    expect(o.told[1]).toBe("left wa.replyPolicy as it was.")
+    expect(await confirm(o.io, "yes")).toBe(false)
+    await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
+    expect(await confirm(o.io, "what's the status?")).toBe(false)
+    expect(await confirm(o.io, "yes")).toBe(false)
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+  })
+
+  test("silence past 10 minutes drops it, so a late yes applies nothing", async () => {
     const o = owned()
     await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
     await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
     o.advance(CONFIRM_MS)
-    expect(await confirm(o.io, "1")).toBe(false)
+    expect(await confirm(o.io, "yes")).toBe(false)
     expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
   })
 })
@@ -193,28 +217,28 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     return { fake, relayed, settle: w.idle }
   }
 
-  test("the owner's line names its id and the settings set, and the owner's 1 applies the guarded key", async () => {
+  test("the owner's line names its id and the settings set, and the owner's yes applies the guarded key", async () => {
     const o = owned()
     const h = watched(o)
     h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
     await h.settle()
     expect(h.relayed[0]).toContain("--from-owner-msg own1")
     await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
-    h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
+    h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own2" })])
     await h.settle()
     expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
     expect(h.relayed).toHaveLength(1)
   })
 
-  test("a 1 from the second number or a stranger applies nothing", async () => {
+  test("a yes from the second number or a stranger applies nothing", async () => {
     const o = owned()
     const h = watched(o)
     h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
     await h.settle()
     await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
     h.fake.upsert([
-      h.fake.message(jid(ALERT), "1", { id: "guest1" }),
-      h.fake.message(jid(STRANGER), "1", { id: "stranger1" }),
+      h.fake.message(jid(ALERT), "yes", { id: "guest1" }),
+      h.fake.message(jid(STRANGER), "yes", { id: "stranger1" }),
     ])
     await h.settle()
     expect(stored(o.data)).toEqual({})

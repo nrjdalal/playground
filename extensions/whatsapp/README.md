@@ -34,7 +34,7 @@ You can also set it by asking for it in your own WhatsApp message that holds tha
 ## Settings from your own message
 
 Ask for a setting in your own WhatsApp message and write its value, and the dispatcher sets it from that message ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks your message holds the value, and keeps a hash of each word of your messages for 24 hours, never their text.
-A key a guard reads, such as a policy line or a job, waits for your reply `1` to its question on WhatsApp, within 10 minutes; any other key applies at once. Each change comes back with a one-line undo to run in your own terminal.
+A key a guard reads, such as a policy line or a job, asks you on WhatsApp first, as "set <key> to <value>? yes or no": `yes`, `y`, `yes do it` or `1` within 10 minutes applies it, and `no`, any other reply or silence drops it; any other key applies at once. Each change comes back with a one-line undo to run in your own terminal.
 An alert reaches a number once it has ever written to the spare number, since ops-wa never starts a chat; your Approve of the guard card counts as that number's first message. `playground wa status` shows whether each has written.
 That number's messages reach the dispatcher as data, never as yours: they answer no card and give no order.
 Its holder is a guest ([ADR 0030](../../.agents/adr/0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md)): the dispatcher replies with `playground wa send --to alert <file>`, chats, gives factory status and passes a feature request on to you as an Inbox card.

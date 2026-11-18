@@ -44,7 +44,7 @@ Done when it prints `wa alert-set: set the second number`, or its refusal goes t
 ## A setting from the owner's message
 
 Each owner text line names its message id. When the owner's own WhatsApp asks for a setting and writes its value, run `playground settings set <key> <value> --from-owner-msg <id>` with the value as the message spells it ([ADR 0035](../../../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks the message holds the value and writes the key itself.
-A key a guard reads waits for the owner's reply `1` on WhatsApp within 10 minutes, which ops-wa asks for and takes alone; any other key applies at once, and ops-wa sends the owner its undo.
+A key a guard reads waits for the owner's yes to ops-wa's own plain question on WhatsApp within 10 minutes, which ops-wa asks and reads alone, so leave the question out of your reply; any other key applies at once, and ops-wa sends the owner its undo.
 Done when it prints `set <key>` with its undo or `asked the owner on WhatsApp to confirm`, or its refusal goes to the owner as the reply.
 `playground wa alert <absolute path>` carries an urgent alert alone, one the owner must act on now: it sends the file's body once to the owner and once to that number, each once it has ever written to the spare number (the owner's Approve of its guard card counts as its first message), and prints `wa alert: sent`, or whom it missed.
 Every other message goes by `wa send`, to the owner, or by `wa send --to alert`, to that number alone.

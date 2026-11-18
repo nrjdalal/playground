@@ -213,7 +213,7 @@ const main = async () => {
     )
     return was
   }
-  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's reply 1 (ADR 0035)
+  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035)
   const owned = {
     apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
     dir,
