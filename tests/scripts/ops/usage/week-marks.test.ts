@@ -233,6 +233,28 @@ test("a whole-point step in the 1-hour window reads the 6-hour rate, so the comb
   expect(line).toContain("; combined 1.7%/h across 2 accounts")
 })
 
+// #2735: under an hour of readings the 1-hour and 6-hour windows hold the same rows, so a step left the 6-hour window skipped, giving ?%/h; reading over the 6-hour window keeps a rate
+test("a step under an hour of readings still reads a rate, not ?%/h (#2735)", () => {
+  const now = Date.now() / 1000
+  const home = setup("sub-hour-step", 50, 20, {
+    "spare@example.test": { readAt: iso(now), week: 11, weekReset: now + 172800 },
+  })
+  history(home, [["login@example.test", 50, now + 86400]])
+  const second = [
+    [2700, 10],
+    [1800, 10],
+    [900, 11],
+  ]
+  for (const [back, week] of second)
+    appendFileSync(
+      samples(home, "account-samples.jsonl"),
+      `${JSON.stringify({ account: "spare@example.test", reset: now + 172800, t: now - back, week })}\n`,
+    )
+  const line = status(home)
+  expect(line).toContain("; combined 2.3%/h across 2 accounts")
+  expect(line).not.toContain("?%/h")
+})
+
 // #1587: a full week's reading parks in the map until its reset with a readAt that stops moving, so it counts 0%/h and the combined figure stays a number
 test("a full-week account counts 0%/h, so the combined figure stays a number (#1587)", () => {
   const now = Date.now() / 1000

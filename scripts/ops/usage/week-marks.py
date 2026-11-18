@@ -47,9 +47,9 @@ def pace(rows):
         span = w[-1]["t"] - w[0]["t"] if w else 0
         if span < 900 or len(w) == seen:
             continue
-        seen = len(w)
         if hours == 1 and (w[-1]["week"] - w[0]["week"]) == 1:
             continue
+        seen = len(w)
         rate = (w[-1]["week"] - w[0]["week"]) / span * 3600
         if rate:
             return rate, f"{rate:.1f}%/h over {hours}h", rate
