@@ -936,11 +936,8 @@ describe("a manager's stop with no alerts-wait running is refused, naming its re
     return { stopAs }
   }
   // A pid whose process has gone: a child that has already exited.
-  const gonePid = async () => {
-    const run = Bun.spawn(["true"])
-    await run.exited
-    return run.pid
-  }
+  // past Linux's highest pid_max (2^22) and macOS's 99998, so no process can hold it
+  const GONE_PID = 2 ** 22 + 1
 
   test("no waiter refuses the stop", async () => {
     const f = folder()
@@ -955,9 +952,7 @@ describe("a manager's stop with no alerts-wait running is refused, naming its re
   })
 
   test("a stale pid file whose process is gone refuses the stop", async () => {
-    expect(await folder(await gonePid()).stopAs("x7mh4d-builder")).toBe(
-      waiterReason("x7mh4d-builder"),
-    )
+    expect(await folder(GONE_PID).stopAs("x7mh4d-builder")).toBe(waiterReason("x7mh4d-builder"))
   })
 
   test("each manager kind is held to it, by roster kind, id name or seat name", async () => {

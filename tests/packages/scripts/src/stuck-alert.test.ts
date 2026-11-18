@@ -16,8 +16,8 @@ import {
   pendingCalls,
   transcriptOf,
   waiterLive,
-  waiterSince,
   waiterPidPath,
+  waiterSince,
 } from "../../../../packages/scripts/src/stuck-alert"
 
 const AGENTS = [
