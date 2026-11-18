@@ -11397,6 +11397,8 @@ var GUARD_KEYS = new Set([
   "slack.gatedSends",
   "usage.keychainService",
   "wa.alert",
+  "wa.guestPolicy",
+  "wa.replyPolicy",
   "yard.logReaders"
 ]);
 var JOB_PREFIX = "jobs.";

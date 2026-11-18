@@ -7,8 +7,10 @@ import { readPolicy, whatsappSettings } from "@packages/settings"
 import { refusalOf, statusOf } from "../ops-wa/bridge"
 import { request, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa alert <file>: the same body once to the owner and once to the alert-only number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card.
-const [verb, file, ...extra] = process.argv.slice(2)
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: the same body once to the owner and once to the alert-only number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card.
+const args = process.argv.slice(2)
+const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
+const [verb, file, ...extra] = guest ? [args[0], ...args.slice(3)] : args
 if (verb === "relink" && !file) {
   const dir = join(dataDir(), "whatsapp")
   // the old auth state is set aside inside the guarded folder, never deleted, so nothing leaves it
@@ -42,7 +44,7 @@ if (
   !(await Bun.file(file).exists())
 ) {
   console.error(
-    "usage: playground wa send <file>, the reply's body in a file named by its absolute path; playground wa alert <file>, the same to the owner and the alert number; playground wa status; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert <file>, the same to the owner and the alert number; playground wa status; or playground wa relink",
   )
   process.exit(2)
 }
@@ -50,7 +52,11 @@ const body = (await Bun.file(file).text()).trimEnd()
 const refusal = refusalOf(body)
 const reply: Awaited<ReturnType<typeof request>> = refusal
   ? { refusal }
-  : await request(socketPath(dataDir()), body, verb === "alert")
+  : await request(
+      socketPath(dataDir()),
+      body,
+      verb === "alert" ? "alert" : guest ? "guest" : "reply",
+    )
 if (reply.refusal) {
   console.error(`wa ${verb}: ${reply.refusal}`)
   process.exit(1)
