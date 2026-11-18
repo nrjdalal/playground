@@ -242,7 +242,7 @@ Done when `CronList` shows both.
 A lead's new session creates both again.
 Ops, when it slows or pauses its own sweep on purpose, a usage squeeze or maintenance, writes `~/.playground/ops/sweep-hold-until` one future ISO 8601 time with its zone, so ops-tick's relay watch stays quiet until it passes (it lapses on its own, and a missing, empty, past or unreadable time leaves the watch on; [LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 
-Every manager (the dispatcher, the Planner and each lead) also keeps one background task waiting on the outbox for lines addressed to it, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher, the same way.
+Every manager (the dispatcher, the Planner, each lead and the Optimizer) also keeps one background task waiting on the outbox for lines addressed to it, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher, the same way.
 It reads its stuck alerts first (ops-stuck-alert.jsonl, where a session's own hook queues them and ops-tick's relay watch its late-stop line), then every other job's line, such as a firefighting heads-up to the Builder:
 
 ```bash
@@ -255,7 +255,7 @@ A waiter started after time down skips the alerts queued over 5 minutes before i
 while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe on its own machine reports to keeps no waiter, and its probe's alert comes by the relay alone; a probe on the other machine reports by `playground send`, so its spawner keeps a waiter while it lives ([Message a session](#message-a-session)).
 Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
-A manager's stop with no live waiter is refused once, naming its restart ([no-chat-question](../../../../scripts/hooks/README.md#no-chat-question)), and an owner WhatsApp line the dispatcher has not answered in a minute while its waiter is down goes to Ops to send on.
+A manager's stop with no live waiter is refused once, naming its restart ([no-chat-question](../../../../scripts/hooks/README.md#no-chat-question)), and an owner WhatsApp line the dispatcher has not answered in a minute goes to Ops to send on when its waiter neither runs nor has handed it an alert since the line came.
 Done when the task is running; the relay sends the same line later, so drop that copy.
 
 ## Wait on a signal

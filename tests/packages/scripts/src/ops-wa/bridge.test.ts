@@ -64,8 +64,9 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     alert: alert ?? "",
     // wa.replyPolicy and wa.guestPolicy as ops-wa reads them, their defaults unless a test sets them
     policy: undefined as Policy | undefined,
-    // whether the dispatcher's alerts-wait runs
+    // whether the dispatcher's alerts-wait runs, and when it last handed over an alert, as its cursor's time
     waiter: true,
+    printedAt: undefined as number | undefined,
   }
   let now = START
   fake.setClock(() => now)
@@ -99,7 +100,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     inbox,
     media,
     policy: async () => mode.policy,
-    waiter: async () => mode.waiter,
+    waiter: async (_: string, since: number) =>
+      mode.waiter || (mode.printedAt !== undefined && mode.printedAt >= since),
   })
   watched.attach(fake.sock)
   return {
@@ -596,6 +598,30 @@ describe("WhatsApp mode", () => {
     answered.advance(90_000)
     await answered.pass()
     expect(answered.routed.map((r) => r.to)).toEqual(["dispatcher"])
+  })
+
+  test("a line the waiter already handed over is not sent on through Ops when the dispatcher's turn on it runs past a minute", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "deploy it")])
+    await h.settle()
+    h.advance(1000)
+    h.mode.printedAt = START + 1000
+    h.mode.waiter = false
+    h.advance(60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+  })
+
+  test("a line settled with a live waiter at a minute is not sent on at a later gap", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "deploy it")])
+    await h.settle()
+    h.advance(60_000)
+    await h.pass()
+    h.mode.waiter = false
+    h.advance(20 * 60_000)
+    await h.pass()
+    expect(h.routed.filter((r) => r.to === "ops")).toHaveLength(0)
   })
 
   test("hands a message with no reply in 3 minutes to the assistant seat too, once", async () => {

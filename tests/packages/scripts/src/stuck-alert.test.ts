@@ -16,6 +16,7 @@ import {
   pendingCalls,
   transcriptOf,
   waiterLive,
+  waiterSince,
   waiterPidPath,
 } from "../../../../packages/scripts/src/stuck-alert"
 
@@ -322,5 +323,23 @@ describe("an alert to a manager with no alerts-wait running", () => {
     const old = new Date(NOW.getTime() - 6 * 60_000)
     utimesSync(cursor, old, old)
     expect(await waiterLive(outbox, "planner", NOW)).toBe(false)
+  })
+
+  test("a waiter counts from a time when its pid runs, or it handed over an alert at or after that time", async () => {
+    const box = join(outbox, "since")
+    mkdirSync(join(box, "alerts-wait"), { recursive: true })
+    const since = NOW.getTime() - 60_000
+    expect(await waiterSince(box, "dispatcher", since)).toBe(false)
+    const cursor = join(box, "alerts-wait", "dispatcher")
+    writeFileSync(cursor, "100")
+    const before = new Date(since - 1000)
+    utimesSync(cursor, before, before)
+    expect(await waiterSince(box, "dispatcher", since)).toBe(false)
+    const after = new Date(since + 1000)
+    utimesSync(cursor, after, after)
+    expect(await waiterSince(box, "dispatcher", since)).toBe(true)
+    utimesSync(cursor, before, before)
+    writeFileSync(waiterPidPath(box, "dispatcher"), String(process.pid))
+    expect(await waiterSince(box, "dispatcher", since)).toBe(true)
   })
 })

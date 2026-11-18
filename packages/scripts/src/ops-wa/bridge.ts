@@ -87,8 +87,8 @@ export type Mode = {
   poll?: (name: string, values: string[]) => Promise<PollSent>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
-  // whether a manager's playground alerts-wait runs now; a bridge with none sends nothing on through Ops
-  waiter?: (name: string) => Promise<boolean>
+  // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
+  waiter?: (name: string, since: number) => Promise<boolean>
 }
 export type Media = {
   // <data>/wa/media
@@ -134,8 +134,8 @@ const alertFile = (dir: string) => join(dir, "alert.json")
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
-// bravo marks a message past its hand-on to the assistant seat, and forwarded one sent on through Ops, so each goes once.
-type Handed = { at: number; bravo?: true; forwarded?: true; line: string }
+// bravo marks a message past its hand-on to the assistant seat, and settled one whose send-on through Ops was decided, sent or not, so each goes once.
+type Handed = { at: number; bravo?: true; line: string; settled?: true }
 // A dispatcher whose alerts-wait is down hears the owner only through the relay's backstop, minutes late, so a line it has not answered in this long goes on through Ops.
 export const FORWARD_MS = 60_000
 type Watch = { handed?: Handed[]; offAt?: number; updateAt?: number }
@@ -434,14 +434,17 @@ async function pass(io: Io & Mode) {
         } else await io.relay(to, `Handed on since ${why}. ${h.line}`)
         h.bravo = true
       }
-      const unforwarded = handed.filter(
-        (h) => !h.forwarded && now - h.at >= FORWARD_MS && !sends.some((at) => at >= h.at),
+      // decided once a line, at the first pass past the minute: a waiter that runs or printed since the line came has handed it on, as alerts-wait exits on each print
+      const unsettled = handed.filter(
+        (h) => !h.settled && now - h.at >= FORWARD_MS && !sends.some((at) => at >= h.at),
       )
-      if (unforwarded.length > 0 && io.waiter && !(await io.waiter("dispatcher")))
-        for (const h of unforwarded) {
-          const { text, to } = forwardLine("dispatcher", h.line)
-          await io.relay(to, text)
-          h.forwarded = true
+      if (io.waiter)
+        for (const h of unsettled) {
+          if (!(await io.waiter("dispatcher", h.at))) {
+            const { text, to } = forwardLine("dispatcher", h.line)
+            await io.relay(to, text)
+          }
+          h.settled = true
         }
       const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
       if (

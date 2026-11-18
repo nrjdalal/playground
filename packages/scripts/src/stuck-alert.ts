@@ -287,12 +287,16 @@ export async function waiterRunning(outbox: string, name: string): Promise<boole
   }
 }
 
-// Whether a manager's alerts-wait is waiting now, or handed it an alert in the last 5 minutes.
-export async function waiterLive(outbox: string, name: string, now = new Date()): Promise<boolean> {
+// Whether a manager's alerts-wait is waiting now, or handed it an alert at or after since (ms), when it wrote its cursor and exited.
+export async function waiterSince(outbox: string, name: string, since: number): Promise<boolean> {
   if (await waiterRunning(outbox, name)) return true
   const cursor = Bun.file(join(outbox, "alerts-wait", name))
-  return (await cursor.exists()) && now.getTime() - cursor.lastModified < WAITER_GRACE_MS
+  return (await cursor.exists()) && cursor.lastModified >= since
 }
+
+// Whether a manager's alerts-wait is waiting now, or handed it an alert in the last 5 minutes.
+export const waiterLive = (outbox: string, name: string, now = new Date()): Promise<boolean> =>
+  waiterSince(outbox, name, now.getTime() - WAITER_GRACE_MS)
 
 // Pure: the restart hint a manager whose waiter is not live reads under its alert.
 const restartHint = (name: string): string =>
