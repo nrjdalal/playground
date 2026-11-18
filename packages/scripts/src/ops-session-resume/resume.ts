@@ -334,8 +334,8 @@ const rosterAgents = async (ops: string) => {
 export async function cycle(options: {
   configDir: string
   live: () => Promise<Map<string, LiveSession>>
-  // whether the local model serves the session and is busy, so its quiet flag is held back; false when not local or idle, null when its /metrics does not read
-  localBusy?: (name: string) => Promise<boolean | null>
+  // whether the local model serves the session and reads busy, so its quiet flag is held back
+  localBusy?: (name: string) => Promise<boolean>
   now?: Date
 }): Promise<{ result: string; resumed: number }> {
   const { configDir, now = new Date() } = options
@@ -423,9 +423,8 @@ export async function cycle(options: {
       const path = await transcriptPathOf(configDir, record.sessionId)
       const moved = path ? await newestWrite(path) : undefined
       if (moved === undefined || now.getTime() - moved < QUIET_MS) continue
-      // A working session the local model serves is not quiet for its first 45 minutes (SERVED_MS), so its quiet flag is held back while the model is busy, and a stuck one is still flagged after.
-      if (now.getTime() - moved < SERVED_MS && (await options.localBusy?.(session.name)) === true)
-        continue
+      // held back while localBusy reads true, for the first 45 minutes of quiet alone (SERVED_MS)
+      if (now.getTime() - moved < SERVED_MS && (await options.localBusy?.(session.name))) continue
       const key = `${record.sessionId} quiet ${new Date(moved).toISOString()}`
       quiet.add(key)
       const tail = await transcriptTail(configDir, record.sessionId)

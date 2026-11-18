@@ -5,7 +5,7 @@ import { dataDirOf } from "@packages/env/data-dir"
 import { readPin } from "@packages/settings"
 
 import { readModelMetrics } from "../local-model/live"
-import { busyOf } from "../local-model/model"
+import { metricsBusy } from "../local-model/model"
 import { beat, cycle, CYCLE_SECONDS, liveSessions, opsDirOf } from "./resume"
 
 const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
@@ -15,14 +15,9 @@ const isLocal = (name: string): Promise<boolean> =>
     .text()
     .catch(() => "")
     .then((text) => readPin(text)?.backend === "local")
-// A working session the local model serves is not quiet for its first 45 minutes: read its /metrics, where running and waiting above 0 means the model is working, before flagging it, so a 15-minute compaction is never read as stuck from the pane's idle; the check is to the local model's sessions only, by its backend pin, and a read that fails is not local.
-const localBusy = async (name: string): Promise<boolean | null> => {
-  if (!(await isLocal(name))) return false
-  const text = await readModelMetrics(dataDirOf(process.env))
-  if (text === null) return null
-  const busy = busyOf(text)
-  return busy === null ? null : busy > 0
-}
+// A working session the local model serves is not quiet while its /metrics reads busy, so a 15-minute compaction is never read as stuck from the pane's idle; only a session whose backend pin reads local is checked, and an unreadable pin is not local.
+const localBusy = async (name: string): Promise<boolean> =>
+  (await isLocal(name)) && metricsBusy(await readModelMetrics(dataDirOf(process.env)))
 const once = () =>
   cycle({
     configDir,

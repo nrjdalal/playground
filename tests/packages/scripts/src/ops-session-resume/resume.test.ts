@@ -672,7 +672,7 @@ describe("a stuck or quiet session (PG-2184)", () => {
     const run = (
       n: number,
       options: {
-        localBusy?: (name: string) => Promise<boolean | null>
+        localBusy?: (name: string) => Promise<boolean>
       } = {},
     ) =>
       cycle({
@@ -794,7 +794,7 @@ describe("a stuck or quiet session (PG-2184)", () => {
     expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
   })
 
-  // A working session the local model serves is not quiet while the model is busy (localBusy true), so its flag is held back; it is quiet once the model is idle (localBusy false) or its /metrics does not read (localBusy null). A session the local model does not serve (Claude or GLM) is judged only by its idle, so localBusy is false there even while another model reads busy.
+  // A working session the local model serves is not quiet while the model is busy (localBusy true), so its flag is held back; it is quiet once localBusy reads false, which metricsBusy gives for an idle model and an unreadable /metrics alike (model.test.ts). A session the local model does not serve (Claude or GLM) is judged only by its idle, so localBusy is false there even while another model reads busy.
   test("a working session the model serves (running and waiting above 0) is not quiet, even after 15 minutes", async () => {
     const { run, sent } = setup("working")
     await run(15, { localBusy: async () => true })
@@ -813,12 +813,6 @@ describe("a stuck or quiet session (PG-2184)", () => {
     const lines = await sent()
     expect(lines.map(({ to }) => to)).toEqual(["m4n7pq-builder"])
     expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
-  })
-
-  test("a working session the /metrics cannot read falls back to the idle timer", async () => {
-    const { run, sent } = setup("working")
-    await run(15, { localBusy: async () => null })
-    expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
   })
 
   // A session the local model does not serve is judged only by its idle, so localBusy is false there even while the model reads busy.
