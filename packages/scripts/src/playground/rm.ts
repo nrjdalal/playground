@@ -84,7 +84,8 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     (pr !== undefined && !worktree) ||
     (card !== undefined && worktree) ||
     (peer !== undefined && card === undefined) ||
-    (peer !== undefined && worktree)
+    (peer !== undefined && worktree) ||
+    (peer !== undefined && reason !== "playground rm")
     ? { error: RM_USAGE }
     : {
         ...(card === undefined ? {} : { card }),
@@ -530,6 +531,7 @@ async function removeApproved(
     return 1
   }
   // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
+  const session = await deps.session()
   if (args.peer !== undefined) {
     if (!deps.peer) {
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
@@ -537,14 +539,15 @@ async function removeApproved(
     }
     const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
-      console.error(`playground: ${args.peer}: ${ran.out.trim() || "the peer did not answer"}`)
+      const refused = ran.out.trim().replace(/^playground: /, "")
+      deps.notify(`${session}: ${refused}`)
+      console.error(`playground: ${args.peer}: ${refused || "the peer did not answer"}`)
       return 1
     }
     console.log(ran.out.trim())
     return 0
   }
   const approved = { bytes: pick.bytes, card }
-  const session = await deps.session()
   let line: string
   if (isWeights(args.path, deps.home, folders)) {
     const done = deleteWeights(

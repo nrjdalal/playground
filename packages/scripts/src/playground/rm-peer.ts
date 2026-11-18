@@ -29,7 +29,7 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
   }
   const [path, bytesText, card] = words
   const bytes = Number(bytesText)
-  if (!Number.isInteger(bytes) || bytes <= 0) {
+  if (!/^\d+$/.test(bytesText) || !Number.isInteger(bytes) || bytes <= 0) {
     console.error(`playground: ${bytesText} is not ${path}'s bytes`)
     return 2
   }
