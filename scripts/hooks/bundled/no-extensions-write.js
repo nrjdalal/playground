@@ -12336,18 +12336,23 @@ function cliWrite(words, tuning) {
   const positional = [];
   let dry = false;
   let scoped = false;
-  let ownerMsg = false;
+  const options = [];
+  let ownerId;
   for (let k = 0;k < rest.length; k++) {
     const word = rest[k];
-    if (word !== undefined && switches.includes(word))
+    if (word !== undefined && switches.includes(word)) {
       dry ||= word === "--dry-run";
-    else if (word?.startsWith("--")) {
+      options.push(word);
+    } else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope");
-      ownerMsg ||= word === "--from-owner-msg" && !!rest[k + 1];
+      if (word === "--from-owner-msg")
+        ownerId = rest[k + 1];
+      options.push(word);
       k++;
     } else
       positional.push(word);
   }
+  const ownerMsg = options.length === 1 && options[0] === "--from-owner-msg" && !!ownerId && positional.length === 2;
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;

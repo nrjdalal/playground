@@ -1,6 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -11,7 +19,8 @@ import {
   wordKey,
   wordKeyFile,
 } from "../../../../../packages/scripts/src/ops-wa/alert-set"
-import { bridge } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import { bridge, type Inbox } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import type { Card } from "../../../../../packages/scripts/src/ops-wa/cards"
 import {
   applyOwnerSetting,
   CONFIRM_MS,
@@ -223,6 +232,23 @@ describe("settings set from the owner's message", () => {
     expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
   })
 
+  test("a second guarded ask tells the owner the first no longer waits, and the yes applies the second alone", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
+    await keepMessage(o.dir, "own2", "guest policy: status only", START, OWNER)
+    await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
+    const said = await settingSet(o.io, "own2", "wa.guestPolicy", "status only")
+    expect(said).toContain(`within ${CONFIRM_MS / 60_000} minutes`)
+    expect(o.told).toEqual([
+      "set wa.replyPolicy to factory status only? yes or no",
+      "the question on wa.replyPolicy no longer waits.",
+      "set wa.guestPolicy to status only? yes or no",
+    ])
+    expect(await confirm(o.io, "yes")).toBe(true)
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+  })
+
   test("silence past 10 minutes drops it, so a late yes applies nothing", async () => {
     const o = owned()
     await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
@@ -234,7 +260,7 @@ describe("settings set from the owner's message", () => {
 })
 
 describe("ops-wa's bridge keeps a message and takes a confirm from the owner alone", () => {
-  const watched = (o: ReturnType<typeof owned>) => {
+  const watched = (o: ReturnType<typeof owned>, inbox?: Inbox) => {
     const fake = fakeSocket()
     fake.setClock(() => o.io.now())
     const relayed: string[] = []
@@ -244,6 +270,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       busy: async () => false,
       confirm: (text) => confirm(o.io, text),
       dir: o.dir,
+      inbox,
       log: () => {},
       now: o.io.now,
       on: async () => true,
@@ -268,6 +295,75 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     await h.settle()
     expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
     expect(h.relayed).toHaveLength(1)
+  })
+
+  // An Inbox whose one open card, #i12, went out to the owner with two rows, so a bare number goes to it.
+  const cardWaits = (o: ReturnType<typeof owned>): Inbox => {
+    mkdirSync(o.dir, { recursive: true })
+    writeFileSync(
+      join(o.dir, "cards.json"),
+      JSON.stringify({ sent: { "12": { at: START, id: "id-12", rows: ["Merge it", "Hold it"] } } }),
+    )
+    const card = { id: "id-12", ref: 12, status: "open" } as Card
+    return { answer: async () => undefined, open: async () => [card], terms: async () => undefined }
+  }
+  const asked = async (o: ReturnType<typeof owned>, h: ReturnType<typeof watched>) => {
+    h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
+    await h.settle()
+    await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
+  }
+
+  test("a bare 1 while a card waits on its rows goes to the card, and the setting still waits for a yes", async () => {
+    const o = owned()
+    const h = watched(o, cardWaits(o))
+    await asked(o, h)
+    h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+    h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+  })
+
+  test.each(["yes", "y", "yes do it"])(
+    "%s applies the waiting setting while a card waits",
+    async (yes) => {
+      const o = owned()
+      const h = watched(o, cardWaits(o))
+      await asked(o, h)
+      h.fake.upsert([h.fake.message(jid(OWNER), yes, { id: "own2" })])
+      await h.settle()
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+    },
+  )
+
+  test("a bare 1 while no card waits applies the waiting setting", async () => {
+    const o = owned()
+    const h = watched(o, {
+      answer: async () => undefined,
+      open: async () => [],
+      terms: async () => undefined,
+    })
+    await asked(o, h)
+    h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+  })
+
+  test("a photo or voice note from the owner drops the waiting setting", async () => {
+    const o = owned()
+    const h = watched(o)
+    await asked(o, h)
+    h.fake.upsert([
+      {
+        ...h.fake.message(jid(OWNER), "", { id: "own2" }),
+        message: { imageMessage: { mimetype: "image/jpeg" } },
+      },
+    ])
+    await h.settle()
+    h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
   })
 
   test("a yes from the second number or a stranger applies nothing", async () => {

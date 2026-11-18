@@ -2723,6 +2723,22 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       `playground settings set wa.alert +15550100444 --reason x --from-owner-msg ""`,
     ],
     [
+      "settings set with the owner's message flag and a reason, which a CLI from before the flag writes",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --reason x",
+    ],
+    [
+      "settings set with the owner's message flag, a reason and a scope",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --reason x --scope acme",
+    ],
+    [
+      "settings set with the owner's message flag and a by",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --by owner",
+    ],
+    [
+      "settings set with the owner's message flag and a third word",
+      "playground settings set wa.alert +15550100444 extra --from-owner-msg own1",
+    ],
+    [
       "settings reset with the owner's message flag",
       "playground settings reset wa.alert --from-owner-msg own1",
     ],

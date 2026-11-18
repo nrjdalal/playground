@@ -217,11 +217,12 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
-  if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
-  if (text && io.confirm && (await io.confirm(text))) return
   const reply = io.inbox && text ? replyOf(text) : null
-  if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
-    return answerCard(io, io.inbox!, reply)
+  const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
+  // a bare number goes to a card waiting on its rows first, leaving a waiting setting as it is; any other owner message, a vote, photo or voice note included, settles it
+  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? ""))) return
+  if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
+  if (toCard) return answerCard(io, io.inbox!, reply!)
   const when = new Date(at).toISOString()
   const line = text
     ? `The owner's WhatsApp at ${when} reads: ${text}\n${id ? `${idLine(id)}\n` : ""}${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`

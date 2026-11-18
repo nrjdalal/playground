@@ -94,9 +94,12 @@ export async function settingSet(io: SettingSetIo, id: string, key: string, valu
   if (!holds(hit.words, value, secret))
     throw new Error(`the owner's message ${id} does not hold the value`)
   if (!guarded(key)) return applied(io, key, value, id)
+  const earlier = await readOwn<Partial<Pending>>(confirmFile(io.dir), {})
+  if (earlier.key && io.now() - (earlier.at ?? 0) < CONFIRM_MS)
+    await io.tell(`the question on ${earlier.key} no longer waits.`)
   await io.tell(`set ${key} to ${shown(key, valueOf(value))}? yes or no`)
   await writeOwn(confirmFile(io.dir), { at: io.now(), id, key, value } satisfies Pending)
-  return `${key} is a key a guard reads: asked the owner on WhatsApp to confirm, and it applies on their yes within 10 minutes`
+  return `${key} is a key a guard reads: asked the owner on WhatsApp to confirm, and it applies on their yes within ${CONFIRM_MS / 60_000} minutes`
 }
 
 // The owner's answers to the question: these apply, "no" drops it, and so does any other message

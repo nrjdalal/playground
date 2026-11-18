@@ -708,8 +708,9 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and of every ops job's `jobs.<name>`,
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
-  A `settings set` that carries `--from-owner-msg` with an id it reads runs, since the CLI then only asks ops-wa, which proves the owner's own WhatsApp message holds the value and writes the key itself, a guarded one on the owner's yes ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md));
-  the flag inside a quoted word, with no id or an id it cannot read, and on a `reset` frees nothing.
+  A `settings set <key> <value>` whose one option is `--from-owner-msg` with an id it reads runs, since the CLI then only asks ops-wa, and a CLI from before the flag stops at its missing `--reason` before it writes;
+  ops-wa proves the owner's own WhatsApp message holds the value and writes the key itself, a guarded one on the owner's yes ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md));
+  the flag inside a quoted word, with no id or an id it cannot read, beside any other option or a third word, and on a `reset` frees nothing.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, to spawn.sh's `paths.codeRoot` and to `yard.logReaders`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   Two of them only tune a number, so the Ops lead sets them as it sets spawn.sh's `gates.*`, on a line that holds the `playground` call alone.
   The Ops lead is `opsLead` in `role.ts`: the lead role, whose name in Claude Code's registry has the roster's `ops` kind.
