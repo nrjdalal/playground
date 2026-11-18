@@ -16,6 +16,8 @@ import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   accountKept,
   BOX_LOAD_MULT,
+  boxContainer,
+  boxContainers,
   boxPath,
   Browser,
   capacityRefusals,
@@ -33,6 +35,7 @@ import {
   resultLine,
   roomReadings,
   scriptsGroup,
+  seedArgv,
   shotAfter,
   STEP_COUNT,
   type Step,
@@ -43,6 +46,8 @@ import {
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { liveSettings } from "../../../../../packages/settings/src/live"
+import { checkSetting } from "../../../../../packages/settings/src/settings"
 import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
 import { machineTest, zshMissing } from "../../../../machine"
 import { scratchEnv } from "../../../../scratch-env"
@@ -629,5 +634,47 @@ describe("the gate's room readings", () => {
   ])("%s and /proc gives neither: both are null", (_, answer) => {
     process.env.PLAYGROUND_PROC = procDir({}, ["loadavg", "stat"])
     expect(roomReadings(answer)).toEqual({ cores: null, load: null })
+  })
+})
+
+// The box shares this Mac's Docker, so a run once reused the live dashboard's running database as first run's own (#2787).
+describe("the box's own database", () => {
+  const box = "/tmp/pg-gate-5d358fd-Vlv9UN"
+  const own = boxContainer(box)
+
+  test("is named after the box's folder, never the live dashboard's default, and passes live.container's schema", () => {
+    expect(own).toBe("pg-gate-5d358fd-Vlv9UN-db")
+    expect(own.startsWith("playground-dashboard-db")).toBe(false)
+    expect(liveSettings.get({ schemaVersion: 1, values: {} }, "live.container")).toBe(
+      "playground-dashboard-db",
+    )
+    expect(checkSetting("live.container", own)).toMatchObject({ ok: true })
+  })
+
+  test("counts only containers first run made under the box's name, never the host's live one", () => {
+    const listed = [
+      "playground-dashboard-db-sY08",
+      "playground-dashboard-db-sY08-old",
+      `${own}-Ab12`,
+      `${own}-Ab12-old`,
+      "pg-gate-5d358fd-Other1-db-Zz99",
+      "",
+    ].join("\n")
+    expect(boxContainers(listed, own)).toEqual([`${own}-Ab12`])
+    expect(boxContainers("playground-dashboard-db-sY08\n", own)).toEqual([])
+  })
+
+  test("is set as the box's live.container with its own checkout's CLI, a reason given", () => {
+    expect(seedArgv("/b/h", own)).toEqual([
+      "bun",
+      "--no-env-file",
+      "/b/h/playground/packages/scripts/src/playground/cli.ts",
+      "settings",
+      "set",
+      "live.container",
+      own,
+      "--reason",
+      "the new-user gate's box keeps a database of its own",
+    ])
   })
 })

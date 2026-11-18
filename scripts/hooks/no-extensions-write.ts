@@ -899,7 +899,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-outside-pr-code, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, yard.logReaders, the bots this Mac answers a read of the dispatcher's log for, and wa.alert, whose Approve stands in for that number's first WhatsApp message (ADR 0028); every jobs.<name> is refused beside them (JOB_PREFIX).
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-outside-pr-code, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, yard.logReaders, the bots this Mac answers a read of the dispatcher's log for, wa.alert, whose Approve stands in for that number's first WhatsApp message (ADR 0028), and wa.device and wa.owner, which choose the number ops-wa links as and the one it takes orders from; every jobs.<name> is refused beside them (JOB_PREFIX).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
@@ -917,7 +917,9 @@ export const GUARD_KEYS = new Set([
   "usage.keychainService",
   "wa.alert",
   "wa.alertCheck",
+  "wa.device",
   "wa.guestPolicy",
+  "wa.owner",
   "wa.replyPolicy",
   "yard.logReaders",
 ])

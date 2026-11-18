@@ -6714,6 +6714,17 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
     })
 
+    test.each(["wa.device", "wa.owner"])(
+      "a %s card's Approve sets the number, so first run's WhatsApp setup works through the Inbox (PG-2821)",
+      async (key) => {
+        const data = folder()
+        const number = "+15550100004"
+        const posted = await post(decision({ ...GUARD, key, scope: "made-up-me", value: number }))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        expect(readSetting(data, key)?.rows).toEqual([{ key, scope: "made-up-me", value: number }])
+      },
+    )
+
     test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {
       const data = folder()
       const posted = await post(decision(GUARD))
