@@ -69,7 +69,8 @@ Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, wh
 Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
 An update posted again with the same title edits the session's own card of that title in place, so you never see a repeated card, and one you sent to Done comes back unread with the new words.
 `playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, when a line names a PR, a ticket or a commit with no link on it, or when a line in a code block other than a `diff` or `progress` one runs past the drawing width (`ASK_CODE_COLUMNS`), since a `diff` block wraps and a `progress` block draws at the card's width.
-It and `edit` refuse a `progress` block whose line holds other than 4 fields (`name | percent | what's going on | ETA`) or a percent outside 0 to 100, naming the line.
+It and `edit` refuse a `progress` block whose line holds other than 4 or 5 fields (`name | percent | what's going on | ETA | state`), a percent outside 0 to 100 or a state other than `active`, `done`, `held` or `waiting`, naming the line.
+An `active` step's bar draws in colour and every other step's muted, so you see at a glance which steps are in progress now; a step at 100 that names no state reads as done.
 A step's name past about 14 characters is cut to the card's 6rem name column, so a session keeps each name short.
 It and `edit` refuse a public post's draft, one with no link, whose words hold a work figure or an internal name, naming the kind and never the words, so what reaches your card is in your own words alone ([playbook](./playbook.md)'s **public** rule).
 Once you answer, the session that posted gets your answer as one `[inbox-answer]` line: it does what the line's `next` says, the way its `verb` names, then runs its `close` ([asks.md](../../.agents/dashboard/asks.md)).
