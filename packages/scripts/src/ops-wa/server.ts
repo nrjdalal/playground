@@ -14,8 +14,8 @@ export function serve(
   path: string,
   send: (body: string, kind: Kind, source?: string) => Promise<string>,
   alertSet?: (id: string) => Promise<string>,
-  settingSet?: (id: string, key: string, value: string) => Promise<string>,
   react?: React,
+  settingSet?: (id: string, key: string, value: string) => Promise<string>,
 ) {
   const server = Bun.listen<{ done: boolean; text: string }>({
     socket: {

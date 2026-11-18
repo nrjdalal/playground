@@ -311,14 +311,29 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
   })
 
   // An Inbox whose one open card, #i12, went out to the owner with two rows, so a bare number goes to it.
-  const cardWaits = (o: ReturnType<typeof owned>): Inbox => {
+  const cardWaits = (o: ReturnType<typeof owned>, answers: unknown[] = []): Inbox => {
     mkdirSync(o.dir, { recursive: true })
     writeFileSync(
       join(o.dir, "cards.json"),
-      JSON.stringify({ sent: { "12": { at: START, id: "id-12", rows: ["Merge it", "Hold it"] } } }),
+      JSON.stringify({
+        sent: {
+          "12": {
+            at: START,
+            id: "id-12",
+            rows: [
+              { go: true, label: "Merge it" },
+              { go: false, label: "Hold it" },
+            ],
+          },
+        },
+      }),
     )
     const card = { id: "id-12", ref: 12, status: "open" } as Card
-    return { answer: async () => undefined, open: async () => [card], terms: async () => undefined }
+    return {
+      answer: async (id, answer) => void answers.push([id, answer]),
+      open: async () => [card],
+      terms: async () => undefined,
+    }
   }
   const asked = async (o: ReturnType<typeof owned>, h: ReturnType<typeof watched>) => {
     h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
@@ -328,10 +343,12 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
 
   test("a bare 1 while a card waits on its rows goes to the card, and the setting still waits for a yes", async () => {
     const o = owned()
-    const h = watched(o, cardWaits(o))
+    const answers: unknown[] = []
+    const h = watched(o, cardWaits(o, answers))
     await asked(o, h)
     h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
     await h.settle()
+    expect(answers).toEqual([["id-12", { action: "approve" }]])
     expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
     h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
     await h.settle()

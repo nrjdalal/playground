@@ -245,8 +245,8 @@ const main = async () => {
     path,
     send,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
-    (id, key, value) => settingSet(owned, id, key, value),
     send.react,
+    (id, key, value) => settingSet(owned, id, key, value),
   )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
