@@ -1348,10 +1348,12 @@ describe("reactions (#2755)", () => {
     await h.settle()
     await h.send("merging now")
     expect(reactions(h)).toHaveLength(2)
+    // 400 ms into the gap, the gap's rest is 600 ms, below a one-character typing time's 1 s floor
+    h.advance(400)
     const before = h.waits.length
     expect(await h.send.react("✅", {})).toBe("sent")
     expect(reactions(h).at(-1)).toEqual([jid(OWNER), id, "✅"])
-    expect(h.waits.slice(before).every((ms) => ms <= SEND.gapMs)).toBe(true)
+    expect(h.waits.slice(before)).toEqual([SEND.gapMs - 400])
     expect(h.fake.calls).toEqual([])
   })
 
