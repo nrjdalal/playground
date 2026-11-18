@@ -23,7 +23,9 @@ import {
   capacityRefusals,
   clean,
   databaseCheck,
+  dockerRefusal,
   dropBox,
+  gateDrift,
   hostTools,
   installCheck,
   installEnv,
@@ -676,5 +678,53 @@ describe("the box's own database", () => {
       "--reason",
       "the new-user gate's box keeps a database of its own",
     ])
+  })
+})
+
+// An older checkout's gate once ran a box with no live.container seed, which reused the live dashboard's database (#2826).
+describe("the box's own docker, in the gate", () => {
+  test("step 2 fails on any call the box's docker refused, naming each, and passes a log with none", () => {
+    const calls =
+      "docker ps\ndocker refused inspect playground-dashboard-db-sY08\ndocker refused volume: not a call the box makes\n"
+    expect(dockerRefusal(calls)).toBe(
+      "the box's docker refused inspect playground-dashboard-db-sY08; volume: not a call the box makes, a container or call the box did not make",
+    )
+    expect(dockerRefusal("docker ps\ndocker run\n")).toBeNull()
+    expect(dockerRefusal("")).toBeNull()
+  })
+
+  test("refuses a checkout whose gate code is not the sha's, naming the detached worktree run, and passes one that is", () => {
+    const sha = "647bbfe931cab96aa71eca1bb15b01a26ae3cf69"
+    expect(gateDrift(0, sha)).toBeNull()
+    const said = gateDrift(1, sha)!
+    expect(said).toContain("differs from 647bbfe's")
+    expect(said).toContain("git worktree add --detach <dir> 647bbfe")
+    expect(said).toContain("bun run --cwd <dir> gate:new-user 647bbfe")
+  })
+
+  test("clean removes every container carrying the box's label, beside the pglaunch stand-in's", () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-clean-")))
+    const box = makeBox("647bbfe931cab96aa71eca1bb15b01a26ae3cf69", parent)
+    const bin = join(parent, "bin")
+    const log = join(parent, "docker-calls")
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "docker"),
+      `#!/bin/sh\necho "$*" >> '${log}'\ncase "$*" in *"label=playground-gate-box=${basename(box)}"*) echo ${basename(box)}-db-Ab12 ;; esac\nexit 0\n`,
+    )
+    writeFileSync(join(bin, "portless"), "#!/bin/sh\nexit 0\n")
+    chmodSync(join(bin, "docker"), 0o755)
+    chmodSync(join(bin, "portless"), 0o755)
+    try {
+      clean(box, join(box, "h"), join(bin, "portless"), join(bin, "docker"))
+      const said = readFileSync(log, "utf8")
+      expect(said).toContain(
+        `ps -a --filter label=playground-gate-box=${basename(box)} --format {{.Names}}`,
+      )
+      expect(said).toContain(`rm -fv ${basename(box)}-db-Ab12`)
+      expect(existsSync(box)).toBe(false)
+    } finally {
+      rmSync(parent, { force: true, recursive: true })
+    }
   })
 })
