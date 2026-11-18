@@ -5,9 +5,9 @@ import { dataDir } from "@packages/env/data-dir"
 import { readPolicy, whatsappSettings } from "@packages/settings"
 
 import { refusalOf, statusOf } from "../ops-wa/bridge"
-import { request, socketPath } from "../ops-wa/server"
+import { request, requestAlertSet, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, once to the owner and once to the alert number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card.
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, once to the owner and once to the alert number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
 const args = process.argv.slice(2)
 const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
 const [verb, file, ...extra] = guest ? [args[0], ...args.slice(3)] : args
@@ -36,6 +36,19 @@ if (verb === "status" && !file) {
   for (const line of lines) console.log(`wa status: ${line}`)
   process.exit(0)
 }
+if (verb === "alert-set") {
+  if (file !== "--from-owner-msg" || extra.length !== 1 || !extra[0]) {
+    console.error("usage: playground wa alert-set --from-owner-msg <id>")
+    process.exit(2)
+  }
+  const reply = await requestAlertSet(socketPath(dataDir()), extra[0])
+  if (reply.refusal) {
+    console.error(`wa alert-set: ${reply.refusal}`)
+    process.exit(1)
+  }
+  console.log(`wa alert-set: ${reply.note}`)
+  process.exit(0)
+}
 if (
   (verb !== "send" && verb !== "alert") ||
   extra.length ||
@@ -44,7 +57,7 @@ if (
   !(await Bun.file(file).exists())
 ) {
   console.error(
-    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert <file>, an urgent alert alone, to the owner and the alert number; playground wa status; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert <file>, an urgent alert alone, to the owner and the alert number; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
   )
   process.exit(2)
 }
