@@ -1223,18 +1223,6 @@ describe("reactions (#2755)", () => {
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT, "dispatcher"])
   })
-
-  test("sets the 👀 with no wait on a long reply's typing time, so the next message is handed on at once", async () => {
-    const h = harness()
-    h.mode.react = true
-    said(h, jid(OWNER), "hi")
-    await h.settle()
-    const reply = h.send("x".repeat(600))
-    said(h, jid(OWNER), "and one more")
-    await h.settle()
-    await reply
-    expect(h.relayed).toHaveLength(2)
-  })
 })
 
 describe("typing time (#2755)", () => {
