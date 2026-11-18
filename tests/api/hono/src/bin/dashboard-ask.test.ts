@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test"
 import { mkdtempSync, readdirSync, rmdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
@@ -291,7 +299,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
 
   test("new and edit refuse a progress block line that does not read, naming it, and post one that does with no width hint (PG-2617)", async () => {
     const status = (...lines: string[]) => ({
-      from: "worker-envy",
+      from: "dispatcher",
       kind: "update",
       preview: {
         outcome: "merged",
@@ -335,6 +343,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const edited = await cli(["edit", tag], JSON.stringify(status("Mac reads | 100 | x | y", wide)))
     expect(edited.code).toBe(0)
     expect(edited.stderr).not.toContain("columns the owner chose")
+    // clear the dispatcher progress card so a later test sees none as its in-flight card
+    await dismiss(id)
   })
 
   test("refuses an invalid item with the reason, and posts nothing", async () => {
@@ -921,5 +931,124 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(result.stderr.replace(/\s+/g, " ")).toContain(
       "more lists up to 20 further ones, accepted after it in that order; Approve stops at the first that fails",
     )
+  })
+
+  // PG-2720: a progress block is the dispatcher's one in-flight card, so `new` refuses it as a second card, a different title, or a card another poster may start; the dispatcher's twin still edits, and an edit is not gated by the rule.
+  describe("PG-2720: the dispatcher's one in-flight card", () => {
+    // each test clears its own inbox first, so a card a test leaves behind never shadows the next.
+    beforeEach(async () => {
+      let dbg: SQL | null = null
+      for (let i = 0; i < 30; i++) {
+        try {
+          dbg = new SQL(url, { max: 1 })
+          await dbg`select 1`
+          break
+        } catch {
+          await Bun.sleep(200)
+        }
+      }
+      await dbg!.unsafe("delete from inbox_item")
+      await dbg!.close()
+    })
+
+    const progress = (from: string, title: string, ...lines: string[]) => ({
+      from,
+      kind: "update",
+      preview: {
+        outcome: "finding",
+        text: ["```progress", ...lines, "```", "", "- One step landed."].join("\n"),
+      },
+      title,
+    })
+
+    test("the dispatcher's first progress card passes, its twin still edits, and a second title is refused naming it", async () => {
+      const first = await post(
+        progress("dispatcher", "Yard control", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      const refused = await cli(
+        ["new"],
+        JSON.stringify(progress("dispatcher", "Ship the yard", "Mac reads | 40 | x | 1:00 pm")),
+      )
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain("not one to start twice")
+      expect(refused.stderr).toContain(first.tag)
+      expect(refused.stdout).toBe("")
+      const twin = await cli(
+        ["new"],
+        JSON.stringify(progress("dispatcher", "Yard control", "Mac reads | 80 | y | 2:00 pm")),
+      )
+      expect(twin.code).toBe(0)
+      expect(twin.stdout).toBe(`${first.id}\n`)
+      await dismiss(first.id)
+    })
+
+    test("refuses a non-dispatcher's progress card, naming the open card, and posts a plain update from any poster", async () => {
+      const card = await post(
+        progress("dispatcher", "Yard control", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      const refused = await cli(
+        ["new"],
+        JSON.stringify(progress("worker-envy", "Yard control", "Mac reads | 40 | x | 1:00 pm")),
+      )
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain("not one a poster may start")
+      expect(refused.stderr).toContain("send its progress up the chain")
+      expect(refused.stderr).toContain(card.tag)
+      expect(refused.stdout).toBe("")
+      // an update without a progress block still posts, from any poster
+      const plain = await cli(
+        ["new"],
+        JSON.stringify({
+          from: "worker-envy",
+          kind: "update",
+          preview: { outcome: "finding", text: "40%" },
+          title: "Yard",
+        }),
+      )
+      expect(plain.code).toBe(0)
+      expect(plain.stdout).toMatch(/^\S+\n$/)
+      await dismiss(card.id)
+    })
+
+    test("another poster's open progress card, from before the rule, is not the in-flight card: the dispatcher's own still posts, and a worker's refusal names it", async () => {
+      const legacy = await post(
+        progress("dispatcher", "Yard control", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      const admin = new SQL(url, { max: 1 })
+      await admin`update inbox_item set "from" = 'worker-envy' where id = ${legacy.id}`
+      await admin.close()
+      const card = await post(
+        progress("dispatcher", "Ship the yard", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      expect(card.id).not.toBe(legacy.id)
+      const refused = await cli(
+        ["new"],
+        JSON.stringify(progress("worker-envy", "Yard control", "Mac reads | 80 | y | 2:00 pm")),
+      )
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain(card.tag)
+      expect(refused.stderr).not.toContain(legacy.tag)
+      await dismiss(card.id)
+      await dismiss(legacy.id)
+    })
+
+    test("edit is not gated by the card rule, so the dispatcher edits its card's progress in place (PG-2720)", async () => {
+      const card = await post(
+        progress("dispatcher", "Yard control", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      const refused = await cli(
+        ["new"],
+        JSON.stringify(progress("dispatcher", "Ship the yard", "Mac reads | 40 | x | 1:00 pm")),
+      )
+      expect(refused.code).toBe(1)
+      const edited = await cli(
+        ["edit", card.tag],
+        JSON.stringify(progress("dispatcher", "Ship the yard", "Mac reads | 80 | y | 2:00 pm")),
+      )
+      expect(edited.code).toBe(0)
+      expect(edited.stderr).toContain(`edited ${card.tag}`)
+      expect(edited.stderr).not.toContain("not one to start twice")
+      await dismiss(card.id)
+    })
   })
 })

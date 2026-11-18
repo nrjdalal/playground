@@ -109,7 +109,9 @@ describe("defineSettings", () => {
       "usage.switchAccount",
       "wa.alert",
       "wa.device",
+      "wa.guestPolicy",
       "wa.owner",
+      "wa.replyPolicy",
       "yard.logReaders",
     ])
     const zone = settingFields().find(({ key }) => key === "clock.ownerZone")!.field.schema

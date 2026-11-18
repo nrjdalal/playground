@@ -94,6 +94,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
   `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
+  It also runs each listed `tests/**/test_*.py` through the same `uv run` step `bun run test:skills` uses, after bun's pass, and stops naming any path it can't run.
   A file red in that run, a by-hand local merge's included, runs again alone once: red there, it is scored, and green there, it is a `BATCH-RED`, with its one issue and no second rerun.
 - When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
 - A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.

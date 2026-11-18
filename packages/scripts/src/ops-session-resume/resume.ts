@@ -423,7 +423,7 @@ export async function cycle(options: {
       const path = await transcriptPathOf(configDir, record.sessionId)
       const moved = path ? await newestWrite(path) : undefined
       if (moved === undefined || now.getTime() - moved < QUIET_MS) continue
-      // held back while localBusy reads true, for the first 45 minutes of quiet alone (SERVED_MS)
+      // held back while localBusy reads true, for the first 45 minutes of quiet only (SERVED_MS)
       if (now.getTime() - moved < SERVED_MS && (await options.localBusy?.(session.name))) continue
       const key = `${record.sessionId} quiet ${new Date(moved).toISOString()}`
       quiet.add(key)

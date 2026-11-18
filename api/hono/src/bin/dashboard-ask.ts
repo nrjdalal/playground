@@ -13,6 +13,7 @@ import { fillNow, futureNowTimes, NOW, ownerTime } from "@/lib/dashboard/ask-clo
 import {
   ASK_EXAMPLES,
   isAskExampleKind,
+  progressCardRefusal,
   progressRefusal,
   shapeHints,
 } from "@/lib/dashboard/ask-shape"
@@ -23,6 +24,7 @@ import {
   editItem,
   getItem,
   getPickLine,
+  inflightCard,
   itemTag,
   openItems,
   postOrEdit,
@@ -80,7 +82,12 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 optional: active, done, held or waiting (active draws in colour,
                                                 the rest muted, a row at 100 with none done); a line with other
                                                 than 4 or 5 fields, a percent outside 0 to 100 or another state
-                                                is refused
+                                                is refused; a progress block is the dispatcher's one in-flight
+                                                card, so new refuses it as a second card, a different title,
+                                                or a card another poster may start: the dispatcher edits it
+                                                in place (edit), any other poster sends it up the chain, not
+                                                its own card, so every job stays one row
+
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a
@@ -264,6 +271,11 @@ if (command === "new" || command === "edit") {
   // a progress block draws as bars only when every line reads, so one that does not is refused before it posts
   const badProgress = progressRefusal(input)
   if (badProgress) fail(badProgress)
+  // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720)
+  if (command === "new") {
+    const refusal = progressCardRefusal(input, await inflightCard(db))
+    if (refusal) fail(refusal)
+  }
   // a draft with no link is a public post's, which goes out in the owner's own words alone (the public rule): scripts/hooks/public-draft.ts reads it with the leak guards' own finders, as a child
   const publicLeak = await publicDraftRefusal(input)
   if (publicLeak) fail(publicLeak)

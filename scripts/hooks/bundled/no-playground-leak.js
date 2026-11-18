@@ -10630,11 +10630,13 @@ var slotSettings = defineSettings({
   }
 });
 // packages/settings/src/whatsapp.ts
+var DEFAULT_POLICY = "factory status; no secrets or customer personal data";
+var policy = string2().trim().min(1).max(400);
 var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
 var whatsappSettings = defineSettings({
   "wa.alert": {
     default: "",
-    description: "A second WhatsApp number in E.164 that gets alerts alone: each playground wa alert goes to it once, beside the owner's number, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
+    description: "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once, beside the owner's number, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
     masked: true,
     schema: e1642
   },
@@ -10644,11 +10646,21 @@ var whatsappSettings = defineSettings({
     masked: true,
     schema: e1642
   },
+  "wa.guestPolicy": {
+    default: DEFAULT_POLICY,
+    description: "What the dispatcher may answer the wa.alert number, a guest, with: the policy line ops-wa adds to each of its messages. A guard key, set by the owner alone.",
+    schema: policy
+  },
   "wa.owner": {
     default: "",
     description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set.",
     masked: true,
     schema: e1642
+  },
+  "wa.replyPolicy": {
+    default: DEFAULT_POLICY,
+    description: "What the dispatcher may answer the owner's WhatsApp with: the policy line ops-wa adds to each message it hands on and to each update it asks for. A guard key, set by the owner alone.",
+    schema: policy
   }
 });
 // packages/settings/src/yard.ts
