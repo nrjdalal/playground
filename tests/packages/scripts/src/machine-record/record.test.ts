@@ -124,9 +124,10 @@ describe("the daily check (PG-2538)", () => {
     expect(await check(data, places())).toEqual([`gone: ${made}`])
   })
 
-  test("a place or a recorded path it cannot read reads unreadable once a run, never gone or new", async () => {
-    const shut = join(root, "usr-local-lib-playground")
-    const inside = join(shut, "rule")
+  test("a place the check should read but cannot reads unreadable once a run, never gone or new, and a recorded path in it too", async () => {
+    const shut = join(home, ".config", "systemd", "user")
+    const inside = join(shut, "x.service")
+    mkdirSync(shut, { recursive: true })
     writeFileSync(inside, "")
     await seed(data, [entry(inside, { kind: "file" })], places())
     chmodSync(shut, 0o000)
@@ -134,6 +135,21 @@ describe("the daily check (PG-2538)", () => {
       expect(await check(data, places())).toEqual([`unreadable: ${shut}`, `unreadable: ${inside}`])
     } finally {
       chmodSync(shut, 0o755)
+    }
+  })
+
+  test("a root-only watched folder the user cannot read reads known with its reason, not unreadable", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    chmodSync(rootOnly, 0o000)
+    try {
+      const lines = await check(data, places())
+      expect(lines).toContain(
+        `root-only: ${rootOnly}, no root helper on this machine, so its listing is skipped`,
+      )
+      expect(lines.some((line) => line.startsWith(`unreadable: ${rootOnly}`))).toBe(false)
+    } finally {
+      chmodSync(rootOnly, 0o755)
     }
   })
 

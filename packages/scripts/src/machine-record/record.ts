@@ -175,27 +175,37 @@ const dockerItems = async (run: Run): Promise<string[] | null> => {
 
 export const DOCKER_UNREAD = "docker images and containers"
 
-// What the watched places hold now, and each place that cannot be read.
-export async function snapshot(places: Places): Promise<{ seen: string[]; unreadable: string[] }> {
+// What the watched places hold now, each root-only place the user cannot read (known, with its reason), and each place the check should read but cannot.
+export async function snapshot(
+  places: Places,
+): Promise<{ seen: string[]; known: string[]; unreadable: string[] }> {
   const seen: string[] = []
+  const known: string[] = []
   const unreadable: string[] = []
+  // The system folders are root-only by design, so one that throws EACCES is known, not a loss.
+  const rootOnly = new Set(places.system ?? [])
   for (const folder of watchedFolders(places.home, places.system)) {
     const entries = await listed(folder)
-    if (entries === "unreadable") unreadable.push(folder)
-    else seen.push(...entries)
+    if (entries === "unreadable") {
+      if (rootOnly.has(folder)) known.push(folder)
+      else unreadable.push(folder)
+    } else seen.push(...entries)
   }
   const docker = await dockerItems(places.run)
   if (docker === null) unreadable.push(DOCKER_UNREAD)
   else seen.push(...docker)
-  return { seen: [...new Set(seen)].sort(), unreadable }
+  return { seen: [...new Set(seen)].sort(), known: known.sort(), unreadable }
 }
 
 const inside = (path: string, home: string) => path === home || path.startsWith(`${home}/`)
 
-// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; and each place or path that cannot be read, which is neither gone nor new, so a root-only folder is named every run and never hides a loss.
+// Why a known root-only place is not listed: the check runs as the user and no root helper exists on this machine to read it, so its listing is skipped, not a loss.
+const ROOT_ONLY_REASON = "no root helper on this machine, so its listing is skipped"
+
+// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; each root-only place the user cannot read, named as known with its reason and never unreadable; and each place or path the check should read but cannot, which is neither gone nor new, so it is named every run and never hides a loss.
 export function findings(
   record: MachineRecord,
-  now: { seen: string[]; unreadable: string[] },
+  now: { seen: string[]; known: string[]; unreadable: string[] },
   stat: Map<string, "gone" | "here" | "unreadable">,
   homes: string[],
 ): string[] {
@@ -211,6 +221,7 @@ export function findings(
     const state = stat.get(entry.path)
     if (state === "gone") lines.push(`gone: ${entry.path}`)
   }
+  for (const path of now.known) lines.push(`root-only: ${path}, ${ROOT_ONLY_REASON}`)
   const unread = [
     ...now.unreadable,
     ...record.entries.filter((e) => stat.get(e.path) === "unreadable").map((e) => e.path),
