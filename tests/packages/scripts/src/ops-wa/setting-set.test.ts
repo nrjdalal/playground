@@ -20,7 +20,7 @@ import {
   wordKeyFile,
 } from "../../../../../packages/scripts/src/ops-wa/alert-set"
 import { bridge, type Inbox } from "../../../../../packages/scripts/src/ops-wa/bridge"
-import type { Card } from "../../../../../packages/scripts/src/ops-wa/cards"
+import { type Card, NO_ID } from "../../../../../packages/scripts/src/ops-wa/cards"
 import {
   applyOwnerSetting,
   CONFIRM_MS,
@@ -277,6 +277,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     const fake = fakeSocket()
     fake.setClock(() => o.io.now())
     const relayed: string[] = []
+    const replied: string[] = []
     const w = bridge({
       alert: async () => ALERT,
       assistant: async () => undefined,
@@ -289,12 +290,12 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       on: async () => true,
       owner: OWNER,
       relay: async (_: string, text: string) => void relayed.push(text),
-      reply: async () => "sent",
+      reply: async (line: string) => (replied.push(line), "sent"),
       sleep: async () => {},
       stuck: async () => null,
     })
     w.attach(fake.sock)
-    return { fake, relayed, settle: w.idle }
+    return { fake, relayed, replied, settle: w.idle }
   }
 
   test("the owner's line names its id and the settings set, and the owner's yes applies the guarded key", async () => {
@@ -341,14 +342,16 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
   }
 
-  test("a bare 1 while a card waits on its rows goes to the card, and the setting still waits for a yes", async () => {
+  test("a bare 1 while a card waits on its rows goes to the card, which asks for its id, and the setting still waits for a yes", async () => {
     const o = owned()
     const answers: unknown[] = []
     const h = watched(o, cardWaits(o, answers))
     await asked(o, h)
     h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
     await h.settle()
-    expect(answers).toEqual([["id-12", { action: "approve" }]])
+    expect(h.replied).toEqual([NO_ID])
+    expect(answers).toEqual([])
+    expect(h.relayed).toHaveLength(1)
     expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
     h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
     await h.settle()
