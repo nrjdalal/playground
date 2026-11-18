@@ -69,6 +69,7 @@ import {
   ROOT_TIMEOUT_MS,
   stepArgv,
 } from "../system/root"
+import { holdsProgressBlock, type InflightCard, isDispatcher } from "./ask-shape"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
@@ -1749,6 +1750,9 @@ const ownerDone = (item: InboxItem): boolean => {
   return !("choice" in answer)
 }
 
+// Pure: an update a poster may still edit, its twin postOrEdit takes, a closed one except the owner's Done (PG-2720).
+const stillEditable = (item: InboxItem): boolean => !closed(item) || ownerDone(item)
+
 // Pure: what a card says, its files by name alone, since bun run ask copies a file under a new id on every edit.
 const wordsOf = ({ preview, title }: { preview: unknown; title: string }): unknown =>
   JSON.parse(
@@ -1848,6 +1852,17 @@ export async function postOrEdit(
     return { item: twin, ok: true, unchanged: true }
   const edited = await editItem(db, twin.id, input, now, settingsData)
   return edited.ok ? { ...edited, edited: true } : edited
+}
+
+// The dispatcher's one open in-flight card: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720).
+export async function inflightCard(db: Database): Promise<InflightCard> {
+  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
+  const card = rows
+    .map(toItem)
+    .find(
+      (item) => isDispatcher(item.from) && stillEditable(item) && holdsProgressBlock(item.preview),
+    )
+  return card ? { ref: card.ref, title: card.title } : null
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.

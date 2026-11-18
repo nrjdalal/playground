@@ -916,6 +916,8 @@ export const GUARD_KEYS = new Set([
   "slack.gatedSends",
   "usage.keychainService",
   "wa.alert",
+  "wa.guestPolicy",
+  "wa.replyPolicy",
   "yard.logReaders",
 ])
 // An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included, but the Ops lead's change of its interval alone (tunes()): only the owner's Approve of a guard decision, or Settings > Jobs, sets any other.

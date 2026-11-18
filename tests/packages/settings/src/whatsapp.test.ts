@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { checkSetting, shownValue } from "../../../../packages/settings/src"
+import {
+  checkSetting,
+  DEFAULT_POLICY,
+  GUARD_SETTING_KEYS,
+  shownValue,
+  whatsappSettings,
+} from "../../../../packages/settings/src"
 
 // Made-up numbers alone: 555-01xx is the range set aside for fiction.
 const GOOD = "+15550100001"
@@ -35,4 +41,20 @@ describe("WhatsApp's numbers (#1797, #2748)", () => {
     expect(shownValue("wa.owner", null)).toBeNull()
     expect(shownValue("clock.ownerZone", "Asia/Kolkata")).toBe("Asia/Kolkata")
   })
+})
+
+describe("WhatsApp's policy lines (#2756)", () => {
+  test.each(["wa.guestPolicy", "wa.replyPolicy"] as const)(
+    "%s defaults to factory status alone, takes a line of words, refuses an empty one, and is a guard key",
+    (key) => {
+      expect(whatsappSettings.get({ schemaVersion: 1, values: {} } as never, key)).toBe(
+        DEFAULT_POLICY,
+      )
+      expect(DEFAULT_POLICY).toBe("factory status; no secrets or customer personal data")
+      expect(checkSetting(key, "a made-up policy")).toMatchObject({ ok: true })
+      expect(checkSetting(key, "  ")).toMatchObject({ ok: false })
+      expect(checkSetting(key, "x".repeat(401))).toMatchObject({ ok: false })
+      expect(GUARD_SETTING_KEYS).toContain(key)
+    },
+  )
 })

@@ -340,7 +340,7 @@ test("branches: a branch whose issue is open and which is no copy stays, though 
   expect(plan).toEqual({ archive: [], bundle: ["PG-70-backup"], local: ["PG-70-done"], remote: [] })
 })
 
-test("containers: an exited worktree container whose folder is gone goes; the live dashboard's, pglaunch's, a Vibeground copy, a running one and one whose folder stands stay", () => {
+test("containers: an exited worktree container whose folder is gone goes; the live dashboard's, first run's, a Vibeground copy, a running one and one whose folder stands stay", () => {
   const small = 100
   const plan = staleContainers(
     [

@@ -68,7 +68,7 @@ describe("playground wa send", () => {
     const { data } = machine("hi")
     const { code, out } = await wa(data, ["send", "body.md"])
     expect(code).toBe(2)
-    expect(out).toStartWith("usage: playground wa send <file>")
+    expect(out).toStartWith("usage: playground wa send [--to alert] <file>")
   })
 
   test("refuses a token-shaped body before it reaches ops-wa", async () => {
@@ -101,7 +101,8 @@ describe("playground wa send", () => {
     const got: string[] = []
     const server = serve(socketPath(data), async (b) => {
       got.push(b)
-      if (got.length > 1) throw new Error("the hourly cap of 60 sends is reached until 04:00Z")
+      if (got.length > 1)
+        throw new Error("ops-wa is not connected to WhatsApp now; try again in a minute")
       return "sent"
     })
     try {
@@ -110,8 +111,30 @@ describe("playground wa send", () => {
       expect(got).toEqual(["all green"])
       expect(await wa(data, ["send", body])).toEqual({
         code: 1,
-        out: "wa send: the hourly cap of 60 sends is reached until 04:00Z",
+        out: "wa send: ops-wa is not connected to WhatsApp now; try again in a minute",
       })
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
+describe("playground wa send --to alert (#2756)", () => {
+  test("hands the body to ops-wa as a guest's reply, and a stray word after it is refused", async () => {
+    const { body, data } = machine("glad you asked\n")
+    const got: [string, string][] = []
+    const server = serve(socketPath(data), async (b, kind) => {
+      got.push([b, kind])
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["send", "--to", "alert", body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect((await wa(data, ["send", "--to", "owner", body])).code).toBe(2)
+      expect((await wa(data, ["alert", "--to", "alert", body])).code).toBe(2)
+      expect(got).toEqual([["glad you asked", "guest"]])
     } finally {
       server.stop(true)
     }
@@ -121,17 +144,17 @@ describe("playground wa send", () => {
 describe("playground wa alert (#2748)", () => {
   test("hands the body to ops-wa as an alert, while wa send's stays a reply", async () => {
     const { body, data } = machine("ops-tick is down\n")
-    const got: [string, boolean][] = []
-    const server = serve(socketPath(data), async (b, alert) => {
-      got.push([b, alert])
+    const got: [string, string][] = []
+    const server = serve(socketPath(data), async (b, kind) => {
+      got.push([b, kind])
       return "sent"
     })
     try {
       expect(await wa(data, ["alert", body])).toEqual({ code: 0, out: "wa alert: sent" })
       expect(await wa(data, ["send", body])).toEqual({ code: 0, out: "wa send: sent" })
       expect(got).toEqual([
-        ["ops-tick is down", true],
-        ["ops-tick is down", false],
+        ["ops-tick is down", "alert"],
+        ["ops-tick is down", "reply"],
       ])
     } finally {
       server.stop(true)

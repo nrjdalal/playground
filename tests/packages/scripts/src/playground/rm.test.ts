@@ -30,6 +30,7 @@ import {
   type RmDeps,
   rmArgs,
   rmDeps,
+  rmPeerCommand,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
@@ -61,12 +62,20 @@ test("rm takes one path, or --worktree's with an optional --discard and --pr, wi
   })
 })
 
-test("rm takes a path with --card <id>, the card that approved its removal", () => {
+test("rm takes a path with --card <id>, the card that approved its removal, and an optional --peer <machine>", () => {
   expect(rmArgs(["/m/x.gguf", "--card", "c1", "--reason", "nightly-clean"])).toEqual({
     card: "c1",
     discard: false,
     path: "/m/x.gguf",
     reason: "nightly-clean",
+    worktree: false,
+  })
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    peer: "spark-b",
+    reason: "playground rm",
     worktree: false,
   })
 })
@@ -92,6 +101,8 @@ test.each([
   [["--worktree", "wt", "--pr"]],
   [["--worktree", "wt", "--card", "c1"]],
   [["a", "--card"]],
+  [["a", "--peer", "spark-b"]],
+  [["--worktree", "wt", "--card", "c1", "--peer", "spark-b"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -2215,6 +2226,74 @@ test.each<[string, Picks | null, string]>([
   const { code, err } = await rmTold([repo, "--card", CARD], deps)
   expect(code).toBe(1)
   expect(err.join("\n")).toContain(said)
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A peer's far end: run-slot's ssh, a closure a test injects so the stub records the command.
+type PeerRun = { machine: string; command: string }
+const peerRun = (out: { code: number; out: string }) => {
+  const seen: PeerRun[] = []
+  const peer: RmDeps["peer"] = async (machine, command) => {
+    seen.push({ machine, command })
+    return out
+  }
+  return { seen, peer }
+}
+
+test("runRm --peer sends one rm-peer command to the named peer and relays its line, leaving this machine's own copy at that path and its record entry", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const record = readFileSync(join(deps.data, "machine-record.json"), "utf8")
+  const { code, out } = await rmTold(
+    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
+    { ...deps, peer },
+  )
+  expect(code).toBe(0)
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(out.join("\n")).toContain("Deleted the weights on the peer")
+  expect(existsSync(repo)).toBe(true)
+  expect(readFileSync(join(deps.data, "machine-record.json"), "utf8")).toBe(record)
+})
+
+test("runRm --peer passes a path with a space or a quote to the peer as one word", () => {
+  expect(rmPeerCommand("/h/models/a b's.gguf", 7, "c1")).toBe(
+    `packages/scripts/src/playground/rm-peer.ts '/h/models/a b'\\''s.gguf' '7' 'c1'`,
+  )
+})
+
+test("runRm --peer refuses a pick the card does not name on that peer, and sends no ssh", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "ignored" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold(
+    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
+    { ...deps, peer },
+  )
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("holds no Remove answer")
+  expect(seen).toEqual([])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's refusal and the path stays", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "no such path" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold(
+    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
+    { ...deps, peer },
+  )
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("no such path")
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
   expect(existsSync(repo)).toBe(true)
 })
 

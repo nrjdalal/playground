@@ -5,7 +5,8 @@ import { removeScratch } from "@packages/safe-delete"
 
 import { sandbox } from "./sandbox"
 
-const py = (file: string, ...withs: string[]) => [
+// Runs one Python test: uv with --python 3.13, a pinned 3.13 so a future uv default can't move the target, tests/<file> as the file the test imports
+export const py = (file: string, ...withs: string[]) => [
   "uv",
   "run",
   "--quiet",

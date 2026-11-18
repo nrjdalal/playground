@@ -576,13 +576,14 @@
      For several calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 `options` and an optional `recommended` index, which the card asks one at a time and sends together.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
-  A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
+  A job of several steps leads with to-inbox's work status block, on the dispatcher's one in-flight card, a read-only update the dispatcher edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`); every other session sends its progress up the chain.
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
   a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`, never a version such as `GLM-4.7`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
   or a code block other than a `diff` or `progress` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   `bun run ask new` and `ask edit` refuse an ask's or a read-only update's `progress` block whose line holds other than 4 or 5 fields, a percent outside 0 to 100 or a state none of the four, naming the block, the line and its words, and post nothing (`progressRefusal` in `api/hono/src/lib/dashboard/ask-shape.ts`).
+  a `progress` block is the dispatcher's one in-flight card, so `ask new` refuses a second of it: a non-dispatcher's card, or the dispatcher's own card a second time, a different title, naming the open one, while `ask edit` carries the dispatcher's card to its end, so a job keeps one card (`progressCardRefusal`, PG-2720).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

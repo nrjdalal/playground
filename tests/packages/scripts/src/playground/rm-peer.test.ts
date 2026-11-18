@@ -1,0 +1,157 @@
+import { afterAll, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { runRmPeer, type RmPeerDeps } from "../../../../../packages/scripts/src/playground/rm-peer"
+
+const dirs: string[] = []
+afterAll(() => {
+  for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
+})
+
+// A made-up machine on its own mkdtemp: HOME with its main checkout and state folder, the ssh key the peer reads, and deps that read its record.
+const machine = () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-peer-")))
+  dirs.push(root)
+  const home = join(root, "home")
+  const main = join(home, "playground")
+  const data = join(home, ".playground")
+  mkdirSync(join(main, ".claude", "worktrees"), { recursive: true })
+  for (const dir of [".config", ".ssh", ".gnupg", ".claude", "Library", "Music", ".playground"])
+    mkdirSync(join(home, dir), { recursive: true })
+  writeFileSync(join(home, ".ssh", "id_ed25519"), "key")
+  writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
+  const told: string[] = []
+  const deps: RmPeerDeps = {
+    data,
+    home,
+    main,
+    notify: (text) => void told.push(text),
+    session: async () => "j6rjgy-worker",
+  }
+  return { data, home, main, root, told, deps }
+}
+
+const file = (path: string, text = "x"): string => {
+  mkdirSync(join(path, ".."), { recursive: true })
+  writeFileSync(path, text)
+  return path
+}
+
+const RECORD = (path: string) =>
+  writeFileSync(
+    join(deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [{ added: "2026-11-17", by: "ops", kind: "folder", path, undo: "rm", why: "seed" }],
+    }),
+  )
+
+let deps: RmPeerDeps
+
+test("runRmPeer takes three words, and refuses a wrong byte count, card, or too few words", async () => {
+  expect(await runRmPeer([], deps)).toBe(2)
+  expect(await runRmPeer(["/m/x.gguf"], deps)).toBe(2)
+  expect(
+    await runRmPeer(["/m/x.gguf", "not-bytes", "11111111-2222-3333-4444-555555555555"], deps),
+  ).toBe(2)
+  expect(await runRmPeer(["/m/x.gguf", "7", "not-a-card"], deps)).toBe(2)
+})
+
+test("runRmPeer refuses a path not on the machine record, and leaves it", async () => {
+  const m = machine()
+  file(join(m.home, "models", "hf", "hub", "models--a--b", "gguf"))
+  const recorded = join(m.home, "models", "hf", "hub", "models--not--recorded")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  const { out, err } = await rmpTold(recorded, {
+    bytes: 1,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(out).toEqual([])
+  expect(err.join("\n")).toContain("is not on the machine record")
+})
+
+test("runRmPeer refuses a non-weights path the record names, and leaves it", async () => {
+  const m = machine()
+  const path = file(join(m.home, "scratch", "note.txt"), "scratch")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(path)
+  const { code, err } = await rmpTold(path, {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("not model weights")
+})
+
+test("runRmPeer refuses a size other than the card approved, and leaves it", async () => {
+  const m = machine()
+  file(join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B", "gguf"), "0123456")
+  const folder = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const { code, err } = await rmpTold(folder, {
+    bytes: 6,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("its size changed")
+})
+
+test("runRmPeer refuses a protected path the record names, and leaves it", async () => {
+  const m = machine()
+  const path = file(join(m.home, ".ssh", "id_ed25519"), "test")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(path)
+  const { code, err, told } = await rmpTold(path, {
+    bytes: 4,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("protected")
+  expect(told.length).toBeGreaterThan(0)
+})
+
+test("runRmPeer deletes a recorded weights file at the card's exact size, logs it, and drops its record entry", async () => {
+  const m = machine()
+  file(join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B", "gguf"), "0123456")
+  const folder = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const { code, out } = await rmpTold(folder, {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(
+    `Deleted ${folder} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
+  )
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(out).toHaveLength(1)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+// One runRmPeer over its words, catching what it logs or errors, with the card's approved byte count.
+const rmpTold = async (
+  path: string,
+  approved: { bytes: number; card: string },
+): Promise<{ code: number; err: string[]; out: string[]; told: string[] }> => {
+  const err: string[] = []
+  const out: string[] = []
+  const told: string[] = []
+  const notify = (text: string) => void told.push(text)
+  const oldErr = console.error
+  const oldLog = console.log
+  console.error = (line: string) => void err.push(line)
+  console.log = (line: string) => void out.push(line)
+  try {
+    const code = await runRmPeer([path, String(approved.bytes), approved.card], { ...deps, notify })
+    return { code, err, out, told }
+  } finally {
+    console.error = oldErr
+    console.log = oldLog
+  }
+}

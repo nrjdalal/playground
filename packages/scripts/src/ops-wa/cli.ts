@@ -4,7 +4,13 @@ import { join } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
 import { configDirOf } from "@packages/env/data-dir"
-import { extSettings, readPolicy, readRendered, whatsappSettings } from "@packages/settings"
+import {
+  DEFAULT_POLICY,
+  extSettings,
+  readPolicy,
+  readRendered,
+  whatsappSettings,
+} from "@packages/settings"
 import makeWASocket, {
   Browsers,
   downloadMediaMessage,
@@ -214,6 +220,16 @@ const main = async () => {
       )
     },
     owner,
+    // the policy lines are read afresh for each message, so the owner's set reaches a running ops-wa; settings that refuse leave the default
+    policy: async () => {
+      const read = await readPolicy(data)
+      return read.refusal === undefined
+        ? {
+            guest: whatsappSettings.get(read.settings, "wa.guestPolicy"),
+            reply: whatsappSettings.get(read.settings, "wa.replyPolicy"),
+          }
+        : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
+    },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
     reply: send,
     sleep: Bun.sleep,
