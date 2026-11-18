@@ -4,6 +4,8 @@ import { join } from "node:path"
 import {
   ASK_EXAMPLES,
   isAskExampleKind,
+  isDispatcher,
+  progressCardRefusal,
   progressRefusal,
   PROSE_LIMIT,
   shapeHints,
@@ -324,5 +326,93 @@ describe("progressRefusal", () => {
         preview: { text: block("B | 140 | x | y"), type: "draft" },
       }),
     ).toBeNull()
+  })
+})
+
+describe("isDispatcher", () => {
+  test("reads the dispatcher from a roster name, a set name, or the second slot, never another kind", () => {
+    expect(isDispatcher("dispatcher")).toBe(true)
+    expect(isDispatcher("b7k2mq-dispatcher")).toBe(true)
+    expect(isDispatcher("dispatcher-2")).toBe(true)
+    expect(isDispatcher("builder")).toBe(false)
+    expect(isDispatcher("worker-envy")).toBe(false)
+    expect(isDispatcher("")).toBe(false)
+    expect(isDispatcher(null)).toBe(false)
+  })
+})
+
+describe("progressCardRefusal", () => {
+  const update = (text: string, title = "Job", from = "dispatcher") => ({
+    from,
+    kind: "update",
+    preview: { outcome: "finding", text },
+    title,
+  })
+  const ask = (text: string, from = "dispatcher") => ({
+    from,
+    preview: { text, type: "ask" },
+    title: "Job",
+  })
+  const block = (...lines: string[]) =>
+    ["```progress", ...lines, "```", "", "- One step landed."].join("\n")
+
+  test("passes a card with no progress block, from any poster", () => {
+    expect(progressCardRefusal(update("The job is done."), null)).toBeNull()
+    expect(progressCardRefusal(update("The job is done."), { ref: 5, title: "Job" })).toBeNull()
+    expect(
+      progressCardRefusal(ask("The job is done.", "worker-envy"), { ref: 5, title: "Job" }),
+    ).toBeNull()
+  })
+
+  test("passes the dispatcher's first card, then a twin of the open one (same title) still edits (PG-2720)", () => {
+    expect(
+      progressCardRefusal(update(block("Mac reads | 100 | done | 9:10 pm"), "Job"), null),
+    ).toBeNull()
+    expect(
+      progressCardRefusal(update(block("Mac reads | 100 | done | 9:10 pm"), "Job"), {
+        ref: 5,
+        title: "Job",
+      }),
+    ).toBeNull()
+  })
+
+  test("refuses the dispatcher's second card, a different title, naming the open one", () => {
+    const refusal = progressCardRefusal(update(block("Yard reads | 40 | x | 1:00 pm"), "Other"), {
+      ref: 5,
+      title: "Job",
+    })
+    expect(refusal).toContain("#5")
+    expect(refusal).toContain("edit it in place with ask edit, not a second card")
+  })
+
+  test("refuses a non-dispatcher's progress card, naming the open card when one is open", () => {
+    const refusal = progressCardRefusal(
+      update(block("Yard reads | 40 | x | 1:00 pm"), "Job", "worker-envy"),
+      { ref: 5, title: "Job" },
+    )
+    expect(refusal).toContain("#5")
+    expect(refusal).toContain("not one a poster may start")
+    expect(refusal).toContain("send its progress up the chain, a row on its in-flight card")
+  })
+
+  test("refuses a non-dispatcher's progress card when no card is open, and says send it up the chain", () => {
+    const refusal = progressCardRefusal(
+      update(block("Yard reads | 40 | x | 1:00 pm"), "Job", "worker-envy"),
+      null,
+    )
+    expect(refusal).toContain("not one a poster may start")
+    expect(refusal).not.toContain("#5")
+    expect(refusal).toContain("not as its own card")
+  })
+
+  test("refuses a non-dispatcher's progress block on an ask, naming the open card", () => {
+    const refusal = progressCardRefusal(
+      ask(block("Yard reads | 40 | x | 1:00 pm"), "worker-envy"),
+      {
+        ref: 5,
+        title: "Job",
+      },
+    )
+    expect(refusal).toContain("#5")
   })
 })

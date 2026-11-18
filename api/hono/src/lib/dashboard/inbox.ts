@@ -1748,6 +1748,9 @@ const ownerDone = (item: InboxItem): boolean => {
   return !("choice" in answer)
 }
 
+// Pure: an update a poster may still edit, its twin postOrEdit takes, a closed one except the owner's Done (PG-2720).
+const stillEditable = (item: InboxItem): boolean => !closed(item) || ownerDone(item)
+
 // Pure: what a card says, its files by name alone, since bun run ask copies a file under a new id on every edit.
 const wordsOf = ({ preview, title }: { preview: unknown; title: string }): unknown =>
   JSON.parse(
@@ -1847,6 +1850,30 @@ export async function postOrEdit(
     return { item: twin, ok: true, unchanged: true }
   const edited = await editItem(db, twin.id, input, now, settingsData)
   return edited.ok ? { ...edited, edited: true } : edited
+}
+
+// The dispatcher's one open in-flight card, its newest update holding a progress block, so a second card or a non-dispatcher's names it (PG-2720). A twin of it (same title) still edits, as postOrEdit's twin does, and one already dismissed, settled or closed by its poster is not it.
+export type InflightCard = { ref: number; title: string } | null
+
+// The newest update's first line opens a ```progress fence, so an update holds a progress block; read alone so inbox.ts stays free of the app's @/lib/dashboard (PG-2720).
+const holdsProgressBarBlock = (preview: unknown): boolean => {
+  const text =
+    typeof preview === "object" &&
+    preview !== null &&
+    !Array.isArray(preview) &&
+    typeof (preview as { text?: unknown }).text === "string"
+      ? (preview as { text: string }).text || ""
+      : ""
+  return /^\s*```[ \t]*progress\b/m.test(text)
+}
+
+// Pure: the dispatcher's one open in-flight card, its newest update still editable and holding a progress block, or null on none, so a second card or a non-dispatcher's names it (PG-2720).
+export async function inflightCard(db: Database): Promise<InflightCard> {
+  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
+  for (const item of rows.map(toItem))
+    if (stillEditable(item) && holdsProgressBarBlock(item.preview))
+      return { ref: item.ref, title: item.title }
+  return null
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
