@@ -10,7 +10,7 @@ A file is more than text, so by [ADR 0015](0015-versions-the-old-one-stays-the-l
 - **A known type alone.** The extension names the kind: `jpg`, `jpeg` and `png` an image, `mp4` a video, `ogg` and `opus` a voice note, and `pdf`, `txt`, `md`, `csv` and `json` a document. Any other type is refused.
 - **The floors read the file's words too.** `refusalOf()` reads the body, the file's name and a text document's words, and `guestRefusal()` reads the same for a guest's reply; a binary file's content is the sender's to keep within the policy line.
 - **The body is the caption.** An image, a video and a document carry the body's first part as their caption, and its other parts follow as text. A voice note takes no caption, so the body goes before it as text. A file with no body goes alone.
-- **The send rules stay.** A file goes to the owner alone, or with `--to alert` to the second number alone, within that number's 24 hours, paced by `SEND`'s gaps, with no presence and no read marks; `wa alert` stays text alone.
+- **The send rules stay.** A file goes to the owner alone, or with `--to alert` to the second number alone, within that number's 24 hours, paced by `SEND`'s gaps, a caption waiting its typing time as a text part does ([ADR 0031](0031-ops-wa-reacts-and-types-at-a-human-pace.md)) and a file with none the gap alone, with no presence and no read marks; `wa alert` stays text alone.
 
 ## Consequences
 

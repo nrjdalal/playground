@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { sender } from "../../../../../packages/scripts/src/ops-wa/bridge"
-import { writeOwn } from "../../../../../packages/scripts/src/ops-wa/habits"
+import { SEND, typingMs, writeOwn } from "../../../../../packages/scripts/src/ops-wa/habits"
 import {
   messagesOf,
   outboxDir,
@@ -38,6 +38,7 @@ const harness = async () => {
     dir,
     now: () => now,
     owner: OWNER,
+    random: () => 0.5,
     sleep: async (ms) => void (now += ms),
     sock: fake.sock,
   })
@@ -94,6 +95,19 @@ describe("wa send's files (#2783)", () => {
       { caption: undefined, image: BYTES, mimetype: "image/jpeg" },
       { audio: BYTES, mimetype: "audio/ogg; codecs=opus", ptt: true },
     ])
+  })
+
+  test("a caption waits its typing time as a text does, and a file with no caption goes on the gap alone", async () => {
+    const h = await harness()
+    const caption = "the new board, with this week's three changes"
+    await h.send("", "reply", h.file("shot.jpg"))
+    await h.send(caption, "reply", h.file("board.png"))
+    await h.send("", "reply", h.file("hello.opus"))
+    const [bare, captioned, note] = h.fake.sent.map((s) => s.at)
+    expect(bare).toBe(START)
+    expect(captioned! - bare!).toBe(typingMs(caption.length, () => 0.5))
+    expect(typingMs(caption.length, () => 0.5)).toBeGreaterThan(SEND.gapMs)
+    expect(note! - captioned!).toBe(SEND.gapMs)
   })
 
   test("a long caption keeps its first part on the file, and the rest follow as text, each paced as a part", async () => {
