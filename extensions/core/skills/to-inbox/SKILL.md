@@ -10,7 +10,6 @@ Every message to the owner is read in seconds, an Inbox card in the aside's narr
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 7 and 10. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
-- A card that offers a new Claude start, or a resume, first runs that start with `spawn.sh --check`, states the measured result on the card, a pass or the gate's refusal line, and checks `--priority`'s order: open the priority window (`playground priority on`) before a `--check --priority`, or check without `--priority`.
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 5, then steps 8 and 9.
 - An `accept`, `apps`, `budget`, `clone`, `delete`, `grant`, `guard`, `own` or `root` decision's `why` is free text, shown as written: it takes steps 3 and 5 as plain lines, one fact each, then steps 8 and 9; a `delete`'s `why` renders as markdown, so it takes step 4 too.
 - A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), so the owner approves the very path that goes, and `ask new` refuses a short name.
@@ -27,6 +26,7 @@ In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work sta
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve your own update once it has settled: an alert that has fixed itself, a progress card whose last step is done.
 A job in flight is a row on the dispatcher's one in-flight card, which the dispatcher posts and edits in place with `playground ask edit`; every other session sends its progress and ETA moves up the chain and posts no progress card, so a new card is posted only for a decision or a finished result ([PROGRESS.md](references/PROGRESS.md)).
+A card that offers a new Claude start, or a resume, first runs that start with `spawn.sh --check`, states the measured result on the card, a pass or the gate's refusal line, and keeps `--priority`'s order: open the priority window (`playground priority on`) before a `--check --priority`, or check without `--priority`.
 Until you resolve it or the owner presses Dismiss, an update stays editable (below, Done), as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `playground ask edit` before that.
 
 Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
