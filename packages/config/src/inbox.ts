@@ -6,17 +6,31 @@ export const ASK_CODE_COLUMNS = 72
 // The fenced block's language an Inbox card draws as progress bars at its own width, one item a line, so no width limit binds it.
 export const PROGRESS_LANGUAGE = "progress"
 
-export type ProgressItem = { eta: string; name: string; percent: number; text: string }
+// A progress row's state: active rows draw in the primary colour and the rest muted.
+export const PROGRESS_STATES = ["active", "done", "held", "waiting"] as const
+export type ProgressState = (typeof PROGRESS_STATES)[number]
 
-// Why a progress block's line does not read: no line at all, too few or too many fields (`count` of them), or a percent outside 0 to 100; `line` counts from 1 inside the block.
+export type ProgressItem = {
+  eta: string
+  name: string
+  percent: number
+  state?: ProgressState
+  text: string
+}
+
+// Why a progress block's line does not read: no line at all, too few or too many fields (`count` of them), a percent outside 0 to 100, or a state none of PROGRESS_STATES; `line` counts from 1 inside the block.
 export type ProgressFault =
   | { kind: "empty"; line: 0; text: "" }
   | { count: number; kind: "fields"; line: number; text: string }
   | { kind: "percent"; line: number; text: string }
+  | { kind: "state"; line: number; state: string; text: string }
 
 const PERCENT = /^(\d{1,3}(?:\.\d+)?)%?$/
 
-// Pure: a progress block's items, one a non-blank line of `name | percent | what's going on | ETA`, the percent 0 to 100 with an optional %, or the first line that does not read.
+const isProgressState = (state: string): state is ProgressState =>
+  PROGRESS_STATES.some((known) => known === state)
+
+// Pure: a progress block's items, one a non-blank line of `name | percent | what's going on | ETA | state`, the percent 0 to 100 with an optional %, the state optional (an empty or missing one is none, and a row at 100 with none reads as done), or the first line that does not read.
 export function progressItems(
   block: string,
 ): { items: ProgressItem[]; ok: true } | { fault: ProgressFault; ok: false } {
@@ -26,12 +40,15 @@ export function progressItems(
     if (text.trim() === "") continue
     const fields = text.split("|").map((field) => field.trim())
     const line = index + 1
-    if (fields.length !== 4)
+    if (fields.length !== 4 && fields.length !== 5)
       return { fault: { count: fields.length, kind: "fields", line, text }, ok: false }
-    const [name, percent, said, eta] = fields as [string, string, string, string]
+    const [name, percent, said, eta, state = ""] = fields as [string, string, string, string]
     const value = Number(PERCENT.exec(percent)?.[1] ?? Number.NaN)
     if (!(value >= 0 && value <= 100)) return { fault: { kind: "percent", line, text }, ok: false }
-    items.push({ eta, name, percent: value, text: said })
+    if (state !== "" && !isProgressState(state))
+      return { fault: { kind: "state", line, state, text }, ok: false }
+    const shown = state || (value === 100 ? "done" : null)
+    items.push({ eta, name, percent: value, ...(shown && { state: shown }), text: said })
   }
   return items.length > 0
     ? { items, ok: true }

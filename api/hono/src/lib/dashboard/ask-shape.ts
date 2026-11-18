@@ -1,4 +1,9 @@
-import { ASK_CODE_COLUMNS, PROGRESS_LANGUAGE, progressItems } from "@packages/config/inbox"
+import {
+  ASK_CODE_COLUMNS,
+  PROGRESS_LANGUAGE,
+  PROGRESS_STATES,
+  progressItems,
+} from "@packages/config/inbox"
 
 // An Inbox ask reads the way chat talks to the owner: a picture of the point first, with a one-sentence note under it (the plain-words skill), then short bullets, then its options, in its `options` and `deny` labels.
 
@@ -101,7 +106,9 @@ const progressBlocks = (text: string): string[] => {
   return blocks
 }
 
-// Pure: why bun run ask refuses an ask's or a read-only update's text, whose card would draw a progress block it cannot read as plain code: the first line with other than 4 fields or a percent outside 0 to 100, named by its block and line; null when every block reads.
+const STATES = `${PROGRESS_STATES.slice(0, -1).join(", ")} or ${PROGRESS_STATES.at(-1)}`
+
+// Pure: why bun run ask refuses an ask's or a read-only update's text, whose card would draw a progress block it cannot read as plain code: the first line with other than 4 or 5 fields, a percent outside 0 to 100 or an unknown state, named by its block and line; null when every block reads.
 export function progressRefusal(input: unknown): string | null {
   const preview = isRecord(input) ? input.preview : undefined
   if (!isRecord(preview) || typeof preview.text !== "string") return null
@@ -111,13 +118,16 @@ export function progressRefusal(input: unknown): string | null {
     if (read.ok) continue
     const { fault } = read
     const where = `progress block ${index + 1}`
-    const shape =
-      "write each line as name | percent | what's going on | ETA, the percent 0 to 100 (to-inbox's PROGRESS.md)"
-    return fault.kind === "empty"
-      ? `${where} holds no line; ${shape}`
-      : fault.kind === "fields"
-        ? `${where}, line ${fault.line}, holds ${fault.count} fields, not 4: "${fault.text}"; ${shape}`
-        : `${where}, line ${fault.line}, has a percent outside 0 to 100: "${fault.text}"; ${shape}`
+    const shape = `write each line as name | percent | what's going on | ETA | state, the percent 0 to 100 and the state optional, one of ${STATES} (to-inbox's PROGRESS.md)`
+    if (fault.kind === "empty") return `${where} holds no line; ${shape}`
+    const at = `${where}, line ${fault.line},`
+    const why =
+      fault.kind === "fields"
+        ? `holds ${fault.count} fields, not 4 or 5`
+        : fault.kind === "percent"
+          ? "has a percent outside 0 to 100"
+          : `has the state "${fault.state}", not ${STATES}`
+    return `${at} ${why}: "${fault.text}"; ${shape}`
   }
   return null
 }
