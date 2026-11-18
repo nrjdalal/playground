@@ -189,6 +189,10 @@ describe("orderInboxItems", () => {
     const [row] = orderInboxItems([{ ...card(7), title: "kept" }])
     expect(row?.title).toBe("kept")
   })
+
+  test("in one group, a null-rank card leads a ranked card", () => {
+    expect(refs(orderInboxItems([card(1, null, "v"), card(2, null, null)]))).toEqual([2, 1])
+  })
 })
 
 // strictly between its neighbours, and only base-62 digits with no trailing "0", so Postgres text stores it and room stays below it
