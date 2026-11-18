@@ -217,18 +217,16 @@ describe("locate", () => {
     expect(failure(() => locate(URL_55432, docker.run)).failure).toBe("exposed")
   })
 
-  test("a port published on every interface passes only for first run's own container, pglaunch's 4-character suffix on the checkout's name", () => {
+  test("a port published on every interface refuses, the checkout's own container included, so only loopback may be open", () => {
     const everywhere = {
       "5432/tcp": [
         { HostIp: "0.0.0.0", HostPort: "55432" },
         { HostIp: "::", HostPort: "55432" },
       ],
     }
-    for (const name of ["playground-db-a1B2", "playground-pg-939-first-run-db-Zz09"]) {
-      const docker = scripted([["a"]], [], { a: container(name, everywhere) })
-      expect(locate(URL_55432, docker.run).owner.name).toBe(name)
-    }
     for (const name of [
+      "playground-db-a1B2",
+      "playground-pg-939-first-run-db-Zz09",
       "playground-db",
       "playground-a-db",
       "playground-db-a1B2c",
@@ -237,6 +235,14 @@ describe("locate", () => {
     ]) {
       const docker = scripted([["a"]], [], { a: container(name, everywhere) })
       expect(failure(() => locate(URL_55432, docker.run)).failure).toBe("exposed")
+    }
+  })
+
+  test("a loopback-only named container passes, first run's own container included", () => {
+    const loopback = { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55432" }] }
+    for (const name of ["playground-db", "playground-db-a1B2", "playground-pg-306-inbox-db-x9Kq"]) {
+      const docker = scripted([["a"]], [], { a: container(name, loopback) })
+      expect(locate(URL_55432, docker.run).owner.name).toBe(name)
     }
   })
 

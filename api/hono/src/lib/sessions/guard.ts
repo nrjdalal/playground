@@ -1,6 +1,6 @@
 import { SQL } from "bun"
 
-// Transcripts hold secrets and customer data, so the importer writes only to a Postgres it can prove is a container on this machine: the URL names a loopback host, a local Docker container publishes the URL's port on loopback alone (but first run's own, below), and the server the URL reaches is that container's own (the same system identifier). A tunnel to a remote database (an SSH forward, cloud-sql-proxy, a Neon pooler) bound to 127.0.0.1 fails the last two.
+// Transcripts hold secrets and customer data, so the importer writes only to a Postgres it can prove is a container on this machine: the URL names a loopback host, a local Docker container publishes the URL's port on loopback alone (first run's own included), and the server the URL reaches is that container's own (the same system identifier). A tunnel to a remote database (an SSH forward, cloud-sql-proxy, a Neon pooler) bound to 127.0.0.1 fails the last two.
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"])
 
@@ -90,9 +90,6 @@ export const publishedOn = (inspect: unknown, port: number): Published[] =>
 export const loopbackOnly = (addresses: string[]): boolean =>
   addresses.length > 0 && addresses.every((address) => LOOPBACK_ADDRESSES.has(address))
 
-// First run's own database (lib/setup/container.ts): pglaunch, which the owner chose as it is for that step, publishes on every interface and names the container the checkout's name plus a dash and 4 letters or digits, so that container alone may be published beyond loopback.
-const FIRST_RUN_CONTAINER = /^playground(?:-[a-zA-Z0-9_.-]+)?-db-[0-9a-zA-Z]{4}$/
-
 export const systemIdentifierOf = (controlData: string): string | null =>
   /Database system identifier:\s*(\d+)/.exec(controlData)?.[1] ?? null
 
@@ -144,7 +141,7 @@ const publishers = (port: number, run: Docker): Published[] => {
   }
 }
 
-// The one running container that publishes the URL's port, on loopback alone but for first run's own, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it.
+// The one running container that publishes the URL's port, on loopback alone and first run's own included, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it.
 export const locate = (url: string, run: Docker = docker): Located => {
   const target = targetOf(url)
   const owners = publishers(target.port, run)
@@ -155,7 +152,7 @@ export const locate = (url: string, run: Docker = docker): Located => {
       `no single running Docker container publishes port ${target.port}`,
     )
   }
-  if (!loopbackOnly(owner.addresses) && !FIRST_RUN_CONTAINER.test(owner.name)) {
+  if (!loopbackOnly(owner.addresses)) {
     const where = owner.addresses.map((address) => address || "every interface").join(", ")
     throw new GuardError(
       "exposed",
