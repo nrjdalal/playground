@@ -592,6 +592,16 @@ describe("WhatsApp mode", () => {
     expect(h.routed[1]!.text).toContain("is it green?")
   })
 
+  test("a reply to the alert number is no answer to the owner, so the owner's message still goes to the assistant seat", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(ALERT), "hello"), h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    expect(await h.send("3 PRs merged today", "guest")).toBe("sent")
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
   test("a reply sent in time keeps the message with the dispatcher, and a dispatcher mid-turn holds the hand-on", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "one")])
