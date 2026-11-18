@@ -17,8 +17,12 @@ export const inboxItem = pgTable("inbox_item", {
     .$defaultFn(() => crypto.randomUUID()),
   // decision, draft or update.
   kind: text("kind").notNull(),
+  // When the item was pinned, so pinned cards sort first, newest pin first.
+  pinned_at: timestamp("pinned_at", { withTimezone: true }),
   // The kind's own payload: a decision's preview of what Approve does, a draft's recipient and text, an update's outcome and link.
   preview: jsonb("preview").notNull(),
+  // A fractional ordering key, so two cards beside each other keep their order.
+  rank: text("rank"),
   readAt: timestamp("read_at", { withTimezone: true }),
   // Its short id, shown as #i<ref>: a sequence, so it is stable and never reused.
   ref: integer("ref").generatedAlwaysAsIdentity().unique().notNull(),
