@@ -206,6 +206,22 @@ describe("startLocal", () => {
     expect(docker.calls.find((c) => c.args[0] === "run")).toBeUndefined()
   })
 
+  test("asked to move, a reused container moves onto loopback on its own port before the proof", async () => {
+    const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
+    const moveTo = vi.fn(async () => ["Moved"])
+    const steps: string[] = []
+    const url = await go(docker, "", { move: true, moveTo, onStep: (step) => steps.push(step) })
+    expect(moveTo).toHaveBeenCalledWith("playground-db-x9Kq", 216, docker.run, noWait)
+    expect(steps.indexOf("Moved")).toBeLessThan(
+      steps.indexOf("Checking the database is on this Mac"),
+    )
+    expect(noProve).toHaveBeenCalledWith(url)
+    const again = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
+    await Bun.write(envFile, "")
+    await go(again, "", { moveTo })
+    expect(moveTo).toHaveBeenCalledTimes(1)
+  })
+
   test("a reused container's URL reads its password from docker inspect, not a fixed one", async () => {
     const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
     const origRun = docker.run
