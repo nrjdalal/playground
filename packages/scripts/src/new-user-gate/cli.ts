@@ -401,6 +401,8 @@ export const ownDatabaseVerdict = ({
   own: string
   saved: { detail: string; ok: boolean }
   seeded: boolean
+  port?: number
+  ports?: number[]
 }): { detail: string; ok: boolean } => {
   // fail closed: with no live.container of its own the click would reuse the host's live database
   if (!seeded) {

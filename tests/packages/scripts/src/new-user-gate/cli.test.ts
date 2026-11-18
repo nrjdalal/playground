@@ -721,4 +721,21 @@ describe("the box's own database", () => {
       }),
     ).toEqual({ detail: "", ok: true })
   })
+
+  test("a saved URL's port must be a host port of the box's own containers", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: 45313,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port 45313 is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
 })
