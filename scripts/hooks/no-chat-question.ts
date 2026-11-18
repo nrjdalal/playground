@@ -9,12 +9,22 @@ import {
   ID_NAME_SOURCE,
   kindOfName,
   MANAGER_KINDS,
+  placedKindOf,
 } from "../../packages/config/src/kinds"
-import { dataDir } from "../../packages/env/src/data-dir"
+import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
+import { waiterRunning } from "../../packages/scripts/src/stuck-alert"
 import { ownerSettings } from "../../packages/settings/src/owner"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { input } from "./input"
-import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, rosterRole } from "./role"
+import {
+  loadNames,
+  MANAGER_ROLES,
+  registryName,
+  roleOfName,
+  rosterKind,
+  rosterNames,
+  rosterRole,
+} from "./role"
 
 export const REASON =
   "name the open #iN on the same thing if one exists (playground ask open lists them), else post it with playground ask new, then say in chat that it's in the inbox as #iN"
@@ -398,15 +408,51 @@ async function gate(
   return `${reason} (${why.join("; ")})`
 }
 
+// The managers that keep a playground alerts-wait running (playbook's SESSIONS.md, Keep the sweep running), placed by the roster's kind for their name, else the name's own (placedKindOf: an `<id>-<kind>` name, a sessions.names or sessions.aliases name).
+const WAITER_KINDS = new Set<string>(["dispatcher", ...MANAGER_KINDS])
+export const waiterReason = (name: string) =>
+  `restart playground alerts-wait ${name} in the background`
+
+// The waiter gate: a manager that stops with no live alerts-wait is told to start it again, once a stop (`stop_hook_active` passes), so a session that cannot start it still stops; ops-wa sends the owner's line on through Ops meanwhile.
+async function waiterGate(
+  env: Record<string, string | undefined>,
+  sessionId: unknown,
+  active: unknown,
+  deps: Deps,
+): Promise<string | undefined> {
+  if (active === true || typeof sessionId !== "string") return
+  const name = await deps.sessionName(sessionId)
+  if (!name) return
+  await loadNames(env)
+  const kind = placedKindOf(name, await rosterKind(name, env))
+  if (!kind || !WAITER_KINDS.has(kind)) return
+  const outbox = join(dataDirOf(env), "ops", "outbox")
+  return (await waiterRunning(outbox, name)) ? undefined : waiterReason(name)
+}
+
 async function inspect(raw: string, env: Record<string, string | undefined>, deps: Deps) {
   const input = JSON.parse(raw) as {
     hook_event_name?: unknown
     last_assistant_message?: unknown
     session_id?: unknown
+    stop_hook_active?: unknown
     tool_name?: unknown
   }
   if (input.hook_event_name === "PreToolUse") return picker(input, env, deps)
-  const { last_assistant_message: reply, session_id: sessionId } = input
+  const [asked, waiter] = await Promise.all([
+    askGate(input.last_assistant_message, input.session_id, env, deps),
+    waiterGate(env, input.session_id, input.stop_hook_active, deps).catch(() => undefined),
+  ])
+  return [asked, waiter].filter(Boolean).join("\n") || undefined
+}
+
+// The inbox gate over the reply.
+async function askGate(
+  reply: unknown,
+  sessionId: unknown,
+  env: Record<string, string | undefined>,
+  deps: Deps,
+) {
   if (typeof reply !== "string") return
   const owner = await (deps.ownerNames ?? policyOwnerNames)(env)
   const asks = asksDecision(reply, [], owner)

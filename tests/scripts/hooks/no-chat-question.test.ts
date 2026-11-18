@@ -12,6 +12,7 @@ import {
   LEAD_REASON,
   REASON,
   STEPS_REASON,
+  waiterReason,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
 import { ITEMS } from "./inbox-items"
@@ -42,6 +43,24 @@ writeFileSync(
     ],
   }),
 )
+
+// The managers the cases below name keep a live alerts-wait, this test's own pid, so the waiter gate passes them.
+mkdirSync(join(config, "playground", "ops", "outbox", "alerts-wait"), { recursive: true })
+for (const name of [
+  "dispatcher",
+  "optimizer",
+  "seat-k8w2rd",
+  "x7mh4d-builder",
+  OLD.builder,
+  OLD.dispatcher,
+  `${OLD.dispatcher}-2`,
+  OLD.ops,
+  OLD.planner,
+])
+  writeFileSync(
+    join(config, "playground", "ops", "outbox", "alerts-wait", `${name}.pid`),
+    String(process.pid),
+  )
 
 const input = (last: unknown, active = false) =>
   JSON.stringify({
@@ -893,5 +912,87 @@ describe("a session with a manager asks it by SendMessage, never by an AskUserQu
     })
     expect(await run.exited).toBe(2)
     refused(await new Response(run.stderr).text())
+  })
+})
+
+describe("a manager's stop with no alerts-wait running is refused, naming its restart", () => {
+  // A data folder of its own, its outbox holding the waiter's pid when given.
+  const folder = (pid?: number) => {
+    const data = mkdtempSync(join(config, "waiter-"))
+    writeFileSync(
+      join(data, "roster.json"),
+      readFileSync(join(config, "playground", "roster.json")),
+    )
+    const outbox = join(data, "ops", "outbox")
+    mkdirSync(join(outbox, "alerts-wait"), { recursive: true })
+    if (pid !== undefined)
+      writeFileSync(join(outbox, "alerts-wait", "x7mh4d-builder.pid"), String(pid))
+    const stopAs = (name: string, last = "Both PRs merged.", active = false) =>
+      check(
+        input(last, active),
+        { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: data, PLAYGROUND_ROLE: "" },
+        { itemStatus: fakeDashboard(), ownerNames: async () => OWNER, sessionName: () => name },
+      )
+    return { stopAs }
+  }
+  // A pid whose process has gone: a child that has already exited.
+  const gonePid = async () => {
+    const run = Bun.spawn(["true"])
+    await run.exited
+    return run.pid
+  }
+
+  test("no waiter refuses the stop", async () => {
+    const f = folder()
+    expect(await f.stopAs("x7mh4d-builder")).toBe(waiterReason("x7mh4d-builder"))
+    expect(waiterReason("x7mh4d-builder")).toBe(
+      "restart playground alerts-wait x7mh4d-builder in the background",
+    )
+  })
+
+  test("a live waiter passes the stop", async () => {
+    expect(await folder(process.pid).stopAs("x7mh4d-builder")).toBeUndefined()
+  })
+
+  test("a stale pid file whose process is gone refuses the stop", async () => {
+    expect(await folder(await gonePid()).stopAs("x7mh4d-builder")).toBe(
+      waiterReason("x7mh4d-builder"),
+    )
+  })
+
+  test("each manager kind is held to it, by roster kind, id name or seat name", async () => {
+    const f = folder()
+    for (const name of [
+      "seat-k8w2rd",
+      "dispatcher",
+      "planner",
+      "builder",
+      "ops",
+      "optimizer",
+      "p4ktzq-planner",
+    ])
+      expect(await f.stopAs(name)).toBe(waiterReason(name))
+  })
+
+  test("workers, checkers, runners, probes and the owner's own sessions are untouched", async () => {
+    const f = folder()
+    for (const name of [
+      "k3v9q2-worker",
+      "k3v9q2-reviewer",
+      "k3v9q2-tester",
+      "k3v9q2-runner",
+      "probe-dashboard",
+      "scratch",
+    ])
+      expect(await f.stopAs(name)).toBeUndefined()
+  })
+
+  test("the stop after a refusal passes, so a manager that cannot start its waiter still stops", async () => {
+    expect(await folder().stopAs("x7mh4d-builder", "Both PRs merged.", true)).toBeUndefined()
+  })
+
+  test("a decision ask and a missing waiter both reach the session", async () => {
+    const reason = await folder().stopAs("x7mh4d-builder", "Merge them now?")
+    expect(reason).toBe(`${LEAD_REASON}\n${waiterReason("x7mh4d-builder")}`)
   })
 })

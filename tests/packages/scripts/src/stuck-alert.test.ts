@@ -10,6 +10,7 @@ import {
   callKey,
   callOf,
   detailOf,
+  forwardLine,
   lastWords,
   managerFor,
   pendingCalls,
@@ -206,6 +207,17 @@ describe("an alert to a manager with no alerts-wait running", () => {
     expect(ops).toEqual({
       text: "m4n7pq-builder has no playground alerts-wait running, so it hears this only from the relay: send it to m4n7pq-builder by SendMessage now.\nx is stuck",
       to: "ops",
+    })
+  })
+
+  test("a line for a manager whose waiter is down goes on through Ops, and Ops' own through the dispatcher", () => {
+    expect(forwardLine("dispatcher", "a made-up line")).toEqual({
+      text: "dispatcher has no playground alerts-wait running, so it hears this only from the relay: send it to dispatcher by SendMessage now.\na made-up line",
+      to: "ops",
+    })
+    expect(forwardLine("ops", "a made-up line")).toEqual({
+      text: "ops has no playground alerts-wait running, so it hears this only from the relay: send it to ops by SendMessage now.\na made-up line",
+      to: "dispatcher",
     })
   })
 

@@ -255,6 +255,7 @@ A waiter started after time down skips the alerts queued over 5 minutes before i
 while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe on its own machine reports to keeps no waiter, and its probe's alert comes by the relay alone; a probe on the other machine reports by `playground send`, so its spawner keeps a waiter while it lives ([Message a session](#message-a-session)).
 Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
+A manager's stop with no live waiter is refused once, naming its restart ([no-chat-question](../../../../scripts/hooks/README.md#no-chat-question)), and an owner WhatsApp line the dispatcher has not answered in a minute while its waiter is down goes to Ops to send on.
 Done when the task is running; the relay sends the same line later, so drop that copy.
 
 ## Wait on a signal

@@ -64,6 +64,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     alert: alert ?? "",
     // wa.replyPolicy and wa.guestPolicy as ops-wa reads them, their defaults unless a test sets them
     policy: undefined as Policy | undefined,
+    // whether the dispatcher's alerts-wait runs
+    waiter: true,
   }
   let now = START
   fake.setClock(() => now)
@@ -97,6 +99,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     inbox,
     media,
     policy: async () => mode.policy,
+    waiter: async () => mode.waiter,
   })
   watched.attach(fake.sock)
   return {
@@ -558,6 +561,41 @@ describe("WhatsApp mode", () => {
     h.fake.upsert([h.fake.message(jid(OWNER), "now?")])
     await h.settle()
     expect(h.fake.sent).toHaveLength(2)
+  })
+
+  test("a message the dispatcher has not answered in a minute while its alerts-wait is down goes on through Ops, once", async () => {
+    const h = harness()
+    h.mode.waiter = false
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    h.advance(30_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    h.advance(30_000)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", "ops"])
+    expect(h.routed[1]!.text).toStartWith(
+      "dispatcher has no playground alerts-wait running, so it hears this only from the relay: send it to dispatcher by SendMessage now.\nThe owner's WhatsApp at",
+    )
+    expect(h.routed[1]!.text).toContain("is it green?")
+  })
+
+  test("a running alerts-wait, or a reply sent in the minute, sends nothing on through Ops", async () => {
+    const live = harness()
+    live.fake.upsert([live.fake.message(jid(OWNER), "one")])
+    await live.settle()
+    live.advance(90_000)
+    await live.pass()
+    expect(live.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    const answered = harness()
+    answered.mode.waiter = false
+    answered.fake.upsert([answered.fake.message(jid(OWNER), "two")])
+    await answered.settle()
+    await answered.send("on it")
+    answered.advance(90_000)
+    await answered.pass()
+    expect(answered.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 
   test("hands a message with no reply in 3 minutes to the assistant seat too, once", async () => {
