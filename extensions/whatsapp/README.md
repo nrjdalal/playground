@@ -19,11 +19,12 @@ A saved number shows by its last 4 digits alone, and an empty field keeps it; th
 Each message of yours the dispatcher gets shows 👀, seen with a reply coming, and turns to ✅ when it needs no reply ([ADR 0031](../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
 A reply arrives after the time it takes to type it, 3 characters a second, so a long one takes up to a minute per part.
 
-## Photos and voice notes
+## What you can send
 
-A photo or voice note you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with the photo's caption or the note's words; it stays out of the attachments folder.
-Voice notes are read as text on this machine by whisper.cpp: `brew install whisper-cpp ffmpeg` (on Linux, build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and install your distro's `ffmpeg`), then put a ggml model at `<data>/wa/whisper-model.bin` (`playground doctor` lists `whisper-cli` as optional).
-Without them a voice note reaches the dispatcher as not transcribed, with its path.
+A photo, voice note, video or document you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with its caption, a document's name, or a voice note's or video's words; it stays out of the attachments folder.
+A sticker reaches the dispatcher by its kind; a location, a contact and a quoted reply as text, the reply with the words it quotes; an edit, a delete and your reaction on a reply as such, naming the message, and a delete or a reaction asks no reply.
+Voice notes and videos are read as text on this machine by whisper.cpp: `brew install whisper-cpp ffmpeg` (on Linux, build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and install your distro's `ffmpeg`), then put a ggml model at `<data>/wa/whisper-model.bin` (`playground doctor` lists `whisper-cli` as optional).
+Without them a voice note or video reaches the dispatcher as not transcribed, with its path.
 
 ## Inbox cards on WhatsApp
 

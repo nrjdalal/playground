@@ -129,6 +129,9 @@ export const UPDATE_MS = 15 * 60_000
 // Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
+// ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
+const oursFile = (dir: string) => join(dir, "ours.json")
+type Ours = { id: string; text: string }
 const handedFile = (dir: string) => join(dir, "handed.json")
 // alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
 const alertFile = (dir: string) => join(dir, "alert.json")
@@ -148,14 +151,13 @@ const chatKind = (jid: string): string | undefined => {
   if (jid.endsWith("@newsletter")) return "newsletter"
 }
 
-// What the dispatcher hears of a message with no text: its kind alone, never its content.
+// What the dispatcher hears of a file it does not read: its kind alone, never its content.
 const MEDIA: Record<string, string> = {
   audioMessage: "a voice note",
-  contactMessage: "a contact",
   documentMessage: "a document",
   imageMessage: "an image",
-  locationMessage: "a location",
   pollUpdateMessage: "a poll vote",
+  ptvMessage: "a video note",
   stickerMessage: "a sticker",
   videoMessage: "a video",
 }
@@ -165,10 +167,93 @@ const mediaOf = (message: Record<string, unknown>): string | undefined =>
     .map((k) => MEDIA[k])
     .find(Boolean)
 
+// The wrappers WhatsApp puts around a message (a disappearing chat's, a view-once one's, a document's with a caption), opened to the message inside.
+const WRAPS = [
+  "documentWithCaptionMessage",
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+]
+const unwrap = (message: Record<string, unknown>): Record<string, unknown> => {
+  for (const k of WRAPS) {
+    const inner = (message[k] as { message?: Record<string, unknown> | null } | undefined)?.message
+    if (inner) return unwrap(inner)
+  }
+  return message
+}
+
 const textOf = (message: Record<string, unknown>): string | undefined => {
   if (typeof message.conversation === "string" && message.conversation) return message.conversation
   const extended = message.extendedTextMessage as { text?: unknown } | undefined
   if (typeof extended?.text === "string" && extended.text) return extended.text
+}
+
+type Part = Record<string, unknown> | undefined
+const str = (value: unknown) => (typeof value === "string" && value ? value : undefined)
+// a vCard's name and numbers, as WhatsApp sends a contact
+const contactOf = (part: Part) => {
+  const vcard = str(part?.vcard) ?? ""
+  const numbers = [...vcard.matchAll(/^TEL[^:]*:(.+)$/gm)].map((t) => t[1]!.trim())
+  return [str(part?.displayName) ?? "no name", ...numbers].join(", ")
+}
+// WhatsApp's protocol message types for a delete and an edit
+const REVOKE = 0
+const MESSAGE_EDIT = 14
+
+// What the dispatcher hears of a message that is no file to keep, as the words after "The owner's WhatsApp at <time>": its text, with the text it quotes; a sticker by its kind; a location or a contact as text; an edit, a delete or a reaction naming the message it is about, which is never kept for wa react, and a delete or a reaction asks no reply. Undefined for a file or a kind ops-wa does not know.
+export type Said = { about?: true; notice?: true; phrase: string; text?: string }
+async function saidOf(io: Io, message: Record<string, unknown>): Promise<Said | undefined> {
+  const text = textOf(message)
+  if (text) {
+    const context = (message.extendedTextMessage as { contextInfo?: { quotedMessage?: Part } })
+      ?.contextInfo
+    const quoted = context?.quotedMessage ? unwrap(context.quotedMessage) : undefined
+    const quote = quoted && (textOf(quoted) ?? mediaOf(quoted))
+    return {
+      phrase: quote
+        ? `reads: ${text}\nIt answers the message that reads: ${quote}`
+        : `reads: ${text}`,
+      text,
+    }
+  }
+  if (message.stickerMessage) return { phrase: "holds a sticker" }
+  const place = (message.locationMessage ?? message.liveLocationMessage) as Part
+  if (place) {
+    const named = [str(place.name), str(place.address)].filter(Boolean).join(", ")
+    return {
+      phrase: `holds a location: latitude ${place.degreesLatitude}, longitude ${place.degreesLongitude}${named ? `, ${named}` : ""}`,
+    }
+  }
+  if (message.contactMessage)
+    return { phrase: `holds a contact: ${contactOf(message.contactMessage as Part)}` }
+  const contacts = (message.contactsArrayMessage as { contacts?: Part[] } | undefined)?.contacts
+  if (contacts?.length) return { phrase: `holds contacts: ${contacts.map(contactOf).join("; ")}` }
+  const protocol = message.protocolMessage as
+    | { editedMessage?: Part; key?: Key | null; type?: number | null }
+    | undefined
+  const id = protocol?.key?.id
+  if (protocol?.type === REVOKE && id)
+    return { about: true, notice: true, phrase: `deletes its message ${id}` }
+  if (protocol?.type === MESSAGE_EDIT && id) {
+    const edited = protocol.editedMessage ? textOf(unwrap(protocol.editedMessage)) : undefined
+    return edited
+      ? { about: true, phrase: `edits its message ${id} to read: ${edited}` }
+      : undefined
+  }
+  const reaction = message.reactionMessage as { key?: Key | null; text?: string | null } | undefined
+  const on = reaction?.key?.id
+  if (on) {
+    const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+    const ours = messages.find((o) => o.id === on)
+    const target = ours ? `ops-wa's message that reads: ${ours.text}` : `the message ${on}`
+    return {
+      about: true,
+      notice: true,
+      phrase: reaction.text
+        ? `reacts ${reaction.text} on ${target}`
+        : `takes back its reaction on ${target}`,
+    }
+  }
 }
 
 // One line in dropped.log: the time, the kind and the sender's last 4 digits, never the words or the whole number.
@@ -194,19 +279,19 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     if (from(alert)) return fromAlert(io, alert, m)
     return drop(io, "stranger", remoteJid)
   }
-  const message = m.message ?? {}
-  // the owner's reaction on a pending alert handles it, so it stays with the owner (ADR 0034); any other reaction goes no further
+  const message = unwrap(m.message ?? {})
+  // the owner's reaction on a pending alert handles it, so it stays with the owner (ADR 0034); any other reaction reaches the dispatcher as such
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction) {
-    if (reaction.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id)))
-      io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
+  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id))) {
+    io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }
-  const text = textOf(message)
+  const said = await saidOf(io, message)
   const media = mediaOf(message)
-  if (!text && !media) return
+  if (!said && !media) return
+  const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
@@ -225,13 +310,19 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
     return answerCard(io, io.inbox!, reply)
   const when = `${new Date(at).toISOString()}${idOf(m.key.id)}`
-  const line = text
-    ? `The owner's WhatsApp at ${when} reads: ${text}\n${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`
-    : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${replyLine((await policyOf(io)).reply)}`
+  const phrase =
+    said?.phrase ??
+    (await saved(io, m, message, at)) ??
+    `holds ${media}, which ops-wa does not read yet: say so to the owner.`
+  const line = `The owner's WhatsApp at ${when} ${phrase}\n${said?.notice ? NOTICE : `${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`}`
   await io.relay("dispatcher", line)
+  if (said?.notice) return
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
-  await seen(io, m, "owner", at)
+  if (!said?.about) await seen(io, m, "owner", at)
 }
+
+// A delete or a reaction asks nothing, so it is never handed on to the assistant seat.
+export const NOTICE = "No reply is needed."
 
 // Whose message a reaction answers: the owner's, or the alert number's, a guest's.
 export type Who = "alert" | "owner"
@@ -293,12 +384,12 @@ export const dataLine = (at: number, words: string, id?: string | null, guest = 
 // A message's id in its line, which wa react --id names.
 const idOf = (id: string | null | undefined) => (id ? `, id ${id}` : "")
 
-// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, a photo or voice note by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, no 👀 either, though it is kept for wa react --to alert.
+// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, any file by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, no 👀 either, though it is kept for wa react --to alert.
 async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
-  const message = m.message ?? {}
-  const text = textOf(message)
+  const message = unwrap(m.message ?? {})
+  const said = await saidOf(io, message)
   const media = mediaOf(message)
-  if (!text && !media) return
+  if (!said && !media) return
   const at = io.now()
   await ownFolder(io.dir)
   await wrote(alertFile(io.dir), "alertAt", at, jidOf(alert))
@@ -307,38 +398,52 @@ async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
     "dispatcher",
     dataLine(
       at,
-      text ?? `(it holds ${media}, which ops-wa does not keep)`,
+      said?.text
+        ? said.phrase.slice("reads: ".length)
+        : `(it ${said?.phrase ?? `holds ${media}, which ops-wa does not keep`})`,
       m.key.id,
       guestLine((await policyOf(io)).guest),
     ),
     true,
   )
-  await seen(io, m, "alert", at)
+  if (!said?.about) await seen(io, m, "alert", at)
 }
 
-// A photo or voice note kept in the media folder, and what the dispatcher hears of it: the path, a photo's caption, a voice note's words or that it was not transcribed; undefined for any other kind, or when it could not be kept.
+// A photo, voice note, video or document kept in the media folder, and what the dispatcher hears of it: the path, a caption, a document's name, and a voice note's or video's words through the same transcriber, or that it was not transcribed; undefined for any other kind, or when it could not be kept.
 async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown>, at: number) {
-  const kind = message.imageMessage ? "image" : message.audioMessage ? "audio" : undefined
-  if (!io.media || !kind) return undefined
-  const part = (message.imageMessage ?? message.audioMessage) as {
-    caption?: unknown
-    mimetype?: string
-  }
+  const key = [
+    "imageMessage",
+    "audioMessage",
+    "videoMessage",
+    "ptvMessage",
+    "documentMessage",
+  ].find((k) => message[k])
+  if (!io.media || !key) return undefined
+  const part = message[key] as { caption?: unknown; fileName?: unknown; mimetype?: string }
   let path: string
   try {
-    path = await keep(io.media.dir, at, part.mimetype, await io.media.download(m))
+    path = await keep(
+      io.media.dir,
+      at,
+      part.mimetype,
+      await io.media.download(m),
+      str(part.fileName),
+    )
   } catch (error) {
-    io.log(`ops-wa: a photo or voice note was not kept: ${(error as Error).message}`)
+    io.log(`ops-wa: ${MEDIA[key]} was not kept: ${(error as Error).message}`)
     return undefined
   }
-  if (kind === "image")
-    return typeof part.caption === "string" && part.caption
-      ? `holds a photo, kept at ${path}, with the words: ${part.caption}`
-      : `holds a photo, kept at ${path}`
+  const caption = str(part.caption) ? `, with the words: ${part.caption}` : ""
+  if (key === "imageMessage") return `holds a photo, kept at ${path}${caption}`
+  if (key === "documentMessage")
+    return `holds a document${str(part.fileName) ? `, ${part.fileName},` : ""} kept at ${path}${caption}`
   const words = await io.media.transcribe(path).catch(() => undefined)
-  return words
-    ? `holds a voice note, kept at ${path}, which says: ${words}`
-    : `holds a voice note, not transcribed, kept at ${path}`
+  if (key === "audioMessage")
+    return words
+      ? `holds a voice note, kept at ${path}, which says: ${words}`
+      : `holds a voice note, not transcribed, kept at ${path}`
+  const sound = words ? `its sound says: ${words}` : "its sound not transcribed"
+  return `holds ${MEDIA[key]}, kept at ${path}${caption}, ${sound}`
 }
 
 // A reply with no card id or no number is a card's only while some open card that went out waits on its rows, so the owner's "2" to the dispatcher's own question reaches the dispatcher.
@@ -682,11 +787,18 @@ export function sender(
       key?: { id?: string | null }
     } | null
     last = io.now()
+    const id = sent?.key?.id
+    if (id && "text" in content) {
+      const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      await writeOwn(oursFile(io.dir), {
+        messages: [...messages, { id, text: content.text }].slice(-50),
+      })
+    }
     if (sends) {
       sends.push(last)
       await writeOwn(sendsFile(io.dir), { sends })
     }
-    return sent?.key?.id
+    return id
   }
   // each send's time in the last hour, which the failover reads to tell whether the dispatcher answered
   const recent = async (now: number) =>

@@ -28,7 +28,8 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 ops-wa sends each text part after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
 
-A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
+A photo, voice note, video or document from the owner arrives as a path in `<data>/wa/media/`: read a photo or document there with the Read tool, and take a voice note's or video's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
+A line ending `No reply is needed.` (a delete, or the owner's reaction on a reply) asks no `wa send`.
 
 ## Inbox cards on WhatsApp
 
