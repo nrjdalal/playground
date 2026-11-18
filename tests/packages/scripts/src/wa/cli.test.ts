@@ -204,3 +204,59 @@ describe("playground wa alert (#2748)", () => {
     })
   })
 })
+
+describe("playground wa send --file (#2783)", () => {
+  test("hands the file's path to ops-wa beside the body, to the owner or as a guest's reply, and alone with no body", async () => {
+    const { body, data } = machine("the new board\n")
+    const shot = join(data, "wa", "outbox", "board.png")
+    mkdirSync(join(data, "wa", "outbox"), { recursive: true })
+    writeFileSync(shot, "made-up bytes")
+    const got: [string, string, string | undefined][] = []
+    const server = serve(socketPath(data), async (b, kind, file) => {
+      got.push([b, kind, file])
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["send", "--file", shot, body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--to", "alert", "--file", shot, body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--file", shot])).toEqual({ code: 0, out: "wa send: sent" })
+      expect(got).toEqual([
+        ["the new board", "reply", shot],
+        ["the new board", "guest", shot],
+        ["", "reply", shot],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("takes the file by its absolute path alone, and wa alert takes none", async () => {
+    const { body, data } = machine("hi")
+    const got: string[] = []
+    const server = serve(socketPath(data), async (b) => {
+      got.push(b)
+      return "sent"
+    })
+    try {
+      for (const args of [
+        ["send", "--file", "board.png", body],
+        ["send", "--file", join(data, "gone.png"), body],
+        ["send", "--file"],
+        ["alert", "--file", body, body],
+      ]) {
+        const { code, out } = await wa(data, args)
+        expect(code).toBe(2)
+        expect(out).toContain("playground wa send [--to alert] --file <path> [<file>]")
+      }
+      expect(got).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+  })
+})

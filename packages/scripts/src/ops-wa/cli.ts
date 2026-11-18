@@ -29,6 +29,7 @@ import { type Card, termsOf } from "./cards"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, transcriber } from "./media"
+import { outboxDir } from "./outbound"
 import { socketPath, serve } from "./server"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
@@ -144,6 +145,7 @@ const main = async () => {
   }
   if (!owner || !device) return stop("wa.owner and wa.device must both be set", "waiting")
   await ownFolder(dir)
+  await ownFolder(outboxDir(data))
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
   const holder = await takeLock(lock, process.pid, (pid) => {

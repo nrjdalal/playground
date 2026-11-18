@@ -25,6 +25,10 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 `playground wa status` prints whether each number has written and the owner's hours left for replies.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL) and splits a long body into parts, so write the reply as you would for the Inbox.
 
+To send a file, put it in `<data>/wa/outbox/` and add `--file <absolute path>`: `playground wa send [--to alert] --file <path> [<body file>]` ([ADR 0036](../../../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)).
+An image (`jpg`, `jpeg`, `png`), a video (`mp4`) or a document (`pdf`, `txt`, `md`, `csv`, `json`) carries the body as its caption; a voice note (`ogg`, `opus`) takes none, so the body goes before it as text.
+A file of any other type, or outside the outbox, is refused, and a text document is read for a token shape as a body is.
+
 A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 
 ## Inbox cards on WhatsApp

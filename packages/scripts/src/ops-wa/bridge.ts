@@ -1,5 +1,5 @@
 import { appendFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
@@ -23,6 +23,7 @@ import {
 } from "./cards"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 import { keep } from "./media"
+import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
 import { alertSeedFile } from "./seed"
 
 type Key = {
@@ -38,7 +39,7 @@ type Events = { call: Call[]; "messages.upsert": Upsert }
 // The calls ops-wa makes on a Baileys socket, so a test hands it a fake one.
 export type Sock = {
   ev: { on<K extends keyof Events>(name: K, fn: (arg: Events[K]) => void): void }
-  sendMessage(jid: string, content: { linkPreview: null; text: string }): Promise<unknown>
+  sendMessage(jid: string, content: Content): Promise<unknown>
 }
 export type Io = {
   // the second number in E.164, wa.alert, read afresh for each send and each message, empty for none: it gets alerts and chats as a guest, and its messages are data
@@ -482,8 +483,11 @@ export type Kind = "alert" | "guest" | "reply"
 export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  const sendNow = async (body: string, kind: Kind): Promise<string> => {
-    const refusal = refusalOf(body)
+  const sendNow = async (body: string, kind: Kind, path?: string): Promise<string> => {
+    // the outbox sits beside whatsapp/ in the data folder
+    const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
+    const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
+    const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
     const now = io.now()
     const alert = kind === "alert"
@@ -494,7 +498,7 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       )
     if (kind === "guest") {
       if (!second) throw new Error("no alert number is set (wa.alert)")
-      const why = guestRefusal(body)
+      const why = guestRefusal(words)
       if (why) throw new Error(why)
     }
     const record = await readOwn<Wrote>(
@@ -523,15 +527,15 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
           ? `${to.length === 1 ? "the owner has never" : "neither the owner nor the alert number has ever"} written to this number, and ops-wa never starts a chat`
           : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    const parts = split(toWhatsApp(body))
+    const messages = messagesOf(split(toWhatsApp(body)), file)
     const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
     // each send's time, which the failover reads to tell whether the dispatcher answered
     const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
     for (const t of going)
-      for (const [k, part] of parts.entries()) {
+      for (const [k, content] of messages.entries()) {
         const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()
         if (last > 0 && wait > 0) await io.sleep(wait)
-        await io.sock.sendMessage(t.jid, { linkPreview: null, text: part })
+        await io.sock.sendMessage(t.jid, content)
         last = io.now()
         sends.push(last)
         await writeOwn(sendsFile(io.dir), { sends })
@@ -541,8 +545,9 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
       : "sent"
   }
-  return (body: string, kind: Kind = "reply"): Promise<string> => {
-    const run = chain.then(() => sendNow(body, kind))
+  // path: a file from the outbox (outbound.ts), sent with the body as its caption
+  return (body: string, kind: Kind = "reply", path?: string): Promise<string> => {
+    const run = chain.then(() => sendNow(body, kind, path))
     chain = run.catch(() => {})
     return run
   }

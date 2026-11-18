@@ -3,12 +3,15 @@ import { join } from "node:path"
 
 import type { Kind } from "./bridge"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, to?} in, `to: "alert"` a guest's reply, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, file?, to?} in, `to: "alert"` a guest's reply, `file` a path in the outbox (outbound.ts), the body then its caption and may be empty, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
 type Reply = { note?: string; refusal?: string; sent?: true }
 
-export function serve(path: string, send: (body: string, kind: Kind) => Promise<string>) {
+export function serve(
+  path: string,
+  send: (body: string, kind: Kind, file?: string) => Promise<string>,
+) {
   const server = Bun.listen<{ done: boolean; text: string }>({
     socket: {
       data: (socket, chunk) => {
@@ -21,14 +24,16 @@ export function serve(path: string, send: (body: string, kind: Kind) => Promise<
           socket.write(`${JSON.stringify(reply)}\n`)
           socket.end()
         }
-        let asked: { alert?: unknown; body?: unknown; to?: unknown } = {}
+        let asked: { alert?: unknown; body?: unknown; file?: unknown; to?: unknown } = {}
         try {
           asked = JSON.parse(socket.data.text) as typeof asked
         } catch {}
         const { body } = asked
-        if (typeof body !== "string" || !body.trim()) return answer({ refusal: "an empty body" })
+        const file = typeof asked.file === "string" && asked.file ? asked.file : undefined
+        if (typeof body !== "string" || (!body.trim() && !file))
+          return answer({ refusal: "an empty body" })
         const kind = asked.alert === true ? "alert" : asked.to === "alert" ? "guest" : "reply"
-        send(body, kind).then(
+        send(body, kind, file).then(
           (said) => answer(said === "sent" ? { sent: true } : { note: said, sent: true }),
           (error: Error) => answer({ refusal: error.message }),
         )
@@ -49,6 +54,7 @@ export async function request(
   body: string,
   kind: Kind = "reply",
   timeoutMs = 600_000,
+  file?: string,
 ): Promise<Reply> {
   if (!existsSync(path)) return { refusal: "ops-wa is not running: its job is off or stopped" }
   const answered = Promise.withResolvers<Reply>()
@@ -75,12 +81,14 @@ export async function request(
       },
       error: () => resolve({ refusal: "ops-wa's socket did not answer" }),
       open: (socket) => {
-        const asked =
-          kind === "alert"
+        const asked = {
+          ...(kind === "alert"
             ? { alert: true, body }
             : kind === "guest"
               ? { body, to: "alert" }
-              : { body }
+              : { body }),
+          ...(file && { file }),
+        }
         socket.write(`${JSON.stringify(asked)}\n`)
       },
     },

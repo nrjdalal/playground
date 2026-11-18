@@ -9,7 +9,8 @@ export const jid = (e164: string) => `${e164.slice(1)}@s.whatsapp.net`
 // A group's chat id, by WhatsApp's group suffix.
 export const groupJid = (id: string) => `${id}@g.us`
 
-type Content = { linkPreview?: null; text: string }
+// a text's or a file's message, as ops-wa's Content holds them
+type Content = { linkPreview?: null; text?: string } & Record<string, unknown>
 
 // A Baileys socket held in memory, answering the calls ops-wa makes: its events are fired by the test, each send and pairing code request recorded, and end and logout close it as Baileys does.
 export function fakeSocket(registered = true) {
