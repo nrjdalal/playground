@@ -25,6 +25,7 @@ import { assistantOf, busyOf, stuckOf } from "../ops-job/dispatcher"
 import { engineData, REPO, run, sendAs } from "../ops-job/job"
 import { beat, CYCLE_SECONDS } from "../ops-tick/tick"
 import { dashboardCheckout } from "../playground/probe"
+import { waiterSince } from "../stuck-alert"
 import { EMPTY_LIST, isPublicList, reposOf } from "../trace-count/kinds"
 import { alertSet } from "./alert-set"
 import { bridge, type Inbox, type Sock, sender } from "./bridge"
@@ -289,6 +290,7 @@ const main = async () => {
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
     votes: votedOptions,
+    waiter: (name, since) => waiterSince(join(data, "ops", "outbox"), name, since),
   })
   const passes = setInterval(() => watched.pass(), 30_000)
   const reminder = setInterval(
