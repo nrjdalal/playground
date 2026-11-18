@@ -992,7 +992,9 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       )
       expect(refused.code).toBe(1)
       expect(refused.stderr).toContain("not one a poster may start")
-      expect(refused.stderr).toContain("send its progress up the chain")
+      expect(refused.stderr).toContain(
+        "send its progress up the chain, for the dispatcher to add as a row on",
+      )
       expect(refused.stderr).toContain(card.tag)
       expect(refused.stdout).toBe("")
       // an update without a progress block still posts, from any poster
