@@ -121,6 +121,12 @@ export const busyOf = (text: string): number | null => {
   return counts.length ? counts.reduce((sum, found) => sum + Number(found[1]), 0) : null
 }
 
+// Pure: whether a /metrics read shows the model working, its requests running and waiting above 0; a read that failed or names neither is not busy.
+export const metricsBusy = (text: string | null): boolean => {
+  const busy = text === null ? null : busyOf(text)
+  return busy !== null && busy > 0
+}
+
 export type Sizing = { maxSessions: number; roomGiB: number; share: number }
 
 // Pure: a server's share and sessions from one memory reading: the room is what is free above the reserve, the share that room over the total, rounded down to a hundredth and capped at the model's working share, and the sessions the KV cache that share leaves after weights and overhead, at sessionTokens each.

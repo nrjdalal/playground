@@ -24,9 +24,10 @@ export type CardState = { at?: string; id: string; items: CardItem[] }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
 export type Kept = Record<string, number>
 
-// An Inbox item as `bun run ask get` prints it: the fields an approval reads.
+// An Inbox item as `bun run ask get` prints it: the fields an approval reads, and createdAt the guard falls back to when the saved write time is missing.
 export type CardAnswer = {
   answer?: { at?: string; choice?: string; options?: number[] }
+  createdAt?: string
   from?: string
   preview?: {
     deny?: string
@@ -191,7 +192,7 @@ export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAn
   return lastLine(read.out) || `exit ${read.code}`
 }
 
-// Pure: card id's Remove picks, counted only when the card reads as nightly-clean last wrote it, cardOf of the items it saved, questions, order and options alike, and the answer came at or after that write; else why it does not count, so no edit or race after the owner's answer approves what the owner did not pick.
+// Pure: card id's Remove picks, counted only when the card reads as nightly-clean last wrote it, cardOf of the items it saved, questions, order and options alike, and the answer came at or after that write (the saved write time, else the card's createdAt when none was saved, else no time to check against); else why it does not count, so no edit or race after the owner's answer approves what the owner did not pick.
 export const savedPicks = (
   card: CardAnswer,
   from: string,
@@ -202,8 +203,12 @@ export const savedPicks = (
   if (shapeOf(card.preview) !== shapeOf(cardOf(saved.items).preview))
     return `card ${id} no longer reads as nightly-clean wrote it`
   const at = card.answer?.at
-  if (!saved.at || !at || at < saved.at)
-    return `card ${id} was answered before nightly-clean's last write`
+  // A saved write time is the card's own updatedAt from that write; none was saved, so fall back to the card's createdAt, the time ask get reads, and check the answer against it.
+  const against = saved.at ?? card.createdAt
+  if (!against || !at || at < against)
+    return against
+      ? `card ${id} was answered before nightly-clean's last write`
+      : `card ${id} has no write time and no created time to check the answer against`
   return approvedOf(card, from)
 }
 

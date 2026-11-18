@@ -285,10 +285,28 @@ describe("progressRefusal", () => {
     expect(progressRefusal(ask("```\nA | 500 | not a progress block\n```"))).toBeNull()
   })
 
-  test("names the block and line with other than 4 fields, and the line itself", () => {
+  test("names the block and line with other than 4 or 5 fields, and the line itself", () => {
     const refusal = progressRefusal(update(block("A | 10 | x | y", "B | 20 | no eta")))
-    expect(refusal).toContain('progress block 1, line 2, holds 3 fields, not 4: "B | 20 | no eta"')
-    expect(refusal).toContain("name | percent | what's going on | ETA")
+    expect(refusal).toContain(
+      'progress block 1, line 2, holds 3 fields, not 4 or 5: "B | 20 | no eta"',
+    )
+    expect(refusal).toContain("name | percent | what's going on | ETA | state")
+    expect(progressRefusal(ask(block("A | 10 | x | y | active | z")))).toContain(
+      'progress block 1, line 1, holds 6 fields, not 4 or 5: "A | 10 | x | y | active | z"',
+    )
+  })
+
+  test("passes a line with a state, and names a line whose state is unknown, on an ask and an edit's update (PG-2730)", () => {
+    expect(
+      progressRefusal(ask(block("A | 10 | x | y | active", "B | 20 | x | y | held"))),
+    ).toBeNull()
+    for (const input of [
+      ask(block("A | 10 | x | y", "B | 20 | x | y | busy")),
+      update(block("A | 10 | x | y", "B | 20 | x | y | busy")),
+    ])
+      expect(progressRefusal(input)).toContain(
+        'progress block 1, line 2, has the state "busy", not active, done, held or waiting: "B | 20 | x | y | busy"',
+      )
   })
 
   test("names a percent outside 0 to 100, in the second block", () => {

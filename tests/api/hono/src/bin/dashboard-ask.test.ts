@@ -303,10 +303,17 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const short = await cli(["new"], JSON.stringify(status("Mac reads | 100 | done")))
     expect(short.code).toBe(1)
     expect(short.stderr).toContain(
-      'progress block 1, line 1, holds 3 fields, not 4: "Mac reads | 100 | done"',
+      'progress block 1, line 1, holds 3 fields, not 4 or 5: "Mac reads | 100 | done"',
     )
     expect(short.stdout).toBe("")
-    const { id, tag } = await post(status("Mac reads | 100 | Reads every Mac | 9:10 pm", wide))
+    const busy = await cli(["new"], JSON.stringify(status("Sign-in | 40 | x | y | busy")))
+    expect(busy.code).toBe(1)
+    expect(busy.stderr).toContain(
+      'progress block 1, line 1, has the state "busy", not active, done, held or waiting: "Sign-in | 40 | x | y | busy"',
+    )
+    const { id, tag } = await post(
+      status("Mac reads | 100 | Reads every Mac | 9:10 pm", `${wide} | active`),
+    )
     const posted = await cli(["get", id])
     expect(JSON.parse(posted.stdout)).toMatchObject({ kind: "update" })
     const over = await cli(
@@ -316,6 +323,14 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(over.code).toBe(1)
     expect(over.stderr).toContain(
       'progress block 1, line 2, has a percent outside 0 to 100: "Sign-in | 140 | x | y"',
+    )
+    const stuck = await cli(
+      ["edit", tag],
+      JSON.stringify(status("Mac reads | 100 | x | y", "Sign-in | 40 | x | y | stuck")),
+    )
+    expect(stuck.code).toBe(1)
+    expect(stuck.stderr).toContain(
+      'progress block 1, line 2, has the state "stuck", not active, done, held or waiting: "Sign-in | 40 | x | y | stuck"',
     )
     const edited = await cli(["edit", tag], JSON.stringify(status("Mac reads | 100 | x | y", wide)))
     expect(edited.code).toBe(0)
