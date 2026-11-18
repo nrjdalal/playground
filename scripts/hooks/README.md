@@ -703,7 +703,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `github.pollMinutes`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, `usage.keychainService`,
-  `wa.alert`, whose Approve stands in for that WhatsApp number's first message (ADR 0028) and which ops-wa also writes from the owner's own WhatsApp message (ADR 0032), `wa.guestPolicy` and `wa.replyPolicy`, the policy lines ops-wa hands the dispatcher (ADR 0030), and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
+  `wa.alert`, whose Approve stands in for that WhatsApp number's first message (ADR 0028) and which ops-wa also writes from the owner's own WhatsApp message (ADR 0032), `wa.alertCheck`, the checker ops-wa runs for an urgent alert (ADR 0034),
+  `wa.guestPolicy` and `wa.replyPolicy`, the policy lines ops-wa hands the dispatcher (ADR 0030), and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
   and of every ops job's `jobs.<name>`,
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.

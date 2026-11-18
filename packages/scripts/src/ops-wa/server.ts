@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import type { Kind, Who } from "./bridge"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, to?} in, `to: "alert"` a guest's reply, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, source?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
 type Reply = { note?: string; refusal?: string; sent?: true }
@@ -12,7 +12,7 @@ type React = (emoji: string, on: { id?: string; who?: Who }) => Promise<string>
 
 export function serve(
   path: string,
-  send: (body: string, kind: Kind) => Promise<string>,
+  send: (body: string, kind: Kind, source?: string) => Promise<string>,
   alertSet?: (id: string) => Promise<string>,
   react?: React,
 ) {
@@ -34,6 +34,7 @@ export function serve(
           body?: unknown
           id?: unknown
           react?: unknown
+          source?: unknown
           to?: unknown
         } = {}
         try {
@@ -54,8 +55,16 @@ export function serve(
           )
         const { body } = asked
         if (typeof body !== "string" || !body.trim()) return answer({ refusal: "an empty body" })
-        const kind = asked.alert === true ? "alert" : asked.to === "alert" ? "guest" : "reply"
-        send(body, kind).then(
+        const kind =
+          asked.alert === true
+            ? "alert"
+            : asked.alert === "first"
+              ? "first"
+              : asked.to === "alert"
+                ? "guest"
+                : "reply"
+        const source = typeof asked.source === "string" && asked.source ? asked.source : undefined
+        send(body, kind, kind === "first" ? source : undefined).then(
           (said) => answer(said === "sent" ? { sent: true } : { note: said, sent: true }),
           (error: Error) => answer({ refusal: error.message }),
         )
@@ -71,10 +80,22 @@ export function serve(
 }
 
 // wa send's and wa alert's side: the body to ops-wa and its one-line answer, or why ops-wa did not answer.
-export const request = (path: string, body: string, kind: Kind = "reply", timeoutMs = 600_000) =>
+export const request = (
+  path: string,
+  body: string,
+  kind: Exclude<Kind, "escalate"> = "reply",
+  timeoutMs = 600_000,
+  source?: string,
+) =>
   ask(
     path,
-    kind === "alert" ? { alert: true, body } : kind === "guest" ? { body, to: "alert" } : { body },
+    kind === "alert"
+      ? { alert: true, body }
+      : kind === "first"
+        ? { alert: "first", body, ...(source && { source }) }
+        : kind === "guest"
+          ? { body, to: "alert" }
+          : { body },
     timeoutMs,
   )
 
