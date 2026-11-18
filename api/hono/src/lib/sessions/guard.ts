@@ -62,7 +62,6 @@ export type Published = {
   id: string
   image: string
   name: string
-  password: string
 }
 
 type Json = Record<string, unknown>
@@ -71,14 +70,6 @@ const isRecord = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "")
-
-// Pure: the password a container started with, from the POSTGRES_PASSWORD= line of Config.Env, or empty.
-const envPassword = (env: unknown): string => {
-  const line = (Array.isArray(env) ? env : []).find(
-    (value) => typeof value === "string" && value.startsWith("POSTGRES_PASSWORD="),
-  )
-  return line ? line.slice("POSTGRES_PASSWORD=".length) : ""
-}
 
 // From `docker inspect` of the running containers: each one that publishes the host port, with every host address it binds it on.
 export const publishedOn = (inspect: unknown, port: number): Published[] =>
@@ -97,7 +88,6 @@ export const publishedOn = (inspect: unknown, port: number): Published[] =>
         id: str(container.Id),
         image: str(config.Image),
         name: str(container.Name).replace(/^\//, ""),
-        password: envPassword(config.Env),
       },
     ]
   })
@@ -157,9 +147,9 @@ const publishers = (port: number, run: Docker): Published[] => {
   }
 }
 
-// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes and password, so the new Postgres is the old one read back.
-const keepDataFix = (name: string, port: number, password: string): string =>
-  `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 -e POSTGRES_PASSWORD=${password} --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
+// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes and its password read back from the old container at run time, so the new Postgres is the old one read back.
+const keepDataFix = (name: string, port: number): string =>
+  `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 -e POSTGRES_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' ${name}-old | sed -n 's/^POSTGRES_PASSWORD=//p')" --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
 
 // The one running container that publishes the URL's port, on loopback alone and first run's own included, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it; an exposed refusal carries the container, so a caller can still name it.
 export const locate = (url: string, run: Docker = docker): Located => {
@@ -176,7 +166,7 @@ export const locate = (url: string, run: Docker = docker): Located => {
     const where = owner.addresses.map((address) => address || "every interface").join(", ")
     throw new GuardError(
       "exposed",
-      `${owner.name} publishes port ${target.port} beyond loopback (${where}); keep its data and re-publish it on 127.0.0.1 alone: \`${keepDataFix(owner.name, target.port, owner.password)}\`; if docker rename fails because ${owner.name}-old already exists, the database is stopped, so start it again with docker start ${owner.name} before retrying`,
+      `${owner.name} publishes port ${target.port} beyond loopback (${where}); keep its data and re-publish it on 127.0.0.1 alone: \`${keepDataFix(owner.name, target.port)}\`; if a step fails, the database is left stopped, so \`docker start ${owner.name}\` brings it back when the rename failed, and \`docker rename ${owner.name}-old ${owner.name} && docker start ${owner.name}\` once the rename has run`,
       { owner, target },
     )
   }

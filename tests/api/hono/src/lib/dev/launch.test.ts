@@ -657,13 +657,7 @@ const LIVE_READS = { PLAYGROUND_LIVE_READS: "1" }
 
 // Stand-ins for the guard: the container that publishes the port, or the guard's own refusal, and a proof that records each call.
 const located = (name: string): Located => ({
-  owner: {
-    addresses: ["127.0.0.1"],
-    id: `${name}-id`,
-    image: "postgres:alpine",
-    name,
-    password: "",
-  },
+  owner: { addresses: ["127.0.0.1"], id: `${name}-id`, image: "postgres:alpine", name },
   target: { database: "postgres", host: "127.0.0.1", port: 33001 },
 })
 const failing = (failure: GuardFailure, message: string) => () => {
