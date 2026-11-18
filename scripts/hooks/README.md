@@ -1446,7 +1446,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-raw-wa
 
-- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>` and its siblings (`wa alert`, `wa alert-set`, `wa status`): `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket, the owner's messages and the owner's answers to cards,
+- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>` and its siblings (`wa alert`, `wa alert-set`, `wa react`, `wa status`): `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket, the owner's messages and the owner's answers to cards,
   so no session can copy the device, write past the allowlist of one or answer a card as the owner ([ADR 0023](../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md), [ADR 0024](../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)).
   It reads the folder as typed and through its links, in any case, as macOS opens it.
   On Bash it refuses a call whose text names that folder under `.playground`, `$PLAYGROUND_DATA_DIR` or the data folder's own path, whatever reads it (a script's string, a variable it cannot expand), then walks the call through `shell.ts`'s reader:
