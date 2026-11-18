@@ -236,13 +236,17 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
       const states = await Promise.all(prs.map((url) => prState(url)))
       const open = states.flatMap((s, i) => (s?.state === "open" ? [prs[i]] : []))
-      // A checker is kept while one of its own open PRs was active under the last day, so a reaper beat between the lead's hand-off and the next review never ends the queue reviewer, even with the row's worker paused and gone.
-      const active = states.some(
-        (s) =>
+      // A checker is kept while one of its own roster prs is open and was active under the last day, even with the row's worker paused and gone; a PR only a transcript links keeps none.
+      const own = new Set(roster[name]?.prs ?? [])
+      const active = prs.some((url, i) => {
+        const s = states[i]
+        return (
+          own.has(url) &&
           s?.state === "open" &&
-          Boolean(s.updatedAt) &&
-          now - new Date(s.updatedAt as string).getTime() / 1000 < RECENT_S,
-      )
+          s.updatedAt !== undefined &&
+          now - Date.parse(s.updatedAt) / 1000 < RECENT_S
+        )
+      })
       if (
         worker &&
         !(worker in sessions) &&

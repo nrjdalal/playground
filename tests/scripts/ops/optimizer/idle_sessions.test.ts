@@ -383,6 +383,25 @@ describe("collect: live sessions with nothing to do", () => {
     expect(whys(rows)).toEqual([["checker-worker-gone (a1b2c4-worker)"]])
   })
 
+  test("checker-worker-gone: a PR only its transcript links keeps no checker, however active", async () => {
+    const LINKED = "https://github.com/o/r/pull/2142"
+    const recent = new Date((NOW - 60 * 60) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === LINKED ? { head: "eee7777", state: "open", updatedAt: recent, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        linkedPrs: async () => [LINKED],
+        prState,
+        roster: {
+          "a1b2c5-reviewer": { kind: "reviewer", name: "a1b2c5-reviewer", worker: "a1b2c5-worker" },
+          "a1b2c5-worker": { kind: "worker", name: "a1b2c5-worker", status: "paused" },
+        },
+        sessions: { "a1b2c5-reviewer": entry({ name: "a1b2c5-reviewer", sessionId: "sess-c1" }) },
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-worker-gone (a1b2c5-worker)"]])
+  })
+
   test("checker-pr-done: one merged PR flags, and so do two closed ones", async () => {
     const sessions = {
       "tester-bright-lark": entry({ name: "tester-bright-lark", sessionId: "sess-t" }),
