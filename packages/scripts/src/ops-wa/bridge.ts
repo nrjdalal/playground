@@ -15,6 +15,7 @@ import {
   noRow,
   notAnswered,
   notSent,
+  pollOf,
   type Reply,
   replyOf,
   type Sent,
@@ -26,6 +27,7 @@ import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted 
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 import { keep } from "./media"
 import { alertSeedFile } from "./seed"
+import type { Vote, votedOptions } from "./votes"
 
 type Key = {
   fromMe?: boolean | null
@@ -41,8 +43,14 @@ type Events = { call: Call[]; "messages.upsert": Upsert }
 // The calls ops-wa makes on a Baileys socket, so a test hands it a fake one.
 export type Sock = {
   ev: { on<K extends keyof Events>(name: K, fn: (arg: Events[K]) => void): void }
-  sendMessage(jid: string, content: { linkPreview: null; text: string }): Promise<unknown>
+  sendMessage(jid: string, content: Content): Promise<unknown>
+  // the linked device's own chat ids, which a vote on its poll is encrypted with
+  user?: { id?: string; lid?: string } | null
 }
+// What ops-wa sends: text, or a poll of one choice, whose secret it makes itself so it can read the owner's vote.
+export type Content =
+  | { linkPreview: null; text: string }
+  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
 export type Io = {
   // the second number in E.164, wa.alert, read afresh for each send and each message, empty for none: it gets alerts and chats as a guest, and its messages are data
   alert?: () => Promise<string>
@@ -76,6 +84,10 @@ export type Mode = {
   confirm?: (text: string) => Promise<boolean>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
+  // sends a card's choices as a poll to the owner; a bridge with none sends text alone
+  poll?: (name: string, values: string[]) => Promise<PollSent>
+  // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
+  votes?: typeof votedOptions
 }
 export type Media = {
   // <data>/wa/media
@@ -140,6 +152,7 @@ const MEDIA: Record<string, string> = {
   documentMessage: "a document",
   imageMessage: "an image",
   locationMessage: "a location",
+  pollUpdateMessage: "a poll vote",
   stickerMessage: "a sticker",
   videoMessage: "a video",
 }
@@ -166,7 +179,7 @@ async function drop(io: Io, kind: string, from: string) {
   )
 }
 
-async function inbound(io: Io & Mode, m: Incoming) {
+async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const { fromMe, participant, remoteJid, remoteJidAlt } = m.key
   if (fromMe || !remoteJid) return
   const kind = chatKind(remoteJid)
@@ -204,6 +217,7 @@ async function inbound(io: Io & Mode, m: Incoming) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
+  if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   if (text && io.confirm && (await io.confirm(text))) return
   const reply = io.inbox && text ? replyOf(text) : null
   if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
@@ -312,6 +326,34 @@ async function rowsWait(io: Io & Mode, inbox: Inbox): Promise<boolean> {
   return open.some((card) => sent[card.ref]?.id === card.id && sent[card.ref]!.rows.length > 0)
 }
 
+// The owner's vote on a card's poll: read back with the poll's secret, it answers the card as a typed reply of that row's number would; a vote on a poll that never went out here, one that picks no row (a vote taken back) or one that cannot be read answers nothing.
+async function vote(io: Io & Mode, inbox: Inbox, m: Incoming, me?: Sock["user"]) {
+  const update = m.message!.pollUpdateMessage as {
+    pollCreationMessageKey?: { id?: string | null } | null
+    vote?: Vote | null
+  }
+  const sent = (await readOwn<Cards>(cardsFile(io.dir), {})).sent ?? {}
+  const hit = Object.entries(sent).find(
+    ([, card]) => card.poll && card.poll.id === update.pollCreationMessageKey?.id,
+  )
+  if (!hit || !update.vote || !io.votes) return
+  const [ref, card] = hit
+  const ids = (...jids: (string | null | undefined)[]) => [
+    ...new Set(jids.flatMap((jid) => (jid ? [jid.replace(/:\d+(?=@)/, "")] : []))),
+  ]
+  const picked = io.votes(
+    update.vote,
+    card.poll!,
+    ids(me?.id, me?.lid),
+    ids(m.key.remoteJid, m.key.remoteJidAlt, jidOf(io.owner)),
+    pollOf(Number(ref), "", card.rows)?.values ?? [],
+  )
+  if (picked === undefined) return io.log(`ops-wa: a vote on #i${ref}'s poll could not be read`)
+  if (picked.length !== 1)
+    return io.log(`ops-wa: a vote on #i${ref}'s poll picks no row, so it answers nothing`)
+  return answerCard(io, inbox, { number: picked[0]! + 1, ref: Number(ref) })
+}
+
 // An owner's reply naming a card: it answers the card only when the card went out here and the number is one of its rows, else one line back says why it answers nothing.
 async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   const say = (line: string) =>
@@ -329,7 +371,7 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   )
 }
 
-// The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting line, sent when the cards it counts change.
+// The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting message, a 📥 line per card by its title, sent when the cards it names change.
 async function cards(io: Io & Mode, inbox: Inbox) {
   const now = io.now()
   const state = await readOwn<Cards>(cardsFile(io.dir), {})
@@ -339,18 +381,28 @@ async function cards(io: Io & Mode, inbox: Inbox) {
   let held = state.held
   try {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
-    const kept: string[] = []
+    const kept: Card[] = []
     for (const card of open) {
       if (!terms || !goesOut(card, terms)) {
-        if (waits(card, now)) kept.push(card.id)
+        if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
-        const { rows, text } = cardOf(card, terms)
+        const { poll, rows, text } = cardOf(card, terms)
         await io.reply(text)
         sent[card.ref] = { at: io.now(), id: card.id, rows }
+        // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
+        if (poll && io.poll)
+          try {
+            sent[card.ref]!.poll = await io.poll(poll.name, poll.values)
+          } catch (error) {
+            io.log(`ops-wa: a card's poll: ${(error as Error).message}`)
+          }
       }
     }
-    const key = kept.sort().join(",")
-    if (kept.length > 0 && key !== held) await io.reply(waitingLine(kept.length))
+    const key = kept
+      .map((card) => card.id)
+      .sort()
+      .join(",")
+    if (kept.length > 0 && key !== held) await io.reply(waitingLine(kept, terms))
     held = key
   } finally {
     await writeOwn(cardsFile(io.dir), { held, sent })
@@ -417,7 +469,7 @@ export function bridge(io: Io & Mode) {
     attach: (sock: Sock) => {
       sock.ev.on("messages.upsert", ({ messages, type }) => {
         if (type !== "notify") return
-        for (const m of messages) queue(() => inbound(io, m))
+        for (const m of messages) queue(() => inbound(io, m, sock.user))
       })
       sock.ev.on("call", (calls) => {
         for (const c of calls) if (c.status === "offer") queue(() => drop(io, "call", c.from))
@@ -428,20 +480,71 @@ export function bridge(io: Io & Mode) {
   }
 }
 
-// Markdown as WhatsApp marks it: headings and bold as *bold*, __x__ as _x_, a link as its text and URL; a fenced block stays as it is.
+// Markdown as WhatsApp marks it: a table as a monospace block or label: value lines, a callout as one plain line, headings and bold as *bold*, __x__ as _x_, a link as its text and URL; a fenced block stays as it is.
 export const toWhatsApp = (md: string): string =>
+  outsideFences(
+    outsideFences(md, (piece) => tables(callouts(piece))),
+    (piece) =>
+      piece
+        .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
+        .replace(/\*\*(.+?)\*\*/g, "*$1*")
+        .replace(/__(.+?)__/g, "_$1_")
+        .replace(/\[([^\]]+)\]\((\S+?)\)/g, "$1 ($2)"),
+  )
+
+const outsideFences = (md: string, fn: (piece: string) => string) =>
   md
     .split(/(```[\s\S]*?```)/)
-    .map((piece, i) =>
-      i % 2 === 1
-        ? piece
-        : piece
-            .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
-            .replace(/\*\*(.+?)\*\*/g, "*$1*")
-            .replace(/__(.+?)__/g, "_$1_")
-            .replace(/\[([^\]]+)\]\((\S+?)\)/g, "$1 ($2)"),
-    )
+    .map((piece, i) => (i % 2 === 1 ? piece : fn(piece)))
     .join("")
+
+// A GitHub callout (> [!NOTE] and the rest) as one plain line, its kind and its words.
+const callouts = (md: string) =>
+  md.replace(
+    /^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\S\n]*\n?((?:>.*(?:\n|$))*)/gim,
+    (_, kind: string, body: string) => {
+      const words = body
+        .split("\n")
+        .map((line) => line.replace(/^>\s?/, "").trim())
+        .filter(Boolean)
+        .join(" ")
+      const end = body.endsWith("\n") ? "\n" : ""
+      return `${kind[0]!.toUpperCase()}${kind.slice(1).toLowerCase()}: ${words}${end}`
+    },
+  )
+
+// The widest table a phone shows in one line of WhatsApp's monospace.
+export const PHONE_CHARS = 32
+const cellsOf = (row: string) =>
+  row
+    .trim()
+    .replace(/^\||\|$/g, "")
+    .split("|")
+    .map((cell) => cell.trim().replace(/\*\*|`/g, ""))
+// A markdown table as a monospace block, its columns padded, or as label: value lines, one row after another, when the block is wider than a phone.
+const tables = (md: string) =>
+  md.replace(
+    /^(\|.*\|[^\S\n]*)\n\|[\s:|-]+\|[^\S\n]*\n((?:\|.*\|[^\S\n]*(?:\n|$))*)/gm,
+    (_, head: string, body: string) => {
+      const labels = cellsOf(head)
+      const rows = body
+        .split("\n")
+        .filter((line) => line.trim())
+        .map(cellsOf)
+      const end = body.endsWith("\n") ? "\n" : ""
+      const widths = labels.map((label, i) =>
+        Math.max(label.length, ...rows.map((row) => (row[i] ?? "").length)),
+      )
+      const line = (cells: string[]) =>
+        widths
+          .map((w, i) => (cells[i] ?? "").padEnd(w))
+          .join("  ")
+          .trimEnd()
+      if (widths.reduce((sum, w) => sum + w, 0) + 2 * (widths.length - 1) <= PHONE_CHARS)
+        return `\`\`\`\n${[line(labels), ...rows.map(line)].join("\n")}\n\`\`\`${end}`
+      return `${rows.map((row) => labels.map((label, i) => `${label}: ${row[i] ?? ""}`).join("\n")).join("\n\n")}${end}`
+    },
+  )
 
 // A body in parts of at most SEND.partChars, split between paragraphs where it can.
 const split = (text: string): string[] => {
@@ -523,10 +626,15 @@ export async function statusOf(
   ]
 }
 
+// A poll that went out: its message id and its secret in base64, which its votes are encrypted with.
+export type PollSent = { id: string; secret: string }
+
+const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa never starts a chat"
+
 // What a send is: a reply to the owner, an urgent alert to both numbers at once, an urgent alert to the owner first that goes on to the alert number unless handled, that later send itself, or a reply to the alert number as a guest.
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
@@ -537,6 +645,37 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
+  // each send's time in the last hour, which the failover reads to tell whether the dispatcher answered
+  const recent = async (now: number) => {
+    const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
+    return (kept.sends ?? []).filter((at) => now - at < HOUR)
+  }
+  // one send, gapMs after the last, its time recorded
+  const paced = async (sends: number[], gapMs: number, jid: string, content: Content) => {
+    const wait = last + gapMs - io.now()
+    if (last > 0 && wait > 0) await io.sleep(wait)
+    const sent = await io.sock.sendMessage(jid, content)
+    last = io.now()
+    sends.push(last)
+    await writeOwn(sendsFile(io.dir), { sends })
+    return sent
+  }
+  const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
+    const refusal = refusalOf([name, ...values].join("\n"))
+    if (refusal) throw new Error(refusal)
+    const now = io.now()
+    const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+    if (windowLeft(owner.ownerAt, now) === 0) throw new Error(NO_CHAT)
+    const sends = await recent(now)
+    const messageSecret = crypto.getRandomValues(new Uint8Array(32))
+    const poll = { messageSecret, name, selectableCount: 1 as const, values }
+    const sent = (await paced(sends, SEND.gapMs, jidOf(io.owner), { poll })) as
+      | { key?: { id?: string | null } }
+      | undefined
+    const id = sent?.key?.id
+    if (!id) throw new Error("WhatsApp gave the poll no id, so its votes cannot be read")
+    return { id, secret: Buffer.from(messageSecret).toString("base64") }
+  }
   const sendNow = async (body: string, kind: Kind, source?: string): Promise<string> => {
     const refusal = refusalOf(body)
     if (refusal) throw new Error(refusal)
@@ -590,21 +729,15 @@ export function sender(
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
     const parts = split(toWhatsApp(body))
-    const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
-    // each send's time, which the failover reads to tell whether the dispatcher answered
-    const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
+    const sends = await recent(now)
     const ids: string[] = []
     for (const t of going)
       for (const [k, part] of parts.entries()) {
-        const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()
-        if (last > 0 && wait > 0) await io.sleep(wait)
-        const sent = (await io.sock.sendMessage(t.jid, { linkPreview: null, text: part })) as {
-          key?: { id?: string | null }
-        } | null
+        const sent = (await paced(sends, k === 0 ? SEND.gapMs : SEND.partGapMs, t.jid, {
+          linkPreview: null,
+          text: part,
+        })) as { key?: { id?: string | null } } | null
         if (sent?.key?.id) ids.push(sent.key.id)
-        last = io.now()
-        sends.push(last)
-        await writeOwn(sendsFile(io.dir), { sends })
       }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
@@ -620,9 +753,14 @@ export function sender(
       ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
       : "sent"
   }
-  return (body: string, kind: Kind = "reply", source?: string): Promise<string> => {
-    const run = chain.then(() => sendNow(body, kind, source))
+  const queued = <T>(job: () => Promise<T>): Promise<T> => {
+    const run = chain.then(job)
     chain = run.catch(() => {})
     return run
   }
+  return Object.assign(
+    (body: string, kind: Kind = "reply", source?: string): Promise<string> =>
+      queued(() => sendNow(body, kind, source)),
+    { poll: (name: string, values: string[]) => queued(() => pollNow(name, values)) },
+  )
 }

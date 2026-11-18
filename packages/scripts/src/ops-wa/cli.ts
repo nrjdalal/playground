@@ -32,10 +32,11 @@ import { type Card, termsOf } from "./cards"
 import { runCheck } from "./escalate"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
-import { mediaDir, modelPath, transcriber } from "./media"
+import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
 import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
+import { votedOptions } from "./votes"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
 process.umask(0o077)
@@ -268,7 +269,7 @@ const main = async () => {
         modelPath(data),
         (command) => Bun.which(command) !== null,
         existsSync,
-        (argv) => run(argv, 300_000),
+        stdoutRun(300_000),
       ),
     },
     now: Date.now,
@@ -292,9 +293,11 @@ const main = async () => {
         : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
+    poll: send.poll,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
+    votes: votedOptions,
   })
   const passes = setInterval(() => watched.pass(), 30_000)
   const reminder = setInterval(
