@@ -22,6 +22,7 @@ import {
   waitingLine,
   waits,
 } from "./cards"
+import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 import { keep } from "./media"
 import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
@@ -64,6 +65,10 @@ export type Mode = {
   on: () => Promise<boolean>
   reply: (body: string) => Promise<string>
   stuck: () => Promise<Stuck>
+  // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
+  check?: (source: string, at: number) => Promise<boolean>
+  // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
+  escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
   inbox?: Inbox
   // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
@@ -173,6 +178,15 @@ async function inbound(io: Io & Mode, m: Incoming) {
     return drop(io, "stranger", remoteJid)
   }
   const message = m.message ?? {}
+  // the owner's reaction on a pending alert handles it, so it stays with the owner (ADR 0034); any other reaction goes no further
+  const reaction = message.reactionMessage as
+    | { key?: { id?: string | null }; text?: string }
+    | undefined
+  if (reaction) {
+    if (reaction.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id)))
+      io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
+    return
+  }
   const text = textOf(message)
   const media = mediaOf(message)
   if (!text && !media) return
@@ -218,11 +232,16 @@ const firstOf = (w: Wrote, jid?: string) =>
 
 type Seed = { at?: number; number?: string }
 const digits = (e164: string) => e164.replace(/\D/g, "")
+// When the owner approved the alert number, by the Inbox's Approve or the owner's own message; undefined while the seed names another number or none.
+async function approvedAt(dir: string, alert: string): Promise<number | undefined> {
+  const seed = await readOwn<Seed>(alertSeedFile(dir), {})
+  return seed.number && digits(seed.number) === digits(alert) ? seed.at : undefined
+}
+
 // When the alert number first wrote, or the owner approved it, whichever came first; undefined for neither.
 export async function alertFirst(dir: string, alert: string): Promise<number | undefined> {
   const own = firstOf(await readOwn<Wrote>(alertFile(dir), {}), jidOf(alert))
-  const seed = await readOwn<Seed>(alertSeedFile(dir), {})
-  const seeded = seed.number && digits(seed.number) === digits(alert) ? seed.at : undefined
+  const seeded = await approvedAt(dir, alert)
   return own === undefined ? seeded : seeded === undefined ? own : Math.min(own, seeded)
 }
 
@@ -334,6 +353,11 @@ async function cards(io: Io & Mode, inbox: Inbox) {
 
 // One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat.
 async function pass(io: Io & Mode) {
+  // an urgent alert goes on whether WhatsApp mode is on or off
+  if (io.escalate)
+    await escalations({ ...io, escalate: io.escalate }).catch((error: Error) =>
+      io.log(`ops-wa: the pending alerts: ${error.message}`),
+    )
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
@@ -452,53 +476,74 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written, so an alert reaches it, and for the owner what is left of the 24 hours replies and cards go in.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
   now: number,
 ): Promise<string[]> {
   const owner = await readOwn<Wrote>(ownerFile(dir), {})
-  const line = (who: string, key: string, number: string, first: number | undefined) => {
+  const line = (
+    who: string,
+    key: string,
+    number: string,
+    first: number | undefined,
+    how = "written",
+  ) => {
     if (!number) return `${who}: none set (${key})`
     const shown = `${who} ${String(shownValue(key, number))}`
     return first === undefined
       ? `${shown}: has never written, so no alert reaches it until it writes once`
-      : `${shown}: written since ${new Date(first).toISOString()}, so alerts reach it`
+      : `${shown}: ${how} since ${new Date(first).toISOString()}, so alerts reach it`
   }
-  const left = windowLeft(owner.ownerAt, now)
-  const replies =
+  const replies = (left: number, over: string) =>
     left === 0
-      ? "its 24 hours for replies are over until it writes"
+      ? over
       : `${Math.floor(left / HOUR)} h ${Math.floor((left % HOUR) / 60_000)} min left of its 24 hours for replies`
+  const alertLine = async (alert: string) => {
+    const first = await alertFirst(dir, alert)
+    const approved = await approvedAt(dir, alert)
+    const guest = await readOwn<Wrote>(alertFile(dir), {})
+    const left = guest.jid === jidOf(alert) ? windowLeft(guest.alertAt, now) : 0
+    const how = approved !== undefined && approved === first ? "approved" : "written"
+    return `${line("alert", "wa.alert", alert, first, how)}; ${approved === undefined ? replies(left, "replies wait until it writes") : "replies can go now (approved)"}`
+  }
   return [
     numbers.owner
-      ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies}`
+      ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies(windowLeft(owner.ownerAt, now), "its 24 hours for replies are over until it writes")}`
       : line("owner", "wa.owner", "", undefined),
-    line(
-      "alert",
-      "wa.alert",
-      numbers.alert,
-      numbers.alert ? await alertFirst(dir, numbers.alert) : undefined,
-    ),
+    numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
+    ...(await pendingLines(dir)),
   ]
 }
 
-// What a send is: a reply to the owner, an alert to both numbers, or a reply to the alert number as a guest.
-export type Kind = "alert" | "guest" | "reply"
+// What a send is: a reply to the owner, an urgent alert to both numbers at once, an urgent alert to the owner first that goes on to the alert number unless handled, that later send itself, or a reply to the alert number as a guest.
+export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028).
-export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+export function sender(
+  io: Omit<Io, "relay"> & {
+    // wa.alertDelayMinutes, read afresh for each alert
+    delay?: () => Promise<number>
+    device: string
+    sock: Sock
+  },
+) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  const sendNow = async (body: string, kind: Kind, path?: string): Promise<string> => {
+  const sendNow = async (
+    body: string,
+    kind: Kind,
+    source?: string,
+    path?: string,
+  ): Promise<string> => {
     // the outbox sits beside whatsapp/ in the data folder
     const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
     const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
     const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
     const now = io.now()
-    const alert = kind === "alert"
+    const alert = kind === "alert" || kind === "first"
     const second = kind === "reply" ? "" : ((await io.alert?.()) ?? "")
     if (second && digits(second) === digits(io.device))
       throw new Error(
@@ -509,22 +554,31 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       const why = guestRefusal(words)
       if (why) throw new Error(why)
     }
+    if (kind === "escalate" && !second) throw new Error("no alert number is set (wa.alert)")
     const record = await readOwn<Wrote>(
       kind === "guest" ? alertFile(io.dir) : ownerFile(io.dir),
       {},
     )
     const open =
-      kind === "guest"
-        ? record.jid === jidOf(second) && windowLeft(record.alertAt, now) > 0
-        : alert
-          ? firstOf(record, jidOf(io.owner)) !== undefined
-          : windowLeft(record.ownerAt, now) > 0
+      kind === "escalate"
+        ? (await alertFirst(io.dir, second)) !== undefined
+        : kind === "guest"
+          ? (record.jid === jidOf(second) && windowLeft(record.alertAt, now) > 0) ||
+            (await approvedAt(io.dir, second)) !== undefined
+          : alert
+            ? firstOf(record, jidOf(io.owner)) !== undefined
+            : windowLeft(record.ownerAt, now) > 0
     const to = [
-      kind === "guest"
+      kind === "guest" || kind === "escalate"
         ? { jid: jidOf(second), open, who: "the alert number" }
         : { jid: jidOf(io.owner), open, who: "the owner" },
     ]
-    if (alert && second && jidOf(second) !== to[0]!.jid) {
+    // an alert for the owner first goes to the alert number at once while the owner has never written, so it still reaches one
+    if (
+      (kind === "alert" || (kind === "first" && !open)) &&
+      second &&
+      jidOf(second) !== to[0]!.jid
+    ) {
       const first = await alertFirst(io.dir, second)
       to.push({ jid: jidOf(second), open: first !== undefined, who: "the alert number" })
     }
@@ -533,29 +587,44 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       throw new Error(
         alert
           ? `${to.length === 1 ? "the owner has never" : "neither the owner nor the alert number has ever"} written to this number, and ops-wa never starts a chat`
-          : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
+          : kind === "escalate"
+            ? "the alert number has never written to this number, and ops-wa never starts a chat"
+            : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
     const messages = messagesOf(split(toWhatsApp(body)), file)
     const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
     // each send's time, which the failover reads to tell whether the dispatcher answered
     const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
+    const ids: string[] = []
     for (const t of going)
       for (const [k, content] of messages.entries()) {
         const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()
         if (last > 0 && wait > 0) await io.sleep(wait)
-        await io.sock.sendMessage(t.jid, content)
+        const sent = (await io.sock.sendMessage(t.jid, content)) as {
+          key?: { id?: string | null }
+        } | null
+        if (sent?.key?.id) ids.push(sent.key.id)
         last = io.now()
         sends.push(last)
         await writeOwn(sendsFile(io.dir), { sends })
       }
+    // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
+    if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
+      if ((await alertFirst(io.dir, second)) === undefined)
+        return "sent to the owner alone: the alert number has never written to this number"
+      const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
+      const due = now + minutes * 60_000
+      await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
+      return `sent to the owner; the alert number gets it at ${new Date(due).toISOString().slice(11, 16)}Z unless it is handled`
+    }
     const left = to.find((t) => !t.open)
     return left
       ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
       : "sent"
   }
-  // path: a file from the outbox (outbound.ts), sent with the body as its caption
-  return (body: string, kind: Kind = "reply", path?: string): Promise<string> => {
-    const run = chain.then(() => sendNow(body, kind, path))
+  // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
+  return (body: string, kind: Kind = "reply", source?: string, path?: string): Promise<string> => {
+    const run = chain.then(() => sendNow(body, kind, source, path))
     chain = run.catch(() => {})
     return run
   }

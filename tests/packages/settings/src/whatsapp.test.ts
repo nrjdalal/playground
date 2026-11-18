@@ -58,3 +58,23 @@ describe("WhatsApp's policy lines (#2756)", () => {
     },
   )
 })
+
+describe("an urgent alert's delay and checker (#2776)", () => {
+  test("wa.alertDelayMinutes defaults to 3 and takes a positive whole number alone", () => {
+    expect(
+      whatsappSettings.get({ schemaVersion: 1, values: {} } as never, "wa.alertDelayMinutes"),
+    ).toBe(3)
+    expect(checkSetting("wa.alertDelayMinutes", 5)).toMatchObject({ ok: true, value: 5 })
+    for (const bad of [0, -1, 2.5, "3"])
+      expect(checkSetting("wa.alertDelayMinutes", bad)).toMatchObject({ ok: false })
+    expect(GUARD_SETTING_KEYS).not.toContain("wa.alertDelayMinutes")
+  })
+
+  test("wa.alertCheck is empty by default, names a file, and is a guard key", () => {
+    expect(whatsappSettings.get({ schemaVersion: 1, values: {} } as never, "wa.alertCheck")).toBe(
+      "",
+    )
+    expect(checkSetting("wa.alertCheck", "scripts/made-up/check.ts")).toMatchObject({ ok: true })
+    expect(GUARD_SETTING_KEYS).toContain("wa.alertCheck")
+  })
+})

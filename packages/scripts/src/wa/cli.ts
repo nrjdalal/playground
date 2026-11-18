@@ -7,24 +7,37 @@ import { readPolicy, whatsappSettings } from "@packages/settings"
 import { refusalOf, statusOf } from "../ops-wa/bridge"
 import { request, requestAlertSet, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone, with --file <path> a file from the outbox beside it (outbound.ts), the body its caption; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, once to the owner and once to the alert number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
-const [verb, ...rest] = process.argv.slice(2)
-let guest = false
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone, with --file <path> a file from the outbox beside it (outbound.ts), the body its caption; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
+const args = process.argv.slice(2)
+const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
+// wa alert's flags, before its file: --now-both sends to both numbers at once, --source <kind>:<ref> names what a checker reads to tell whether it was handled
+let nowBoth = false
+let source: string | undefined
+let rest = guest ? [args[0]!, ...args.slice(3)] : args
+if (rest[0] === "alert")
+  for (let i = 1; i < rest.length - 1;) {
+    if (rest[i] === "--now-both") {
+      nowBoth = true
+      rest = [...rest.slice(0, i), ...rest.slice(i + 1)]
+    } else if (rest[i] === "--source") {
+      if (!/^[a-z][\w-]*:\S+$/.test(rest[i + 1] ?? "")) {
+        console.error("wa alert: --source takes <kind>:<ref>, such as test:2026-11-11T03:00Z")
+        process.exit(2)
+      }
+      source = rest[i + 1]
+      rest = [...rest.slice(0, i), ...rest.slice(i + 2)]
+    } else break
+  }
+// wa send's --file <path>, before its file: a file from the outbox, the body then its caption and optional
 let attach: string | undefined
-const words: string[] = []
-for (let i = 0; i < rest.length; i++) {
-  if (verb === "send" && !guest && rest[i] === "--to" && rest[i + 1] === "alert") {
-    guest = true
-    i++
-  } else if (verb === "send" && attach === undefined && rest[i] === "--file") {
-    attach = rest[i + 1] ?? ""
-    i++
-  } else words.push(rest[i]!)
+if (rest[0] === "send" && rest[1] === "--file") {
+  attach = rest[2] ?? ""
+  rest = [rest[0], ...rest.slice(3)]
 }
-const [file, ...extra] = words
+const [verb, file, ...extra] = rest
 const named = async (path: string | undefined) =>
   !!path && isAbsolute(path) && (await Bun.file(path).exists())
-if (verb === "relink" && !rest.length) {
+if (verb === "relink" && !file) {
   const dir = join(dataDir(), "whatsapp")
   // the old auth state is set aside inside the guarded folder, never deleted, so nothing leaves it
   await rename(join(dir, "auth"), join(dir, `auth.${Date.now()}.old`)).catch(() => {})
@@ -32,7 +45,7 @@ if (verb === "relink" && !rest.length) {
   console.log("wa relink: the old link is set aside; restart ops-wa for a new pairing card")
   process.exit(0)
 }
-if (verb === "status" && !rest.length) {
+if (verb === "status" && !file) {
   const policy = await readPolicy(dataDir())
   if (policy.refusal !== undefined) {
     console.error(`wa status: the settings refuse: ${policy.refusal}`)
@@ -69,7 +82,7 @@ if (
   (attach !== undefined && !(await named(attach)))
 ) {
   console.error(
-    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa send [--to alert] --file <path> [<file>], an image, a document, a video or a voice note in the data folder's wa/outbox/, named by its absolute path, the body its caption; playground wa alert <file>, an urgent alert alone, to the owner and the alert number; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa send [--to alert] --file <path> [<file>], an image, a document, a video or a voice note in the data folder's wa/outbox/, named by its absolute path, the body its caption; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled within wa.alertDelayMinutes, or to both at once; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
   )
   process.exit(2)
 }
@@ -80,8 +93,9 @@ const reply: Awaited<ReturnType<typeof request>> = refusal
   : await request(
       socketPath(dataDir()),
       body,
-      verb === "alert" ? "alert" : guest ? "guest" : "reply",
-      undefined,
+      verb === "alert" ? (nowBoth ? "alert" : "first") : guest ? "guest" : "reply",
+      600_000,
+      source,
       attach,
     )
 if (reply.refusal) {

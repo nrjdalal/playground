@@ -46,7 +46,14 @@ const harness = async () => {
     writeFileSync(path, bytes)
     return path
   }
-  return { data, fake, file, outbox, send }
+  return {
+    data,
+    fake,
+    file,
+    outbox,
+    send: (body: string, kind: Parameters<typeof send>[1], path?: string) =>
+      send(body, kind, undefined, path),
+  }
 }
 
 describe("wa send's files (#2783)", () => {

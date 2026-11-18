@@ -1,0 +1,98 @@
+import { readdir, unlink } from "node:fs/promises"
+import { join } from "node:path"
+
+import { ownFolder, readOwn, writeOwn } from "./habits"
+
+// An urgent alert that reached the owner first and goes to the second number at due unless handled (ADR 0034): its body, the ids of the owner's copy, which a reaction names, and the opaque source a checker reads.
+export type Pending = { at: number; body: string; due: number; ids: string[]; source?: string }
+
+// pending/, one 0600 file per alert by its send time, so a restart keeps each alert and its deadline: the sender writes a file, and the bridge's queue alone removes one.
+export const pendingDir = (dir: string) => join(dir, "pending")
+export const DEFAULT_DELAY_MINUTES = 3
+export const CHECK_TIMEOUT_MS = 20_000
+
+export async function keepPending(dir: string, pending: Pending) {
+  await ownFolder(pendingDir(dir))
+  await writeOwn(join(pendingDir(dir), `${pending.at}.json`), pending)
+}
+
+export async function pendingOf(dir: string): Promise<{ file: string; pending: Pending }[]> {
+  const names = await readdir(pendingDir(dir)).catch(() => [] as string[])
+  const all = await Promise.all(
+    names
+      .filter((name) => name.endsWith(".json"))
+      .map(async (name) => {
+        const file = join(pendingDir(dir), name)
+        return { file, pending: await readOwn<Pending | null>(file, null) }
+      }),
+  )
+  return all
+    .filter((p): p is { file: string; pending: Pending } => p.pending !== null)
+    .sort((a, b) => a.pending.at - b.pending.at)
+}
+
+// The owner's reaction on any part of a pending alert handles it; true when one was.
+export async function reacted(dir: string, id: string): Promise<boolean> {
+  const hit = (await pendingOf(dir)).filter(({ pending }) => pending.ids.includes(id))
+  for (const { file } of hit) await unlink(file).catch(() => {})
+  return hit.length > 0
+}
+
+// The checker a setting names: handled only on exit 0 within the timeout; any other code, a crash or the timeout reads as not handled, since a missed alert costs more than a second message.
+export async function runCheck(
+  path: string,
+  source: string,
+  at: number,
+  timeoutMs = CHECK_TIMEOUT_MS,
+): Promise<boolean> {
+  try {
+    const child = Bun.spawn([process.execPath, path, source, new Date(at).toISOString()], {
+      stderr: "ignore",
+      stdin: "ignore",
+      stdout: "ignore",
+    })
+    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs)
+    const code = await child.exited
+    clearTimeout(timer)
+    return code === 0 && child.signalCode === null
+  } catch {
+    return false
+  }
+}
+
+export type EscalateIo = {
+  // whether the alert's source was handled elsewhere, by the checker wa.alertCheck names; none set reads as not handled
+  check?: (source: string, at: number) => Promise<boolean>
+  dir: string
+  escalate: (body: string) => Promise<string>
+  log: (line: string) => void
+  now: () => number
+}
+
+// One pass over the pending alerts: each one past its due is dropped once its source reads handled, else sent to the second number once, and dropped either way.
+export async function escalations(io: EscalateIo) {
+  for (const { file, pending } of await pendingOf(io.dir)) {
+    if (pending.due > io.now()) continue
+    const sent = new Date(pending.at).toISOString()
+    const handled =
+      pending.source !== undefined && io.check
+        ? await io.check(pending.source, pending.at).catch(() => false)
+        : false
+    if (handled)
+      io.log(`ops-wa: the alert of ${sent} was handled at its source, so it stays with the owner`)
+    else
+      await io.escalate(pending.body).then(
+        (said) => io.log(`ops-wa: the alert of ${sent} went to the second number: ${said}`),
+        (error: Error) =>
+          io.log(`ops-wa: the alert of ${sent} did not reach the second number: ${error.message}`),
+      )
+    await unlink(file).catch(() => {})
+  }
+}
+
+// wa status's lines for the pending alerts.
+export const pendingLines = async (dir: string): Promise<string[]> =>
+  (await pendingOf(dir)).map(
+    ({ pending }) =>
+      `pending: the alert of ${new Date(pending.at).toISOString()} goes to the second number at ${new Date(pending.due).toISOString()} unless handled${pending.source ? ` (source ${pending.source})` : ""}`,
+  )
