@@ -438,7 +438,7 @@ const PEER_IDS = ROOT_NAMES.map((name) => `"${PEER_ACTION}.${name}"`).join(", ")
 export const PEER_INSTALL_TEXT = [
   "set -eu",
   "user=${SUDO_USER:-}",
-  `case $user in ""|root|*[!a-z0-9_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
+  `case $user in ""|root|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
   `[ -d ${PEER_POLICY.slice(0, PEER_POLICY.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit actions folder")}`,
   `[ -d ${PEER_RULE.slice(0, PEER_RULE.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit rules folder")}`,
   INSTALL_TEXT,

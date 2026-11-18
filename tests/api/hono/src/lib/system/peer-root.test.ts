@@ -257,8 +257,8 @@ describe("a peer's install text (PG-2434)", () => {
     expect(PEER_INSTALL_TEXT).not.toMatch(/\bread\b|cat -|<&0|\/dev\/stdin/)
   })
 
-  test("refuses when sudo named no user, root, or a name a rule cannot hold, writing no rule", async () => {
-    for (const user of ["", "root", 'a" || true || "']) {
+  test("refuses when sudo named no user, root, or a name a rule cannot hold, an uppercase or non-ASCII one included, writing no rule", async () => {
+    for (const user of ["", "root", 'a" || true || "', "Bob", "\u00e9"]) {
       const { base, rule, run } = await setUp(user)
       const ran = await run(...GOOD.map((s) => s.sha256))
       expect(ran.code).toBe(1)
