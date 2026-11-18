@@ -2,14 +2,14 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
-import { deleteWeights, type Roots } from "@packages/safe-delete"
+import { deleteWeights, isWeights, type Roots } from "@packages/safe-delete"
 
 import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { CARD_ID } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 
-// The far end of an approved removal on a peer's own machine, run from there by the ssh `peerArgv` shapes: <path> <bytes> <card>, one recorded weights path at the card's exact size, re-checked here before the same deleteWeights drops it.
+// The far end of an approved removal on a peer's own machine, run from there by the ssh `peerArgv` shapes: <path> <bytes> <card>, a path on the record or under a recorded folder at the card's exact size, re-checked here before the same deleteWeights drops it.
 export const RM_PEER_USAGE =
   "usage: playground rm --card <id> --peer <machine> <path> (a far end takes <path> <bytes> <card>)"
 
@@ -21,7 +21,7 @@ export type RmPeerDeps = {
   session: () => Promise<string> | string
 }
 
-// The peer's far end: <path> <bytes> <card>, or why the bytes or card do not read, one recorded weights path at its exact size, re-checked on this peer and deleted with the same deleteWeights, its record entry dropped.
+// The peer's far end: <path> <bytes> <card>, or why the bytes or card do not read, a path on the record or under a recorded folder at its exact size, re-checked on this peer and deleted with the same deleteWeights, its record entry dropped.
 export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<number> {
   if (words.length < 3) {
     console.error(`playground: ${RM_PEER_USAGE}`)
@@ -37,13 +37,13 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     console.error(`playground: ${card} is not an Inbox card id`)
     return 2
   }
-  // recorded: the path is on this peer's own machine record, or it stays
+  // recorded: the path is on this peer's own machine record, or isWeights accepts it under ~/models or a recorded folder, so the peer uses the one shared rule
   const { entries } = await readRecord(deps.data).catch(() => ({ entries: [] }))
-  if (!entries.some((entry) => entry.path === path)) {
+  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
+  if (!entries.some((entry) => entry.path === path) && !isWeights(path, deps.home, folders)) {
     console.error(`playground: ${path} is not on the machine record, so it stays`)
     return 1
   }
-  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   const session = await deps.session()
   const done = deleteWeights(

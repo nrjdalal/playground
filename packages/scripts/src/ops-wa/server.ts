@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import type { Kind, Who } from "./bridge"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, to?} in, `to: "alert"` a guest's reply, or {react, id?, to?} for a reaction, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, to?} in, `to: "alert"` a guest's reply, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
 type Reply = { note?: string; refusal?: string; sent?: true }
@@ -13,6 +13,7 @@ type React = (emoji: string, on: { id?: string; who?: Who }) => Promise<string>
 export function serve(
   path: string,
   send: (body: string, kind: Kind) => Promise<string>,
+  alertSet?: (id: string) => Promise<string>,
   react?: React,
 ) {
   const server = Bun.listen<{ done: boolean; text: string }>({
@@ -29,6 +30,7 @@ export function serve(
         }
         let asked: {
           alert?: unknown
+          alertSet?: unknown
           body?: unknown
           id?: unknown
           react?: unknown
@@ -37,16 +39,23 @@ export function serve(
         try {
           asked = JSON.parse(socket.data.text) as typeof asked
         } catch {}
+        if (alertSet && typeof asked.alertSet === "string" && asked.alertSet)
+          return void alertSet(asked.alertSet).then(
+            (said) => answer({ note: said }),
+            (error: Error) => answer({ refusal: error.message }),
+          )
+        if (react && typeof asked.react === "string" && asked.react)
+          return void react(asked.react, {
+            id: typeof asked.id === "string" ? asked.id : undefined,
+            who: asked.to === "alert" ? "alert" : "owner",
+          }).then(
+            () => answer({ sent: true }),
+            (error: Error) => answer({ refusal: error.message }),
+          )
         const { body } = asked
-        const id = typeof asked.id === "string" ? asked.id : undefined
-        const reacting = typeof asked.react === "string" && react
-        if (!reacting && (typeof body !== "string" || !body.trim()))
-          return answer({ refusal: "an empty body" })
+        if (typeof body !== "string" || !body.trim()) return answer({ refusal: "an empty body" })
         const kind = asked.alert === true ? "alert" : asked.to === "alert" ? "guest" : "reply"
-        ;(reacting
-          ? react(asked.react as string, { id, who: asked.to === "alert" ? "alert" : "owner" })
-          : send(body as string, kind)
-        ).then(
+        send(body, kind).then(
           (said) => answer(said === "sent" ? { sent: true } : { note: said, sent: true }),
           (error: Error) => answer({ refusal: error.message }),
         )
@@ -71,13 +80,16 @@ export const request = (path: string, body: string, kind: Kind = "reply", timeou
 
 // wa react's side: a reaction on the latest message of who's, or on the one its id names.
 export const reactRequest = (path: string, emoji: string, on: { id?: string; who?: Who }) =>
-  ask(path, {
-    react: emoji,
-    ...(on.id && { id: on.id }),
-    ...(on.who === "alert" && { to: "alert" }),
-  })
+  ask(
+    path,
+    { react: emoji, ...(on.id && { id: on.id }), ...(on.who === "alert" && { to: "alert" }) },
+    600_000,
+  )
 
-async function ask(path: string, line: object, timeoutMs = 600_000): Promise<Reply> {
+// wa alert-set's side: the owner's message id to ops-wa, and its answer.
+export const requestAlertSet = (path: string, id: string) => ask(path, { alertSet: id }, 60_000)
+
+async function ask(path: string, line: object, timeoutMs: number): Promise<Reply> {
   if (!existsSync(path)) return { refusal: "ops-wa is not running: its job is off or stopped" }
   const answered = Promise.withResolvers<Reply>()
   const resolve = (reply: Reply) => {
@@ -86,7 +98,7 @@ async function ask(path: string, line: object, timeoutMs = 600_000): Promise<Rep
   }
   let text = ""
   const timer = setTimeout(
-    () => resolve({ refusal: "ops-wa did not answer in 10 minutes" }),
+    () => resolve({ refusal: `ops-wa did not answer in ${timeoutMs / 1000} s` }),
     timeoutMs,
   )
   await Bun.connect({
