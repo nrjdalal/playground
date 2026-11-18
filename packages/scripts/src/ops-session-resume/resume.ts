@@ -334,6 +334,8 @@ export async function cycle(options: {
   configDir: string
   live: () => Promise<Map<string, LiveSession>>
   metrics?: () => Promise<string | null>
+  // a session the local model serves, by its backend pin, so the /metrics skip below gates on it; a read that fails is not local
+  servedByLocal?: (name: string) => Promise<boolean>
   now?: Date
 }): Promise<{ result: string; resumed: number }> {
   const { configDir, now = new Date() } = options
@@ -421,12 +423,14 @@ export async function cycle(options: {
       const path = await transcriptPathOf(configDir, record.sessionId)
       const moved = path ? await newestWrite(path) : undefined
       if (moved === undefined || now.getTime() - moved < QUIET_MS) continue
-      // A working session the local model still serves is not quiet: read its /metrics, where running and waiting above 0 means the model is working, before flagging, so a 15-minute compaction is never read as stuck from the pane's idle.
-      if (options.metrics) {
-        const text = await options.metrics()
-        if (text !== null) {
-          const busy = busyOf(text)
-          if (busy !== null && busy > 0) continue
+      // A working session the local model still serves is not quiet: read its /metrics, where running and waiting above 0 means the model is working, before flagging, so a 15-minute compaction is never read as stuck from the pane's idle; a session the local model does not serve (Claude or GLM) is judged only by its idle.
+      if (await options.servedByLocal?.(session.name)) {
+        if (options.metrics) {
+          const text = await options.metrics()
+          if (text !== null) {
+            const busy = busyOf(text)
+            if (busy !== null && busy > 0) continue
+          }
         }
       }
       const key = `${record.sessionId} quiet ${new Date(moved).toISOString()}`

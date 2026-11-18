@@ -2,18 +2,26 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
+import { readPin } from "@packages/settings"
 
 import { readModelMetrics } from "../local-model/live"
 import { beat, cycle, CYCLE_SECONDS, liveSessions, opsDirOf } from "./resume"
 
 const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 const beatPath = join(opsDirOf(), "ops-session-resume.json")
+// The backend a session runs on, read the way spawn.sh pins it (~/.playground/backends/<name>): true only when it is local, so the /metrics skip is applied to the local model's sessions alone, and a read that fails is not local.
+const isLocal = (name: string): Promise<boolean> =>
+  Bun.file(join(dataDirOf(process.env), "backends", name))
+    .text()
+    .catch(() => "")
+    .then((text) => readPin(text)?.backend === "local")
 const once = () =>
   cycle({
     configDir,
     live: () => liveSessions(configDir),
     // read the local model's /metrics before flagging a working session quiet, so a 15-minute compaction is never read as stuck from the pane's idle
     metrics: () => readModelMetrics(dataDirOf(process.env)),
+    servedByLocal: isLocal,
   })
 
 if (process.argv.includes("--once")) {
