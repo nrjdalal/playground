@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { createCipheriv, createHash, createHmac, randomBytes } from "node:crypto"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -30,6 +31,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
+import { votedOptions } from "../../../../../packages/scripts/src/ops-wa/votes"
 import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
 import { ALERT, fakeSocket, groupJid, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
@@ -89,8 +91,10 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       routed.push({ text, to })
       if (to === "dispatcher") relayed.push(text)
     },
+    poll: send.poll,
     reply: send,
     stuck: async () => mode.stuck,
+    votes: votedOptions,
     inbox,
     media,
     policy: async () => mode.policy,
@@ -666,6 +670,42 @@ describe("toWhatsApp", () => {
     )
     expect(toWhatsApp("```\ncode **kept**\n```")).toBe("```\ncode **kept**\n```")
   })
+
+  test("a table a phone fits goes as a monospace block, its columns padded", () => {
+    expect(
+      toWhatsApp("Runs:\n| PR | State |\n|---|:-:|\n| #12 | **green** |\n| #9 | red |\nDone."),
+    ).toBe("Runs:\n```\nPR   State\n#12  green\n#9   red\n```\nDone.")
+  })
+
+  test("a table wider than a phone goes as label: value lines, one row after another", () => {
+    const wide =
+      "| Session | What it does now |\n| --- | --- |\n| k3m9px-worker | builds the poll path for cards |\n| q7r2zz-reviewer | scores round 2 |"
+    expect(toWhatsApp(wide)).toBe(
+      "Session: k3m9px-worker\nWhat it does now: builds the poll path for cards\n\nSession: q7r2zz-reviewer\nWhat it does now: scores round 2",
+    )
+  })
+
+  test("a GitHub callout goes as one plain line", () => {
+    expect(toWhatsApp("> [!WARNING]\n> The merge waits\n> on CI.\n\nNext.")).toBe(
+      "Warning: The merge waits on CI.\n\nNext.",
+    )
+    expect(toWhatsApp("> [!NOTE] All green.")).toBe("Note: All green.")
+  })
+
+  test("a card holding a table and a callout reaches the owner with neither as raw marks (#i910's shape)", async () => {
+    const h = await withCards([
+      card(
+        12,
+        {},
+        {
+          text: "> [!IMPORTANT]\n> Pick one.\n\n| Plan | Cost |\n|---|---|\n| A | 1 h |\n| B | 2 h |",
+        },
+      ),
+    ])
+    expect(h.texts()[0]).toBe(
+      "*Card 12*\nImportant: Pick one.\n\n```\nPlan  Cost\nA     1 h\nB     2 h\n```\nReply 1 #i12 to Merge it\nReply 2 #i12 to Hold it",
+    )
+  })
 })
 
 // A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
@@ -710,20 +750,70 @@ const inboxOf = (open: Card[], terms: typeof TERMS | null = TERMS) => {
   return { answers, inbox, open }
 }
 // the owner writes first, since ops-wa never starts a chat, then one pass sends the cards
-const withCards = async (open: Card[], terms?: typeof TERMS | null) => {
+const withCards = async (open: Card[], terms?: typeof TERMS | null, alert?: string) => {
   const ib = inboxOf(open, terms)
-  const h = harness(ib.inbox)
+  const h = harness(ib.inbox, undefined, alert)
   h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
   await h.settle()
   await h.pass()
-  const texts = () => h.fake.sent.map((s) => s.content.text)
-  return { ...h, ...ib, texts }
+  const texts = () => h.fake.sent.flatMap((s) => s.content.text ?? [])
+  const polls = () => h.fake.sent.flatMap((s) => (s.content.poll ? [s] : []))
+  return { ...h, ...ib, polls, texts }
 }
 const say = async (h: Awaited<ReturnType<typeof withCards>>, text: string, from = OWNER) => {
   const before = h.fake.sent.length
   h.fake.upsert([h.fake.message(jid(from), text)])
   await h.settle()
-  return h.fake.sent.slice(before).map((s) => s.content.text)
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
+}
+// A vote on the card's poll as the owner's phone sends it: the picked options' hashes, encrypted with the poll's secret for its sender's and voter's chat ids, as WhatsApp's poll vote is.
+const POLL_SENDER = jid(SPARE)
+const encryptVote = (pollId: string, secret: Uint8Array, voter: string, options: string[]) => {
+  const sign = Buffer.concat([
+    Buffer.from(pollId),
+    Buffer.from(POLL_SENDER),
+    Buffer.from(voter),
+    Buffer.from("Poll Vote"),
+    new Uint8Array([1]),
+  ])
+  const key0 = createHmac("sha256", new Uint8Array(32)).update(secret).digest()
+  const key = createHmac("sha256", key0).update(sign).digest()
+  // PollVoteMessage's one field, repeated bytes selectedOptions = 1, each a 32-byte hash
+  const plain = Buffer.concat(
+    options.map((o) =>
+      Buffer.concat([Buffer.from([0x0a, 0x20]), createHash("sha256").update(o).digest()]),
+    ),
+  )
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", key, iv)
+  cipher.setAAD(Buffer.from(`${pollId}\u0000${voter}`))
+  return {
+    encIv: iv,
+    encPayload: Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]),
+  }
+}
+const vote = async (
+  h: Awaited<ReturnType<typeof withCards>>,
+  options: string[],
+  { from = OWNER, secret }: { from?: string; secret?: Uint8Array } = {},
+) => {
+  const poll = h.polls()[0]!
+  secret ??= poll.content.poll!.messageSecret
+  const before = h.fake.sent.length
+  const id = h.fake.sent.indexOf(poll) + 1
+  h.fake.upsert([
+    {
+      key: { fromMe: false, id: `v${Math.random()}`, remoteJid: jid(from) },
+      message: {
+        pollUpdateMessage: {
+          pollCreationMessageKey: { id: `m${id}` },
+          vote: encryptVote(`m${id}`, secret, jid(from), options),
+        },
+      },
+    },
+  ])
+  await h.settle()
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
 }
 
 describe("Inbox cards on WhatsApp", () => {
@@ -897,6 +987,86 @@ describe("Inbox cards on WhatsApp", () => {
     const h = await withCards([card(12)])
     await say(h, "is #i12 merged?")
     expect(h.relayed.at(-1)).toContain("is #i12 merged?")
+  })
+})
+
+describe("an Inbox card as a poll (#2752)", () => {
+  test("a card with choices goes as its text, then as a poll of its numbered choices, paced and counted as any send", async () => {
+    const h = await withCards([card(12)])
+    expect(h.texts()).toEqual([
+      "*Card 12*\nMerge tonight?\nReply 1 #i12 to Merge it\nReply 2 #i12 to Hold it",
+    ])
+    const [poll] = h.polls()
+    expect(poll!.jid).toBe(jid(OWNER))
+    expect(poll!.content.poll).toMatchObject({
+      name: "#i12 Card 12",
+      selectableCount: 1,
+      values: ["1. Merge it", "2. Hold it"],
+    })
+    expect(poll!.content.poll!.messageSecret).toHaveLength(32)
+    expect(poll!.at - h.fake.sent[0]!.at).toBeGreaterThanOrEqual(SEND.gapMs)
+    const kept = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(kept.sends).toHaveLength(2)
+    expect(h.fake.calls).toEqual([])
+    await h.pass()
+    expect(h.polls()).toHaveLength(1)
+  })
+
+  test("an update goes with no poll, since it asks nothing", async () => {
+    const h = await withCards([card(12, { kind: "update" }, { type: undefined })])
+    expect(h.polls()).toEqual([])
+  })
+
+  test("the owner's vote answers the card once, through the Inbox's route, and reaches no session", async () => {
+    const h = await withCards([card(12)])
+    expect(await vote(h, ["2. Hold it"])).toEqual(["Answered #i12: Hold it."])
+    expect(h.answers).toEqual([{ answer: { action: "deny" }, id: "id-12" }])
+    expect(h.relayed.filter((line) => !line.includes("hello"))).toEqual([])
+  })
+
+  test("a changed vote follows the card's rule: the card is answered already, so it answers nothing and says so", async () => {
+    const h = await withCards([card(12)])
+    await vote(h, ["1. Merge it"])
+    expect(await vote(h, ["2. Hold it"])).toEqual([
+      "#i12 was not answered: This item is already answered. Answer it in the Inbox.",
+    ])
+    expect(h.answers.map((a) => a.answer)).toEqual([{ action: "approve" }, { action: "deny" }])
+    expect((h.open[0] as Card).status).toBe("approved")
+  })
+
+  test("a vote taken back answers nothing, and a vote that cannot be read answers nothing and is logged", async () => {
+    const h = await withCards([card(12)])
+    expect(await vote(h, [])).toEqual([])
+    expect(await vote(h, ["1. Merge it"], { secret: new Uint8Array(32) })).toEqual([])
+    expect(h.answers).toEqual([])
+    expect(h.logs).toContain("ops-wa: a vote on #i12's poll could not be read")
+  })
+
+  test("a vote from the alert number answers nothing and reaches the dispatcher as data", async () => {
+    const h = await withCards([card(12)], undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(ALERT), "hi")])
+    await h.settle()
+    expect(await vote(h, ["1. Merge it"], { from: ALERT })).toEqual([])
+    expect(h.answers).toEqual([])
+    expect(h.data.at(-1)).toContain("holds a poll vote")
+  })
+
+  test("a poll that fails leaves the text's numbered lines to answer by", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (content.poll) throw new Error("made-up poll failure")
+      return real(to, content)
+    }
+    await h.pass()
+    expect(h.logs).toContain("ops-wa: a card's poll: made-up poll failure")
+    h.fake.sock.sendMessage = real
+    h.fake.upsert([h.fake.message(jid(OWNER), "1 #i12")])
+    await h.settle()
+    expect(ib.answers).toEqual([{ answer: { action: "approve" }, id: "id-12" }])
   })
 })
 

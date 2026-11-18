@@ -6,6 +6,7 @@ import {
   cardOf,
   goesOut,
   HIDDEN,
+  pollOf,
   redact,
   replyOf,
   termsOf,
@@ -177,6 +178,7 @@ describe("a card as WhatsApp shows it", () => {
       TERMS,
     )
     expect(card).toEqual({
+      poll: undefined,
       rows: [],
       text: "*#1828 merged*\nCI is green\n#i12 is an update: it asks nothing.",
     })
@@ -186,6 +188,27 @@ describe("a card as WhatsApp shows it", () => {
     const { rows, text } = cardOf(ask({}, { approve: "Tell Quillon Barr", deny: "Hold" }), TERMS)
     expect(rows[0]!.label).toBe(`Tell ${HIDDEN}`)
     expect(text).not.toContain("Quillon")
+  })
+
+  test("its poll names the card's id and redacted title, one numbered option per row, and fits WhatsApp's 2 to 12 options (#2752)", () => {
+    const { poll } = cardOf(
+      ask({ title: "Tell Quillon Barr?" }, { approve: "Merge it", deny: "Hold it" }),
+      TERMS,
+    )
+    expect(poll).toEqual({
+      name: `#i12 Tell ${HIDDEN}?`,
+      values: ["1. Merge it", "2. Hold it"],
+    })
+    const row = (label: string) => ({ go: true, label })
+    expect(pollOf(3, "x", [row("only")])).toBeUndefined()
+    expect(
+      pollOf(
+        3,
+        "x",
+        Array.from({ length: 13 }, (_, i) => row(`r${i}`)),
+      ),
+    ).toBeUndefined()
+    expect(pollOf(3, "x", [row("same"), row("same")])!.values).toEqual(["1. same", "2. same"])
   })
 
   test("the waiting line names a count alone", () => {
