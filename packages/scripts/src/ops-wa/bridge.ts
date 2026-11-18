@@ -146,11 +146,11 @@ const chatKind = (jid: string): string | undefined => {
 // What the dispatcher hears of a message with no text: its kind alone, never its content.
 const MEDIA: Record<string, string> = {
   audioMessage: "a voice note",
-  pollUpdateMessage: "a poll vote",
   contactMessage: "a contact",
   documentMessage: "a document",
   imageMessage: "an image",
   locationMessage: "a location",
+  pollUpdateMessage: "a poll vote",
   stickerMessage: "a sticker",
   videoMessage: "a video",
 }
@@ -342,7 +342,8 @@ async function vote(io: Io & Mode, inbox: Inbox, m: Incoming, me?: Sock["user"])
     pollOf(Number(ref), "", card.rows)?.values ?? [],
   )
   if (picked === undefined) return io.log(`ops-wa: a vote on #i${ref}'s poll could not be read`)
-  if (picked.length !== 1) return
+  if (picked.length !== 1)
+    return io.log(`ops-wa: a vote on #i${ref}'s poll picks no row, so it answers nothing`)
   return answerCard(io, inbox, { number: picked[0]! + 1, ref: Number(ref) })
 }
 

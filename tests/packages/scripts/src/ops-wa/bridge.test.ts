@@ -1042,9 +1042,10 @@ describe("an Inbox card as a poll (#2752)", () => {
     expect((h.open[0] as Card).status).toBe("approved")
   })
 
-  test("a vote taken back answers nothing, and a vote that cannot be read answers nothing and is logged", async () => {
+  test("a vote taken back, or one that cannot be read, answers nothing and is logged", async () => {
     const h = await withCards([card(12)])
     expect(await vote(h, [])).toEqual([])
+    expect(h.logs).toContain("ops-wa: a vote on #i12's poll picks no row, so it answers nothing")
     expect(await vote(h, ["1. Merge it"], { secret: new Uint8Array(32) })).toEqual([])
     expect(h.answers).toEqual([])
     expect(h.logs).toContain("ops-wa: a vote on #i12's poll could not be read")
