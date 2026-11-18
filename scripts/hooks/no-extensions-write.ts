@@ -2069,11 +2069,13 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
   const positional: (string | undefined)[] = []
   let dry = false
   let scoped = false
+  let ownerMsg = false
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
     if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
     else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope")
+      ownerMsg ||= word === "--from-owner-msg" && !!rest[k + 1]
       k++
     } else positional.push(word)
   }
@@ -2085,6 +2087,8 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
+    // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
+    if (verb === "set" && ownerMsg) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]

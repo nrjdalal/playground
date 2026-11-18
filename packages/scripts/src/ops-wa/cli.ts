@@ -34,6 +34,7 @@ import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, transcriber } from "./media"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
+import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
 process.umask(0o077)
@@ -212,7 +213,20 @@ const main = async () => {
     )
     return was
   }
-  serve(path, send, (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id))
+  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's reply 1 (ADR 0035)
+  const owned = {
+    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    dir,
+    log: (line: string) => console.log(line),
+    now: Date.now,
+    tell: (line: string) => send(line, "reply"),
+  }
+  serve(
+    path,
+    send,
+    (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
+    (id, key, value) => settingSet(owned, id, key, value),
+  )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
   const relayData = sendAs("wa-data", true, true)
@@ -222,6 +236,7 @@ const main = async () => {
     alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
+    confirm: (text) => confirm(owned, text),
     dir,
     inbox: inboxOf(),
     log: (line) => console.log(line),

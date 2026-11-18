@@ -1,0 +1,263 @@
+import { afterAll, describe, expect, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { keepMessage, keptFile } from "../../../../../packages/scripts/src/ops-wa/alert-set"
+import { bridge } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import {
+  applyOwnerSetting,
+  CONFIRM_MS,
+  confirm,
+  guarded,
+  holds,
+  settingSet,
+} from "../../../../../packages/scripts/src/ops-wa/setting-set"
+import { type Io, runStore } from "../../../../../packages/scripts/src/playground/store"
+import { scopeDir } from "../../../../../packages/settings/src/rendered"
+import { ALERT, fakeSocket, jid, OWNER, STRANGER } from "./fake-socket"
+
+process.env.PLAYGROUND_LOGIN = "made-up-me"
+
+const scratch = mkdtempSync(join(tmpdir(), "ops-wa-setting-"))
+afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+let n = 0
+
+const HOUR = 3_600_000
+const START = Date.parse("2026-11-11T03:00:00Z")
+
+// The settings CLI on a data folder of its own, as settings.test.ts runs it.
+const cli = (data: string) => async (words: string[]) => {
+  const out: string[] = []
+  const err: string[] = []
+  const io: Io = { data, out: (l) => out.push(l), stdin: async () => "", write: Bun.write }
+  const code = await runStore("settings", words, io, (l) => err.push(l))
+  return { code, err: err.join("\n"), out: out.join("\n") }
+}
+
+// The login scope's stored values, none before its first write.
+const stored = (data: string): Record<string, unknown> => {
+  const path = join(scopeDir(data, "made-up-me"), "settings.json")
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {}
+}
+
+// A data folder and ops-wa's folder in it, the setting-set io over them, each line told to the owner, and a clock a test moves.
+const owned = () => {
+  const data = join(scratch, `data-${n++}`)
+  const dir = join(data, "whatsapp")
+  const told: string[] = []
+  const logged: string[] = []
+  let now = START
+  const io = {
+    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    dir,
+    log: (line: string) => void logged.push(line),
+    now: () => now,
+    tell: async (line: string) => void told.push(line),
+  }
+  return { advance: (ms: number) => (now += ms), data, dir, io, logged, run: cli(data), told }
+}
+
+describe("the kept record", () => {
+  test("keeps a hash of each word of every owner text, in an owner-only file, never the text", async () => {
+    const o = owned()
+    expect(await keepMessage(o.dir, "own1", "Set the theme to dark, please.", START, OWNER)).toBe(
+      false,
+    )
+    const raw = readFileSync(keptFile(o.dir), "utf8")
+    expect(raw).not.toContain("dark")
+    expect(raw).not.toContain("theme")
+    const { kept } = JSON.parse(raw) as { kept: { id: string; words: string[] }[] }
+    expect(kept[0]!.id).toBe("own1")
+    expect(kept[0]!.words).toHaveLength(6)
+    expect(statSync(keptFile(o.dir)).mode & 0o777).toBe(0o600)
+  })
+
+  test("a value matches the message's words in a row, past case, quotes and stops", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", 'Reply policy: "Factory status only." thanks', START, OWNER)
+    const { kept } = (await Bun.file(keptFile(o.dir)).json()) as { kept: { words: string[] }[] }
+    expect(holds(kept[0]!.words, "factory status only")).toBe(true)
+    expect(holds(kept[0]!.words, "status")).toBe(true)
+    expect(holds(kept[0]!.words, "factory only")).toBe(false)
+    expect(holds(kept[0]!.words, "  ")).toBe(false)
+  })
+})
+
+describe("settings set from the owner's message", () => {
+  test("an owner id whose message holds the value applies it, logs the id and old value, and tells the undo", async () => {
+    const o = owned()
+    await o.run(["set", "factory.repo", "made-up-me/old", "--reason", "made-up start"])
+    await keepMessage(o.dir, "own1", "point the repo at made-up-me/new", START, OWNER)
+    const said = await settingSet(o.io, "own1", "factory.repo", "made-up-me/new")
+    expect(said).toContain("set factory.repo from the owner's message own1")
+    expect(stored(o.data)["factory.repo"]).toBe("made-up-me/new")
+    expect(o.logged).toEqual([
+      'ops-wa: factory.repo set from the owner\'s message own1; it was "made-up-me/old"',
+    ])
+    expect(o.told).toHaveLength(1)
+    expect(o.told[0]).toContain("To undo: playground settings set factory.repo")
+  })
+
+  test("a value the message does not hold refuses, and nothing is set", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "point the repo at made-up-me/new", START, OWNER)
+    await expect(settingSet(o.io, "own1", "factory.repo", "made-up-me/old")).rejects.toThrow(
+      "does not hold the value",
+    )
+    expect(o.told).toEqual([])
+  })
+
+  test("an unknown id and one older than 24 hours refuse", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "point the repo at made-up-me/new", START, OWNER)
+    await expect(settingSet(o.io, "own9", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no message of the owner's",
+    )
+    o.advance(25 * HOUR)
+    await expect(settingSet(o.io, "own1", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no message of the owner's",
+    )
+    expect(o.told).toEqual([])
+  })
+
+  test("the undo line restores the old value, and a reset when there was none", async () => {
+    const o = owned()
+    await o.run(["set", "factory.repo", "made-up-me/old", "--reason", "made-up start"])
+    await keepMessage(o.dir, "own1", "repo made-up-me/new and the db made-up-db", START, OWNER)
+    const words = (said: string) =>
+      [...said.split("to undo: ")[1]!.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2]!)
+    const undo = words(await settingSet(o.io, "own1", "factory.repo", "made-up-me/new"))
+    expect(undo.slice(0, 2)).toEqual(["playground", "settings"])
+    expect((await o.run(undo.slice(2))).code).toBe(0)
+    expect(stored(o.data)["factory.repo"]).toBe("made-up-me/old")
+    const reset = words(await settingSet(o.io, "own1", "live.container", "made-up-db"))
+    expect(reset.slice(0, 4)).toEqual(["playground", "settings", "reset", "live.container"])
+    expect(stored(o.data)["live.container"]).toBe("made-up-db")
+    expect((await o.run(reset.slice(2))).code).toBe(0)
+    expect(stored(o.data)).not.toHaveProperty("live.container")
+  })
+
+  test("a guarded key waits for the owner's reply 1, and applies on it within 10 minutes", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
+    expect(guarded("wa.replyPolicy")).toBe(true)
+    expect(guarded("jobs.ops-wa")).toBe(true)
+    expect(guarded("factory.repo")).toBe(false)
+    const said = await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
+    expect(said).toContain("asked the owner on WhatsApp to confirm")
+    expect(o.told).toEqual([
+      'Set wa.replyPolicy to "factory status only"? Reply 1 to apply, within 10 minutes.',
+    ])
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+    expect(await confirm(o.io, "ok")).toBe(false)
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+    o.advance(CONFIRM_MS - 1)
+    expect(await confirm(o.io, " 1 ")).toBe(true)
+    expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
+    expect(o.told[1]).toContain("To undo: playground settings reset wa.replyPolicy")
+    expect(await confirm(o.io, "1")).toBe(false)
+  })
+
+  test("a guarded key with no confirm, or a late one, applies nothing", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "reply policy: factory status only", START, OWNER)
+    await settingSet(o.io, "own1", "wa.replyPolicy", "factory status only")
+    o.advance(CONFIRM_MS)
+    expect(await confirm(o.io, "1")).toBe(false)
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+  })
+})
+
+describe("ops-wa's bridge keeps a message and takes a confirm from the owner alone", () => {
+  const watched = (o: ReturnType<typeof owned>) => {
+    const fake = fakeSocket()
+    fake.setClock(() => o.io.now())
+    const relayed: string[] = []
+    const w = bridge({
+      alert: async () => ALERT,
+      assistant: async () => undefined,
+      busy: async () => false,
+      confirm: (text) => confirm(o.io, text),
+      dir: o.dir,
+      log: () => {},
+      now: o.io.now,
+      on: async () => true,
+      owner: OWNER,
+      relay: async (_: string, text: string) => void relayed.push(text),
+      reply: async () => "sent",
+      sleep: async () => {},
+      stuck: async () => null,
+    })
+    w.attach(fake.sock)
+    return { fake, relayed, settle: w.idle }
+  }
+
+  test("the owner's line names its id and the settings set, and the owner's 1 applies the guarded key", async () => {
+    const o = owned()
+    const h = watched(o)
+    h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("--from-owner-msg own1")
+    await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
+    h.fake.upsert([h.fake.message(jid(OWNER), "1", { id: "own2" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+    expect(h.relayed).toHaveLength(1)
+  })
+
+  test("a 1 from the second number or a stranger applies nothing", async () => {
+    const o = owned()
+    const h = watched(o)
+    h.fake.upsert([h.fake.message(jid(OWNER), "guest policy: status only", { id: "own1" })])
+    await h.settle()
+    await settingSet(o.io, "own1", "wa.guestPolicy", "status only")
+    h.fake.upsert([
+      h.fake.message(jid(ALERT), "1", { id: "guest1" }),
+      h.fake.message(jid(STRANGER), "1", { id: "stranger1" }),
+    ])
+    await h.settle()
+    expect(stored(o.data)).toEqual({})
+  })
+
+  test("a guest's or a stranger's message is never kept, so its id refuses", async () => {
+    const o = owned()
+    const h = watched(o)
+    h.fake.upsert([
+      h.fake.message(jid(ALERT), "repo made-up-me/new", { id: "guest1" }),
+      h.fake.message(jid(STRANGER), "repo made-up-me/new", { id: "stranger1" }),
+    ])
+    await h.settle()
+    await expect(settingSet(o.io, "guest1", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no message of the owner's",
+    )
+    await expect(settingSet(o.io, "stranger1", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no message of the owner's",
+    )
+  })
+})
+
+describe("playground settings set --from-owner-msg", () => {
+  test("only asks ops-wa, so with ops-wa down it refuses and writes nothing", async () => {
+    const o = owned()
+    const r = await o.run(["set", "wa.alert", "+15550100444", "--from-owner-msg", "own1"])
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("ops-wa is not running")
+    expect(stored(o.data)).toEqual({})
+  })
+
+  test("takes no --scope, --by or --reason", async () => {
+    const o = owned()
+    const r = await o.run([
+      "set",
+      "factory.repo",
+      "a/b",
+      "--from-owner-msg",
+      "own1",
+      "--scope",
+      "x",
+    ])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("--from-owner-msg takes no --scope")
+  })
+})

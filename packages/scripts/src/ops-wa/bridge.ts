@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
-import { keepNumber } from "./alert-set"
+import { keepMessage } from "./alert-set"
 import {
   answered,
   answerOf,
@@ -67,6 +67,8 @@ export type Mode = {
   inbox?: Inbox
   // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
   media?: Media
+  // the owner's reply 1 to a setting waiting on it, applied: true when the text was that reply (setting-set.ts's confirm)
+  confirm?: (text: string) => Promise<boolean>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
 }
@@ -179,7 +181,7 @@ async function inbound(io: Io & Mode, m: Incoming) {
   await ownFolder(io.dir)
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
   const id = m.key.id
-  const kept = !!text && !!id && (await keepNumber(io.dir, id, text, at, io.owner))
+  const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   if (!(await io.on())) {
     // one reply an hour at most, so a run of messages while it is off gets one answer; offAt is written first, so a failed reply waits out the hour too
@@ -188,16 +190,21 @@ async function inbound(io: Io & Mode, m: Incoming) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
+  if (text && io.confirm && (await io.confirm(text))) return
   const reply = io.inbox && text ? replyOf(text) : null
   if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
     return answerCard(io, io.inbox!, reply)
   const when = new Date(at).toISOString()
   const line = text
-    ? `The owner's WhatsApp at ${when} reads: ${text}\n${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`
+    ? `The owner's WhatsApp at ${when} reads: ${text}\n${id ? `${idLine(id)}\n` : ""}${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`
     : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${replyLine((await policyOf(io)).reply)}`
   await io.relay("dispatcher", line)
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
 }
+
+// The note on every owner text message, so the dispatcher can set a setting whose value it names when the owner asks (ADR 0035).
+export const idLine = (id: string) =>
+  `Its message id is ${id}: when it asks for a setting it names the value of, run playground settings set <key> <value> --from-owner-msg ${id}.`
 
 // The note on an owner message whose one number ops-wa kept, so the dispatcher can set it as the second number when the owner asks.
 export const keptLine = (id: string) =>

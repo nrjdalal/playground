@@ -2706,6 +2706,30 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     ],
     ["settings reset of a guard key", "playground settings reset glm.readOnlyLoad5 --reason x"],
     ["settings set of a key the hook cannot read", 'playground settings set "$KEY" 1 --reason x'],
+    [
+      "settings set with the owner's message flag in a quoted word",
+      `playground settings set wa.alert +15550100444 "--from-owner-msg own1"`,
+    ],
+    [
+      "settings set chained after one from the owner's message",
+      "playground settings set ui.theme dark --from-owner-msg own1 && playground settings set wa.alert +15550100444 --reason x",
+    ],
+    [
+      "settings set with the owner's message flag and no id",
+      "playground settings set wa.alert +15550100444 --reason x --from-owner-msg",
+    ],
+    [
+      "settings set with the owner's message flag and an empty id",
+      `playground settings set wa.alert +15550100444 --reason x --from-owner-msg ""`,
+    ],
+    [
+      "settings reset with the owner's message flag",
+      "playground settings reset wa.alert --from-owner-msg own1",
+    ],
+    [
+      "settings set with the owner's message id the hook cannot read",
+      'playground settings set wa.alert +15550100444 --from-owner-msg "$ID"',
+    ],
     ["migrate", "playground migrate --archive /tmp/a --pre-squash abc --org acme"],
     ["uninstall --purge", "playground uninstall --purge"],
     ["a command word the hook cannot read", 'playground "$CMD" put login list x /tmp/l.json'],
@@ -2844,6 +2868,14 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["settings why", "playground settings why ext.links"],
     ["settings set of a key no guard reads", "playground settings set ui.theme dark --reason x"],
     ["settings reset of a key no guard reads", "playground settings reset ui.theme --reason x"],
+    [
+      "settings set of a guard key from the owner's message, which only asks ops-wa",
+      "playground settings set wa.replyPolicy 'factory status' --from-owner-msg own1",
+    ],
+    [
+      "settings set of a job's row from the owner's message",
+      `playground settings set jobs.ops-wa '{"enabled":true}' --from-owner-msg own1`,
+    ],
     ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],
