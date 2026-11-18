@@ -542,9 +542,11 @@ async function removeApproved(
     }
     const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
-      const refused = ran.out.trim().replace(/^playground: /, "")
-      deps.notify(`${session}: ${refused || "the peer did not answer"}`)
-      console.error(`playground: ${args.peer}: ${refused || "the peer did not answer"}`)
+      const said = ran.out.trim().replace(/^playground: /, "")
+      const refused = said || "the peer did not answer"
+      // a plain refusal (exit 1) stays quiet, as a local one does; a protected or tripwire one (exit 3), silence or a failed ssh reaches the dispatcher
+      if (ran.code !== 1 || !said) deps.notify(`${session}: ${refused}`)
+      console.error(`playground: ${args.peer}: ${refused}`)
       return 1
     }
     console.log(ran.out.trim())

@@ -99,6 +99,18 @@ test("runRmPeer leaves a .gguf under a like-named record folder, so it stays", a
   expect(existsSync(path)).toBe(true)
 })
 
+test("runRmPeer leaves a .gguf outside the record and models, so it stays", async () => {
+  const m = machine()
+  file(join(m.home, "scratch", "model.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  const { out, err } = await rmpTold(join(m.home, "scratch", "model.gguf"), {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(out).toEqual([])
+  expect(err.join("\n")).toContain("is not on the machine record, so it stays")
+})
+
 test("runRmPeer refuses a non-weights path the record names, and leaves it", async () => {
   const m = machine()
   const path = file(join(m.home, "scratch", "note.txt"), "scratch")
@@ -135,7 +147,7 @@ test("runRmPeer refuses a protected path the record names, and leaves it", async
     bytes: 4,
     card: "11111111-2222-3333-4444-555555555555",
   })
-  expect(code).toBe(1)
+  expect(code).toBe(3)
   expect(err.join("\n")).toContain("protected")
 })
 

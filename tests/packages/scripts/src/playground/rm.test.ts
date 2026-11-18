@@ -2288,7 +2288,7 @@ test("runRm --peer refuses a pick the card does not name on that peer, and sends
   expect(existsSync(repo)).toBe(true)
 })
 
-test("runRm --peer relays a peer's refusal once, and the path stays", async () => {
+test("runRm --peer relays a peer's plain refusal once and tells the dispatcher nothing, as a local one does", async () => {
   const { seen, peer } = peerRun({ code: 1, out: "playground: no such path" })
   const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
   const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
@@ -2296,14 +2296,23 @@ test("runRm --peer relays a peer's refusal once, and the path stays", async () =
     peer,
   })
   expect(code).toBe(1)
-  expect(told).toEqual(["j6rjgy-worker: no such path"])
-  expect(err.join("\n")).toContain("no such path")
+  expect(told).toEqual([])
+  expect(err).toEqual(["playground: spark-b: no such path"])
   expect(seen).toEqual([
     {
       machine: "spark-b",
       command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
     },
   ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer tells the dispatcher of a peer's protected refusal (exit 3), as a local one does", async () => {
+  const { peer } = peerRun({ code: 3, out: "playground: /m/x.gguf is protected" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], { ...deps, peer })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: /m/x.gguf is protected"])
   expect(existsSync(repo)).toBe(true)
 })
 
