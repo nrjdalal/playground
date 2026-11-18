@@ -168,8 +168,8 @@ A sweep reads each agent's state from four places:
   A `stuck` or `usage-limit` record goes stale once the transcript holds a newer turn (`stateNow()` in `packages/config/src/session-state.ts` reads it as over), so the positive check is the record reading `working` with `at` after the send.
 
 Before you call a local session stuck, read its model's /metrics, where running and waiting requests are above 0 and generation tokens per second are rising, not the pane's idle counter.
-The skip holds for the first 45 minutes of quiet, and a local session hung on a tool call is still flagged after that.
-A 15-minute compaction on a local session runs with no tool call and is not stuck, and 6 at once is the model's compute limit, which is normal.
+ops-session-resume's quiet line skips a working session the model serves for its first 45 minutes of quiet, counted from the moment it went quiet, and a session hung on a tool call is still flagged after that.
+A 15-minute compaction on a local session runs with no tool call and is not stuck, and 6 requests at once is the model's compute limit, which is normal.
 
 ## Message a session
 

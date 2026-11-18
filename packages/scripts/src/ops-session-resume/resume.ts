@@ -12,7 +12,6 @@ import {
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { roleOfName } from "../../../../scripts/hooks/role"
-import { busyOf } from "../local-model/model"
 import { escalateMs, leadOf } from "../ops-tick/tick"
 import {
   alertText,
@@ -335,9 +334,8 @@ const rosterAgents = async (ops: string) => {
 export async function cycle(options: {
   configDir: string
   live: () => Promise<Map<string, LiveSession>>
-  metrics?: () => Promise<string | null>
-  // a session the local model serves, by its backend pin, so the /metrics skip below gates on it; a read that fails is not local
-  servedByLocal?: (name: string) => Promise<boolean>
+  // whether the local model serves the session and is busy, so its quiet flag is held back; false when not local or idle, null when its /metrics does not read
+  localBusy?: (name: string) => Promise<boolean | null>
   now?: Date
 }): Promise<{ result: string; resumed: number }> {
   const { configDir, now = new Date() } = options
@@ -425,16 +423,9 @@ export async function cycle(options: {
       const path = await transcriptPathOf(configDir, record.sessionId)
       const moved = path ? await newestWrite(path) : undefined
       if (moved === undefined || now.getTime() - moved < QUIET_MS) continue
-      // A working session the local model still serves is not quiet: read its /metrics, where running and waiting above 0 means the model is working, before flagging, so a 15-minute compaction is never read as stuck from the pane's idle; a session the local model does not serve (Claude or GLM) is judged only by its idle.
-      if (now.getTime() - moved < SERVED_MS && (await options.servedByLocal?.(session.name))) {
-        if (options.metrics) {
-          const text = await options.metrics()
-          if (text !== null) {
-            const busy = busyOf(text)
-            if (busy !== null && busy > 0) continue
-          }
-        }
-      }
+      // A working session the local model serves is not quiet for its first 45 minutes (SERVED_MS), so its quiet flag is held back while the model is busy, and a stuck one is still flagged after.
+      if (now.getTime() - moved < SERVED_MS && (await options.localBusy?.(session.name)) === true)
+        continue
       const key = `${record.sessionId} quiet ${new Date(moved).toISOString()}`
       quiet.add(key)
       const tail = await transcriptTail(configDir, record.sessionId)
