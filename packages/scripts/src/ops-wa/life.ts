@@ -27,7 +27,7 @@ export type LinkSock = {
 }
 export type LifeIo<S extends LinkSock> = {
   alert: (text: string) => Promise<unknown>
-  // wa.alert, the alert-only second number in E.164, if set
+  // wa.alert, the second number in E.164, a guest, if set
   alertNumber?: string
   // posts the pairing card with its code, answering the card's id
   card: (code: string) => Promise<string | undefined>

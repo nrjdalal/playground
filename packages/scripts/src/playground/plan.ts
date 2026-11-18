@@ -61,10 +61,10 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
-playground wa send <file>
-                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa send [--to alert] <file>
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
 playground wa alert <file>
-                      send the alert in <file>, named by its absolute path, once to the owner's WhatsApp and once to the alert-only wa.alert number, each once it has ever written to the spare number (bun run wa)
+                      send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, once to the owner's WhatsApp and once to the wa.alert number, each once it has ever written to the spare number (bun run wa)
 playground wa status  print whether the owner and the alert number have written, each masked, and the owner's hours left for replies (bun run wa)
 playground wa relink
                       after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
