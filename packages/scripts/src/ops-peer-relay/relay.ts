@@ -129,10 +129,15 @@ export async function link({
   await save()
   let ended = false
   let why = ""
+  let stoppedResolve: () => void = () => {}
+  let endResolve: () => void = () => {}
+  const stopped = new Promise<void>((done) => (stoppedResolve = done))
+  const endSeen = new Promise<"end">((done) => (endResolve = () => done("end")))
   const stop = (reason: string) => {
     if (ended) return
     ended = true
     why = reason
+    stoppedResolve()
     far.kill()
   }
   const onAbort = () => stop("")
@@ -170,6 +175,7 @@ export async function link({
       if (Number.isInteger(message.end)) {
         cursor.remote = message.end as number
         await save()
+        endResolve()
       }
     }
     hello("ended")
@@ -192,7 +198,9 @@ export async function link({
             : `${peer.target} ended with code ${code} before its hello`,
     )
   }
-  if (!ended) up?.()
+  // count the link up only once the far has reported its start, so a line it already holds is read from, never read past
+  const seen = await Promise.race([endSeen, stopped])
+  if (!ended && seen === "end") up?.()
   const send = async (line: PeerLine): Promise<boolean> => {
     const answer = new Promise<unknown>((done) => (acked = done))
     far.stdin.write(`${JSON.stringify({ line })}\n`)
