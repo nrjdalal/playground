@@ -1303,13 +1303,18 @@ export function makeScratch(prefix: string, tmp = tmpdir()): string {
   return dir
 }
 
-// Removes a folder makeScratch made, and nothing else: null once removed, else why not.
-export function removeScratch(dir: string, tmp = tmpdir()): string | null {
+// Removes a folder makeScratch made, or an unmarked one the caller's own unmarked rule takes, and nothing else: null once removed, else why not.
+export function removeScratch(
+  dir: string,
+  tmp = tmpdir(),
+  unmarked?: (abs: string) => boolean,
+): string | null {
   const abs = resolve(dir)
   if (!lstat(abs)?.isDirectory()) return `${abs} is not a folder`
   if (dirname(real(abs)) !== real(tmp))
     return `${abs} is not a folder made in the temp folder ${tmp}`
-  if (!lstat(join(abs, MARKER))?.isFile()) return `${abs} has no ${MARKER} marker`
+  if (!lstat(join(abs, MARKER))?.isFile() && !unmarked?.(abs))
+    return `${abs} has no ${MARKER} marker`
   rmSync(abs, { force: true, recursive: true })
   return null
 }

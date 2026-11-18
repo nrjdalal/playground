@@ -6,7 +6,9 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -60,6 +62,46 @@ describe("ship:rehearsal", () => {
     big(deeper)
     expect(clearRehearsal(deeper, t)).toContain("temp folder")
     for (const dir of [unmarked, other, deeper]) expect(existsSync(dir)).toBe(true)
+  })
+
+  test("clear takes a legacy folder: ops-r<NNN>, its clone and logs, over 48 hours old, and no near miss", () => {
+    const t = tmp()
+    const old = new Date(Date.now() - 49 * 60 * 60 * 1000)
+    const legacy = (name: string, parts = ["clone", "logs"], at = old): string => {
+      const dir = join(t, name)
+      mkdirSync(dir)
+      for (const part of parts) mkdirSync(join(dir, part))
+      utimesSync(dir, at, at)
+      return dir
+    }
+    const taken = legacy(`${REHEARSAL_PREFIX}123b`)
+    big(taken)
+    utimesSync(taken, old, old)
+    expect(clearRehearsal(taken, t)).toBeNull()
+    expect(existsSync(taken)).toBe(false)
+    const young = legacy(
+      `${REHEARSAL_PREFIX}124`,
+      undefined,
+      new Date(Date.now() - 47 * 60 * 60 * 1000),
+    )
+    const linkTarget = legacy(`${REHEARSAL_PREFIX}128`)
+    const link = join(t, `${REHEARSAL_PREFIX}129`)
+    symlinkSync(linkTarget, link)
+    const linkedParts = legacy(`${REHEARSAL_PREFIX}130`, [])
+    symlinkSync(join(linkTarget, "clone"), join(linkedParts, "clone"))
+    symlinkSync(join(linkTarget, "logs"), join(linkedParts, "logs"))
+    utimesSync(linkedParts, old, old)
+    const kept = [
+      legacy(`${REHEARSAL_PREFIX}12`),
+      legacy(`${REHEARSAL_PREFIX}x125`),
+      legacy(`${REHEARSAL_PREFIX}126`, ["clone"]),
+      legacy(`${REHEARSAL_PREFIX}127`, ["logs"]),
+      young,
+      link,
+      linkedParts,
+    ]
+    for (const dir of kept) expect(clearRehearsal(dir, t)).not.toBeNull()
+    for (const dir of [...kept, linkTarget]) expect(existsSync(dir)).toBe(true)
   })
 
   test("the command makes a folder in its TMPDIR and clears it, and refuses a usage it does not know", () => {

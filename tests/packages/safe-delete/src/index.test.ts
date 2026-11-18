@@ -1565,6 +1565,21 @@ describe("removeScratch", () => {
     expect(removeScratch(join(tmp, "link"), tmp)).toBeString()
     expect(existsSync(made)).toBe(true)
   })
+
+  test("removes an unmarked folder only where the caller's unmarked rule takes it", () => {
+    const { root } = machine()
+    const tmp = join(root, "tmp")
+    const old = join(tmp, "ops-r123b")
+    mkdirSync(join(old, "clone"), { recursive: true })
+    mkdirSync(join(old, "logs"))
+    utimesSync(old, new Date(0), new Date(0))
+    expect(removeScratch(old, tmp)).toContain(MARKER)
+    expect(removeStale("ops-r", tmp, 0, new Date())).toEqual([])
+    expect(removeScratch(old, tmp, () => false)).toContain(MARKER)
+    expect(existsSync(old)).toBe(true)
+    expect(removeScratch(old, tmp, (abs) => abs === old)).toBeNull()
+    expect(existsSync(old)).toBe(false)
+  })
 })
 
 describe("removeStale", () => {

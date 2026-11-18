@@ -102,7 +102,8 @@ d. **Update.** Run the update, then `playground doctor`, still contained:
 The rehearsal's result goes into the ship PR's body beside the new-user gate's line, as `Invitee rehearsal at <sha>: PASS` on a line of its own, `<sha>` the full `$CANARY`; a candidate that changes no update path writes `Invitee rehearsal at <sha>: not needed` there, since step 3's `ship:merge` reads one of the two.
 
 **Clear.** Clear the scratch folder with `bun run ship:rehearsal clear <scratch>` once step 3's `ship:merge` has merged, since the ship PR's body cites its before and after files and a held ship reruns from it; a ship that fails or stops clears it as its freeze ends.
-The clear removes the whole folder, about 140,000 entries, past `playground rm`'s cap of 5,000 files or 2 GB, and keeps any folder without the marker, outside your temp folder or not named `ops-r` (`packages/scripts/src/ship/rehearsal.ts`); nightly-clean removes a marked one left over a day, so a rehearsal that dies frees its disk by the next night.
+The clear removes the whole folder, about 140,000 entries, past `playground rm`'s cap of 5,000 files or 2 GB, and keeps any folder without the marker, outside your temp folder or not named `ops-r` (`packages/scripts/src/ship/rehearsal.ts`).
+A legacy folder from before `ship:rehearsal new`, with no marker, is cleared too when it is named `ops-r<NNN>`, holds real `clone` and `logs` folders, and its mtime is over 48 hours old; nightly-clean takes no legacy folder, so clear each one by hand. Nightly-clean removes a marked one left over a day, so a rehearsal that dies frees its disk by the next night.
 Done when `ship:rehearsal clear` printed `removed <scratch>`, or kept it as `is not a folder`, since a clear or the nightly clean already removed it, or as `not a folder made in the temp folder`, since on Linux a session started again since `new` has a new temp folder, and the nightly clean removes that folder after a day.
 
 ## 2. Open the ship PR
