@@ -167,6 +167,10 @@ A sweep reads each agent's state from four places:
   The way from a session's name to its id: the `~/.claude/sessions/<pid>.json` file that names the session holds its `sessionId`.
   A `stuck` or `usage-limit` record goes stale once the transcript holds a newer turn (`stateNow()` in `packages/config/src/session-state.ts` reads it as over), so the positive check is the record reading `working` with `at` after the send.
 
+Before you call a local session stuck, read its model's /metrics, where running and waiting requests are above 0 and generation tokens per second are rising, not the pane's idle counter.
+The skip holds for the first 45 minutes of quiet, and a local session hung on a tool call is still flagged after that.
+A 15-minute compaction on a local session runs with no tool call and is not stuck, and 6 at once is the model's compute limit, which is normal.
+
 ## Message a session
 
 `SendMessage` takes a live session's name.
