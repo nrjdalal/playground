@@ -1,12 +1,13 @@
 // The suite's runner: runs `bun test` in sandbox.ts's sandbox, so no test can start a real session or read the real config by accident (a self-removal test once started two). The env is set before bun starts, since os.homedir() and the spawn PATH lookup read the boot environment, not a later mutation. The folder goes when the run does.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { availableParallelism, constants } from "node:os"
-import { isAbsolute, join, relative } from "node:path"
+import { basename, isAbsolute, join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
 import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
+import { py } from "./test-skills"
 import { isMainCheckout, prebuildTests } from "./verify/prebuild"
 
 const TIMINGS = "tests/timings.json"
@@ -121,10 +122,85 @@ if (relativeHere.length > 0) {
   dropScratch()
   process.exit(1)
 }
-// bun reads a path it cannot find as a name filter that matches nothing, so the run would pass on the other files: a test path names a file or the run stops
-const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
-if (missing.length > 0) {
-  console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
+// bun reads a path it cannot find as a name filter that matches nothing, so a test path bun cannot run would read green on the other files. A bun test file, a Python test, or a folder holding a test is run; a path that is none of these, or a name filter selecting nothing, stops the run before bun, naming each. The run stops, so a broken test or a typo is heard now, not swallowed.
+// a bun test file is any .test.ts or .test.tsx named path
+const isBunTest = (path: string) => /\.test\.tsx?$/.test(path)
+// a Python test is any test_*.py, matched by its stem so a nested one, tests/x/test_x.py, still names a test
+const isPyTest = (path: string) => /^test_[^/]+\.py$/.test(basename(path))
+// a folder scanned depth-first, skipping its build and VCS folders, holds a test when any entry under it is a bun test or a Python test
+const IGNORED = new Set(["node_modules", ".git", "dist", ".next"])
+const holdsTest = (dir: string): boolean => {
+  let found = false
+  const one = (folder: string) => {
+    if (found) return
+    for (const entry of readdirSync(folder)) {
+      if (found) break
+      if (IGNORED.has(entry)) continue
+      try {
+        const full = join(folder, entry)
+        if (statSync(full).isDirectory()) one(full)
+        else if (isBunTest(entry) || isPyTest(entry)) found = true
+      } catch {
+        continue
+      }
+    }
+  }
+  one(dir)
+  return found
+}
+// a bare name filter selects a test when any test file of the run's, found depth-first from here, carries it, so the run's set of test files decides, and bun still gets the filter to run it
+const filterMatches = (filter: string): boolean => {
+  let found = false
+  const one = (folder: string) => {
+    if (found) return
+    for (const entry of readdirSync(folder)) {
+      if (found) break
+      if (IGNORED.has(entry)) continue
+      try {
+        const full = join(folder, entry)
+        if (statSync(full).isDirectory()) one(full)
+        else if ((isBunTest(entry) || isPyTest(entry)) && entry.includes(filter)) found = true
+      } catch {
+        continue
+      }
+    }
+  }
+  one(".")
+  return found
+}
+// a .py path that is not a test, and any other path that is not a test or a folder holding one, is passed to bun only as a filter, so bun would read green on the other files; these are rejected here, before bun
+const bunTargets: string[] = []
+const pyTargets: [label: string, file: string][] = []
+const unrunnable: [label: string, reason: string][] = []
+const seenPy = new Set<string>()
+for (const arg of args) {
+  if (arg.startsWith("-")) continue
+  const b = bare(arg)
+  if (isBunTest(b)) {
+    if (!existsSync(b)) unrunnable.push([arg, "no test file at"])
+    else bunTargets.push(arg)
+  } else if (isPyTest(b)) {
+    if (!existsSync(b)) unrunnable.push([arg, "no Python test at"])
+    else if (!seenPy.has(b)) {
+      seenPy.add(b)
+      pyTargets.push([arg, b.replace(/^tests\//, "")])
+    }
+  } else if (existsSync(b)) {
+    try {
+      if (statSync(b).isDirectory()) {
+        if (holdsTest(b)) bunTargets.push(arg)
+        else unrunnable.push([arg, "no test in folder at"])
+      } else unrunnable.push([arg, "no test file at"])
+    } catch {
+      unrunnable.push([arg, "no test file at"])
+    }
+  } else if (filterMatches(b)) bunTargets.push(arg)
+  else unrunnable.push([arg, "no test matching"])
+}
+if (unrunnable.length > 0) {
+  console.error(
+    `test-sandbox: ${unrunnable.map(([label, reason]) => `${reason} ${label}`).join(", ")}; check the path and run again`,
+  )
   dropScratch()
   process.exit(1)
 }
@@ -147,11 +223,11 @@ const skipValidation = async (): Promise<boolean> => {
 if (await skipValidation())
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
 const serial = SERIAL.filter((file) =>
-  paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
+  bunTargets.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
 // a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
-const left = ahead ? paths.filter((path) => clockExempt(bare(path))) : []
-const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !left.includes(path))
+const left = ahead ? bunTargets.filter((path) => clockExempt(bare(path))) : []
+const rest = bunTargets.filter((path) => !SERIAL.includes(bare(path)) && !left.includes(path))
 if (left.length > 0)
   console.error(`test-sandbox: the clock-ahead pass leaves out ${left.join(", ")}`)
 
@@ -161,7 +237,7 @@ console.error(
 // a flag left alone in `rest` (every path named was serial) would have bun test run the whole suite
 const named = (list: string[]) => list.some((path) => !path.startsWith("-"))
 const parallel =
-  named(rest) || (rest.length > 0 && !named(paths))
+  named(rest) || (rest.length > 0 && !named(bunTargets))
     ? await runPass(
         [
           `--preload=${preload}`,
@@ -182,8 +258,30 @@ if (interrupted) {
   process.exit(128 + constants.signals[interrupted])
 }
 const alone = serial.length > 0 ? await runPass(serial) : 0
+// the Python tests run in one step each, the same uv run test-skills uses, only when bun's pass finished without a failure, so a broken bun does not wait out the slow Docker and kill tests; the run stops naming the first one that fails
+const pyFailed: string[] = []
+if (parallel === 0 && alone === 0) {
+  for (const [label, file] of pyTargets) {
+    console.error(`test-sandbox: running Python test ${label}`)
+    const step = Bun.spawn(wrap(py(file)), {
+      env: { ...env, PYTHONUNBUFFERED: "1" },
+      stdout: "pipe",
+      stderr: "inherit",
+    })
+    const out: Uint8Array[] = []
+    for await (const chunk of step.stdout) out.push(chunk)
+    if ((await step.exited) !== 0) {
+      const fail = Buffer.concat(out)
+        .toString()
+        .split("\n")
+        .find((line) => /^FAIL\b/.test(line))
+      console.error(`test-sandbox: Python test ${label} failed${fail ? `: ${fail.trim()}` : ""}`)
+      pyFailed.push(label)
+    }
+  }
+}
 console.error(
-  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}`,
+  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}, ${pyTargets.length} Python test${pyTargets.length === 1 ? "" : "s"} ${pyFailed.length ? "failed" : "passed"}`,
 )
 dropScratch()
-process.exit(parallel || alone)
+process.exit(parallel || alone || pyFailed.length)

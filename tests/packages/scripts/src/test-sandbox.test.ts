@@ -508,3 +508,111 @@ describe("a relative path in the factory's main checkout", () => {
     20_000,
   )
 })
+
+// 2711: a Python test is one of the paths test:file runs, so one that fails exits the run naming it, one that passes is reported as run, and a diff that only adds a docs line still lists a repo-walking Python test through touchedTests. A .py test bun cannot run would read green on the other files, so each row is one bun would read green, and none is allowed to.
+test("a failing Python test exits the run, naming it, like a failing bun test (#2711)", async () => {
+  const dir = join(DIR, "py-fail")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  // a .py bun would read a .py path as a name filter matching nothing, so green on the other files; one that exits 1 is the failing case, and its FAIL line names it, as test:file's grep reads
+  writeFileSync(
+    join(dir, "tests", "x", "test_fail.py"),
+    'import sys\nprint("FAIL boom", flush=True)\nsys.exit(1)\n',
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x/test_fail.py"], {
+    cwd: dir,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).not.toBe(0)
+  expect(stderr).toContain("tests/x/test_fail.py")
+  expect(stderr).toMatch(/Python test .* failed/)
+}, 180_000)
+
+test("a passing Python test exits 0, and is reported as run, not read green (#2711)", async () => {
+  const dir = join(DIR, "py-ok")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(join(dir, "tests", "x", "test_ok.py"), 'import sys\nprint("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x/test_ok.py"], {
+    cwd: dir,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("running Python test tests/x/test_ok.py")
+  expect(stderr).toContain("1 Python test passed")
+}, 180_000)
+
+test("a diff that only adds a docs line still lists a repo-walking Python test, and test:file over that list runs it (#2711)", async () => {
+  const dir = join(DIR, "py-repo")
+  mkdirSync(dir, { recursive: true })
+  const git = (...a: string[]) => {
+    const out = Bun.spawnSync(["git", "-C", dir, ...a], { stdout: "pipe", stderr: "pipe" })
+    if (out.exitCode !== 0) throw new Error(`git ${a.join(" ")}: ${out.stderr.toString()}`)
+  }
+  git("init", "-q", "-b", "canary")
+  git("config", "user.email", "t@t")
+  git("config", "user.name", "t")
+  mkdirSync(join(dir, "tests", "walk"), { recursive: true })
+  mkdirSync(join(dir, "docs"), { recursive: true })
+  // a test that walks the repo, so touchedTests lists it whenever the diff adds text, though only docs changed
+  writeFileSync(join(dir, "docs", "a.md"), "# a\n\nfirst line\n")
+  writeFileSync(
+    join(dir, "tests", "walk", "test_walks.py"),
+    "import os\nn = 0\nfor root, dirs, names in os.walk('.'):\n    n += len(names)\nassert n >= 0\n",
+  )
+  git("add", ".")
+  git("commit", "-qm", "base")
+  // canary keeps the base commit; the docs line lands on the next branch, so canary (base) and HEAD (tip) differ and the diff adds text
+  git("checkout", "-q", "-b", "feature")
+  // a change that adds a docs line only, so the diff adds text without touching a test
+  writeFileSync(join(dir, "docs", "a.md"), "# a\n\nfirst line\nsecond line\n")
+  git("commit", "-qam", "add a docs line")
+  const { touchedTests } =
+    await import("../../../../extensions/core/skills/code-review-loop/scripts/state")
+  const listed = touchedTests(dir, "canary", "HEAD")
+  expect(listed).toContain("tests/walk/test_walks.py")
+  // test:file over the list routes the Python test to uv, so the run passes, as it could not over the docs-only diff before
+  const run = Bun.spawn(["bun", SCRIPT, ...listed], {
+    cwd: dir,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("tests/walk/test_walks.py")
+  expect(stderr).toContain("1 Python test passed")
+}, 180_000)
+
+test.each([
+  ["a .json path that is not a test", "package.json"],
+  ["a folder that holds no test", "empty"],
+  ["a name filter that matches nothing", "no-such-filter-xyz"],
+])(
+  "stops the run on %s, naming it, since bun would read green on the other files (#2711)",
+  async (_, arg) => {
+    const dir = join(DIR, "stop")
+    mkdirSync(join(dir, "tests", "scripts"), { recursive: true })
+    mkdirSync(join(dir, "empty"), { recursive: true })
+    // a folder that holds no test, and a .json that is not a test, reach bun only as a filter, so bun reads green on the one real test; the classifier stops them before bun, naming them
+    writeFileSync(
+      join(dir, "tests", "scripts", "ok.test.ts"),
+      'import { test } from "bun:test"\ntest("ok", () => {})\n',
+    )
+    const run = Bun.spawn(["bun", SCRIPT, arg], {
+      cwd: dir,
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    expect(code).not.toBe(0)
+    expect(stderr).toContain(arg)
+    expect(stderr).toContain("check the path and run again")
+  },
+  20_000,
+)
