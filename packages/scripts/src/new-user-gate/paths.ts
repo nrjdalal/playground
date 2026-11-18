@@ -1,6 +1,7 @@
 // What a new user meets first: the installer, first run's trust and setup, and the first start; a PR changing any of them merges only on this gate's PASS at its head (pr-merge's new-user gate). A path ending in / takes everything under it.
 export const NEW_USER_PATHS = [
   "api/hono/src/lib/onboard/",
+  "api/hono/src/lib/setup/",
   "api/hono/src/routers/onboard.ts",
   "install.sh",
   "packages/scripts/src/new-user-gate/",
