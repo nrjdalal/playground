@@ -1311,6 +1311,16 @@ describe("every kind the owner sends (#2789)", () => {
     )
   })
 
+  test("a voice note that answers a message carries the text it quotes", async () => {
+    const h = withMedia()
+    const contextInfo = { quotedMessage: { conversation: "PR 12 is green" }, stanzaId: "m1" }
+    h.fake.upsert([of(h, { audioMessage: { contextInfo, mimetype: "audio/ogg; codecs=opus" } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(
+      "which says: merge the fix tonight\nIt answers the message that reads: PR 12 is green\n",
+    )
+  })
+
   test("a video no tool can read goes on as not transcribed", async () => {
     const h = withMedia(null)
     h.fake.upsert([of(h, { videoMessage: { mimetype: "video/mp4" } })])
@@ -1386,6 +1396,24 @@ describe("every kind the owner sends (#2789)", () => {
       "edits its message in-old to read: merge it after lunch\nAnswer through",
     )
     expect(h.fake.sent).toEqual([])
+  })
+
+  test("an edit of a photo's caption reads as the new caption, and the line names only the edited message's id", async () => {
+    const h = harness()
+    const protocolMessage = {
+      editedMessage: { imageMessage: { caption: "the second build" } },
+      key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
+      type: 14,
+    }
+    h.fake.upsert([
+      {
+        ...of(h, { protocolMessage }),
+        key: { fromMe: false, id: "edit-1", remoteJid: jid(OWNER) },
+      },
+    ])
+    await h.settle()
+    expect(h.relayed[0]).toContain("edits its message in-old to read: the second build\n")
+    expect(h.relayed[0]).not.toContain("edit-1")
   })
 
   test("an edit inside WhatsApp's editedMessage wrapper reads the same", async () => {

@@ -192,6 +192,20 @@ const textOf = (message: Record<string, unknown>): string | undefined => {
 
 type Part = Record<string, unknown> | undefined
 const str = (value: unknown) => (typeof value === "string" && value ? value : undefined)
+// a photo's, video's or document's caption, the words a file carries
+const captionOf = (message: Record<string, unknown>) =>
+  ["imageMessage", "videoMessage", "documentMessage"]
+    .map((k) => str((message[k] as Part)?.caption))
+    .find(Boolean)
+// the words of the message a part quotes, when it answers one: its text, its caption or its kind
+const quoteOf = (part: Part) => {
+  const quoted = (part?.contextInfo as { quotedMessage?: Part } | undefined)?.quotedMessage
+  if (!quoted) return undefined
+  const inner = unwrap(quoted)
+  return textOf(inner) ?? captionOf(inner) ?? mediaOf(inner)
+}
+const answering = (quote: string | undefined) =>
+  quote ? `\nIt answers the message that reads: ${quote}` : ""
 // a vCard's name and numbers, as WhatsApp sends a contact
 const contactOf = (part: Part) => {
   const vcard = str(part?.vcard) ?? ""
@@ -204,20 +218,12 @@ const REVOKE = 0
 const MESSAGE_EDIT = 14
 
 // What the dispatcher hears of a message that is no file to keep, as the words after "The owner's WhatsApp at <time>": its text, with the text it quotes; a sticker by its kind; a location or a contact as text; an edit, a delete or a reaction naming the message it is about, which is never kept for wa react, and a delete or a reaction asks no reply. Undefined for a file or a kind ops-wa does not know.
-export type Said = { about?: true; notice?: true; phrase: string; text?: string }
+export type Said = { about?: true; notice?: true; phrase: string; quote?: string; text?: string }
 async function saidOf(io: Io, message: Record<string, unknown>): Promise<Said | undefined> {
   const text = textOf(message)
   if (text) {
-    const context = (message.extendedTextMessage as { contextInfo?: { quotedMessage?: Part } })
-      ?.contextInfo
-    const quoted = context?.quotedMessage ? unwrap(context.quotedMessage) : undefined
-    const quote = quoted && (textOf(quoted) ?? mediaOf(quoted))
-    return {
-      phrase: quote
-        ? `reads: ${text}\nIt answers the message that reads: ${quote}`
-        : `reads: ${text}`,
-      text,
-    }
+    const quote = quoteOf(message.extendedTextMessage as Part)
+    return { phrase: `reads: ${text}${answering(quote)}`, quote, text }
   }
   if (message.stickerMessage) return { phrase: "holds a sticker" }
   const place = (message.locationMessage ?? message.liveLocationMessage) as Part
@@ -238,7 +244,8 @@ async function saidOf(io: Io, message: Record<string, unknown>): Promise<Said | 
   if (protocol?.type === REVOKE && id)
     return { about: true, notice: true, phrase: `deletes its message ${id}` }
   if (protocol?.type === MESSAGE_EDIT && id) {
-    const edited = protocol.editedMessage ? textOf(unwrap(protocol.editedMessage)) : undefined
+    const inner = protocol.editedMessage ? unwrap(protocol.editedMessage) : undefined
+    const edited = inner && (textOf(inner) ?? captionOf(inner))
     return edited
       ? { about: true, phrase: `edits its message ${id} to read: ${edited}` }
       : undefined
@@ -312,7 +319,8 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reply = io.inbox && text ? replyOf(text) : null
   if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
     return answerCard(io, io.inbox!, reply)
-  const when = `${new Date(at).toISOString()}${idOf(m.key.id)}`
+  // a line about another message names only that one's id, the one wa react --id takes
+  const when = `${new Date(at).toISOString()}${idOf(said?.about ? undefined : m.key.id)}`
   const phrase =
     said?.phrase ??
     (await saved(io, m, message, at)) ??
@@ -402,7 +410,7 @@ async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
     dataLine(
       at,
       said?.text
-        ? said.phrase.slice("reads: ".length)
+        ? `${said.text}${answering(said.quote)}`
         : `(it ${said?.phrase ?? `holds ${media}, which ops-wa does not keep`})`,
       m.key.id,
       guestLine((await policyOf(io)).guest),
@@ -422,7 +430,12 @@ async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown
     "documentMessage",
   ].find((k) => message[k])
   if (!io.media || !key) return undefined
-  const part = message[key] as { caption?: unknown; fileName?: unknown; mimetype?: string }
+  const part = message[key] as {
+    caption?: unknown
+    contextInfo?: unknown
+    fileName?: unknown
+    mimetype?: string
+  }
   let path: string
   try {
     path = await keep(
@@ -437,16 +450,17 @@ async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown
     return undefined
   }
   const caption = str(part.caption) ? `, with the words: ${part.caption}` : ""
-  if (key === "imageMessage") return `holds a photo, kept at ${path}${caption}`
+  const answers = answering(quoteOf(part as Part))
+  if (key === "imageMessage") return `holds a photo, kept at ${path}${caption}${answers}`
   if (key === "documentMessage")
-    return `holds a document${str(part.fileName) ? `, ${part.fileName},` : ""} kept at ${path}${caption}`
+    return `holds a document${str(part.fileName) ? `, ${part.fileName},` : ""} kept at ${path}${caption}${answers}`
   const words = await io.media.transcribe(path).catch(() => undefined)
   if (key === "audioMessage")
     return words
-      ? `holds a voice note, kept at ${path}, which says: ${words}`
-      : `holds a voice note, not transcribed, kept at ${path}`
+      ? `holds a voice note, kept at ${path}, which says: ${words}${answers}`
+      : `holds a voice note, not transcribed, kept at ${path}${answers}`
   const sound = words ? `its sound says: ${words}` : "its sound not transcribed"
-  return `holds ${MEDIA[key]}, kept at ${path}${caption}, ${sound}`
+  return `holds ${MEDIA[key]}, kept at ${path}${caption}, ${sound}${answers}`
 }
 
 // A reply with no card id or no number is a card's only while some open card that went out waits on its rows, so the owner's "2" to the dispatcher's own question reaches the dispatcher.
