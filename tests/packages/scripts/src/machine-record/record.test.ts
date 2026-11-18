@@ -166,6 +166,15 @@ describe("the daily check (PG-2538)", () => {
     }
   })
 
+  test("a root-only watched folder the user can list is watched as any other, so a new path in it reads misplaced", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    writeFileSync(join(rootOnly, "by-hand.rules"), "")
+    expect(await check(data, places({ rootOnly: [rootOnly] }))).toEqual([
+      `misplaced: ${join(rootOnly, "by-hand.rules")}`,
+    ])
+  })
+
   test("a root-step folder the install leaves readable reads unreadable when the user cannot list it", async () => {
     const shut = join(root, "usr-local-lib-playground")
     await seed(data, [], places())

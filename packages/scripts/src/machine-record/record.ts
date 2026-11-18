@@ -263,15 +263,12 @@ async function states(
   return out
 }
 
-// The check: the record against what the watched places hold now, as findings' lines; a root-only folder the record holds no path in is left out, since nothing of the factory's sits there to read.
+// The check: the record against what the watched places hold now, as findings' lines; a root-only folder the user cannot list and the record holds no path in gets no line, since nothing of the factory's sits there to read.
 export async function check(data: string, places: Places): Promise<string[]> {
   const record = await readRecord(data)
-  const empty = (places.rootOnly ?? ROOT_ONLY).filter(
-    (folder) => !record.entries.some((e) => dirname(e.path) === folder),
-  )
-  const system = (places.system ?? ROOT_FOLDERS).filter((folder) => !empty.includes(folder))
-  const now = await snapshot({ ...places, system })
-  return findings(record, now, await states(record, now), places.homes)
+  const now = await snapshot(places)
+  const known = now.known.filter((folder) => record.entries.some((e) => dirname(e.path) === folder))
+  return findings(record, { ...now, known }, await states(record, now), places.homes)
 }
 
 // The peer install's staging folder in the ssh user's home (api/hono/src/lib/system/peer-root.ts's PEER_STAGE), as a ~/ path the peer's own add reads under its home.

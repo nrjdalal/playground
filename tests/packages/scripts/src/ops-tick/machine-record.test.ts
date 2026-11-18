@@ -50,7 +50,8 @@ const setUp = async (ssh: { code: number; out: string }, dashboard = false) => {
 
 test("the machine-record beat runs daily, sending ops each finding here and on the peer, each led by its machine", async () => {
   expect(BEATS.find((b) => b.name === "machine-record")).toMatchObject({ cron: "45 3 * * *" })
-  const peer = "misplaced: /home/me/.cache/hand\nunreadable: /etc/polkit-1/rules.d\n"
+  const peer =
+    "misplaced: /home/me/.cache/hand\nroot-only: /etc/polkit-1/rules.d, no root helper on this machine, so its listing is skipped\nunreadable: /usr/local/lib/playground\n"
   const { beat, ctx, home, runs, sent } = await setUp({ code: 1, out: peer })
   mkdirSync(join(home, ".cache", "by-hand"))
   await beat(ctx)
@@ -60,7 +61,11 @@ test("the machine-record beat runs daily, sending ops each finding here and on t
   expect(sent).toEqual([
     { text: `machine record: ${HERE}: misplaced: ${join(home, ".cache", "by-hand")}`, to: "ops" },
     { text: "machine record: spark-test: misplaced: /home/me/.cache/hand", to: "ops" },
-    { text: "machine record: spark-test: unreadable: /etc/polkit-1/rules.d", to: "ops" },
+    {
+      text: "machine record: spark-test: root-only: /etc/polkit-1/rules.d, no root helper on this machine, so its listing is skipped",
+      to: "ops",
+    },
+    { text: "machine record: spark-test: unreadable: /usr/local/lib/playground", to: "ops" },
   ])
 })
 
