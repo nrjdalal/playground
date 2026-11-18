@@ -210,7 +210,7 @@ step() {
     failed=1
   fi
 }
-# the suite, with Checks' rule for load flakes: each failing file again alone, then the whole suite once more, every re-run named
+# the suite, with Checks' rule for load flakes: each failing file again alone, then the whole suite once more, any red its rerun turns green named as a BATCH-RED
 test_step() {
   local t0 code out=$F.test files f alone="" ok=1
   t0=$(date +%s)
@@ -235,6 +235,10 @@ test_step() {
     code=$?
     cat "$out" >> "$LOG"
     if [ "$code" = 0 ] && sandbox_ok "$out"; then
+      # a file its rerun turns green: red in the batch, green alone and in the rerun, so name it for the one issue that root-causes it
+      for f in $files; do
+        echo "BATCH-RED: $f (open one issue to root-cause it, by code-review-loop's step 2)"
+      done
       echo "ok test $(($(date +%s) - t0))s: $(summary "$out"); the first run had $first, its files each passed alone:${alone%,}, and the full suite passed again"
       return
     fi

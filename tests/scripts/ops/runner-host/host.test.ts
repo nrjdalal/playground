@@ -634,6 +634,32 @@ exit 1`,
   return p.stdout.toString()
 }
 
+// suite.sh's test step when a file fails in the batch, passes alone, and the rerun is green: it names the file a BATCH-RED and still passes
+const testStepRedTurnsGreen = (
+  bun = `[ "$2" = test:file ] && exit 0
+n=$(($(cat "ROOT/n" 2> /dev/null || echo 0) + 1)); echo "$n" > "ROOT/n"
+if [ "$n" -lt 2 ]; then
+printf 'tests/a.test.ts:\n(fail) a > breaks [1.00ms]\n\n 9 pass\n 1 fail\n'
+exit 1
+fi
+printf ' 10 pass\n 0 fail\ntest-sandbox: parallel pass passed, serial pass passed\n'
+exit 0`,
+) => {
+  const root = mkdtempSync(join(tmpdir(), "runner-test-red-green-"))
+  dirs.push(root)
+  const b = join(root, "bin")
+  mkdirSync(b)
+  bin(b, "timeout", `shift; exec "$@"`)
+  bin(b, "bun", bun.replaceAll("ROOT", root))
+  const script = ["failing_files", "failing_names", "sandbox_ok", "summary", "test_step"]
+    .map(suiteFn)
+    .join("\n")
+  const p = Bun.spawnSync(["bash", "-c", `failed=0\n${script}\ntest_step`], {
+    env: { F: join(root, "run"), LOG: join(root, "log"), PATH: `${b}:/usr/bin:/bin` },
+  })
+  return p.stdout.toString()
+}
+
 describe("suite.sh", () => {
   test("a second full run that fails names its own files, so the Mac never re-runs the first run's", () => {
     const out = testStep()
@@ -641,6 +667,15 @@ describe("suite.sh", () => {
     expect(out).toContain("files test tests/b.test.ts\n")
     expect(out).not.toContain("files test tests/a.test.ts")
     expect(out).toContain("tally test 1 0\n")
+  })
+
+  test("a red its rerun turns green is named a BATCH-RED, and the step still passes", () => {
+    const out = testStepRedTurnsGreen()
+    expect(out).toContain(
+      "BATCH-RED: tests/a.test.ts (open one issue to root-cause it, by code-review-loop's step 2)\n",
+    )
+    expect(out).toContain("ok test ")
+    expect(out).not.toContain("fail test ")
   })
 
   test("only the oldest live waiter tries a slot, first come first served, and dead tickets drop", () => {
