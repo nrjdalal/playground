@@ -686,7 +686,7 @@ describe("WhatsApp mode", () => {
     )
   })
 
-  test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message queues it", async () => {
+  test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message or a send queues it", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
     await h.settle()
@@ -704,6 +704,13 @@ describe("WhatsApp mode", () => {
     h.advance(UPDATE_MS)
     await h.pass()
     expect(updates()).toBe(2)
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(2)
+    await h.send("merged")
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(3)
   })
 })
 
