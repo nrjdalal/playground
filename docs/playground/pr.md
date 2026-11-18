@@ -56,6 +56,8 @@ Nothing in the template: it is settled by the owner, and [code-review-loop](./co
 - The PRs you open read in the same five sections, and a reviewer finds the proof under Evidence and the risk under Merge Danger without asking.
 - A merge's Changelog line comes straight off the TL;DR with no second write.
 
+- A body whose code reads live machine state shows one read-only run of that code on the live layout, its output beside the injected stub, under Evidence.
+
 ## Where it fits
 
 Every skill that opens a PR leans on it: an org's ticket skill, in its extension, writes its PR bodies with it, and [code-review-loop](./code-review-loop.md) reads a body against it before it scores.
