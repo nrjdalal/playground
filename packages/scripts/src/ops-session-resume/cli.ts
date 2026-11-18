@@ -1,11 +1,20 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { dataDirOf } from "@packages/env/data-dir"
+
+import { readModelMetrics } from "../local-model/live"
 import { beat, cycle, CYCLE_SECONDS, liveSessions, opsDirOf } from "./resume"
 
 const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude")
 const beatPath = join(opsDirOf(), "ops-session-resume.json")
-const once = () => cycle({ configDir, live: () => liveSessions(configDir) })
+const once = () =>
+  cycle({
+    configDir,
+    live: () => liveSessions(configDir),
+    // read the local model's /metrics before flagging a working session quiet, so a 15-minute compaction is never read as stuck from the pane's idle
+    metrics: () => readModelMetrics(dataDirOf(process.env)),
+  })
 
 if (process.argv.includes("--once")) {
   const { result, resumed } = await once()
