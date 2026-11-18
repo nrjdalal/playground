@@ -148,6 +148,19 @@ describe("settings set from the owner's message", () => {
     expect(o.told[0]).toContain("to undo: playground settings set factory.repo")
   })
 
+  test.each(["wa.owner", "wa.device"])(
+    "%s, the number that proves the owner or the one ops-wa links as, refuses, so no message changes it",
+    async (key) => {
+      const o = owned()
+      await keepMessage(o.dir, "own1", "my number is now +15550100999", START, OWNER)
+      await expect(settingSet(o.io, "own1", key, "+15550100999")).rejects.toThrow(
+        `set ${key} on this Mac`,
+      )
+      expect(stored(o.data)[key]).toBeUndefined()
+      expect(o.told).toEqual([])
+    },
+  )
+
   test("a value the message does not hold refuses, and nothing is set", async () => {
     const o = owned()
     await keepMessage(o.dir, "own1", "point the repo at made-up-me/new", START, OWNER)

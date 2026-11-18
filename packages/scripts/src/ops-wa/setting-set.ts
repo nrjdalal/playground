@@ -19,6 +19,9 @@ export const confirmFile = (dir: string) => join(dir, "confirm.json")
 export const CONFIRM_MS = 10 * 60_000
 type Pending = { at: number; id: string; key: string; value: string }
 
+// The keys that name the channel which proves the owner, which never change through that channel (ADR 0035)
+const CHANNEL_KEYS = new Set(["wa.device", "wa.owner"])
+
 // Whether a key is one a guard reads, which waits for the owner's confirm on WhatsApp: a guard key or any ops job's jobs.<name>.
 export const guarded = (key: string) => {
   const name = resolveKey(key) ?? key
@@ -87,6 +90,11 @@ async function applied(io: SettingSetIo, key: string, value: string, id: string)
 
 // settings set --from-owner-msg: the owner's own kept message of that id must hold the value; a guarded key then waits for the owner's yes on WhatsApp, and any other key applies at once.
 export async function settingSet(io: SettingSetIo, id: string, key: string, value: string) {
+  const name = resolveKey(key) ?? key
+  if (CHANNEL_KEYS.has(name))
+    throw new Error(
+      `${name} names the WhatsApp that proves the owner, so set ${name} on this Mac by the Inbox card or your own terminal`,
+    )
   const hit = await keptMessage(io.dir, id, io.now())
   if (!hit) throw new Error(`no message of the owner's in the last 24 hours has the id ${id}`)
   const secret = await wordKey(io.dir)
