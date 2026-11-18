@@ -237,7 +237,7 @@ const main = async () => {
   }
   serve(
     path,
-    send,
+    send.out,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
     send.react,
   )

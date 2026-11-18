@@ -26,6 +26,7 @@ Voice notes are read as text on this machine by whisper.cpp: `brew install whisp
 Without them a voice note reaches the dispatcher as not transcribed, with its path.
 
 The dispatcher can send you a photo, a video, a document or a voice note too: it puts the file in `<data>/wa/outbox/` and sends it with `playground wa send --file <path>`, its reply as the caption ([ADR 0036](../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)); no file outside that folder goes.
+It can also send a location, quote your message in its reply, and fix or take back a message it sent ([ADR 0037](../../.agents/adr/0037-wa-send-sends-a-location-a-quote-an-edit-and-a-delete.md)); for the quote, ops-wa keeps your words of the last 24 hours on this Mac.
 
 ## Inbox cards on WhatsApp
 

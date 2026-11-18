@@ -1505,3 +1505,40 @@ describe("typing time (#2755)", () => {
     expect(texts[1]!.at - texts[0]!.at).toBe(typingMs(30, () => 0.5))
   })
 })
+
+describe("quoted replies (#2799)", () => {
+  test("a handed-on message keeps its words, so a reply quotes it by its id, a photo by its kind", async () => {
+    const h = harness()
+    const text = h.fake.message(jid(OWNER), "is the board green?")
+    const photo = { ...h.fake.message(jid(OWNER), ""), message: { imageMessage: {} } }
+    h.fake.upsert([text, photo])
+    await h.settle()
+    expect(await h.send("yes", "reply", undefined, { quote: text.key.id })).toBe("sent")
+    expect(await h.send("nice", "reply", undefined, { quote: photo.key.id })).toBe("sent")
+    expect(h.fake.sent.map((s) => s.content.contextInfo)).toEqual([
+      {
+        participant: jid(OWNER),
+        quotedMessage: { conversation: "is the board green?" },
+        stanzaId: text.key.id,
+      },
+      {
+        participant: jid(OWNER),
+        quotedMessage: { conversation: "an image" },
+        stanzaId: photo.key.id,
+      },
+    ])
+  })
+
+  test("a kept message's words go after 24 hours, so it is quoted no more", async () => {
+    const h = harness()
+    const old = h.fake.message(jid(OWNER), "an old question")
+    h.fake.upsert([old])
+    await h.settle()
+    h.advance(24 * HOUR)
+    h.fake.upsert([h.fake.message(jid(OWNER), "a new one")])
+    await h.settle()
+    await expect(h.send("x", "reply", undefined, { quote: old.key.id })).rejects.toThrow(
+      "is kept to quote",
+    )
+  })
+})

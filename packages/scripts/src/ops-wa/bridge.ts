@@ -27,7 +27,15 @@ import {
 import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
-import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
+import {
+  type Content,
+  type Extra,
+  extraRefusal,
+  messagesOf,
+  outboxDir,
+  type OwnKey,
+  readOutbound,
+} from "./outbound"
 import { alertSeedFile } from "./seed"
 import type { Vote, votedOptions } from "./votes"
 
@@ -236,16 +244,21 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
 
 // Whose message a reaction answers: the owner's, or the alert number's, a guest's.
 export type Who = "alert" | "owner"
-// The messages handed on, the last 50, so wa react finds the latest or one by its id.
-type Kept = { at: number; id: string; jid: string; who: Who }
+// The messages handed on, the last 50, so wa react finds the latest or one by its id, and wa send --quote its words, kept 24 hours.
+type Kept = { at: number; id: string; jid: string; text?: string; who: Who }
 const messagesFile = (dir: string) => join(dir, "messages.json")
 // A handed-on message is kept for wa react; the owner's then gets 👀, seen and a reply coming, which the dispatcher's ✅ replaces once no reply is needed (ADR 0031); the 👀 is not awaited, so a long reply's typing time never holds the next message back.
 async function seen(io: Io & Mode, m: Incoming, who: Who, at: number) {
   const { id, remoteJid } = m.key
   if (!id || !remoteJid) return
   const { messages = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+  const message = m.message ?? {}
+  const text = textOf(message) ?? mediaOf(message)
+  const fresh = messages.map(({ text: words, ...k }) =>
+    at - k.at < OWNER_WINDOW_MS && words !== undefined ? { ...k, text: words } : k,
+  )
   await writeOwn(messagesFile(io.dir), {
-    messages: [...messages, { at, id, jid: remoteJid, who }].slice(-50),
+    messages: [...fresh, { at, id, jid: remoteJid, text, who }].slice(-50),
   })
   if (who === "owner")
     void io
@@ -664,6 +677,13 @@ export async function statusOf(
 
 // A poll that went out: its message id and its secret in base64, which its votes are encrypted with.
 export type PollSent = { id: string; secret: string }
+// What a send answers: who it reached, and the ids of the messages it sent.
+export type Out = { ids: string[]; said: string }
+// Our own sent messages, the last 50, each by its id and chat, so an edit or a delete names one of ours alone; written by the sender's chain.
+type Own = { at: number; id: string; jid: string }
+const oursFile = (dir: string) => join(dir, "ours.json")
+// WhatsApp takes an edit in a message's first 15 minutes.
+const EDIT_MS = 15 * 60_000
 
 const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa never starts a chat"
 
@@ -699,7 +719,7 @@ export function sender(
       sends.push(last)
       await writeOwn(sendsFile(io.dir), { sends })
     }
-    return sent?.key?.id
+    return sent?.key?.id ?? undefined
   }
   // each send's time in the last hour, which the failover reads to tell whether the dispatcher answered
   const recent = async (now: number) =>
@@ -722,11 +742,15 @@ export function sender(
   const sendNow = async (
     body: string,
     kind: Kind,
-    source?: string,
-    path?: string,
-  ): Promise<string> => {
+    source: string | undefined,
+    extra: Extra,
+  ): Promise<Out> => {
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
+    if (kind !== "reply" && kind !== "guest" && Object.keys(extra).length > 0)
+      throw new Error("wa alert sends text alone")
     // the outbox sits beside whatsapp/ in the data folder
-    const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
+    const file = extra.file ? await readOutbound(outboxDir(dirname(io.dir)), extra.file) : undefined
     const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
     const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
@@ -779,7 +803,29 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    const messages = messagesOf(split(toWhatsApp(body)), file)
+    const jid = going[0]!.jid
+    const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+    const who: Who = kind === "guest" ? "alert" : "owner"
+    const quoted = extra.quote ? kept.find((k) => k.id === extra.quote && k.who === who) : undefined
+    if (extra.quote && !quoted?.text)
+      throw new Error(`no message ${extra.quote} from ${going[0]!.who} is kept to quote`)
+    const ours = await readOwn<{ messages?: Own[] }>(oursFile(io.dir), {})
+    const target = extra.edit ?? extra.delete
+    const own = target ? ours.messages?.find((o) => o.id === target && o.jid === jid) : undefined
+    if (target && !own)
+      throw new Error(
+        `message ${target} is not one ops-wa sent to ${going[0]!.who}, so it cannot be ${extra.edit ? "edited" : "deleted"}`,
+      )
+    if (extra.edit && now - own!.at > EDIT_MS)
+      throw new Error("WhatsApp edits a message only in its first 15 minutes")
+    const key: OwnKey | undefined = own && { fromMe: true, id: own.id, remoteJid: jid }
+    const messages = messagesOf(split(toWhatsApp(body)), {
+      ...(extra.delete && { delete: key }),
+      ...(extra.edit && { edit: key }),
+      file,
+      location: extra.location,
+      ...(quoted && { quote: { id: quoted.id, jid: quoted.jid, text: quoted.text! } }),
+    })
     const sends = await recent(now)
     const ids: string[] = []
     for (const t of going)
@@ -793,21 +839,34 @@ export function sender(
           content,
           typed ? typingMs(typed.length, io.random) : 0,
         )
-        if (id) ids.push(id)
+        if (id && !target) {
+          ids.push(id)
+          ours.messages = [...(ours.messages ?? []), { at: io.now(), id, jid: t.jid }]
+        }
       }
+    if (ids.length > 0) await writeOwn(oursFile(io.dir), { messages: ours.messages!.slice(-50) })
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return "sent to the owner alone: the alert number has never written to this number"
+        return {
+          ids,
+          said: "sent to the owner alone: the alert number has never written to this number",
+        }
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
-      return `sent to the owner; the alert number gets it at ${new Date(due).toISOString().slice(11, 16)}Z unless it is handled`
+      return {
+        ids,
+        said: `sent to the owner; the alert number gets it at ${new Date(due).toISOString().slice(11, 16)}Z unless it is handled`,
+      }
     }
     const left = to.find((t) => !t.open)
-    return left
-      ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
-      : "sent"
+    return {
+      ids,
+      said: left
+        ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
+        : "sent",
+    }
   }
   const queued = <T>(job: () => Promise<T>): Promise<T> => {
     const run = chain.then(job)
@@ -838,11 +897,14 @@ export function sender(
     })
     return "sent"
   }
-  // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
   return Object.assign(
-    (body: string, kind: Kind = "reply", source?: string, path?: string): Promise<string> =>
-      queued(() => sendNow(body, kind, source, path)),
+    // source: what a checker reads for an alert to the owner first; extra: a file, a location, a quote, an edit or a delete beside the body (outbound.ts)
+    (body: string, kind: Kind = "reply", source?: string, extra: Extra = {}): Promise<string> =>
+      queued(() => sendNow(body, kind, source, extra)).then((out) => out.said),
     {
+      // the same send, with the ids of the messages it sent, which an edit or a delete names
+      out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
+        queued(() => sendNow(body, kind, source, extra)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
       react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>
         queued(() => reactNow(emoji, on)),

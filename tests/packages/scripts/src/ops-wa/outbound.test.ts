@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { sender } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import { type Kind, sender } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { SEND, typingMs, writeOwn } from "../../../../../packages/scripts/src/ops-wa/habits"
 import {
+  type Extra,
   messagesOf,
   outboxDir,
   readOutbound,
@@ -48,12 +49,23 @@ const harness = async () => {
     return path
   }
   return {
+    advance: (ms: number) => void (now += ms),
     data,
+    dir,
     fake,
     file,
     outbox,
-    send: (body: string, kind: Parameters<typeof send>[1], path?: string) =>
-      send(body, kind, undefined, path),
+    // a file's send by its path, the shape #2783's tests take
+    send: (body: string, kind: Kind, path?: string) =>
+      send(body, kind, undefined, path === undefined ? {} : { file: path }),
+    // a send with its extra, no alert source
+    sender: Object.assign(
+      (body: string, kind: Kind, extra: Extra = {}) => send(body, kind, undefined, extra),
+      {
+        out: (body: string, kind: Kind, extra: Extra = {}) =>
+          send.out(body, kind, undefined, extra),
+      },
+    ),
   }
 }
 
@@ -112,10 +124,7 @@ describe("wa send's files (#2783)", () => {
 
   test("a long caption keeps its first part on the file, and the rest follow as text, each paced as a part", async () => {
     const parts = messagesOf(["first", "second"], {
-      bytes: BYTES,
-      kind: "image",
-      mimetype: "image/png",
-      name: "a.png",
+      file: { bytes: BYTES, kind: "image", mimetype: "image/png", name: "a.png" },
     })
     expect(parts).toEqual([
       { caption: "first", image: BYTES, mimetype: "image/png" },
@@ -191,5 +200,152 @@ describe("wa send's files (#2783)", () => {
       name: "Notes.MD",
       text: "made-up words",
     })
+  })
+})
+
+describe("wa send's structure (#2799)", () => {
+  // a kept message of the owner's and one of the guest's, as the bridge keeps each it hands on
+  const kept = async (h: Awaited<ReturnType<typeof harness>>) =>
+    writeOwn(join(h.dir, "messages.json"), {
+      messages: [
+        {
+          at: START - 60_000,
+          id: "own1",
+          jid: jid(OWNER),
+          text: "is the board green?",
+          who: "owner",
+        },
+        { at: START - 60_000, id: "gst1", jid: jid(ALERT), text: "any news?", who: "alert" },
+      ],
+    })
+
+  test("a location goes as one message, the body its name, and a bare one with no name", async () => {
+    const h = await harness()
+    expect(await h.sender("Made-up Cafe", "reply", { location: { lat: 12.5, lon: -45.25 } })).toBe(
+      "sent",
+    )
+    expect(await h.sender("", "guest", { location: { lat: -90, lon: 180 } })).toBe("sent")
+    expect(h.fake.sent.map((s) => [s.jid, s.content])).toEqual([
+      [
+        jid(OWNER),
+        { location: { degreesLatitude: 12.5, degreesLongitude: -45.25, name: "Made-up Cafe" } },
+      ],
+      [jid(ALERT), { location: { degreesLatitude: -90, degreesLongitude: 180 } }],
+    ])
+  })
+
+  test("a location out of range is refused, and nothing goes", async () => {
+    const h = await harness()
+    for (const location of [
+      { lat: 91, lon: 0 },
+      { lat: 0, lon: -180.5 },
+      { lat: Number.NaN, lon: 0 },
+    ])
+      await expect(h.sender("", "reply", { location })).rejects.toThrow("a latitude from -90 to 90")
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("a quoted reply's first part quotes the kept message by its id, its sender and its words", async () => {
+    const h = await harness()
+    await kept(h)
+    expect(await h.sender("yes, all green", "reply", { quote: "own1" })).toBe("sent")
+    expect(await h.sender("nothing new", "guest", { quote: "gst1" })).toBe("sent")
+    expect(h.fake.sent.map((s) => [s.jid, s.content])).toEqual([
+      [
+        jid(OWNER),
+        {
+          contextInfo: {
+            participant: jid(OWNER),
+            quotedMessage: { conversation: "is the board green?" },
+            stanzaId: "own1",
+          },
+          linkPreview: null,
+          text: "yes, all green",
+        },
+      ],
+      [
+        jid(ALERT),
+        {
+          contextInfo: {
+            participant: jid(ALERT),
+            quotedMessage: { conversation: "any news?" },
+            stanzaId: "gst1",
+          },
+          linkPreview: null,
+          text: "nothing new",
+        },
+      ],
+    ])
+  })
+
+  test("a quote of an unknown id, or of the other chat's message, is refused, and nothing goes", async () => {
+    const h = await harness()
+    await kept(h)
+    await expect(h.sender("x", "reply", { quote: "nope" })).rejects.toThrow(
+      "no message nope from the owner is kept to quote",
+    )
+    await expect(h.sender("x", "reply", { quote: "gst1" })).rejects.toThrow("is kept to quote")
+    await expect(h.sender("x", "guest", { quote: "own1" })).rejects.toThrow("is kept to quote")
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("a send answers its messages' ids, and an edit or a delete names one of them in its own chat", async () => {
+    const h = await harness()
+    const first = await h.sender.out("the bord is green", "reply")
+    expect(first).toEqual({ ids: ["m1"], said: "sent" })
+    expect(await h.sender("the board is green", "reply", { edit: "m1" })).toBe("sent")
+    expect(await h.sender("", "reply", { delete: "m1" })).toBe("sent")
+    const key = { fromMe: true, id: "m1", remoteJid: jid(OWNER) }
+    expect(h.fake.sent.slice(1).map((s) => [s.jid, s.content])).toEqual([
+      [jid(OWNER), { edit: key, linkPreview: null, text: "the board is green" }],
+      [jid(OWNER), { delete: key }],
+    ])
+    expect((await h.sender.out("", "reply", { delete: "m1" })).ids).toEqual([])
+  })
+
+  test("an edit or a delete of a message that is not ours is refused, and nothing goes", async () => {
+    const h = await harness()
+    await kept(h)
+    await h.sender("to the owner", "reply")
+    for (const [kind, extra, why] of [
+      [
+        "reply",
+        { edit: "own1" },
+        "message own1 is not one ops-wa sent to the owner, so it cannot be edited",
+      ],
+      [
+        "reply",
+        { delete: "zzz" },
+        "message zzz is not one ops-wa sent to the owner, so it cannot be deleted",
+      ],
+      ["guest", { delete: "m1" }, "message m1 is not one ops-wa sent to the alert number"],
+    ] as const)
+      await expect(h.sender("edit" in extra ? "x" : "", kind, extra)).rejects.toThrow(why)
+    expect(h.fake.sent).toHaveLength(1)
+  })
+
+  test("an edit goes only in the message's first 15 minutes", async () => {
+    const h = await harness()
+    await h.sender("first", "reply")
+    h.advance(15 * 60_000 + 1)
+    await expect(h.sender("second", "reply", { edit: "m1" })).rejects.toThrow(
+      "WhatsApp edits a message only in its first 15 minutes",
+    )
+    expect(h.fake.sent).toHaveLength(1)
+  })
+
+  test("a send takes one extra, a quote beside text alone, and wa alert takes none", async () => {
+    const h = await harness()
+    for (const [body, extra, why] of [
+      ["x", { file: h.file("a.png"), location: { lat: 0, lon: 0 } }, "one of a file, a location"],
+      ["x", { file: h.file("b.png"), quote: "own1" }, "a quoted reply is text alone"],
+      ["x", { delete: "m1" }, "a delete takes no body"],
+      ["", { edit: "m1" }, "an edit or a quoted reply takes a body"],
+    ] as const)
+      await expect(h.sender(body, "reply", extra)).rejects.toThrow(why)
+    await expect(h.sender("x", "alert", { quote: "own1" })).rejects.toThrow(
+      "wa alert sends text alone",
+    )
+    expect(h.fake.sent).toEqual([])
   })
 })
