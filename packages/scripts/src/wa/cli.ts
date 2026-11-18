@@ -5,9 +5,9 @@ import { dataDir } from "@packages/env/data-dir"
 import { readPolicy, whatsappSettings } from "@packages/settings"
 
 import { refusalOf, statusOf } from "../ops-wa/bridge"
-import { request, requestAlertSet, socketPath } from "../ops-wa/server"
+import { reactRequest, request, requestAlertSet, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone, with --file <path> a file from the outbox beside it (outbound.ts), the body its caption; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa status: whether each number has written or been approved, whether a reply can go to each now, and each pending alert; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone, with --file <path> a file from the outbox beside it (outbound.ts), the body its caption; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa react <emoji> [--to alert] [--id <id>]: a reaction on the latest message of the owner's, or the guest's, or on the one named; wa status: whether each number has written or been approved, whether a reply can go to each now, and each pending alert; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
 const args = process.argv.slice(2)
 const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
 // wa alert's flags, before its file: --now-both sends to both numbers at once, --source <kind>:<ref> names what a checker reads to tell whether it was handled
@@ -43,6 +43,30 @@ if (verb === "relink" && !file) {
   await rename(join(dir, "auth"), join(dir, `auth.${Date.now()}.old`)).catch(() => {})
   await rm(join(dir, "logged-out"), { force: true })
   console.log("wa relink: the old link is set aside; restart ops-wa for a new pairing card")
+  process.exit(0)
+}
+if (args[0] === "react") {
+  const [, emoji, ...flags] = args
+  const on: { id?: string; who?: "alert" } = {}
+  let bad = flags.length % 2 === 1
+  for (let i = 0; i < flags.length; i += 2) {
+    if (flags[i] === "--to" && flags[i + 1] === "alert" && !on.who) on.who = "alert"
+    else if (flags[i] === "--id" && flags[i + 1] && !on.id) on.id = flags[i + 1]
+    else bad = true
+  }
+  // one emoji, as WhatsApp's reaction takes, never words
+  const one =
+    /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\u200d\ufe0f\p{Emoji_Modifier}]*$/u
+  if (bad || !emoji || !one.test(emoji)) {
+    console.error("usage: playground wa react <emoji> [--to alert] [--id <id>]")
+    process.exit(2)
+  }
+  const reply = await reactRequest(socketPath(dataDir()), emoji, on)
+  if (reply.refusal) {
+    console.error(`wa react: ${reply.refusal}`)
+    process.exit(1)
+  }
+  console.log("wa react: sent")
   process.exit(0)
 }
 if (verb === "status" && !file) {
@@ -82,7 +106,7 @@ if (
   (attach !== undefined && !(await named(attach)))
 ) {
   console.error(
-    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa send [--to alert] --file <path> [<file>], an image, a document, a video or a voice note in the data folder's wa/outbox/, named by its absolute path, the body its caption; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled before wa.alertDelayMinutes passes, or to both at once; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa send [--to alert] --file <path> [<file>], an image, a document, a video or a voice note in the data folder's wa/outbox/, named by its absolute path, the body its caption; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled before wa.alertDelayMinutes passes, or to both at once; playground wa react <emoji> [--to alert] [--id <id>]; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
   )
   process.exit(2)
 }

@@ -14,6 +14,11 @@ Sessions started after that read its skills after your own extensions and before
 ops-wa also needs its two numbers and its job turned on: type them into the WhatsApp card's **Device number** (`wa.device`, the spare number) and **Your number** (`wa.owner`, the one it answers), each `+` and 8 to 15 digits, and Save.
 A saved number shows by its last 4 digits alone, and an empty field keeps it; the spare phone then links by the pairing card the Inbox shows.
 
+## Reactions and pace
+
+Each message of yours the dispatcher gets shows 👀, seen with a reply coming, and turns to ✅ when it needs no reply ([ADR 0031](../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
+A reply arrives after the time it takes to type it, 3 characters a second, so a long one takes up to a minute per part.
+
 ## Photos and voice notes
 
 A photo or voice note you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with the photo's caption or the note's words; it stays out of the attachments folder.

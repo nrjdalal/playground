@@ -9,10 +9,11 @@ export const jid = (e164: string) => `${e164.slice(1)}@s.whatsapp.net`
 // A group's chat id, by WhatsApp's group suffix.
 export const groupJid = (id: string) => `${id}@g.us`
 
-// a text's, a file's or a poll's message, as ops-wa's Content holds them
+// a text's, a file's, a poll's or a reaction's message, as ops-wa's Content holds them
 type Content = {
   linkPreview?: null
   poll?: { messageSecret: Uint8Array; name: string; selectableCount: number; values: string[] }
+  react?: { key: { fromMe: boolean; id: string; remoteJid: string }; text: string }
   text?: string
 } & Record<string, unknown>
 

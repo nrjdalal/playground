@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 
 import { makeScratch, removeScratch } from "@packages/safe-delete"
 import { gateSettings, SCHEMA_VERSION } from "@packages/settings"
@@ -365,6 +365,29 @@ export const installCheck = (out: string, shot: () => string): Omit<Step, "name"
   }
 }
 
+// The box's own live.container, named after its folder: the box shares this Mac's Docker, so with the default name its first run reused the live dashboard's running database as its own.
+export const boxContainer = (box: string): string => `${basename(box)}-db`
+
+// Pure: the containers in a `docker ps -a` name list that first run made under name, name-<4 letters or digits>, the only ones the gate counts as its own or removes.
+export const boxContainers = (listed: string, name: string): string[] =>
+  listed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((c) => c.startsWith(`${name}-`) && /^[0-9a-zA-Z]{4}$/.test(c.slice(name.length + 1)))
+
+// Pure: the box's own `playground settings set` of its live.container, run with its checkout's CLI.
+export const seedArgv = (home: string, name: string): string[] => [
+  "bun",
+  "--no-env-file",
+  join(home, "playground", "packages", "scripts", "src", "playground", "cli.ts"),
+  "settings",
+  "set",
+  "live.container",
+  name,
+  "--reason",
+  "the new-user gate's box keeps a database of its own",
+]
+
 // Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
 export const databaseCheck = async (
   click: () => boolean,
@@ -549,7 +572,11 @@ export const clean = (box: string, home: string, portless = PORTLESS) => {
   ])
     .out.split("\n")
     .filter(Boolean)
-  for (const name of names) run(["docker", "rm", "-fv", name])
+  const own = boxContainers(
+    run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out,
+    boxContainer(box),
+  )
+  for (const name of [...names, ...own]) run(["docker", "rm", "-fv", name])
   dropBox(box)
 }
 
@@ -621,7 +648,16 @@ const main = async (args: string[]) => {
         }),
       )
     })
+    const own = boxContainer(box)
+    const seeded = run(seedArgv(home, own), { env: boxEnv(home) })
     await check("first run starts the database with one click", async () => {
+      // fail closed: with no live.container of its own the click would reuse the host's live database
+      if (seeded.code !== 0) {
+        return {
+          detail: `the box could not set its own live.container ${own}: ${(seeded.err || seeded.out).trim().slice(-200)}`,
+          ok: false,
+        }
+      }
       const env = join(desk, ".env")
       const saved = await databaseCheck(
         () => browser.clickEnabled("Start the database"),
@@ -633,6 +669,14 @@ const main = async (args: string[]) => {
           } catch {}
         },
       )
+      const made = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      if (saved.ok && made.length === 0) {
+        return {
+          detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+          ok: false,
+          shot: browser.shot("2-database"),
+        }
+      }
       return { ...saved, shot: browser.shot("2-database") }
     })
     await check("the Dashboard shows Alpha", async () => {
