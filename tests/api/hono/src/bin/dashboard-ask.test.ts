@@ -971,7 +971,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       )
       expect(refused.code).toBe(1)
       expect(refused.stderr).toContain("not one to start twice")
-      expect(refused.stderr).toContain(`#${first.tag.replace("#i", "")}`)
+      expect(refused.stderr).toContain(first.tag)
       expect(refused.stdout).toBe("")
       const twin = await cli(
         ["new"],
@@ -993,7 +993,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       expect(refused.code).toBe(1)
       expect(refused.stderr).toContain("not one a poster may start")
       expect(refused.stderr).toContain("send its progress up the chain")
-      expect(refused.stderr).toContain(`#${card.tag.replace("#i", "")}`)
+      expect(refused.stderr).toContain(card.tag)
       expect(refused.stdout).toBe("")
       // an update without a progress block still posts, from any poster
       const plain = await cli(
@@ -1008,6 +1008,28 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       expect(plain.code).toBe(0)
       expect(plain.stdout).toMatch(/^\S+\n$/)
       await dismiss(card.id)
+    })
+
+    test("another poster's open progress card, from before the rule, is not the in-flight card: the dispatcher's own still posts, and a worker's refusal names it", async () => {
+      const legacy = await post(
+        progress("dispatcher", "Yard control", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      const admin = new SQL(url, { max: 1 })
+      await admin`update inbox_item set "from" = 'worker-envy' where id = ${legacy.id}`
+      await admin.close()
+      const card = await post(
+        progress("dispatcher", "Ship the yard", "Mac reads | 40 | x | 1:00 pm"),
+      )
+      expect(card.id).not.toBe(legacy.id)
+      const refused = await cli(
+        ["new"],
+        JSON.stringify(progress("worker-envy", "Yard control", "Mac reads | 80 | y | 2:00 pm")),
+      )
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain(card.tag)
+      expect(refused.stderr).not.toContain(legacy.tag)
+      await dismiss(card.id)
+      await dismiss(legacy.id)
     })
 
     test("edit is not gated by the card rule, so the dispatcher edits its card's progress in place (PG-2720)", async () => {

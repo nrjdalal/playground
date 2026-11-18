@@ -381,8 +381,9 @@ describe("progressCardRefusal", () => {
       ref: 5,
       title: "Job",
     })
-    expect(refusal).toContain("#5")
-    expect(refusal).toContain("edit it in place with ask edit, not a second card")
+    expect(refusal).toContain("#i5")
+    expect(refusal).toContain("add this job as a row on it with `playground ask edit #i5`")
+    expect(refusal).toContain('post under its title, "Job"')
   })
 
   test("refuses a non-dispatcher's progress card, naming the open card when one is open", () => {
@@ -390,7 +391,7 @@ describe("progressCardRefusal", () => {
       update(block("Yard reads | 40 | x | 1:00 pm"), "Job", "worker-envy"),
       { ref: 5, title: "Job" },
     )
-    expect(refusal).toContain("#5")
+    expect(refusal).toContain("#i5")
     expect(refusal).toContain("not one a poster may start")
     expect(refusal).toContain("send its progress up the chain, a row on its in-flight card")
   })
@@ -401,7 +402,7 @@ describe("progressCardRefusal", () => {
       null,
     )
     expect(refusal).toContain("not one a poster may start")
-    expect(refusal).not.toContain("#5")
+    expect(refusal).not.toContain("#i5")
     expect(refusal).toContain("not as its own card")
   })
 
@@ -413,6 +414,6 @@ describe("progressCardRefusal", () => {
         title: "Job",
       },
     )
-    expect(refusal).toContain("#5")
+    expect(refusal).toContain("#i5")
   })
 })

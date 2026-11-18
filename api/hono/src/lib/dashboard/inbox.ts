@@ -68,6 +68,7 @@ import {
   ROOT_TIMEOUT_MS,
   stepArgv,
 } from "../system/root"
+import { holdsProgressBlock, type InflightCard, isDispatcher } from "./ask-shape"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
@@ -1852,28 +1853,15 @@ export async function postOrEdit(
   return edited.ok ? { ...edited, edited: true } : edited
 }
 
-// The dispatcher's one open in-flight card, its newest update holding a progress block, so a second card or a non-dispatcher's names it (PG-2720). A twin of it (same title) still edits, as postOrEdit's twin does, and one already dismissed, settled or closed by its poster is not it.
-export type InflightCard = { ref: number; title: string } | null
-
-// The newest update's first line opens a ```progress fence, so an update holds a progress block; read alone so inbox.ts stays free of the app's @/lib/dashboard (PG-2720).
-const holdsProgressBarBlock = (preview: unknown): boolean => {
-  const text =
-    typeof preview === "object" &&
-    preview !== null &&
-    !Array.isArray(preview) &&
-    typeof (preview as { text?: unknown }).text === "string"
-      ? (preview as { text: string }).text || ""
-      : ""
-  return /^\s*```[ \t]*progress\b/m.test(text)
-}
-
-// Pure: the dispatcher's one open in-flight card, its newest update still editable and holding a progress block, or null on none, so a second card or a non-dispatcher's names it (PG-2720).
+// The dispatcher's one open in-flight card: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720).
 export async function inflightCard(db: Database): Promise<InflightCard> {
   const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
-  for (const item of rows.map(toItem))
-    if (stillEditable(item) && holdsProgressBarBlock(item.preview))
-      return { ref: item.ref, title: item.title }
-  return null
+  const card = rows
+    .map(toItem)
+    .find(
+      (item) => isDispatcher(item.from) && stillEditable(item) && holdsProgressBlock(item.preview),
+    )
+  return card ? { ref: card.ref, title: card.title } : null
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
