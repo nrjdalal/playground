@@ -714,6 +714,33 @@ describe("sweep", () => {
     expect(existsSync(join(ops, "tick", "load-told"))).toBe(false)
   })
 
+  test("names no felled line for a merged or closed session, both a finished roster status", async () => {
+    const ops = scratch()
+    const now = at(13, 7)
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({
+        agents: [
+          { name: "worker-merged", status: "merged" },
+          { name: "worker-closed", status: "closed" },
+          { name: "worker-x", status: "working" },
+        ],
+      }),
+    )
+    const { ctx, sent } = fake(ops, now, {
+      ...QUIET_LOAD,
+      "--sessions": [
+        "/m/scripts/spawn.sh resume worker-merged /m 8888",
+        "/m/scripts/spawn.sh resume worker-closed /m 9999",
+        "/m/scripts/spawn.sh resume worker-x /m 1111",
+      ].join("\n"),
+    })
+    await beat("sweep").run(ctx)
+    expect(sent).toEqual([
+      { text: "Felled: /m/scripts/spawn.sh resume worker-x /m 1111", to: "builder" },
+    ])
+  })
+
   test("a quiet run sends nothing and runs no ops-up", async () => {
     const ops = scratch()
     const now = at(13, 37)

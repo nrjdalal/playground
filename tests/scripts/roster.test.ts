@@ -894,6 +894,8 @@ describe("status", () => {
         ...quoted(all(`\\[([^\\]]*)\\]\\.includes\\(${through}\\)`)),
         ...quoted(all(`${through} (?:not )?in \\(([^)]*)\\)`)),
         ...quoted(all(`(?:SEATLESS|HELD) = new Set\\(\\[(.*)\\]\\)`)),
+        // A reader that consumes the statuses JSON reads exactly those words, so it cannot drift from the list.
+        ...(text.includes("roster-statuses.json") ? [...live!, ...finished!] : []),
       ]
       expect({ file, read: words.length > 0 }).toEqual({ file, read: true })
       for (const word of words)
