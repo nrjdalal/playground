@@ -3,7 +3,7 @@ import { basename, extname, join, sep } from "node:path"
 
 import type { AnyMessageContent } from "baileys"
 
-// The one folder wa send takes a file from, beside the media folder and outside whatsapp/, so no other file on this Mac goes over WhatsApp (ADR 0036).
+// The one folder wa send takes a file from, beside the media folder and outside whatsapp/, so a file goes over WhatsApp only once a session has put it there (ADR 0036).
 export const outboxDir = (data: string) => join(data, "wa", "outbox")
 
 type Kind = "audio" | "document" | "image" | "video"
@@ -21,7 +21,7 @@ const TYPES: Record<string, { kind: Kind; mimetype: string; text?: true }> = {
   png: { kind: "image", mimetype: "image/png" },
   txt: { kind: "document", mimetype: "text/plain", text: true },
 }
-export const TYPE_NAMES = Object.keys(TYPES).join(", ")
+const TYPE_NAMES = Object.keys(TYPES).join(", ")
 
 // What ops-wa sends, each shape one Baileys takes (Fits checks it): text, an image, a video or a document with its caption, or an audio file as a voice note, which takes none.
 type Fits<T extends AnyMessageContent> = T

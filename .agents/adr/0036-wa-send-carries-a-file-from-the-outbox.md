@@ -6,7 +6,7 @@ A file is more than text, so by [ADR 0015](0015-versions-the-old-one-stays-the-l
 
 ## Decision
 
-- **A file comes from the outbox alone.** `playground wa send [--to alert] --file <path> [<file>]` names a file in `<data>/wa/outbox/` (`outboxDir()` in `packages/scripts/src/ops-wa/outbound.ts`), beside the media folder and outside `whatsapp/`, which ops-wa makes at start. ops-wa reads the file itself and sends it only when its real path, links resolved, is a regular file in that folder, so no other file on this Mac goes over WhatsApp.
+- **A file comes from the outbox alone.** `playground wa send [--to alert] --file <path> [<file>]` names a file in `<data>/wa/outbox/` (`outboxDir()` in `packages/scripts/src/ops-wa/outbound.ts`), beside the media folder and outside `whatsapp/`, which ops-wa makes at start. ops-wa reads the file itself and sends it only when its real path, links resolved, is a regular file in that folder, so a file goes over WhatsApp only once a session has put it there.
 - **A known type alone.** The extension names the kind: `jpg`, `jpeg` and `png` an image, `mp4` a video, `ogg` and `opus` a voice note, and `pdf`, `txt`, `md`, `csv` and `json` a document. Any other type is refused.
 - **The floors read the file's words too.** `refusalOf()` reads the body, the file's name and a text document's words, and `guestRefusal()` reads the same for a guest's reply; a binary file's content is the sender's to keep within the policy line.
 - **The body is the caption.** An image, a video and a document carry the body's first part as their caption, and its other parts follow as text. A voice note takes no caption, so the body goes before it as text. A file with no body goes alone.
