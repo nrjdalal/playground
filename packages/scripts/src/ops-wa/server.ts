@@ -72,7 +72,7 @@ async function ask(path: string, line: object, timeoutMs: number): Promise<Reply
   }
   let text = ""
   const timer = setTimeout(
-    () => resolve({ refusal: `ops-wa did not answer in ${timeoutMs / 60_000} minutes` }),
+    () => resolve({ refusal: `ops-wa did not answer in ${timeoutMs / 1000} s` }),
     timeoutMs,
   )
   await Bun.connect({
