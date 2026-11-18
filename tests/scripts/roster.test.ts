@@ -36,12 +36,18 @@ const factoryConfig = (agents: Agent[]): string => {
   return dir
 }
 
-const run = async (config: string, args: string[]) => {
-  const proc = Bun.spawn(["bun", script, ...args], {
+const run = async (config: string, args: string[], readback?: Agent[]) => {
+  // A read-back seed file holds the row the set reads back, so a prs-= the write-back just cleared still reads set in the read-back, which the read-back check refuses, so the check has a row that drives it. The preload is a .ts module, since a preload is never a .json file Bun can import.
+  const seed = readback ? join(scratch, `readback-${++dirs}.seed.json`) : undefined
+  if (seed) writeFileSync(seed, JSON.stringify({ agents: readback }))
+  const preload = readback ? join(import.meta.dir, "roster-readback-stub.ts") : undefined
+  const argv = preload ? ["bun", "--preload", preload, script, ...args] : ["bun", script, ...args]
+  const proc = Bun.spawn(argv, {
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
+      ...(seed ? { ROSTER_READBACK_FILE: seed } : {}),
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -829,7 +835,8 @@ describe("prs (#706)", () => {
     const removed = await run(config, ["set", "x7rv2k-reviewer", "prs-=1", `prs-=${ISSUE}`])
     expect(agentOf(removed.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(2)])
     const empty = await run(config, ["set", "x7rv2k-reviewer", "prs-=2"])
-    expect(agentOf(empty.roster, "x7rv2k-reviewer")).toEqual(reviewer)
+    // a prs-= of the row's own pr clears pr too, so removing every PR leaves no pr behind
+    expect(agentOf(empty.roster, "x7rv2k-reviewer")).toEqual({ ...reviewer, pr: undefined })
   })
 
   test("a prs entry that is no PR and no issue is refused, naming both forms, and writes nothing", async () => {
@@ -855,6 +862,97 @@ describe("prs (#706)", () => {
     expect(agentOf(next.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(1), ISSUE, pull(3)])
     const worker = await run(config, ["assign", "worker-greed", "New chore", "Do it"])
     expect(agentOf(worker.roster, "worker-greed")?.prs).toBeUndefined()
+  })
+})
+
+// A checker queued the PR it now serves as both its pr and its only prs, so prs-= of it had to clear pr too, not leave pr holding the merged PR.
+describe("prs-= clears a matching pr", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+
+  test("prs-= of a checker's own pr clears pr, so holders exits 1 and assign has no old pr to re-add", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const holders = await run(config, ["holders", "1"])
+    expect([holders.code, holders.out]).toEqual([1, ""])
+    const reassigned = await run(config, [
+      "assign",
+      "k3v9q2-reviewer",
+      "Reviewer of b4n8tz-worker",
+      "Review #2",
+      "worker=b4n8tz-worker",
+      "pr=2",
+    ])
+    expect(reassigned.code).toBe(0)
+    expect(agentOf(reassigned.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(2)])
+  })
+
+  // the comment's case, measured once a merged PR was cleared from a row by hand
+  test("prs-= of a checker whose pr is the PR leaves the row with no pr, so holders reads empty", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const holders = await run(config, ["holders", "1"])
+    expect([holders.code, holders.out]).toEqual([1, ""])
+  })
+
+  // set reads the row back through the move guard, so a prs-= that would leave the PR in pr or prs is refused, naming the entry
+  test("a prs-= leaves no old pr behind, and the row reads back clean on the next set", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const again = await run(config, ["set", "k3v9q2-reviewer", "status=waiting"])
+    expect(again.code).toBe(0)
+    expect(agentOf(again.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(again.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    expect(agentOf(again.roster, "k3v9q2-reviewer")?.status).toBe("waiting")
+  })
+
+  test("a prs-= of another PR beside an empty pr= is refused as a move, and writes nothing", async () => {
+    const config = configWith([{ ...checker, prs: [pull(1), pull(2)] }])
+    const refused = await run(config, ["set", "k3v9q2-reviewer", `prs-=${pull(2)}`, "pr="])
+    expect(refused.code).not.toBe(0)
+    expect(refused.err).toContain("roster.ts assign k3v9q2-reviewer")
+    expect(agentOf(refused.roster, "k3v9q2-reviewer")).toEqual({
+      ...checker,
+      prs: [pull(1), pull(2)],
+    })
+  })
+
+  test("a prs+= that puts back the PR a prs-= took in the same call passes the read-back", async () => {
+    const config = configWith([checker])
+    const kept = await run(config, ["set", "k3v9q2-reviewer", `prs-=${pull(1)}`, `prs+=${pull(1)}`])
+    expect([kept.code, kept.err]).toEqual([0, ""])
+    expect(agentOf(kept.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1)])
+  })
+
+  // The read-back returns the row as it was, so a prs-= the write-back just cleared still reads set, and the read-back check refuses, naming the entry.
+  test("a prs-= whose read-back still holds the removed PR is refused, naming the entry and the PR", async () => {
+    const config = configWith([checker])
+    const refused = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"], [checker])
+    expect(refused.code).not.toBe(0)
+    expect(refused.err).toContain("k3v9q2-reviewer")
+    expect(refused.err).toContain(pull(1))
+    // The write-back persisted the clear; only the read-back check refused, so the row here is the real one, not the stale read-back.
+    const row = refused.roster?.agents.find((a) => a.name === "k3v9q2-reviewer")
+    expect((row as unknown as { pr?: unknown })?.pr).toBeUndefined()
+    expect((row as unknown as { prs?: unknown })?.prs).toBeUndefined()
   })
 })
 
