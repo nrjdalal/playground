@@ -21,6 +21,7 @@ export class GuardError extends Error {
   constructor(
     readonly failure: GuardFailure,
     message: string,
+    readonly located?: Located,
   ) {
     super(message)
     this.name = "GuardError"
@@ -141,7 +142,11 @@ const publishers = (port: number, run: Docker): Published[] => {
   }
 }
 
-// The one running container that publishes the URL's port, on loopback alone and first run's own included, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it.
+// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes.
+const keepDataFix = (name: string, port: number): string =>
+  `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
+
+// The one running container that publishes the URL's port, on loopback alone and first run's own included, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it; an exposed refusal carries the container, so a caller can still name it.
 export const locate = (url: string, run: Docker = docker): Located => {
   const target = targetOf(url)
   const owners = publishers(target.port, run)
@@ -156,19 +161,11 @@ export const locate = (url: string, run: Docker = docker): Located => {
     const where = owner.addresses.map((address) => address || "every interface").join(", ")
     throw new GuardError(
       "exposed",
-      `${owner.name} publishes port ${target.port} beyond loopback (${where}); re-publish it on 127.0.0.1 alone, e.g. \`docker run -p 127.0.0.1::5432 postgres:alpine\``,
+      `${owner.name} publishes port ${target.port} beyond loopback (${where}); keep its data and re-publish it on 127.0.0.1 alone: \`${keepDataFix(owner.name, target.port)}\``,
+      { owner, target },
     )
   }
   return { owner, target }
-}
-
-// The container publishing the URL's port, read without the loopback or identity checks `locate` runs after: the owner it refused on, so first run's own, which predates loopback, can still be named.
-export const ownerName = (url: string, run: Docker = docker): string | null => {
-  try {
-    return publishers(targetOf(url).port, run)[0]?.name ?? null
-  } catch {
-    return null
-  }
 }
 
 // Proves the server the URL reaches is the located container's own Postgres, by the system identifier in its pg_controldata, and returns the proof the importer prints before its first write.

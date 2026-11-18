@@ -34,7 +34,7 @@ You need a Mac, a Claude account and a GitHub account.
 1. Install starts Playground and opens the Dashboard; the first start takes a few minutes. After that, `playground` in a new terminal starts whatever is down and opens it.
 2. On a first run, the Dashboard's chat checks this Mac: each missing thing the app can set up has a button that does it, the database's **Start a local container** among them. Once nothing is missing, click **Continue**. You are now this Mac's owner, signed in with no password, and later starts skip the checks.
 
-   > **Warning**: the local database listens on loopback alone (127.0.0.1), with the user, password and database `postgres`, so only this Mac can reach it.
+   > **Warning**: the local database listens on loopback alone (127.0.0.1), with the user and database `postgres` and a random password, so only this Mac can reach it.
 
 3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), **Harness** (Claude Code or Codex for Alpha), a Claude account when the pick is Claude Code, and **Start Alpha**.
 

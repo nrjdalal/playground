@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test, vi } from "bun:test"
+import { randomUUID } from "node:crypto"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -19,7 +20,8 @@ const envFile = join(dir, ".env")
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
 // The password every argv and URL in this suite uses, so startLocal's URL and run argv stay in step.
-const PASSWORD = "s3cr3t"
+// It is read back from docker inspect on a reuse, so it is a random value this run chose, never a literal.
+const PASSWORD = randomUUID()
 
 const URL = `postgres://postgres:${PASSWORD}@localhost:54123/postgres`
 
@@ -205,21 +207,19 @@ describe("startLocal", () => {
   })
 
   test("a reused container's URL reads its password from docker inspect, not a fixed one", async () => {
-    const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 54123)
+    const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
     const origRun = docker.run
     docker.run = async (args) =>
       args[0] === "inspect"
         ? {
             code: 0,
             stderr: "",
-            stdout: JSON.stringify([
-              { Config: { Env: ["POSTGRES_PASSWORD=the-reused-password"] } },
-            ]),
+            stdout: JSON.stringify([{ Config: { Env: [`POSTGRES_PASSWORD=${PASSWORD}`] } }]),
           }
         : { ...(await origRun(args)) }
     const url = await go(docker)
     expect(docker.calls.find((c) => c.args[0] === "run")).toBeUndefined()
-    expect(url).toBe(urlFor(54123, "the-reused-password"))
+    expect(url).toBe(urlFor(216, PASSWORD))
     expect(noProve).toHaveBeenCalledWith(url)
   })
 

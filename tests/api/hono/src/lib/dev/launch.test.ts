@@ -1022,18 +1022,57 @@ describe("preflight", () => {
     }
   })
 
-  test("lets a first-run container that predates loopback start, and prints the keep-data fix", async () => {
+  // First run's own container, published on every interface before loopback was required: the guard refuses it as exposed and carries it, so the preflight lets it through to the proof and the schema checks.
+  const FIRST_RUN = "playground-pg-1-db-x9Kq"
+  const KEEP_DATA = `${FIRST_RUN} publishes port 33001 beyond loopback (0.0.0.0); keep its data and re-publish it on 127.0.0.1 alone`
+  const exposedOwn = () => {
+    const own = located(FIRST_RUN)
+    throw new GuardError("exposed", KEEP_DATA, {
+      ...own,
+      owner: { ...own.owner, addresses: ["0.0.0.0"] },
+    })
+  }
+
+  test("lets first run's own container through the loopback check alone, so a proof that fails still refuses", async () => {
     const checked = await preflight(BRANCH, read(URL), {
-      locate: failing("exposed", "playground-pg-1-db-x9Kq publishes port 33001 beyond loopback"),
-      owner: () => "playground-pg-1-db-x9Kq",
+      locate: exposedOwn,
+      prove: failing("other-server", "the server on port 33001 is not that container's own"),
       root: FACTORY_ROOT,
     })
+    expect(checked.ok).toBe(false)
+    if (!checked.ok) {
+      expect(checked.refusal).toStartWith("the server on port 33001 is not that container's own; ")
+    }
+  })
+
+  test("starts first run's own container once its proof and schema pass, and warns with the keep-data fix", async () => {
+    const proof = proving()
+    const checked = await preflight(BRANCH, read(URL), {
+      locate: exposedOwn,
+      pending: current,
+      prove: proof.prove,
+      root: FACTORY_ROOT,
+      tables: seeded,
+    })
+    expect(proof.calls).toEqual([FIRST_RUN])
     expect(checked.ok).toBe(true)
     if (checked.ok) {
-      expect(checked.proof).toBe(
-        "docker stop playground-pg-1-db-x9Kq && docker rename playground-pg-1-db-x9Kq playground-pg-1-db-x9Kq-old && docker run -d --name playground-pg-1-db-x9Kq -p 127.0.0.1:33001:5432 --volumes-from playground-pg-1-db-x9Kq-old postgres:alpine",
-      )
+      expect(checked.proof).toBe(`${URL} is ${FIRST_RUN}`)
+      expect(checked.warning).toBe(KEEP_DATA)
     }
+  })
+
+  test("refuses an exposed container that is not first run's own, with the keep-data fix", async () => {
+    const checked = await preflight(BRANCH, read(URL), {
+      locate: () => {
+        throw new GuardError("exposed", "playground-a-db publishes port 33001 beyond loopback", {
+          ...located("playground-a-db"),
+        })
+      },
+      root: FACTORY_ROOT,
+    })
+    expect(checked.ok).toBe(false)
+    if (!checked.ok) expect(checked.refusal).toStartWith("playground-a-db publishes port 33001")
   })
 
   test("keeps the live dashboard's database to the live dashboard's own branch, refused before the proof runs anything in it", async () => {

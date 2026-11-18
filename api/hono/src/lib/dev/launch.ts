@@ -28,9 +28,7 @@ import {
   type GuardFailure,
   type Located,
   locate as locateOwner,
-  ownerName as ownerNameOf,
   prove as proveOwner,
-  targetOf,
 } from "@/lib/sessions/guard"
 import { isNamedContainer, setupName } from "@/lib/setup/container"
 
@@ -303,7 +301,7 @@ export type Dashboard =
   | { kind: "live"; rule: DashboardRule }
 
 export type Preflight =
-  | { dashboard: Dashboard; ok: true; proof: string }
+  | { dashboard: Dashboard; ok: true; proof: string; warning?: string }
   | { ok: false; refusal: string }
 
 const refuse = (refusal: string): Preflight => ({ ok: false, refusal })
@@ -312,12 +310,6 @@ const refuseFor = (error: unknown): Preflight =>
   error instanceof GuardError
     ? refuse(`${error.message}; ${FIX[error.failure]}`)
     : refuse(`${error instanceof Error ? error.message : String(error)}; ${OWN_DATABASE}`)
-
-// First run's own container predates the loopback rule and holds this stack's data: the one command that stops it, moves the name aside, and starts a new one on the same loopback port, keeping its volumes.
-const keepData = (url: string, name: string): string => {
-  const port = targetOf(url).port
-  return `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 --volumes-from ${name}-old postgres:alpine`
-}
 
 const FIXTURE_FIX =
   "point PLAYGROUND_FIXTURE at a dashboard fixture file (api/hono/src/fixtures/dashboard.json is the shape), or set it to shipped for that one"
@@ -364,7 +356,6 @@ export type Guard = {
   containers?: () => Container[]
   liveDashboard?: LiveDashboard
   locate?: (url: string) => Located
-  owner?: (url: string) => string | null
   pending?: (url: string) => Promise<number>
   prove?: (url: string, located: Located) => Promise<string>
   root?: string
@@ -384,7 +375,6 @@ export async function preflight(
     containers = containerList,
     liveDashboard = livePair(),
     locate = locateOwner,
-    owner = ownerNameOf,
     pending = pendingMigrations,
     prove = proveOwner,
     root = process.cwd(),
@@ -433,20 +423,21 @@ export async function preflight(
   }
   if (!url) return { dashboard, ok: true, proof: SETUP_MODE }
   let located: Located
+  let warning: string | undefined
   try {
     located = locate(url)
   } catch (error) {
-    // A first-run container predates the loopback rule: it was published on every interface before loopback was required, so the guard refuses it though it is this checkout's own. Let it start, and print the command that keeps its data, unless the owner is not this kind.
-    const owner_ = owner(url)
+    // First run's own container predates the loopback rule, so the guard refuses it as exposed though it holds this stack's data: let it through to the checks below, and warn with the guard's keep-data fix.
     if (
-      error instanceof GuardError &&
-      error.failure === "exposed" &&
-      owner_ !== null &&
-      isNamedContainer(setupName(root, branch, liveDashboard), owner_)
+      !(error instanceof GuardError) ||
+      error.failure !== "exposed" ||
+      !error.located ||
+      !isNamedContainer(setupName(root, branch, liveDashboard), error.located.owner.name)
     ) {
-      return { dashboard, ok: true, proof: keepData(url, owner_) }
+      return refuseFor(error)
     }
-    return refuseFor(error)
+    located = error.located
+    warning = error.message
   }
   if (othersLiveDashboard(located.owner.name, branch, liveDashboard)) {
     return refuse(
@@ -462,7 +453,7 @@ export async function preflight(
         `database lacks ${lacking} migration${lacking === 1 ? "" : "s"}: run bun run db:migrate`,
       )
     }
-    return { dashboard, ok: true, proof }
+    return { dashboard, ok: true, proof, ...(warning && { warning }) }
   } catch (error) {
     return refuseFor(error)
   }
