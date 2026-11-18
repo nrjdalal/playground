@@ -669,11 +669,12 @@ describe("a stuck or quiet session (PG-2184)", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line) as { text: string; to: string })
     const named = { a: "k3m9px-worker", b: "m4n7pq-builder", m: OLD.dispatcher, o: "notes" }
-    const run = (n: number) =>
+    const run = (n: number, options: { metrics?: () => Promise<string | null> } = {}) =>
       cycle({
         configDir: config,
         live: async () => new Map(Object.entries(named).map(([id, name]) => [id, { name }])),
         now: at(n),
+        ...options,
       })
     return { config, run, sent }
   }
@@ -786,6 +787,31 @@ describe("a stuck or quiet session (PG-2184)", () => {
     const lines = await sent()
     expect(lines.map(({ to }) => to)).toEqual(["m4n7pq-builder"])
     expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
+  })
+
+  // A working session the local model still serves is not quiet: the quiet judge reads its /metrics, where running and waiting above 0 means the model is working, and skips it; one the model is idle on is still quiet, and a /metrics that does not read falls back to the idle timer, so none of these three change when /metrics is unavailable.
+  test("a working session the model serves (running and waiting above 0) is not quiet, even after 15 minutes", async () => {
+    const { run, sent } = setup("working")
+    await run(15, {
+      metrics: async () => "vllm:num_requests_running 3\nvllm:num_requests_waiting 1\n",
+    })
+    expect(await sent()).toEqual([])
+  })
+
+  test("a working session the model is idle on (running and waiting at 0) still is quiet after 15 minutes", async () => {
+    const { run, sent } = setup("working")
+    await run(15, {
+      metrics: async () => "vllm:num_requests_running 0\nvllm:num_requests_waiting 0\n",
+    })
+    const lines = await sent()
+    expect(lines.map(({ to }) => to)).toEqual(["m4n7pq-builder"])
+    expect(lines[0]!.text).toStartWith("k3m9px-worker has made no tool call for 15 minutes.")
+  })
+
+  test("a working session the /metrics cannot read falls back to the idle timer", async () => {
+    const { run, sent } = setup("working")
+    await run(15, { metrics: async () => null })
+    expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
   })
 
   test("a session whose subagent is still writing is not quiet", async () => {
