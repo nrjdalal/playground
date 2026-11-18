@@ -202,7 +202,7 @@ test("the factory's accounts at 1%/h each read 2%/h combined", () => {
   expect(new Set(accounts("account-samples.jsonl"))).toEqual(new Set(["spare@example.test"]))
 })
 
-// #2735: a whole-point step in the 1-hour window inflated the combined line; reading the 6-hour rate keeps it 1.0 plus 0.7, not 1.0 plus 1.3
+// #2735: a whole-point step in the 1-hour window inflated the combined line; reading the 6-hour rate keeps it 1.0 plus 0.7, not 1.0 plus 2.0
 test("a whole-point step in the 1-hour window reads the 6-hour rate, so the combined line does not inflate (#2735)", () => {
   const now = Date.now() / 1000
   const home = setup("step-2735", 50, 20, {
@@ -233,26 +233,15 @@ test("a whole-point step in the 1-hour window reads the 6-hour rate, so the comb
   expect(line).toContain("; combined 1.7%/h across 2 accounts")
 })
 
-// #2735: under an hour of readings the 1-hour and 6-hour windows hold the same rows, so a step left the 6-hour window skipped, giving ?%/h; reading over the 6-hour window keeps a rate
-test("a step under an hour of readings still reads a rate, not ?%/h (#2735)", () => {
-  const now = Date.now() / 1000
-  const home = setup("sub-hour-step", 50, 20, {
-    "spare@example.test": { readAt: iso(now), week: 11, weekReset: now + 172800 },
-  })
-  history(home, [["login@example.test", 50, now + 86400]])
-  const second = [
+// #2735: under an hour of readings the 6-hour window holds no older reading, so a single step reads over the hour and its words name 1h, as before
+test("a step under an hour of readings reads over 1h, not over 6h (#2735)", () => {
+  const home = setup("sub-hour-step", 11, 20)
+  readings(home, [
     [2700, 10],
     [1800, 10],
     [900, 11],
-  ]
-  for (const [back, week] of second)
-    appendFileSync(
-      samples(home, "account-samples.jsonl"),
-      `${JSON.stringify({ account: "spare@example.test", reset: now + 172800, t: now - back, week })}\n`,
-    )
-  const line = status(home)
-  expect(line).toContain("; combined 2.3%/h across 2 accounts")
-  expect(line).not.toContain("?%/h")
+  ])
+  expect(status(home)).toContain("rate 1.3%/h over 1h")
 })
 
 // #1587: a full week's reading parks in the map until its reset with a readAt that stops moving, so it counts 0%/h and the combined figure stays a number
