@@ -335,7 +335,11 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 - `playground ingest` reads every Claude Code and Codex session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.
-- `playground wa send <file>` sends the reply in the file, named by its absolute path, to your WhatsApp through ops-wa, the WhatsApp link on a spare number, to your own number (`wa.owner`), or with `--to alert` to the number in `wa.alert`, a guest; it refuses a body holding a token shape, and says so when ops-wa is not running. `playground wa alert <file>` sends an alert once to your number and once to the number in `wa.alert`, each once that number has written to the spare number, and `playground wa status` prints whether each has written and your hours left for replies. `playground wa relink` sets the old link aside after WhatsApp logged the device out, so ops-wa's next start posts a new pairing card.
+- `playground wa send <file>` sends the reply in the file, named by its absolute path, to your WhatsApp through ops-wa, the WhatsApp link on a spare number, to your own number (`wa.owner`), or with `--to alert` to the number in `wa.alert`, a guest; it refuses a body holding a token shape, and says so when ops-wa is not running.
+- `playground wa alert [--now-both] [--source <kind>:<ref>] <file>` sends an urgent alert to you at once and to the number in `wa.alert` after `wa.alertDelayMinutes`, unless you react on it or `wa.alertCheck` reads its source as handled; `--now-both` sends to both at once.
+- `playground wa status` prints whether each number has written or been approved, whether a reply can go to it now, and each pending alert.
+- `playground wa alert-set --from-owner-msg <id>` sets the second number (`wa.alert`) to the one phone number in your own WhatsApp message of that id, which ops-wa keeps for 24 hours.
+- `playground wa relink` sets the old link aside after WhatsApp logged the device out, so ops-wa's next start posts a new pairing card.
 
 ## Troubleshooting
 
