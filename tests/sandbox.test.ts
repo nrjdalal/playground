@@ -34,19 +34,20 @@ describe("the test sandbox", () => {
 
 // On Linux the suite runs under bwrap (sandbox.ts's wrap), since a scratch HOME hides nothing a test names by its full path
 describe.skipIf(process.platform !== "linux")("the test sandbox on Linux", () => {
-  // the passwd entry's home, since os.userInfo().homedir follows the sandbox's HOME
+  // the passwd entry's home, since os.userInfo().homedir follows the sandbox's HOME; read in each test, since a skipped describe's body still runs on macOS, which has no getent
   const uid = process.getuid!()
-  const home = Bun.spawnSync(["getent", "passwd", String(uid)])
-    .stdout.toString()
-    .split(":")[5]!
+  const homeOfUid = () =>
+    Bun.spawnSync(["getent", "passwd", String(uid)])
+      .stdout.toString()
+      .split(":")[5]!
 
   test("each live folder reads empty: the data folder, Claude's config, herdr's, portless's and the user's runtime folder", () => {
-    for (const dir of hidden(home, uid, {}))
+    for (const dir of hidden(homeOfUid(), uid, {}))
       if (existsSync(dir)) expect([dir, readdirSync(dir)]).toEqual([dir, []])
   })
 
   test("~/.ssh is mounted read-only", () => {
-    const ssh = join(home, ".ssh")
+    const ssh = join(homeOfUid(), ".ssh")
     if (!existsSync(ssh)) return
     const mount = readFileSync("/proc/self/mountinfo", "utf8")
       .split("\n")
