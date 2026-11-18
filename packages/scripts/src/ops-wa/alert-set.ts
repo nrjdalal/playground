@@ -1,9 +1,10 @@
-import { createHash } from "node:crypto"
+import { createHmac, randomBytes } from "node:crypto"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { OWNER_WINDOW_MS, readOwn, writeOwn } from "./habits"
+import { ownFolder, OWNER_WINDOW_MS, readOwn, writeOwn } from "./habits"
 
-// kept.json, the bridge's queue's alone: for each owner text message, its id, time, a hash of each of its words and its one phone number when it holds exactly one, never its text, the last 50 of 24 hours, so the owner's own message can set the second number (ADR 0032) or a setting it names the value of (ADR 0035)
+// kept.json, the bridge's queue's alone: for each owner text message, its id, time, a keyed hash of each of its words (wordHashes) and its one phone number when it holds exactly one, never its text, the last 50 of 24 hours, so the owner's own message can set the second number (ADR 0032) or a setting it names the value of (ADR 0035)
 export const keptFile = (dir: string) => join(dir, "kept.json")
 export type Kept = { at: number; id: string; number?: string; words: string[] }
 const KEEP = 50
@@ -23,13 +24,33 @@ export function phonesIn(text: string, owner: string): string[] {
   return [...found]
 }
 
-// A text's words in order, each lowercased with its wrapping quotes and trailing stops cut, as a 16-character sha256, so a value can be matched against a message without its text being kept.
-export const wordHashes = (text: string): string[] =>
+// word.key, beside kept.json: ops-wa's own 32 random bytes, made once and never logged, printed or stored elsewhere, that key the word hashes, so a word list cannot read a kept hash back as its word (ADR 0035)
+export const wordKeyFile = (dir: string) => join(dir, "word.key")
+
+// The word key, made at its first need when make is set; one missing, unreadable or not 32 bytes is undefined, so no value matches.
+export async function wordKey(dir: string, make = false): Promise<Buffer | undefined> {
+  const read = async () => {
+    const key = Buffer.from(await Bun.file(wordKeyFile(dir)).arrayBuffer())
+    return key.length === 32 ? key : undefined
+  }
+  const key = await read().catch(() => undefined)
+  if (key || !make) return key
+  await ownFolder(dir)
+  try {
+    writeFileSync(wordKeyFile(dir), randomBytes(32), { flag: "wx", mode: 0o600 })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") return undefined
+  }
+  return read().catch(() => undefined)
+}
+
+// A text's words in order, each lowercased with its wrapping quotes and trailing stops cut, as a 16-character HMAC-sha256 under the word key, so a value can be matched against a message without its text being kept.
+export const wordHashes = (text: string, key: Buffer): string[] =>
   text
     .split(/\s+/)
     .map((word) => word.toLowerCase().replace(/^["'`“‘(]+|["'`”’).,!?;:]+$/g, ""))
     .filter(Boolean)
-    .map((word) => createHash("sha256").update(word).digest("hex").slice(0, 16))
+    .map((word) => createHmac("sha256", key).update(word).digest("hex").slice(0, 16))
 
 // Keeps an owner text message's proof by its id; says whether it held exactly one phone number.
 export async function keepMessage(
@@ -41,8 +62,10 @@ export async function keepMessage(
 ): Promise<boolean> {
   const numbers = phonesIn(text, owner)
   const one = numbers.length === 1
+  const key = await wordKey(dir, true)
+  const words = key ? wordHashes(text, key) : []
   const { kept = [] } = await readOwn<{ kept?: Kept[] }>(keptFile(dir), {})
-  const fresh = [...kept, { at, id, ...(one && { number: numbers[0]! }), words: wordHashes(text) }]
+  const fresh = [...kept, { at, id, ...(one && { number: numbers[0]! }), words }]
     .filter((k) => at - k.at < OWNER_WINDOW_MS)
     .slice(-KEEP)
   await writeOwn(keptFile(dir), { kept: fresh })

@@ -10,7 +10,7 @@ import {
 } from "@packages/settings"
 
 import { valueOf } from "../playground/store"
-import { keptMessage, wordHashes } from "./alert-set"
+import { keptMessage, wordHashes, wordKey } from "./alert-set"
 import { readOwn, writeOwn } from "./habits"
 import { seedAlert } from "./seed"
 
@@ -26,8 +26,8 @@ export const guarded = (key: string) => {
 }
 
 // Whether the value's words stand in a row in the message's words, so a value the owner did not write is refused.
-export const holds = (words: string[], value: string) => {
-  const want = wordHashes(value)
+export const holds = (words: string[], value: string, key: Buffer) => {
+  const want = wordHashes(value, key)
   if (!want.length) return false
   for (let i = 0; i + want.length <= words.length; i++)
     if (want.every((hash, k) => words[i + k] === hash)) return true
@@ -89,7 +89,10 @@ async function applied(io: SettingSetIo, key: string, value: string, id: string)
 export async function settingSet(io: SettingSetIo, id: string, key: string, value: string) {
   const hit = await keptMessage(io.dir, id, io.now())
   if (!hit) throw new Error(`no message of the owner's in the last 24 hours has the id ${id}`)
-  if (!holds(hit.words, value)) throw new Error(`the owner's message ${id} does not hold the value`)
+  const secret = await wordKey(io.dir)
+  if (!secret) throw new Error("ops-wa has no word key, so no message can be matched")
+  if (!holds(hit.words, value, secret))
+    throw new Error(`the owner's message ${id} does not hold the value`)
   if (!guarded(key)) return applied(io, key, value, id)
   await io.tell(`set ${key} to ${shown(key, valueOf(value))}? yes or no`)
   await writeOwn(confirmFile(io.dir), { at: io.now(), id, key, value } satisfies Pending)

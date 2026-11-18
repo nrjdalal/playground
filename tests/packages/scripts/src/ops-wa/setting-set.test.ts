@@ -1,9 +1,16 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { keepMessage, keptFile } from "../../../../../packages/scripts/src/ops-wa/alert-set"
+import {
+  keepMessage,
+  keptFile,
+  wordHashes,
+  wordKey,
+  wordKeyFile,
+} from "../../../../../packages/scripts/src/ops-wa/alert-set"
 import { bridge } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import {
   applyOwnerSetting,
@@ -77,10 +84,43 @@ describe("the kept record", () => {
     const o = owned()
     await keepMessage(o.dir, "own1", 'Reply policy: "Factory status only." thanks', START, OWNER)
     const { kept } = (await Bun.file(keptFile(o.dir)).json()) as { kept: { words: string[] }[] }
-    expect(holds(kept[0]!.words, "factory status only")).toBe(true)
-    expect(holds(kept[0]!.words, "status")).toBe(true)
-    expect(holds(kept[0]!.words, "factory only")).toBe(false)
-    expect(holds(kept[0]!.words, "  ")).toBe(false)
+    const key = (await wordKey(o.dir))!
+    expect(holds(kept[0]!.words, "factory status only", key)).toBe(true)
+    expect(holds(kept[0]!.words, "status", key)).toBe(true)
+    expect(holds(kept[0]!.words, "factory only", key)).toBe(false)
+    expect(holds(kept[0]!.words, "  ", key)).toBe(false)
+  })
+
+  test("the word hashes are keyed by ops-wa's own random key, an owner-only file, so a plain sha256 word list matches none", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "set the reply policy to factory status", START, OWNER)
+    const key = await wordKey(o.dir)
+    expect(key).toHaveLength(32)
+    expect(statSync(wordKeyFile(o.dir)).mode & 0o777).toBe(0o600)
+    const { kept } = (await Bun.file(keptFile(o.dir)).json()) as { kept: { words: string[] }[] }
+    const plain = ["set", "the", "reply", "policy", "to", "factory", "status"].map((word) =>
+      createHash("sha256").update(word).digest("hex").slice(0, 16),
+    )
+    expect(kept[0]!.words.filter((hash) => plain.includes(hash))).toEqual([])
+    expect(wordHashes("factory status", key!)).not.toEqual(
+      wordHashes("factory status", Buffer.alloc(32, 7)),
+    )
+    expect(wordHashes("factory status", key!)).toEqual(kept[0]!.words.slice(-2))
+  })
+
+  test("a missing or unreadable key applies no setting", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "point the repo at made-up-me/new", START, OWNER)
+    rmSync(wordKeyFile(o.dir))
+    await expect(settingSet(o.io, "own1", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no word key",
+    )
+    writeFileSync(wordKeyFile(o.dir), "short", { mode: 0o600 })
+    await expect(settingSet(o.io, "own1", "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no word key",
+    )
+    expect(stored(o.data)["factory.repo"]).toBeUndefined()
+    expect(o.told).toEqual([])
   })
 })
 
