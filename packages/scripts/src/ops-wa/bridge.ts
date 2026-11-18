@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
+import { keepNumber } from "./alert-set"
 import {
   answered,
   answerOf,
@@ -28,6 +29,7 @@ import { alertSeedFile } from "./seed"
 
 type Key = {
   fromMe?: boolean | null
+  id?: string | null
   participant?: string | null
   remoteJid?: string | null
   remoteJidAlt?: string | null
@@ -177,6 +179,8 @@ async function inbound(io: Io & Mode, m: Incoming) {
   const at = io.now()
   await ownFolder(io.dir)
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
+  const id = m.key.id
+  const kept = !!text && !!id && (await keepNumber(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   if (!(await io.on())) {
     // one reply an hour at most, so a run of messages while it is off gets one answer; offAt is written first, so a failed reply waits out the hour too
@@ -190,11 +194,15 @@ async function inbound(io: Io & Mode, m: Incoming) {
     return answerCard(io, io.inbox!, reply)
   const when = new Date(at).toISOString()
   const line = text
-    ? `The owner's WhatsApp at ${when} reads: ${text}\n${replyLine((await policyOf(io)).reply)}`
+    ? `The owner's WhatsApp at ${when} reads: ${text}\n${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`
     : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${replyLine((await policyOf(io)).reply)}`
   await io.relay("dispatcher", line)
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
 }
+
+// The note on an owner message whose one number ops-wa kept, so the dispatcher can set it as the second number when the owner asks.
+export const keptLine = (id: string) =>
+  `ops-wa kept the one phone number in it: when the owner asks for it to be the second number, run playground wa alert-set --from-owner-msg ${id}.`
 
 // What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
 type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }

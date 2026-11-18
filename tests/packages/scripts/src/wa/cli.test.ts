@@ -205,6 +205,55 @@ describe("playground wa alert (#2748)", () => {
   })
 })
 
+describe("playground wa alert-set", () => {
+  test("asks ops-wa to set the second number from the owner's message by its id, and prints its answer", async () => {
+    const { data } = machine("")
+    const asked: string[] = []
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async (id) => {
+        asked.push(id)
+        return "set the second number to ...0444 from the owner's message own1; it was unset"
+      },
+    )
+    try {
+      expect(await wa(data, ["alert-set", "--from-owner-msg", "own1"])).toEqual({
+        code: 0,
+        out: "wa alert-set: set the second number to ...0444 from the owner's message own1; it was unset",
+      })
+      expect(asked).toEqual(["own1"])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("prints ops-wa's refusal and exits 1", async () => {
+    const { data } = machine("")
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async () => {
+        throw new Error("no message of the owner's in the last 24 hours has the id in9")
+      },
+    )
+    try {
+      expect(await wa(data, ["alert-set", "--from-owner-msg", "in9"])).toEqual({
+        code: 1,
+        out: "wa alert-set: no message of the owner's in the last 24 hours has the id in9",
+      })
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("takes --from-owner-msg and an id alone", async () => {
+    const { data } = machine("")
+    for (const args of [["alert-set"], ["alert-set", "own1"], ["alert-set", "--from-owner-msg"]])
+      expect((await wa(data, args)).code).toBe(2)
+  })
+})
+
 describe("playground wa send --file (#2783)", () => {
   test("hands the file's path to ops-wa beside the body, to the owner or as a guest's reply, and alone with no body", async () => {
     const { body, data } = machine("the new board\n")

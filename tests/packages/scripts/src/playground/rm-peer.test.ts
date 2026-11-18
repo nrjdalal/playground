@@ -134,6 +134,52 @@ test("runRmPeer deletes a recorded weights file at the card's exact size, logs i
   )
 })
 
+test("runRmPeer deletes a .gguf directly under a recorded folder, logs it", async () => {
+  const m = machine()
+  const folder = join(m.home, "gguf")
+  file(join(folder, "model.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const path = join(folder, "model.gguf")
+  const { code, out } = await rmpTold(path, {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(
+    `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
+  )
+})
+
+test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it", async () => {
+  const m = machine()
+  const folder = join(m.home, "gguf")
+  file(join(folder, "UD-Q3_K_XL", "model.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const path = join(folder, "UD-Q3_K_XL", "model.gguf")
+  const { code, out } = await rmpTold(path, {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(
+    `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
+  )
+})
+
+test("runRmPeer leaves a .gguf outside the record and models, so it stays", async () => {
+  const m = machine()
+  file(join(m.home, "scratch", "model.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  const { out, err } = await rmpTold(join(m.home, "scratch", "model.gguf"), {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(out).toEqual([])
+  expect(err.join("\n")).toContain("is not on the machine record, so it stays")
+})
+
 // One runRmPeer over its words, catching what it logs or errors, with the card's approved byte count.
 const rmpTold = async (
   path: string,
