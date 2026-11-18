@@ -991,7 +991,7 @@ describe("status", () => {
         ...all(`(?<![\\w.])${through} [!=]==? "([a-z-]+)"`).map((m) => m[1]),
         ...quoted(all(`\\[([^\\]]*)\\]\\.includes\\(${through}\\)`)),
         ...quoted(all(`${through} (?:not )?in \\(([^)]*)\\)`)),
-        ...quoted(all(`(?:SEATLESS|HELD) = new Set\\(\\[(.*)\\]\\)`)),
+        ...quoted(all(`(?:SEATLESS|HELD) = new Set(?:<string>)?\\(\\[(.*)\\]\\)`)),
       ]
       expect({ file, read: words.length > 0 }).toEqual({ file, read: true })
       for (const word of words)
