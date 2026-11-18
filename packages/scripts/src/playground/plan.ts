@@ -456,6 +456,9 @@ export const rollTimedOut = (
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
 export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
   let failed: string | undefined
+  // a roll that moved the database onto loopback names the move and the old container's remove command on its PASS or FAIL line (supervisor.sh's move_database), which the report keeps either way
+  let moved: string | undefined
+  const withMove = (done: string) => (moved ? `${done}; ${moved}` : done)
   for (const line of results) {
     if (failed !== undefined) {
       // a refused roll's own line follows roll_up's FAIL and names the refusal with its count
@@ -467,7 +470,9 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
       const back = line.match(/^\S+ FALLBACK (\w+) (PASS|FAIL)/)
       if (back)
         return {
-          done: `Failed: ${failed}; ${back[2] === "PASS" ? `back on ${back[1]}` : `going back to ${back[1]} failed too`}`,
+          done: withMove(
+            `Failed: ${failed}; ${back[2] === "PASS" ? `back on ${back[1]}` : `going back to ${back[1]} failed too`}`,
+          ),
           ok: false,
         }
       continue
@@ -477,17 +482,18 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     const refused = line.match(/^\S+ (?:SKIP \w+ FAIL|ANOMALY) (.*)$/)
     if (refused) return { done: `Failed: ${refused[1]}`, ok: false }
     const roll = line.match(/^\S+ ROLL (.*?) (\w+) (PASS|FAIL)(?: (.*))?$/)
-    // a roll that moved the database onto loopback names the move and the old container's remove command on its PASS line (supervisor.sh's move_database)
-    const moved = roll?.[4]?.match(/ database: (Moved .*)$/)?.[1]
-    if (roll?.[3] === "PASS")
-      return { done: `Updated to ${roll[2]}${moved ? `; ${moved}` : ""}`, ok: true }
     if (!roll) continue
-    failed = roll[4] || "the roll failed"
+    moved = roll[4]?.match(/ database: (Moved .*)$/)?.[1]
+    if (roll[3] === "PASS") return { done: withMove(`Updated to ${roll[2]}`), ok: true }
+    failed = (roll[4] || "the roll failed").replace(/ database: Moved .*$/, "")
     // a build that failed before the stop stopped nothing, so no fallback follows
-    if (failed.startsWith("build before the stop:")) return { done: `Failed: ${failed}`, ok: false }
+    if (failed.startsWith("build before the stop:"))
+      return { done: withMove(`Failed: ${failed}`), ok: false }
     if (/\bmigrate\b/.test(roll[1]))
       return {
-        done: `Failed: ${failed}; it changed the database, so the Dashboard stays on ${roll[2]}`,
+        done: withMove(
+          `Failed: ${failed}; it changed the database, so the Dashboard stays on ${roll[2]}`,
+        ),
         ok: false,
       }
   }

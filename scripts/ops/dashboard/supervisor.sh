@@ -314,8 +314,8 @@ dev_down() {
   [ -n "$reason" ] || reason=$(printf '%s\n' "$tail" | tail -1)
   printf '%s' "$reason" | cut -c1-360
 }
-# An install made before the loopback rule publishes its database on every interface, which the follower's guard refuses: move it onto 127.0.0.1 alone with this checkout's code (lib/setup/move.ts) while the API and the follower are down, so it is healthy before either connects; a container on loopback is left alone with nothing printed. A move sets moved_note, which the roll's PASS line carries for playground update to print, and a failed one, which starts the old container again as it was, sets move_failure, which finish_roll puts first in the roll's refusal
-move_database() { local out; if out=$(bun "$WT/api/hono/src/bin/dashboard-db.ts" move 2>&1); then [ -z "$out" ] || { moved_note="database: $(echo "$out" | tr '\n' ' ' | sed 's/ *$//')"; say "$moved_note"; }; else move_failure=$(echo "$out" | tail -1 | cut -c1-300); say "database: $move_failure"; fi; }
+# An install made before the loopback rule publishes its database on every interface, which the follower's guard refuses: move it onto 127.0.0.1 alone with this checkout's code (lib/setup/move.ts) while the API and the follower are down, so it is healthy before either connects; a container on loopback is left alone with nothing printed. A move sets moved_note, which the roll's PASS or FAIL line carries for playground update to print, and a failed one, which starts the old container again as it was, sets move_failure, which finish_roll puts first in the roll's refusal
+move_database() { local out; if out=$(bun "$WT/api/hono/src/bin/dashboard-db.ts" move 2>&1); then [ -z "$out" ] || { moved_note="database: $(echo "$out" | awk 'NR>1{printf "; "} {printf "%s", $0} END{print ""}')"; say "$moved_note"; }; else move_failure=$(echo "$out" | tail -1 | cut -c1-300); say "database: $move_failure"; fi; }
 # The follower's last line when it is the guard's refusal of the database's publish (a container published beyond loopback, or none publishing the port): the machine's, not the head's, so finish_roll keeps the head out of bad-builds
 guard_reason() { tail -2 "$INGLOG" | grep -m1 -oE 'refusing to write: .*(beyond loopback|no single running Docker container publishes port [0-9]+)'; }
 roll_up() {   # build the head when it has no build, start it and the follower, check both, and report one line; returns 0 on PASS
@@ -339,7 +339,7 @@ roll_up() {   # build the head when it has no build, start it and the follower, 
     t=$(date -u +%Y-%m-%dT%H:%M:%S); start_follower; fol=$(check_follower "$t"); fok=$?
     [ $fok -eq 0 ] || guard_refusal=$(guard_reason)
   fi
-  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol${moved_note:+ $moved_note}"; keep_builds "$(git rev-parse HEAD)"; return 0; else result "$tag $sha FAIL $dev $fol${move_failure:+ database move: $move_failure}"; return 1; fi
+  if [ $dok -eq 0 ] && [ $fok -eq 0 ]; then result "$tag $sha PASS $dev $fol${moved_note:+ $moved_note}"; keep_builds "$(git rev-parse HEAD)"; return 0; else result "$tag $sha FAIL $dev $fol${move_failure:+ database move: $move_failure}${moved_note:+ $moved_note}"; return 1; fi
 }
 # The owner's rule: restart the app every time something lands on the upstream, so the change is visible at once
 tell_dispatcher() { NOTIFY_TO=dispatcher "$OPS/notify.sh" dashboard "$1"; }

@@ -2182,8 +2182,27 @@ describe("the supervisor's database move", () => {
     )
   })
 
-  test("names a move on the roll's PASS line, which playground update prints", () => {
+  test("names a move on the roll's PASS or FAIL line, which playground update prints", () => {
     expect(script).toContain('result "$tag $sha PASS $dev $fol${moved_note:+ $moved_note}"')
+    expect(script).toContain(
+      'result "$tag $sha FAIL $dev $fol${move_failure:+ database move: $move_failure}${moved_note:+ $moved_note}"',
+    )
+  })
+
+  test("joins a move's lines with a semicolon, so the two read apart", async () => {
+    const moving = join(scratch, "moving-bin")
+    await Bun.write(
+      join(moving, "bun"),
+      `#!/bin/sh\nprintf 'Moved the database x onto 127.0.0.1:1 alone, keeping its data\\nx-old is stopped and kept; remove it with: docker rm -v x-old\\n'\n`,
+    )
+    chmodSync(join(moving, "bun"), 0o755)
+    const proc = Bun.spawn(
+      ["bash", "-c", `say() { :; }\n${fn("move_database")}\nmove_database; echo "$moved_note"`],
+      { env: { ...process.env, PATH: `${moving}:${process.env.PATH}`, WT: root }, stdout: "pipe" },
+    )
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      "database: Moved the database x onto 127.0.0.1:1 alone, keeping its data; x-old is stopped and kept; remove it with: docker rm -v x-old",
+    )
   })
 
   test("still lists a head in bad-builds when its follower failed for any other reason", async () => {

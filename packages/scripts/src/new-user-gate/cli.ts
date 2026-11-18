@@ -365,7 +365,6 @@ export const installCheck = (out: string, shot: () => string): Omit<Step, "name"
   }
 }
 
-// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
 // The box's own live.container, named after its folder: the box shares this Mac's Docker, so with the default name its first run reused the live dashboard's running database as its own.
 export const boxContainer = (box: string): string => `${basename(box)}-db`
 
@@ -389,6 +388,7 @@ export const seedArgv = (home: string, name: string): string[] => [
   "the new-user gate's box keeps a database of its own",
 ]
 
+// Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
 export const databaseCheck = async (
   click: () => boolean,
   saved: () => boolean,
