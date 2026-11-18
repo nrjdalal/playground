@@ -35,6 +35,8 @@ How:
 
 Standing lines:
 
+- Start in your worktree: `cd <worktree>` before any other command, with `<worktree>` the worktree's absolute path, so a shell that resumes in the main checkout moves nothing there.
+- Give every file tool (Edit, Write, Read) the worktree's absolute path, never a repo-relative one, since a relative path lands in the main checkout.
 - Remix icons only: no emoji, no inline SVG, no other icon library.
 - Live numbers that tick (readings, timers, countdowns, counts): `font-mono tabular-nums` at their natural width, with no padStart and no fixed min-width, so each number sits right after its icon (this replaces the old fixed-width rule).
 - Reuse first: name the existing pattern you follow. Sizes follow the sidebar. No emoji. Hardcode no session name.
