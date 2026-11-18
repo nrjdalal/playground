@@ -10487,13 +10487,23 @@ var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8
 var whatsappSettings = defineSettings({
   "wa.alert": {
     default: "",
-    description: "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once, beside the owner's number, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
+    description: "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once the owner has not handled it within wa.alertDelayMinutes, or at once with --now-both, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
     masked: true,
     schema: e1642
   },
+  "wa.alertCheck": {
+    default: "",
+    description: "The checker ops-wa runs when an urgent alert's delay ends, a file in the extensions (such as scripts/<key>/check.ts) run with bun and given the alert's --source and its send time: exit 0 means handled, so the alert stays with the owner; any other exit, a crash or 20 s with no exit sends it on to wa.alert. Empty: only the owner's WhatsApp reaction on the alert handles it. A guard key, set by the owner alone.",
+    schema: string2().trim().max(300)
+  },
+  "wa.alertDelayMinutes": {
+    default: 3,
+    description: "The minutes an urgent alert waits with the owner before it goes on to wa.alert, unless the owner's reaction or wa.alertCheck says it was handled; read for each alert.",
+    schema: number2().int().positive()
+  },
   "wa.device": {
     default: "",
-    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e1642
   },
@@ -10504,7 +10514,7 @@ var whatsappSettings = defineSettings({
   },
   "wa.owner": {
     default: "",
-    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set.",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e1642
   },

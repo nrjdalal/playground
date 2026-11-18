@@ -703,7 +703,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `github.pollMinutes`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, `usage.keychainService`,
-  `wa.alert`, whose Approve stands in for that WhatsApp number's first message (ADR 0028) and which ops-wa also writes from the owner's own WhatsApp message (ADR 0032), `wa.guestPolicy` and `wa.replyPolicy`, the policy lines ops-wa hands the dispatcher (ADR 0030), and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
+  `wa.alert`, whose Approve stands in for that WhatsApp number's first message (ADR 0028) and which ops-wa also writes from the owner's own WhatsApp message (ADR 0032), `wa.alertCheck`, the checker ops-wa runs for an urgent alert (ADR 0034), `wa.device` and `wa.owner`, the number ops-wa links as and the one it takes orders from,
+  `wa.guestPolicy` and `wa.replyPolicy`, the policy lines ops-wa hands the dispatcher (ADR 0030), and `yard.logReaders`, the bots this Mac answers a read of the dispatcher's log for,
   and of every ops job's `jobs.<name>`,
   and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
@@ -1445,7 +1446,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 ## no-raw-wa
 
-- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>` and its siblings (`wa alert`, `wa alert-set`, `wa status`): `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket, the owner's messages and the owner's answers to cards,
+- A factory session reaches ops-wa's folder only through `playground wa send <absolute file>` and its siblings (`wa alert`, `wa alert-set`, `wa react`, `wa status`): `scripts/hooks/no-raw-wa.ts` refuses a call that reaches the data folder's `whatsapp/`, which holds the linked device's auth state, its socket, the owner's messages and the owner's answers to cards,
   so no session can copy the device, write past the allowlist of one or answer a card as the owner ([ADR 0023](../../.agents/adr/0023-the-owners-whatsapp-chat-is-the-owners-words.md), [ADR 0024](../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)).
   It reads the folder as typed and through its links, in any case, as macOS opens it.
   On Bash it refuses a call whose text names that folder under `.playground`, `$PLAYGROUND_DATA_DIR` or the data folder's own path, whatever reads it (a script's string, a variable it cannot expand), then walks the call through `shell.ts`'s reader:

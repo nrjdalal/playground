@@ -1,9 +1,18 @@
 import { afterAll, beforeEach, describe, expect, test, vi } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { mkdtempSync, rmSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
+import { livePair } from "../../../../../../api/hono/src/lib/dev/live-dashboard"
 import {
   isNamedContainer,
   portFromPort,
@@ -13,6 +22,7 @@ import {
   urlFor,
   withDatabase,
 } from "../../../../../../api/hono/src/lib/setup/container"
+import { stubs } from "../../../../../../packages/scripts/src/new-user-gate/stubs"
 
 // A fresh temp folder per test, so no startLocal writes a real .env and no test leaves files behind.
 const dir = mkdtempSync(join(tmpdir(), "setup-container-"))
@@ -206,6 +216,22 @@ describe("startLocal", () => {
     expect(docker.calls.find((c) => c.args[0] === "run")).toBeUndefined()
   })
 
+  test("asked to move, a reused container moves onto loopback on its own port before the proof", async () => {
+    const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
+    const moveTo = vi.fn(async () => ["Moved"])
+    const steps: string[] = []
+    const url = await go(docker, "", { move: true, moveTo, onStep: (step) => steps.push(step) })
+    expect(moveTo).toHaveBeenCalledWith("playground-db-x9Kq", 216, docker.run, noWait)
+    expect(steps.indexOf("Moved")).toBeLessThan(
+      steps.indexOf("Checking the database is on this Mac"),
+    )
+    expect(noProve).toHaveBeenCalledWith(url)
+    const again = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
+    await Bun.write(envFile, "")
+    await go(again, "", { moveTo })
+    expect(moveTo).toHaveBeenCalledTimes(1)
+  })
+
   test("a reused container's URL reads its password from docker inspect, not a fixed one", async () => {
     const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 216)
     const origRun = docker.run
@@ -284,4 +310,87 @@ describe("startLocal", () => {
     // A fresh one would bind to loopback alone.
     expect(startArgv("playground-db", PASSWORD)).toContain("127.0.0.1::5432")
   })
+})
+
+// A new-user gate box whose stand-ins front a host docker (host-docker.ts) holding one decoy the box did not make: a running container named as first run reuses, on its own port, with the password the box would use.
+const decoyBox = (nameOf: (dir: string) => string) => {
+  const box = realpathSync(mkdtempSync(join(tmpdir(), "pg-gate-decoy-")))
+  const host = join(box, "host")
+  const stand = join(box, "stubs")
+  const state = join(box, "docker.json")
+  mkdirSync(host)
+  mkdirSync(stand)
+  writeFileSync(
+    join(host, "docker"),
+    `#!/bin/sh\nexec bun ${join(import.meta.dir, "host-docker.ts")} "$@"\n`,
+  )
+  chmodSync(join(host, "docker"), 0o755)
+  for (const [name, text] of Object.entries(stubs(box, "", "", join(host, "docker")))) {
+    writeFileSync(join(stand, name), text)
+    chmodSync(join(stand, name), 0o755)
+  }
+  const name = nameOf(box)
+  const decoy = {
+    env: ["POSTGRES_PASSWORD=box-password"],
+    id: "d".repeat(64),
+    labels: {},
+    name: `${name}-ab12`,
+    port: 55001,
+    state: "running",
+  }
+  writeFileSync(state, JSON.stringify([decoy]))
+  const env = {
+    DOCKER_STATE: state,
+    PATH: `${stand}:${host}:${dirname(process.execPath)}:/usr/bin:/bin`,
+  }
+  const docker = async (args: string[]) => {
+    const child = Bun.spawn([Bun.which("docker", { PATH: env.PATH })!, ...args], {
+      env,
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    return { code, stderr, stdout }
+  }
+  return { box, decoy: decoy.name, docker, name, state }
+}
+
+describe("first run in a new-user gate box", () => {
+  const live = livePair()
+  for (const [label, nameOf] of [
+    ["with no live.container seed", () => live.database],
+    ["with the box's own live.container seed", (box: string) => `${basename(box)}-db`],
+  ] as const) {
+    test(`on the live branch, never reaches a decoy the box did not make, ${label}`, async () => {
+      const { box, decoy, docker, name, state } = decoyBox(nameOf)
+      try {
+        const url = await startLocal({
+          branch: live.branch,
+          docker,
+          envFile: join(box, ".env"),
+          migrate: async () => {},
+          name,
+          onStep: () => {},
+          prove: async () => "",
+          wait: async () => {},
+        })
+        expect(url).not.toContain(":55001/")
+        expect(url).not.toContain("box-password")
+        const touched = readFileSync(`${state}.log`, "utf8")
+          .split("\n")
+          .filter((line) => line.includes(decoy))
+        expect(touched).toEqual([])
+        expect((await docker(["inspect", decoy])).code).not.toBe(0)
+        expect(readFileSync(join(box, "calls.log"), "utf8")).toContain(
+          `docker refused inspect ${decoy}`,
+        )
+      } finally {
+        rmSync(box, { force: true, recursive: true })
+      }
+    })
+  }
 })

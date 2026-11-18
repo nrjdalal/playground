@@ -5,18 +5,60 @@ import { dataDir } from "@packages/env/data-dir"
 import { readPolicy, whatsappSettings } from "@packages/settings"
 
 import { refusalOf, statusOf } from "../ops-wa/bridge"
-import { request, requestAlertSet, socketPath } from "../ops-wa/server"
+import { reactRequest, request, requestAlertSet, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, once to the owner and once to the alert number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa react <emoji> [--to alert] [--id <id>]: a reaction on the latest message of the owner's, or the guest's, or on the one named; wa status: whether each number has written or been approved, whether a reply can go to each now, and each pending alert; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
 const args = process.argv.slice(2)
 const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
-const [verb, file, ...extra] = guest ? [args[0], ...args.slice(3)] : args
+// wa alert's flags, before its file: --now-both sends to both numbers at once, --source <kind>:<ref> names what a checker reads to tell whether it was handled
+let nowBoth = false
+let source: string | undefined
+let rest = guest ? [args[0]!, ...args.slice(3)] : args
+if (rest[0] === "alert")
+  for (let i = 1; i < rest.length - 1;) {
+    if (rest[i] === "--now-both") {
+      nowBoth = true
+      rest = [...rest.slice(0, i), ...rest.slice(i + 1)]
+    } else if (rest[i] === "--source") {
+      if (!/^[a-z][\w-]*:\S+$/.test(rest[i + 1] ?? "")) {
+        console.error("wa alert: --source takes <kind>:<ref>, such as test:2026-11-11T03:00Z")
+        process.exit(2)
+      }
+      source = rest[i + 1]
+      rest = [...rest.slice(0, i), ...rest.slice(i + 2)]
+    } else break
+  }
+const [verb, file, ...extra] = rest
 if (verb === "relink" && !file) {
   const dir = join(dataDir(), "whatsapp")
   // the old auth state is set aside inside the guarded folder, never deleted, so nothing leaves it
   await rename(join(dir, "auth"), join(dir, `auth.${Date.now()}.old`)).catch(() => {})
   await rm(join(dir, "logged-out"), { force: true })
   console.log("wa relink: the old link is set aside; restart ops-wa for a new pairing card")
+  process.exit(0)
+}
+if (args[0] === "react") {
+  const [, emoji, ...flags] = args
+  const on: { id?: string; who?: "alert" } = {}
+  let bad = flags.length % 2 === 1
+  for (let i = 0; i < flags.length; i += 2) {
+    if (flags[i] === "--to" && flags[i + 1] === "alert" && !on.who) on.who = "alert"
+    else if (flags[i] === "--id" && flags[i + 1] && !on.id) on.id = flags[i + 1]
+    else bad = true
+  }
+  // one emoji, as WhatsApp's reaction takes, never words
+  const one =
+    /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\u200d\ufe0f\p{Emoji_Modifier}]*$/u
+  if (bad || !emoji || !one.test(emoji)) {
+    console.error("usage: playground wa react <emoji> [--to alert] [--id <id>]")
+    process.exit(2)
+  }
+  const reply = await reactRequest(socketPath(dataDir()), emoji, on)
+  if (reply.refusal) {
+    console.error(`wa react: ${reply.refusal}`)
+    process.exit(1)
+  }
+  console.log("wa react: sent")
   process.exit(0)
 }
 if (verb === "status" && !file) {
@@ -57,7 +99,7 @@ if (
   !(await Bun.file(file).exists())
 ) {
   console.error(
-    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert <file>, an urgent alert alone, to the owner and the alert number; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled before wa.alertDelayMinutes passes, or to both at once; playground wa react <emoji> [--to alert] [--id <id>]; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
   )
   process.exit(2)
 }
@@ -68,7 +110,9 @@ const reply: Awaited<ReturnType<typeof request>> = refusal
   : await request(
       socketPath(dataDir()),
       body,
-      verb === "alert" ? "alert" : guest ? "guest" : "reply",
+      verb === "alert" ? (nowBoth ? "alert" : "first") : guest ? "guest" : "reply",
+      600_000,
+      source,
     )
 if (reply.refusal) {
   console.error(`wa ${verb}: ${reply.refusal}`)

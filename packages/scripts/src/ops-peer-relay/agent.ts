@@ -13,6 +13,9 @@ export async function agent(
   pollMs = 500,
 ): Promise<void> {
   say(HELLO)
+  // a test holds the far end here (argv[1] ms) between hello and reading its start, so a line landed after the link is up is read past it; inert with no second argument
+  const delayMs = Number(argv[1])
+  if (Number.isInteger(delayMs) && delayMs >= 0) await Bun.sleep(delayMs)
   const named = Number(argv[0])
   let at = Number.isInteger(named) && named >= 0 ? named : Bun.file(path).size
   say({ end: at })

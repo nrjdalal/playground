@@ -32,7 +32,29 @@ export type Card = {
 }
 
 // What a card that went out keeps, so a reply naming it answers the row the owner read: its id, when it went, and each row's go and label as sent.
-export type Sent = { at: number; id: string; rows: { go: boolean; label: string }[] }
+export type Sent = {
+  at: number
+  id: string
+  // the card's poll, when one went: its message id and its secret in base64, so the owner's vote reads back as a row
+  poll?: { id: string; secret: string }
+  rows: { go: boolean; label: string }[]
+}
+
+// WhatsApp's poll holds 2 to 12 options.
+export const POLL_MAX = 12
+
+// Pure: a card's choices as a poll, its name the card's id and redacted title and each option a row's number and label, so every option is unique and each reads as the text's line; undefined when the rows do not fit a poll.
+export const pollOf = (
+  ref: number,
+  title: string,
+  rows: Sent["rows"],
+): { name: string; values: string[] } | undefined =>
+  rows.length < 2 || rows.length > POLL_MAX
+    ? undefined
+    : {
+        name: `${tag(ref)} ${title}`.slice(0, 200),
+        values: rows.map((row, i) => `${i + 1}. ${row.label}`.slice(0, 90)),
+      }
 
 // The patterns a card is read with: org, the terms that keep a whole card in the Inbox, and hide, every kind no-public-leak refuses, each written as [hidden] in a card that goes.
 export type Terms = { hide: RegExp[]; org: RegExp[] }
@@ -92,7 +114,10 @@ export const redact = (text: string, terms: Terms): string =>
 const tag = (ref: number) => `#i${ref}`
 
 // Pure: a card as WhatsApp shows it, redacted, and the rows a reply picks from: its title, its words, a line for its files, then one numbered line per choice, or for an update that it asks nothing.
-export function cardOf(card: Card, terms: Terms): { rows: Sent["rows"]; text: string } {
+export function cardOf(
+  card: Card,
+  terms: Terms,
+): { poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string } {
   const files = card.preview.attachments?.length ?? 0
   const lines = [`*${card.title}*`, card.preview.text ?? ""]
   if (files > 0)
@@ -109,12 +134,30 @@ export function cardOf(card: Card, terms: Terms): { rows: Sent["rows"]; text: st
       ? rows.map((row, i) => `Reply ${i + 1} ${tag(card.ref)} to ${row.label}`)
       : [`${tag(card.ref)} is an update: it asks nothing.`]),
   )
-  return { rows, text: redact(lines.filter(Boolean).join("\n"), terms) }
+  return {
+    poll: pollOf(card.ref, redact(card.title, terms), rows),
+    rows,
+    text: redact(lines.filter(Boolean).join("\n"), terms),
+  }
 }
 
-// Pure: the one line that stands for the cards kept in the Inbox, with no title or detail.
-export const waitingLine = (n: number): string =>
-  `${n} ${n === 1 ? "card waits" : "cards wait"} in the Inbox.`
+export const WAITING_SHOWN = 5
+
+// Pure: the lines that stand for the cards kept in the Inbox: one 📥 line per card by its title alone, redacted, never its text or files, at most WAITING_SHOWN, then one line counting the rest and every card whose title holds a term goesOut() keeps back; while the terms cannot be read, that count alone.
+export const waitingLine = (cards: Pick<Card, "title">[], terms: Terms | undefined): string => {
+  const shown = terms
+    ? cards
+        .filter((card) => !holds(card.title, terms.org))
+        .slice(0, WAITING_SHOWN)
+        .map((card) => `📥 ${redact(card.title, terms)}`)
+    : []
+  const rest = cards.length - shown.length
+  if (rest === 0) return shown.join("\n")
+  const count = shown.length
+    ? `📥 +${rest} more in the Inbox`
+    : `📥 ${rest} ${rest === 1 ? "card" : "cards"} in the Inbox`
+  return [...shown, count].join("\n")
+}
 
 // What a message is, read as an answer to a card: a number and a card's id in either order, a number alone, or an id alone; null for any other message, which goes to the dispatcher.
 export type Reply = { number?: number; ref?: number }
