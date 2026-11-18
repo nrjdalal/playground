@@ -188,7 +188,7 @@ export async function startLocal({
       )
     }
   } else {
-    // The reused container's password is not known, so read it from its image: the URL must match it, or the import would reach the wrong Postgres.
+    // The reused container's password is read from Config.Env, which the URL must match, or the import would reach the wrong Postgres.
     password = passwordOf((await docker(["inspect", container])).stdout)
   }
   const port = portFromPort((await docker(["port", container])).stdout)
