@@ -11418,6 +11418,7 @@ var GUARD_KEYS = new Set([
   "slack.gatedSends",
   "usage.keychainService",
   "wa.alert",
+  "wa.alertCheck",
   "wa.guestPolicy",
   "wa.replyPolicy",
   "yard.logReaders"

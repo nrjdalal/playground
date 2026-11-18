@@ -108,6 +108,8 @@ describe("defineSettings", () => {
       "usage.keychainService",
       "usage.switchAccount",
       "wa.alert",
+      "wa.alertCheck",
+      "wa.alertDelayMinutes",
       "wa.device",
       "wa.guestPolicy",
       "wa.owner",
