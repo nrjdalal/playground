@@ -231,11 +231,16 @@ const firstOf = (w: Wrote, jid?: string) =>
 
 type Seed = { at?: number; number?: string }
 const digits = (e164: string) => e164.replace(/\D/g, "")
+// When the owner approved the alert number, by the Inbox's Approve or the owner's own message; undefined while the seed names another number or none.
+async function approvedAt(dir: string, alert: string): Promise<number | undefined> {
+  const seed = await readOwn<Seed>(alertSeedFile(dir), {})
+  return seed.number && digits(seed.number) === digits(alert) ? seed.at : undefined
+}
+
 // When the alert number first wrote, or the owner approved it, whichever came first; undefined for neither.
 export async function alertFirst(dir: string, alert: string): Promise<number | undefined> {
   const own = firstOf(await readOwn<Wrote>(alertFile(dir), {}), jidOf(alert))
-  const seed = await readOwn<Seed>(alertSeedFile(dir), {})
-  const seeded = seed.number && digits(seed.number) === digits(alert) ? seed.at : undefined
+  const seeded = await approvedAt(dir, alert)
   return own === undefined ? seeded : seeded === undefined ? own : Math.min(own, seeded)
 }
 
@@ -470,35 +475,43 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written, so an alert reaches it, and for the owner what is left of the 24 hours replies and cards go in.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
   now: number,
 ): Promise<string[]> {
   const owner = await readOwn<Wrote>(ownerFile(dir), {})
-  const line = (who: string, key: string, number: string, first: number | undefined) => {
+  const line = (
+    who: string,
+    key: string,
+    number: string,
+    first: number | undefined,
+    how = "written",
+  ) => {
     if (!number) return `${who}: none set (${key})`
     const shown = `${who} ${String(shownValue(key, number))}`
     return first === undefined
       ? `${shown}: has never written, so no alert reaches it until it writes once`
-      : `${shown}: written since ${new Date(first).toISOString()}, so alerts reach it`
+      : `${shown}: ${how} since ${new Date(first).toISOString()}, so alerts reach it`
   }
-  const left = windowLeft(owner.ownerAt, now)
-  const replies =
+  const replies = (left: number, over: string) =>
     left === 0
-      ? "its 24 hours for replies are over until it writes"
+      ? over
       : `${Math.floor(left / HOUR)} h ${Math.floor((left % HOUR) / 60_000)} min left of its 24 hours for replies`
+  const alertLine = async (alert: string) => {
+    const first = await alertFirst(dir, alert)
+    const approved = await approvedAt(dir, alert)
+    const guest = await readOwn<Wrote>(alertFile(dir), {})
+    const left = guest.jid === jidOf(alert) ? windowLeft(guest.alertAt, now) : 0
+    const how = approved !== undefined && approved === first ? "approved" : "written"
+    return `${line("alert", "wa.alert", alert, first, how)}; ${approved === undefined ? replies(left, "replies wait until it writes") : "replies can go now (approved)"}`
+  }
   return [
     numbers.owner
-      ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies}`
+      ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies(windowLeft(owner.ownerAt, now), "its 24 hours for replies are over until it writes")}`
       : line("owner", "wa.owner", "", undefined),
-    line(
-      "alert",
-      "wa.alert",
-      numbers.alert,
-      numbers.alert ? await alertFirst(dir, numbers.alert) : undefined,
-    ),
+    numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
     ...(await pendingLines(dir)),
   ]
 }
@@ -506,7 +519,7 @@ export async function statusOf(
 // What a send is: a reply to the owner, an urgent alert to both numbers at once, an urgent alert to the owner first that goes on to the alert number unless handled, that later send itself, or a reply to the alert number as a guest.
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
@@ -541,7 +554,8 @@ export function sender(
       kind === "escalate"
         ? (await alertFirst(io.dir, second)) !== undefined
         : kind === "guest"
-          ? record.jid === jidOf(second) && windowLeft(record.alertAt, now) > 0
+          ? (record.jid === jidOf(second) && windowLeft(record.alertAt, now) > 0) ||
+            (await approvedAt(io.dir, second)) !== undefined
           : alert
             ? firstOf(record, jidOf(io.owner)) !== undefined
             : windowLeft(record.ownerAt, now) > 0
