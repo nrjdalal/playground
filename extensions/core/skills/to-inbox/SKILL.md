@@ -37,13 +37,13 @@ On an update, Done types you `done`: edit the same card for more, which brings i
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
-   | The item is about                                    | Its picture                                                                               |
-   | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-   | A number or a short comparison                       | a markdown table of three columns or fewer                                                |
-   | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
-   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)    |
-   | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
-   | A job of several steps (a plan, a lane, a PR series) | the **work status** `progress` block, by [PROGRESS.md](references/PROGRESS.md)            |
+   | The item is about                                    | Its picture                                                                                                            |
+   | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+   | A number or a short comparison                       | a markdown table of three columns or fewer                                                                             |
+   | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md)                              |
+   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)                                 |
+   | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view                                       |
+   | A job of several steps (a plan, a lane, a PR series) | the **work status** `progress` block, on the dispatcher's one in-flight card, by [PROGRESS.md](references/PROGRESS.md) |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
