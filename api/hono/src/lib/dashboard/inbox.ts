@@ -21,6 +21,7 @@ import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
 import { addEntries, peerRecordArgv, rootEntries } from "@packages/scripts/machine-record/record"
+import { seedAlert } from "@packages/scripts/ops-wa/seed"
 import {
   checkSetting,
   extensionsDir,
@@ -2646,9 +2647,11 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       line: `${key} at ${scope} is already ${JSON.stringify(held)}, so nothing changed`,
     }
   const set = setSetting(data, { key, scope, value: next }, who)
-  return set.ok
-    ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
-    : { exitCode: 1, line: set.message }
+  if (!set.ok) return { exitCode: 1, line: set.message }
+  // the owner's Approve of wa.alert stands in for that number's first message, so an alert may reach it (ADR 0028)
+  if (key === "wa.alert" && typeof set.value === "string" && set.value)
+    seedAlert(data, set.value, Date.now())
+  return { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
 }
 
 // Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.

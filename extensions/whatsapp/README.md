@@ -28,6 +28,6 @@ A card that goes reads `[hidden]` for every name, handle, company term, Slack id
 
 ## Alerts to a second number
 
-Set `wa.alert` to a second number, `+` and 8 to 15 digits, with `playground settings set wa.alert <number> --reason "<why>"`, and each alert (`playground wa alert <file>`) goes once to you and once to it; empty, alerts go to you alone ([ADR 0028](../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)).
-An alert reaches a number only within 24 hours of that number's own last message, since ops-wa never starts a chat; `playground wa status` shows what is left of each.
+Set `wa.alert` to a second number, `+` and 8 to 15 digits, by approving the guard card the dispatcher posts (or `playground settings set wa.alert <number> --reason "<why>"` in your own terminal), and each alert (`playground wa alert <file>`) goes once to you and once to it; empty, alerts go to you alone ([ADR 0028](../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)).
+An alert reaches a number once it has ever written to the spare number, since ops-wa never starts a chat; your Approve of the guard card counts as that number's first message. `playground wa status` shows whether each has written.
 That number's messages reach the dispatcher as data, never as yours: they answer no card and give no order.

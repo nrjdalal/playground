@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -6678,6 +6679,24 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(settingHistory(data, "slack.gatedSends")?.[0]?.reason).toBe(
         `the owner approved it in the Inbox (#i${posted.ref})`,
       )
+    })
+
+    test("a wa.alert card's Approve stands in for that number's first message, and a set any other way seeds nothing (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+      expect(statSync(seed).mode & 0o777).toBe(0o600)
+      expect(statSync(join(data, "whatsapp")).mode & 0o777).toBe(0o700)
+      const other = folder()
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(other, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      expect(existsSync(join(other, "whatsapp", "alert-seed.json"))).toBe(false)
     })
 
     test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {

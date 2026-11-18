@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { type Stuck } from "../../../../../packages/scripts/src/ops-job/dispatcher"
 import {
@@ -15,7 +15,7 @@ import {
   toWhatsApp,
   UPDATE,
   UPDATE_MS,
-  windowsOf,
+  statusOf,
 } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import {
   type Card,
@@ -26,6 +26,7 @@ import {
   waitingLine,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
+import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
 import { ALERT, fakeSocket, groupJid, jid, OWNER, STRANGER } from "./fake-socket"
 
@@ -348,15 +349,52 @@ describe("the alert-only second number (#2748)", () => {
     expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(OWNER)])
   })
 
-  test("never starts a chat: an alert reaches each number that wrote in the last 24 hours, and none refuses it", async () => {
+  test("never starts a chat: an alert reaches a number that has ever written, days ago too, and one that never wrote is refused", async () => {
     const h = harness(undefined, undefined, ALERT)
-    await expect(h.send("down", true)).rejects.toThrow("has written in the last 24 hours")
+    await expect(h.send("down", true)).rejects.toThrow(
+      "neither the owner nor the alert number has ever written to this number",
+    )
     h.fake.upsert([h.fake.message(jid(ALERT), "hello")])
     await h.settle()
+    h.advance(5 * 24 * HOUR)
     expect(await h.send("down", true)).toBe(
-      "sent to the alert number alone: the owner has not written in the last 24 hours",
+      "sent to the alert number alone: the owner has never written to this number",
     )
-    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT)])
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    h.advance(3 * 24 * HOUR)
+    expect(await h.send("down again", true)).toBe("sent")
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT), jid(OWNER), jid(ALERT)])
+  })
+
+  test("a reply keeps the owner's 24 hours while an alert reaches the owner days on", async () => {
+    const h = await both()
+    h.advance(2 * 24 * HOUR)
+    await expect(h.send("reply")).rejects.toThrow("has not written in the last 24 hours")
+    expect(await h.send("alert", true)).toBe("sent")
+  })
+
+  test("the owner's Approve of the alert number seeds it, so an alert reaches it before it writes; a seed for another number counts for nothing", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    seedAlert(dirname(h.dir), STRANGER, START)
+    expect(await h.send("down", true)).toBe(
+      "sent to the owner alone: the alert number has never written to this number",
+    )
+    seedAlert(dirname(h.dir), ALERT, START)
+    expect(await h.send("hi, I am alive", true)).toBe("sent")
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(OWNER), jid(OWNER), jid(ALERT)])
+  })
+
+  test("a new alert number starts with none: the old number's message counts for nothing", async () => {
+    const old = await both()
+    const h = harness(undefined, undefined, STRANGER)
+    await Bun.write(join(h.dir, "alert.json"), await Bun.file(join(old.dir, "alert.json")).text())
+    await Bun.write(join(h.dir, "owner.json"), await Bun.file(join(old.dir, "owner.json")).text())
+    expect(await h.send("down", true)).toBe(
+      "sent to the owner alone: the alert number has never written to this number",
+    )
   })
 
   test("an alert keeps the send habits: each of its sends paced a second apart and counted in the hourly cap", async () => {
@@ -370,16 +408,23 @@ describe("the alert-only second number (#2748)", () => {
     expect(h.fake.calls).toEqual([])
   })
 
-  test("wa status names each number by its last 4 digits with what is left of its 24 hours", () => {
+  test("wa status names each number by its last 4 digits, whether it has written, and the owner's hours left for replies", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).toEqual([
+      "owner ••••0001: has never written, so no alert reaches it until it writes once; its 24 hours for replies are over until it writes",
+      "alert ••••0003: has never written, so no alert reaches it until it writes once",
+    ])
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    seedAlert(dirname(h.dir), ALERT, START - HOUR)
     const now = START + 2 * HOUR + 30 * 60_000
-    expect(windowsOf({ alert: ALERT, owner: OWNER }, { ownerAt: START }, now)).toEqual([
-      "owner ••••0001: 21 h 30 min left of its 24 hours",
-      "alert ••••0003: its 24 hours are over, so nothing reaches it until it writes",
+    expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, now)).toEqual([
+      "owner ••••0001: written since 2026-11-11T03:00:00.000Z, so alerts reach it; 21 h 30 min left of its 24 hours for replies",
+      "alert ••••0003: written since 2026-11-11T02:00:00.000Z, so alerts reach it",
     ])
-    expect(windowsOf({ alert: "", owner: OWNER }, {}, now)).toEqual([
-      "owner ••••0001: its 24 hours are over, so nothing reaches it until it writes",
+    expect(await statusOf(h.dir, { alert: "", owner: OWNER }, now)).toContain(
       "alert: none set (wa.alert)",
-    ])
+    )
   })
 
   test("a message from the alert number reaches the dispatcher as data under its own relay, never as the owner's", async () => {

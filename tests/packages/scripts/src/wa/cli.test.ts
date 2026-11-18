@@ -142,12 +142,12 @@ describe("playground wa alert (#2748)", () => {
     const { body, data } = machine("ops-tick is down")
     const server = serve(
       socketPath(data),
-      async () => "sent to the owner alone: the alert number has not written in the last 24 hours",
+      async () => "sent to the owner alone: the alert number has never written to this number",
     )
     try {
       expect(await wa(data, ["alert", body])).toEqual({
         code: 0,
-        out: "wa alert: sent to the owner alone: the alert number has not written in the last 24 hours",
+        out: "wa alert: sent to the owner alone: the alert number has never written to this number",
       })
     } finally {
       server.stop(true)
@@ -172,7 +172,7 @@ describe("playground wa alert (#2748)", () => {
     expect(await wa(data, ["status"])).toEqual({
       code: 0,
       out: [
-        "wa status: owner ••••0001: its 24 hours are over, so nothing reaches it until it writes",
+        "wa status: owner ••••0001: written since 1970-01-01T00:00:00.000Z, so alerts reach it; its 24 hours for replies are over until it writes",
         "wa status: alert: none set (wa.alert)",
       ].join("\n"),
     })

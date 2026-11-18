@@ -4,11 +4,10 @@ import { isAbsolute, join } from "node:path"
 import { dataDir } from "@packages/env/data-dir"
 import { readPolicy, whatsappSettings } from "@packages/settings"
 
-import { alertFile, ownerFile, refusalOf, windowsOf } from "../ops-wa/bridge"
-import { readOwn } from "../ops-wa/habits"
+import { refusalOf, statusOf } from "../ops-wa/bridge"
 import { request, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa alert <file>: the same body once to the owner and once to the alert-only number; wa status: what is left of each number's 24 hours; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card.
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa alert <file>: the same body once to the owner and once to the alert-only number; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card.
 const [verb, file, ...extra] = process.argv.slice(2)
 if (verb === "relink" && !file) {
   const dir = join(dataDir(), "whatsapp")
@@ -24,15 +23,11 @@ if (verb === "status" && !file) {
     console.error(`wa status: the settings refuse: ${policy.refusal}`)
     process.exit(1)
   }
-  const dir = join(dataDir(), "whatsapp")
-  const lines = windowsOf(
+  const lines = await statusOf(
+    join(dataDir(), "whatsapp"),
     {
       alert: whatsappSettings.get(policy.settings, "wa.alert"),
       owner: whatsappSettings.get(policy.settings, "wa.owner"),
-    },
-    {
-      ...(await readOwn<{ alertAt?: number }>(alertFile(dir), {})),
-      ...(await readOwn<{ ownerAt?: number }>(ownerFile(dir), {})),
     },
     Date.now(),
   )
