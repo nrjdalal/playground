@@ -434,7 +434,9 @@ function checkRetask(
   const moved = (k: string) => entry[k] !== undefined && next[k] !== entry[k]
   // A prs-= of the row's own pr clears it: clearing the PR a row served is not moving it, so the guard that moves a pr only through assign stays quiet
   const prClearedByPrs =
-    pairs.some(([k]) => k === "prs-") && entry.pr !== undefined && next.pr === undefined
+    typeof entry.pr === "string" &&
+    next.pr === undefined &&
+    prsWithdrawn(entry, pairs, factoryRepo).includes(entry.pr)
   const given = (k: string) => pairs.some(([p]) => p === k)
   // spawn.sh's restart of an ended checker names the PRs it serves now, prs and pr in one set
   const restart = entry.status === "ended" && given("prs")
@@ -546,6 +548,10 @@ async function main(argv: string[]): Promise<void> {
         1,
       )
     apply(entry, pairs, factoryRepo)
+    // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
+    withdrawn = withdrawn.filter(
+      (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
+    )
     parkHold(entry, pairs, false)
   } else if (cmd === "report") {
     const [text, ...more] = rest

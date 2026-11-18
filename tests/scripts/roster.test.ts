@@ -924,6 +924,24 @@ describe("prs-= clears a matching pr", () => {
     expect(agentOf(again.roster, "k3v9q2-reviewer")?.status).toBe("waiting")
   })
 
+  test("a prs-= of another PR beside an empty pr= is refused as a move, and writes nothing", async () => {
+    const config = configWith([{ ...checker, prs: [pull(1), pull(2)] }])
+    const refused = await run(config, ["set", "k3v9q2-reviewer", `prs-=${pull(2)}`, "pr="])
+    expect(refused.code).not.toBe(0)
+    expect(refused.err).toContain("roster.ts assign k3v9q2-reviewer")
+    expect(agentOf(refused.roster, "k3v9q2-reviewer")).toEqual({
+      ...checker,
+      prs: [pull(1), pull(2)],
+    })
+  })
+
+  test("a prs+= that puts back the PR a prs-= took in the same call passes the read-back", async () => {
+    const config = configWith([checker])
+    const kept = await run(config, ["set", "k3v9q2-reviewer", `prs-=${pull(1)}`, `prs+=${pull(1)}`])
+    expect([kept.code, kept.err]).toEqual([0, ""])
+    expect(agentOf(kept.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(1)])
+  })
+
   // The read-back returns the row as it was, so a prs-= the write-back just cleared still reads set, and the read-back check refuses, naming the entry.
   test("a prs-= whose read-back still holds the removed PR is refused, naming the entry and the PR", async () => {
     const config = configWith([checker])
