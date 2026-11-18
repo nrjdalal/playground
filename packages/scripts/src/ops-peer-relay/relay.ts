@@ -103,7 +103,7 @@ export type Link = {
   // how long the far end has to say hello, and to answer one line
   replyMs?: number
   signal: AbortSignal
-  // called once the far end said hello, so the loop can say up
+  // called once the far end reported its start, so the loop can say up
   up?: () => unknown
 }
 
@@ -198,8 +198,14 @@ export async function link({
             : `${peer.target} ended with code ${code} before its hello`,
     )
   }
+  void far.exited.then((code) => stop(`ssh to ${peer.target} ended with code ${code}`))
   // count the link up only once the far has reported its start, so a line it already holds is read from, never read past
+  const startTimer = setTimeout(
+    () => stop(`${peer.target} reported no start within ${replyMs / 1000}s`),
+    replyMs,
+  )
   const seen = await Promise.race([endSeen, stopped])
+  clearTimeout(startTimer)
   if (!ended && seen === "end") up?.()
   const send = async (line: PeerLine): Promise<boolean> => {
     const answer = new Promise<unknown>((done) => (acked = done))
@@ -213,7 +219,6 @@ export async function link({
     acked = undefined
     return id === line.id
   }
-  void far.exited.then((code) => stop(`ssh to ${peer.target} ended with code ${code}`))
   while (!ended) {
     const { end, reads, skipped } = await linesFrom(queue, cursor.local!)
     for (const { end, line } of reads) {

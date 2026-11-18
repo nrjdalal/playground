@@ -11,7 +11,11 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { appendOnce, linesFrom } from "../../../../../packages/scripts/src/ops-peer-relay/queue"
+import {
+  appendOnce,
+  HELLO,
+  linesFrom,
+} from "../../../../../packages/scripts/src/ops-peer-relay/queue"
 import {
   clusterOf,
   envKeysOf,
@@ -354,6 +358,20 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     const { here } = machines("silent")
     const held = hold(here, shFar("sleep 5"), 300)
     expect(await held.done).toBe("me@spark-b said no hello within 0.3s")
+  })
+
+  test("a far end that ends after its hello, before its start, ends the link with its exit and never counts up", async () => {
+    const { here } = machines("hello-ended")
+    const held = hold(here, shFar(`echo '${JSON.stringify(HELLO)}'; sleep 0.2; exit 0`))
+    expect(await held.done).toBe("ssh to me@spark-b ended with code 0")
+    expect(held.isUp()).toBe(false)
+  })
+
+  test("a far end that says hello and no start reads as that silence, and never counts up", async () => {
+    const { here } = machines("hello-silent")
+    const held = hold(here, shFar(`echo '${JSON.stringify(HELLO)}'; sleep 5`), 300)
+    expect(await held.done).toBe("me@spark-b reported no start within 0.3s")
+    expect(held.isUp()).toBe(false)
   })
 
   test("a far end that ends with no output reads as its exit code, not as a missing agent.ts", async () => {
