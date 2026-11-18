@@ -263,10 +263,14 @@ async function states(
   return out
 }
 
-// The check: the record against what the watched places hold now, as findings' lines.
+// The check: the record against what the watched places hold now, as findings' lines; a root-only folder the record holds no path in is left out, since nothing of the factory's sits there to read.
 export async function check(data: string, places: Places): Promise<string[]> {
   const record = await readRecord(data)
-  const now = await snapshot(places)
+  const empty = (places.rootOnly ?? ROOT_ONLY).filter(
+    (folder) => !record.entries.some((e) => dirname(e.path) === folder),
+  )
+  const system = (places.system ?? ROOT_FOLDERS).filter((folder) => !empty.includes(folder))
+  const now = await snapshot({ ...places, system })
   return findings(record, now, await states(record, now), places.homes)
 }
 

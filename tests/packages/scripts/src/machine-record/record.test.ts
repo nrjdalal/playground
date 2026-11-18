@@ -155,6 +155,17 @@ describe("the daily check (PG-2538)", () => {
     }
   })
 
+  test("a root-only watched folder the record holds no path in is left out, with no line", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    chmodSync(rootOnly, 0o000)
+    try {
+      expect(await check(data, places({ rootOnly: [rootOnly] }))).toEqual([])
+    } finally {
+      chmodSync(rootOnly, 0o755)
+    }
+  })
+
   test("a root-step folder the install leaves readable reads unreadable when the user cannot list it", async () => {
     const shut = join(root, "usr-local-lib-playground")
     await seed(data, [], places())
