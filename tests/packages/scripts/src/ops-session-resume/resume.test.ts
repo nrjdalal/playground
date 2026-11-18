@@ -805,6 +805,15 @@ describe("a stuck or quiet session (PG-2184)", () => {
     expect(await sent()).toEqual([])
   })
 
+  test("a working session the model serves is quiet once 45 minutes pass, so a stuck one is flagged while others are served", async () => {
+    const { run, sent } = setup("working")
+    await run(45, {
+      metrics: async () => "vllm:num_requests_running 3\nvllm:num_requests_waiting 1\n",
+      servedByLocal: async () => true,
+    })
+    expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
+  })
+
   test("a working session the model is idle on (running and waiting at 0) still is quiet after 15 minutes", async () => {
     const { run, sent } = setup("working")
     await run(15, {
