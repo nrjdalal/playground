@@ -266,7 +266,9 @@ describe("locate", () => {
       locate(URL_55432, scripted([["a"]], [], { a: container("playground-db", every) }).run),
     )
     expect(refusal.failure).toBe("exposed")
-    expect(refusal.message).toContain("docker start playground-db")
+    expect(refusal.message).toContain(
+      "`docker start playground-db` brings it back when the rename failed",
+    )
     expect(refusal.message).toContain(
       `docker rename playground-db-old playground-db && docker start playground-db`,
     )

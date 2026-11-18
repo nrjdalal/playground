@@ -57,12 +57,7 @@ export const checkoutMismatch = (url: string, dotenv: string | null): string | n
   return `POSTGRES_URL names port ${port}, while this checkout's .env names port ${ownPort}; run it as bun --cwd=<checkout> run <script> in the checkout whose database you mean`
 }
 
-export type Published = {
-  addresses: string[]
-  id: string
-  image: string
-  name: string
-}
+export type Published = { addresses: string[]; id: string; image: string; name: string }
 
 type Json = Record<string, unknown>
 
@@ -147,7 +142,7 @@ const publishers = (port: number, run: Docker): Published[] => {
   }
 }
 
-// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes and its password read back from the old container at run time, so the new Postgres is the old one read back.
+// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes and its password, read from the old container at run time so the refusal never prints it.
 const keepDataFix = (name: string, port: number): string =>
   `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 -e POSTGRES_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' ${name}-old | sed -n 's/^POSTGRES_PASSWORD=//p')" --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
 
