@@ -37,7 +37,7 @@ GATE="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.cla
 git worktree add --detach "$GATE" "$CANARY"
 ~/.playground/ops/run-slot.sh ops-ship -- bun install --cwd "$GATE"
 ~/.playground/ops/run-slot.sh ops-ship -- bun run --cwd "$GATE" gate:new-user "$CANARY"
-git worktree remove "$GATE"
+playground rm --worktree "$GATE" --reason "ship gate at ${CANARY:0:7}"
 ```
 
 Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
