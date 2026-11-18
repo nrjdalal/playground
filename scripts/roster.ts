@@ -59,6 +59,26 @@ async function load(): Promise<Roster> {
   return (await file.json()) as Roster
 }
 
+// A prs-= clears the row's pr and prs in memory, so the row read back must show the clear: if the write-back left one of the PRs the call removed still set, the clear did not persist, so refuse, naming the entry and that PR.
+async function clearedOnRead(
+  cmd: string,
+  name: string | undefined,
+  withdrawn: string[],
+): Promise<void> {
+  if (cmd !== "set" || !name || !withdrawn.length) return
+  const row = (await load()).agents.find((a) => a.name === name)
+  if (!row) return
+  const held = [...((row.prs as string[] | undefined) ?? []), row.pr].filter((pr): pr is string =>
+    Boolean(pr),
+  )
+  const still = withdrawn.find((pr) => held.includes(pr))
+  if (still)
+    throw new Refusal(
+      `roster.ts: ${name} cleared ${still} with prs-=, but the row read back still holds it in pr or prs, so the clear did not persist`,
+      1,
+    )
+}
+
 // The title cut keeps whole characters and fits the reader's 40.
 const titled = (value: string): string => {
   let out = ""
@@ -149,6 +169,21 @@ const PRS_KEYS = new Set(["prs", "prs+", "prs-"])
 
 const isChecker = (entry: Agent): boolean =>
   ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
+
+// The PRs a prs-= call withdrew, normalized as the row holds them: the ones still set on the row when the call began, so a read-back can confirm the clear took.
+const prsWithdrawn = (entry: Agent, pairs: [string, string][], repo: string): string[] => {
+  const held = (entry.prs as string[] | undefined) ?? []
+  const removed = new Set<string>()
+  for (const [, raw] of pairs.filter(([k]) => k === "prs-"))
+    for (const pr of raw
+      .split(",")
+      .map((one) => one.trim())
+      .filter(Boolean)) {
+      const url = prsEntry(pr, repo)
+      if (entry.pr === url || held.includes(url)) removed.add(url)
+    }
+  return [...removed]
+}
 
 function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): void {
   const given = pairs.find(([k]) => k === "repo")
@@ -489,6 +524,8 @@ async function main(argv: string[]): Promise<void> {
     return
   }
   const roster = await load()
+  // The PRs a prs-= withdrew, read back after the write to confirm the clear persisted.
+  let withdrawn: string[] = []
   // A bare PR number links into factory.repo, read only when one is given.
   const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
     ? await factoryRepoOf().catch((error: Error) => {
@@ -500,6 +537,8 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(roster, entry, pairs, factoryRepo)
+    // Captured before apply clears the row, so the read-back can confirm the clear persisted.
+    withdrawn = prsWithdrawn(entry, pairs, factoryRepo)
     // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
     if (entry.pr && pairs.some(([k]) => k === "task"))
       throw new Refusal(
@@ -589,6 +628,8 @@ async function main(argv: string[]): Promise<void> {
   }
   roster.updatedAt = now()
   await writeAtomic(path, JSON.stringify(roster, null, 2))
+  // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
+  await clearedOnRead(cmd, name, withdrawn)
 }
 
 if (import.meta.main) {

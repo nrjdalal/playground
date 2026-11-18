@@ -36,12 +36,18 @@ const factoryConfig = (agents: Agent[]): string => {
   return dir
 }
 
-const run = async (config: string, args: string[]) => {
-  const proc = Bun.spawn(["bun", script, ...args], {
+const run = async (config: string, args: string[], readback?: Agent[]) => {
+  // A read-back seed file holds the row the set reads back, so a prs-= the write-back just cleared still reads set in the read-back, which the read-back check refuses, so the check has a row that drives it. The preload is a .ts module, since a preload is never a .json file Bun can import.
+  const seed = readback ? join(scratch, `readback-${++dirs}.seed.json`) : undefined
+  if (seed) writeFileSync(seed, JSON.stringify({ agents: readback }))
+  const preload = readback ? join(import.meta.dir, "roster-readback-stub.ts") : undefined
+  const argv = preload ? ["bun", "--preload", preload, script, ...args] : ["bun", script, ...args]
+  const proc = Bun.spawn(argv, {
     env: {
       ...process.env,
       CLAUDE_CONFIG_DIR: config,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
+      ...(seed ? { ROSTER_READBACK_FILE: seed } : {}),
     },
     stderr: "pipe",
     stdout: "pipe",
@@ -916,6 +922,19 @@ describe("prs-= clears a matching pr", () => {
     expect(agentOf(again.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
     expect(agentOf(again.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
     expect(agentOf(again.roster, "k3v9q2-reviewer")?.status).toBe("waiting")
+  })
+
+  // The read-back returns the row as it was, so a prs-= the write-back just cleared still reads set, and the read-back check refuses, naming the entry.
+  test("a prs-= whose read-back still holds the removed PR is refused, naming the entry and the PR", async () => {
+    const config = configWith([checker])
+    const refused = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"], [checker])
+    expect(refused.code).not.toBe(0)
+    expect(refused.err).toContain("k3v9q2-reviewer")
+    expect(refused.err).toContain(pull(1))
+    // The write-back persisted the clear; only the read-back check refused, so the row here is the real one, not the stale read-back.
+    const row = refused.roster?.agents.find((a) => a.name === "k3v9q2-reviewer")
+    expect((row as unknown as { pr?: unknown })?.pr).toBeUndefined()
+    expect((row as unknown as { prs?: unknown })?.prs).toBeUndefined()
   })
 })
 
