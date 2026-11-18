@@ -36,8 +36,14 @@ export type MachineRecord = { baseline: string[]; entries: Entry[] }
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
-// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders and docker through run, each a test's seam.
-export type Places = { home: string; homes: string[]; run: Run; system?: string[] }
+// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders, the root-only ones among them and docker through run, each a test's seam.
+export type Places = {
+  home: string
+  homes: string[]
+  rootOnly?: string[]
+  run: Run
+  system?: string[]
+}
 
 // The folders a root step writes into, from ROOT_STEPS and the peer install's polkit files.
 export const ROOT_FOLDERS: string[] = [
@@ -50,6 +56,9 @@ export const ROOT_FOLDERS: string[] = [
     ...Object.values(ROOT_STEPS).flatMap((step) => step.adds.map((path) => dirname(path))),
   ]),
 ].sort()
+
+// The watched folders root-only by design: polkit's rules folder is root:polkitd 0750, where the install leaves every other root-step folder 0755, so only these read as known when the user cannot list them.
+export const ROOT_ONLY: string[] = [dirname(PEER_RULE)]
 
 // spawn.sh's --ssh probe folder on the peer: a temp folder under /tmp, which no watched place holds, so the check skips it.
 export const TEMP_PREFIX = "/tmp/playground-"
@@ -182,8 +191,7 @@ export async function snapshot(
   const seen: string[] = []
   const known: string[] = []
   const unreadable: string[] = []
-  // The system folders are root-only by design, so one that throws EACCES is known, not a loss.
-  const rootOnly = new Set(places.system ?? [])
+  const rootOnly = new Set(places.rootOnly ?? ROOT_ONLY)
   for (const folder of watchedFolders(places.home, places.system)) {
     const entries = await listed(folder)
     if (entries === "unreadable") {
@@ -202,7 +210,7 @@ const inside = (path: string, home: string) => path === home || path.startsWith(
 // Why a known root-only place is not listed: the check runs as the user and no root helper exists on this machine to read it, so its listing is skipped, not a loss.
 const ROOT_ONLY_REASON = "no root helper on this machine, so its listing is skipped"
 
-// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; each root-only place the user cannot read, named as known with its reason and never unreadable; and each place or path the check should read but cannot, which is neither gone nor new, so it is named every run and never hides a loss.
+// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; each root-only place the user cannot read, named as known with its reason, and a recorded path in one, which is then not named again; and each place or path the check should read but cannot, which is neither gone nor new, so it is named every run and never hides a loss.
 export function findings(
   record: MachineRecord,
   now: { seen: string[]; known: string[]; unreadable: string[] },
@@ -224,7 +232,9 @@ export function findings(
   for (const path of now.known) lines.push(`root-only: ${path}, ${ROOT_ONLY_REASON}`)
   const unread = [
     ...now.unreadable,
-    ...record.entries.filter((e) => stat.get(e.path) === "unreadable").map((e) => e.path),
+    ...record.entries
+      .filter((e) => stat.get(e.path) === "unreadable" && !now.known.includes(dirname(e.path)))
+      .map((e) => e.path),
   ]
   for (const path of [...new Set(unread)]) lines.push(`unreadable: ${path}`)
   return lines

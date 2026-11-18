@@ -138,18 +138,33 @@ describe("the daily check (PG-2538)", () => {
     }
   })
 
-  test("a root-only watched folder the user cannot read reads known with its reason, not unreadable", async () => {
+  test("a root-only watched folder the user cannot read reads known with its reason, and a recorded path in it reads nothing, never unreadable", async () => {
     const rootOnly = join(root, "usr-local-lib-playground")
-    await seed(data, [], places())
+    const rule = join(rootOnly, "49-playground-root.rules")
+    writeFileSync(rule, "")
+    await seed(data, [entry(rule, { kind: "file" })], places())
     chmodSync(rootOnly, 0o000)
     try {
-      const lines = await check(data, places())
+      const lines = await check(data, places({ rootOnly: [rootOnly] }))
       expect(lines).toContain(
         `root-only: ${rootOnly}, no root helper on this machine, so its listing is skipped`,
       )
-      expect(lines.some((line) => line.startsWith(`unreadable: ${rootOnly}`))).toBe(false)
+      expect(lines.filter((line) => line.startsWith("unreadable:"))).toEqual([])
     } finally {
       chmodSync(rootOnly, 0o755)
+    }
+  })
+
+  test("a root-step folder the install leaves readable reads unreadable when the user cannot list it", async () => {
+    const shut = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    chmodSync(shut, 0o000)
+    try {
+      const lines = await check(data, places())
+      expect(lines).toContain(`unreadable: ${shut}`)
+      expect(lines.some((line) => line.startsWith("root-only:"))).toBe(false)
+    } finally {
+      chmodSync(shut, 0o755)
     }
   })
 
