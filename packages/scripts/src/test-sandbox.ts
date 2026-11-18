@@ -173,8 +173,11 @@ const bunTargets: string[] = []
 const pyTargets: [label: string, file: string][] = []
 const unrunnable: [label: string, reason: string][] = []
 const seenPy = new Set<string>()
-for (const arg of args) {
-  if (arg.startsWith("-")) continue
+for (const arg of paths) {
+  if (arg.startsWith("-")) {
+    bunTargets.push(arg)
+    continue
+  }
   const b = bare(arg)
   if (isBunTest(b)) {
     if (!existsSync(b)) unrunnable.push([arg, "no test file at"])
@@ -183,7 +186,7 @@ for (const arg of args) {
     if (!existsSync(b)) unrunnable.push([arg, "no Python test at"])
     else if (!seenPy.has(b)) {
       seenPy.add(b)
-      pyTargets.push([arg, b.replace(/^tests\//, "")])
+      pyTargets.push([arg, relative("tests", b)])
     }
   } else if (existsSync(b)) {
     try {
@@ -237,7 +240,7 @@ console.error(
 // a flag left alone in `rest` (every path named was serial) would have bun test run the whole suite
 const named = (list: string[]) => list.some((path) => !path.startsWith("-"))
 const parallel =
-  named(rest) || (rest.length > 0 && !named(bunTargets))
+  named(rest) || (rest.length > 0 && !named(paths))
     ? await runPass(
         [
           `--preload=${preload}`,
@@ -258,9 +261,10 @@ if (interrupted) {
   process.exit(128 + constants.signals[interrupted])
 }
 const alone = serial.length > 0 ? await runPass(serial) : 0
-// the Python tests run in one step each, the same uv run test-skills uses, only when bun's pass finished without a failure, so a broken bun does not wait out the slow Docker and kill tests; the run stops naming the first one that fails
+// the Python tests run in one step each, the same uv run test-skills uses, only when bun's pass finished without a failure, so a broken bun does not wait out the slow Docker and kill tests; each one that fails is named, and the summary reads them as skipped when bun failed
 const pyFailed: string[] = []
-if (parallel === 0 && alone === 0) {
+const pyRan = parallel === 0 && alone === 0
+if (pyRan) {
   for (const [label, file] of pyTargets) {
     console.error(`test-sandbox: running Python test ${label}`)
     const step = Bun.spawn(wrap(py(file)), {
@@ -281,7 +285,7 @@ if (parallel === 0 && alone === 0) {
   }
 }
 console.error(
-  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}, ${pyTargets.length} Python test${pyTargets.length === 1 ? "" : "s"} ${pyFailed.length ? "failed" : "passed"}`,
+  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}, ${pyTargets.length} Python test${pyTargets.length === 1 ? "" : "s"} ${!pyRan ? "skipped" : pyFailed.length ? "failed" : "passed"}`,
 )
 dropScratch()
 process.exit(parallel || alone || pyFailed.length)
