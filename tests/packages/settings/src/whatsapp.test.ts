@@ -5,13 +5,16 @@ import { checkSetting, shownValue } from "../../../../packages/settings/src"
 // Made-up numbers alone: 555-01xx is the range set aside for fiction.
 const GOOD = "+15550100001"
 
-describe("WhatsApp's two numbers (#1797)", () => {
-  test.each(["wa.device", "wa.owner"])("%s takes + and 8 to 15 digits, or empty", (key) => {
-    expect(checkSetting(key, GOOD)).toEqual({ key, ok: true, value: GOOD })
-    expect(checkSetting(key, "+15550100")).toMatchObject({ ok: true })
-    expect(checkSetting(key, "+155501000012345")).toMatchObject({ ok: true })
-    expect(checkSetting(key, "")).toMatchObject({ ok: true })
-  })
+describe("WhatsApp's numbers (#1797, #2748)", () => {
+  test.each(["wa.alert", "wa.device", "wa.owner"])(
+    "%s takes + and 8 to 15 digits, or empty",
+    (key) => {
+      expect(checkSetting(key, GOOD)).toEqual({ key, ok: true, value: GOOD })
+      expect(checkSetting(key, "+15550100")).toMatchObject({ ok: true })
+      expect(checkSetting(key, "+155501000012345")).toMatchObject({ ok: true })
+      expect(checkSetting(key, "")).toMatchObject({ ok: true })
+    },
+  )
 
   test.each([
     ["15550100001"],

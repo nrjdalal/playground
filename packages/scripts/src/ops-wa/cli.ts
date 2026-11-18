@@ -131,6 +131,11 @@ const main = async () => {
   if (policy.refusal !== undefined) return stop(`the settings refuse: ${policy.refusal}`)
   const owner = whatsappSettings.get(policy.settings, "wa.owner")
   const device = whatsappSettings.get(policy.settings, "wa.device")
+  // wa.alert is read afresh for each send and each message, so the owner's Approve reaches a running ops-wa
+  const alert = async () => {
+    const read = await readPolicy(data)
+    return read.refusal === undefined ? whatsappSettings.get(read.settings, "wa.alert") : ""
+  }
   if (!owner || !device) return stop("wa.owner and wa.device must both be set", "waiting")
   await ownFolder(dir)
   const lock = join(dir, "lock")
@@ -159,6 +164,8 @@ const main = async () => {
   const { saveCreds, state } = await useMultiFileAuthState(join(dir, "auth"))
   let current: Sock | undefined
   const send = sender({
+    alert,
+    device,
     dir,
     now: Date.now,
     owner,
@@ -176,9 +183,12 @@ const main = async () => {
   await unlink(path).catch(() => {})
   serve(path, send)
   const relay = sendAs("wa", true, true)
+  // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
+  const relayData = sendAs("wa-data", true, true)
   const seconds = () => Date.now() / 1000
   const config = configDirOf(process.env)
   const watched = bridge({
+    alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
     dir,
@@ -204,7 +214,7 @@ const main = async () => {
       )
     },
     owner,
-    relay: (to, text) => relay(to, text),
+    relay: (to, text, data) => (data ? relayData : relay)(to, text),
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
@@ -233,6 +243,7 @@ const main = async () => {
   }
   const why = await life({
     alert: (text) => post("ops-wa needs a look", text, "alert"),
+    alertNumber: await alert(),
     card: (code) => {
       result = "waiting: the pairing code waits to be typed on the spare phone"
       void pulse()
