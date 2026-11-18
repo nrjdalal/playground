@@ -1678,6 +1678,17 @@ describe("reactions (#2755)", () => {
     expect(reactions(h).at(-1)).toEqual([jid(ALERT), id, "✅"])
   })
 
+  test("wa react ✅ on an owner message that came by LID is the dispatcher's answer, so the failover leaves it", async () => {
+    const h = harness()
+    h.mode.react = true
+    h.fake.upsert([h.fake.message("99887766554433@lid", "thanks", { remoteJidAlt: jid(OWNER) })])
+    await h.settle()
+    await h.send.react("✅", {})
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+  })
+
   test("the automatic 👀 is no answer, so the failover still hands on, and wa react ✅ is one", async () => {
     const h = harness()
     h.mode.react = true

@@ -780,7 +780,7 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -801,7 +801,7 @@ export function sender(
         messages: [...messages, { id, text: content.text }].slice(-50),
       })
     }
-    if (sends && jid === jidOf(io.owner)) {
+    if (sends) {
       sends.push(last)
       await writeOwn(sendsFile(io.dir), { sends })
     }
@@ -883,7 +883,7 @@ export function sender(
     for (const t of going)
       for (const [k, part] of parts.entries()) {
         const id = await paced(
-          sends,
+          t.jid === jidOf(io.owner) ? sends : null,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
           { linkPreview: null, text: part },
@@ -929,9 +929,14 @@ export function sender(
         "that message is over 24 hours old, and ops-wa reacts only inside its 24 hours",
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
-    await paced(on.auto ? null : await recent(now), SEND.gapMs, target.jid, {
-      react: { key, text: emoji },
-    })
+    await paced(
+      on.auto || target.who !== "owner" ? null : await recent(now),
+      SEND.gapMs,
+      target.jid,
+      {
+        react: { key, text: emoji },
+      },
+    )
     return "sent"
   }
   return Object.assign(
