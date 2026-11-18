@@ -17,6 +17,7 @@ import {
   unreusedLiveDatabase,
 } from "@/lib/dev/live-dashboard"
 import { provenLocal } from "@/lib/sessions/guard"
+import { moveToLoopback } from "@/lib/setup/move"
 
 // First run's Start a local container: Postgres started on 127.0.0.1 alone (the owner's choice for this one step, on a random host port bound to loopback only), proved local as bun run ingest proves it, migrated, and named in .env. Every call is a fixed argv: the image, the postgres login and the checkout's container name are the only values, and nothing comes from a request.
 
@@ -31,7 +32,7 @@ const READY_TRIES = 30
 
 export class SetupError extends Error {}
 
-const runner =
+export const runner =
   (command: string): Run =>
   async (args) => {
     if (!Bun.which(command)) return { code: 127, stderr: `${command} is not on PATH`, stdout: "" }
@@ -131,6 +132,8 @@ export type Start = {
   docker?: Run
   envFile: string
   migrate?: (url: string) => Promise<void>
+  move?: boolean
+  moveTo?: typeof moveToLoopback
   name: string
   onStep: (step: string) => void
   prove?: (url: string) => Promise<string>
@@ -143,6 +146,8 @@ export async function startLocal({
   docker = runner("docker"),
   envFile,
   migrate: migrateTo = migrate,
+  move = false,
+  moveTo = moveToLoopback,
   name,
   onStep,
   prove = provenLocal,
@@ -194,6 +199,11 @@ export async function startLocal({
   const port = portFromPort((await docker(["port", container])).stdout)
   if (port === null) {
     throw new SetupError(`docker reported no port for ${container}`)
+  }
+  // the click that answers the guard's exposed refusal moves the reused container onto 127.0.0.1 alone, on the same port and with its data
+  if (move && running) {
+    onStep("Moving Postgres onto this Mac alone")
+    for (const line of await moveTo(container, port, docker, wait)) onStep(line)
   }
   const url = urlFor(port, password)
   // setup's container has no restart policy, so the live dashboard's would stay stopped after a reboot
