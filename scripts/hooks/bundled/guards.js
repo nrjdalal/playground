@@ -11291,6 +11291,12 @@ var slotSettings = defineSettings({
 // packages/settings/src/whatsapp.ts
 var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
 var whatsappSettings = defineSettings({
+  "wa.alert": {
+    default: "",
+    description: "A second WhatsApp number in E.164 that gets alerts alone: each playground wa alert goes to it once, beside the owner's number, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
+    masked: true,
+    schema: e1642
+  },
   "wa.device": {
     default: "",
     description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
@@ -11299,7 +11305,7 @@ var whatsappSettings = defineSettings({
   },
   "wa.owner": {
     default: "",
-    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set.",
     masked: true,
     schema: e1642
   }
