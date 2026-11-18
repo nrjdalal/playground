@@ -122,7 +122,7 @@ export const jidOf = (e164: string) => `${e164.replace(/^\+/, "")}@s.whatsapp.ne
 export const OFF =
   "WhatsApp mode is off, so this message goes no further. Turn it on in Playground's Settings, under Extensions."
 export const updateLine = (policy: string) =>
-  `WhatsApp mode: send the owner an update on the factory's work now. ${replyLine(policy)}`
+  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. ${replyLine(policy)}`
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
@@ -565,10 +565,14 @@ async function pass(io: Io & Mode) {
         h.bravo = true
       }
       const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+      // a window with no owner message handed on and no send to the owner since the last line asks for nothing, so a quiet chat gets no update
+      const since = watch.updateAt ?? 0
+      const moved = handed.some((h) => h.at > since) || sends.some((at) => at > since)
       if (
         ownerAt !== undefined &&
         now - ownerAt <= OWNER_WINDOW_MS &&
-        now - Math.max(watch.updateAt ?? 0, ownerAt) >= UPDATE_MS
+        now - Math.max(since, ownerAt) >= UPDATE_MS &&
+        moved
       ) {
         await io.relay("dispatcher", updateLine((await policyOf(io)).reply))
         watch.updateAt = now

@@ -672,9 +672,36 @@ describe("WhatsApp mode", () => {
     await h.pass()
     expect(updates()).toBe(1)
     h.advance(UPDATE_MS)
+    await h.send("the train merged two PRs")
     await h.pass()
     expect(updates()).toBe(2)
     h.advance(24 * HOUR)
+    await h.pass()
+    expect(updates()).toBe(2)
+  })
+
+  test("the update line asks for an update only if something changed, and says to send nothing otherwise", () => {
+    expect(UPDATE).toContain(
+      "send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing.",
+    )
+  })
+
+  test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message queues it", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
+    await h.settle()
+    const updates = () => h.routed.filter((r) => r.text === UPDATE).length
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.advance(UPDATE_MS)
+    await h.pass()
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.fake.upsert([h.fake.message(jid(OWNER), "anything new?")])
+    await h.settle()
+    h.advance(UPDATE_MS)
     await h.pass()
     expect(updates()).toBe(2)
   })

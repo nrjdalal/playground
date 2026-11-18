@@ -19,8 +19,8 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
    When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
-2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way.
-   Done when the update is sent, or nothing has changed since the last one and the reply says so.
+2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
+   Done when the update is sent, or nothing has changed and nothing is sent.
 
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat, but for the alert number the owner approved, which takes a reply at any time; a refusal names its reason.
 `playground wa status` prints whether each number has written or been approved, and whether a reply can go to it now.
