@@ -142,20 +142,33 @@ describe("playground wa send --to alert (#2756)", () => {
 })
 
 describe("playground wa alert (#2748)", () => {
-  test("hands the body to ops-wa as an alert, while wa send's stays a reply", async () => {
+  test("hands the body to ops-wa as an alert to the owner first, with its source, or to both at once with --now-both, while wa send's stays a reply", async () => {
     const { body, data } = machine("ops-tick is down\n")
-    const got: [string, string][] = []
-    const server = serve(socketPath(data), async (b, kind) => {
-      got.push([b, kind])
+    const got: [string, string, string | undefined][] = []
+    const server = serve(socketPath(data), async (b, kind, source) => {
+      got.push([b, kind, source])
       return "sent"
     })
     try {
       expect(await wa(data, ["alert", body])).toEqual({ code: 0, out: "wa alert: sent" })
+      expect(await wa(data, ["alert", "--source", "test:2026-11-18T15:40Z", body])).toEqual({
+        code: 0,
+        out: "wa alert: sent",
+      })
+      expect(await wa(data, ["alert", "--now-both", body])).toEqual({
+        code: 0,
+        out: "wa alert: sent",
+      })
       expect(await wa(data, ["send", body])).toEqual({ code: 0, out: "wa send: sent" })
       expect(got).toEqual([
-        ["ops-tick is down", "alert"],
-        ["ops-tick is down", "reply"],
+        ["ops-tick is down", "first", undefined],
+        ["ops-tick is down", "first", "test:2026-11-18T15:40Z"],
+        ["ops-tick is down", "alert", undefined],
+        ["ops-tick is down", "reply", undefined],
       ])
+      const bad = await wa(data, ["alert", "--source", "no-kind", body])
+      expect(bad.code).toBe(2)
+      expect(bad.out).toContain("--source takes <kind>:<ref>")
     } finally {
       server.stop(true)
     }
