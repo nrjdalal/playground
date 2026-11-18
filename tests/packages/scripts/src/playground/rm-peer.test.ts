@@ -64,6 +64,12 @@ test("runRmPeer takes three words, and refuses a wrong byte count, card, or too 
   expect(
     await runRmPeer(["/m/x.gguf", "not-bytes", "11111111-2222-3333-4444-555555555555"], deps),
   ).toBe(2)
+  expect(await runRmPeer(["/m/x.gguf", "1e3", "11111111-2222-3333-4444-555555555555"], deps)).toBe(
+    2,
+  )
+  expect(await runRmPeer(["/m/x.gguf", "0x10", "11111111-2222-3333-4444-555555555555"], deps)).toBe(
+    2,
+  )
   expect(await runRmPeer(["/m/x.gguf", "7", "not-a-card"], deps)).toBe(2)
 })
 
