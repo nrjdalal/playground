@@ -393,7 +393,9 @@ describe("progressCardRefusal", () => {
     )
     expect(refusal).toContain("#i5")
     expect(refusal).toContain("not one a poster may start")
-    expect(refusal).toContain("send its progress up the chain, a row on its in-flight card")
+    expect(refusal).toContain(
+      "send its progress up the chain, for the dispatcher to add as a row on",
+    )
   })
 
   test("refuses a non-dispatcher's progress card when no card is open, and says send it up the chain", () => {

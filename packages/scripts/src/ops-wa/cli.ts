@@ -246,6 +246,7 @@ const main = async () => {
     send,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
     (id, key, value) => settingSet(owned, id, key, value),
+    send.react,
   )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
@@ -294,6 +295,7 @@ const main = async () => {
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
     poll: send.poll,
+    react: send.react,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),

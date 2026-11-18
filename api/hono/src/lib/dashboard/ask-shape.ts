@@ -145,14 +145,14 @@ export function isDispatcher(from: string | null | undefined): boolean {
 // The dispatcher's one open in-flight card, its newest item it may still edit that holds a progress block, so a second card or another poster's names it (PG-2720).
 export type InflightCard = { ref: number; title: string } | null
 
-// Pure: why bun run ask refuses an ask's or a read-only update's progress card, the block the dispatcher draws as its one card, one a poster may not start: the dispatcher's first card passes, a twin of the open one (same title) still edits, a second, a different title, is refused, and a card another poster starts is refused, naming the open card when one is.
+// Pure: why bun run ask refuses a progress card: only the dispatcher's first card or its same-title twin passes.
 export function progressCardRefusal(input: unknown, inFlight: InflightCard): string | null {
   if (!isRecord(input)) return null
   const preview = input.preview
   if (!isRecord(preview) || typeof preview.text !== "string") return null
   // a progress block draws the card, so only an ask or a read-only update may hold one, the same shape progressRefusal reads
   if (preview.type !== "ask" && input.kind !== "update") return null
-  // the block draws the card, so no progress block is none, one without it posts either way
+  // an item with no progress block posts from any poster, so its absence returns null
   if (!holdsProgressBlock(preview)) return null
   const from = typeof input.from === "string" ? input.from : undefined
   const title = typeof input.title === "string" ? input.title : ""
@@ -164,7 +164,7 @@ export function progressCardRefusal(input: unknown, inFlight: InflightCard): str
   }
   // a progress card is the dispatcher's, not one another poster may start
   return inFlight
-    ? `a progress block is the dispatcher's one card, not one a poster may start; send its progress up the chain, a row on its in-flight card #i${inFlight.ref}`
+    ? `a progress block is the dispatcher's one card, not one a poster may start; send its progress up the chain, for the dispatcher to add as a row on #i${inFlight.ref}`
     : `a progress block is the dispatcher's one card, not one a poster may start; send it up the chain, not as its own card`
 }
 

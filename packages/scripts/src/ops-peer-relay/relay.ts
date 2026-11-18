@@ -103,7 +103,7 @@ export type Link = {
   // how long the far end has to say hello, and to answer one line
   replyMs?: number
   signal: AbortSignal
-  // called once the far end said hello, so the loop can say up
+  // called once the far end reported its start, so the loop can say up
   up?: () => unknown
 }
 
@@ -129,10 +129,15 @@ export async function link({
   await save()
   let ended = false
   let why = ""
+  let stoppedResolve: () => void = () => {}
+  let endResolve: () => void = () => {}
+  const stopped = new Promise<void>((done) => (stoppedResolve = done))
+  const endSeen = new Promise<"end">((done) => (endResolve = () => done("end")))
   const stop = (reason: string) => {
     if (ended) return
     ended = true
     why = reason
+    stoppedResolve()
     far.kill()
   }
   const onAbort = () => stop("")
@@ -170,6 +175,7 @@ export async function link({
       if (Number.isInteger(message.end)) {
         cursor.remote = message.end as number
         await save()
+        endResolve()
       }
     }
     hello("ended")
@@ -192,7 +198,15 @@ export async function link({
             : `${peer.target} ended with code ${code} before its hello`,
     )
   }
-  if (!ended) up?.()
+  void far.exited.then((code) => stop(`ssh to ${peer.target} ended with code ${code}`))
+  // count the link up only once the far has reported its start, so a line it already holds is read from, never read past
+  const startTimer = setTimeout(
+    () => stop(`${peer.target} reported no start within ${replyMs / 1000}s`),
+    replyMs,
+  )
+  const seen = await Promise.race([endSeen, stopped])
+  clearTimeout(startTimer)
+  if (!ended && seen === "end") up?.()
   const send = async (line: PeerLine): Promise<boolean> => {
     const answer = new Promise<unknown>((done) => (acked = done))
     far.stdin.write(`${JSON.stringify({ line })}\n`)
@@ -205,7 +219,6 @@ export async function link({
     acked = undefined
     return id === line.id
   }
-  void far.exited.then((code) => stop(`ssh to ${peer.target} ended with code ${code}`))
   while (!ended) {
     const { end, reads, skipped } = await linesFrom(queue, cursor.local!)
     for (const { end, line } of reads) {

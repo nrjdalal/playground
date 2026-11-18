@@ -13,6 +13,10 @@ export const KEEP_ALIVE_DAYS = 12
 
 export const HOUR = 3_600_000
 
+// The wait before a text part, its typing time: 3 characters a second, a typist's mean of 36.2 WPM on a phone (Palin et al., MobileHCI 2019, http://pokristensson.com/pubs/PalinEtAlMobileHCI2019.pdf), spread by up to a fifth either way and kept between 1 s and 60 s.
+export const typingMs = (chars: number, random: () => number = Math.random): number =>
+  Math.round(Math.min(60_000, Math.max(1_000, (chars / 3) * 1_000 * (0.8 + 0.4 * random()))))
+
 // The wait before connect try n (1 the first retry): doubling from 2 s to 30 s, spread by up to a quarter either way and kept inside the two.
 export const backoffMs = (attempt: number, random: () => number = Math.random): number => {
   const base = Math.min(BACKOFF.maxMs, BACKOFF.firstMs * 2 ** (attempt - 1))

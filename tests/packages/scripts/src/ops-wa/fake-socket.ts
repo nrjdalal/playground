@@ -12,6 +12,7 @@ export const groupJid = (id: string) => `${id}@g.us`
 type Content = {
   linkPreview?: null
   poll?: { messageSecret: Uint8Array; name: string; selectableCount: number; values: string[] }
+  react?: { key: { fromMe: boolean; id: string; remoteJid: string }; text: string }
   text?: string
 }
 

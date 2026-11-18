@@ -11398,7 +11398,9 @@ var GUARD_KEYS = new Set([
   "usage.keychainService",
   "wa.alert",
   "wa.alertCheck",
+  "wa.device",
   "wa.guestPolicy",
+  "wa.owner",
   "wa.replyPolicy",
   "yard.logReaders"
 ]);
@@ -12315,23 +12317,16 @@ function cliWrite(words, tuning) {
   const positional = [];
   let dry = false;
   let scoped = false;
-  const options = [];
-  let ownerId;
   for (let k = 0;k < rest.length; k++) {
     const word = rest[k];
-    if (word !== undefined && switches.includes(word)) {
+    if (word !== undefined && switches.includes(word))
       dry ||= word === "--dry-run";
-      options.push(word);
-    } else if (word?.startsWith("--")) {
+    else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope");
-      if (word === "--from-owner-msg")
-        ownerId = rest[k + 1];
-      options.push(word);
       k++;
     } else
       positional.push(word);
   }
-  const ownerMsg = options.length === 1 && options[0] === "--from-owner-msg" && !!ownerId && positional.length === 2;
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;
@@ -12340,8 +12335,6 @@ function cliWrite(words, tuning) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
-    if (verb === "set" && ownerMsg)
-      return;
     const job = key.startsWith(JOB_PREFIX);
     if (!GUARD_KEYS.has(key) && !job)
       return;
