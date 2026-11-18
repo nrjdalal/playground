@@ -601,6 +601,8 @@ export function sender(
       }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
+      if ((await alertFirst(io.dir, second)) === undefined)
+        return "sent to the owner alone: the alert number has never written to this number"
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })

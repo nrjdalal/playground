@@ -187,6 +187,20 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     expect(h.fake.sent).toHaveLength(1)
   })
 
+  test("while the alert number has never written, it goes to the owner alone, says so and keeps nothing pending", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    expect(await h.send("ops-tick is down", "first")).toBe(
+      "sent to the owner alone: the alert number has never written to this number",
+    )
+    const lines = await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)
+    expect(lines.filter((line) => line.startsWith("pending:"))).toEqual([])
+    h.advance(10 * MINUTE)
+    await h.pass()
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(OWNER)])
+  })
+
   test("an empty wa.alert never escalates", async () => {
     const h = await ready({ alert: "" })
     expect(await h.send("ops-tick is down", "first")).toBe("sent")
