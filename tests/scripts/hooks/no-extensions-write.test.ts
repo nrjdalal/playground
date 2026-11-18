@@ -2696,6 +2696,9 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "settings set of usage.keychainService",
       "playground settings set usage.keychainService x --reason x",
     ],
+    ["settings set of wa.device", "playground settings set wa.device +15550100002 --reason x"],
+    ["settings set of wa.owner", "playground settings set wa.owner +15550100001 --reason x"],
+    ["settings reset of wa.owner", "playground settings reset wa.owner --reason x"],
     [
       "settings set of glm.readOnlyLoad5",
       "playground settings set glm.readOnlyLoad5 99 --reason x",

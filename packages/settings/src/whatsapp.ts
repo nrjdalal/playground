@@ -35,7 +35,7 @@ export const whatsappSettings = defineSettings({
   "wa.device": {
     default: "",
     description:
-      "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+      "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e164,
   },
@@ -48,7 +48,7 @@ export const whatsappSettings = defineSettings({
   "wa.owner": {
     default: "",
     description:
-      "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set.",
+      "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e164,
   },

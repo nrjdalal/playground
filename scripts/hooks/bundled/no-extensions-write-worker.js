@@ -11398,7 +11398,9 @@ var GUARD_KEYS = new Set([
   "usage.keychainService",
   "wa.alert",
   "wa.alertCheck",
+  "wa.device",
   "wa.guestPolicy",
+  "wa.owner",
   "wa.replyPolicy",
   "yard.logReaders"
 ]);
