@@ -132,9 +132,14 @@ describe("the install text (PG-2433)", () => {
     expect(leftover(base)).toEqual([])
   })
 
-  test("refuses a hash that holds a quote or $(, and a wrong count of hashes, before it copies anything", async () => {
+  test("refuses a hash that holds a quote, $( or an uppercase letter, and a wrong count of hashes, before it copies anything", async () => {
     const { base, good, run } = await setUp()
-    for (const bad of [`${"a".repeat(63)}'`, `$(touch ${base}-pwned)`, "A".repeat(64)]) {
+    for (const bad of [
+      `${"a".repeat(63)}'`,
+      `$(touch ${base}-pwned)`,
+      "A".repeat(64),
+      `${"a".repeat(63)}B`,
+    ]) {
       const ran = await run(...good.slice(1), bad)
       expect(ran).toMatchObject({ code: 1, err: "refused: a hash is not 64 lowercase hex" })
     }
@@ -305,10 +310,10 @@ describe("the Dashboard's CA in an install (PG-2458)", () => {
     expect(await caPin(join(root, "none.pem"))).toBeUndefined()
   })
 
-  test("refuses a relative CA path and a hash that holds a quote or $(", async () => {
+  test("refuses a relative CA path and a hash that holds a quote, $( or an uppercase letter", async () => {
     const { base, ca, run } = await setUp()
     expect((await run("ca.pem", ca.pin)).err).toBe("refused: the CA's path is not absolute")
-    for (const bad of [`${"a".repeat(63)}'`, `$(touch ${base}-pwned)`]) {
+    for (const bad of [`${"a".repeat(63)}'`, `$(touch ${base}-pwned)`, "C".repeat(64)]) {
       expect((await run(ca.path, bad)).err).toBe("refused: a hash is not 64 lowercase hex")
     }
     expect(existsSync(`${base}-pwned`)).toBe(false)
