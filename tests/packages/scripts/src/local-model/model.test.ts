@@ -10,6 +10,7 @@ import {
   keepUp,
   type Machine,
   memOf,
+  metricsBusy,
   type ModelConfig,
   type ModelDeps,
   sizeOf,
@@ -732,5 +733,13 @@ describe("the model readers (PG-2543)", () => {
     expect(memOf("nothing")).toBeNull()
     expect(busyOf(metrics(2, 3))).toBe(5)
     expect(busyOf("")).toBeNull()
+  })
+
+  // PG-2741: the quiet skip holds a local session back only on a /metrics read that shows the model working, so every other read falls toward flagging
+  test("the model reads busy only when running and waiting are above 0", () => {
+    expect(metricsBusy(metrics(2, 3))).toBe(true)
+    expect(metricsBusy(metrics(0, 0))).toBe(false)
+    expect(metricsBusy("")).toBe(false)
+    expect(metricsBusy(null)).toBe(false)
   })
 })
