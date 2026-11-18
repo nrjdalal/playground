@@ -327,7 +327,7 @@ export type InboxPlace = {
   rank: string | null
 }
 
-// Pure: the cards, pinned first, each group by rank and the unranked after in the order given, today's order, since the sort is stable; a rank compares by code point here, never in ORDER BY, whose collation can read the same keys differently.
+// Pure: the cards, pinned first, each group's unranked first in the order given (today's order, since the sort is stable), then its ranked by rank; a rank compares by code point here, never in ORDER BY, whose collation can read the same keys differently.
 export function orderInboxItems<T extends InboxPlace>(items: T[]): T[] {
   const byRank = (a: T, b: T): number =>
     a.rank === b.rank ? 0 : a.rank === null ? -1 : b.rank === null ? 1 : a.rank < b.rank ? -1 : 1
