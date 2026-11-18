@@ -477,7 +477,10 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
     const refused = line.match(/^\S+ (?:SKIP \w+ FAIL|ANOMALY) (.*)$/)
     if (refused) return { done: `Failed: ${refused[1]}`, ok: false }
     const roll = line.match(/^\S+ ROLL (.*?) (\w+) (PASS|FAIL)(?: (.*))?$/)
-    if (roll?.[3] === "PASS") return { done: `Updated to ${roll[2]}`, ok: true }
+    // a roll that moved the database onto loopback names the move and the old container's remove command on its PASS line (supervisor.sh's move_database)
+    const moved = roll?.[4]?.match(/ database: (Moved .*)$/)?.[1]
+    if (roll?.[3] === "PASS")
+      return { done: `Updated to ${roll[2]}${moved ? `; ${moved}` : ""}`, ok: true }
     if (!roll) continue
     failed = roll[4] || "the roll failed"
     // a build that failed before the stop stopped nothing, so no fallback follows
