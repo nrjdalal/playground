@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -16,7 +17,7 @@ import { join } from "node:path"
 import { GATE_WORKTREES } from "../../../../../packages/scripts/src/ops-tick/boot-check"
 import { BEATS, bootCheck, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 
-const scratch = mkdtempSync(join(tmpdir(), "boot-check-"))
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "boot-check-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 const IDENT = {

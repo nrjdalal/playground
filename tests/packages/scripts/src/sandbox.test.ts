@@ -280,6 +280,19 @@ test("each root tool is bound at its own file, a link's target once, and a missi
   }
 })
 
+// macOS's /usr/bin/sudo is mode 4511, and bun's realpathSync opens the file, so it threw EACCES
+test("a root tool this user cannot read is bound at its own file all the same", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "sandbox-root-")))
+  try {
+    writeFileSync(join(dir, "real"), "")
+    chmodSync(join(dir, "real"), 0o111)
+    symlinkSync("real", join(dir, "sudo"))
+    expect(rootFiles([join(dir, "sudo"), join(dir, "real")])).toEqual([join(dir, "real")])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
 test("a test's own fake gh ahead of the sandbox's answers instead", () => {
   const { env, scratch } = sandbox()
   try {
