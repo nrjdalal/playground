@@ -55,8 +55,6 @@ export type Io = {
 // WhatsApp mode's reads, and the reply it sends while it is off, so a test hands in fakes.
 export type Mode = {
   assistant: () => Promise<string | undefined>
-  // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
-  policy?: () => Promise<Policy | undefined>
   busy: () => Promise<boolean>
   log: (line: string) => void
   // whether WhatsApp mode is on: the bundled whatsapp extension's switch in Settings, Extensions
@@ -67,6 +65,8 @@ export type Mode = {
   inbox?: Inbox
   // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
   media?: Media
+  // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
+  policy?: () => Promise<Policy | undefined>
 }
 export type Media = {
   // <data>/wa/media
@@ -428,9 +428,16 @@ export const refusalOf = (body: string): string | undefined => {
 export const guestRefusal = (body: string): string | undefined => {
   if (/[\w.+-]+@[\w-]+\.[\w.-]+/.test(body))
     return "a guest's reply holds an email address, personal data a guest never gets"
-  if (/\+\d[\d ()-]{7,}\d|(?<![\w.:-])\d{10}(?![\w.:-])/.test(body))
-    return "a guest's reply holds a phone number, personal data a guest never gets"
+  if (phoneIn(body)) return "a guest's reply holds a phone number, personal data a guest never gets"
 }
+
+// A phone number's shapes: a + and 8 or more digits, a bare 10 digits, or 10 to 13 digits split into groups by spaces, dashes, dots or brackets; a date, a time, a #-numbered PR and a bare 11 or 12 digit run id still go.
+const phoneIn = (body: string): boolean =>
+  /\+\d[\d ().-]{6,}\d|(?<![\w.:-])\d{10}(?![\w.:-])/.test(body) ||
+  [...body.matchAll(/(?<![\w.:/#-])\(?\d[\d ().-]{7,22}\d(?![\w.:/-])/g)].some(([run]) => {
+    const digits = run.replace(/\D/g, "").length
+    return /[ ().-]/.test(run) && digits >= 10 && digits <= 13
+  })
 
 // Pure: what is left of a number's 24 hours since it last wrote, in ms, 0 once they are over or before it ever wrote.
 export const windowLeft = (at: number | undefined, now: number): number =>
@@ -490,13 +497,16 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       const why = guestRefusal(body)
       if (why) throw new Error(why)
     }
-    const owner = await readOwn<Wrote>(kind === "guest" ? alertFile(io.dir) : ownerFile(io.dir), {})
+    const record = await readOwn<Wrote>(
+      kind === "guest" ? alertFile(io.dir) : ownerFile(io.dir),
+      {},
+    )
     const open =
       kind === "guest"
-        ? owner.jid === jidOf(second) && windowLeft(owner.alertAt, now) > 0
+        ? record.jid === jidOf(second) && windowLeft(record.alertAt, now) > 0
         : alert
-          ? firstOf(owner, jidOf(io.owner)) !== undefined
-          : windowLeft(owner.ownerAt, now) > 0
+          ? firstOf(record, jidOf(io.owner)) !== undefined
+          : windowLeft(record.ownerAt, now) > 0
     const to = [
       kind === "guest"
         ? { jid: jidOf(second), open, who: "the alert number" }

@@ -28,7 +28,7 @@ A card that goes reads `[hidden]` for every name, handle, company term, Slack id
 
 ## Alerts to a second number
 
-Set `wa.alert` to a second number, `+` and 8 to 15 digits, by approving the guard card the dispatcher posts (or `playground settings set wa.alert <number> --reason "<why>"` in your own terminal), and each alert (`playground wa alert <file>`) goes once to you and once to it; empty, alerts go to you alone ([ADR 0028](../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)).
+Set `wa.alert` to a second number, `+` and 8 to 15 digits, by approving the guard card the dispatcher posts (or `playground settings set wa.alert <number> --reason "<why>"` in your own terminal), and each urgent alert (`playground wa alert <file>`, one you must act on now) goes once to you and once to it, while every other message goes by `wa send` to you alone; empty, alerts go to you alone ([ADR 0028](../../.agents/adr/0028-a-second-whatsapp-number-gets-alerts-and-is-data.md)).
 An alert reaches a number once it has ever written to the spare number, since ops-wa never starts a chat; your Approve of the guard card counts as that number's first message. `playground wa status` shows whether each has written.
 That number's messages reach the dispatcher as data, never as yours: they answer no card and give no order.
 Its holder is a guest ([ADR 0030](../../.agents/adr/0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md)): the dispatcher replies with `playground wa send --to alert <file>`, chats, gives factory status and passes a feature request on to you as an Inbox card.

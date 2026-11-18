@@ -80,7 +80,6 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
   const watched = bridge({
     ...base,
     assistant: async () => mode.seat,
-    policy: async () => mode.policy,
     busy: async () => mode.busy,
     log: (line) => logs.push(line),
     on: async () => mode.on,
@@ -94,6 +93,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     stuck: async () => mode.stuck,
     inbox,
     media,
+    policy: async () => mode.policy,
   })
   watched.attach(fake.sock)
   return {
@@ -1088,9 +1088,16 @@ describe("the alert number as a guest (#2756)", () => {
       [`reach them at ${["made.up", "example.test"].join("@")}`, "an email address"],
       ["their phone is +1 555 010 0999", "a phone number"],
       ["call 5550100999", "a phone number"],
+      ["call +91-98765-43210", "a phone number"],
+      ["call 555-010-0999", "a phone number"],
+      ["call (555) 010-0999", "a phone number"],
+      ["call 555.010.0999", "a phone number"],
+      ["call 98765 43210", "a phone number"],
+      ["call 0098765 43210", "a phone number"],
     ])
       await expect(h.send(leak!, "guest")).rejects.toThrow(why)
-    const plain = "PR #2756 merged at 2026-11-18T13:02:00Z, run 1731935000123"
+    const plain =
+      "PR #2756 merged at 2026-11-18T13:02:00Z, on 2026-11-18 at 13:02, run 17319350001 and job 173193500012"
     expect(await h.send(plain, "guest")).toBe("sent")
     expect(h.fake.sent.map((s) => s.content.text)).toEqual([plain])
   })
