@@ -148,7 +148,7 @@ Edit a bash script only once every live run of it has ended, since bash reads a 
 
 No end-to-end suite exists: `bun run test:e2e` matches no file.
 
-The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box, with stand-ins for claude, gh, brew, security and sudo, and a logging curl (`stubs.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
+The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box, with stand-ins for claude, gh, brew, security and sudo, and a logging curl (`stubs.ts`), its own portless proxy on port 14155.
 The install runs on this host's OS, since `installEnv` sets no `INSTALL_OS` and install.sh reads `uname -s`.
 The box's PATH (`boxPath`) carries this host's uv, linked alone into the box's `tools` folder, so install.sh's uv step downloads nothing on Linux, as `/opt/homebrew/bin` gives it on a Mac; a `curl` stand-in logs each URL to calls.log, so a download shows there.
 The box is `makeBox`'s scratch folder `/tmp/pg-gate-<sha7>-<random>`, made in another parent folder with `--box <parent dir>`.
