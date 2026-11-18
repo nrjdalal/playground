@@ -23,7 +23,7 @@ const TYPES: Record<string, { kind: Kind; mimetype: string; text?: true }> = {
 }
 const TYPE_NAMES = Object.keys(TYPES).join(", ")
 
-// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, an image, a video or a document with its caption, or an audio file as a voice note, which takes none.
+// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, an image, a video or a document with its caption, an audio file as a voice note, which takes none, or a poll of one choice, whose secret ops-wa makes itself so it can read the owner's vote.
 type Fits<T extends AnyMessageContent> = T
 export type Content = Fits<
   | { linkPreview: null; text: string }
@@ -31,6 +31,7 @@ export type Content = Fits<
   | { caption?: string; mimetype: string; video: Buffer }
   | { caption?: string; document: Buffer; fileName: string; mimetype: string }
   | { audio: Buffer; mimetype: string; ptt: true }
+  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
 >
 
 export type Outbound = { bytes: Buffer; kind: Kind; mimetype: string; name: string; text?: string }
