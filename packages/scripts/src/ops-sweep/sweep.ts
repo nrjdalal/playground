@@ -295,8 +295,8 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
-// A steady beat that is not `ok` but is not a failure: up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job.
-const HEALTHY_PREFIXES: Record<string, string[]> = {
+// A steady beat that is not `ok` but is not a failure: up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job. The Dashboard reads this same list, its copy kept in step by a test.
+export const HEALTHY_PREFIXES: Record<string, string[]> = {
   "ops-model-tunnel": ["up: "],
   "ops-peer-relay": ["idle: "],
   "ops-tunnel": ["up: "],
