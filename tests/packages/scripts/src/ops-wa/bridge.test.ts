@@ -400,7 +400,7 @@ describe("the alert-only second number (#2748)", () => {
     )
   })
 
-  test("a changed owner starts with none: the old owner's message opens no alert to the new number", async () => {
+  test("a changed owner starts with none: the old owner's message opens no alert to the new number, while a file from before chats were named still counts", async () => {
     const old = await both()
     const h = harness(undefined, undefined, ALERT)
     await Bun.write(join(h.dir, "alert.json"), await Bun.file(join(old.dir, "alert.json")).text())
@@ -411,13 +411,12 @@ describe("the alert-only second number (#2748)", () => {
     expect(await h.send("down", true)).toBe(
       "sent to the alert number alone: the owner has never written to this number",
     )
-    await Bun.write(join(h.dir, "owner.json"), JSON.stringify({ firstAt: START, ownerAt: START }))
-    expect(await h.send("down", true)).toBe(
-      "sent to the alert number alone: the owner has never written to this number",
-    )
     expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).toContain(
       "owner ••••0001: has never written, so no alert reaches it until it writes once; 24 h 0 min left of its 24 hours for replies",
     )
+    await Bun.write(join(h.dir, "owner.json"), JSON.stringify({ ownerAt: START }))
+    expect(await h.send("down", true)).toBe("sent")
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT), jid(OWNER), jid(ALERT)])
   })
 
   test("wa.alert is read afresh: a running ops-wa follows its change for each send and each message", async () => {

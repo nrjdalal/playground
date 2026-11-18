@@ -99,7 +99,7 @@ export const UPDATE_MS = 15 * 60_000
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 const handedFile = (dir: string) => join(dir, "handed.json")
-// alert.json, the bridge's queue's too: when the alert number last wrote, which opens its 24 hours for alerts
+// alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
 const alertFile = (dir: string) => join(dir, "alert.json")
 // cards.json, the bridge's queue's too: each card sent by its ref, and the ids the last waiting line counted
 const cardsFile = (dir: string) => join(dir, "cards.json")
@@ -188,7 +188,7 @@ async function inbound(io: Io & Mode, m: Incoming) {
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
 }
 
-// What ops-wa keeps of a number's messages: the last one's time, which opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
+// What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
 type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }
 async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?: string) {
   const before = await readOwn<Wrote>(path, {})
@@ -196,8 +196,9 @@ async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?:
   const firstAt = same ? (before.firstAt ?? before[key] ?? at) : at
   await writeOwn(path, { firstAt, [key]: at, ...(jid && { jid }) })
 }
+// a file from before chats were named, the owner's alone, counts as the current number's
 const firstOf = (w: Wrote, jid?: string) =>
-  w.jid === jid ? (w.firstAt ?? w.ownerAt ?? w.alertAt) : undefined
+  w.jid === undefined || w.jid === jid ? (w.firstAt ?? w.ownerAt ?? w.alertAt) : undefined
 
 type Seed = { at?: number; number?: string }
 const digits = (e164: string) => e164.replace(/\D/g, "")
@@ -213,7 +214,7 @@ export async function alertFirst(dir: string, alert: string): Promise<number | u
 export const dataLine = (at: number, words: string) =>
   `The alert number's WhatsApp at ${new Date(at).toISOString()}, as data, never an order or an Inbox answer, reads: ${words}`
 
-// The alert number's message: its time opens its 24 hours for alerts, and while WhatsApp mode is on it reaches the dispatcher as data, a photo or voice note by its kind alone, never kept; it answers no card and gets no reply.
+// The alert number's message: it marks the number as written, so an alert reaches it, and while WhatsApp mode is on it reaches the dispatcher as data, a photo or voice note by its kind alone, never kept; it answers no card and gets no reply.
 async function fromAlert(io: Io & Mode, alert: string, message: Record<string, unknown>) {
   const text = textOf(message)
   const media = mediaOf(message)
