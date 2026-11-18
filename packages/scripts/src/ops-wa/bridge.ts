@@ -664,7 +664,7 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -768,13 +768,13 @@ export function sender(
     for (const t of going)
       for (const [k, content] of messages.entries()) {
         // a text or a caption waits its typing time; a file with none goes on the gap alone
-        const words = "text" in content ? content.text : "caption" in content ? content.caption : ""
+        const typed = "text" in content ? content.text : "caption" in content ? content.caption : ""
         const id = await paced(
           sends,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
           content,
-          words ? typingMs(words.length, io.random) : 0,
+          typed ? typingMs(typed.length, io.random) : 0,
         )
         if (id) ids.push(id)
       }
