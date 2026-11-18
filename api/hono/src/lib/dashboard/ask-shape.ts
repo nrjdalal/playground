@@ -152,7 +152,7 @@ export function progressCardRefusal(input: unknown, inFlight: InflightCard): str
   if (!isRecord(preview) || typeof preview.text !== "string") return null
   // a progress block draws the card, so only an ask or a read-only update may hold one, the same shape progressRefusal reads
   if (preview.type !== "ask" && input.kind !== "update") return null
-  // the block draws the card, so no progress block is none, one without it posts either way
+  // an item with no progress block posts from any poster, so its absence returns null
   if (!holdsProgressBlock(preview)) return null
   const from = typeof input.from === "string" ? input.from : undefined
   const title = typeof input.title === "string" ? input.title : ""
@@ -164,7 +164,7 @@ export function progressCardRefusal(input: unknown, inFlight: InflightCard): str
   }
   // a progress card is the dispatcher's, not one another poster may start
   return inFlight
-    ? `a progress block is the dispatcher's one card, not one a poster may start; send its progress up the chain, a row on its in-flight card #i${inFlight.ref}`
+    ? `a progress block is the dispatcher's one card, not one a poster may start; send its progress up the chain, for the dispatcher to add as a row on #i${inFlight.ref}`
     : `a progress block is the dispatcher's one card, not one a poster may start; send it up the chain, not as its own card`
 }
 
