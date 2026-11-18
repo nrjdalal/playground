@@ -100,9 +100,9 @@ Every background job starts off but the Dashboard's own and the usage read ([Ops
 
 ## The Dashboard's database
 
-On its first start the Dashboard's **Start a local container**, on the Database row of **Let's check this Mac**, makes its database with [pglaunch](https://www.npmjs.com/package/pglaunch): a Postgres container on Docker or OrbStack, on a random port.
-That database listens on every interface with pglaunch's own credentials (user, password and database `postgres`), so anyone who can reach this Mac on that port can read and change it.
-Keep the Mac on a network you trust, or block the port in its firewall.
+On its first start the Dashboard's **Start a local container**, on the Database row of **Let's check this Mac**, makes its database: a Postgres container on Docker or OrbStack, on a random port, with user and database `postgres` and a new random password.
+It listens on 127.0.0.1 alone, so only this Mac can reach it.
+An install made before that rule has a database that listens on every interface: the Dashboard's next update moves it onto 127.0.0.1, keeping its data, and leaves the old container stopped as `<name>-old`, with the one command that removes it (`docker rm <name>-old`) in the update's log.
 
 ## Run it again
 
