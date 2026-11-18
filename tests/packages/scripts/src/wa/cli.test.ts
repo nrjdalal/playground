@@ -168,7 +168,10 @@ describe("playground wa alert (#2748)", () => {
       join(data, "extensions", "policy.json"),
       JSON.stringify({ values: { "wa.owner": "+15550100001" } }),
     )
-    writeFileSync(join(data, "whatsapp", "owner.json"), JSON.stringify({ ownerAt: 0 }))
+    writeFileSync(
+      join(data, "whatsapp", "owner.json"),
+      JSON.stringify({ jid: `${"15550100001"}@s.whatsapp.net`, ownerAt: 0 }),
+    )
     expect(await wa(data, ["status"])).toEqual({
       code: 0,
       out: [

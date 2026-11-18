@@ -2641,16 +2641,21 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
   if (part && orgJobKey(key) && held === undefined)
     return { exitCode: 1, line: `${key} has no row at ${scope} to change` }
   const next = part ? { ...(held as object | undefined), ...(value as object) } : value
-  if (held !== undefined && isDeepStrictEqual(held, next))
+  // the owner's Approve of wa.alert stands in for that number's first message, so an alert may reach it, a value already held included (ADR 0028)
+  const seed = (approved: unknown) => {
+    if (key === "wa.alert" && typeof approved === "string" && approved)
+      seedAlert(data, approved, Date.now())
+  }
+  if (held !== undefined && isDeepStrictEqual(held, next)) {
+    seed(held)
     return {
       exitCode: 0,
       line: `${key} at ${scope} is already ${JSON.stringify(held)}, so nothing changed`,
     }
+  }
   const set = setSetting(data, { key, scope, value: next }, who)
   if (!set.ok) return { exitCode: 1, line: set.message }
-  // the owner's Approve of wa.alert stands in for that number's first message, so an alert may reach it (ADR 0028)
-  if (key === "wa.alert" && typeof set.value === "string" && set.value)
-    seedAlert(data, set.value, Date.now())
+  seed(set.value)
   return { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
 }
 

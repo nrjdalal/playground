@@ -6699,6 +6699,21 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(existsSync(join(other, "whatsapp", "alert-seed.json"))).toBe(false)
     })
 
+    test("a wa.alert card's Approve seeds the number when it was already set by hand, as the README says (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(data, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(existsSync(seed)).toBe(false)
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+    })
+
     test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {
       const data = folder()
       const posted = await post(decision(GUARD))

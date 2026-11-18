@@ -131,7 +131,11 @@ const main = async () => {
   if (policy.refusal !== undefined) return stop(`the settings refuse: ${policy.refusal}`)
   const owner = whatsappSettings.get(policy.settings, "wa.owner")
   const device = whatsappSettings.get(policy.settings, "wa.device")
-  const alert = whatsappSettings.get(policy.settings, "wa.alert")
+  // wa.alert is read afresh for each send and each message, so the owner's Approve reaches a running ops-wa
+  const alert = async () => {
+    const read = await readPolicy(data)
+    return read.refusal === undefined ? whatsappSettings.get(read.settings, "wa.alert") : ""
+  }
   if (!owner || !device) return stop("wa.owner and wa.device must both be set", "waiting")
   await ownFolder(dir)
   const lock = join(dir, "lock")
@@ -161,6 +165,7 @@ const main = async () => {
   let current: Sock | undefined
   const send = sender({
     alert,
+    device,
     dir,
     now: Date.now,
     owner,
@@ -238,7 +243,7 @@ const main = async () => {
   }
   const why = await life({
     alert: (text) => post("ops-wa needs a look", text, "alert"),
-    alertNumber: alert,
+    alertNumber: await alert(),
     card: (code) => {
       result = "waiting: the pairing code waits to be typed on the spare phone"
       void pulse()

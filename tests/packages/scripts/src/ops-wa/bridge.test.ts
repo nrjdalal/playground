@@ -28,7 +28,7 @@ import {
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
-import { ALERT, fakeSocket, groupJid, jid, OWNER, STRANGER } from "./fake-socket"
+import { ALERT, fakeSocket, groupJid, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -56,11 +56,13 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     on: true,
     seat: ASSISTANT as string | undefined,
     stuck: null as Stuck,
+    // wa.alert as ops-wa reads it afresh, so a test can change it mid-run
+    alert: alert ?? "",
   }
   let now = START
   fake.setClock(() => now)
   const base = {
-    alert,
+    alert: async () => mode.alert,
     dir,
     now: () => now,
     owner: OWNER,
@@ -69,7 +71,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       now += ms
     },
   }
-  const send = sender({ ...base, sock: fake.sock })
+  const send = sender({ ...base, device: SPARE, sock: fake.sock })
   const watched = bridge({
     ...base,
     assistant: async () => mode.seat,
@@ -278,6 +280,7 @@ describe("ops-wa's bridge", () => {
     for (let i = 0; i < SEND.perHour; i++) await h.send(`n${i}`)
     // a new sender over the same folder stands for a restart of ops-wa
     const again = sender({
+      device: SPARE,
       dir: h.dir,
       now: () => START + 70_000,
       owner: OWNER,
@@ -395,6 +398,56 @@ describe("the alert-only second number (#2748)", () => {
     expect(await h.send("down", true)).toBe(
       "sent to the owner alone: the alert number has never written to this number",
     )
+  })
+
+  test("a changed owner starts with none: the old owner's message opens no alert to the new number", async () => {
+    const old = await both()
+    const h = harness(undefined, undefined, ALERT)
+    await Bun.write(join(h.dir, "alert.json"), await Bun.file(join(old.dir, "alert.json")).text())
+    await Bun.write(
+      join(h.dir, "owner.json"),
+      JSON.stringify({ firstAt: START, jid: jid(STRANGER), ownerAt: START }),
+    )
+    expect(await h.send("down", true)).toBe(
+      "sent to the alert number alone: the owner has never written to this number",
+    )
+    await Bun.write(join(h.dir, "owner.json"), JSON.stringify({ firstAt: START, ownerAt: START }))
+    expect(await h.send("down", true)).toBe(
+      "sent to the alert number alone: the owner has never written to this number",
+    )
+    expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).toContain(
+      "owner ••••0001: has never written, so no alert reaches it until it writes once; 24 h 0 min left of its 24 hours for replies",
+    )
+  })
+
+  test("wa.alert is read afresh: a running ops-wa follows its change for each send and each message", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    expect(await h.send("down", true)).toBe("sent")
+    h.mode.alert = ALERT
+    seedAlert(dirname(h.dir), ALERT, START)
+    expect(await h.send("hi, I am alive", true)).toBe("sent")
+    h.fake.upsert([h.fake.message(jid(ALERT), "hello back")])
+    await h.settle()
+    expect(h.data).toHaveLength(1)
+    expect(h.data[0]).toEndWith("reads: hello back")
+    expect(await h.dropped()).toEqual([])
+    h.mode.alert = ""
+    expect(await h.send("down again", true)).toBe("sent")
+    h.fake.upsert([h.fake.message(jid(ALERT), "still there?")])
+    await h.settle()
+    expect(h.data).toHaveLength(1)
+    expect(await h.dropped()).toHaveLength(1)
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(OWNER), jid(OWNER), jid(ALERT), jid(OWNER)])
+  })
+
+  test("an alert while wa.alert is the spare number is refused, a self-chat, and nothing goes", async () => {
+    const h = harness(undefined, undefined, SPARE)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    await expect(h.send("down", true)).rejects.toThrow("wa.alert is the spare number")
+    expect(h.fake.sent).toEqual([])
   })
 
   test("an alert keeps the send habits: each of its sends paced a second apart and counted in the hourly cap", async () => {
