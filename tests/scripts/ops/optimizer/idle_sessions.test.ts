@@ -335,6 +335,54 @@ describe("collect: live sessions with nothing to do", () => {
     }
   })
 
+  // #2704: a reaper beat between the lead's hand-off and the next review never ends a queue reviewer; one of its own open PRs still active keeps it on, even with the row's worker paused and no live session
+  test("checker-worker-gone: kept while one of its open PRs was active under the last day, the row's worker paused and no live session", async () => {
+    const OPEN = "https://github.com/o/r/pull/2140"
+    const recent = new Date((NOW - 60 * 60) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === OPEN ? { head: "eee5555", state: "open", updatedAt: recent, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        prState,
+        roster: {
+          "a1b2c3-reviewer": {
+            kind: "reviewer",
+            name: "a1b2c3-reviewer",
+            prs: [OPEN],
+            worker: "a1b2c3-worker",
+          },
+          "a1b2c3-worker": { kind: "worker", name: "a1b2c3-worker", status: "paused" },
+        },
+        sessions: { "a1b2c3-reviewer": entry({ name: "a1b2c3-reviewer", sessionId: "sess-a1" }) },
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+
+  // #2704: an open PR last active over the day ago is no activity, so the reaper ends the queue reviewer even with the row's worker paused and no live session
+  test("checker-worker-gone: ended when one of its open PRs was last active over the last day, the row's worker paused and no live session", async () => {
+    const OPEN = "https://github.com/o/r/pull/2141"
+    const stale = new Date((NOW - 2 * 24 * 3600) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === OPEN ? { head: "eee6666", state: "open", updatedAt: stale, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        prState,
+        roster: {
+          "a1b2c4-reviewer": {
+            kind: "reviewer",
+            name: "a1b2c4-reviewer",
+            prs: [OPEN],
+            worker: "a1b2c4-worker",
+          },
+          "a1b2c4-worker": { kind: "worker", name: "a1b2c4-worker", status: "paused" },
+        },
+        sessions: { "a1b2c4-reviewer": entry({ name: "a1b2c4-reviewer", sessionId: "sess-b1" }) },
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-worker-gone (a1b2c4-worker)"]])
+  })
+
   test("checker-pr-done: one merged PR flags, and so do two closed ones", async () => {
     const sessions = {
       "tester-bright-lark": entry({ name: "tester-bright-lark", sessionId: "sess-t" }),

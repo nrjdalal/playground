@@ -24,6 +24,8 @@ import { GH_TIMEOUT_MS, ghDown } from "../../../packages/scripts/src/gh-read"
 import STATUSES from "../../roster-statuses.json"
 
 const CACHE_TTL_S = 300
+// A PR still active under the last day keeps its checker, so a reaper beat between the lead's hand-off and the next review never ends the queue reviewer.
+const RECENT_S = 24 * 3600
 
 const PR_URL = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/
 // A checker's prs list names a PR not yet opened by its issue, which reads open until the PR that closes it merges.
@@ -58,6 +60,7 @@ export type PrState = {
   mergedAt?: string
   ref?: string
   state: string
+  updatedAt?: string
   verdicts: string[]
 }
 
@@ -233,12 +236,20 @@ export async function collect(input: CollectInput): Promise<Row[]> {
       const prs = await sessionPrs(input, name, worker, d.sessionId)
       const states = await Promise.all(prs.map((url) => prState(url)))
       const open = states.flatMap((s, i) => (s?.state === "open" ? [prs[i]] : []))
+      // A checker is kept while one of its own open PRs was active under the last day, so a reaper beat between the lead's hand-off and the next review never ends the queue reviewer, even with the row's worker paused and gone.
+      const active = states.some(
+        (s) =>
+          s?.state === "open" &&
+          Boolean(s.updatedAt) &&
+          now - new Date(s.updatedAt as string).getTime() / 1000 < RECENT_S,
+      )
       if (
         worker &&
         !(worker in sessions) &&
         !Object.keys(sessions).some((s) => s.startsWith("worker-") && s.startsWith(worker)) &&
         !comingBack(input, worker) &&
-        !(await servesLiveWorker(input, open))
+        !(await servesLiveWorker(input, open)) &&
+        !active
       )
         why.push(`checker-worker-gone (${worker})`)
       refs = states.flatMap((s) => (s?.ref ? [s.ref] : []))
@@ -436,6 +447,7 @@ export async function prStateLive(
     merge_commit_sha?: string | null
     merged_at?: string | null
     state?: string
+    updated_at?: string | null
   } | null
   if (!pr?.state || !pr.head?.sha) return null
   const state = pr.merged_at ? "merged" : pr.state
@@ -457,6 +469,7 @@ export async function prStateLive(
     mergedAt: pr.merged_at || undefined,
     ref: pr.head.ref,
     state,
+    updatedAt: pr.updated_at || undefined,
     verdicts,
   })
 }
