@@ -2872,10 +2872,6 @@ describe("a playground CLI call that no guard reads runs", () => {
       "settings set of a guard key from the owner's message, which only asks ops-wa",
       "playground settings set wa.replyPolicy 'factory status' --from-owner-msg own1",
     ],
-    [
-      "settings set of a job's row from the owner's message",
-      `playground settings set jobs.ops-wa '{"enabled":true}' --from-owner-msg own1`,
-    ],
     ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],

@@ -10,7 +10,6 @@ import {
   settingHistory,
 } from "@packages/settings"
 
-import { requestSettingSet, socketPath } from "../ops-wa/server"
 import { type Io, need, one, type Out, parseWords, print, Usage, valueOf } from "./store"
 
 // playground settings: reads and writes the settings files in the extensions folder itself, with no dashboard needed; a write is one commit in its scope's clone, under the lock every writer takes.
@@ -52,6 +51,8 @@ export async function settingsCommand(words: string[], io: Io, err: Out): Promis
       throw new Usage(
         "--from-owner-msg takes no --scope, --by or --reason: ops-wa sets it at your login's scope, as the owner's act, with the message id as its reason",
       )
+    // loaded only here, since no other settings call needs ops-wa's socket
+    const { requestSettingSet, socketPath } = await import("../ops-wa/server")
     const reply = await requestSettingSet(
       socketPath(io.data),
       need(one(options, "--from-owner-msg"), "--from-owner-msg"),
