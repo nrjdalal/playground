@@ -388,6 +388,18 @@ export const seedArgv = (home: string, name: string): string[] => [
   "the new-user gate's box keeps a database of its own",
 ]
 
+// The box's own database, so a first run that shares this Mac's Docker fails closed when it has no container of the box's own.
+export const ownDatabaseVerdict = (_case: {
+  error: string
+  made: number
+  own: string
+  saved: { detail: string; ok: boolean }
+  seeded: boolean
+}): { detail: string; ok: boolean } => {
+  // not implemented: a first run with no container of the box's own reused the host's database
+  return { detail: "", ok: false }
+}
+
 // Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
 export const databaseCheck = async (
   click: () => boolean,

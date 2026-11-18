@@ -29,6 +29,7 @@ import {
   installEnv,
   leftForYou,
   makeBox,
+  ownDatabaseVerdict,
   plantLogin,
   readAfter,
   report,
@@ -676,5 +677,48 @@ describe("the box's own database", () => {
       "--reason",
       "the new-user gate's box keeps a database of its own",
     ])
+  })
+
+  // OwnDatabaseVerdict: the box shares this Mac's Docker, so a step 2 verdict fails closed when the box has no database of its own.
+  test("a failed seed fails, so the box never reused the host's database", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "the settings set failed",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: false,
+      }),
+    ).toEqual({
+      detail: `the box could not set its own live.container ${own}: the settings set failed`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with no container of the box's own fails", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 0,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({
+      detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with a container of the box's own passes", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({ detail: "", ok: true })
   })
 })
