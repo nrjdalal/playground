@@ -81,7 +81,7 @@ export type Mode = {
   escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
   inbox?: Inbox
-  // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
+  // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
