@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 
 import {
   checkoutMismatch,
@@ -84,8 +85,12 @@ describe("targetOf", () => {
 const container = (
   name: string,
   bindings: Record<string, { HostIp: string; HostPort: string }[]>,
+  password = "",
 ) => ({
-  Config: { Image: "postgres:alpine" },
+  Config: {
+    Image: "postgres:alpine",
+    Env: password ? [`POSTGRES_PASSWORD=${password}`] : [],
+  },
   Id: `${name}-id`,
   Name: `/${name}`,
   NetworkSettings: { Ports: bindings },
@@ -112,6 +117,7 @@ describe("publishedOn and loopbackOnly", () => {
         id: `${OLD.dispatcher}-desk-db-id`,
         image: "postgres:alpine",
         name: `${OLD.dispatcher}-desk-db`,
+        password: "",
       },
     ])
     expect(publishedOn(inspect, 64918)[0]?.addresses).toEqual(["0.0.0.0", "::"])
@@ -238,16 +244,29 @@ describe("locate", () => {
     }
   })
 
-  test("the exposed refusal names the fix that keeps the data, on the same host port and image, so dev and ingest print one line", () => {
+  test("the keep-data command in the refusal carries the old container's password, on the same host port and image, so dev and ingest print one line", () => {
+    const password = randomUUID().replaceAll("-", "")
+    const every = { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "55432" }] }
+    const refusal = failure(() =>
+      locate(
+        URL_55432,
+        scripted([["a"]], [], { a: container("playground-db", every, password) }).run,
+      ),
+    )
+    expect(refusal.failure).toBe("exposed")
+    expect(refusal.message).toContain("keep its data and re-publish it on 127.0.0.1 alone")
+    expect(refusal.message).toContain(
+      `docker stop playground-db && docker rename playground-db playground-db-old && docker run -d --name playground-db -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=${password} --volumes-from playground-db-old "$(docker inspect -f '{{.Image}}' playground-db-old)"`,
+    )
+  })
+
+  test("the refusal names the recovery if the rename fails, so a database left stopped is started again", () => {
     const every = { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "55432" }] }
     const refusal = failure(() =>
       locate(URL_55432, scripted([["a"]], [], { a: container("playground-db", every) }).run),
     )
     expect(refusal.failure).toBe("exposed")
-    expect(refusal.message).toContain("keep its data and re-publish it on 127.0.0.1 alone")
-    expect(refusal.message).toContain(
-      `docker stop playground-db && docker rename playground-db playground-db-old && docker run -d --name playground-db -p 127.0.0.1:55432:5432 --volumes-from playground-db-old "$(docker inspect -f '{{.Image}}' playground-db-old)"`,
-    )
+    expect(refusal.message).toContain("docker start playground-db")
   })
 
   test("the exposed refusal carries the container it found, so a caller can let its own through", () => {
