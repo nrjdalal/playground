@@ -19,7 +19,11 @@ if (rest[0] === "alert")
     if (rest[i] === "--now-both") {
       nowBoth = true
       rest = [...rest.slice(0, i), ...rest.slice(i + 1)]
-    } else if (rest[i] === "--source" && /^[a-z][\w-]*:\S+$/.test(rest[i + 1] ?? "")) {
+    } else if (rest[i] === "--source") {
+      if (!/^[a-z][\w-]*:\S+$/.test(rest[i + 1] ?? "")) {
+        console.error("wa alert: --source takes <kind>:<ref>, such as test:2026-11-11T03:00Z")
+        process.exit(2)
+      }
       source = rest[i + 1]
       rest = [...rest.slice(0, i), ...rest.slice(i + 2)]
     } else break

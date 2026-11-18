@@ -166,7 +166,9 @@ describe("playground wa alert (#2748)", () => {
         ["ops-tick is down", "alert", undefined],
         ["ops-tick is down", "reply", undefined],
       ])
-      expect((await wa(data, ["alert", "--source", "no-kind", body])).code).toBe(2)
+      const bad = await wa(data, ["alert", "--source", "no-kind", body])
+      expect(bad.code).toBe(2)
+      expect(bad.out).toContain("--source takes <kind>:<ref>")
     } finally {
       server.stop(true)
     }

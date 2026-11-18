@@ -70,7 +70,7 @@ export function serve(
 export const request = (
   path: string,
   body: string,
-  kind: Kind = "reply",
+  kind: Exclude<Kind, "escalate"> = "reply",
   timeoutMs = 600_000,
   source?: string,
 ) =>

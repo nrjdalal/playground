@@ -550,7 +550,12 @@ export function sender(
         ? { jid: jidOf(second), open, who: "the alert number" }
         : { jid: jidOf(io.owner), open, who: "the owner" },
     ]
-    if (kind === "alert" && second && jidOf(second) !== to[0]!.jid) {
+    // an alert for the owner first goes to the alert number at once while the owner has never written, so it still reaches one
+    if (
+      (kind === "alert" || (kind === "first" && !open)) &&
+      second &&
+      jidOf(second) !== to[0]!.jid
+    ) {
       const first = await alertFirst(io.dir, second)
       to.push({ jid: jidOf(second), open: first !== undefined, who: "the alert number" })
     }
@@ -581,7 +586,7 @@ export function sender(
         await writeOwn(sendsFile(io.dir), { sends })
       }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
-    if (kind === "first" && second && jidOf(second) !== jidOf(io.owner)) {
+    if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
