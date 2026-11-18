@@ -125,7 +125,7 @@ A reviewer's round sorts its findings into blocking, should-fix and nits; the wo
 - When a scope ruling drops or changes an item, change the PR's title in the same update as its body (`gh pr edit <n> --title <title> --body-file <file>`), since the merge commit and the Changelog take the title: one PR merged under a title naming an item its ruling had dropped.
 - Keep a nit only if it fixes a wrong statement, a misleading name or comment, or a real readability problem; drop a style-only nit with a one-line note.
 - A head at 5/5 with green checks, and each PASS its diff calls for (the tester's, the new-user gate's), merges as it stands; fold each kept nit into the next PR that touches the same file, never a nits-only PR.
-- Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why.
+- Post one sort comment per PR, naming each nit kept, with the PR it waits for, or dropped, with why; it posts once, before or after the merge, since pr:merge marks a green 5/5 draft ready itself and merge-on-ready can take it within a minute of its label (pr-merge README:10).
 - Apply a patch copied from a GitHub comment with `git apply --recount <file>`, since a comment's patch often carries stale hunk counts.
 - A lead hands a reviewer's patch on by the reviewer's own path, its verdict comment or the file it saved, never as a copy the lead writes out again, since a rewritten copy lost the leading space of its blank context lines and failed `git apply --check`.
 - A lead that holds a PR (its own line in the held list, `packages/scripts/src/pr-merge/README.md`'s Holds and rulings) sends its reviewer the hold, then the resume, by `SendMessage`, as playbook's Chain sends a lead's word to a checker.
