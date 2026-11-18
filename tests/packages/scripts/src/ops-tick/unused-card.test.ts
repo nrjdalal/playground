@@ -12,6 +12,7 @@ import {
   offered,
   peerCommand,
   questionOf,
+  readCard,
   savedPicks,
 } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 
@@ -363,6 +364,15 @@ test("kept stays for a machine not read, and drops an item gone from tonight's l
   expect(keptAfter([here(image), { machine: "peer", why: "exit 255" }], kept)).toEqual({
     "peer docker image x:1": MB,
   })
+})
+
+// nightly-clean asks through ops-job's run, whose out is stdout then stderr (job.ts's `out + err`), so ask get's picked line follows the card (PG-2707).
+test("a card reads when ask's picked line on stderr follows its JSON in the joined output", async () => {
+  const card = { status: "approved", updatedAt: WROTE }
+  for (const json of [JSON.stringify(card, null, 2), JSON.stringify(card)])
+    expect(
+      await readCard(async () => ({ code: 0, out: `${json}\nask: picked A: Remove\n` }), ID),
+    ).toEqual(card)
 })
 
 test("a card that does not read stays for the next night, and one the Inbox no longer holds is let go", async () => {
