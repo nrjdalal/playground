@@ -25,6 +25,7 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import STATUSES from "../../../../scripts/roster-statuses.json"
 import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
 import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
@@ -567,8 +568,8 @@ const resumeRelay = async (ctx: Context, line: string): Promise<boolean> => {
   return false
 }
 
-// A session the roster holds on purpose, or a probe, is never named as felled.
-const HELD = new Set(["done", "ended", "parked", "paused", "starting"])
+// A session the roster holds finished (roster-statuses.json) or starting is never named as felled, so a status added to that file is held without a second edit.
+const HELD = new Set<string>([...(STATUSES.finished as string[]), "starting"])
 
 type Agent = { kind?: unknown; name?: string; status?: string; worker?: unknown }
 

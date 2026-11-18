@@ -12,6 +12,7 @@ import {
   offered,
   peerCommand,
   questionOf,
+  readCard,
   savedPicks,
 } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 
@@ -153,11 +154,86 @@ test("an answer counts only on the card as nightly-clean last wrote it, answered
   const before = `card ${ID} was answered before nightly-clean's last write`
   const early = { ...answered, answer: { ...answered.answer, at: "2026-11-17T02:00:00.000Z" } }
   expect(savedPicks(early, "ops", saved, ID)).toBe(before)
-  expect(savedPicks(answered, "ops", { id: ID, items }, ID)).toBe(before)
+  expect(savedPicks(answered, "ops", { id: ID, items }, ID)).toBe(
+    `card ${ID} has no write time and no created time to check the answer against`,
+  )
   expect(savedPicks(answered, "ops", { ...saved, id: "another" }, ID)).toBe(
     `card ${ID} is not the card nightly-clean saved`,
   )
   expect(savedPicks(answered, "ops", undefined, ID)).toBeString()
+})
+
+// When the saved write time is missing, the guard falls back to the card's own createdAt (as ask get reads it): an answer at or after that time counts. Both missing refuses with a reason that names the case. These two rows are red at canary, which the fall back fixes.
+test("a saved card with no write time falls back to the card's createdAt, and both missing refuses", () => {
+  const items = offered([here(weights, image)], HOME, out, {})
+  const noAt = { id: ID, items }
+  // A missing saved at, with an answer after the card's createdAt, returns the picks.
+  const afterCreated = {
+    ...cardOf(items),
+    createdAt: "2026-11-17T02:00:00.000Z",
+    answer: { at: LATER, choice: "approve", options: [0, 1] },
+    from: "ops",
+    status: "approved",
+  }
+  expect(savedPicks(afterCreated, "ops", noAt, ID)).toEqual([
+    { bytes: weights.bytes, machine: "here", path: weights.path },
+  ])
+  // A missing saved at and a missing createdAt refuses, with the new reason.
+  const noCreated = {
+    ...cardOf(items),
+    answer: { at: LATER, choice: "approve", options: [0, 1] },
+    from: "ops",
+    status: "approved",
+  }
+  expect(savedPicks(noCreated, "ops", noAt, ID)).toBe(
+    `card ${ID} has no write time and no created time to check the answer against`,
+  )
+})
+
+// These three rows hold at canary and after the fix: the old reason still stands for a stale answer, the shape check is the only guard against an edit, and an answer before createdAt refuses.
+test("a saved card with no write time still refuses a stale answer, an edited card, or one answered before createdAt", () => {
+  const items = offered([here(weights, image)], HOME, out, {})
+  const noAt = { id: ID, items }
+  // An answer given before the saved at (a later write) still refuses, with the old reason.
+  const withAt = { at: "2026-11-17T10:00:00.000Z", id: ID, items }
+  const earlyAnswer = {
+    ...cardOf(items),
+    createdAt: "2026-11-17T02:00:00.000Z",
+    answer: { at: WROTE, choice: "approve", options: [0, 1] },
+    from: "ops",
+    status: "approved",
+  }
+  expect(savedPicks(earlyAnswer, "ops", withAt, ID)).toBe(
+    `card ${ID} was answered before nightly-clean's last write`,
+  )
+  // A card edited after its answer, with no saved at, is still refused by the shape check, since that check is then the only guard against an edit after the answer.
+  const editedPreview = {
+    ...(cardOf(items).preview as Questions),
+    questions: (cardOf(items).preview as Questions).questions.map((q) => ({
+      ...q,
+      options: [...q.options].reverse(),
+    })),
+  }
+  const editedAfter = {
+    ...cardOf(items),
+    createdAt: "2026-11-17T02:00:00.000Z",
+    answer: { at: LATER, choice: "approve", options: [0, 1] },
+    from: "ops",
+    status: "approved",
+    preview: editedPreview,
+  }
+  expect(savedPicks(editedAfter, "ops", noAt, ID)).toBe(
+    `card ${ID} no longer reads as nightly-clean wrote it`,
+  )
+  // An answer timed before the card's createdAt, with no saved at, refuses.
+  const beforeCreated = {
+    ...cardOf(items),
+    createdAt: "2026-11-17T12:00:00.000Z",
+    answer: { at: LATER, choice: "approve", options: [0, 1] },
+    from: "ops",
+    status: "approved",
+  }
+  expect(savedPicks(beforeCreated, "ops", noAt, ID)).toBeString()
 })
 
 test("a peer's approved item is a command Ops runs by hand, naming the card", () => {
@@ -363,6 +439,15 @@ test("kept stays for a machine not read, and drops an item gone from tonight's l
   expect(keptAfter([here(image), { machine: "peer", why: "exit 255" }], kept)).toEqual({
     "peer docker image x:1": MB,
   })
+})
+
+// nightly-clean asks through ops-job's run, whose out is stdout then stderr (job.ts's `out + err`), so ask get's picked line follows the card (PG-2707).
+test("a card reads when ask's picked line on stderr follows its JSON in the joined output", async () => {
+  const card = { status: "approved", updatedAt: WROTE }
+  for (const json of [JSON.stringify(card, null, 2), JSON.stringify(card)])
+    expect(
+      await readCard(async () => ({ code: 0, out: `${json}\nask: picked A: Remove\n` }), ID),
+    ).toEqual(card)
 })
 
 test("a card that does not read stays for the next night, and one the Inbox no longer holds is let go", async () => {

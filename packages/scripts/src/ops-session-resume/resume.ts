@@ -12,6 +12,7 @@ import {
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { roleOfName } from "../../../../scripts/hooks/role"
+import { busyOf } from "../local-model/model"
 import { escalateMs, leadOf } from "../ops-tick/tick"
 import {
   alertText,
@@ -183,6 +184,8 @@ async function callsTail(configDir: string, record: SessionState): Promise<strin
 
 // a stuck session its manager has not answered in unstick.escalateMinutes goes to the primary dispatcher, who posts to the owner's Inbox only when it cannot resolve it; a session reading working whose transcript has not moved in QUIET_MS (no tool call) goes to its manager.
 const QUIET_MS = 15 * 60_000
+// /metrics counts requests, not sessions, so the local model's busy read holds a quiet local session's line back this long at most, and a stuck one is still flagged while others are served.
+const SERVED_MS = 45 * 60_000
 
 // A permission prompt's escalation carries its waiting call and the call's key, so the dispatcher can answer it with playground picker.
 export const stuckEscalation = (
@@ -332,6 +335,9 @@ const rosterAgents = async (ops: string) => {
 export async function cycle(options: {
   configDir: string
   live: () => Promise<Map<string, LiveSession>>
+  metrics?: () => Promise<string | null>
+  // a session the local model serves, by its backend pin, so the /metrics skip below gates on it; a read that fails is not local
+  servedByLocal?: (name: string) => Promise<boolean>
   now?: Date
 }): Promise<{ result: string; resumed: number }> {
   const { configDir, now = new Date() } = options
@@ -419,6 +425,16 @@ export async function cycle(options: {
       const path = await transcriptPathOf(configDir, record.sessionId)
       const moved = path ? await newestWrite(path) : undefined
       if (moved === undefined || now.getTime() - moved < QUIET_MS) continue
+      // A working session the local model still serves is not quiet: read its /metrics, where running and waiting above 0 means the model is working, before flagging, so a 15-minute compaction is never read as stuck from the pane's idle; a session the local model does not serve (Claude or GLM) is judged only by its idle.
+      if (now.getTime() - moved < SERVED_MS && (await options.servedByLocal?.(session.name))) {
+        if (options.metrics) {
+          const text = await options.metrics()
+          if (text !== null) {
+            const busy = busyOf(text)
+            if (busy !== null && busy > 0) continue
+          }
+        }
+      }
       const key = `${record.sessionId} quiet ${new Date(moved).toISOString()}`
       quiet.add(key)
       const tail = await transcriptTail(configDir, record.sessionId)

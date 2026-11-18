@@ -19,6 +19,7 @@ import { basename, dirname, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
+import { cardOf, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import {
   clonesOf,
   processesOf,
@@ -139,6 +140,76 @@ const machine = () => {
   }
   return { deps, home, main, root, told }
 }
+
+// A mkdtemp machine for a card: a main whose ask prints one approved card to stdout, a data folder with the ops manager's roster and the saved card, and the card id with its one pick.
+const cardMachine = () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-card-")))
+  dirs.push(root)
+  const home = join(root, "home")
+  const main = join(home, "playground")
+  const data = join(home, ".playground")
+  mkdirSync(join(data, "ops", "tick"), { recursive: true })
+  mkdirSync(main, { recursive: true })
+  const cardId = "11111111-2222-3333-4444-555555555555"
+  const item = {
+    bytes: 300 * 1024 * 1024,
+    id: "sha256:abc",
+    kind: "image",
+    machine: "here",
+    path: "docker image img:1",
+  } satisfies CardItem
+  const pick = { bytes: item.bytes, machine: item.machine, path: item.path }
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({ agents: [{ kind: "ops", name: "ops" }] }),
+  )
+  writeFileSync(
+    join(data, "ops", "tick", "nightly-clean.json"),
+    JSON.stringify({ card: { at: "2026-11-18T00:00:00.000Z", id: cardId, items: [item] } }),
+  )
+  const card = {
+    answer: { at: "2026-11-18T01:00:00.000Z", choice: "approve", options: [0] },
+    from: "ops",
+    kind: "decision",
+    preview: cardOf([item]).preview,
+    status: "approved",
+    updatedAt: "2026-11-18T00:00:00.000Z",
+  }
+  writeFileSync(join(main, "card.json"), `${JSON.stringify(card)}\n`)
+  writeFileSync(
+    join(main, "ask.sh"),
+    `#!/bin/sh\nif [ "$1" = "get" ] && [ "$#" -eq 2 ]; then cat card.json; printf '%s\\n' 'ask: picked A: Remove' >&2; exit 0; fi\nexit 1\n`,
+  )
+  writeFileSync(
+    join(main, "package.json"),
+    JSON.stringify({ name: "fake", private: true, scripts: { ask: "sh ask.sh" } }),
+  )
+  const repo0 = process.env.PLAYGROUND_REPO
+  const data0 = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_REPO = main
+  process.env.PLAYGROUND_DATA_DIR = data
+  return {
+    cardId,
+    deps: rmDeps(main),
+    pick,
+    restore: () => {
+      if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = repo0
+      if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = data0
+    },
+  }
+}
+
+test("rm --card reads ask's card from its stdout alone, so a picked line on stderr no longer breaks it", async () => {
+  const { cardId, deps, pick, restore } = cardMachine()
+  try {
+    const picks = await deps.approvals!(cardId)
+    expect(picks).toEqual([pick])
+  } finally {
+    restore()
+  }
+})
 
 test("runRm moves a path, lists it and restores it, telling no one", async () => {
   const { deps, home, told } = machine()

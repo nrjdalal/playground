@@ -55,3 +55,19 @@ test("the download, PDF and site-write lines live in the template, not in planne
   }
   expect(planner).toContain("`~/.playground/handoffs/new-research-worker.md`")
 })
+
+// issue 2729: a release cited as a project's latest is a stable one, not a pre-release
+test("the research worker template says a release cited as latest is stable", async () => {
+  const template = await read()
+  expect(template).toContain(
+    "A release cited as a project's latest has `prerelease: false` and `draft: false` on GitHub's releases API (`gh api repos/<owner>/<repo>/releases`), and a pre-release is named as one.",
+  )
+})
+
+// issue 2729: a release cited as a project's latest is a stable one, not a pre-release
+test("the planner's own writes cite a stable release as latest (#2729)", async () => {
+  const planner = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/planner.md")).text()
+  expect(planner).toContain(
+    "A release you cite as a project's latest in a deck or card you edit yourself has `prerelease: false` and `draft: false` on GitHub's releases API (`gh api repos/<owner>/<repo>/releases`), and a pre-release is named as one.",
+  )
+})
