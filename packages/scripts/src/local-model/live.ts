@@ -149,13 +149,12 @@ export const keepBeat = async (data: string): Promise<string[]> => {
   return lines
 }
 
-// The kept model's current /metrics, read at LOCAL_URL, so a session's stuck read can skip a session the model still serves, null when the read fails or its status is not 200.
-export const readModelMetrics = async (data: string, url = LOCAL_URL): Promise<string | null> => {
-  let res: Response | undefined
+// The local model's current /metrics, read at LOCAL_URL, where every local session reaches it with or without a model record, so a session's stuck read can skip a session the model still serves; null when the read fails or its status is not 200.
+export const readModelMetrics = async (url = LOCAL_URL): Promise<string | null> => {
   try {
-    res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(5_000) })
+    const res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(5_000) })
+    return res.status === 200 ? await res.text() : null
   } catch {
     return null
   }
-  return res.status === 200 ? await res.text() : null
 }

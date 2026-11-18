@@ -17,7 +17,7 @@ const isLocal = (name: string): Promise<boolean> =>
     .then((text) => readPin(text)?.backend === "local")
 // A working session the local model serves is not quiet while its /metrics reads busy, so a 15-minute compaction is never read as stuck from the pane's idle; only a session whose backend pin reads local is checked, and an unreadable pin is not local.
 const localBusy = async (name: string): Promise<boolean> =>
-  (await isLocal(name)) && metricsBusy(await readModelMetrics(dataDirOf(process.env)))
+  (await isLocal(name)) && metricsBusy(await readModelMetrics())
 const once = () =>
   cycle({
     configDir,

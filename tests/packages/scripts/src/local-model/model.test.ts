@@ -746,10 +746,9 @@ describe("the model readers (PG-2543)", () => {
 })
 
 describe("readModelMetrics (PG-2749)", () => {
-  // A stub HTTP server answers /metrics; the read takes the URL as its second argument, so the test never reaches the live model or 127.0.0.1:8000, and a scratch data folder holds no model record.
+  // A stub HTTP server answers /metrics; the read takes the URL alone, so it needs no model record, and the test never reaches the live model or 127.0.0.1:8000.
   test("reads /metrics at the given url, so a session the model serves is skipped with no model record", async () => {
     const text = metrics(2, 0)
-    const data = scratch()
     const server = Bun.serve({
       port: 0,
       async fetch(request) {
@@ -759,10 +758,37 @@ describe("readModelMetrics (PG-2749)", () => {
     })
     try {
       const url = `http://127.0.0.1:${server.port}`
-      expect(await readModelMetrics(data, url)).toBe(text)
-      expect(metricsBusy(await readModelMetrics(data, url))).toBe(true)
+      expect(await readModelMetrics(url)).toBe(text)
+      expect(metricsBusy(await readModelMetrics(url))).toBe(true)
     } finally {
       server.stop()
+    }
+  })
+
+  test("a failed read or a status other than 200 reads null, so the quiet session is still flagged", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("down", { status: 503 }) })
+    try {
+      expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+    } finally {
+      server.stop()
+    }
+    expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+  })
+
+  test("a body that breaks off after a 200 reads null, not a throw that fails the whole cycle", async () => {
+    const server = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data: (socket) => {
+          socket.end("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nvllm:num_requests_running 2\n")
+        },
+      },
+    })
+    try {
+      expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+    } finally {
+      server.stop(true)
     }
   })
 })
