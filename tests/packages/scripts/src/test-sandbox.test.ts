@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +14,11 @@ import { join } from "node:path"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/test-sandbox.ts")
 const DIR = mkdtempSync(join(tmpdir(), "test-sandbox-test-"))
+// 2711: the suite runner has no uv on PATH, so each Python row sets PATH to this stub first, which runs the file with python3
+const uvBin = join(DIR, "uv-bin")
+mkdirSync(uvBin)
+writeFileSync(join(uvBin, "uv"), '#!/bin/sh\nfor a; do f=$a; done; exec python3 "$f"\n')
+chmodSync(join(uvBin, "uv"), 0o755)
 
 // removing DIR also ends the looping child's loop, even when bun drops a timed-out test's body before its finally
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
@@ -520,6 +526,7 @@ test("a failing Python test exits the run, naming it, like a failing bun test (#
   )
   const run = Bun.spawn(["bun", SCRIPT, "tests/x/test_fail.py"], {
     cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
     stderr: "pipe",
     stdout: "ignore",
     timeout: 120_000,
@@ -536,6 +543,7 @@ test("a passing Python test exits 0, and is reported as run, not read green (#27
   writeFileSync(join(dir, "tests", "x", "test_ok.py"), 'import sys\nprint("ok", flush=True)\n')
   const run = Bun.spawn(["bun", SCRIPT, "tests/x/test_ok.py"], {
     cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
     stderr: "pipe",
     stdout: "ignore",
     timeout: 120_000,
@@ -578,6 +586,7 @@ test("a diff that only adds a docs line still lists a repo-walking Python test, 
   // test:file over the list routes the Python test to uv, so the run passes, as it could not over the docs-only diff before
   const run = Bun.spawn(["bun", SCRIPT, ...listed], {
     cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
     stderr: "pipe",
     stdout: "ignore",
     timeout: 120_000,
