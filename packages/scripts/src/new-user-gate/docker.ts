@@ -35,20 +35,22 @@ const NAMED = new Set([
   "restart",
   "rm",
   "start",
+  "stats",
   "stop",
   "update",
   "wait",
 ])
 
-// Pure: the argv the box's docker hands the real one, or why it refuses: ps and run carry the box's label, a call naming a container the box did not make is refused, and so is every other subcommand (prune, volume, system, cp), since it reaches past the box's own.
+// Pure: the argv the box's docker hands the real one, its own answer, or why it refuses: ps, run and a bare stats keep to the box's label, a call naming a container the box did not make is refused, and so is every other subcommand (prune, volume, system, cp), since it reaches past the box's own; a refusal always names a reach, never a read the box's own jobs make.
 export const narrow = (
   argv: string[],
   box: string,
   listed: Listed[] | null,
-): { argv: string[] } | { refused: string } => {
+): { argv: string[] } | { answer: string } | { refused: string } => {
   const [sub = "", ...rest] = argv
   const own = `${BOX_LABEL}=${box}`
   if (READS.has(sub)) return { argv }
+  if (sub === "context" && ["inspect", "ls", "show"].includes(rest[0] ?? "")) return { argv }
   if (sub === "ps") return { argv: [...argv, "--filter", `label=${own}`] }
   if (sub !== "run" && !NAMED.has(sub))
     return { refused: `${sub || "(none)"}: not a call the box makes` }
@@ -63,6 +65,11 @@ export const narrow = (
     return c !== undefined && c.label !== box
   })
   if (other) return { refused: `${sub} ${other}` }
+  // a bare stats reads every container on the machine, so the box's reads its own alone, and none answers empty
+  if (sub === "stats" && !words.some((w) => named(w))) {
+    const mine = listed.filter((c) => c.label === box).flatMap((c) => c.names.slice(0, 1))
+    return mine.length ? { argv: [...argv, ...mine] } : { answer: "" }
+  }
   return { argv: sub === "run" ? ["run", "--label", own, ...rest] : argv }
 }
 
@@ -82,6 +89,10 @@ if (import.meta.main) {
     process.exit(1)
   }
   appendFileSync(log, `docker ${argv[0] ?? ""}\n`)
+  if ("answer" in decided) {
+    process.stdout.write(decided.answer)
+    process.exit(0)
+  }
   const child = Bun.spawn([real, ...decided.argv], {
     stderr: "inherit",
     stdin: "inherit",

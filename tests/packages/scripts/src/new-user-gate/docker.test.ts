@@ -90,7 +90,6 @@ describe("the gate box's docker", () => {
       "volume",
       "system",
       "cp",
-      "stats",
       "context",
       "network",
       "builder",
@@ -100,5 +99,19 @@ describe("the gate box's docker", () => {
       expect(narrow([sub, "prune", "-f"], box, listed)).toHaveProperty("refused")
     expect(narrow(["inspect", `${box}-db-Ab12`], box, null)).toHaveProperty("refused")
     expect(narrow(["info"], box, null)).toEqual({ argv: ["info"] })
+  })
+
+  test("answers the System panel's host-wide reads with the box's own, so a refusal always names a reach", () => {
+    const stats = ["stats", "--no-stream", "--format", "{{json .}}"]
+    expect(narrow(stats, box, listed)).toEqual({
+      argv: [...stats, `${box}-db-Ab12`, `${box}-db-Ab12-old`],
+    })
+    expect(narrow(stats, "pg-gate-0000000-none", listed)).toEqual({ answer: "" })
+    expect(narrow(["stats", "--no-stream", "playground-dashboard-db-sY08"], box, listed)).toEqual({
+      refused: "stats playground-dashboard-db-sY08",
+    })
+    const context = ["context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"]
+    expect(narrow(context, box, listed)).toEqual({ argv: context })
+    expect(narrow(["context", "rm", "default"], box, listed)).toHaveProperty("refused")
   })
 })
