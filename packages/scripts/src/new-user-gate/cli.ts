@@ -20,7 +20,7 @@ import { networkChangedWait } from "../agent-browser-retry"
 import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
-import { GATE_LABEL, stubs, usageReading } from "./stubs"
+import { stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -588,22 +588,12 @@ export const clean = (box: string, home: string, portless = PORTLESS) => {
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
-  const names = run([
-    "docker",
-    "ps",
-    "-a",
-    "--filter",
-    `label=${GATE_LABEL}`,
-    "--format",
-    "{{.Names}}",
-  ])
-    .out.split("\n")
-    .filter(Boolean)
   const own = boxContainers(
     run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
   )
-  for (const name of [...names, ...own]) run(["docker", "rm", "-fv", name])
+  // the box starts its own containers with docker, so the clean removes those by name; the gate sets no label any more
+  for (const name of own) run(["docker", "rm", "-fv", name])
   dropBox(box)
 }
 

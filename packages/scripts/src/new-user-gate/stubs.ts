@@ -2,9 +2,6 @@
 
 import { join } from "node:path"
 
-// The label on every container the gate starts, which its clean-up removes by name.
-export const GATE_LABEL = "playground-gate=1"
-
 const logged = (box: string, name: string) =>
   `#!/bin/bash\necho "${name} $*" >> "${box}/calls.log"\n`
 
