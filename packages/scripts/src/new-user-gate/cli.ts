@@ -389,15 +389,30 @@ export const seedArgv = (home: string, name: string): string[] => [
 ]
 
 // The box's own database, so a first run that shares this Mac's Docker fails closed when it has no container of the box's own.
-export const ownDatabaseVerdict = (_case: {
+export const ownDatabaseVerdict = ({
+  error,
+  made,
+  own,
+  saved,
+  seeded,
+}: {
   error: string
   made: number
   own: string
   saved: { detail: string; ok: boolean }
   seeded: boolean
 }): { detail: string; ok: boolean } => {
-  // not implemented: a first run with no container of the box's own reused the host's database
-  return { detail: "", ok: false }
+  // fail closed: with no live.container of its own the click would reuse the host's live database
+  if (!seeded) {
+    return { detail: `the box could not set its own live.container ${own}: ${error}`, ok: false }
+  }
+  if (saved.ok && made === 0) {
+    return {
+      detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    }
+  }
+  return { detail: saved.detail, ok: saved.ok }
 }
 
 // Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
@@ -665,10 +680,13 @@ const main = async (args: string[]) => {
     await check("first run starts the database with one click", async () => {
       // fail closed: with no live.container of its own the click would reuse the host's live database
       if (seeded.code !== 0) {
-        return {
-          detail: `the box could not set its own live.container ${own}: ${(seeded.err || seeded.out).trim().slice(-200)}`,
-          ok: false,
-        }
+        return ownDatabaseVerdict({
+          error: (seeded.err || seeded.out).trim().slice(-200),
+          made: 0,
+          own,
+          saved: { detail: "", ok: true },
+          seeded: false,
+        })
       }
       const env = join(desk, ".env")
       const saved = await databaseCheck(
@@ -681,15 +699,18 @@ const main = async (args: string[]) => {
           } catch {}
         },
       )
-      const made = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
-      if (saved.ok && made.length === 0) {
-        return {
-          detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
-          ok: false,
-          shot: browser.shot("2-database"),
-        }
+      const names = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      const verdict = ownDatabaseVerdict({
+        error: "",
+        made: names.length,
+        own,
+        saved,
+        seeded: true,
+      })
+      return {
+        ...verdict,
+        shot: browser.shot("2-database"),
       }
-      return { ...saved, shot: browser.shot("2-database") }
     })
     await check("the Dashboard shows Alpha", async () => {
       browser.cmd("open", `${web}/dashboard`)
