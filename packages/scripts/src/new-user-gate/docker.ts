@@ -1,0 +1,91 @@
+// The gate box's docker: this machine's real docker narrowed to the containers the box made, so a box's first run, or any job it starts, never reaches a container of the machine's own (the live dashboard's database among them). Usage: docker.ts <real docker> <box name> <calls.log> <docker argv...>
+import { appendFileSync } from "node:fs"
+
+// The label every container the box starts carries, set to the box's name; a container without it is one the box did not make.
+export const BOX_LABEL = "playground-gate-box"
+
+export type Listed = { id: string; label: string; names: string[] }
+
+// The real docker's listing of every container, each with its full id, its names and its box label.
+export const LIST_ARGV = [
+  "ps",
+  "-a",
+  "--no-trunc",
+  "--format",
+  `{{.ID}}\t{{.Names}}\t{{.Label "${BOX_LABEL}"}}`,
+]
+
+export const listedOf = (out: string): Listed[] =>
+  out
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => {
+      const [id = "", names = "", label = ""] = line.split("\t")
+      return { id: id.trim(), label: label.trim(), names: names.trim().split(",") }
+    })
+
+const READS = new Set(["info", "version", "--version", "images", "pull"])
+const NAMED = new Set([
+  "exec",
+  "inspect",
+  "kill",
+  "logs",
+  "port",
+  "rename",
+  "restart",
+  "rm",
+  "start",
+  "stop",
+  "update",
+  "wait",
+])
+
+// Pure: the argv the box's docker hands the real one, or why it refuses: ps and run carry the box's label, a call naming a container the box did not make is refused, and so is every other subcommand (prune, volume, system, cp), since it reaches past the box's own.
+export const narrow = (
+  argv: string[],
+  box: string,
+  listed: Listed[] | null,
+): { argv: string[] } | { refused: string } => {
+  const [sub = "", ...rest] = argv
+  const own = `${BOX_LABEL}=${box}`
+  if (READS.has(sub)) return { argv }
+  if (sub === "ps") return { argv: [...argv, "--filter", `label=${own}`] }
+  if (sub !== "run" && !NAMED.has(sub))
+    return { refused: `${sub || "(none)"}: not a call the box makes` }
+  if (listed === null) return { refused: `${sub}: docker could not list its containers` }
+  const words = rest.flatMap((a) =>
+    a.startsWith("-") ? (a.includes("=") ? [a.slice(a.indexOf("=") + 1)] : []) : [a],
+  )
+  const named = (w: string) =>
+    listed.find((c) => c.names.includes(w) || (w.length >= 12 && c.id.startsWith(w)))
+  const other = words.find((w) => {
+    const c = named(w)
+    return c !== undefined && c.label !== box
+  })
+  if (other) return { refused: `${sub} ${other}` }
+  return { argv: sub === "run" ? ["run", "--label", own, ...rest] : argv }
+}
+
+if (import.meta.main) {
+  const [real = "", box = "", log = "", ...argv] = process.argv.slice(2)
+  const listing = Bun.spawnSync([real, ...LIST_ARGV], { stderr: "ignore", stdin: "ignore" })
+  const decided = narrow(
+    argv,
+    box,
+    listing.exitCode === 0 ? listedOf(listing.stdout.toString()) : null,
+  )
+  if ("refused" in decided) {
+    appendFileSync(log, `docker refused ${decided.refused}\n`)
+    console.error(
+      `docker: the gate box refuses ${decided.refused}, a container or call this box did not make`,
+    )
+    process.exit(1)
+  }
+  appendFileSync(log, `docker ${argv[0] ?? ""}\n`)
+  const child = Bun.spawn([real, ...decided.argv], {
+    stderr: "inherit",
+    stdin: "inherit",
+    stdout: "inherit",
+  })
+  process.exit(await child.exited)
+}

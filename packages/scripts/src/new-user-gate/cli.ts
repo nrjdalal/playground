@@ -20,6 +20,7 @@ import { networkChangedWait } from "../agent-browser-retry"
 import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
+import { BOX_LABEL } from "./docker"
 import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
@@ -221,7 +222,9 @@ const prep = (box: string, sha: string) => {
   mkdirSync(join(box, "stubs"), { recursive: true })
   mkdirSync(join(box, "shots"), { recursive: true })
   mkdirSync(home, { recursive: true })
-  for (const [name, text] of Object.entries(stubs(box, realBin("bunx"), realBin("curl")))) {
+  for (const [name, text] of Object.entries(
+    stubs(box, realBin("bunx"), realBin("curl"), realBin("docker")),
+  )) {
     writeFileSync(join(box, "stubs", name), text)
     chmodSync(join(box, "stubs", name), 0o755)
   }
@@ -374,6 +377,19 @@ export const boxContainers = (listed: string, name: string): string[] =>
     .split("\n")
     .map((line) => line.trim())
     .filter((c) => c.startsWith(`${name}-`) && /^[0-9a-zA-Z]{4}$/.test(c.slice(name.length + 1)))
+
+// Pure: each docker call the box's docker refused, from calls.log's text (docker.ts).
+export const dockerRefusals = (calls: string): string[] =>
+  calls
+    .split("\n")
+    .filter((line) => line.startsWith("docker refused "))
+    .map((line) => line.slice("docker refused ".length))
+
+// Pure: why the gate refuses to run from a checkout whose gate code is not the sha's, or null when it is: an older gate's box once reached the live dashboard's database.
+export const gateDrift = (diffCode: number, sha: string): string | null =>
+  diffCode === 0
+    ? null
+    : `this checkout's packages/scripts/src/new-user-gate/ differs from ${sha.slice(0, 7)}'s, so its box is not the one that sha ships; run the gate from a checkout at that sha: git worktree add --detach <dir> ${sha.slice(0, 7)}, bun install there, then bun run --cwd <dir> gate:new-user ${sha.slice(0, 7)}`
 
 // Pure: the box's own `playground settings set` of its live.container, run with its checkout's CLI.
 export const seedArgv = (home: string, name: string): string[] => [
@@ -561,17 +577,11 @@ export const clean = (box: string, home: string, portless = PORTLESS) => {
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
-  const names = run([
-    "docker",
-    "ps",
-    "-a",
-    "--filter",
-    `label=${GATE_LABEL}`,
-    "--format",
-    "{{.Names}}",
-  ])
-    .out.split("\n")
-    .filter(Boolean)
+  const names = [GATE_LABEL, `${BOX_LABEL}=${basename(box)}`].flatMap((label) =>
+    run(["docker", "ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
+      .out.split("\n")
+      .filter(Boolean),
+  )
   const own = boxContainers(
     run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
@@ -605,6 +615,15 @@ const main = async (args: string[]) => {
   const full = run(["git", "rev-parse", `${fromTag ?? sha}^{commit}`], { cwd: REPO }).out.trim()
   if (!full) {
     console.error(`gate: ${sha} is no commit in this checkout`)
+    return 2
+  }
+  const drift = gateDrift(
+    run(["git", "diff", "--quiet", full, "--", "packages/scripts/src/new-user-gate"], { cwd: REPO })
+      .code,
+    full,
+  )
+  if (drift) {
+    console.error(`gate: ${drift}`)
     return 2
   }
   const keep = args.includes("--keep")
@@ -670,6 +689,15 @@ const main = async (args: string[]) => {
         },
       )
       const made = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      const calls = join(box, "calls.log")
+      const refused = dockerRefusals(existsSync(calls) ? readFileSync(calls, "utf8") : "")
+      if (refused.length) {
+        return {
+          detail: `the box's docker refused ${refused.join("; ")}, a container or call the box did not make`,
+          ok: false,
+          shot: browser.shot("2-database"),
+        }
+      }
       if (saved.ok && made.length === 0) {
         return {
           detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
