@@ -56,14 +56,17 @@ const line = (text: string, at = "2026-11-16T20:00:00Z", to = "probe-b"): PeerLi
 const write = (data: string, row: object) =>
   appendFileSync(queueOf(data), `${JSON.stringify(row)}\n`)
 
-// The far end: agent.ts on the other machine's data folder, started from the offset the relay names, ended by its own handle.
-const agentFar = (there: string, from: number | "end" = "end"): Far => {
-  const child = Bun.spawn(["bun", "--no-env-file", AGENT, String(from)], {
-    env: { ...process.env, PLAYGROUND_DATA_DIR: there },
-    stderr: "pipe",
-    stdin: "pipe",
-    stdout: "pipe",
-  })
+// The far end: agent.ts on the other machine's data folder, started from the offset the relay names, ended by its own handle; a test passes delayMs to hold it between hello and reading its start.
+const agentFar = (there: string, from: number | "end" = "end", delayMs?: number): Far => {
+  const child = Bun.spawn(
+    ["bun", "--no-env-file", AGENT, String(from), ...(delayMs ? [String(delayMs)] : [])],
+    {
+      env: { ...process.env, PLAYGROUND_DATA_DIR: there },
+      stderr: "pipe",
+      stdin: "pipe",
+      stdout: "pipe",
+    },
+  )
   return {
     exited: child.exited,
     kill: () => child.kill(),
@@ -185,6 +188,32 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
   test("each machine's new lines reach the other once, a copied line never goes back, and a line there keeps its at", async () => {
     const { here, there } = machines("both")
     const link1 = hold(here, agentFar(there))
+    await until(link1.isUp, 10_000, "link up")
+    const out = line("to there", "2026-11-16T20:00:01Z", "probe-b")
+    const back = line("to here", "2026-11-16T20:00:02Z", "probe-a")
+    write(here, out)
+    write(there, back)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        const hereRows = rows(here).length
+        return thereRows === 2 && hereRows === 2 ? true : { there: thereRows, here: hereRows }
+      },
+      10_000,
+      "copied both ways",
+    )
+    await Bun.sleep(200)
+    link1.stop()
+    expect(await link1.done).toBe("")
+    expect(rows(there)).toEqual([back, { ...out, relayedAt: expect.any(String) }])
+    expect(rows(here)).toEqual([out, { ...back, relayedAt: expect.any(String) }])
+    expect(link1.told).toEqual([])
+  })
+
+  test("a far line written after the link is up, before the far reads its start, still crosses here", async () => {
+    const { here, there } = machines("read-past")
+    // an 80 ms hold between the far's hello and its start read makes the link go up first, then the line lands after the far reads its start.
+    const link1 = hold(here, agentFar(there, "end", 80))
     await until(link1.isUp, 10_000, "link up")
     const out = line("to there", "2026-11-16T20:00:01Z", "probe-b")
     const back = line("to here", "2026-11-16T20:00:02Z", "probe-a")
