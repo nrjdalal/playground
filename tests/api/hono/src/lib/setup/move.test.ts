@@ -160,7 +160,7 @@ describe("moveIfExposed", () => {
     expect(docker.calls.some(([verb]) => verb === "rm")).toBe(false)
     expect(lines).toEqual([
       `Moved the database ${NAME} onto 127.0.0.1:${PORT} alone, keeping its data`,
-      `${NAME}-old is stopped and kept; once the Dashboard reads its data, remove it with: docker rm ${NAME}-old`,
+      `${NAME}-old is stopped and kept; once the Dashboard reads its data, remove it with: docker rm -v ${NAME}-old`,
     ])
     expect(lines.join("\n")).not.toContain(SECRET)
   })

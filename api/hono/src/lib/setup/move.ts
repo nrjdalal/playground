@@ -68,8 +68,8 @@ export const loopbackArgv = (name: string, port: number, kept: Kept): string[] =
   ...kept.cmd,
 ]
 
-// Pure: the one command that removes the old container once the moved one holds the data; with no -v, since its volumes are the moved one's too.
-export const removeLine = (name: string): string => `docker rm ${name}-old`
+// Pure: the one command that removes the old container once the moved one holds the data; its -v leaves every volume the moved one still mounts.
+export const removeLine = (name: string): string => `docker rm -v ${name}-old`
 
 const said = (result: { code: number; stderr: string }) =>
   result.stderr.trim().slice(0, 200) || `exit ${result.code}`

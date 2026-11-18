@@ -25,7 +25,7 @@ On a first run, **Start a local container** on the Database row of **Let's check
   Fix what it names, then click **Start a local container** again.
 - **`<container> publishes port <port> beyond loopback`**: the database was made before it listened on 127.0.0.1 alone, so other devices on your network can reach it, and the Dashboard refuses to write to it.
   On the Database row, click **Move the database onto this Mac alone**; otherwise `playground update` moves it as the Dashboard rolls.
-  The move keeps its data and leaves the old container stopped as `<container>-old`; once the Dashboard shows your sessions, remove that one with `docker rm <container>-old`.
+  The move keeps its data and leaves the old container stopped as `<container>-old`; once the Dashboard shows your sessions, remove that one with `docker rm -v <container>-old`.
   A failed move starts the old container again as it was and names why.
 - **Postgres in `<container>` did not start in 30 seconds** on the Database row: the container started, but its database did not answer.
   Click **Start a local container** again, which reuses that container; if it fails again, remove it with `docker rm -f -v <container>`, which deletes its data.
