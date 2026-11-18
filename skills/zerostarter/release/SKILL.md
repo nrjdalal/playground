@@ -29,7 +29,18 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again, and clears its rehearsal's scratch folder (the rehearsal's **Clear**).
 
-Run the new-user gate on it through run-slot as `ops-ship`, `~/.playground/ops/run-slot.sh ops-ship -- bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus. Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
+Run the new-user gate on it from a detached worktree at `$CANARY`, through run-slot as `ops-ship`, so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus (`.agents/testing.md`, End-to-end tests).
+The box is the calling checkout's gate code, so the gate runs from the pin's own: the gate stops with exit 2 in a checkout whose gate code differs from the sha's, since a main checkout's older gate once let its box reach the live dashboard's database.
+
+```bash
+GATE="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/ship-gate-${CANARY:0:7}"
+git worktree add --detach "$GATE" "$CANARY"
+~/.playground/ops/run-slot.sh ops-ship -- bun install --cwd "$GATE"
+~/.playground/ops/run-slot.sh ops-ship -- bun run --cwd "$GATE" gate:new-user "$CANARY"
+git worktree remove "$GATE"
+```
+
+Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 A ship the owner approves past a FAIL takes the dispatcher's Inbox decision whose title or text names `vX.Y.Z` and whose approved row reads `Ship everything now, skip the new-user check this once` verbatim (`WAIVER_LABEL`), the label the dispatcher offers for it: write `New-user gate at <sha>: waived by Inbox <id>` in place of the FAIL line, the failing lines still named below it, since `ship:merge` refuses a FAIL line beside a waiver too and reads the decision through `playground ask get` ([pr-merge's README, ship:merge](../../../packages/scripts/src/pr-merge/README.md#shipmerge)).
 
 Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (step 3's `ship:merge` refuses a line Ops wrote by hand, so ask Ops to lift one), `CANARY` holds the SHA you mean to ship and the gate's last line for it, or its waiver line, is in hand. When `canary` moves before step 3, read it again.
