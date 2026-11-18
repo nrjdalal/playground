@@ -167,6 +167,8 @@ You may use one of these, you may use several, it is unlikely you will use all o
 
 Concrete evidence that the change works. Show a before and after.
 
+A PR whose code reads live machine state (a model server, herdr, docker, a systemd unit, the usage files) also gives one read of that code on the live layout, as a read-only run, with its output, not only the injected stub.
+
 Screenshots are S-tier - when the environment is set up for it and the change is visual.
 
 Execution-based evidence is A-tier. Test results, console output. Show the exact test that now fails and passes, using pseudocode.

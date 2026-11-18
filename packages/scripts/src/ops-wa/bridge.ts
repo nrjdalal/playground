@@ -478,7 +478,7 @@ export async function statusOf(
 // What a send is: a reply to the owner, an alert to both numbers, or a reply to the alert number as a guest.
 export type Kind = "alert" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND and counted in its hourly cap, and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028).
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028).
 export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
@@ -525,11 +525,8 @@ export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
       )
     const parts = split(toWhatsApp(body))
     const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
+    // each send's time, which the failover reads to tell whether the dispatcher answered
     const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
-    if (sends.length + parts.length * going.length > SEND.perHour) {
-      const frees = new Date(Math.min(...sends, now) + HOUR).toISOString().slice(11, 16)
-      throw new Error(`the hourly cap of ${SEND.perHour} sends is reached until ${frees}Z`)
-    }
     for (const t of going)
       for (const [k, part] of parts.entries()) {
         const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()

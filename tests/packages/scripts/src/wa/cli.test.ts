@@ -101,7 +101,8 @@ describe("playground wa send", () => {
     const got: string[] = []
     const server = serve(socketPath(data), async (b) => {
       got.push(b)
-      if (got.length > 1) throw new Error("the hourly cap of 60 sends is reached until 04:00Z")
+      if (got.length > 1)
+        throw new Error("ops-wa is not connected to WhatsApp now; try again in a minute")
       return "sent"
     })
     try {
@@ -110,7 +111,7 @@ describe("playground wa send", () => {
       expect(got).toEqual(["all green"])
       expect(await wa(data, ["send", body])).toEqual({
         code: 1,
-        out: "wa send: the hourly cap of 60 sends is reached until 04:00Z",
+        out: "wa send: ops-wa is not connected to WhatsApp now; try again in a minute",
       })
     } finally {
       server.stop(true)
