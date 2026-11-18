@@ -24,6 +24,7 @@ import {
   clean,
   databaseCheck,
   dropBox,
+  hostPorts,
   hostTools,
   installCheck,
   installEnv,
@@ -31,6 +32,7 @@ import {
   makeBox,
   ownDatabaseVerdict,
   plantLogin,
+  postgresUrl,
   readAfter,
   report,
   resultLine,
@@ -41,6 +43,7 @@ import {
   STEP_COUNT,
   type Step,
   strayStandIns,
+  urlPort,
   usageWords,
   verdictLine,
   verdictPost,
@@ -737,5 +740,25 @@ describe("the box's own database", () => {
       detail: `the saved database's port 45313 is not a host port of the box's own containers`,
       ok: false,
     })
+  })
+})
+
+describe("from the host's own docker and the desk's .env", () => {
+  test("postgresUrl returns the value set, and '' when none is set", () => {
+    expect(postgresUrl("POSTGRES_URL=postgres://a:b@127.0.0.1:45313/db\nfoo=bar\n")).toBe(
+      "postgres://a:b@127.0.0.1:45313/db",
+    )
+    expect(postgresUrl("# nothing set\n")).toBe("")
+  })
+
+  test("urlPort takes the port a postgres:// URL names, and NaN when it names none", () => {
+    expect(urlPort("postgres://gate:pw@127.0.0.1:45313/db")).toBe(45313)
+    expect(urlPort("postgres://gate:pw@127.0.0.1/db")).toBeNaN()
+  })
+
+  test("hostPorts takes the host ports a docker port list binds, de-duped", () => {
+    expect(hostPorts("0.0.0.0:33210->5432\n[::]:45313->5432\n")).toEqual([33210, 45313])
+    expect(hostPorts("0.0.0.0:33210->5432\n0.0.0.0:33210->5432\n")).toEqual([33210])
+    expect(hostPorts("\n")).toEqual([])
   })
 })

@@ -375,6 +375,32 @@ export const boxContainers = (listed: string, name: string): string[] =>
     .map((line) => line.trim())
     .filter((c) => c.startsWith(`${name}-`) && /^[0-9a-zA-Z]{4}$/.test(c.slice(name.length + 1)))
 
+// Pure: the POSTGRES_URL a dotenv file sets, or "" when it sets none.
+export const postgresUrl = (env: string): string =>
+  (/^POSTGRES_URL=(.*)/m.exec(env)?.[1] || "").trim()
+
+// Pure: the port a postgres:// URL names, or NaN when the URL names none.
+export const urlPort = (url: string): number => {
+  const port = new URL(url).port
+  return port ? Number(port) : NaN
+}
+
+// Pure: the host ports a `docker port` list binds, like 0.0.0.0:33210->5432, de-duped.
+export const hostPorts = (out: string): number[] =>
+  Array.from(
+    new Set(
+      out
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          const m = /:(\d+)/.exec(l)
+          return m ? Number(m[1]) : NaN
+        })
+        .filter((n) => !Number.isNaN(n)),
+    ),
+  )
+
 // Pure: the box's own `playground settings set` of its live.container, run with its checkout's CLI.
 export const seedArgv = (home: string, name: string): string[] => [
   "bun",
@@ -393,6 +419,8 @@ export const ownDatabaseVerdict = ({
   error,
   made,
   own,
+  port,
+  ports,
   saved,
   seeded,
 }: {
@@ -411,6 +439,12 @@ export const ownDatabaseVerdict = ({
   if (saved.ok && made === 0) {
     return {
       detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    }
+  }
+  if (saved.ok && ports && port !== undefined && !ports.includes(port)) {
+    return {
+      detail: `the saved database's port ${port} is not a host port of the box's own containers`,
       ok: false,
     }
   }
@@ -692,12 +726,16 @@ const main = async (args: string[]) => {
         },
       )
       const names = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      const port = saved.ok ? urlPort(postgresUrl(readFileSync(env, "utf8"))) : NaN
+      const ports = names.flatMap((name) => hostPorts(run(["docker", "port", name, "5432"]).out))
       const verdict = ownDatabaseVerdict({
         error: "",
         made: names.length,
         own,
         saved,
         seeded: true,
+        port,
+        ports,
       })
       return {
         ...verdict,
