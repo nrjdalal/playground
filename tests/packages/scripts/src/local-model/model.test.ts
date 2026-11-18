@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { readModelMetrics } from "../../../../../packages/scripts/src/local-model/live"
 import {
   busyOf,
   commandArgv,
@@ -741,5 +742,27 @@ describe("the model readers (PG-2543)", () => {
     expect(metricsBusy(metrics(0, 0))).toBe(false)
     expect(metricsBusy("")).toBe(false)
     expect(metricsBusy(null)).toBe(false)
+  })
+})
+
+describe("readModelMetrics (PG-2749)", () => {
+  // A stub HTTP server answers /metrics; the read takes the URL as its second argument, so the test never reaches the live model or 127.0.0.1:8000, and a scratch data folder holds no model record.
+  test("reads /metrics at the given url, so a session the model serves is skipped with no model record", async () => {
+    const text = metrics(2, 0)
+    const data = scratch()
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        expect(new URL(request.url).pathname).toEqual("/metrics")
+        return new Response(text)
+      },
+    })
+    try {
+      const url = `http://127.0.0.1:${server.port}`
+      expect(await readModelMetrics(data, url)).toBe(text)
+      expect(metricsBusy(await readModelMetrics(data, url))).toBe(true)
+    } finally {
+      server.stop()
+    }
   })
 })

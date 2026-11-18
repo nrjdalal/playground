@@ -795,7 +795,7 @@ describe("a stuck or quiet session (PG-2184)", () => {
   })
 
   // A working session the local model serves is not quiet while the model is busy (localBusy true), so its flag is held back; it is quiet once localBusy reads false, which metricsBusy gives for an idle model and an unreadable /metrics alike (model.test.ts). A session the local model does not serve (Claude or GLM) is judged only by its idle, so localBusy is false there even while another model reads busy.
-  test("a working session the model serves (running and waiting above 0) is not quiet, even after 15 minutes", async () => {
+  test("a working session the local model serves is not quiet while its localBusy reads true, even after 15 minutes", async () => {
     const { run, sent } = setup("working")
     await run(15, { localBusy: async () => true })
     expect(await sent()).toEqual([])
@@ -807,7 +807,7 @@ describe("a stuck or quiet session (PG-2184)", () => {
     expect((await sent()).map(({ to }) => to)).toEqual(["m4n7pq-builder"])
   })
 
-  test("a working session the model is idle on (running and waiting at 0) still is quiet after 15 minutes", async () => {
+  test("a working session the local model serves is quiet once its localBusy reads false, still after 15 minutes", async () => {
     const { run, sent } = setup("working")
     await run(15, { localBusy: async () => false })
     const lines = await sent()
