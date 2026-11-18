@@ -15,14 +15,17 @@ The owner sets both numbers in Settings, Extensions, on the WhatsApp card (**Dev
 What goes over WhatsApp follows the policy line ops-wa adds to each message it hands you, from `wa.replyPolicy` (`wa.guestPolicy` for the guest), a setting the owner keeps on this machine ([ADR 0030](../../../../.agents/adr/0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md)); its default is factory status, and a secret, a token or customer personal data never goes, whatever the line says.
 
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
+   ops-wa has already reacted 👀 on it (seen, a reply is coming); a message that needs no reply, a yes or a thanks, gets `playground wa react ✅` in place of one, which replaces the 👀 (got it) ([ADR 0031](../../../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
    When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
-   Done when the command prints `wa send: sent`, or the Inbox update's id.
+   Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way.
    Done when the update is sent, or nothing has changed since the last one and the reply says so.
 
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat; a refusal names its reason.
 `playground wa status` prints whether each number has written and the owner's hours left for replies.
+`playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
+ops-wa sends each text part after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL) and splits a long body into parts, so write the reply as you would for the Inbox.
 
 A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.

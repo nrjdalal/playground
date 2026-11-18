@@ -9,6 +9,7 @@ import {
   mediaDir,
   modelPath,
   type Run,
+  stdoutOf,
   transcriber,
 } from "../../../../../packages/scripts/src/ops-wa/media"
 
@@ -141,5 +142,11 @@ describe("reading a voice note on this Mac", () => {
       )(note),
     ).toBeUndefined()
     expect(existsSync(`${note}.wav`)).toBe(false)
+  })
+
+  test("whisper-cli's log lines on stderr stay out of the words", async () => {
+    const whisper = 'console.error("read_audio_data: 3.2 s of audio"); console.log(" ship it ")'
+    const said = await stdoutOf([process.execPath, "-e", whisper])
+    expect(said).toEqual({ code: 0, out: " ship it \n" })
   })
 })

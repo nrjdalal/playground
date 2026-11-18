@@ -65,6 +65,8 @@ playground wa send [--to alert] <file>
                       send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
 playground wa alert <file>
                       send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, once to the owner's WhatsApp and once to the wa.alert number, each once it has ever written to the spare number (bun run wa)
+playground wa react <emoji> [--to alert] [--id <id>]
+                      react on the owner's latest WhatsApp message, the guest's with --to alert, or one by its id, as ✅ for got it, no reply needed (bun run wa)
 playground wa status  print whether the owner and the alert number have written, each masked, and the owner's hours left for replies (bun run wa)
 playground wa relink
                       after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)

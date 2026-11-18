@@ -28,7 +28,7 @@ import { bridge, type Inbox, type Sock, sender } from "./bridge"
 import { type Card, termsOf } from "./cards"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
-import { mediaDir, modelPath, transcriber } from "./media"
+import { mediaDir, modelPath, stdoutOf, transcriber } from "./media"
 import { socketPath, serve } from "./server"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
@@ -187,7 +187,7 @@ const main = async () => {
   })
   const path = socketPath(data)
   await unlink(path).catch(() => {})
-  serve(path, send)
+  serve(path, send, send.react)
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
   const relayData = sendAs("wa-data", true, true)
@@ -207,7 +207,7 @@ const main = async () => {
         modelPath(data),
         (command) => Bun.which(command) !== null,
         existsSync,
-        (argv) => run(argv, 300_000),
+        stdoutOf,
       ),
     },
     now: Date.now,
@@ -231,6 +231,7 @@ const main = async () => {
         : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
+    react: send.react,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),

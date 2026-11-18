@@ -141,6 +141,66 @@ describe("playground wa send --to alert (#2756)", () => {
   })
 })
 
+describe("playground wa react (#2755)", () => {
+  test("hands one emoji to ops-wa as a reaction, on the owner's latest, the guest's, or a message by its id", async () => {
+    const { data } = machine("")
+    const got: unknown[] = []
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async (emoji, on) => {
+        got.push([emoji, on])
+        return "sent"
+      },
+    )
+    try {
+      expect(await wa(data, ["react", "✅"])).toEqual({ code: 0, out: "wa react: sent" })
+      expect(await wa(data, ["react", "👀", "--to", "alert"])).toEqual({
+        code: 0,
+        out: "wa react: sent",
+      })
+      expect((await wa(data, ["react", "👍🏽", "--id", "ABC123"])).code).toBe(0)
+      expect(got).toEqual([
+        ["✅", { who: "owner" }],
+        ["👀", { who: "alert" }],
+        ["👍🏽", { id: "ABC123", who: "owner" }],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("refuses words, a missing emoji or a stray flag, before it reaches ops-wa", async () => {
+    const { data } = machine("")
+    for (const args of [
+      ["react"],
+      ["react", "ok"],
+      ["react", "✅", "--to", "owner"],
+      ["react", "✅", "--id"],
+    ])
+      expect((await wa(data, args)).code).toBe(2)
+  })
+
+  test("prints ops-wa's refusal", async () => {
+    const { data } = machine("")
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async () => {
+        throw new Error("the owner has no message kept to react to")
+      },
+    )
+    try {
+      expect(await wa(data, ["react", "✅"])).toEqual({
+        code: 1,
+        out: "wa react: the owner has no message kept to react to",
+      })
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
 describe("playground wa alert (#2748)", () => {
   test("hands the body to ops-wa as an alert, while wa send's stays a reply", async () => {
     const { body, data } = machine("ops-tick is down\n")
