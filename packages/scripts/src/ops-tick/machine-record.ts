@@ -45,7 +45,7 @@ export const machineRecord =
         // the check exits 0 with no finding and 1 with some; any other exit is ssh's or the clone's
         if (ran.code > 1) lines.push(`${peer.name}: not checked: ${firstLine(ran.out, ran.code)}`)
         else
-          for (const line of ran.out.split("\n").filter((l) => /^\w+: /.test(l)))
+          for (const line of ran.out.split("\n").filter((l) => /^[\w-]+: /.test(l)))
             lines.push(`${peer.name}: ${line}`)
       }
     }

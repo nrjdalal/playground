@@ -24,9 +24,10 @@ export type CardState = { at?: string; id: string; items: CardItem[] }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
 export type Kept = Record<string, number>
 
-// An Inbox item as `bun run ask get` prints it: the fields an approval reads.
+// An Inbox item as `bun run ask get` prints it: the fields an approval reads, and createdAt the guard falls back to when the saved write time is missing.
 export type CardAnswer = {
   answer?: { at?: string; choice?: string; options?: number[] }
+  createdAt?: string
   from?: string
   preview?: {
     deny?: string
@@ -179,16 +180,19 @@ const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 // An Inbox id as ask new prints it, the one form a card id takes.
 export const CARD_ID = /^[0-9a-f-]{36}$/
 
+// The card's JSON alone: ask get puts its `ask: picked` line on stderr, which a run joining both streams (ops-job's) leaves after it.
+const cardJson = (out: string) => out.slice(out.indexOf("{")).replace(/(?:\n+ask: [^\n]*)+\s*$/, "")
+
 // One card read by `bun run ask get <id>`, or ask's last line when it did not read.
 export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAnswer | string> => {
   const read = await ask(["get", id])
   try {
-    if (read.code === 0) return JSON.parse(read.out.slice(read.out.indexOf("{"))) as CardAnswer
+    if (read.code === 0) return JSON.parse(cardJson(read.out)) as CardAnswer
   } catch {}
   return lastLine(read.out) || `exit ${read.code}`
 }
 
-// Pure: card id's Remove picks, counted only when the card reads as nightly-clean last wrote it, cardOf of the items it saved, questions, order and options alike, and the answer came at or after that write; else why it does not count, so no edit or race after the owner's answer approves what the owner did not pick.
+// Pure: card id's Remove picks, counted only when the card reads as nightly-clean last wrote it, cardOf of the items it saved, questions, order and options alike, and the answer came at or after that write (the saved write time, else the card's createdAt when none was saved, else no time to check against); else why it does not count, so no edit or race after the owner's answer approves what the owner did not pick.
 export const savedPicks = (
   card: CardAnswer,
   from: string,
@@ -199,8 +203,12 @@ export const savedPicks = (
   if (shapeOf(card.preview) !== shapeOf(cardOf(saved.items).preview))
     return `card ${id} no longer reads as nightly-clean wrote it`
   const at = card.answer?.at
-  if (!saved.at || !at || at < saved.at)
-    return `card ${id} was answered before nightly-clean's last write`
+  // A saved write time is the card's own updatedAt from that write; none was saved, so fall back to the card's createdAt, the time ask get reads, and check the answer against it.
+  const against = saved.at ?? card.createdAt
+  if (!against || !at || at < against)
+    return against
+      ? `card ${id} was answered before nightly-clean's last write`
+      : `card ${id} has no write time and no created time to check the answer against`
   return approvedOf(card, from)
 }
 

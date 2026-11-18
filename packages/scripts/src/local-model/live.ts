@@ -9,9 +9,9 @@ import { addEntries, peerRecordArgv } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { REPO, run } from "../ops-job/job"
 import { dashboardCheckout } from "../playground/probe"
-import { FIXED, keepUp, type Machine, type ModelDeps, useModel } from "./model"
+import { FIXED, commandArgv, keepUp, type Machine, type ModelDeps, useModel } from "./model"
 import { peerOf } from "./peer"
-import { thisMachine } from "./state"
+import { machineState, PORTS, thisMachine } from "./state"
 
 // The live seams of playground model use and the keep beat: the settings, this machine and the peer from the Dashboard's .env, commands through ops-job's run, and the machine record here and on the peer.
 
@@ -146,4 +146,22 @@ export const keepBeat = async (data: string): Promise<string[]> => {
     if (line) lines.push(line)
   }
   return lines
+}
+
+// The kept model's current /metrics on this machine, so a session's stuck read can skip a session the model still serves, null when the model has none set, has no server, or its /metrics does not read.
+export const readModelMetrics = async (data: string): Promise<string | null> => {
+  const settings = settingsOf(data)
+  if (!settings.hereModel) return null
+  const machine = thisMachine()
+  const server = (await machineState(data, machine)).servers?.[settings.hereModel]
+  if (!server?.port || !PORTS.includes(server.port as (typeof PORTS)[number])) return null
+  const ran = await run(
+    commandArgv(
+      { name: machine },
+      undefined,
+      `curl -sf --max-time 5 http://127.0.0.1:${server.port}/metrics`,
+    ),
+    6_000,
+  )
+  return ran.code === 0 ? ran.out : null
 }

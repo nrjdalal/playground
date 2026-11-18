@@ -76,8 +76,11 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 a draft with no link is a public post's: one whose text holds a work
                                                 figure or an internal name is refused (playground rules public)
                                                 a \`\`\`progress block draws bars at the card's width, one
-                                                name | percent | what's going on | ETA a line; a line with other
-                                                than 4 fields or a percent outside 0 to 100 is refused
+                                                name | percent | what's going on | ETA | state a line, the state
+                                                optional: active, done, held or waiting (active draws in colour,
+                                                the rest muted, a row at 100 with none done); a line with other
+                                                than 4 or 5 fields, a percent outside 0 to 100 or another state
+                                                is refused
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a

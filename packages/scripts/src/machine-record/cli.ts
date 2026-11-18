@@ -22,6 +22,7 @@ import {
 
 export const USAGE = `usage: playground record add <path> --kind <${KINDS.join("|")}> --why "<why>" --undo "<undo>" [--by <who>]
        playground record add --stdin            (a JSON list of entries, the form a peer's add takes over ssh)
+       an undo with a delete word (rm, rmdir, docker rm -fv) goes in through --stdin < entry.json, a JSON list holding the entry, since the no-raw-delete hook reads a quoted --undo value as a command
        playground record drop <path>
        playground record seed [--machine <name>] [--notes <folder>]
        playground record check
