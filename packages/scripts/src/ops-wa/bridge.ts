@@ -60,11 +60,11 @@ export type Io = {
   now: () => number
   // the owner's number in E.164, the allowlist of one
   owner: string
+  // a number in [0, 1) that spreads each typing time, Math.random unless a test fixes it
+  random?: () => number
   // a line to a session by its name, through the ops relay; data goes under its own relay, so no line of it reads as the owner's
   relay: (to: string, text: string, data?: boolean) => Promise<unknown>
   sleep: (ms: number) => Promise<void>
-  // a number in [0, 1) that spreads each typing time, Math.random unless a test fixes it
-  random?: () => number
 }
 // WhatsApp mode's reads, and the reply it sends while it is off, so a test hands in fakes.
 export type Mode = {
@@ -74,8 +74,6 @@ export type Mode = {
   // whether WhatsApp mode is on: the bundled whatsapp extension's switch in Settings, Extensions
   on: () => Promise<boolean>
   reply: (body: string) => Promise<string>
-  // a reaction on a kept message, the sender's; a bridge with none sets no 👀
-  react?: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) => Promise<string>
   stuck: () => Promise<Stuck>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
@@ -89,6 +87,8 @@ export type Mode = {
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
+  // a reaction on a kept message, the sender's; a bridge with none sets no 👀
+  react?: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) => Promise<string>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
 }
