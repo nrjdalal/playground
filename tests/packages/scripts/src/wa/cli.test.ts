@@ -142,20 +142,33 @@ describe("playground wa send --to alert (#2756)", () => {
 })
 
 describe("playground wa alert (#2748)", () => {
-  test("hands the body to ops-wa as an alert, while wa send's stays a reply", async () => {
+  test("hands the body to ops-wa as an alert to the owner first, with its source, or to both at once with --now-both, while wa send's stays a reply", async () => {
     const { body, data } = machine("ops-tick is down\n")
-    const got: [string, string][] = []
-    const server = serve(socketPath(data), async (b, kind) => {
-      got.push([b, kind])
+    const got: [string, string, string | undefined][] = []
+    const server = serve(socketPath(data), async (b, kind, source) => {
+      got.push([b, kind, source])
       return "sent"
     })
     try {
       expect(await wa(data, ["alert", body])).toEqual({ code: 0, out: "wa alert: sent" })
+      expect(await wa(data, ["alert", "--source", "test:2026-11-18T15:40Z", body])).toEqual({
+        code: 0,
+        out: "wa alert: sent",
+      })
+      expect(await wa(data, ["alert", "--now-both", body])).toEqual({
+        code: 0,
+        out: "wa alert: sent",
+      })
       expect(await wa(data, ["send", body])).toEqual({ code: 0, out: "wa send: sent" })
       expect(got).toEqual([
-        ["ops-tick is down", "alert"],
-        ["ops-tick is down", "reply"],
+        ["ops-tick is down", "first", undefined],
+        ["ops-tick is down", "first", "test:2026-11-18T15:40Z"],
+        ["ops-tick is down", "alert", undefined],
+        ["ops-tick is down", "reply", undefined],
       ])
+      const bad = await wa(data, ["alert", "--source", "no-kind", body])
+      expect(bad.code).toBe(2)
+      expect(bad.out).toContain("--source takes <kind>:<ref>")
     } finally {
       server.stop(true)
     }
@@ -202,5 +215,54 @@ describe("playground wa alert (#2748)", () => {
         "wa status: alert: none set (wa.alert)",
       ].join("\n"),
     })
+  })
+})
+
+describe("playground wa alert-set", () => {
+  test("asks ops-wa to set the second number from the owner's message by its id, and prints its answer", async () => {
+    const { data } = machine("")
+    const asked: string[] = []
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async (id) => {
+        asked.push(id)
+        return "set the second number to ...0444 from the owner's message own1; it was unset"
+      },
+    )
+    try {
+      expect(await wa(data, ["alert-set", "--from-owner-msg", "own1"])).toEqual({
+        code: 0,
+        out: "wa alert-set: set the second number to ...0444 from the owner's message own1; it was unset",
+      })
+      expect(asked).toEqual(["own1"])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("prints ops-wa's refusal and exits 1", async () => {
+    const { data } = machine("")
+    const server = serve(
+      socketPath(data),
+      async () => "sent",
+      async () => {
+        throw new Error("no message of the owner's in the last 24 hours has the id in9")
+      },
+    )
+    try {
+      expect(await wa(data, ["alert-set", "--from-owner-msg", "in9"])).toEqual({
+        code: 1,
+        out: "wa alert-set: no message of the owner's in the last 24 hours has the id in9",
+      })
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("takes --from-owner-msg and an id alone", async () => {
+    const { data } = machine("")
+    for (const args of [["alert-set"], ["alert-set", "own1"], ["alert-set", "--from-owner-msg"]])
+      expect((await wa(data, args)).code).toBe(2)
   })
 })

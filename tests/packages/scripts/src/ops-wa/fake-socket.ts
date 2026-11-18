@@ -9,7 +9,11 @@ export const jid = (e164: string) => `${e164.slice(1)}@s.whatsapp.net`
 // A group's chat id, by WhatsApp's group suffix.
 export const groupJid = (id: string) => `${id}@g.us`
 
-type Content = { linkPreview?: null; text: string }
+type Content = {
+  linkPreview?: null
+  poll?: { messageSecret: Uint8Array; name: string; selectableCount: number; values: string[] }
+  text?: string
+}
 
 // A Baileys socket held in memory, answering the calls ops-wa makes: its events are fired by the test, each send and pairing code request recorded, and end and logout close it as Baileys does.
 export function fakeSocket(registered = true) {
@@ -37,6 +41,8 @@ export function fakeSocket(registered = true) {
       return { key: { id: `m${sent.length}` } }
     },
     sendPresenceUpdate: async () => void calls.push("sendPresenceUpdate"),
+    // the linked device's own chat id, a device of the spare phone's number
+    user: { id: jid(SPARE).replace("@", ":7@") },
   }
   const message = (from: string, text: string, extra: Record<string, unknown> = {}) => ({
     key: { fromMe: false, id: `in${Math.random()}`, remoteJid: from, ...extra },

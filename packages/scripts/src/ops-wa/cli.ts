@@ -7,8 +7,10 @@ import { configDirOf } from "@packages/env/data-dir"
 import {
   DEFAULT_POLICY,
   extSettings,
+  loginOf,
   readPolicy,
   readRendered,
+  setSetting,
   whatsappSettings,
 } from "@packages/settings"
 import makeWASocket, {
@@ -24,12 +26,16 @@ import { engineData, REPO, run, sendAs } from "../ops-job/job"
 import { beat, CYCLE_SECONDS } from "../ops-tick/tick"
 import { dashboardCheckout } from "../playground/probe"
 import { EMPTY_LIST, isPublicList, reposOf } from "../trace-count/kinds"
+import { alertSet } from "./alert-set"
 import { bridge, type Inbox, type Sock, sender } from "./bridge"
 import { type Card, termsOf } from "./cards"
+import { runCheck } from "./escalate"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
-import { mediaDir, modelPath, transcriber } from "./media"
+import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
+import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
+import { votedOptions } from "./votes"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
 process.umask(0o077)
@@ -143,6 +149,23 @@ const main = async () => {
     return read.refusal === undefined ? whatsappSettings.get(read.settings, "wa.alert") : ""
   }
   if (!owner || !device) return stop("wa.owner and wa.device must both be set", "waiting")
+  // the minutes an urgent alert waits for the owner, and the checker that reads its source, each read afresh for each alert
+  const waSetting = async <K extends "wa.alertCheck" | "wa.alertDelayMinutes">(key: K) => {
+    const read = await readPolicy(data)
+    return whatsappSettings.get(read.settings ?? { schemaVersion: 1, values: {} }, key)
+  }
+  const check = async (source: string, at: number) => {
+    const name = await waSetting("wa.alertCheck")
+    if (!name) return false
+    const file = await readRendered(data, name)
+    if (!file.path) {
+      console.log(
+        `ops-wa: the checker ${name} is not in the extensions: ${file.refusal ?? "absent"}`,
+      )
+      return false
+    }
+    return runCheck(file.path, source, at)
+  }
   await ownFolder(dir)
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
@@ -171,6 +194,7 @@ const main = async () => {
   let current: Sock | undefined
   const send = sender({
     alert,
+    delay: () => waSetting("wa.alertDelayMinutes"),
     device,
     dir,
     now: Date.now,
@@ -187,7 +211,28 @@ const main = async () => {
   })
   const path = socketPath(data)
   await unlink(path).catch(() => {})
-  serve(path, send)
+  // the owner's own message, under ops-wa's link, is the owner's act: wa.alert is written as the Inbox's Approve writes it, with the seed, and the log keeps the id and what it held before
+  const setAlert = async (number: string, id: string) => {
+    const before = await alert()
+    const set = setSetting(
+      data,
+      { key: "wa.alert", scope: loginOf(data), value: number },
+      {
+        actor: "ops-wa",
+        author: "owner",
+        inboxRef: null,
+        reason: `the owner's WhatsApp message ${id} named it`,
+      },
+    )
+    if (!set.ok) throw new Error(set.message)
+    seedAlert(data, number, Date.now())
+    const was = before ? `it was ...${before.slice(-4)}` : "it was unset"
+    console.log(
+      `ops-wa: wa.alert set to ...${number.slice(-4)} from the owner's message ${id}; ${was}`,
+    )
+    return was
+  }
+  serve(path, send, (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id))
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
   const relayData = sendAs("wa-data", true, true)
@@ -197,7 +242,9 @@ const main = async () => {
     alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
+    check,
     dir,
+    escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),
     log: (line) => console.log(line),
     media: {
@@ -207,7 +254,7 @@ const main = async () => {
         modelPath(data),
         (command) => Bun.which(command) !== null,
         existsSync,
-        (argv) => run(argv, 300_000),
+        stdoutRun(300_000),
       ),
     },
     now: Date.now,
@@ -231,9 +278,11 @@ const main = async () => {
         : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
+    poll: send.poll,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
+    votes: votedOptions,
   })
   const passes = setInterval(() => watched.pass(), 30_000)
   const reminder = setInterval(

@@ -142,9 +142,9 @@ const publishers = (port: number, run: Docker): Published[] => {
   }
 }
 
-// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes.
+// The one command that keeps a container's data and re-publishes it on loopback alone: it stops the container, moves its name aside, and starts the same image under the name on the same host port with the old one's volumes and its password, read from the old container at run time so the refusal never prints it.
 const keepDataFix = (name: string, port: number): string =>
-  `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
+  `docker stop ${name} && docker rename ${name} ${name}-old && docker run -d --name ${name} -p 127.0.0.1:${port}:5432 -e POSTGRES_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' ${name}-old | sed -n 's/^POSTGRES_PASSWORD=//p')" --volumes-from ${name}-old "$(docker inspect -f '{{.Image}}' ${name}-old)"`
 
 // The one running container that publishes the URL's port, on loopback alone and first run's own included, read from Docker's metadata: nothing runs inside it and nothing connects to it, so a caller can refuse a container by name before touching it; an exposed refusal carries the container, so a caller can still name it.
 export const locate = (url: string, run: Docker = docker): Located => {
@@ -161,7 +161,7 @@ export const locate = (url: string, run: Docker = docker): Located => {
     const where = owner.addresses.map((address) => address || "every interface").join(", ")
     throw new GuardError(
       "exposed",
-      `${owner.name} publishes port ${target.port} beyond loopback (${where}); keep its data and re-publish it on 127.0.0.1 alone: \`${keepDataFix(owner.name, target.port)}\``,
+      `${owner.name} publishes port ${target.port} beyond loopback (${where}); keep its data and re-publish it on 127.0.0.1 alone: \`${keepDataFix(owner.name, target.port)}\`; if a step fails, the database is left stopped, so \`docker start ${owner.name}\` brings it back when the rename failed, and \`docker rename ${owner.name}-old ${owner.name} && docker start ${owner.name}\` once the rename has run`,
       { owner, target },
     )
   }

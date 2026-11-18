@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
+import { createCipheriv, createHash, createHmac, randomBytes } from "node:crypto"
 import { mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -26,10 +27,10 @@ import {
   noRow,
   notSent,
   termsOf,
-  waitingLine,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { SEND } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
+import { votedOptions } from "../../../../../packages/scripts/src/ops-wa/votes"
 import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
 import { ALERT, fakeSocket, groupJid, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
@@ -89,8 +90,10 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       routed.push({ text, to })
       if (to === "dispatcher") relayed.push(text)
     },
+    poll: send.poll,
     reply: send,
     stuck: async () => mode.stuck,
+    votes: votedOptions,
     inbox,
     media,
     policy: async () => mode.policy,
@@ -466,7 +469,7 @@ describe("the alert number (#2748)", () => {
     const h = harness(undefined, undefined, ALERT)
     expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).toEqual([
       "owner ••••0001: has never written, so no alert reaches it until it writes once; its 24 hours for replies are over until it writes",
-      "alert ••••0003: has never written, so no alert reaches it until it writes once",
+      "alert ••••0003: has never written, so no alert reaches it until it writes once; replies wait until it writes",
     ])
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
@@ -474,7 +477,7 @@ describe("the alert number (#2748)", () => {
     const now = START + 2 * HOUR + 30 * 60_000
     expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, now)).toEqual([
       "owner ••••0001: written since 2026-11-11T03:00:00.000Z, so alerts reach it; 21 h 30 min left of its 24 hours for replies",
-      "alert ••••0003: written since 2026-11-11T02:00:00.000Z, so alerts reach it",
+      "alert ••••0003: approved since 2026-11-11T02:00:00.000Z, so alerts reach it; replies can go now (approved)",
     ])
     expect(await statusOf(h.dir, { alert: "", owner: OWNER }, now)).toContain(
       "alert: none set (wa.alert)",
@@ -666,6 +669,42 @@ describe("toWhatsApp", () => {
     )
     expect(toWhatsApp("```\ncode **kept**\n```")).toBe("```\ncode **kept**\n```")
   })
+
+  test("a table a phone fits goes as a monospace block, its columns padded", () => {
+    expect(
+      toWhatsApp("Runs:\n| PR | State |\n|---|:-:|\n| #12 | **green** |\n| #9 | red |\nDone."),
+    ).toBe("Runs:\n```\nPR   State\n#12  green\n#9   red\n```\nDone.")
+  })
+
+  test("a table wider than a phone goes as label: value lines, one row after another", () => {
+    const wide =
+      "| Session | What it does now |\n| --- | --- |\n| k3m9px-worker | builds the poll path for cards |\n| q7r2zz-reviewer | scores round 2 |"
+    expect(toWhatsApp(wide)).toBe(
+      "Session: k3m9px-worker\nWhat it does now: builds the poll path for cards\n\nSession: q7r2zz-reviewer\nWhat it does now: scores round 2",
+    )
+  })
+
+  test("a GitHub callout goes as one plain line", () => {
+    expect(toWhatsApp("> [!WARNING]\n> The merge waits\n> on CI.\n\nNext.")).toBe(
+      "Warning: The merge waits on CI.\n\nNext.",
+    )
+    expect(toWhatsApp("> [!NOTE] All green.")).toBe("Note: All green.")
+  })
+
+  test("a card holding a table and a callout reaches the owner with neither as raw marks (#i910's shape)", async () => {
+    const h = await withCards([
+      card(
+        12,
+        {},
+        {
+          text: "> [!IMPORTANT]\n> Pick one.\n\n| Plan | Cost |\n|---|---|\n| A | 1 h |\n| B | 2 h |",
+        },
+      ),
+    ])
+    expect(h.texts()[0]).toBe(
+      "*Card 12*\nImportant: Pick one.\n\n```\nPlan  Cost\nA     1 h\nB     2 h\n```\nReply 1 #i12 to Merge it\nReply 2 #i12 to Hold it",
+    )
+  })
 })
 
 // A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
@@ -710,20 +749,70 @@ const inboxOf = (open: Card[], terms: typeof TERMS | null = TERMS) => {
   return { answers, inbox, open }
 }
 // the owner writes first, since ops-wa never starts a chat, then one pass sends the cards
-const withCards = async (open: Card[], terms?: typeof TERMS | null) => {
+const withCards = async (open: Card[], terms?: typeof TERMS | null, alert?: string) => {
   const ib = inboxOf(open, terms)
-  const h = harness(ib.inbox)
+  const h = harness(ib.inbox, undefined, alert)
   h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
   await h.settle()
   await h.pass()
-  const texts = () => h.fake.sent.map((s) => s.content.text)
-  return { ...h, ...ib, texts }
+  const texts = () => h.fake.sent.flatMap((s) => s.content.text ?? [])
+  const polls = () => h.fake.sent.flatMap((s) => (s.content.poll ? [s] : []))
+  return { ...h, ...ib, polls, texts }
 }
 const say = async (h: Awaited<ReturnType<typeof withCards>>, text: string, from = OWNER) => {
   const before = h.fake.sent.length
   h.fake.upsert([h.fake.message(jid(from), text)])
   await h.settle()
-  return h.fake.sent.slice(before).map((s) => s.content.text)
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
+}
+// A vote on the card's poll as the owner's phone sends it: the picked options' hashes, encrypted with the poll's secret for its sender's and voter's chat ids, as WhatsApp's poll vote is.
+const POLL_SENDER = jid(SPARE)
+const encryptVote = (pollId: string, secret: Uint8Array, voter: string, options: string[]) => {
+  const sign = Buffer.concat([
+    Buffer.from(pollId),
+    Buffer.from(POLL_SENDER),
+    Buffer.from(voter),
+    Buffer.from("Poll Vote"),
+    new Uint8Array([1]),
+  ])
+  const key0 = createHmac("sha256", new Uint8Array(32)).update(secret).digest()
+  const key = createHmac("sha256", key0).update(sign).digest()
+  // PollVoteMessage's one field, repeated bytes selectedOptions = 1, each a 32-byte hash
+  const plain = Buffer.concat(
+    options.map((o) =>
+      Buffer.concat([Buffer.from([0x0a, 0x20]), createHash("sha256").update(o).digest()]),
+    ),
+  )
+  const iv = randomBytes(12)
+  const cipher = createCipheriv("aes-256-gcm", key, iv)
+  cipher.setAAD(Buffer.from(`${pollId}\u0000${voter}`))
+  return {
+    encIv: iv,
+    encPayload: Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]),
+  }
+}
+const vote = async (
+  h: Awaited<ReturnType<typeof withCards>>,
+  options: string[],
+  { from = OWNER, secret }: { from?: string; secret?: Uint8Array } = {},
+) => {
+  const poll = h.polls()[0]!
+  secret ??= poll.content.poll!.messageSecret
+  const before = h.fake.sent.length
+  const id = h.fake.sent.indexOf(poll) + 1
+  h.fake.upsert([
+    {
+      key: { fromMe: false, id: `v${Math.random()}`, remoteJid: jid(from) },
+      message: {
+        pollUpdateMessage: {
+          pollCreationMessageKey: { id: `m${id}` },
+          vote: encryptVote(`m${id}`, secret, jid(from), options),
+        },
+      },
+    },
+  ])
+  await h.settle()
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
 }
 
 describe("Inbox cards on WhatsApp", () => {
@@ -741,7 +830,7 @@ describe("Inbox cards on WhatsApp", () => {
       card(12, {}, { scope: undefined }),
       card(13, {}, { scope: "zyx-org" }),
     ])
-    expect(h.texts()).toEqual([waitingLine(2)])
+    expect(h.texts()).toEqual(["📥 Card 12\n📥 Card 13"])
     expect(await say(h, "1 #i13")).toEqual([notSent(13)])
     expect(h.answers).toEqual([])
   })
@@ -752,7 +841,7 @@ describe("Inbox cards on WhatsApp", () => {
       card(13, { answer: { choice: "replied" } }, { scope: undefined }),
       card(14, { answer: { snoozedUntil: "2026-11-12T00:00:00Z" } }, { scope: undefined }),
     ])
-    expect(h.texts()).toEqual([waitingLine(1)])
+    expect(h.texts()).toEqual(["📥 Card 12"])
   })
 
   test("no card goes before the owner has written, since ops-wa never starts a chat", async () => {
@@ -827,7 +916,16 @@ describe("Inbox cards on WhatsApp", () => {
       card(25, {}, { key: "wa.owner", type: "guard", value: "15550000000" } as never),
     ]
     const h = await withCards(kept)
-    expect(h.texts()).toEqual([waitingLine(6)])
+    expect(h.texts()).toEqual([
+      [
+        "📥 Card 20",
+        "📥 Card 21",
+        "📥 Card 22",
+        "📥 Card 23",
+        "📥 Card 24",
+        "📥 +1 more in the Inbox",
+      ].join("\n"),
+    ])
     expect(h.texts().join("\n")).not.toContain("15550000000")
     for (const ref of [20, 21, 22, 23, 24, 25])
       expect(await say(h, `1 #i${ref}`)).toEqual([notSent(ref)])
@@ -863,14 +961,14 @@ describe("Inbox cards on WhatsApp", () => {
       card(41, {}, { text: "for Acmeworks" }),
     ]
     const h = await withCards(open)
-    expect(h.texts()).toEqual([expect.stringContaining("#i12"), waitingLine(2)])
+    expect(h.texts()).toEqual([expect.stringContaining("#i12"), "📥 Card 40\n📥 Card 41"])
     await h.pass()
     expect(h.texts()).toHaveLength(2)
     open.push(
       card(42, { kind: "draft" }, { text: "a reply", to: "a thread", type: undefined } as never),
     )
     await h.pass()
-    expect(h.texts().at(-1)).toBe(waitingLine(3))
+    expect(h.texts().at(-1)).toBe("📥 Card 40\n📥 Card 41\n📥 Card 42")
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
   })
 
@@ -883,7 +981,7 @@ describe("Inbox cards on WhatsApp", () => {
 
   test("while no-public-leak's list cannot be read, no card goes, and the waiting line counts them all", async () => {
     const h = await withCards([card(12), card(13)], null)
-    expect(h.texts()).toEqual([waitingLine(2)])
+    expect(h.texts()).toEqual(["📥 2 cards in the Inbox"])
   })
 
   test("while WhatsApp mode is off, a reply is no answer and gets the off line", async () => {
@@ -897,6 +995,87 @@ describe("Inbox cards on WhatsApp", () => {
     const h = await withCards([card(12)])
     await say(h, "is #i12 merged?")
     expect(h.relayed.at(-1)).toContain("is #i12 merged?")
+  })
+})
+
+describe("an Inbox card as a poll (#2752)", () => {
+  test("a card with choices goes as its text, then as a poll of its numbered choices, paced and counted as any send", async () => {
+    const h = await withCards([card(12)])
+    expect(h.texts()).toEqual([
+      "*Card 12*\nMerge tonight?\nReply 1 #i12 to Merge it\nReply 2 #i12 to Hold it",
+    ])
+    const [poll] = h.polls()
+    expect(poll!.jid).toBe(jid(OWNER))
+    expect(poll!.content.poll).toMatchObject({
+      name: "#i12 Card 12",
+      selectableCount: 1,
+      values: ["1. Merge it", "2. Hold it"],
+    })
+    expect(poll!.content.poll!.messageSecret).toHaveLength(32)
+    expect(poll!.at - h.fake.sent[0]!.at).toBeGreaterThanOrEqual(SEND.gapMs)
+    const kept = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(kept.sends).toHaveLength(2)
+    expect(h.fake.calls).toEqual([])
+    await h.pass()
+    expect(h.polls()).toHaveLength(1)
+  })
+
+  test("an update goes with no poll, since it asks nothing", async () => {
+    const h = await withCards([card(12, { kind: "update" }, { type: undefined })])
+    expect(h.polls()).toEqual([])
+  })
+
+  test("the owner's vote answers the card once, through the Inbox's route, and reaches no session", async () => {
+    const h = await withCards([card(12)])
+    expect(await vote(h, ["2. Hold it"])).toEqual(["Answered #i12: Hold it."])
+    expect(h.answers).toEqual([{ answer: { action: "deny" }, id: "id-12" }])
+    expect(h.relayed.filter((line) => !line.includes("hello"))).toEqual([])
+  })
+
+  test("a changed vote follows the card's rule: the card is answered already, so it answers nothing and says so", async () => {
+    const h = await withCards([card(12)])
+    await vote(h, ["1. Merge it"])
+    expect(await vote(h, ["2. Hold it"])).toEqual([
+      "#i12 was not answered: This item is already answered. Answer it in the Inbox.",
+    ])
+    expect(h.answers.map((a) => a.answer)).toEqual([{ action: "approve" }, { action: "deny" }])
+    expect((h.open[0] as Card).status).toBe("approved")
+  })
+
+  test("a vote taken back, or one that cannot be read, answers nothing and is logged", async () => {
+    const h = await withCards([card(12)])
+    expect(await vote(h, [])).toEqual([])
+    expect(h.logs).toContain("ops-wa: a vote on #i12's poll picks no row, so it answers nothing")
+    expect(await vote(h, ["1. Merge it"], { secret: new Uint8Array(32) })).toEqual([])
+    expect(h.answers).toEqual([])
+    expect(h.logs).toContain("ops-wa: a vote on #i12's poll could not be read")
+  })
+
+  test("a vote from the alert number answers nothing and reaches the dispatcher as data", async () => {
+    const h = await withCards([card(12)], undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(ALERT), "hi")])
+    await h.settle()
+    expect(await vote(h, ["1. Merge it"], { from: ALERT })).toEqual([])
+    expect(h.answers).toEqual([])
+    expect(h.data.at(-1)).toContain("holds a poll vote")
+  })
+
+  test("a poll that fails leaves the text's numbered lines to answer by", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (content.poll) throw new Error("made-up poll failure")
+      return real(to, content)
+    }
+    await h.pass()
+    expect(h.logs).toContain("ops-wa: a card's poll: made-up poll failure")
+    h.fake.sock.sendMessage = real
+    h.fake.upsert([h.fake.message(jid(OWNER), "1 #i12")])
+    await h.settle()
+    expect(ib.answers).toEqual([{ answer: { action: "approve" }, id: "id-12" }])
   })
 })
 
@@ -1047,17 +1226,30 @@ describe("the alert number as a guest (#2756)", () => {
     expect(h.fake.calls).toEqual([])
   })
 
-  test("a guest's reply needs the guest's own 24 hours: the owner's message or the owner's Approve opens none", async () => {
+  test("a guest's reply goes with no message first to the number the owner approved, under the same pacing (ADR 0034)", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    seedAlert(dirname(h.dir), ALERT, START)
+    expect(await h.send("hello", "guest")).toBe("sent")
+    h.advance(48 * HOUR)
+    expect(await h.send("still here", "guest")).toBe("sent")
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT), jid(ALERT)])
+    expect(h.fake.calls).toEqual([])
+  })
+
+  test("an unapproved guest's reply needs the guest's own 24 hours: the owner's message, or an Approve of another number, opens none", async () => {
     const h = harness(undefined, undefined, ALERT)
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
-    seedAlert(dirname(h.dir), ALERT, START)
+    seedAlert(dirname(h.dir), "+15550000999", START)
     await expect(h.send("hello", "guest")).rejects.toThrow(
       "the alert number has not written in the last 24 hours, and ops-wa never starts a chat",
     )
     h.fake.upsert([h.fake.message(jid(ALERT), "hey")])
     await h.settle()
     expect(await h.send("hello", "guest")).toBe("sent")
+    expect((await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START + HOUR))[1]).toBe(
+      "alert ••••0003: written since 2026-11-11T03:00:00.000Z, so alerts reach it; 23 h 0 min left of its 24 hours for replies",
+    )
     h.advance(24 * HOUR + 1)
     await expect(h.send("late", "guest")).rejects.toThrow("has not written in the last 24 hours")
     expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT)])
