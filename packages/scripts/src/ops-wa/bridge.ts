@@ -167,12 +167,14 @@ const mediaOf = (message: Record<string, unknown>): string | undefined =>
     .map((k) => MEDIA[k])
     .find(Boolean)
 
-// The wrappers WhatsApp puts around a message (a disappearing chat's, a view-once one's, a document's with a caption), opened to the message inside.
+// The wrappers WhatsApp puts around a message (a disappearing chat's, a view-once one's, a document's with a caption, an edit's), opened to the message inside, as Baileys' own normalizeMessageContent opens them.
 const WRAPS = [
   "documentWithCaptionMessage",
+  "editedMessage",
   "ephemeralMessage",
   "viewOnceMessage",
   "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
 ]
 const unwrap = (message: Record<string, unknown>): Record<string, unknown> => {
   for (const k of WRAPS) {
@@ -193,7 +195,8 @@ const str = (value: unknown) => (typeof value === "string" && value ? value : un
 // a vCard's name and numbers, as WhatsApp sends a contact
 const contactOf = (part: Part) => {
   const vcard = str(part?.vcard) ?? ""
-  const numbers = [...vcard.matchAll(/^TEL[^:]*:(.+)$/gm)].map((t) => t[1]!.trim())
+  // a TEL line, its group prefix (item1.TEL) and any case allowed, as RFC 6350 3.3 does
+  const numbers = [...vcard.matchAll(/^(?:[^.:\n]+\.)?TEL[^:]*:(.+)$/gim)].map((t) => t[1]!.trim())
   return [str(part?.displayName) ?? "no name", ...numbers].join(", ")
 }
 // WhatsApp's protocol message types for a delete and an edit
@@ -777,7 +780,7 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -798,7 +801,7 @@ export function sender(
         messages: [...messages, { id, text: content.text }].slice(-50),
       })
     }
-    if (sends) {
+    if (sends && jid === jidOf(io.owner)) {
       sends.push(last)
       await writeOwn(sendsFile(io.dir), { sends })
     }

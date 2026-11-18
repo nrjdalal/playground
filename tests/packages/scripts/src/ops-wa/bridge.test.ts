@@ -712,6 +712,24 @@ describe("WhatsApp mode", () => {
     await h.pass()
     expect(updates()).toBe(3)
   })
+
+  test("a send to the alert number is no send to the owner, so it queues no update line", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([
+      h.fake.message(jid(OWNER), "keep me posted"),
+      h.fake.message(jid(ALERT), "hello"),
+    ])
+    await h.settle()
+    const updates = () => h.routed.filter((r) => r.text === UPDATE).length
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.advance(UPDATE_MS / 2)
+    expect(await h.send("3 PRs merged today", "guest")).toBe("sent")
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+  })
 })
 
 describe("toWhatsApp", () => {
@@ -1322,6 +1340,15 @@ describe("every kind the owner sends (#2789)", () => {
     expect(h.relayed[0]).toContain("holds a contact: Test Person, +1 555-010-0999")
   })
 
+  test("a contact whose vCard groups its number (item1.TEL) still gives the number", async () => {
+    const h = harness()
+    const vcard =
+      "BEGIN:VCARD\nVERSION:3.0\nN:;Test Person;;;\nFN:Test Person\nitem1.TEL;waid=15550100998:+1 555-010-0998\nitem1.X-ABLabel:Mobile\nEND:VCARD"
+    h.fake.upsert([of(h, { contactMessage: { displayName: "Test Person", vcard } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("holds a contact: Test Person, +1 555-010-0998\n")
+  })
+
   test("a quoted reply is relayed with the text of the message it quotes", async () => {
     const h = harness()
     const extendedTextMessage = {
@@ -1349,6 +1376,18 @@ describe("every kind the owner sends (#2789)", () => {
       "edits its message in-old to read: merge it after lunch\nAnswer through",
     )
     expect(h.fake.sent).toEqual([])
+  })
+
+  test("an edit inside WhatsApp's editedMessage wrapper reads the same", async () => {
+    const h = harness()
+    const protocolMessage = {
+      editedMessage: { conversation: "merge it after lunch" },
+      key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
+      type: 14,
+    }
+    h.fake.upsert([of(h, { editedMessage: { message: { protocolMessage } } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("edits its message in-old to read: merge it after lunch\n")
   })
 
   test("a delete is relayed as such, naming the message, asks no reply and is never handed on", async () => {
