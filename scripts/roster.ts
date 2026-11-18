@@ -33,7 +33,7 @@ export const USAGE = `Usage:
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
   roster.ts holders <pr>                            (prints each live row naming the PR, number or URL, in pr or prs, else exits 1, and exits 2 on a roster that does not read; writes nothing)
-A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request, and a checker whose worker is unset or ended takes a new PR only through that assign with a live worker=.
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a prs-= of the row's own pr clears pr too, so holders stops naming it and an assign has nothing to re-add; a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request, and a checker whose worker is unset or ended takes a new PR only through that assign with a live worker=.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
@@ -164,6 +164,8 @@ function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): vo
         k === "prs-" ? held.filter((u) => !named.includes(u)) : [...new Set([...held, ...named])]
       if (next.length) entry.prs = next
       else delete entry.prs
+      // A prs-= of the row's own pr clears pr too: the row no longer serves it, so holders stops naming it and an assign has nothing to re-add
+      if (k === "prs-" && typeof entry.pr === "string" && named.includes(entry.pr)) delete entry.pr
       continue
     }
     // item= names the extension item a checker is given to score: it joins prs as pr= would take one, and the row holds no pr
@@ -395,13 +397,16 @@ function checkRetask(
   apply(next, pairs, factoryRepo)
   if (!isChecker(next)) return
   const moved = (k: string) => entry[k] !== undefined && next[k] !== entry[k]
+  // A prs-= of the row's own pr clears it: clearing the PR a row served is not moving it, so the guard that moves a pr only through assign stays quiet
+  const prClearedByPrs =
+    pairs.some(([k]) => k === "prs-") && entry.pr !== undefined && next.pr === undefined
   const given = (k: string) => pairs.some(([p]) => p === k)
   // spawn.sh's restart of an ended checker names the PRs it serves now, prs and pr in one set
   const restart = entry.status === "ended" && given("prs")
   if (
     assign
       ? (entry.pr || entry.item) && (given("pr") || given("item")) !== given("worker")
-      : (moved("pr") && !restart) || moved("worker") || given("item")
+      : (!prClearedByPrs && moved("pr") && !restart) || moved("worker") || given("item")
   )
     throw new Refusal(
       `roster.ts: ${entry.name} is a checker, so it moves to another PR through roster.ts assign ${entry.name} <title> <task> worker=<worker> pr=<url> [repo=<owner>/<name>], which sets its worker, pr, repo and title together, or item=<scope>/<kind>/<key> in place of pr= for an extension item`,

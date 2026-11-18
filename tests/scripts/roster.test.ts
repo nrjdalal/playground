@@ -829,7 +829,8 @@ describe("prs (#706)", () => {
     const removed = await run(config, ["set", "x7rv2k-reviewer", "prs-=1", `prs-=${ISSUE}`])
     expect(agentOf(removed.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(2)])
     const empty = await run(config, ["set", "x7rv2k-reviewer", "prs-=2"])
-    expect(agentOf(empty.roster, "x7rv2k-reviewer")).toEqual(reviewer)
+    // a prs-= of the row's own pr clears pr too, so removing every PR leaves no pr behind
+    expect(agentOf(empty.roster, "x7rv2k-reviewer")).toEqual({ ...reviewer, pr: undefined })
   })
 
   test("a prs entry that is no PR and no issue is refused, naming both forms, and writes nothing", async () => {
@@ -855,6 +856,66 @@ describe("prs (#706)", () => {
     expect(agentOf(next.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(1), ISSUE, pull(3)])
     const worker = await run(config, ["assign", "worker-greed", "New chore", "Do it"])
     expect(agentOf(worker.roster, "worker-greed")?.prs).toBeUndefined()
+  })
+})
+
+// A checker queued the PR it now serves as both its pr and its only prs, so prs-= of it had to clear pr too, not leave pr holding the merged PR.
+describe("prs-= clears a matching pr", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const checker: Agent = {
+    kind: "reviewer",
+    name: "k3v9q2-reviewer",
+    pr: pull(1),
+    prs: [pull(1)],
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7mh4d-worker",
+    worker: "x7mh4d-worker",
+  }
+
+  test("prs-= of a checker's own pr clears pr, so holders exits 1 and assign has no old pr to re-add", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const holders = await run(config, ["holders", "1"])
+    expect([holders.code, holders.out]).toEqual([1, ""])
+    const reassigned = await run(config, [
+      "assign",
+      "k3v9q2-reviewer",
+      "Reviewer of b4n8tz-worker",
+      "Review #2",
+      "worker=b4n8tz-worker",
+      "pr=2",
+    ])
+    expect(reassigned.code).toBe(0)
+    expect(agentOf(reassigned.roster, "k3v9q2-reviewer")?.prs).toEqual([pull(2)])
+  })
+
+  // the comment's case, measured once a merged PR was cleared from a row by hand
+  test("prs-= of a checker whose pr is the PR leaves the row with no pr, so holders reads empty", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const holders = await run(config, ["holders", "1"])
+    expect([holders.code, holders.out]).toEqual([1, ""])
+  })
+
+  // set reads the row back through the move guard, so a prs-= that would leave the PR in pr or prs is refused, naming the entry
+  test("a prs-= leaves no old pr behind, and the row reads back clean on the next set", async () => {
+    const config = configWith([checker])
+    const cleared = await run(config, ["set", "k3v9q2-reviewer", "prs-=1"])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(cleared.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    const again = await run(config, ["set", "k3v9q2-reviewer", "status=waiting"])
+    expect(again.code).toBe(0)
+    expect(agentOf(again.roster, "k3v9q2-reviewer")).not.toHaveProperty("pr")
+    expect(agentOf(again.roster, "k3v9q2-reviewer")?.prs).not.toBeDefined()
+    expect(agentOf(again.roster, "k3v9q2-reviewer")?.status).toBe("waiting")
   })
 })
 
