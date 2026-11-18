@@ -161,14 +161,14 @@ test("an answer counts only on the card as nightly-clean last wrote it, answered
   expect(savedPicks(answered, "ops", undefined, ID)).toBeString()
 })
 
-test("a peer's approved item is a command Ops runs by hand, naming the card", () => {
+test("a peer's image runs `docker image rm`, a rehearsal a `playground rm` with a reason, and weights a `playground rm` naming the peer's card", () => {
   const item = ({ recorded: _, ...u }: Unused): CardItem => ({ ...u, machine: "peer" })
   expect(peerCommand(item(peerImage), ID)).toBe("docker image rm sha256:ccc")
   expect(peerCommand(item(rehearsal), ID)).toBe(
     `playground rm ${rehearsal.path} --reason "nightly-clean card ${ID}"`,
   )
-  expect(peerCommand(item(weights), ID)).toContain(
-    `delete ${weights.path} (${weights.bytes} bytes) by hand`,
+  expect(peerCommand(item(weights), ID)).toBe(
+    `playground rm --card ${ID} --peer peer ${weights.path}`,
   )
 })
 

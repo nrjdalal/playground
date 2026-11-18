@@ -1,0 +1,78 @@
+import { homedir } from "node:os"
+import { join } from "node:path"
+
+import { dataDir } from "@packages/env/data-dir"
+import { deleteWeights, type Roots } from "@packages/safe-delete"
+
+import { dropPaths, readRecord } from "../machine-record/record"
+import { mainCheckout } from "../main-checkout"
+import { CARD_ID } from "../ops-tick/unused-card"
+import { sessionName } from "../trash"
+
+// The far end of an approved removal on a peer's own machine, run from there by the ssh `peerArgv` shapes: <path> <bytes> <card>, one recorded weights path at the card's exact size, re-checked here before the same deleteWeights drops it.
+export const RM_PEER_USAGE =
+  "usage: playground rm --card <id> --peer <machine> <path> (a far end takes <path> <bytes> <card>)"
+
+export type RmPeerDeps = {
+  data: string
+  home: string
+  main: string
+  notify?: (text: string) => void
+  session: () => Promise<string> | string
+}
+
+// The peer's far end: <path> <bytes> <card>, or why the bytes or card do not read, one recorded weights path at its exact size, re-checked on this peer and deleted with the same deleteWeights, its record entry dropped.
+export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<number> {
+  if (words.length < 3) {
+    console.error(`playground: ${RM_PEER_USAGE}`)
+    return 2
+  }
+  const [path, bytesText, card] = words
+  const bytes = Number(bytesText)
+  if (!Number.isInteger(bytes) || bytes <= 0) {
+    console.error(`playground: ${bytesText} is not ${path}'s bytes`)
+    return 2
+  }
+  if (!CARD_ID.test(card)) {
+    console.error(`playground: ${card} is not an Inbox card id`)
+    return 2
+  }
+  // recorded: the path is on this peer's own machine record, or it stays
+  const { entries } = await readRecord(deps.data).catch(() => ({ entries: [] }))
+  if (!entries.some((entry) => entry.path === path)) {
+    console.error(`playground: ${path} is not on the machine record, so it stays`)
+    return 1
+  }
+  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
+  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
+  const session = await deps.session()
+  const done = deleteWeights(
+    path,
+    { approved: { bytes, card }, folders, reason: `nightly-clean card ${card}`, session },
+    roots,
+  )
+  if ("refused" in done) {
+    if (done.kind !== "refused") deps.notify?.(`${session}: ${done.refused}`)
+    console.error(`playground: ${done.refused}`)
+    return 1
+  }
+  const logged = `Deleted ${path} outright (${done.size} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
+  console.log(logged)
+  const dropped = await dropPaths(deps.data, [path]).catch(() => [])
+  console.log(dropped.length ? `${logged}; its machine record entry is dropped` : logged)
+  return 0
+}
+
+if (import.meta.main) {
+  void (async () => {
+    const home = process.env.HOME || homedir()
+    const code = await runRmPeer(process.argv.slice(2), {
+      data: dataDir(),
+      home,
+      main: mainCheckout(),
+      notify: (text) => void Bun.spawnSync(["bash", "-c", `printf '%s' ${JSON.stringify(text)}`]),
+      session: sessionName,
+    })
+    process.exit(code)
+  })()
+}
