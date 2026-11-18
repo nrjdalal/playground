@@ -151,7 +151,7 @@ describe("ops-wa's bridge", () => {
     )
   })
 
-  test("keeps every send and the owner's last message when both land at once, so the hourly cap counts them all", async () => {
+  test("keeps every send and the owner's last message when both land at once, so the failover reads them all", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "go")])
     await h.settle()
@@ -285,24 +285,15 @@ describe("ops-wa's bridge", () => {
     expect(parts.map((p) => p.content.text).join("\n\n")).toBe(long)
   })
 
-  test("refuses the 61st send in an hour, naming when it frees, and counts across restarts", async () => {
+  test("sends 70 in a row with no hourly cap, each a gap after the last", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "go")])
     await h.settle()
-    for (let i = 0; i < SEND.perHour; i++) await h.send(`n${i}`)
-    // a new sender over the same folder stands for a restart of ops-wa
-    const again = sender({
-      device: SPARE,
-      dir: h.dir,
-      now: () => START + 70_000,
-      owner: OWNER,
-      sleep: async () => {},
-      sock: h.fake.sock,
-    })
-    await expect(again("one more")).rejects.toThrow(
-      /the hourly cap of 60 sends is reached until \d\d:\d\dZ/,
-    )
-    expect(h.fake.sent).toHaveLength(SEND.perHour)
+    for (let i = 0; i < 70; i++) expect(await h.send(`n${i}`)).toBe("sent")
+    expect(h.fake.sent).toHaveLength(70)
+    for (let i = 1; i < 70; i++)
+      expect(h.fake.sent[i]!.at - h.fake.sent[i - 1]!.at).toBeGreaterThanOrEqual(SEND.gapMs)
+    expect(SEND).not.toHaveProperty("perHour")
   })
 
   test("never marks a message read nor sends presence", async () => {
@@ -461,14 +452,13 @@ describe("the alert number (#2748)", () => {
     expect(h.fake.sent).toEqual([])
   })
 
-  test("an alert keeps the send habits: each of its sends paced a second apart and counted in the hourly cap", async () => {
+  test("an alert keeps the send habits: each of its sends paced a second apart, with no hourly cap", async () => {
     const h = await both()
     await h.send("first", "alert")
     expect(h.fake.sent[1]!.at - h.fake.sent[0]!.at).toBeGreaterThanOrEqual(SEND.gapMs)
-    for (let n = 0; n < SEND.perHour / 2 - 1; n++) await h.send(`more ${n}`, "alert")
-    expect(h.fake.sent).toHaveLength(SEND.perHour)
-    await expect(h.send("one too many", "alert")).rejects.toThrow("hourly cap")
-    await expect(h.send("one too many")).rejects.toThrow("hourly cap")
+    for (let n = 0; n < 35; n++) await h.send(`more ${n}`, "alert")
+    expect(h.fake.sent).toHaveLength(72)
+    expect(await h.send("one more")).toBe("sent")
     expect(h.fake.calls).toEqual([])
   })
 
@@ -1045,7 +1035,7 @@ describe("the alert number as a guest (#2756)", () => {
     expect(h.data[1]).toEndWith(guestLine("made-up guest policy"))
   })
 
-  test("a guest's reply reaches the alert number alone, under the same pacing and hourly cap as every send", async () => {
+  test("a guest's reply reaches the alert number alone, under the same pacing as every send", async () => {
     const h = await guest()
     expect(await h.send("3 PRs merged today", "guest")).toBe("sent")
     expect(await h.send("and 2 in review", "guest")).toBe("sent")
@@ -1054,9 +1044,6 @@ describe("the alert number as a guest (#2756)", () => {
       [jid(ALERT), "and 2 in review"],
     ])
     expect(h.fake.sent[1]!.at - h.fake.sent[0]!.at).toBeGreaterThanOrEqual(SEND.gapMs)
-    for (let n = 0; n < SEND.perHour - 3; n++) await h.send(`owner ${n}`)
-    await h.send("last one", "guest")
-    await expect(h.send("one too many", "guest")).rejects.toThrow("hourly cap")
     expect(h.fake.calls).toEqual([])
   })
 
