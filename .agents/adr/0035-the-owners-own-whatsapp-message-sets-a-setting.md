@@ -1,0 +1,20 @@
+# The owner's own WhatsApp message sets a setting
+
+[ADR 0032](0032-the-owners-own-whatsapp-message-sets-the-second-number.md) let the owner's own WhatsApp message set one guard key, `wa.alert`.
+The owner asked that a setting the owner names on WhatsApp is applied with no card and no `!` command: a command is done, and a change to a setting asks for a confirm first.
+By [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR stands beside 0032, and every other line of 0032 still holds.
+
+## Decision
+
+- **ops-wa keeps the proof of every owner text, never the text.** `kept.json` (0600, the last 50, 24 hours), which 0032's `numbers.json` becomes, holds each owner text message's id, time, a 16-character sha256 of each of its words in order (lowercased, wrapping quotes and trailing stops cut) and, as before, its one phone number when it holds exactly one. It keeps nothing of a guest's or a stranger's message.
+- **`playground settings set <key> <value> --from-owner-msg <id>` only asks.** The CLI sends the id, key and value to ops-wa's socket and writes nothing itself. ops-wa refuses an id it did not keep or one older than 24 hours, and a value whose words do not stand in a row in that message.
+- **A key a guard reads waits for the owner's confirm.** For a guard key (`GUARD_SETTING_KEYS`) or any `jobs.<name>`, ops-wa asks the owner on WhatsApp "Set <key> to <value>? Reply 1 to apply", the value masked where the setting is masked, and applies it only on the owner's own reply `1` within 10 minutes. A late `1`, any other reply, and a `1` from the second number or a stranger apply nothing. Any other key applies at once.
+- **Each set is the owner's act, logged with its undo.** ops-wa writes the key at the login's scope with author `owner`, actor `ops-wa` and the message id as its reason, logs the id and the old value, and sends the owner a line with a one-line undo: the old value's `settings set`, or a `settings reset` when the scope held none. The CLI prints the same undo for a key that applied at once.
+- **Every other writer stays refused.** no-extensions-write passes a `settings set` that carries `--from-owner-msg` with an id it reads, since that call writes nothing, and refuses every other set or reset of a guarded key as before. no-raw-wa keeps every session out of ops-wa's folder, so no session writes `kept.json`, `confirm.json` or the socket by hand.
+- **The Dashboard's chat stays out.** A message from it reaches a session as text with no id ops-wa can prove, and the Settings page already sets a key as the owner's own act.
+
+## Consequences
+
+- The owner changes a setting by asking for it on WhatsApp, a guarded one with one more reply, and the Inbox card and the `!` command stay as the other ways.
+- A value from the owner's message can be applied to a key that message does not name; the confirm on a guarded key, which names the key, is the check on it.
+- A hash of each word is on disk for 24 hours in ops-wa's owner-only folder, and a common word's hash reads back by a lookup.
