@@ -321,55 +321,39 @@ export function picksOf(
   return picks
 }
 
-// A card's three fields the order reads, pinned when pinnedAt is set, ranked when the owner moved it, newest first by its stable sequence ref, so the API's rows and the web's drag share one order.
-export type InboxItem = {
+// The two fields a card's place reads: pinned when pinnedAt is set, placed by hand when rank is.
+export type InboxPlace = {
   pinnedAt: string | null
   rank: string | null
-  ref: number
 }
 
-// The cards, pinned first, each pinned card by the fractional rank the owner gave it, then the rest newest first by their sequence ref. A rank is a code-point key, so the order is this JS's, not SQL's, whose text collation can read the same ranks differently, so the sort stays here, never in ORDER BY.
-export function orderInboxItems(items: InboxItem[]): InboxItem[] {
-  const rankKey = (a: InboxItem, b: InboxItem): number => {
-    if (a.rank === b.rank) return 0
-    if (a.rank === null) return 1
-    if (b.rank === null) return -1
-    return a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0
-  }
-  return [...items].sort((a, b) => {
-    const aPinned = a.pinnedAt !== null
-    const bPinned = b.pinnedAt !== null
-    if (aPinned !== bPinned) return aPinned ? -1 : 1
-    return rankKey(a, b) || b.ref - a.ref
-  })
+// Pure: the cards, pinned first, each group by rank and the unranked after in the order given, today's order, since the sort is stable; a rank compares by code point here, never in ORDER BY, whose collation can read the same keys differently.
+export function orderInboxItems<T extends InboxPlace>(items: T[]): T[] {
+  const byRank = (a: T, b: T): number =>
+    a.rank === b.rank ? 0 : a.rank === null ? 1 : b.rank === null ? -1 : a.rank < b.rank ? -1 : 1
+  return [...items].sort(
+    (a, b) => Number(a.pinnedAt === null) - Number(b.pinnedAt === null) || byRank(a, b),
+  )
 }
 
-// The smallest key strictly between two neighbour ranks, one or both null at a tab's ends, so a move can slot a card between them, before the first, or after the last. It is a code-point key, so it matches the JS order, never SQL's, whose collation can read it differently.
+const RANK_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// Pure: a key strictly between two neighbour ranks, null at a tab's end, from base-62 digits alone, so Postgres text stores it and no key ends in "0", which keeps room below every key (fractional-indexing's midpoint).
 export function rankBetween(prev: string | null, next: string | null): string {
-  if (prev === null) return next === null ? "\x00" : prefixNextLessThan(next)
-  if (next === null) return prefixNextGreaterThan(prev)
-  if (next.startsWith(prev)) return prev + "\x00"
-  let i = 0
-  while (prev[i] === next[i]) i++
-  const prevCode = prev.charCodeAt(i)
-  const nextCode = next.charCodeAt(i)
-  if (nextCode - prevCode > 1) {
-    return prev.slice(0, i) + String.fromCharCode(Math.floor((prevCode + nextCode) / 2))
+  return rankMidpoint(prev ?? "", next)
+}
+
+function rankMidpoint(low: string, high: string | null): string {
+  if (high !== null) {
+    let n = 0
+    while ((low[n] ?? "0") === high[n]) n++
+    if (n > 0) return high.slice(0, n) + rankMidpoint(low.slice(n), high.slice(n))
   }
-  return prev + "\x00"
-}
-
-// A key that leads `key` by one step: drop trailing nulls, then step the last code point down, or a null when there is none, so it stays below with room opening below it.
-function prefixNextLessThan(key: string): string {
-  let end = key.length
-  while (end > 0 && key.charCodeAt(end - 1) === 0) end--
-  if (end === 0) return "\x00"
-  return key.slice(0, end - 1) + String.fromCharCode(key.charCodeAt(end - 1) - 1)
-}
-
-// The key that ends `key`, the smallest one with a null after it, so it stays above with room opening above it.
-function prefixNextGreaterThan(key: string): string {
-  return key + "\x00"
+  const a = low === "" ? 0 : RANK_DIGITS.indexOf(low[0]!)
+  const b = high === null ? RANK_DIGITS.length : RANK_DIGITS.indexOf(high[0]!)
+  if (b - a > 1) return RANK_DIGITS[Math.round((a + b) / 2)]!
+  if (high !== null && high.length > 1) return high.slice(0, 1)
+  return RANK_DIGITS[a]! + rankMidpoint(low.slice(1), null)
 }
 
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
