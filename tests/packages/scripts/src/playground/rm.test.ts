@@ -111,6 +111,9 @@ test("rm refuses a --reason alongside a --peer, since a far-end removal is the p
   expect(
     rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "nightly-clean"]),
   ).toEqual({ error: RM_USAGE })
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "playground rm"]),
+  ).toEqual({ error: RM_USAGE })
 })
 
 const dirs: string[] = []
@@ -2295,6 +2298,25 @@ test("runRm --peer relays a peer's refusal once, and the path stays", async () =
   expect(code).toBe(1)
   expect(told).toEqual(["j6rjgy-worker: no such path"])
   expect(err.join("\n")).toContain("no such path")
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's silence with the did-not-answer fallback", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: the peer did not answer"])
+  expect(err.join("\n")).toContain("the peer did not answer")
   expect(seen).toEqual([
     {
       machine: "spark-b",
