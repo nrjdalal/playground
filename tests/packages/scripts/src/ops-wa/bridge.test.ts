@@ -67,6 +67,9 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     alert: alert ?? "",
     // wa.replyPolicy and wa.guestPolicy as ops-wa reads them, their defaults unless a test sets them
     policy: undefined as Policy | undefined,
+    // whether the dispatcher's alerts-wait runs, and when it last handed over an alert, as its cursor's time
+    waiter: true,
+    printedAt: undefined as number | undefined,
     // whether the bridge's own 👀 goes out, on in the reactions' tests alone, so every other test reads its texts as they were
     react: false,
   }
@@ -111,6 +114,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     inbox,
     media,
     policy: async () => mode.policy,
+    waiter: async (_: string, since: number) =>
+      mode.waiter || (mode.printedAt !== undefined && mode.printedAt >= since),
   })
   watched.attach(fake.sock)
   return {
@@ -575,6 +580,65 @@ describe("WhatsApp mode", () => {
     h.fake.upsert([h.fake.message(jid(OWNER), "now?")])
     await h.settle()
     expect(h.fake.sent).toHaveLength(2)
+  })
+
+  test("a message the dispatcher has not answered in a minute while its alerts-wait is down goes on through Ops, once", async () => {
+    const h = harness()
+    h.mode.waiter = false
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    h.advance(30_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    h.advance(30_000)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", "ops"])
+    expect(h.routed[1]!.text).toStartWith(
+      "dispatcher has no playground alerts-wait running, so it hears this only from the relay: send it to dispatcher by SendMessage now.\nThe owner's WhatsApp at",
+    )
+    expect(h.routed[1]!.text).toContain("is it green?")
+  })
+
+  test("a running alerts-wait, or a reply sent in the minute, sends nothing on through Ops", async () => {
+    const live = harness()
+    live.fake.upsert([live.fake.message(jid(OWNER), "one")])
+    await live.settle()
+    live.advance(90_000)
+    await live.pass()
+    expect(live.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    const answered = harness()
+    answered.mode.waiter = false
+    answered.fake.upsert([answered.fake.message(jid(OWNER), "two")])
+    await answered.settle()
+    await answered.send("on it")
+    answered.advance(90_000)
+    await answered.pass()
+    expect(answered.routed.map((r) => r.to)).toEqual(["dispatcher"])
+  })
+
+  test("a line the waiter already handed over is not sent on through Ops when the dispatcher's turn on it runs past a minute", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "deploy it")])
+    await h.settle()
+    h.advance(1000)
+    h.mode.printedAt = START + 1000
+    h.mode.waiter = false
+    h.advance(60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+  })
+
+  test("a line settled with a live waiter at a minute is not sent on at a later gap", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "deploy it")])
+    await h.settle()
+    h.advance(60_000)
+    await h.pass()
+    h.mode.waiter = false
+    h.advance(20 * 60_000)
+    await h.pass()
+    expect(h.routed.filter((r) => r.to === "ops")).toHaveLength(0)
   })
 
   test("hands a message with no reply in 3 minutes to the assistant seat too, once", async () => {
