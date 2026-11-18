@@ -214,6 +214,7 @@ and runs `--model local --effort <effort>` with `--settings ~/.playground/factor
 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` declares the server's own window, since Claude Code assumes 1M for a model name it does not know and so never compacted before the server refused: the `local` card's `max_model_len` from that GET, less 8192 for the reply, which shares the window; a card with no number above 16384 takes 120000.
 The 120k compact window is capped at the declared one, so a session on a smaller server compacts inside it.
 A start records `claude-code local`, which a resume runs on.
+A `--backend local` session always starts and resumes at `--effort high`, so its thinking stays uncapped, per the model rule (`scripts/briefs/brief-rush.md`), and a resume passes `--effort high` explicitly rather than the effort its record carries.
 
 ## --runtime herdr and restore
 
