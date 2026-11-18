@@ -1022,6 +1022,20 @@ describe("preflight", () => {
     }
   })
 
+  test("lets a first-run container that predates loopback start, and prints the keep-data fix", async () => {
+    const checked = await preflight(BRANCH, read(URL), {
+      locate: failing("exposed", "playground-pg-1-db-x9Kq publishes port 33001 beyond loopback"),
+      owner: () => "playground-pg-1-db-x9Kq",
+      root: FACTORY_ROOT,
+    })
+    expect(checked.ok).toBe(true)
+    if (checked.ok) {
+      expect(checked.proof).toBe(
+        "docker stop playground-pg-1-db-x9Kq && docker rename playground-pg-1-db-x9Kq playground-pg-1-db-x9Kq-old && docker run -d --name playground-pg-1-db-x9Kq -p 127.0.0.1:33001:5432 --volumes-from playground-pg-1-db-x9Kq-old postgres:alpine",
+      )
+    }
+  })
+
   test("keeps the live dashboard's database to the live dashboard's own branch, refused before the proof runs anything in it", async () => {
     const elsewhere = proving()
     const refused = await preflight(BRANCH, read(URL), {

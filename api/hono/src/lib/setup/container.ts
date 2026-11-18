@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { chmodSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -63,8 +64,8 @@ export const withDatabase = (text: string, url: string): string => {
   return `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`
 }
 
-// Pure: argv that starts first run's Postgres, published on 127.0.0.1 alone (docker maps a random host port to the container's 5432), on postgres:alpine with the postgres login.
-export const startArgv = (name: string): string[] => [
+// Pure: argv that starts first run's Postgres, published on 127.0.0.1 alone (docker maps a random host port to the container's 5432), on postgres:alpine with the postgres login and a password this run chose.
+export const startArgv = (name: string, password: string): string[] => [
   "run",
   "--name",
   name,
@@ -74,11 +75,14 @@ export const startArgv = (name: string): string[] => [
   "-e",
   "POSTGRES_USER=postgres",
   "-e",
-  "POSTGRES_PASSWORD=postgres",
+  `POSTGRES_PASSWORD=${password}`,
   "-e",
   "POSTGRES_DB=postgres",
   "postgres:alpine",
 ]
+
+// Pure: a password strong enough for a container no one reaches past loopback, never reused across runs.
+const randomPassword = (): string => randomUUID().replaceAll("-", "")
 
 // Pure: 4 random letters or digits, the suffix setup adds to the checkout's name.
 const randomSuffix = (): string => {
@@ -98,9 +102,20 @@ export const portFromPort = (stdout: string): number | null => {
   return match ? Number(match[1]) : null
 }
 
-// Pure: the URL first run's container publishes, on localhost with the postgres login.
-export const urlFor = (port: number): string =>
-  `postgres://postgres:postgres@localhost:${port}/postgres`
+// Pure: the URL first run's container publishes, on localhost with the postgres login and this run's password.
+export const urlFor = (port: number, password: string): string =>
+  `postgres://postgres:${password}@localhost:${port}/postgres`
+
+// Pure: the password a reused container was started with, read from `docker inspect`'s Config.Env, or empty when it started without one.
+const passwordOf = (inspectStdout: string): string => {
+  try {
+    const env = JSON.parse(inspectStdout)?.[0]?.Config?.Env as string[]
+    const line = env?.find((value) => value.startsWith("POSTGRES_PASSWORD="))
+    return line ? line.slice("POSTGRES_PASSWORD=".length) : ""
+  } catch {
+    return ""
+  }
+}
 
 const migrate = async (url: string) => {
   const client = new SQL(url)
@@ -159,22 +174,28 @@ export async function startLocal({
     if (existing) throw new SetupError(liveDatabaseHeld(existing))
   }
   onStep("Starting Postgres")
-  const names = containersOf((await docker(CONTAINER_LIST)).stdout).map((c) => c.name)
-  const running = names.find((c) => isNamedContainer(name, c))
+  const running = containersOf((await docker(CONTAINER_LIST)).stdout).find(
+    (c) => c.state === "running" && isNamedContainer(name, c.name),
+  )?.name
   const container = running ?? `${name}-${randomSuffix()}`
+  let password = ""
   if (!running) {
-    const started = await docker(startArgv(container))
+    password = randomPassword()
+    const started = await docker(startArgv(container, password))
     if (started.code !== 0) {
       throw new SetupError(
         `docker run ${container} failed: ${started.stderr.trim() || `exit ${started.code}`}`,
       )
     }
+  } else {
+    // The reused container's password is not known, so read it from its image: the URL must match it, or the import would reach the wrong Postgres.
+    password = passwordOf((await docker(["inspect", container])).stdout)
   }
   const port = portFromPort((await docker(["port", container])).stdout)
   if (port === null) {
     throw new SetupError(`docker reported no port for ${container}`)
   }
-  const url = urlFor(port)
+  const url = urlFor(port, password)
   // setup's container has no restart policy, so the live dashboard's would stay stopped after a reboot
   if (isLiveDatabase(container, live)) {
     onStep("Keeping Postgres running after a restart")

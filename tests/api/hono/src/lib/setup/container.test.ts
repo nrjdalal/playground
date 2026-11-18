@@ -18,7 +18,10 @@ const dir = mkdtempSync(join(tmpdir(), "setup-container-"))
 const envFile = join(dir, ".env")
 afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
-const URL = "postgres://postgres:postgres@localhost:54123/postgres"
+// The password every argv and URL in this suite uses, so startLocal's URL and run argv stay in step.
+const PASSWORD = "s3cr3t"
+
+const URL = `postgres://postgres:${PASSWORD}@localhost:54123/postgres`
 
 // A fake Run: it logs each call, replies to the ones startLocal makes, and never touches Docker.
 class FakeRun {
@@ -42,7 +45,11 @@ class FakeDocker extends FakeRun {
   run = async (args: string[]) => {
     this.calls.push({ args, when: this.when })
     if (args[0] === "ps") {
-      return { code: 0, stderr: "", stdout: this.containers.map((c) => c).join("\n") }
+      return {
+        code: 0,
+        stderr: "",
+        stdout: this.containers.map((c) => (c.includes("\t") ? c : `${c}\trunning`)).join("\n"),
+      }
     }
     if (args[0] === "port") {
       return { code: 0, stderr: "", stdout: `5432/tcp -> 127.0.0.1:${this.runningPort}\n` }
@@ -54,9 +61,13 @@ class FakeDocker extends FakeRun {
 // Pure: the name an argv names, as `run --name <name> -d ...`, so a test derives the child's name from the run call.
 const named = (argv: string[]): string => argv[argv.indexOf("--name") + 1]
 
+// Pure: the password an argv binds, from the `POSTGRES_PASSWORD=<pw>` element, so a test can compare the URL's and the run's.
+const passwordOfArgv = (argv: string[]): string =>
+  argv.find((arg) => arg.startsWith("POSTGRES_PASSWORD="))?.slice("POSTGRES_PASSWORD=".length) ?? ""
+
 describe("startArgv", () => {
-  test("publishes the Postgres port on 127.0.0.1 alone, with the checkout's name and the postgres login", () => {
-    expect(startArgv("playground-db")).toEqual([
+  test("publishes the Postgres port on 127.0.0.1 alone, with the checkout's name, the postgres login and this run's password", () => {
+    expect(startArgv("playground-db", PASSWORD)).toEqual([
       "run",
       "--name",
       "playground-db",
@@ -66,7 +77,7 @@ describe("startArgv", () => {
       "-e",
       "POSTGRES_USER=postgres",
       "-e",
-      "POSTGRES_PASSWORD=postgres",
+      `POSTGRES_PASSWORD=${PASSWORD}`,
       "-e",
       "POSTGRES_DB=postgres",
       "postgres:alpine",
@@ -74,8 +85,12 @@ describe("startArgv", () => {
   })
 
   test("binds the host port to 127.0.0.1, so only this machine can reach it", () => {
-    const argv = startArgv("playground-db")
+    const argv = startArgv("playground-db", PASSWORD)
     expect(argv[argv.indexOf("-p") + 1]).toMatch(/^127\.0\.0\.1::5432$/)
+  })
+
+  test("binds this run's password to the postgres login, so the URL reads it back", () => {
+    expect(passwordOfArgv(startArgv("playground-db", PASSWORD))).toBe(PASSWORD)
   })
 })
 
@@ -86,8 +101,8 @@ describe("portFromPort and urlFor", () => {
     expect(portFromPort("")).toBeNull()
   })
 
-  test("urlFor names the postgres login on localhost and the port", () => {
-    expect(urlFor(54123)).toBe(URL)
+  test("urlFor names the postgres login, this run's password, on localhost and the port", () => {
+    expect(urlFor(54123, PASSWORD)).toBe(URL)
   })
 })
 
@@ -149,30 +164,30 @@ describe("startLocal", () => {
     const docker = new FakeDocker("Starting", [], 54123)
     const url = await go(docker)
 
-    // It lists, then runs the container on loopback alone, naming it, and reads the port back off that child.
+    // It lists, then runs the container on loopback alone, naming it, and reads the port back off that child. The run and the URL carry the same password this run chose.
     const runCall = docker.calls.find((c) => c.args[0] === "run")
     expect(runCall).toBeDefined()
     const child = named(runCall!.args)
-    expect(runCall!.args).toEqual(startArgv(child))
+    expect(runCall!.args).toEqual(startArgv(child, passwordOfArgv(runCall!.args)))
     expect(runCall!.args).toContain("127.0.0.1::5432")
 
     expect(docker.calls.find((c) => c.args[0] === "port")!.args).toEqual(["port", child])
-    expect(url).toBe(urlFor(54123))
+    expect(url).toBe(urlFor(54123, passwordOfArgv(runCall!.args)))
 
     const execCall = docker.calls.find((c) => c.args[0] === "exec")
     expect(execCall!.args).toEqual(["exec", child, "pg_isready", "-U", "postgres"])
-    expect(noProve).toHaveBeenCalledWith(URL)
-    expect(noMigrate).toHaveBeenCalledWith(URL)
+    expect(noProve).toHaveBeenCalledWith(url)
+    expect(noMigrate).toHaveBeenCalledWith(url)
 
-    expect(await Bun.file(envFile).text()).toContain(`POSTGRES_URL=${URL}`)
+    expect(await Bun.file(envFile).text()).toContain(`POSTGRES_URL=${url}`)
   })
 
-  test("the loopback argv is fixed: nothing comes from a request, only the checkout's name", async () => {
+  test("the loopback argv names only this container and this run's password, nothing from a request", async () => {
     const docker = new FakeDocker("Starting", [], 54123)
     await go(docker)
     const argv = docker.calls.find((c) => c.args[0] === "run")!.args
     expect(argv[argv.indexOf("-p") + 1]).toBe("127.0.0.1::5432")
-    expect(argv).toEqual(startArgv(named(argv)))
+    expect(argv).toEqual(startArgv(named(argv), passwordOfArgv(argv)))
   })
 
   test("when docker reports no port, it says what docker printed and leaves the running container", async () => {
@@ -187,6 +202,33 @@ describe("startLocal", () => {
     const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 54123)
     await go(docker)
     expect(docker.calls.find((c) => c.args[0] === "run")).toBeUndefined()
+  })
+
+  test("a reused container's URL reads its password from docker inspect, not a fixed one", async () => {
+    const docker = new FakeDocker("Starting", ["playground-db-x9Kq"], 54123)
+    const origRun = docker.run
+    docker.run = async (args) =>
+      args[0] === "inspect"
+        ? {
+            code: 0,
+            stderr: "",
+            stdout: JSON.stringify([
+              { Config: { Env: ["POSTGRES_PASSWORD=the-reused-password"] } },
+            ]),
+          }
+        : { ...(await origRun(args)) }
+    const url = await go(docker)
+    expect(docker.calls.find((c) => c.args[0] === "run")).toBeUndefined()
+    expect(url).toBe(urlFor(54123, "the-reused-password"))
+    expect(noProve).toHaveBeenCalledWith(url)
+  })
+
+  test("a stopped container of the name is left as it is, and a new one is started beside it", async () => {
+    const docker = new FakeDocker("Starting", ["playground-db-x9Kq\texited"], 54123)
+    await go(docker)
+    const run = docker.calls.find((c) => c.args[0] === "run")
+    expect(run).toBeDefined()
+    expect(named(run?.args ?? [])).not.toBe("playground-db-x9Kq")
   })
 
   test("with no name running, it starts one and, if the live dashboard's, keeps it running after a reboot", async () => {
@@ -240,6 +282,6 @@ describe("startLocal", () => {
     const runCall = docker.calls.find((c) => c.args[0] === "run")
     expect(runCall).toBeUndefined()
     // A fresh one would bind to loopback alone.
-    expect(startArgv("playground-db")).toContain("127.0.0.1::5432")
+    expect(startArgv("playground-db", PASSWORD)).toContain("127.0.0.1::5432")
   })
 })

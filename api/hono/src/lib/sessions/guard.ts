@@ -162,6 +162,15 @@ export const locate = (url: string, run: Docker = docker): Located => {
   return { owner, target }
 }
 
+// The container publishing the URL's port, read without the loopback or identity checks `locate` runs after: the owner it refused on, so first run's own, which predates loopback, can still be named.
+export const ownerName = (url: string, run: Docker = docker): string | null => {
+  try {
+    return publishers(targetOf(url).port, run)[0]?.name ?? null
+  } catch {
+    return null
+  }
+}
+
 // Proves the server the URL reaches is the located container's own Postgres, by the system identifier in its pg_controldata, and returns the proof the importer prints before its first write.
 export async function prove(
   url: string,
