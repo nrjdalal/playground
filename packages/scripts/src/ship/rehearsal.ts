@@ -11,7 +11,7 @@ export const REHEARSAL_PREFIX = "ops-r"
 const LEGACY_AGE_MS = 48 * 60 * 60 * 1000
 
 // A rehearsal folder from before ship:rehearsal new, so with no marker: named ops-r<NNN>, holding the rehearsal's own clone and logs folders, and untouched for over 48 hours.
-const isLegacyRehearsal = (abs: string): boolean =>
+export const isLegacyRehearsal = (abs: string): boolean =>
   /^ops-r\d{3}/.test(basename(abs)) &&
   ["clone", "logs"].every((part) =>
     lstatSync(join(abs, part), { throwIfNoEntry: false })?.isDirectory(),
