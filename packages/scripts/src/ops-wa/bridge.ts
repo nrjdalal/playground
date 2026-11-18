@@ -117,7 +117,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json and handed.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 const handedFile = (dir: string) => join(dir, "handed.json")
