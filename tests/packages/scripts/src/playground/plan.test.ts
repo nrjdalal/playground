@@ -411,6 +411,65 @@ describe("rollOutcome", () => {
     ).toEqual({ done: "Updated to abc1234", ok: true })
   })
 
+  // #2787: a roll that moved the database onto loopback names the move and the old container's remove command on its PASS line
+  test("reads a passing roll that moved the database as updated, naming the move and its remove command", () => {
+    const moved =
+      "Moved the database playground-db-Ab12 onto 127.0.0.1:55432 alone, keeping its data; playground-db-Ab12-old is stopped and kept; once the Dashboard reads its data, remove it with: docker rm -v playground-db-Ab12-old"
+    expect(
+      rollOutcome(
+        [],
+        [
+          `2026-10-18T02:03:00Z ROLL canary abc1234 (roll-now) abc1234 PASS version=abc1234 verify=PASS follower=running database: ${moved}`,
+        ],
+      ),
+    ).toEqual({ done: `Updated to abc1234; ${moved}`, ok: true })
+  })
+
+  test("keeps a move's note when the roll fails after it, so the old container and its remove command still reach the report", () => {
+    const moved =
+      "Moved the database playground-db-Ab12 onto 127.0.0.1:55432 alone, keeping its data; playground-db-Ab12-old is stopped and kept; once the Dashboard reads its data, remove it with: docker rm -v playground-db-Ab12-old"
+    expect(
+      rollOutcome(
+        [],
+        [
+          `2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=DOWN (dev: refusing to start: x) follower=running database: ${moved}`,
+          "2026-10-18T02:03:01Z ROLL canary def5678 (roll-now) def5678 FAIL dev refusing: x (not the head's, no bad build)",
+          "2026-10-18T02:05:00Z FALLBACK abc1234 PASS version=abc1234 verify=PASS",
+        ],
+      ),
+    ).toEqual({
+      done: `Failed: dev refusing: x (not the head's, no bad build); back on abc1234; ${moved}`,
+      ok: false,
+    })
+    expect(
+      rollOutcome(
+        [],
+        [
+          `2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=DOWN (dev: y) database: ${moved}`,
+          "2026-10-18T02:05:00Z FALLBACK abc1234 PASS version=abc1234 verify=PASS",
+        ],
+      ),
+    ).toEqual({ done: `Failed: dev=DOWN (dev: y); back on abc1234; ${moved}`, ok: false })
+  })
+
+  test("reads a failed move's reason first, from the refusing line playground update prints", () => {
+    const why =
+      "database move: dashboard-db: the move failed (docker run failed: no); playground-db is started again as it was"
+    expect(
+      rollOutcome(
+        [],
+        [
+          `2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=up follower=FAIL x ${why}`,
+          `2026-10-18T02:03:01Z ROLL canary def5678 (roll-now) def5678 FAIL dev refusing: ${why}; refusing to write: playground-db publishes port 55432 beyond loopback (not the head's, no bad build)`,
+          "2026-10-18T02:05:00Z FALLBACK abc1234 PASS version=abc1234 verify=PASS",
+        ],
+      ),
+    ).toEqual({
+      done: `Failed: dev refusing: ${why}; refusing to write: playground-db publishes port 55432 beyond loopback (not the head's, no bad build); back on abc1234`,
+      ok: false,
+    })
+  })
+
   const FAILED =
     "2026-10-18T02:03:00Z ROLL canary def5678 (roll-now) def5678 FAIL dev=DOWN (dev: refusing to start: x)"
 

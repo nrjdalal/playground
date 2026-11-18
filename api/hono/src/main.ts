@@ -17,11 +17,12 @@ const root = resolve(process.cwd(), "../..")
 
 const serve: Fetch = process.env.POSTGRES_URL
   ? await normal()
-  : firstRun(async (onStep) => {
+  : firstRun(async (onStep, move) => {
       const branch = branchOf(root)
       process.env.POSTGRES_URL = await startLocal({
         branch,
         envFile: resolve(root, ".env"),
+        move,
         name: setupName(root, branch),
         onStep,
       })

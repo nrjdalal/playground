@@ -35,6 +35,20 @@ export async function keep(
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
+// A run that answers with stdout alone, since whisper-cli logs its model load to stderr and the note's words are stdout's.
+export const stdoutRun =
+  (timeoutMs: number): Run =>
+  async (argv) => {
+    const proc = Bun.spawn(argv, {
+      stderr: "ignore",
+      stdin: "ignore",
+      stdout: "pipe",
+      timeout: timeoutMs,
+    })
+    const out = await new Response(proc.stdout).text()
+    return { code: await proc.exited, out }
+  }
+
 // A voice note's words through whisper.cpp on this Mac, after ffmpeg turns it into the 16 kHz wav whisper-cli reads; undefined while ffmpeg, whisper-cli or the model is missing, or either run fails, so the note goes on not transcribed.
 export const transcriber =
   (model: string, has: (command: string) => boolean, exists: (path: string) => boolean, run: Run) =>
