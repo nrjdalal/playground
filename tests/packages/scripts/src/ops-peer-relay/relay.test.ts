@@ -83,10 +83,21 @@ const shFar = (script: string): Far => {
   }
 }
 
-const until = async (check: () => boolean, ms = 10_000) => {
+// A check returns true when the step is done, or the last state it saw otherwise, so a timeout names that state.
+const describeState = (value: boolean | number | string | Record<string, number>): string =>
+  typeof value === "object" ? JSON.stringify(value) : String(value)
+
+// Wait until the check returns true, or give up after ms. On timeout the error names the step's label, the time waited, and the state the check last saw.
+const until = async (
+  check: () => boolean | number | string | Record<string, number>,
+  ms = 10_000,
+  label: string,
+) => {
   const end = Date.now() + ms
-  while (!check()) {
-    if (Date.now() > end) throw new Error("timed out")
+  let last: boolean | number | string | Record<string, number>
+  while ((last = check()) !== true) {
+    if (Date.now() > end)
+      throw new Error(`timed out after ${ms}ms waiting for ${label}: last ${describeState(last)}`)
     await Bun.sleep(20)
   }
 }
@@ -174,12 +185,20 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
   test("each machine's new lines reach the other once, a copied line never goes back, and a line there keeps its at", async () => {
     const { here, there } = machines("both")
     const link1 = hold(here, agentFar(there))
-    await until(link1.isUp)
+    await until(link1.isUp, 10_000, "link up")
     const out = line("to there", "2026-11-16T20:00:01Z", "probe-b")
     const back = line("to here", "2026-11-16T20:00:02Z", "probe-a")
     write(here, out)
     write(there, back)
-    await until(() => rows(there).length === 2 && rows(here).length === 2)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        const hereRows = rows(here).length
+        return thereRows === 2 && hereRows === 2 ? true : { there: thereRows, here: hereRows }
+      },
+      10_000,
+      "copied both ways",
+    )
     await Bun.sleep(200)
     link1.stop()
     expect(await link1.done).toBe("")
@@ -191,11 +210,19 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
   test("a line written while the link is down arrives once after it, through the cursor on each side", async () => {
     const { here, there } = machines("drop")
     const first = hold(here, agentFar(there))
-    await until(first.isUp)
+    await until(first.isUp, 10_000, "link up")
     const before = line("before the drop")
     write(here, before)
     const sent = Buffer.byteLength(`${JSON.stringify(before)}\n`)
-    await until(() => rows(there).length === 1 && cursorOf(here).local === sent)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        const local = cursorOf(here).local
+        return thereRows === 1 && local === sent ? true : { there: thereRows, local }
+      },
+      10_000,
+      "copied up",
+    )
     first.stop()
     await first.done
     const { local, remote } = cursorOf(here)
@@ -207,7 +234,15 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     write(there, whileDownThere)
 
     const second = hold(here, agentFar(there, remote))
-    await until(() => rows(there).length === 3 && rows(here).length === 3)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        const hereRows = rows(here).length
+        return thereRows === 3 && hereRows === 3 ? true : { there: thereRows, here: hereRows }
+      },
+      10_000,
+      "copied both ways",
+    )
     await Bun.sleep(200)
     second.stop()
     await second.done
@@ -228,7 +263,7 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     const { here, there } = machines("kill")
     let far: Far | undefined
     const held = hold(here, (far = agentFar(there)))
-    await until(held.isUp)
+    await until(held.isUp, 10_000, "link up")
     far!.kill()
     expect(await held.done).toMatch(/^ssh to me@spark-b ended with code|^ssh said:/)
   })
@@ -237,7 +272,7 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     const { here, there } = machines("bad")
     await Bun.write(queueOf(there), "")
     const held = hold(here, agentFar(there))
-    await until(held.isUp)
+    await until(held.isUp, 10_000, "link up")
     appendFileSync(
       queueOf(there),
       `${JSON.stringify({ ...line("big"), text: "x".repeat(17 * 1024) })}\n`,
@@ -245,7 +280,15 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
     appendFileSync(queueOf(here), "{not a line\n")
     const good = line("good")
     write(there, good)
-    await until(() => rows(here).length === 1 && held.told.length === 2)
+    await until(
+      () => {
+        const hereRows = rows(here).length
+        const toldLines = held.told.length
+        return hereRows === 1 && toldLines === 2 ? true : { here: hereRows, told: toldLines }
+      },
+      10_000,
+      "copied and told",
+    )
     held.stop()
     await held.done
     expect(rows(here).map((r) => r.text)).toEqual(["good"])
@@ -301,14 +344,22 @@ describe("ops-peer-relay copies lines both ways (PG-2444)", () => {
       const { here, there } = machines(`unacked-${_.replaceAll(" ", "-")}`)
       writeFileSync(queueOf(here), "")
       const first = hold(here, shFar(script), 300)
-      await until(first.isUp)
+      await until(first.isUp, 10_000, "link up")
       const kept = line("not yet written there")
       write(here, kept)
       expect(await first.done).toContain(why)
       expect(cursorOf(here).local).toBe(0)
       const sent = Buffer.byteLength(`${JSON.stringify(kept)}\n`)
       const second = hold(here, agentFar(there))
-      await until(() => rows(there).length === 1 && cursorOf(here).local === sent)
+      await until(
+        () => {
+          const thereRows = rows(there).length
+          const local = cursorOf(here).local
+          return thereRows === 1 && local === sent ? true : { there: thereRows, local }
+        },
+        10_000,
+        "copied up",
+      )
       second.stop()
       await second.done
       expect(rows(there)).toEqual([{ ...kept, relayedAt: expect.any(String) }])
@@ -343,14 +394,32 @@ describe("the relay job's loop (PG-2444)", () => {
       signal: stop.signal,
       wait: (ms) => Bun.sleep(ms),
     })
-    await until(() => existsSync(join(here, "ops", "peer-relay", `${PEER.name}.json`)))
+    await until(
+      () => existsSync(join(here, "ops", "peer-relay", `${PEER.name}.json`)),
+      10_000,
+      "link written",
+    )
     write(here, line("first"))
-    await until(() => rows(there).length === 1)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        return thereRows === 1 ? true : { there: thereRows }
+      },
+      10_000,
+      "copied up",
+    )
     fars[0]!.kill()
-    await until(() => fars.length === 3)
+    await until(() => (fars.length === 3 ? true : fars.length), 10_000, "links restarted")
     write(here, line("after the drop"))
-    await until(() => rows(there).length === 2)
-    await until(() => told.length === 2)
+    await until(
+      () => {
+        const thereRows = rows(there).length
+        return thereRows === 2 ? true : { there: thereRows }
+      },
+      10_000,
+      "copied again",
+    )
+    await until(() => (told.length === 2 ? true : told.length), 10_000, "two tells")
     stop.abort()
     await running
     expect(told[0]).toStartWith("spark-b: down: ")
@@ -383,7 +452,14 @@ describe("the relay job's loop (PG-2444)", () => {
     })
     const said = () =>
       existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
-    await until(() => said().includes("spark-b: up: ") && said().includes("spark-c: down: "))
+    await until(
+      () => {
+        const s = said()
+        return s.includes("spark-b: up: ") && s.includes("spark-c: down: ") ? true : s
+      },
+      10_000,
+      "one up one down",
+    )
     stop.abort()
     await running
     expect(said()).not.toBe("ok")
@@ -411,7 +487,14 @@ describe("the relay job's loop (PG-2444)", () => {
     })
     const said = () =>
       existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
-    await until(() => said().startsWith("idle: "))
+    await until(
+      () => {
+        const s = said()
+        return s.startsWith("idle: ") ? true : s
+      },
+      10_000,
+      "beats idle",
+    )
     stop.abort()
     await running
     expect(said()).toBe("idle: PLAYGROUND_PEERS names no peer")
@@ -443,10 +526,24 @@ describe("the relay job's loop (PG-2444)", () => {
     const said = () =>
       existsSync(join(here, "ops", "ops-peer-relay.json")) ? String(beatOf(here).lastResult) : ""
     // the first down beat, from the unreadable value, before the value turns to no peer
-    await until(() => said().includes("down: "))
+    await until(
+      () => {
+        const s = said()
+        return s.includes("down: ") ? true : s
+      },
+      10_000,
+      "first down",
+    )
     phase = "idle"
     // the first bare idle: beat, from the no-peer branch
-    await until(() => said().startsWith("idle: "))
+    await until(
+      () => {
+        const s = said()
+        return s.startsWith("idle: ") ? true : s
+      },
+      10_000,
+      "bare idle",
+    )
     // sample several timer ticks; each must read the bare idle: alone
     const samples: string[] = []
     for (let i = 0; i < 12; i++) {

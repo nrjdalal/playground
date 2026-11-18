@@ -314,7 +314,11 @@ export const rmDeps = (repo: string): RmDeps => ({
           stdout: "pipe",
         },
       )
-      return { code: read.exitCode, out: `${read.stdout}${read.stderr}` }
+      // stdout is the card, stderr only on a failure, so --card's stdout parses whole
+      return {
+        code: read.exitCode,
+        out: read.exitCode === 0 ? read.stdout.toString() : `${read.stderr}${read.stdout}`,
+      }
     }, id)
     if (typeof item === "string") return item
     try {
