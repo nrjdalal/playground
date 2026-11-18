@@ -85,6 +85,36 @@ describe("the gate box's docker", () => {
     ).toEqual({ refused: "run playground-dashboard-db-sY08" })
   })
 
+  test("refuses every word docker resolves to another's container: a short id prefix, a leading slash, and a name inside name:mode, container:name or name:alias", () => {
+    const live = "playground-dashboard-db-sY08"
+    for (const argv of [
+      ["inspect", "aaaa"],
+      ["exec", "a".repeat(11), "psql"],
+      ["inspect", `/${live}`],
+      ["run", "--volumes-from", `${live}:ro`, "postgres:alpine"],
+      ["run", `--volumes-from=${live}:rw`, "postgres:alpine"],
+      ["run", "--network", `container:${live}`, "postgres:alpine", "psql", "-h", "127.0.0.1"],
+      ["run", `--pid=container:${live}`, "alpine"],
+      ["run", `--ipc=container:${live}`, "alpine"],
+      ["run", "--link", `${live}:db`, "alpine"],
+    ])
+      expect(narrow(argv, box, listed)).toHaveProperty("refused")
+    expect(
+      narrow(
+        [
+          "run",
+          "--volumes-from",
+          `${box}-db-Ab12-old:ro`,
+          "-p",
+          "127.0.0.1::5432",
+          "postgres:alpine",
+        ],
+        box,
+        listed,
+      ),
+    ).not.toHaveProperty("refused")
+  })
+
   test("refuses every call that reaches past the box's own containers, and a named call when docker cannot list", () => {
     for (const sub of [
       "volume",

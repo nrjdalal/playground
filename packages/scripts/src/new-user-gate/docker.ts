@@ -58,15 +58,21 @@ export const narrow = (
   const words = rest.flatMap((a) =>
     a.startsWith("-") ? (a.includes("=") ? [a.slice(a.indexOf("=") + 1)] : []) : [a],
   )
-  const named = (w: string) =>
-    listed.find((c) => c.names.includes(w) || (w.length >= 12 && c.id.startsWith(w)))
-  const other = words.find((w) => {
-    const c = named(w)
-    return c !== undefined && c.label !== box
-  })
+  // docker resolves a word to a container by its name, with or without a leading slash, or by any unique id prefix, and reads one inside name:ro, container:name and name:alias
+  const resolved = (w: string) =>
+    w
+      .split(":")
+      .map((part) => part.replace(/^\/+/, ""))
+      .filter(Boolean)
+      .flatMap((part) =>
+        listed.filter(
+          (c) => c.names.includes(part) || (/^[0-9a-f]+$/.test(part) && c.id.startsWith(part)),
+        ),
+      )
+  const other = words.find((w) => resolved(w).some((c) => c.label !== box))
   if (other) return { refused: `${sub} ${other}` }
   // a bare stats reads every container on the machine, so the box's reads its own alone, and none answers empty
-  if (sub === "stats" && !words.some((w) => named(w))) {
+  if (sub === "stats" && !words.some((w) => resolved(w).length)) {
     const mine = listed.filter((c) => c.label === box).flatMap((c) => c.names.slice(0, 1))
     return mine.length ? { argv: [...argv, ...mine] } : { answer: "" }
   }
