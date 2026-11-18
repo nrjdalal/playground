@@ -42,7 +42,12 @@ type Fake = ReturnType<typeof fakeSocket>
 // ops-wa's life over fake sockets: each connect hands the next socket, whose script runs once the life listens to it; every alert, card, wait and the reason it stopped are kept.
 const harness = (
   scripts: ((fake: Fake) => void)[],
-  { device = SPARE, dir = scratch(), registered = true } = {},
+  {
+    alert = undefined as string | undefined,
+    device = SPARE,
+    dir = scratch(),
+    registered = true,
+  } = {},
 ) => {
   let now = START
   const alerts: string[] = []
@@ -53,6 +58,7 @@ const harness = (
   const sockets: Fake[] = []
   const io = {
     alert: async (text: string) => void alerts.push(text),
+    alertNumber: alert,
     card: async (code: string) => {
       cards.push(code)
       return "card-1"
@@ -265,6 +271,12 @@ describe("ops-wa's ban-safety habits", () => {
   test("refuses to run with the spare number as the owner's, since a self-chat number is banned fast", async () => {
     const h = harness([], { device: OWNER })
     expect(await h.run()).toContain("the owner's own number")
+    expect(h.sockets).toHaveLength(0)
+  })
+
+  test("refuses to run with the spare number as the alert number, a self-chat too (#2748)", async () => {
+    const h = harness([], { alert: SPARE })
+    expect(await h.run()).toContain("wa.alert is the spare number")
     expect(h.sockets).toHaveLength(0)
   })
 

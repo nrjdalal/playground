@@ -107,6 +107,7 @@ describe("defineSettings", () => {
       "usage.accounts",
       "usage.keychainService",
       "usage.switchAccount",
+      "wa.alert",
       "wa.device",
       "wa.owner",
       "yard.logReaders",
