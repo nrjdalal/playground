@@ -4,6 +4,7 @@ import {
   PROGRESS_STATES,
   progressItems,
 } from "@packages/config/inbox"
+import { placedKindOf } from "@packages/config/kinds"
 
 // An Inbox ask reads the way chat talks to the owner: a picture of the point first, with a one-sentence note under it (the plain-words skill), then short bullets, then its options, in its `options` and `deny` labels.
 
@@ -130,6 +131,41 @@ export function progressRefusal(input: unknown): string | null {
     return `${at} ${why}: "${fault.text}"; ${shape}`
   }
   return null
+}
+
+// Pure: whether a card's text holds a progress block, the mark of the dispatcher's in-flight card (PG-2720).
+export const holdsProgressBlock = (preview: unknown): boolean =>
+  isRecord(preview) && typeof preview.text === "string" && progressBlocks(preview.text).length > 0
+
+// Pure: whether the poster's name places as the dispatcher (an `<id>-dispatcher` name, or the dispatcher's name in sessions.names), so no name is hard-coded (PG-2720).
+export function isDispatcher(from: string | null | undefined): boolean {
+  return typeof from === "string" && placedKindOf(from, undefined) === "dispatcher"
+}
+
+// The dispatcher's one open in-flight card, its newest item it may still edit that holds a progress block, so a second card or another poster's names it (PG-2720).
+export type InflightCard = { ref: number; title: string } | null
+
+// Pure: why bun run ask refuses an ask's or a read-only update's progress card, the block the dispatcher draws as its one card, one a poster may not start: the dispatcher's first card passes, a twin of the open one (same title) still edits, a second, a different title, is refused, and a card another poster starts is refused, naming the open card when one is.
+export function progressCardRefusal(input: unknown, inFlight: InflightCard): string | null {
+  if (!isRecord(input)) return null
+  const preview = input.preview
+  if (!isRecord(preview) || typeof preview.text !== "string") return null
+  // a progress block draws the card, so only an ask or a read-only update may hold one, the same shape progressRefusal reads
+  if (preview.type !== "ask" && input.kind !== "update") return null
+  // the block draws the card, so no progress block is none, one without it posts either way
+  if (!holdsProgressBlock(preview)) return null
+  const from = typeof input.from === "string" ? input.from : undefined
+  const title = typeof input.title === "string" ? input.title : ""
+  // the dispatcher posts the card, then edits it in place, so its first card passes and a twin still edits
+  if (isDispatcher(from)) {
+    if (!inFlight) return null
+    if (title === inFlight.title) return null
+    return `a progress block is the dispatcher's one card, not one to start twice: yours is #i${inFlight.ref}, so add this job as a row on it with \`playground ask edit #i${inFlight.ref}\`, or post under its title, "${inFlight.title}"`
+  }
+  // a progress card is the dispatcher's, not one another poster may start
+  return inFlight
+    ? `a progress block is the dispatcher's one card, not one a poster may start; send its progress up the chain, a row on its in-flight card #i${inFlight.ref}`
+    : `a progress block is the dispatcher's one card, not one a poster may start; send it up the chain, not as its own card`
 }
 
 // A template for each shape the docs work through, each picture with its one-sentence note under it: a code change led by a diff, a plain decision led by an ASCII flow, a UI change, whose before and after pictures join it as attachments once the card takes attachments, and a Slack message led by its thread so far.
