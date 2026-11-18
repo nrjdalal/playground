@@ -466,7 +466,7 @@ describe("the alert number (#2748)", () => {
     const h = harness(undefined, undefined, ALERT)
     expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).toEqual([
       "owner ••••0001: has never written, so no alert reaches it until it writes once; its 24 hours for replies are over until it writes",
-      "alert ••••0003: has never written, so no alert reaches it until it writes once",
+      "alert ••••0003: has never written, so no alert reaches it until it writes once; replies wait until it writes",
     ])
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
@@ -474,7 +474,7 @@ describe("the alert number (#2748)", () => {
     const now = START + 2 * HOUR + 30 * 60_000
     expect(await statusOf(h.dir, { alert: ALERT, owner: OWNER }, now)).toEqual([
       "owner ••••0001: written since 2026-11-11T03:00:00.000Z, so alerts reach it; 21 h 30 min left of its 24 hours for replies",
-      "alert ••••0003: written since 2026-11-11T02:00:00.000Z, so alerts reach it",
+      "alert ••••0003: approved since 2026-11-11T02:00:00.000Z, so alerts reach it; replies can go now (approved)",
     ])
     expect(await statusOf(h.dir, { alert: "", owner: OWNER }, now)).toContain(
       "alert: none set (wa.alert)",
@@ -1047,17 +1047,30 @@ describe("the alert number as a guest (#2756)", () => {
     expect(h.fake.calls).toEqual([])
   })
 
-  test("a guest's reply needs the guest's own 24 hours: the owner's message or the owner's Approve opens none", async () => {
+  test("a guest's reply goes with no message first to the number the owner approved, under the same pacing (ADR 0034)", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    seedAlert(dirname(h.dir), ALERT, START)
+    expect(await h.send("hello", "guest")).toBe("sent")
+    h.advance(48 * HOUR)
+    expect(await h.send("still here", "guest")).toBe("sent")
+    expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT), jid(ALERT)])
+    expect(h.fake.calls).toEqual([])
+  })
+
+  test("an unapproved guest's reply needs the guest's own 24 hours: the owner's message, or an Approve of another number, opens none", async () => {
     const h = harness(undefined, undefined, ALERT)
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
-    seedAlert(dirname(h.dir), ALERT, START)
+    seedAlert(dirname(h.dir), "+15550000999", START)
     await expect(h.send("hello", "guest")).rejects.toThrow(
       "the alert number has not written in the last 24 hours, and ops-wa never starts a chat",
     )
     h.fake.upsert([h.fake.message(jid(ALERT), "hey")])
     await h.settle()
     expect(await h.send("hello", "guest")).toBe("sent")
+    expect((await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START + HOUR))[1]).toBe(
+      "alert ••••0003: written since 2026-11-11T03:00:00.000Z, so alerts reach it; 23 h 0 min left of its 24 hours for replies",
+    )
     h.advance(24 * HOUR + 1)
     await expect(h.send("late", "guest")).rejects.toThrow("has not written in the last 24 hours")
     expect(h.fake.sent.map((s) => s.jid)).toEqual([jid(ALERT)])

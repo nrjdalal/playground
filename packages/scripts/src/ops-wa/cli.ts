@@ -29,6 +29,7 @@ import { EMPTY_LIST, isPublicList, reposOf } from "../trace-count/kinds"
 import { alertSet } from "./alert-set"
 import { bridge, type Inbox, type Sock, sender } from "./bridge"
 import { type Card, termsOf } from "./cards"
+import { runCheck } from "./escalate"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, transcriber } from "./media"
@@ -148,6 +149,23 @@ const main = async () => {
     return read.refusal === undefined ? whatsappSettings.get(read.settings, "wa.alert") : ""
   }
   if (!owner || !device) return stop("wa.owner and wa.device must both be set", "waiting")
+  // the minutes an urgent alert waits for the owner, and the checker that reads its source, each read afresh for each alert
+  const waSetting = async <K extends "wa.alertCheck" | "wa.alertDelayMinutes">(key: K) => {
+    const read = await readPolicy(data)
+    return whatsappSettings.get(read.settings ?? { schemaVersion: 1, values: {} }, key)
+  }
+  const check = async (source: string, at: number) => {
+    const name = await waSetting("wa.alertCheck")
+    if (!name) return false
+    const file = await readRendered(data, name)
+    if (!file.path) {
+      console.log(
+        `ops-wa: the checker ${name} is not in the extensions: ${file.refusal ?? "absent"}`,
+      )
+      return false
+    }
+    return runCheck(file.path, source, at)
+  }
   await ownFolder(dir)
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
@@ -176,6 +194,7 @@ const main = async () => {
   let current: Sock | undefined
   const send = sender({
     alert,
+    delay: () => waSetting("wa.alertDelayMinutes"),
     device,
     dir,
     now: Date.now,
@@ -236,8 +255,10 @@ const main = async () => {
     alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
+    check,
     confirm: (text) => confirm(owned, text),
     dir,
+    escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),
     log: (line) => console.log(line),
     media: {

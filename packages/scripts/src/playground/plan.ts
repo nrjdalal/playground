@@ -63,8 +63,8 @@ playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
 playground wa send [--to alert] <file>
                       send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
-playground wa alert <file>
-                      send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, once to the owner's WhatsApp and once to the wa.alert number, each once it has ever written to the spare number (bun run wa)
+playground wa alert [--now-both] [--source <kind>:<ref>] <file>
+                      send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, to the owner's WhatsApp at once and to the wa.alert number after wa.alertDelayMinutes unless the owner reacts or wa.alertCheck reads its source as handled, or to both at once with --now-both (bun run wa)
 playground wa alert-set --from-owner-msg <id>
                       set the second number, wa.alert, to the one phone number in the owner's own WhatsApp message of that id, which ops-wa kept for 24 hours (bun run wa)
 playground wa status  print whether the owner and the alert number have written, each masked, and the owner's hours left for replies (bun run wa)

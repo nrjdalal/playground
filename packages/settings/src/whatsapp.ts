@@ -16,9 +16,21 @@ export const whatsappSettings = defineSettings({
   "wa.alert": {
     default: "",
     description:
-      "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once, beside the owner's number, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
+      "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once the owner has not handled it within wa.alertDelayMinutes, or at once with --now-both, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
     masked: true,
     schema: e164,
+  },
+  "wa.alertCheck": {
+    default: "",
+    description:
+      "The checker ops-wa runs when an urgent alert's delay ends, a file in the extensions (such as scripts/<key>/check.ts) run with bun and given the alert's --source and its send time: exit 0 means handled, so the alert stays with the owner; any other exit, a crash or 20 s with no exit sends it on to wa.alert. Empty: only the owner's WhatsApp reaction on the alert handles it. A guard key, set by the owner alone.",
+    schema: z.string().trim().max(300),
+  },
+  "wa.alertDelayMinutes": {
+    default: 3,
+    description:
+      "The minutes an urgent alert waits with the owner before it goes on to wa.alert, unless the owner's reaction or wa.alertCheck says it was handled; read for each alert.",
+    schema: z.number().int().positive(),
   },
   "wa.device": {
     default: "",

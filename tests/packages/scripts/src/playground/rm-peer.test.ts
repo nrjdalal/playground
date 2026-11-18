@@ -1,5 +1,13 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -61,15 +69,30 @@ test("runRmPeer takes three words, and refuses a wrong byte count, card, or too 
 
 test("runRmPeer refuses a path not on the machine record, and leaves it", async () => {
   const m = machine()
-  file(join(m.home, "models", "hf", "hub", "models--a--b", "gguf"))
-  const recorded = join(m.home, "models", "hf", "hub", "models--not--recorded")
+  const path = file(join(m.home, "scratch", "off-record.gguf"), "0123456")
   deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
-  const { out, err } = await rmpTold(recorded, {
-    bytes: 1,
+  const { out, err } = await rmpTold(path, {
+    bytes: 7,
     card: "11111111-2222-3333-4444-555555555555",
   })
   expect(out).toEqual([])
   expect(err.join("\n")).toContain("is not on the machine record")
+  expect(existsSync(path)).toBe(true)
+})
+
+test("runRmPeer leaves a .gguf under a like-named record folder, so it stays", async () => {
+  const m = machine()
+  const folder = join(m.home, "gguf")
+  const path = file(join(m.home, "gguf2", "model.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const { out, err } = await rmpTold(path, {
+    bytes: 7,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(out).toEqual([])
+  expect(err.join("\n")).toContain("is not on the machine record, so it stays")
+  expect(existsSync(path)).toBe(true)
 })
 
 test("runRmPeer refuses a non-weights path the record names, and leaves it", async () => {
@@ -149,6 +172,11 @@ test("runRmPeer deletes a .gguf directly under a recorded folder, logs it", asyn
   expect(out.join("\n")).toContain(
     `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
   )
+  expect(
+    JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries.some(
+      (entry: { path: string }) => entry.path === folder,
+    ),
+  ).toBe(true)
 })
 
 test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it", async () => {
@@ -166,6 +194,11 @@ test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it
   expect(out.join("\n")).toContain(
     `Deleted ${path} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
   )
+  expect(
+    JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries.some(
+      (entry: { path: string }) => entry.path === folder,
+    ),
+  ).toBe(true)
 })
 
 test("runRmPeer leaves a .gguf outside the record and models, so it stays", async () => {

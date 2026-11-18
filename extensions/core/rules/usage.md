@@ -8,4 +8,4 @@ A usage report lists every account the factory holds, the stored login included,
 While an account the split can pick would leave points unused by this forecast, its week projecting under 100% at its own reset, ops-sweep turns the week pace off an hour at a time; once none would, the pace comes back.
 A forecast is labelled estimated and its readings measured (**verify**).
 scripts/ops/README.md's Usage forecasts section holds where the readings live and how to print the table.
-A card that offers a Claude start states its measured `--check` result; to-inbox's decision guidance (`extensions/core/skills/to-inbox/SKILL.md`) holds it. Open the priority window, on the owner's or the dispatcher's word, before a `--check --priority`, or check without `--priority`.
+A card that offers a Claude start states its measured `--check` result; to-inbox's `SKILL.md` (`extensions/core/skills/to-inbox/SKILL.md`) holds it. Open the priority window, on the owner's or the dispatcher's word, before a `--check --priority`, or check without `--priority`.
