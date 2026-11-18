@@ -69,7 +69,7 @@ playground wa react <emoji> [--to alert] [--id <id>]
                       react on the owner's latest WhatsApp message, the guest's with --to alert, or one by its id, as ✅ for got it, no reply needed (bun run wa)
 playground wa alert-set --from-owner-msg <id>
                       set the second number, wa.alert, to the one phone number in the owner's own WhatsApp message of that id, which ops-wa kept for 24 hours (bun run wa)
-playground wa status  print whether the owner and the alert number have written, each masked, and the owner's hours left for replies (bun run wa)
+playground wa status  print whether the owner and the alert number have written or been approved, each masked, whether a reply can go to each now, and each pending alert (bun run wa)
 playground wa relink
                       after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>

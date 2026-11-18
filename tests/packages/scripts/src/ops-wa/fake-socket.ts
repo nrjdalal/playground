@@ -11,6 +11,7 @@ export const groupJid = (id: string) => `${id}@g.us`
 
 type Content = {
   linkPreview?: null
+  poll?: { messageSecret: Uint8Array; name: string; selectableCount: number; values: string[] }
   react?: { key: { fromMe: boolean; id: string; remoteJid: string }; text: string }
   text?: string
 }
@@ -41,6 +42,8 @@ export function fakeSocket(registered = true) {
       return { key: { id: `m${sent.length}` } }
     },
     sendPresenceUpdate: async () => void calls.push("sendPresenceUpdate"),
+    // the linked device's own chat id, a device of the spare phone's number
+    user: { id: jid(SPARE).replace("@", ":7@") },
   }
   const message = (from: string, text: string, extra: Record<string, unknown> = {}) => ({
     key: { fromMe: false, id: `in${Math.random()}`, remoteJid: from, ...extra },

@@ -9,7 +9,7 @@ import {
   mediaDir,
   modelPath,
   type Run,
-  stdoutOf,
+  stdoutRun,
   transcriber,
 } from "../../../../../packages/scripts/src/ops-wa/media"
 
@@ -143,10 +143,15 @@ describe("reading a voice note on this Mac", () => {
     ).toBeUndefined()
     expect(existsSync(`${note}.wav`)).toBe(false)
   })
+})
 
-  test("whisper-cli's log lines on stderr stay out of the words", async () => {
-    const whisper = 'console.error("read_audio_data: 3.2 s of audio"); console.log(" ship it ")'
-    const said = await stdoutOf([process.execPath, "-e", whisper])
-    expect(said).toEqual({ code: 0, out: " ship it \n" })
+describe("whisper-cli's run", () => {
+  test("keeps stdout's words alone, so the model-load log whisper-cli writes to stderr never reaches the note's line", async () => {
+    const heard = await stdoutRun(10_000)([
+      "sh",
+      "-c",
+      "echo 'whisper_init_from_file: loading model' >&2; printf ' ship it'; echo 'system_info: n_threads = 4' >&2",
+    ])
+    expect(heard).toEqual({ code: 0, out: " ship it" })
   })
 })

@@ -26,14 +26,15 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 `playground wa status` prints whether each number has written or been approved, and whether a reply can go to it now.
 `playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
 ops-wa sends each text part after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
-It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL) and splits a long body into parts, so write the reply as you would for the Inbox.
+It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
 
 A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 
 ## Inbox cards on WhatsApp
 
-ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card that still asks, open, not replied, and awake, as one `N cards wait in the Inbox` line ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
-The owner's reply naming a card (`1 #i12`) goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
+ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card that still asks, open, not replied, and awake, as one `📥 <title>` line each, at most 5 then `📥 +N more in the Inbox` ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
+A card with choices also goes as a WhatsApp poll ([ADR 0029](../../../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)), and the owner's vote counts as that row's number typed.
+The owner's reply naming a card (`1 #i12`) or vote goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
 A number alone or an id alone reaches you only while no card that went out waits on its choices, so read it as the owner's answer to your own question.
 
 ## The alert number

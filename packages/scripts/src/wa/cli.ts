@@ -7,7 +7,7 @@ import { readPolicy, whatsappSettings } from "@packages/settings"
 import { refusalOf, statusOf } from "../ops-wa/bridge"
 import { reactRequest, request, requestAlertSet, socketPath } from "../ops-wa/server"
 
-// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa react <emoji> [--to alert] [--id <id>]: a reaction on the latest message of the owner's, or the guest's, or on the one named; wa status: whether each number has written, and the owner's hours left for replies; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
+// wa send <file>: the one way a session writes to the owner on WhatsApp, through ops-wa's socket, to the owner's number alone; wa send --to alert <file>: a reply to the alert number, a guest of the chat; wa alert <file>: an urgent alert alone, to the owner first and on to the alert number after wa.alertDelayMinutes unless handled, or to both at once with --now-both; wa react <emoji> [--to alert] [--id <id>]: a reaction on the latest message of the owner's, or the guest's, or on the one named; wa status: whether each number has written or been approved, whether a reply can go to each now, and each pending alert; wa relink: after a logout, sets the old link aside so ops-wa's next start posts a new pairing card; wa alert-set --from-owner-msg <id>: the second number becomes the one number in the owner's own message of that id.
 const args = process.argv.slice(2)
 const guest = args[0] === "send" && args[1] === "--to" && args[2] === "alert"
 // wa alert's flags, before its file: --now-both sends to both numbers at once, --source <kind>:<ref> names what a checker reads to tell whether it was handled
@@ -99,7 +99,7 @@ if (
   !(await Bun.file(file).exists())
 ) {
   console.error(
-    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled within wa.alertDelayMinutes, or to both at once; playground wa react <emoji> [--to alert] [--id <id>]; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
+    "usage: playground wa send [--to alert] <file>, the reply's body in a file named by its absolute path, to the owner or to the alert number; playground wa alert [--now-both] [--source <kind>:<ref>] <file>, an urgent alert alone, to the owner first and to the alert number unless handled before wa.alertDelayMinutes passes, or to both at once; playground wa react <emoji> [--to alert] [--id <id>]; playground wa status; playground wa alert-set --from-owner-msg <id>; or playground wa relink",
   )
   process.exit(2)
 }
