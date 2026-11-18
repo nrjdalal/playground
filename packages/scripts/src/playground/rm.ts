@@ -59,6 +59,7 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
+  let reasonGiven = false
   let worktree = false
   let discard = false
   let pr: string | undefined
@@ -66,8 +67,10 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let peer: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
-    if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
-    else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
+    if (word === "--reason" && words[i + 1] !== undefined) {
+      reason = words[++i]!
+      reasonGiven = true
+    } else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
       card = words[++i]!
     else if (word === "--peer" && words[i + 1] !== undefined && peer === undefined)
       peer = words[++i]!
@@ -85,7 +88,7 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     (card !== undefined && worktree) ||
     (peer !== undefined && card === undefined) ||
     (peer !== undefined && worktree) ||
-    (peer !== undefined && reason !== "playground rm")
+    (peer !== undefined && reasonGiven)
     ? { error: RM_USAGE }
     : {
         ...(card === undefined ? {} : { card }),
@@ -540,7 +543,7 @@ async function removeApproved(
     const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
       const refused = ran.out.trim().replace(/^playground: /, "")
-      deps.notify(`${session}: ${refused}`)
+      deps.notify(`${session}: ${refused || "the peer did not answer"}`)
       console.error(`playground: ${args.peer}: ${refused || "the peer did not answer"}`)
       return 1
     }

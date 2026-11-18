@@ -17,7 +17,6 @@ export type RmPeerDeps = {
   data: string
   home: string
   main: string
-  notify?: (text: string) => void
   session: () => Promise<string> | string
 }
 
@@ -52,7 +51,6 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     roots,
   )
   if ("refused" in done) {
-    if (done.kind !== "refused") deps.notify?.(`${session}: ${done.refused}`)
     console.error(`playground: ${done.refused}`)
     return 1
   }

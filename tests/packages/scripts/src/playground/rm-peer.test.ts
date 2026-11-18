@@ -30,15 +30,13 @@ const machine = () => {
     mkdirSync(join(home, dir), { recursive: true })
   writeFileSync(join(home, ".ssh", "id_ed25519"), "key")
   writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
-  const told: string[] = []
   const deps: RmPeerDeps = {
     data,
     home,
     main,
-    notify: (text) => void told.push(text),
     session: async () => "j6rjgy-worker",
   }
-  return { data, home, main, root, told, deps }
+  return { data, home, main, root, deps }
 }
 
 const file = (path: string, text = "x"): string => {
@@ -133,13 +131,12 @@ test("runRmPeer refuses a protected path the record names, and leaves it", async
   const path = file(join(m.home, ".ssh", "id_ed25519"), "test")
   deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
   RECORD(path)
-  const { code, err, told } = await rmpTold(path, {
+  const { code, err } = await rmpTold(path, {
     bytes: 4,
     card: "11111111-2222-3333-4444-555555555555",
   })
   expect(code).toBe(1)
   expect(err.join("\n")).toContain("protected")
-  expect(told.length).toBeGreaterThan(0)
 })
 
 test("runRmPeer deletes a recorded weights file at the card's exact size, logs it, and drops its record entry", async () => {
@@ -209,18 +206,16 @@ test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it
 const rmpTold = async (
   path: string,
   approved: { bytes: number; card: string },
-): Promise<{ code: number; err: string[]; out: string[]; told: string[] }> => {
+): Promise<{ code: number; err: string[]; out: string[] }> => {
   const err: string[] = []
   const out: string[] = []
-  const told: string[] = []
-  const notify = (text: string) => void told.push(text)
   const oldErr = console.error
   const oldLog = console.log
   console.error = (line: string) => void err.push(line)
   console.log = (line: string) => void out.push(line)
   try {
-    const code = await runRmPeer([path, String(approved.bytes), approved.card], { ...deps, notify })
-    return { code, err, out, told }
+    const code = await runRmPeer([path, String(approved.bytes), approved.card], deps)
+    return { code, err, out }
   } finally {
     console.error = oldErr
     console.log = oldLog
