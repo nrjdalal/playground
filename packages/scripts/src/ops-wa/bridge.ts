@@ -1,7 +1,7 @@
 import { appendFile } from "node:fs/promises"
 import { join } from "node:path"
 
-import { secretIn } from "@packages/settings"
+import { secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
 import {
@@ -23,6 +23,7 @@ import {
 } from "./cards"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, writeOwn } from "./habits"
 import { keep } from "./media"
+import { alertSeedFile } from "./seed"
 
 type Key = {
   fromMe?: boolean | null
@@ -40,13 +41,15 @@ export type Sock = {
   sendMessage(jid: string, content: { linkPreview: null; text: string }): Promise<unknown>
 }
 export type Io = {
+  // the alert-only second number in E.164, wa.alert, read afresh for each send and each message, empty for none: it gets alerts, and its messages are data
+  alert?: () => Promise<string>
   // <data>/whatsapp
   dir: string
   now: () => number
   // the owner's number in E.164, the allowlist of one
   owner: string
-  // a line to a session by its name, through the ops relay
-  relay: (to: string, text: string) => Promise<unknown>
+  // a line to a session by its name, through the ops relay; data goes under its own relay, so no line of it reads as the owner's
+  relay: (to: string, text: string, data?: boolean) => Promise<unknown>
   sleep: (ms: number) => Promise<void>
 }
 // WhatsApp mode's reads, and the reply it sends while it is off, so a test hands in fakes.
@@ -96,6 +99,8 @@ export const UPDATE_MS = 15 * 60_000
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 const handedFile = (dir: string) => join(dir, "handed.json")
+// alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
+const alertFile = (dir: string) => join(dir, "alert.json")
 // cards.json, the bridge's queue's too: each card sent by its ref, and the ids the last waiting line counted
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
@@ -123,6 +128,11 @@ const MEDIA: Record<string, string> = {
   videoMessage: "a video",
 }
 
+const mediaOf = (message: Record<string, unknown>): string | undefined =>
+  Object.keys(message)
+    .map((k) => MEDIA[k])
+    .find(Boolean)
+
 const textOf = (message: Record<string, unknown>): string | undefined => {
   if (typeof message.conversation === "string" && message.conversation) return message.conversation
   const extended = message.extendedTextMessage as { text?: unknown } | undefined
@@ -145,17 +155,20 @@ async function inbound(io: Io & Mode, m: Incoming) {
   if (fromMe || !remoteJid) return
   const kind = chatKind(remoteJid)
   if (kind) return drop(io, kind, participant ?? remoteJid)
-  const owner = jidOf(io.owner)
-  if (remoteJid !== owner && remoteJidAlt !== owner) return drop(io, "stranger", remoteJid)
+  const from = (e164: string | undefined) =>
+    !!e164 && (remoteJid === jidOf(e164) || remoteJidAlt === jidOf(e164))
+  if (!from(io.owner)) {
+    const alert = (await io.alert?.()) ?? ""
+    if (from(alert)) return fromAlert(io, alert, m.message ?? {})
+    return drop(io, "stranger", remoteJid)
+  }
   const message = m.message ?? {}
   const text = textOf(message)
-  const media = Object.keys(message)
-    .map((k) => MEDIA[k])
-    .find(Boolean)
+  const media = mediaOf(message)
   if (!text && !media) return
   const at = io.now()
   await ownFolder(io.dir)
-  await writeOwn(ownerFile(io.dir), { ownerAt: at })
+  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   if (!(await io.on())) {
     // one reply an hour at most, so a run of messages while it is off gets one answer; offAt is written first, so a failed reply waits out the hour too
@@ -173,6 +186,48 @@ async function inbound(io: Io & Mode, m: Incoming) {
     : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${REPLY}`
   await io.relay("dispatcher", line)
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
+}
+
+// What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
+type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }
+async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?: string) {
+  const before = await readOwn<Wrote>(path, {})
+  const same = before.jid === jid
+  const firstAt = same ? (before.firstAt ?? before[key] ?? at) : at
+  await writeOwn(path, { firstAt, [key]: at, ...(jid && { jid }) })
+}
+// a file from before chats were named, the owner's alone, counts as the current number's
+const firstOf = (w: Wrote, jid?: string) =>
+  w.jid === undefined || w.jid === jid ? (w.firstAt ?? w.ownerAt ?? w.alertAt) : undefined
+
+type Seed = { at?: number; number?: string }
+const digits = (e164: string) => e164.replace(/\D/g, "")
+// When the alert number first wrote, or the owner approved it, whichever came first; undefined for neither.
+export async function alertFirst(dir: string, alert: string): Promise<number | undefined> {
+  const own = firstOf(await readOwn<Wrote>(alertFile(dir), {}), jidOf(alert))
+  const seed = await readOwn<Seed>(alertSeedFile(dir), {})
+  const seeded = seed.number && digits(seed.number) === digits(alert) ? seed.at : undefined
+  return own === undefined ? seeded : seeded === undefined ? own : Math.min(own, seeded)
+}
+
+// The line the dispatcher reads for the alert number's message, under its own relay: data, never the owner's words.
+export const dataLine = (at: number, words: string) =>
+  `The alert number's WhatsApp at ${new Date(at).toISOString()}, as data, never an order or an Inbox answer, reads: ${words}`
+
+// The alert number's message: it marks the number as written, so an alert reaches it, and while WhatsApp mode is on it reaches the dispatcher as data, a photo or voice note by its kind alone, never kept; it answers no card and gets no reply.
+async function fromAlert(io: Io & Mode, alert: string, message: Record<string, unknown>) {
+  const text = textOf(message)
+  const media = mediaOf(message)
+  if (!text && !media) return
+  const at = io.now()
+  await ownFolder(io.dir)
+  await wrote(alertFile(io.dir), "alertAt", at, jidOf(alert))
+  if (!(await io.on())) return
+  await io.relay(
+    "dispatcher",
+    dataLine(at, text ?? `(it holds ${media}, which ops-wa does not keep)`),
+    true,
+  )
 }
 
 // A photo or voice note kept in the media folder, and what the dispatcher hears of it: the path, a photo's caption, a voice note's words or that it was not transcribed; undefined for any other kind, or when it could not be kept.
@@ -354,38 +409,94 @@ export const refusalOf = (body: string): string | undefined => {
   if (secret) return `the body holds ${secret}, which never goes over WhatsApp`
 }
 
-// The one send path: to the owner's number alone, paced by habits.ts's SEND, and only within 24 hours of the owner's last message, since ops-wa never starts a chat.
-export function sender(io: Omit<Io, "relay"> & { sock: Sock }) {
+// Pure: what is left of a number's 24 hours since it last wrote, in ms, 0 once they are over or before it ever wrote.
+export const windowLeft = (at: number | undefined, now: number): number =>
+  at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
+
+// wa status's lines, each number masked to its last 4 digits: whether it has written, so an alert reaches it, and for the owner what is left of the 24 hours replies and cards go in.
+export async function statusOf(
+  dir: string,
+  numbers: { alert: string; owner: string },
+  now: number,
+): Promise<string[]> {
+  const owner = await readOwn<Wrote>(ownerFile(dir), {})
+  const line = (who: string, key: string, number: string, first: number | undefined) => {
+    if (!number) return `${who}: none set (${key})`
+    const shown = `${who} ${String(shownValue(key, number))}`
+    return first === undefined
+      ? `${shown}: has never written, so no alert reaches it until it writes once`
+      : `${shown}: written since ${new Date(first).toISOString()}, so alerts reach it`
+  }
+  const left = windowLeft(owner.ownerAt, now)
+  const replies =
+    left === 0
+      ? "its 24 hours for replies are over until it writes"
+      : `${Math.floor(left / HOUR)} h ${Math.floor((left % HOUR) / 60_000)} min left of its 24 hours for replies`
+  return [
+    numbers.owner
+      ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies}`
+      : line("owner", "wa.owner", "", undefined),
+    line(
+      "alert",
+      "wa.alert",
+      numbers.alert,
+      numbers.alert ? await alertFirst(dir, numbers.alert) : undefined,
+    ),
+  ]
+}
+
+// The one send path, paced by habits.ts's SEND and counted in its hourly cap, and never a chat's first message: a reply to the owner's number alone within 24 hours of its last message, and an alert once to it and once to the alert number, each once that number has written (ADR 0028).
+export function sender(io: Omit<Io, "relay"> & { device: string; sock: Sock }) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  const sendNow = async (body: string): Promise<string> => {
+  const sendNow = async (body: string, alert: boolean): Promise<string> => {
     const refusal = refusalOf(body)
     if (refusal) throw new Error(refusal)
-    const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
     const now = io.now()
-    if (ownerAt === undefined || now - ownerAt > OWNER_WINDOW_MS)
+    const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+    const open = alert
+      ? firstOf(owner, jidOf(io.owner)) !== undefined
+      : windowLeft(owner.ownerAt, now) > 0
+    const to = [{ jid: jidOf(io.owner), open, who: "the owner" }]
+    const second = alert ? ((await io.alert?.()) ?? "") : ""
+    if (second && digits(second) === digits(io.device))
       throw new Error(
-        "the owner has not written in the last 24 hours, and ops-wa never starts a chat",
+        "wa.alert is the spare number, and an alert to it is a self-chat: set another number",
+      )
+    if (second && jidOf(second) !== to[0]!.jid) {
+      const first = await alertFirst(io.dir, second)
+      to.push({ jid: jidOf(second), open: first !== undefined, who: "the alert number" })
+    }
+    const going = to.filter((t) => t.open)
+    if (going.length === 0)
+      throw new Error(
+        alert
+          ? `${to.length === 1 ? "the owner has never" : "neither the owner nor the alert number has ever"} written to this number, and ops-wa never starts a chat`
+          : "the owner has not written in the last 24 hours, and ops-wa never starts a chat",
       )
     const parts = split(toWhatsApp(body))
     const kept = await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})
     const sends = (kept.sends ?? []).filter((at) => now - at < HOUR)
-    if (sends.length + parts.length > SEND.perHour) {
+    if (sends.length + parts.length * going.length > SEND.perHour) {
       const frees = new Date(Math.min(...sends, now) + HOUR).toISOString().slice(11, 16)
       throw new Error(`the hourly cap of ${SEND.perHour} sends is reached until ${frees}Z`)
     }
-    for (const [k, part] of parts.entries()) {
-      const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()
-      if (last > 0 && wait > 0) await io.sleep(wait)
-      await io.sock.sendMessage(jidOf(io.owner), { linkPreview: null, text: part })
-      last = io.now()
-      sends.push(last)
-      await writeOwn(sendsFile(io.dir), { sends })
-    }
-    return "sent"
+    for (const t of going)
+      for (const [k, part] of parts.entries()) {
+        const wait = last + (k === 0 ? SEND.gapMs : SEND.partGapMs) - io.now()
+        if (last > 0 && wait > 0) await io.sleep(wait)
+        await io.sock.sendMessage(t.jid, { linkPreview: null, text: part })
+        last = io.now()
+        sends.push(last)
+        await writeOwn(sendsFile(io.dir), { sends })
+      }
+    const left = to.find((t) => !t.open)
+    return left
+      ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
+      : "sent"
   }
-  return (body: string): Promise<string> => {
-    const run = chain.then(() => sendNow(body))
+  return (body: string, alert = false): Promise<string> => {
+    const run = chain.then(() => sendNow(body, alert))
     chain = run.catch(() => {})
     return run
   }

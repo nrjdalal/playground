@@ -117,3 +117,67 @@ describe("playground wa send", () => {
     }
   })
 })
+
+describe("playground wa alert (#2748)", () => {
+  test("hands the body to ops-wa as an alert, while wa send's stays a reply", async () => {
+    const { body, data } = machine("ops-tick is down\n")
+    const got: [string, boolean][] = []
+    const server = serve(socketPath(data), async (b, alert) => {
+      got.push([b, alert])
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["alert", body])).toEqual({ code: 0, out: "wa alert: sent" })
+      expect(await wa(data, ["send", body])).toEqual({ code: 0, out: "wa send: sent" })
+      expect(got).toEqual([
+        ["ops-tick is down", true],
+        ["ops-tick is down", false],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("prints who it reached when it reached one number alone", async () => {
+    const { body, data } = machine("ops-tick is down")
+    const server = serve(
+      socketPath(data),
+      async () => "sent to the owner alone: the alert number has never written to this number",
+    )
+    try {
+      expect(await wa(data, ["alert", body])).toEqual({
+        code: 0,
+        out: "wa alert: sent to the owner alone: the alert number has never written to this number",
+      })
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("refuses a token-shaped body before it reaches ops-wa", async () => {
+    const { body, data } = machine(`the key is xoxb-${"1".repeat(12)}-made-up`)
+    const { code, out } = await wa(data, ["alert", body])
+    expect(code).toBe(1)
+    expect(out).toBe("wa alert: the body holds a Slack token, which never goes over WhatsApp")
+  })
+
+  test("wa status reads the numbers from the settings and each one's last message", async () => {
+    const { data } = machine("")
+    mkdirSync(join(data, "extensions"))
+    writeFileSync(
+      join(data, "extensions", "policy.json"),
+      JSON.stringify({ values: { "wa.owner": "+15550100001" } }),
+    )
+    writeFileSync(
+      join(data, "whatsapp", "owner.json"),
+      JSON.stringify({ jid: `${"15550100001"}@s.whatsapp.net`, ownerAt: 0 }),
+    )
+    expect(await wa(data, ["status"])).toEqual({
+      code: 0,
+      out: [
+        "wa status: owner ••••0001: written since 1970-01-01T00:00:00.000Z, so alerts reach it; its 24 hours for replies are over until it writes",
+        "wa status: alert: none set (wa.alert)",
+      ].join("\n"),
+    })
+  })
+})
