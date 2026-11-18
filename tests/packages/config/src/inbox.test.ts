@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import {
   type ChoicePreview,
+  type InboxItem,
   choicesOf,
+  orderInboxItems,
   progressItems,
+  rankBetween,
   rowOfAnswer,
 } from "../../../../packages/config/src/inbox"
 
@@ -154,5 +157,59 @@ describe("progressItems", () => {
       fault: { kind: "empty", line: 0, text: "" },
       ok: false,
     })
+  })
+})
+
+describe("orderInboxItems", () => {
+  // A card's ref is its stable sequence, newest first, so it is today's order.
+  const card = (
+    ref: number,
+    pinnedAt: string | null = null,
+    rank: string | null = null,
+  ): InboxItem => ({ pinnedAt, rank, ref })
+
+  test("a pinned card leads a newer unpinned one, then today's order, newest first by ref", () => {
+    expect(
+      orderInboxItems([card(4), card(1), card(2, "2020", "a"), card(3, "2020", "b")]).map(
+        (row) => row.ref,
+      ),
+    ).toEqual([2, 3, 4, 1])
+  })
+
+  test("pinned cards order by their rank's code point, not their ref", () => {
+    expect(
+      orderInboxItems([card(1, "2020", "c"), card(2, "2020", "a"), card(3, "2020", "b")]).map(
+        (row) => row.ref,
+      ),
+    ).toEqual([2, 3, 1])
+  })
+
+  test("unpinned cards keep today's order, newest first by their ref", () => {
+    expect(orderInboxItems([card(1), card(3), card(2)]).map((row) => row.ref)).toEqual([3, 2, 1])
+  })
+})
+
+const betweenKeys = (prev: string | null, key: string, next: string | null): boolean =>
+  (prev === null || key > prev) && (next === null || key < next)
+
+describe("rankBetween", () => {
+  test("a fractional key sits strictly between two neighbours", () => {
+    const key = rankBetween("aa", "ac")
+    expect(betweenKeys("aa", key, "ac")).toBe(true)
+  })
+
+  test("a fractional key leads the tab when its lower bound is none", () => {
+    const key = rankBetween(null, "c")
+    expect(betweenKeys(null, key, "c")).toBe(true)
+  })
+
+  test("a fractional key ends the tab when its upper bound is none", () => {
+    const key = rankBetween("a", null)
+    expect(betweenKeys("a", key, null)).toBe(true)
+  })
+
+  test("a fractional key sits between two keys that are next to each other", () => {
+    const key = rankBetween("a", "b")
+    expect(betweenKeys("a", key, "b")).toBe(true)
   })
 })
