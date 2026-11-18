@@ -128,6 +128,7 @@ test("runRmPeer deletes a recorded weights file at the card's exact size, logs i
     `Deleted ${folder} outright (7 bytes), as card 11111111-2222-3333-4444-555555555555 approved on the peer`,
   )
   expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(out).toHaveLength(1)
   expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
     [],
   )

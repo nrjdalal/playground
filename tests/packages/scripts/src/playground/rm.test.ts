@@ -30,6 +30,7 @@ import {
   type RmDeps,
   rmArgs,
   rmDeps,
+  rmPeerCommand,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
@@ -2239,21 +2240,29 @@ const peerRun = (out: { code: number; out: string }) => {
   return { seen, peer }
 }
 
-test("runRm --peer sends one rm-peer command to the named peer, relays its line, and drops the record entry", async () => {
+test("runRm --peer sends one rm-peer command to the named peer and relays its line, leaving this machine's own copy at that path and its record entry", async () => {
   const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const record = readFileSync(join(deps.data, "machine-record.json"), "utf8")
   const { code, out } = await rmTold(
     [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
     { ...deps, peer },
   )
   expect(code).toBe(0)
   expect(seen).toEqual([
-    { machine: "spark-b", command: `packages/scripts/src/playground/rm-peer.ts ${repo} 7 ${CARD}` },
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
   ])
   expect(out.join("\n")).toContain("Deleted the weights on the peer")
-  expect(existsSync(repo)).toBe(false)
-  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
-    [],
+  expect(existsSync(repo)).toBe(true)
+  expect(readFileSync(join(deps.data, "machine-record.json"), "utf8")).toBe(record)
+})
+
+test("runRm --peer passes a path with a space or a quote to the peer as one word", () => {
+  expect(rmPeerCommand("/h/models/a b's.gguf", 7, "c1")).toBe(
+    `packages/scripts/src/playground/rm-peer.ts '/h/models/a b'\\''s.gguf' '7' 'c1'`,
   )
 })
 
@@ -2280,7 +2289,10 @@ test("runRm --peer relays a peer's refusal and the path stays", async () => {
   expect(code).toBe(1)
   expect(err.join("\n")).toContain("no such path")
   expect(seen).toEqual([
-    { machine: "spark-b", command: `packages/scripts/src/playground/rm-peer.ts ${repo} 7 ${CARD}` },
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
   ])
   expect(existsSync(repo)).toBe(true)
 })

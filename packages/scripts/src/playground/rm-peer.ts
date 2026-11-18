@@ -57,7 +57,6 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     return 1
   }
   const logged = `Deleted ${path} outright (${done.size} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
-  console.log(logged)
   const dropped = await dropPaths(deps.data, [path]).catch(() => [])
   console.log(dropped.length ? `${logged}; its machine record entry is dropped` : logged)
   return 0
@@ -70,7 +69,6 @@ if (import.meta.main) {
       data: dataDir(),
       home,
       main: mainCheckout(),
-      notify: (text) => void Bun.spawnSync(["bash", "-c", `printf '%s' ${JSON.stringify(text)}`]),
       session: sessionName,
     })
     process.exit(code)

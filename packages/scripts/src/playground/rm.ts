@@ -311,7 +311,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stderr: "ignore",
       stdout: "ignore",
     }),
-  // The one ssh to a peer: shape sshArgs's argv, run it, and return its code with its combined output, or why the peer cannot be reached.
+  // The one ssh to a peer: shape sshArgs's argv, run it, and return its code with its stdout and stderr, where the far end prints a refusal, or why the peer cannot be reached.
   peer: async (machine, command) => {
     const home = homedir()
     const cluster = await peersOf(repo, home)
@@ -322,8 +322,12 @@ export const rmDeps = (repo: string): RmDeps => ({
     if (clone === null) return { code: 1, out: `this checkout is not a plain path under ${home}` }
     const argv = peerArgv(cluster.key, peer.target, clone, command)
     const ran = await Bun.spawn(argv, { stdin: "ignore", stderr: "pipe", stdout: "pipe" })
-    const [stdout] = await Promise.all([new Response(ran.stdout).text(), ran.exited])
-    return { code: ran.exitCode ?? 1, out: stdout }
+    const [stdout, stderr] = await Promise.all([
+      new Response(ran.stdout).text(),
+      new Response(ran.stderr).text(),
+      ran.exited,
+    ])
+    return { code: ran.exitCode ?? 1, out: `${stdout}${stderr}` }
   },
   places: linkPlaces,
   prState,
@@ -497,6 +501,13 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   return 0
 }
 
+// Pure: the far end's command for one approved weights path on a peer, each word single-quoted, since peerArgv hands it to the peer's shell.
+export const rmPeerCommand = (path: string, bytes: number, card: string): string =>
+  [
+    "packages/scripts/src/playground/rm-peer.ts",
+    ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
+  ].join(" ")
+
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
@@ -518,20 +529,19 @@ async function removeApproved(
     )
     return 1
   }
-  // A peer: run one narrow ssh to that peer's own machine, where the far end re-checks the path and moves only the listed weights to its own trash, before this near end removes what it still tracks here.
-  let peerLine: string | undefined
+  // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
   if (args.peer !== undefined) {
     if (!deps.peer) {
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
       return 1
     }
-    const command = `packages/scripts/src/playground/rm-peer.ts ${args.path} ${pick.bytes} ${card}`
-    const ran = await deps.peer(args.peer, command)
+    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
-      console.error(`playground: ${ran.out.trim() || "the peer did not answer"}`)
+      console.error(`playground: ${args.peer}: ${ran.out.trim() || "the peer did not answer"}`)
       return 1
     }
-    peerLine = ran.out.trim()
+    console.log(ran.out.trim())
+    return 0
   }
   const approved = { bytes: pick.bytes, card }
   const session = await deps.session()
@@ -558,9 +568,7 @@ async function removeApproved(
     line = `Moved to the trash as ${done.id} (${done.files} files), as card ${card} approved; playground rm --restore ${done.id} brings it back`
   }
   const dropped = await dropPaths(deps.data, [args.path]).catch(() => [])
-  console.log(
-    `${peerLine ? `${peerLine}; ` : ""}${dropped.length ? `${line}; its machine record entry is dropped` : line}`,
-  )
+  console.log(dropped.length ? `${line}; its machine record entry is dropped` : line)
   return 0
 }
 
