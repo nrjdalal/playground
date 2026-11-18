@@ -156,7 +156,7 @@ describe("startLocal", () => {
     expect(runCall!.args).toEqual(startArgv(child))
     expect(runCall!.args).toContain("127.0.0.1::5432")
 
-    expect(docker.calls.find((c) => c.args[0] === "port")!.args).toEqual(["port", child, "5432"])
+    expect(docker.calls.find((c) => c.args[0] === "port")!.args).toEqual(["port", child])
     expect(url).toBe(urlFor(54123))
 
     const execCall = docker.calls.find((c) => c.args[0] === "exec")

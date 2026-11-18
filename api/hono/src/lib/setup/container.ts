@@ -92,7 +92,7 @@ const randomSuffix = (): string => {
 export const isNamedContainer = (base: string, container: string): boolean =>
   container.startsWith(`${base}-`) && /^[0-9a-zA-Z]{4}$/.test(container.slice(base.length + 1))
 
-// Pure: the host port `docker port <name> 5432` prints as `5432/tcp -> 127.0.0.1:<port>`, or null when it prints none.
+// Pure: the host port `docker port <name>` prints as `5432/tcp -> 127.0.0.1:<port>`, or null when it prints none.
 export const portFromPort = (stdout: string): number | null => {
   const match = /5432\/tcp -> [\w.:@-]+:(\d+)\s*/.exec(stdout)
   return match ? Number(match[1]) : null
@@ -170,7 +170,7 @@ export async function startLocal({
       )
     }
   }
-  const port = portFromPort((await docker(["port", container, "5432"])).stdout)
+  const port = portFromPort((await docker(["port", container])).stdout)
   if (port === null) {
     throw new SetupError(`docker reported no port for ${container}`)
   }
