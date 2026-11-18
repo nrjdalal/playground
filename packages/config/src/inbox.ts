@@ -6,7 +6,7 @@ export const ASK_CODE_COLUMNS = 72
 // The fenced block's language an Inbox card draws as progress bars at its own width, one item a line, so no width limit binds it.
 export const PROGRESS_LANGUAGE = "progress"
 
-// A progress row's state: active rows draw in the primary colour and the rest muted.
+// A progress row's state: active rows draw in the palette's blue and the rest muted.
 export const PROGRESS_STATES = ["active", "done", "held", "waiting"] as const
 export type ProgressState = (typeof PROGRESS_STATES)[number]
 
