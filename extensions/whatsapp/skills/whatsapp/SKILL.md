@@ -17,7 +17,7 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
    ops-wa has already reacted 👀 on it (seen, a reply is coming); a message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces the 👀 (got it); with no `--id` it lands on the owner's latest message, which may be a later one ([ADR 0031](../../../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
-   When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
+   When its line does not start with `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
    Done when the update is sent, or nothing has changed and nothing is sent.
@@ -32,6 +32,14 @@ To send a file, put it in `<data>/wa/outbox/` and add `--file <absolute path>`: 
 An image (`jpg`, `jpeg`, `png`), a video (`mp4`) or a document (`pdf`, `txt`, `md`, `csv`, `json`) carries the body as its caption; a voice note (`ogg`, `opus`) takes none, so the body goes before it as text.
 A file of any other type, or outside the outbox, is refused, and a text document is read for a token shape as a body is.
 
+`wa send` takes one more shape beside the body ([ADR 0037](../../../../.agents/adr/0037-wa-send-sends-a-location-a-quote-an-edit-and-a-delete.md)):
+
+- `--location <lat>,<lon>` sends a location, the body its name and optional.
+- `--quote <id>` quotes the owner's message of that id (the guest's, with `--to alert`), the id its handed-on line names, in the last 24 hours.
+- `--edit <id>` replaces the text of a message `wa send` sent, in its first 15 minutes, and `--delete <id>` deletes one for everyone, with no body.
+
+Each send prints the ids of the messages it sent, `wa send: sent (id <id>)`, or `(ids <id>, <id>)` for several, and an edit or a delete takes one of those ids alone.
+
 A photo, voice note, video or document from the owner arrives as a path in `<data>/wa/media/`: read a photo or document there with the Read tool, and take a voice note's or video's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 A line ending `No reply is needed.` (a delete, or the owner's reaction on a reply) asks no `wa send`.
 
@@ -39,6 +47,8 @@ A line ending `No reply is needed.` (a delete, or the owner's reaction on a repl
 
 ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card that still asks, open, not replied, and awake, as one `📥 <title>` line each, at most 5 then `📥 +N more in the Inbox` ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
 A card with choices also goes as a WhatsApp poll ([ADR 0029](../../../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)), and the owner's vote counts as that row's number typed.
+Each decision that goes stays pinned in the owner's chat, its poll or else its text, until it settles by any route, a WhatsApp answer, an Inbox answer, a settle, an ack or a resolve, with WhatsApp mode on or off; at most 3 stay pinned, the oldest coming off first.
+A pin comes off only inside the owner's 24 hours, so one that settles after them comes off at the owner's next message.
 The owner's reply naming a card (`1 #i12`) or vote goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
 A number alone or an id alone reaches you only while no card that went out waits on its choices and no setting question of ops-wa's waits (below), so read it as the owner's answer to your own question.
 

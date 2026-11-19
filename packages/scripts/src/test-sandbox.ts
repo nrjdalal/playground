@@ -1,7 +1,15 @@
 // The suite's runner: runs `bun test` in sandbox.ts's sandbox, so no test can start a real session or read the real config by accident (a self-removal test once started two). The env is set before bun starts, since os.homedir() and the spawn PATH lookup read the boot environment, not a later mutation. The folder goes when the run does.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { availableParallelism, constants } from "node:os"
-import { basename, isAbsolute, join, relative, resolve } from "node:path"
+import { basename, isAbsolute, join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
@@ -196,6 +204,7 @@ const filterMatches = (filter: string): boolean => {
 const bunTargets: string[] = []
 const pyTargets: [label: string, file: string][] = []
 const unrunnable: [label: string, reason: string][] = []
+// each Python test keyed by its real path, so a linked folder and its real one, as macOS's /var and /private/var, name one file once (issue 2858)
 const seenPy = new Set<string>()
 for (const arg of paths) {
   if (arg.startsWith("-")) {
@@ -208,8 +217,8 @@ for (const arg of paths) {
     else bunTargets.push(arg)
   } else if (isPyTest(b)) {
     if (!existsSync(b)) unrunnable.push([arg, "no Python test at"])
-    else if (!seenPy.has(resolve(b))) {
-      seenPy.add(resolve(b))
+    else if (!seenPy.has(realpathSync(b))) {
+      seenPy.add(realpathSync(b))
       pyTargets.push([arg, relative("tests", b)])
     }
   } else if (existsSync(b)) {
@@ -218,8 +227,8 @@ for (const arg of paths) {
         const { bun, py } = scanFolder(b)
         if (py.length > 0 && bun.length === 0) {
           for (const full of py)
-            if (!seenPy.has(resolve(full))) {
-              seenPy.add(resolve(full))
+            if (!seenPy.has(realpathSync(full))) {
+              seenPy.add(realpathSync(full))
               pyTargets.push([full, relative("tests", full)])
             }
         } else if (bun.length > 0) {

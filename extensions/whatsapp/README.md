@@ -27,11 +27,13 @@ Voice notes and videos are read as text on this machine by whisper.cpp: `brew in
 Without them a voice note or video reaches the dispatcher as not transcribed, with its path.
 
 The dispatcher can send you a photo, a video, a document or a voice note too: it puts the file in `<data>/wa/outbox/` and sends it with `playground wa send --file <path>`, its reply as the caption ([ADR 0036](../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)); no file outside that folder goes.
+It can also send a location, quote your message in its reply, and fix or take back a message it sent ([ADR 0037](../../.agents/adr/0037-wa-send-sends-a-location-a-quote-an-edit-and-a-delete.md)); for the quote, ops-wa keeps your words and the alert number's on this Mac, and a message 24 hours old is quoted no more; its words leave once the next message comes in.
 
 ## Inbox cards on WhatsApp
 
 While WhatsApp mode is on and you have written in the last 24 hours, ops-wa sends you each open `ask` decision and update its poster scoped to the factory (`scope: "factory"`) from the Inbox once, with its choices numbered: reply `1 #i12` to pick choice 1 on #i12, and ops-wa answers it as the card's own button would, recorded as from WhatsApp ([ADR 0024](../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)).
 A card with choices also comes as a poll: tap a choice, and your vote answers the card as typing its number would; a changed vote finds the card answered already ([ADR 0029](../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)).
+A decision stays pinned in your chat until it settles, on WhatsApp or in the Inbox, with WhatsApp mode on or off; one that settles once your 24 hours have passed comes off when you next write. At most 3 stay pinned, the oldest coming off first.
 Every other card stays in the Inbox, named by its title alone as `📥 <title>`, at most 5 then `📥 +N more in the Inbox`, and a title holding a term the Inbox keeps back only in that count: a card with no scope or another scope than the factory's, a secret, a delete, a budget, a ship, a schema, a ticket, a Slack message and a draft. A card is named only while it still asks, the Inbox tab's test: open, not replied, and awake.
 A card that goes reads `[hidden]` for every name, handle, company term, Slack id, Linear key, email and token, and its files stay in the Inbox.
 

@@ -336,8 +336,8 @@ describe("playground wa send --file (#2783)", () => {
     mkdirSync(join(data, "wa", "outbox"), { recursive: true })
     writeFileSync(shot, "made-up bytes")
     const got: [string, string, string | undefined][] = []
-    const server = serve(socketPath(data), async (b, kind, _source, file) => {
-      got.push([b, kind, file])
+    const server = serve(socketPath(data), async (b, kind, _source, extra) => {
+      got.push([b, kind, extra.file])
       return "sent"
     })
     try {
@@ -378,6 +378,67 @@ describe("playground wa send --file (#2783)", () => {
         expect(code).toBe(2)
         expect(out).toContain("playground wa send [--to alert] --file <path> [<file>]")
       }
+      expect(got).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
+describe("playground wa send's structure (#2799)", () => {
+  test("hands a location, a quote, an edit and a delete to ops-wa, and prints the ids ops-wa sent", async () => {
+    const { body, data } = machine("Made-up Cafe\n")
+    const got: [string, string, unknown][] = []
+    const server = serve(socketPath(data), async (b, kind, _source, extra) => {
+      got.push([b, kind, extra])
+      return { ids: got.length === 1 ? ["m1", "m2"] : got.length === 2 ? ["m3"] : [], said: "sent" }
+    })
+    try {
+      expect(await wa(data, ["send", "--location", "12.5,-45.25", body])).toEqual({
+        code: 0,
+        out: "wa send: sent (ids m1, m2)",
+      })
+      expect(await wa(data, ["send", "--to", "alert", "--quote", "own1", body])).toEqual({
+        code: 0,
+        out: "wa send: sent (id m3)",
+      })
+      expect(await wa(data, ["send", "--edit", "m3", body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--delete", "m3"])).toEqual({ code: 0, out: "wa send: sent" })
+      expect(got).toEqual([
+        ["Made-up Cafe", "reply", { location: { lat: 12.5, lon: -45.25 } }],
+        ["Made-up Cafe", "guest", { quote: "own1" }],
+        ["Made-up Cafe", "reply", { edit: "m3" }],
+        ["", "reply", { delete: "m3" }],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("refuses a bad location, two extras and a bodiless edit before ops-wa", async () => {
+    const { body, data } = machine("x")
+    const got: string[] = []
+    const server = serve(socketPath(data), async (b) => {
+      got.push(b)
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["send", "--location", "91,0", body])).toEqual({
+        code: 1,
+        out: "wa send: a location takes a latitude from -90 to 90 and a longitude from -180 to 180",
+      })
+      expect((await wa(data, ["send", "--location", "1,2,3", body])).code).toBe(1)
+      expect((await wa(data, ["send", "--location", "north", body])).code).toBe(1)
+      expect(await wa(data, ["send", "--edit", "m1", "--delete", "m1", body])).toEqual({
+        code: 1,
+        out: "wa send: a send takes one of a file, a location, an edit and a delete",
+      })
+      expect((await wa(data, ["send", "--edit", "m1"])).code).toBe(2)
+      expect((await wa(data, ["send", "--quote"])).code).toBe(2)
+      expect((await wa(data, ["alert", "--quote", "own1", body])).code).toBe(2)
       expect(got).toEqual([])
     } finally {
       server.stop(true)
