@@ -2497,6 +2497,7 @@ test("runRm --peer relays a peer's silence with the did-not-answer fallback", as
 const decisionMachine = (
   base: ReturnType<typeof approvedMachine>,
   decision: DeleteDecision | string,
+  approvals?: RmDeps["approvals"],
 ) => {
   const { repo } = base
   const blob = join(repo, "blobs", "b")
@@ -2510,6 +2511,7 @@ const decisionMachine = (
       spy.card = card
       return Promise.resolve(decision)
     },
+    ...(approvals ? { approvals } : {}),
     peer: async (machine, command) => {
       spy.seen.push({ machine, command })
       return { code: 0, out: "Deleted the weights on the peer" }
@@ -2633,6 +2635,23 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
     expect(code).toBe(1)
     expect(err.join("\n")).not.toBe("")
     expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card removes a path an approved delete decision names when nightly-clean's reader answers that the card is not its own", async () => {
+    const base = approvedMachine(null)
+    const { deps, spy } = decisionMachine(
+      base,
+      withWhat(base.repo),
+      async (card) => `card ${card} is not the card nightly-clean saved`,
+    )
+    const { code, out } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(0)
+    expect(out.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(false)
+    expect(spy.card).toBe(CARD)
   })
 })
 
