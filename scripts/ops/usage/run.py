@@ -32,6 +32,7 @@ HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os
 OPS = os.path.dirname(HERE)
 OUT = os.path.join(os.path.dirname(OPS), "usage.json")
 STORED = os.path.join(HERE, "stored-login.json")
+STATUS = os.path.join(HERE, "stored-login-status.json")  # whether the last stored read found the token expired, which spawn.sh reads in place of the Keychain
 FLIP = os.path.join(HERE, "login-flip.json")
 CYCLE = 300
 PROBE_EVERY, FRESH_FOR = 840, 1800
@@ -65,6 +66,10 @@ class NoLogin(RuntimeError):
     pass
 
 
+class TokenExpired(RuntimeError):
+    pass
+
+
 def oauth():
     r = subprocess.run(["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "Claude Code-credentials", "-w"], capture_output=True, text=True, timeout=15)
     # 44 is security's item-not-found; a locked or denied Keychain is a failure, not a missing login
@@ -91,7 +96,7 @@ def window(w):
 def stored_login():
     o = oauth()
     if o.get("expiresAt", 0) / 1000 < time.time():
-        raise RuntimeError("access token expired; waiting for Claude Code to refresh it")
+        raise TokenExpired("access token expired; waiting for Claude Code to refresh it")
     # the account is read every cycle, with the token it goes with: the owner switches logins, and a cached email names the wrong account
     account = (get("profile", o["accessToken"]).get("account") or {}).get("email")
     u = get("usage", o["accessToken"])
@@ -267,13 +272,18 @@ while True:
     except SystemExit as e:
         problems.append(f"usage.accounts: {e}")
         FACTORY = None  # no list known, so no account counts as removed this cycle
+    token_expired = False
     try:
         stored = stored_login()
         write(STORED, stored)
         write_stored(stored)
     except Exception as e:
-        no_login = isinstance(e, NoLogin)
+        no_login, token_expired = isinstance(e, NoLogin), isinstance(e, TokenExpired)
         problems.append(f"stored login: {type(e).__name__}: {e}")
+    try:
+        write(STATUS, {"tokenExpired": token_expired, "writtenAt": iso(time.time())})
+    except OSError as e:
+        problems.append(f"stored login status: {type(e).__name__}: {e}")
     flip = flip_file() or {}
     resolved = resolved_factory(flip)
     try:

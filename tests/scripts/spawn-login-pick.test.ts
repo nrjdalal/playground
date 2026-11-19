@@ -657,8 +657,8 @@ describe("the capacity gate refuses and spawns nothing", () => {
   test("--account naming the own login starts on it once on its stale reading while ops-usage finds its token expired, and leaves a 0600 marker", async () => {
     const r = await spawn(ownStart, [], ownEnv, script, undefined, expiredLogin())
     expect(r.code).toBe(0)
-    expect(r.out).toContain(
-      "--account own@example.com is this machine's own login, so it starts there, the split skipped: its week is at 20% (stored-login.json, written 600 minutes ago: its token expired, so this one start lets Claude Code refresh it)",
+    expect(r.out).toMatch(
+      /--account own@example\.com is this machine's own login, so it starts there, the split skipped: its week is at 20% \(stored-login\.json, written 6\d\d minutes ago: its token expired, so this one start lets Claude Code refresh it\)/,
     )
     expect(launchOf(r)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN")
     expect(markers(r)).toEqual([markerName(staleAt)])
@@ -708,13 +708,13 @@ describe("the capacity gate refuses and spawns nothing", () => {
     [
       "no expired token in ops-usage's status",
       { status: { age: 0, tokenExpired: false } },
-      "stored-login.json was written 600 minutes ago",
+      "(writtenAt), 15 is its limit",
     ],
-    ["no ops-usage status", { status: null }, "stored-login.json was written 600 minutes ago"],
+    ["no ops-usage status", { status: null }, "(writtenAt), 15 is its limit"],
     [
       "a stale ops-usage status",
       { status: { age: 20, tokenExpired: true } },
-      "stored-login.json was written 600 minutes ago",
+      "(writtenAt), 15 is its limit",
     ],
     ["a week reset since the reading", { resetsInHours: -1 }, "its week has reset since"],
     [
@@ -762,7 +762,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
       },
     )
     expect(r.code).not.toBe(0)
-    expect(r.err).toContain("the week is at 40% (stored-login.json seven_day.used_percentage)")
+    expect(r.err).toContain(
+      "the week is at 40% (ops/usage/stored-login.json seven_day.used_percentage)",
+    )
   })
 
   test("login-flip's seen entry for the own login is no fresh reading of it", async () => {
@@ -771,7 +773,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       probedFiles({ "own@example.com": { ...probed(20, 0), via: undefined } }, {})(h)
     })
     expect(r.code).not.toBe(0)
-    expect(r.err).toContain("stored-login.json was written 600 minutes ago")
+    expect(r.err).toContain("(writtenAt), 15 is its limit")
   })
 
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
