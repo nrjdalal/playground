@@ -241,7 +241,7 @@ export const followerRunning = (): boolean => pidAlive(join(opsDashboard(), "das
 const etime = (pid: string): string =>
   Bun.spawnSync(["ps", "-o", "etime=", "-p", pid], { stdout: "pipe" }).stdout.toString().trim()
 
-// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid, the last 3000 lines of run-slot.runs.log and the pid's own start.
+// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid, the last 3000 lines of run-slot.runs.log and the pid's own start; a prebuild.pid the supervisor's rm -f dropped between the read and the stat reads not queued.
 export const prebuildQueued = (): boolean => {
   const read = (path: string) => {
     try {

@@ -433,7 +433,7 @@ export const parseEtime = (elapsed: string): number => {
   return days * 86400 + secs
 }
 
-// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line for it, and the pid is not another process that reused it. It reads not queued when the pid started after the file that names it, and counts only start lines at or after the pid file's mtime.
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line back 5 s past the file's mtime, and the pid is not another that reused it, read as reused only once it clears the mtime by more than 2 s.
 export const stepQueued = (
   pid: string | undefined,
   alive: (pid: number) => boolean,
@@ -443,9 +443,9 @@ export const stepQueued = (
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
-  // the pid's elapsed prints to whole seconds, so its start can read up to a second late; treat a pid as reused only once it clears the file's mtime by more than 2 s
+  // the pid's elapsed prints to whole seconds, so its start reads up to a second late
   if (pidStart > fileMtime + 2000) return false
-  // run-slot can log start before the echo writes the file, so count a start line back 5 s past the file's mtime, as slot_step counts only lines after its mark
+  // run-slot can log start before the echo writes the file, so a start line can come before the file exists
   return !runs.some((line) => {
     const words = line.split(" ")
     if (words[1] !== "start" || words[3] !== String(n)) return false
