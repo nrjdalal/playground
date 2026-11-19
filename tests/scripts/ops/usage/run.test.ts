@@ -484,6 +484,32 @@ test.each([
   },
 )
 
+test("a seat probe 59 minutes old still carries the ended login, so the beat stays ok", async () => {
+  const { beat } = await cycle("seat-59", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    seat: { age: 59 },
+    storedAge: 600,
+  })
+  expect(beat.result).toBe("ok")
+})
+
+test("with the seat token carrying the ended login, a refused factory read beats its own error, the stored login left to the detail", async () => {
+  const { beat } = await cycle("seat-factory-refused", {
+    added: ["added@example.org"],
+    ended: true,
+    factory: "added@example.org",
+    login: true,
+    probeUrl: "http://127.0.0.1:8/v1/messages",
+    seat: { age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toStartWith("error: factory account: ")
+  expect(beat.result).not.toContain("stored login")
+  expect(beat.detail).toContain("stored login: LoginEnded: ")
+})
+
 test.each([
   ["its seat probe is over 60 minutes old", "seat-old", { seat: { age: 61 } }],
   ["its seen entry is no seat probe", "seat-stamp", { seat: { age: 5, via: null } }],
