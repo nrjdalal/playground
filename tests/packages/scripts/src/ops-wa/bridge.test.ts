@@ -1682,19 +1682,13 @@ describe("reactions (#2755)", () => {
       .filter((s) => s.content.react)
       .map((s) => [s.jid, s.content.react!.key.id, s.content.react!.text])
 
-  test("an owner message handed to the dispatcher gets 👀, on its own key, after the relay", async () => {
+  test("an owner message handed to the dispatcher gets no reaction from ops-wa", async () => {
     const h = harness()
     h.mode.react = true
-    const id = said(h, jid(OWNER), "is the train moving?")
+    said(h, jid(OWNER), "is the train moving?")
     await h.settle()
     expect(h.relayed).toHaveLength(1)
-    expect(h.fake.sent).toEqual([
-      {
-        at: expect.any(Number),
-        content: { react: { key: { fromMe: false, id, remoteJid: jid(OWNER) }, text: "👀" } },
-        jid: jid(OWNER),
-      },
-    ])
+    expect(h.fake.sent).toEqual([])
   })
 
   test("each handed-on line names its message's id, for wa react --id", async () => {
@@ -1707,15 +1701,17 @@ describe("reactions (#2755)", () => {
     expect(h.data[0]).toContain(`, id ${guest}, as data`)
   })
 
-  test("a reply leaves the 👀, and wa react ✅ on the latest message replaces it, one send with the gap alone", async () => {
+  test("wa react 👀 --id sets the dispatcher's 👀, a reply leaves it, and wa react ✅ on the latest message replaces it, one send with the gap alone", async () => {
     const h = harness()
     h.mode.react = true
     said(h, jid(OWNER), "first")
     await h.settle()
     const id = said(h, jid(OWNER), "merge it")
     await h.settle()
+    expect(await h.send.react("👀", { id })).toBe("sent")
+    expect(reactions(h)).toEqual([[jid(OWNER), id, "👀"]])
     await h.send("merging now")
-    expect(reactions(h)).toHaveLength(2)
+    expect(reactions(h)).toHaveLength(1)
     // 400 ms into the gap, the gap's rest is 600 ms, below a one-character typing time's 1 s floor
     h.advance(400)
     const before = h.waits.length
@@ -1741,7 +1737,7 @@ describe("reactions (#2755)", () => {
     await expect(h.send.react("✅", {})).rejects.toThrow("over 24 hours old")
   })
 
-  test("no 👀 on a card's answer, a stranger's message, or a message while WhatsApp mode is off", async () => {
+  test("no reaction on a card's answer, a stranger's message, or a message while WhatsApp mode is off", async () => {
     const ib = inboxOf([card(12)])
     const h = harness(ib.inbox)
     h.mode.react = true
@@ -1755,7 +1751,7 @@ describe("reactions (#2755)", () => {
     said(h, jid(OWNER), "are you there?")
     await h.settle()
     expect(ib.answers).toHaveLength(1)
-    expect(reactions(h).map(([, , emoji]) => emoji)).toEqual(["👀"])
+    expect(reactions(h)).toEqual([])
   })
 
   test("the guest's message gets no 👀, and wa react --to alert ✅ answers the guest's latest", async () => {
@@ -1765,7 +1761,7 @@ describe("reactions (#2755)", () => {
     await h.settle()
     const id = said(h, jid(ALERT), "what is the factory on?")
     await h.settle()
-    expect(reactions(h).map(([to]) => to)).toEqual([jid(OWNER)])
+    expect(reactions(h)).toEqual([])
     await h.send.react("✅", { who: "alert" })
     expect(reactions(h).at(-1)).toEqual([jid(ALERT), id, "✅"])
   })
@@ -1781,7 +1777,7 @@ describe("reactions (#2755)", () => {
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 
-  test("the automatic 👀 is no answer, so the failover still hands on, and wa react ✅ is one", async () => {
+  test("a message with no reply still goes on to the assistant seat, and the dispatcher's wa react 👀 is its answer", async () => {
     const h = harness()
     h.mode.react = true
     said(h, jid(OWNER), "is it green?")
@@ -1789,9 +1785,9 @@ describe("reactions (#2755)", () => {
     h.advance(3 * 60_000)
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
-    said(h, jid(OWNER), "thanks")
+    said(h, jid(OWNER), "what broke overnight?")
     await h.settle()
-    await h.send.react("✅", {})
+    await h.send.react("👀", {})
     h.advance(3 * 60_000)
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT, "dispatcher"])
