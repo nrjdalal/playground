@@ -474,7 +474,7 @@ def heavy_jobs(rows=None):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
         except (OSError, IndexError):
             pass
-    # a slot's holder and the run that started it (commit-slot.ts's pre-commit and pre-push, which hold run-slot-<slot> as a child) each hold the slot, so the set is the holder and every pid up it
+    # owners is the holder and every pid up it, so `pid in owners` counts a run that is itself the holder or started it, never one that merely shares an ancestor with a holder
     owners = set(holders)
     for hpid in holders:
         p, pp = hpid, parent.get(hpid)
@@ -510,8 +510,8 @@ def heavy_jobs(rows=None):
         if (where, "dev" if "dev.ts" in cmd else "suite") in seen:
             continue
         seen.add((where, "dev" if "dev.ts" in cmd else "suite"))
-        # inside a slot when the slot's holder is one of its ancestors, or the run itself holds the slot, as commit-slot.ts does by holding run-slot as a child
-        jobs.append({"inside": bool(owners & set(chain)) or pid in owners, "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
+        # inside a slot when the slot's holder is one of its ancestors, or the run itself is the holder or started it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
+        jobs.append({"inside": bool(holders & set(chain)) or pid in owners, "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
     return jobs
 
 
@@ -528,8 +528,8 @@ def heavy_cap():
 
 
 def slot_alerts(jobs, cap, at):
-    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors or the run holds the slot itself (commit-slot.ts's pre-commit and pre-push hold run-slot as a child), and a
-    dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
+    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors, or the run itself is the holder or started the holder, as commit-slot.ts's pre-commit and pre-push
+    hold run-slot as a child; a dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
     alerts = []
     for j in jobs:
         if not j["inside"] and j["kind"] not in ("ci job", "dev stack"):
