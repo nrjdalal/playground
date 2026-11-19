@@ -56,7 +56,7 @@ if "week" in me:
 if spec.get("probeRead"):
     json.dump({"account": email[spec["on"]], "rate_limits": limits, "source": "token/ratelimit-headers"}, open(os.path.expanduser("~/.playground/usage.json"), "w"))
 else:
-    json.dump(dict({"account": email[spec["on"]], "rate_limits": limits}, **({"writtenAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(spec["storedAt"]))} if spec.get("storedAt") else {})), open(os.path.join(folder, "stored-login.json"), "w"))
+    json.dump(dict({"account": email[spec["on"]], "rate_limits": limits}, **({"writtenAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(spec.get("storedAt", spec["now"])))} if spec.get("storedAt", spec["now"]) else {})), open(os.path.join(folder, "stored-login.json"), "w"))
 path = os.path.join(folder, "login-flip.json")
 state = json.load(open(path)) if os.path.exists(path) else {}
 state["seen"] = dict(state.get("seen") or {}, **{email[k]: dict({"five": 0, "at": spec["now"]}, **v) for k, v in spec["seen"].items() if k != spec["on"] or spec.get("probeRead")})
@@ -135,7 +135,7 @@ const flip = (
     noFive?: boolean
     prior?: Record<string, Reading>
     split?: Record<string, number>
-    storedAt?: number
+    storedAt?: number | null
     tokens?: string[]
   } = {},
 ) => {
@@ -594,7 +594,7 @@ test.each([
   },
 )
 
-// #2863: a stored reading 15 minutes old or more, as when the stored login's token has expired, is no fresh reading: the stored login's seen entry stays with its seat probe, which spawn.sh's own-login start judges through usage.json's accounts
+// #2863: a stored reading 15 minutes old or more, as when the stored login's token has expired, is no fresh reading: the stored login's seen entry stays with its seat probe, which spawn.sh's own-login start judges
 test("a stale stored reading leaves the stored login's seat probe in seen, and a fresh one is stamped as before", () => {
   const seat = { at: TONIGHT - 300, five: 5, via: "token", week: 76, weekReset: MON_1500 }
   const stale = flip(
@@ -621,4 +621,20 @@ test("a stale stored reading leaves the stored login's seat probe in seen, and a
   )
   expect(fresh.seenAt.OWN).toBe(TONIGHT)
   expect(fresh.seenWeek.OWN).toBe(73)
+})
+
+test("a stored reading with no writtenAt is no fresh reading either, and leaves the seat probe in seen", () => {
+  const seat = { at: TONIGHT - 300, five: 5, via: "token", week: 76, weekReset: MON_1500 }
+  const out = flip(
+    "OWN",
+    { ...spent, OWN: { week: 73, weekReset: MON_1500 } },
+    TONIGHT,
+    undefined,
+    undefined,
+    false,
+    false,
+    { prior: { OWN: seat }, storedAt: null },
+  )
+  expect(out.seenAt.OWN).toBe(TONIGHT - 300)
+  expect(out.seenWeek.OWN).toBe(76)
 })
