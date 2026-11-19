@@ -1588,3 +1588,150 @@ describe("name", () => {
     expect(agentOf(r.roster, "k3m9px-worker")).toMatchObject({ name: "k3m9px-worker" })
   })
 })
+
+// The queue entry, as the Builder writes it: a PR's number, its item and an etaMerge when known.
+const QUEUE: {
+  queue: { pr: number; item: string; etaMerge: string }[]
+  parked: []
+  updatedAt: string
+} = {
+  queue: [{ pr: 1, item: "Fix the export", etaMerge: "2026-10-01T00:00:00Z" }],
+  parked: [],
+  updatedAt: "2026-10-01T00:00:00Z",
+}
+
+// A worker on the queued PR #1, so its eta write should move the queue entry too.
+const QUEUED_PR: Agent = {
+  branch: "pg-1-x",
+  kind: "worker",
+  lastReport: "PR opened",
+  lastReportAt: "2026-10-01T00:00:00Z",
+  name: "worker-eta",
+  pr: "https://github.com/acme/app/pull/1",
+  repo: "acme/app",
+  role: "worker",
+  status: "working",
+  task: "Fix the export",
+  title: "Export fix",
+}
+
+// A worker on #2, a PR the queue does not hold, so its eta write leaves the queue alone.
+const NOT_QUEUED: Agent = {
+  branch: "pg-2-x",
+  kind: "worker",
+  lastReport: "Working",
+  lastReportAt: "2026-10-01T00:00:00Z",
+  name: "worker-late",
+  pr: "https://github.com/acme/app/pull/2",
+  repo: "acme/app",
+  role: "worker",
+  status: "working",
+  task: "Wait",
+  title: "Wait",
+}
+
+// A checker whose pr is the queued #1, but a checker's pr is not its own PR to time.
+const CHECKER_PR: Agent = {
+  kind: "reviewer",
+  name: "k3v9q2-reviewer",
+  pr: "https://github.com/acme/app/pull/1",
+  role: "worker",
+  status: "working",
+  task: "Review #1",
+  title: "Reviewer of worker-eta",
+  worker: "worker-eta",
+}
+
+describe("set eta= moves the PR's merge-queue entry (#2955)", () => {
+  // Copies run() but also points PLAYGROUND_MERGE_QUEUE at a queue file in this config's folder, seeded by the case, and returns that file's parsed contents.
+  const qrun = async (config: string, args: string[], seed: string) => {
+    const queuePath = join(config, "playground", "merge-queue.json")
+    writeFileSync(queuePath, seed)
+    const proc = Bun.spawn(["bun", script, ...args], {
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        PLAYGROUND_MERGE_QUEUE: queuePath,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const code = await proc.exited
+    const parse = (): { queue?: { pr?: number; etaMerge?: string }[] } | null => {
+      try {
+        return JSON.parse(readFileSync(queuePath, "utf8")) as {
+          queue?: { pr?: number; etaMerge?: string }[]
+        }
+      } catch {
+        return null
+      }
+    }
+    const rosterPath = join(config, "playground", "roster.json")
+    return {
+      code,
+      err: await new Response(proc.stderr).text(),
+      out: await new Response(proc.stdout).text(),
+      roster: existsSync(rosterPath)
+        ? (JSON.parse(readFileSync(rosterPath, "utf8")) as RosterFile)
+        : null,
+      queue: parse(),
+    }
+  }
+
+  test("set eta= moves the row's eta and the queued entry's etaMerge together", async () => {
+    const config = configWith([QUEUED_PR])
+    const at = inMinutes(30)
+    const r = await qrun(config, ["set", "worker-eta", `eta=${at}`], JSON.stringify(QUEUE))
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-eta")?.eta).toBe(at)
+    const entry = r.queue?.queue?.find((one) => one.pr === 1)
+    expect(entry?.etaMerge).toBe(at)
+  })
+
+  test("a row whose pr is not queued leaves the queue file unchanged", async () => {
+    const config = configWith([NOT_QUEUED])
+    const at = inMinutes(30)
+    const seed = JSON.stringify(QUEUE)
+    const r = await qrun(config, ["set", "worker-late", `eta=${at}`], seed)
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-late")?.eta).toBe(at)
+    expect(JSON.stringify(r.queue)).toBe(seed)
+  })
+
+  test("a checker's row leaves the queue alone, though its pr is queued", async () => {
+    const config = configWith([CHECKER_PR])
+    const at = inMinutes(30)
+    const seed = JSON.stringify(QUEUE)
+    const r = await qrun(config, ["set", "k3v9q2-reviewer", `eta=${at}`], seed)
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "k3v9q2-reviewer")?.eta).toBe(at)
+    expect(JSON.stringify(r.queue)).toBe(seed)
+  })
+
+  test("an unreadable queue file still writes the roster and prints the line", async () => {
+    const config = configWith([QUEUED_PR])
+    const at = inMinutes(30)
+    const r = await qrun(config, ["set", "worker-eta", `eta=${at}`], "not valid json")
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-eta")?.eta).toBe(at)
+    expect(r.queue).toBeNull()
+    expect(r.err).toContain("merge-queue.json")
+    expect(r.err).toContain("set its etaMerge by hand")
+  })
+
+  test("report <name> <text> eta=<iso> moves the queued entry too", async () => {
+    const config = configWith([QUEUED_PR])
+    const at = inMinutes(30)
+    const r = await qrun(
+      config,
+      ["report", "worker-eta", "PR opened", `eta=${at}`],
+      JSON.stringify(QUEUE),
+    )
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-eta")?.eta).toBe(at)
+    expect(agentOf(r.roster, "worker-eta")?.lastReport).toBe("PR opened")
+    const entry = r.queue?.queue?.find((one) => one.pr === 1)
+    expect(entry?.etaMerge).toBe(at)
+  })
+})
