@@ -25,8 +25,12 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat, but for the alert number the owner approved, which takes a reply at any time; a refusal names its reason.
 `playground wa status` prints whether each number has written or been approved, and whether a reply can go to it now.
 `playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
-ops-wa sends each text part after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
+ops-wa sends each text part, and a file's caption, after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
+
+To send a file, put it in `<data>/wa/outbox/` and add `--file <absolute path>`: `playground wa send [--to alert] --file <path> [<body file>]` ([ADR 0036](../../../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)).
+An image (`jpg`, `jpeg`, `png`), a video (`mp4`) or a document (`pdf`, `txt`, `md`, `csv`, `json`) carries the body as its caption; a voice note (`ogg`, `opus`) takes none, so the body goes before it as text.
+A file of any other type, or outside the outbox, is refused, and a text document is read for a token shape as a body is.
 
 A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 

@@ -61,8 +61,8 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
-playground wa send [--to alert] <file>
-                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa send [--to alert] [--file <path>] [<file>]
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; with --file, an image, a document, a video or a voice note from the data folder's wa/outbox/, the reply its caption and optional; it refuses a body holding a token shape (bun run wa)
 playground wa alert [--now-both] [--source <kind>:<ref>] <file>
                       send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, to the owner's WhatsApp at once and to the wa.alert number after wa.alertDelayMinutes unless the owner reacts or wa.alertCheck reads its source as handled, or to both at once with --now-both (bun run wa)
 playground wa react <emoji> [--to alert] [--id <id>]
@@ -106,7 +106,7 @@ playground add --dispatcher --backend glm
 playground alerts-wait <name>
                       for a manager's background task, or a session on another machine's: wait for the next outbox line addressed to <name>, a stuck alert first, else any job's line such as a heads-up or a playground send from the other machine, led by [ops-peer] and its sender's name, print it and exit, so it wakes without waiting on the relay
 playground ci-wait <pr> [--repo <owner/name>]
-                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until each check pr:merge needs (Audit, Lint, and Build and test) exists there and has concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
+                      wait on a PR's CI, as a background task: poll its head over REST every 5 minutes until the two required checks (Audit, Lint, and Build and test) exist there and have concluded, then print each conclusion and exit 0 when all passed, else 1; a rate limit waits for its reset, a head that moves is waited on afresh, a check whose workflow run ended without creating it exits 1 with its rerun, a PR that conflicts with its base exits 1 at once naming the merge it needs (no CI runs on one), and a PR or repo GitHub does not know, or a refused login, exits 2; --repo is the factory's own repo when left out
 playground picker <session> allow <key> [--rule <name>] | deny <key> [--rule <name>] "<reason>"
                       as the session's manager, answer the permission prompt its stuck alert named by key: allow presses Yes once, deny presses No and sends the session the reason; --rule names the standing rule that settles the answer; each answer is a line in ops/picker.log
 playground model use <name> [--machine <name>]

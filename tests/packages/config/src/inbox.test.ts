@@ -2,8 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import {
   type ChoicePreview,
+  type InboxPlace,
   choicesOf,
+  orderInboxItems,
   progressItems,
+  rankBetween,
   rowOfAnswer,
 } from "../../../../packages/config/src/inbox"
 
@@ -154,5 +157,81 @@ describe("progressItems", () => {
       fault: { kind: "empty", line: 0, text: "" },
       ok: false,
     })
+  })
+})
+
+describe("orderInboxItems", () => {
+  // A card's ref labels it; the order it comes in is today's order.
+  const card = (
+    ref: number,
+    pinnedAt: string | null = null,
+    rank: string | null = null,
+  ): InboxPlace & { ref: number } => ({ pinnedAt, rank, ref })
+  const refs = (items: { ref: number }[]) => items.map((row) => row.ref)
+
+  test("a pinned card leads an unpinned one, and the unranked keep the order they came in", () => {
+    expect(
+      refs(orderInboxItems([card(4), card(1), card(2, "2020", "a"), card(3, "2020", "b")])),
+    ).toEqual([2, 3, 4, 1])
+  })
+
+  test("pinned cards order by their rank's code point, not the order they came in", () => {
+    expect(
+      refs(orderInboxItems([card(1, "2020", "c"), card(2, "2020", "a"), card(3, "2020", "b")])),
+    ).toEqual([2, 3, 1])
+  })
+
+  test("unpinned, unranked cards keep today's order as given, whatever their refs", () => {
+    expect(refs(orderInboxItems([card(1), card(3), card(2)]))).toEqual([1, 3, 2])
+  })
+
+  test("a card keeps the fields its caller gave it", () => {
+    const [row] = orderInboxItems([{ ...card(7), title: "kept" }])
+    expect(row?.title).toBe("kept")
+  })
+
+  test("in one group, a null-rank card leads a ranked card", () => {
+    expect(refs(orderInboxItems([card(1, null, "v"), card(2, null, null)]))).toEqual([2, 1])
+  })
+})
+
+// strictly between its neighbours, and only base-62 digits with no trailing "0", so Postgres text stores it and room stays below it
+const between = (prev: string | null, key: string, next: string | null): boolean =>
+  /^[0-9A-Za-z]*[1-9A-Za-z]$/.test(key) &&
+  (prev === null || key > prev) &&
+  (next === null || key < next)
+
+describe("rankBetween", () => {
+  test("a fractional key sits strictly between two neighbours", () => {
+    expect(between("aa", rankBetween("aa", "ac"), "ac")).toBe(true)
+  })
+
+  test("a fractional key sits between two keys that are next to each other", () => {
+    expect(between("a", rankBetween("a", "b"), "b")).toBe(true)
+  })
+
+  test("a tab's first key, and every key before the first or after the last, stores as text", () => {
+    const first = rankBetween(null, null)
+    expect(between(null, first, null)).toBe(true)
+    let top = first
+    let end = first
+    for (let i = 0; i < 100; i++) {
+      const above = rankBetween(null, top)
+      const below = rankBetween(end, null)
+      expect(between(null, above, top)).toBe(true)
+      expect(between(end, below, null)).toBe(true)
+      top = above
+      end = below
+    }
+  })
+
+  test("a card slotted again and again between the same two neighbours gets a new key each time", () => {
+    const low = rankBetween(null, null)
+    let high = rankBetween(low, null)
+    for (let i = 0; i < 100; i++) {
+      const key = rankBetween(low, high)
+      expect(between(low, key, high)).toBe(true)
+      high = key
+    }
   })
 })

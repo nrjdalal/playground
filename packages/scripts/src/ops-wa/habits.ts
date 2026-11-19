@@ -13,7 +13,7 @@ export const KEEP_ALIVE_DAYS = 12
 
 export const HOUR = 3_600_000
 
-// The wait before a text part, its typing time: 3 characters a second, a typist's mean of 36.2 WPM on a phone (Palin et al., MobileHCI 2019, http://pokristensson.com/pubs/PalinEtAlMobileHCI2019.pdf), spread by up to a fifth either way and kept between 1 s and 60 s.
+// The wait before a text part or a file's caption, its typing time: 3 characters a second, a typist's mean of 36.2 WPM on a phone (Palin et al., MobileHCI 2019, http://pokristensson.com/pubs/PalinEtAlMobileHCI2019.pdf), spread by up to a fifth either way and kept between 1 s and 60 s.
 export const typingMs = (chars: number, random: () => number = Math.random): number =>
   Math.round(Math.min(60_000, Math.max(1_000, (chars / 3) * 1_000 * (0.8 + 0.4 * random()))))
 

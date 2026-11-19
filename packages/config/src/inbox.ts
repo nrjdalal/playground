@@ -321,6 +321,41 @@ export function picksOf(
   return picks
 }
 
+// The two fields a card's place reads: pinned when pinnedAt is set, placed by hand when rank is.
+export type InboxPlace = {
+  pinnedAt: string | null
+  rank: string | null
+}
+
+// Pure: the cards, pinned first, each group's unranked first in the order given (today's order, since the sort is stable), then its ranked by rank; a rank compares by code point here, never in ORDER BY, whose collation can read the same keys differently.
+export function orderInboxItems<T extends InboxPlace>(items: T[]): T[] {
+  const byRank = (a: T, b: T): number =>
+    a.rank === b.rank ? 0 : a.rank === null ? -1 : b.rank === null ? 1 : a.rank < b.rank ? -1 : 1
+  return [...items].sort(
+    (a, b) => Number(a.pinnedAt === null) - Number(b.pinnedAt === null) || byRank(a, b),
+  )
+}
+
+const RANK_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// Pure: a key strictly between two neighbour ranks, null at a tab's end, from base-62 digits alone, so Postgres text stores it and no key ends in "0", which keeps room below every key (fractional-indexing's midpoint).
+export function rankBetween(prev: string | null, next: string | null): string {
+  return rankMidpoint(prev ?? "", next)
+}
+
+function rankMidpoint(low: string, high: string | null): string {
+  if (high !== null) {
+    let n = 0
+    while ((low[n] ?? "0") === high[n]) n++
+    if (n > 0) return high.slice(0, n) + rankMidpoint(low.slice(n), high.slice(n))
+  }
+  const a = low === "" ? 0 : RANK_DIGITS.indexOf(low[0]!)
+  const b = high === null ? RANK_DIGITS.length : RANK_DIGITS.indexOf(high[0]!)
+  if (b - a > 1) return RANK_DIGITS[Math.round((a + b) / 2)]!
+  if (high !== null && high.length > 1) return high.slice(0, 1)
+  return RANK_DIGITS[a]! + rankMidpoint(low.slice(1), null)
+}
+
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
 

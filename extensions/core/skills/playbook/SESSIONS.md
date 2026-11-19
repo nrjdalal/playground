@@ -60,7 +60,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A worker starts its checkers in one step, once its PR's head is ready (its checks green at it): its reviewer always, and its tester (`bun run name tester`) with it when a tester's drive is due, since a reviewer started later left heads waiting over an hour; ops-sweep tells the worker's lead of a head ready 20 minutes with no review round and no live reviewer.
    Done when both are briefed, or the reviewer alone for a PR with no `web/next/` change.
    A worker's brief says that before a push it runs the whole list `extensions/core/skills/code-review-loop/scripts/state.ts touched-tests <worktree> origin/canary HEAD` writes to a file it checks is non-empty before passing it to xargs (code-review-loop's two steps), and check-types, through run-slot, and leaves the full suite to GitHub Actions,
-   whose `Audit, Lint, and Build` and `test` checks gate the head (**ci**).
+   whose checks on the head gate it (`Audit, Lint, and Build`, `test` and, on `factory.repo`, `GitGuardian`) (**ci**).
    A brief names a `CLOCK_AHEAD_DAYS=30` run only for touched test files outside `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`), since a run over exempt files alone runs nothing, a no-op its report names as one rather than a pass: on one PR all 3 files a brief named were exempt.
    A brief that has its session clone a repo no org guards places the clone under `.claude/worktrees/<name>` in the Playground checkout and has the session name the clone's path in its last report, since no automated cleanup reaches a plain clone (two clones left in a session's scratch folder stayed behind), so its lead removes it by hand with `playground rm --worktree <path>`;
    under `~/.playground` only the caller's own `scratch/<name>/` and `scratchpad/<name>/`, its own loose file in `scratch/` (below), its own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file), an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/` and a retired data folder whole (safe-delete's `RETIRED` list, `ci` today) clear,
@@ -242,7 +242,7 @@ Done when `CronList` shows both.
 A lead's new session creates both again.
 Ops, when it slows or pauses its own sweep on purpose, a usage squeeze or maintenance, writes `~/.playground/ops/sweep-hold-until` one future ISO 8601 time with its zone, so ops-tick's relay watch stays quiet until it passes (it lapses on its own, and a missing, empty, past or unreadable time leaves the watch on; [LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), the relay watch).
 
-Every manager (the dispatcher, the Planner and each lead) also keeps one background task waiting on the outbox for lines addressed to it, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher, the same way.
+Every manager (the dispatcher, the Planner, each lead and the Optimizer) also keeps one background task waiting on the outbox for lines addressed to it, so a stuck session reaches it in seconds rather than after the relay's turn (**unstick**), and a late sweep reaches Ops, then the dispatcher, the same way.
 It reads its stuck alerts first (ops-stuck-alert.jsonl, where a session's own hook queues them and ops-tick's relay watch its late-stop line), then every other job's line, such as a firefighting heads-up to the Builder:
 
 ```bash
@@ -255,6 +255,7 @@ A waiter started after time down skips the alerts queued over 5 minutes before i
 while none runs, each alert also goes to Ops to send on, which is fast only while Ops' own waiter runs, so each line to Ops names Ops' restart while it does not.
 A worker a probe on its own machine reports to keeps no waiter, and its probe's alert comes by the relay alone; a probe on the other machine reports by `playground send`, so its spawner keeps a waiter while it lives ([Message a session](#message-a-session)).
 Each waiter keeps its own cursor (`alerts-wait/<name>` in the outbox), so a printed line is not printed again and a line addressed to another session waits for that session's waiter; Ops' `cursor.json` stays the drain's.
+A manager's stop with no live waiter is refused once, naming its restart ([no-chat-question](../../../../scripts/hooks/README.md#no-chat-question)), and an owner WhatsApp line the dispatcher has not answered in a minute goes to Ops to send on when its waiter neither runs nor has handed it an alert since the line came.
 Done when the task is running; the relay sends the same line later, so drop that copy.
 
 ## Wait on a signal

@@ -271,7 +271,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
 - Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there, nor, for an installer or first-run diff, without the new-user gate's PASS there.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` and every other check green at its head, and, on `factory.repo`, a `GitGuardian` check among them, nor, for a `web/next/` diff, without its tester's PASS there, nor, for an installer or first-run diff, without the new-user gate's PASS there (`**ci**`).
   A merge of `canary` makes a new head, which needs its own checks and 5/5, and its own tester's or new-user gate's PASS where its diff calls for one.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.

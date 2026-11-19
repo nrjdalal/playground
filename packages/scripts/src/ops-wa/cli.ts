@@ -25,6 +25,7 @@ import { assistantOf, busyOf, stuckOf } from "../ops-job/dispatcher"
 import { engineData, REPO, run, sendAs } from "../ops-job/job"
 import { beat, CYCLE_SECONDS } from "../ops-tick/tick"
 import { dashboardCheckout } from "../playground/probe"
+import { waiterSince } from "../stuck-alert"
 import { EMPTY_LIST, isPublicList, reposOf } from "../trace-count/kinds"
 import { alertSet } from "./alert-set"
 import { bridge, type Inbox, type Sock, sender } from "./bridge"
@@ -33,6 +34,7 @@ import { runCheck } from "./escalate"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
+import { outboxDir } from "./outbound"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
 import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
@@ -168,6 +170,7 @@ const main = async () => {
     return runCheck(file.path, source, at)
   }
   await ownFolder(dir)
+  await ownFolder(outboxDir(data))
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
   const holder = await takeLock(lock, process.pid, (pid) => {
@@ -300,6 +303,7 @@ const main = async () => {
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
     votes: votedOptions,
+    waiter: (name, since) => waiterSince(join(data, "ops", "outbox"), name, since),
   })
   const passes = setInterval(() => watched.pass(), 30_000)
   const reminder = setInterval(
