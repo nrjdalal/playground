@@ -184,9 +184,9 @@ export async function moveIfExposed(
     if (!(error instanceof GuardError) || error.failure !== "exposed" || !error.located) return []
     const { owner, target } = error.located
     const parsed = new URL(url)
-    // the user and the database from the URL, "postgres" when the URL names none (a first-run's `postgres://postgres@localhost` has a user, an empty pathname has neither)
-    const dumpUser = parsed.username || "postgres"
-    const dumpDb = parsed.pathname.replace(/^\//, "") || "postgres"
+    // the user and the database from the URL, "postgres" when the URL names none (a first-run's `postgres://postgres@localhost` has a user, an empty pathname has neither); the values are percent-encoded in the URL, so decodeURIComponent strips any %20, %40 or % before pg_dump sees them
+    const dumpUser = decodeURIComponent(parsed.username) || "postgres"
+    const dumpDb = decodeURIComponent(parsed.pathname.replace(/^\//, "")) || "postgres"
     return moveToLoopback(owner.name, target.port, docker, wait, dumpDir, dumpUser, dumpDb)
   }
 }
