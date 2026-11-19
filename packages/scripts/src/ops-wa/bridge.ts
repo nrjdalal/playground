@@ -51,7 +51,12 @@ type Key = {
 export type Incoming = { key: Key; message?: Record<string, unknown> | null }
 export type Upsert = { messages: Incoming[]; type: string }
 export type Call = { from: string; status: string }
-type Events = { call: Call[]; "messages.upsert": Upsert }
+// a 1:1 chat's receipt, as Baileys gives it: the message's key and its status, with the receipt's time in seconds
+export type Update = {
+  key: Key
+  update: { messageTimestamp?: number | null; status?: number | null }
+}
+type Events = { call: Call[]; "messages.update": Update[]; "messages.upsert": Upsert }
 // The calls ops-wa makes on a Baileys socket, so a test hands it a fake one.
 export type Sock = {
   ev: { on<K extends keyof Events>(name: K, fn: (arg: Events[K]) => void): void }
@@ -100,8 +105,6 @@ export type Mode = {
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
-  // a reaction on a kept message, the sender's; a bridge with none sets no 👀
-  react?: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) => Promise<string>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
   // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
@@ -141,9 +144,11 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
+// the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
+const eyesFile = (dir: string) => join(dir, "eyes.json")
 // ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
 const oursFile = (dir: string) => join(dir, "ours.json")
 type Ours = { id: string; text: string }
@@ -366,7 +371,7 @@ export type Who = "alert" | "owner"
 // The messages handed on, the last 50, so wa react finds the latest or one by its id, and wa send --quote its words, kept 24 hours.
 type Kept = { at: number; id: string; jid: string; text?: string; who: Who }
 const messagesFile = (dir: string) => join(dir, "messages.json")
-// A handed-on message is kept for wa react; the owner's then gets 👀, seen and a reply coming, which the dispatcher's ✅ replaces once no reply is needed (ADR 0031); the 👀 is not awaited, so a long reply's typing time never holds the next message back.
+// A handed-on message is kept for wa react, and ops-wa itself sets no reaction on it: the dispatcher sets 👀 when a reply will take a while, and ✅ when none is needed (ADR 0038).
 async function seen(io: Io & Mode, m: Incoming, who: Who, at: number) {
   const { id, remoteJid } = m.key
   if (!id || !remoteJid) return
@@ -379,10 +384,6 @@ async function seen(io: Io & Mode, m: Incoming, who: Who, at: number) {
   await writeOwn(messagesFile(io.dir), {
     messages: [...fresh, { at, id, jid: remoteJid, text, who }].slice(-50),
   })
-  if (who === "owner")
-    void io
-      .react?.("👀", { auto: true, id })
-      .catch((error: Error) => io.log(`ops-wa: no 👀 on a message: ${error.message}`))
 }
 
 // The note on every owner text message, so the dispatcher can set a setting whose value it names when the owner asks (ADR 0035).
@@ -430,7 +431,7 @@ export const dataLine = (at: number, words: string, id?: string | null, guest = 
 // A message's id in its line, which wa react --id names.
 const idOf = (id: string | null | undefined) => (id ? `, id ${id}` : "")
 
-// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, any file by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, no 👀 either, though it is kept for wa react --to alert.
+// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, any file by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, though it is kept for wa react --to alert.
 async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
   const message = unwrap(m.message ?? {})
   const said = await saidOf(io, message)
@@ -668,10 +669,13 @@ async function pass(io: Io & Mode) {
   try {
     if (await io.on()) {
       const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
+      const eyes = (await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})).eyes ?? []
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
       const blocked = waiting.length > 0 ? await io.stuck() : null
       const working = !blocked && waiting.length > 0 && (await io.busy())
-      const { due, why } = handOn(waiting, (h) => (now - h.at) / 1000, blocked, working)
+      // a 👀 holds the 3-minute timer alone, so a stuck or failed dispatcher still hands on a message it has not answered
+      const timed = blocked ? waiting : waiting.filter((h) => !eyes.some((at) => at >= h.at))
+      const { due, why } = handOn(timed, (h) => (now - h.at) / 1000, blocked, working)
       const to = due.length > 0 ? await io.assistant() : undefined
       for (const h of due) {
         if (!to) {
@@ -729,6 +733,10 @@ export function bridge(io: Io & Mode) {
       sock.ev.on("messages.upsert", ({ messages, type }) => {
         if (type !== "notify") return
         for (const m of messages) queue(() => inbound(io, m, sock.user))
+      })
+      sock.ev.on("messages.update", (updates) => {
+        const seen = updates.flatMap(seenOf(io.now()))
+        if (seen.length > 0) queue(() => keepReceipts(io.dir, seen))
       })
       sock.ev.on("call", (calls) => {
         for (const c of calls) if (c.status === "offer") queue(() => drop(io, "call", c.from))
@@ -844,7 +852,7 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, whether a reply can go to it now, as the sender decides, the receipts' lines and the pending alerts.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
@@ -881,6 +889,7 @@ export async function statusOf(
       ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies(windowLeft(owner.ownerAt, now), "its 24 hours for replies are over until it writes")}`
       : line("owner", "wa.owner", "", undefined),
     numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
+    ...(await receiptLines(dir, numbers)),
     ...(await pendingLines(dir)),
   ]
 }
@@ -889,9 +898,80 @@ export async function statusOf(
 export type PollSent = { id: string; secret: string }
 // What a send answers: who it reached, and the ids of the messages it sent.
 export type Out = { ids: string[]; said: string }
-// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat and time, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one.
-type Own = { at: number; id: string; jid: string }
+// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat, time and kind, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one, and a receipt is kept for ours alone.
+type Own = { at: number; id: string; jid: string; kind?: Kind }
 const ownFile = (dir: string) => join(dir, "own.json")
+
+// receipts.json, the bridge's queue's: the delivered and read times WhatsApp sends for each message in own.json, kept only while own.json keeps that message; ops-wa only reads them, and marks nothing read and sends no receipt or presence of its own
+type Receipt = { delivered?: number; id: string; read?: number }
+const receiptsFile = (dir: string) => join(dir, "receipts.json")
+// proto.WebMessageInfo.Status's DELIVERY_ACK and READ; PLAYED, a voice note's, is past READ
+const DELIVERED = 3
+const READ = 4
+// Pure: the receipts in a messages.update for messages from this number, at the receipt's own time or now; a read is a delivery too. Baileys sends a group's receipts on message-receipt.update, and ops-wa sends to no group.
+const seenOf =
+  (now: number) =>
+  ({ key, update }: Update): Receipt[] => {
+    const status = update.status ?? 0
+    if (!key.fromMe || !key.id || status < DELIVERED) return []
+    const at = update.messageTimestamp ? update.messageTimestamp * 1000 : now
+    return [{ delivered: at, id: key.id, ...(status >= READ && { read: at }) }]
+  }
+// each receipt for a message ops-wa sent, matched by its id alone, since a chat's id can come as its LID; the first delivered and the first read time stay
+async function keepReceipts(dir: string, seen: Receipt[]) {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const ours = seen.filter((s) => own.some((o) => o.id === s.id))
+  if (ours.length === 0) return
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  for (const s of ours) {
+    const had = receipts.find((r) => r.id === s.id)
+    if (!had) receipts.push(s)
+    else {
+      had.delivered ??= s.delivered
+      if (s.read !== undefined) had.read ??= s.read
+    }
+  }
+  await writeOwn(receiptsFile(dir), {
+    receipts: receipts.filter((r) => own.some((o) => o.id === r.id)),
+  })
+}
+// each message ops-wa sent to a number, with its receipts, oldest first
+const sentTo = async (dir: string, number: string) => {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  return own
+    .filter((o) => o.jid === jidOf(number))
+    .map((o) => ({ ...o, ...receipts.find((r) => r.id === o.id) }))
+}
+// The owner's last read: the latest read time WhatsApp sent for a message ops-wa sent the owner, or undefined before any; quiet hours reads it.
+export async function ownerReadAt(dir: string, owner: string): Promise<number | undefined> {
+  const reads = (await sentTo(dir, owner)).flatMap((o) => (o.read === undefined ? [] : [o.read]))
+  return reads.length === 0 ? undefined : Math.max(...reads)
+}
+// wa status's receipt lines, each only once there is something to say: the owner's last read, and the last alert to the alert number with its delivered and read times
+async function receiptLines(dir: string, numbers: { alert: string; owner: string }) {
+  const iso = (at: number) => new Date(at).toISOString()
+  const read = numbers.owner ? await ownerReadAt(dir, numbers.owner) : undefined
+  const alert = numbers.alert
+    ? (await sentTo(dir, numbers.alert)).filter((o) => o.kind && o.kind !== "guest").at(-1)
+    : undefined
+  return [
+    ...(read === undefined
+      ? []
+      : [
+          `owner ${String(shownValue("wa.owner", numbers.owner))}: read ops-wa's messages last at ${iso(read)}`,
+        ]),
+    ...(alert === undefined
+      ? []
+      : [
+          `alert ${String(shownValue("wa.alert", numbers.alert))}: the last alert went at ${iso(alert.at)}; ${
+            alert.delivered === undefined
+              ? "not delivered yet"
+              : `delivered at ${iso(alert.delivered)}, ${alert.read === undefined ? "not read yet" : `read at ${iso(alert.read)}`}`
+          }`,
+        ]),
+  ]
+}
 // WhatsApp takes an edit in a message's first 15 minutes.
 const EDIT_MS = 15 * 60_000
 
@@ -917,7 +997,7 @@ export function sender(
   let last = 0
   // the ids of the last send's messages, read on the chain right after it, so a card's text gives its id for a pin
   let lastIds: string[] = []
-  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so a send to the alert number never reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -1075,7 +1155,7 @@ export function sender(
         // kept as each part goes, so a part already sent can be taken back when a later one fails
         if (id && !target) {
           ids.push(id)
-          own.push({ at: io.now(), id, jid: t.jid })
+          own.push({ at: io.now(), id, jid: t.jid, kind })
           await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
         }
       }
@@ -1108,8 +1188,8 @@ export function sender(
     chain = run.catch(() => {})
     return run
   }
-  // a reaction on a kept message of the last 24 hours, the latest of who's or the one named by its id, one send with the gap and no typing time; the dispatcher's own counts as its answer, the automatic 👀 does not
-  const reactNow = async (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) => {
+  // a reaction on a kept message of the last 24 hours, the latest of who's or the one named by its id, one send with the gap and no typing time
+  const reactNow = async (emoji: string, on: { id?: string; who?: Who }) => {
     const now = io.now()
     const { messages = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
     const who = on.who ?? "owner"
@@ -1127,14 +1207,21 @@ export function sender(
         "that message is over 24 hours old, and ops-wa reacts only inside its 24 hours",
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
+    // on the owner's message a ✅ or any other reaction is the dispatcher's answer, and a 👀 says a reply is coming, so it holds the 3-minute timer alone
+    const eyes = target.who === "owner" && emoji === "👀"
     await paced(
-      on.auto || target.who !== "owner" ? null : await recent(now),
+      target.who === "owner" && !eyes ? await recent(now) : null,
       SEND.gapMs,
       target.jid,
       {
         react: { key, text: emoji },
       },
     )
+    if (eyes) {
+      const at = io.now()
+      const { eyes: list = [] } = await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})
+      await writeOwn(eyesFile(io.dir), { eyes: [...list.filter((e) => at - e < HOUR), at] })
+    }
     return "sent"
   }
   // a card's decision pinned in the owner's chat for 7 days, or with off unpinned: the gap alone, no typing time, never counted as an answer, and inside the owner's 24 hours alone
@@ -1160,8 +1247,7 @@ export function sender(
         queued(() => sendNow(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
-      react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>
-        queued(() => reactNow(emoji, on)),
+      react: (emoji: string, on: { id?: string; who?: Who }) => queued(() => reactNow(emoji, on)),
     },
   )
 }
