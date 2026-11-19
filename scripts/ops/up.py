@@ -19,6 +19,10 @@ nothing is ever selected by name or pattern. A launchd job is only reported, onc
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
+herdr closes a job's pane the moment its job exits, so a restart reads why the job stopped from ops/<job>.last, the last
+stderr line once.py's reader kept, when it was written after the job's last start, and a private notify.sh line tells
+ops once per job until the line changes (ops/up-last-lines.json, 0600) or the job is healthy again; the printed started
+line leaves it out, since ops-tick sends every printed line to ops in public.
 """
 import calendar, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
 
@@ -50,6 +54,7 @@ import ptable
 OPS = once.OPS
 LOG = os.path.join(OPS, "up.log")
 STARTS = os.path.join(OPS, "up-state.json")
+LAST_TOLD = os.path.join(OPS, "up-last-lines.json")  # each job's last line already told to ops
 
 HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")
 HERDR_SESSION = os.environ.get("PLAYGROUND_HERDR_SESSION") or os.environ.get("DESK_HERDR_SESSION") or "playground"
@@ -60,17 +65,17 @@ def log(msg):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {msg}\n")
 
 
-def run_streams(argv, timeout=60):
+def run_streams(argv, timeout=60, env=None):
     """(exit code, stdout, stderr) of the command, its streams apart, as a caller that reads one alone needs."""
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
         return r.returncode, r.stdout or "", r.stderr or ""
     except Exception as e:
         return 1, "", str(e)
 
 
-def run(argv, timeout=60):
-    code, out, err = run_streams(argv, timeout)
+def run(argv, timeout=60, env=None):
+    code, out, err = run_streams(argv, timeout, env)
     return code, out + err
 
 
@@ -193,6 +198,33 @@ def stale_of(holder, beat, gone):
     if beat in gone:
         return f"holds pid {beat}, which runs a deleted executable ({gone[beat]})"
     return ""
+
+
+def last_line(name, since):
+    """The job's last stderr line, as once.py's reader kept it, when written after the job's last start (since), else ""."""
+    path = os.path.join(OPS, f"{name}.last")
+    try:
+        if os.path.getmtime(path) < since:
+            return ""
+        return open(path).read().strip()[: once.LAST_MAX]
+    except OSError:
+        return ""
+
+
+def told_last(name, line):
+    """Record line as the job's last line told to ops, line None forgetting it; True when it differs from the one told before."""
+    try:
+        told = json.load(open(LAST_TOLD))
+    except Exception:
+        told = {}
+    if told.get(name) == line:
+        return False
+    if line is None:
+        told.pop(name)
+    else:
+        told[name] = line
+    once.private(LAST_TOLD, json.dumps(told))
+    return line is not None
 
 
 def herdr():
@@ -394,6 +426,9 @@ def up(quiet):
             ok, why = False, stale
         if ok:
             starts.get("_down", {}).pop(job["name"], None)
+            # a healthy job's told line is forgotten, so a later stop on the same line is told again
+            if os.path.exists(LAST_TOLD):
+                told_last(job["name"], None)
             continue
         binary = None
         if is_herdr(job):
@@ -443,9 +478,15 @@ def up(quiet):
         log(f"{job['name']} unhealthy ({why}); starting")
         # the printed line is told to ops once until it changes, so a heartbeat's age stays out of it
         told = re.sub(r"\d+m old", "stale", why)
-        # only a job that started waits out GRACE; a failed start is tried again on the next pass
+        # read before the start, whose once.py drops the line: herdr closed the dead job's pane, so this file holds why it stopped
+        last = last_line(job["name"], start_at)
+        # a job's error can carry a key's name or a token's piece, so the line goes to ops in private alone: ops-tick sends every printed line in public
+        if last and told_last(job["name"], last):
+            run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60, {**os.environ, "NOTIFY_PRIVATE": "1"})
+        # only a job that started waits out GRACE; a failed start is tried again on the next pass; stamped before the start, so a line the new copy writes at once is never read as older than it
+        at = time.time()
         if start(job):
-            starts[job["name"]] = time.time()
+            starts[job["name"]] = at
             with open(STARTS, "w") as f:
                 json.dump(starts, f)
             if not quiet:
