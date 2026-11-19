@@ -495,7 +495,7 @@ const lastOf = (steps: object[]) => {
 }
 
 // PG-2878: herdr closes a dead job's pane with it, so a restart tells ops the job's last line, from once.py's ops/<job>.last, once per line
-test("a job restarted three times on the same last line tells ops once, and a new last line tells it again, each a private line kept out of up.log", () => {
+test("a job restarted three times on the same last line tells ops once, and a new last line tells it again, each a private line kept out of up.log and the printed line", () => {
   const unreadable = "vault: cache unreadable: no cached copy"
   const { calls, ops, said, told } = lastOf([
     { last: unreadable },
@@ -507,12 +507,8 @@ test("a job restarted three times on the same last line tells ops once, and a ne
     `ops-h stopped, and ops-up started it again; its last line: ${unreadable}`,
     "ops-h stopped, and ops-up started it again; its last line: made-up: a new reason",
   ])
-  expect(said).toEqual([
-    `started ops-h in herdr (no heartbeat; its last line: ${unreadable})`,
-    `started ops-h in herdr (no heartbeat; its last line: ${unreadable})`,
-    `started ops-h in herdr (no heartbeat; its last line: ${unreadable})`,
-    "started ops-h in herdr (no heartbeat; its last line: made-up: a new reason)",
-  ])
+  // ops-tick sends each printed line to ops in public, so the printed line keeps the last line out
+  expect(said).toEqual(Array(4).fill("started ops-h in herdr (no heartbeat)"))
   expect(statSync(join(ops, "up-last-lines.json")).mode & 0o777).toBe(0o600)
   expect(calls.map((c) => c.at(-1))).toEqual(["private", "private"])
   expect(readFileSync(join(ops, "up.log"), "utf8")).not.toContain("cache unreadable")
