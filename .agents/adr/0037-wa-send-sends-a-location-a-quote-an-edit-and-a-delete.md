@@ -2,7 +2,7 @@
 
 [ADR 0036](0036-wa-send-carries-a-file-from-the-outbox.md) let `playground wa send` carry a file beside its body.
 The owner asked for every kind WhatsApp's client library sends, so `wa send` also takes a location, a quoted reply, and an edit or a delete of a message it sent.
-A quote needs the quoted message's words, which ops-wa did not keep, so by [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR stands beside 0036, [ADR 0031](0031-ops-wa-reacts-and-types-at-a-human-pace.md) and [ADR 0032](0032-the-owners-own-whatsapp-message-sets-the-second-number.md), whose "no message text" now holds for `numbers.json` alone, and every other line of theirs still holds.
+A quote needs the quoted message's words, which ops-wa did not keep, so by [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR stands beside 0036, [ADR 0031](0031-ops-wa-reacts-and-types-at-a-human-pace.md), [ADR 0032](0032-the-owners-own-whatsapp-message-sets-the-second-number.md) and [ADR 0035](0035-the-owners-own-whatsapp-message-sets-a-setting.md), whose "never the text" and "nothing of a guest's" now hold for `kept.json` alone, since `messages.json` keeps the words themselves, and every other line of theirs still holds.
 
 ## Decision
 
