@@ -212,6 +212,7 @@ const pyNow = () =>
   )
 
 // Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
+// RESTARTED reads no host boot time, so a host boot read after its start can never end its grace.
 const RESTARTED = `${LOAD}started = []
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
@@ -219,6 +220,7 @@ up.once.running = lambda name, marker: None
 up.run = lambda argv, timeout=60: (0, "")
 up.start = lambda job: started.append(job["name"]) or True
 up.herdr = lambda: ("/x/herdr", "")
+up.boot_time = lambda: 0
 sys.argv = sys.argv[1:]
 up.main()
 print(json.dumps(started))
