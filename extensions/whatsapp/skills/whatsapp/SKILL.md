@@ -51,6 +51,8 @@ A card with choices also goes as a WhatsApp poll ([ADR 0029](../../../../.agents
 Each decision that goes stays pinned in the owner's chat, its poll or else its text, until it settles by any route, a WhatsApp answer, an Inbox answer, a settle, an ack or a resolve, with WhatsApp mode on or off; at most 3 stay pinned, the oldest coming off first.
 A pin comes off only inside the owner's 24 hours, so one that settles after them comes off at the owner's next message.
 The owner's reply naming a card (`1 #i12`) or vote goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
+Each open draft, whatever its scope, goes to the owner's own chat once, with its words as written, unredacted, where it goes and how to reply; it leaves the `📥` lines ([ADR 0039](../../../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
+The owner's reply quoting it, `send` or the owner's own words, goes to ops-wa alone and posts the draft through `bun run ask whatsapp`, as the Inbox's Send does; a draft with files goes from the Inbox alone.
 A number alone or an id alone reaches you only while no card that went out waits on its choices and no setting question of ops-wa's waits (below), so read it as the owner's answer to your own question.
 
 ## The alert number
