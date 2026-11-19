@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -440,6 +441,93 @@ test("a launchd job down 3 passes in a row is told to ops once, and again only a
     "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
   ]
   expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
+// Loads up.py and runs one pass per step, the herdr job ops-h always down and started, GRACE off; a step's "last" is written to ops/ops-h.last first, "age" seconds old, as once.py's reader leaves a dead copy's line. Prints each pass's started line, then every notify.sh call.
+const LAST = `${LOAD}import os, time
+calls, said = [], []
+up.render_jobs = lambda: None
+up.GRACE = 0
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.herdr = lambda: ("/x/herdr", "")
+up.healthy = lambda job: (False, "no heartbeat")
+up.start = lambda job: True
+up.run = lambda argv, timeout=60, env=None: (calls.append(argv + ["private" if (env or {}).get("NOTIFY_PRIVATE") == "1" else "public"]) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+up.print = lambda line: said.append(line)
+for step in json.loads(sys.argv[2]):
+    path = os.path.join(up.OPS, "ops-h.last")
+    if step.get("last") is not None:
+        open(path, "w").write(step["last"])
+        then = time.time() - step.get("age", 0)
+        os.utime(path, (then, then))
+    up.up(False)
+print(json.dumps({"calls": calls, "said": said}))
+`
+
+const lastOf = (steps: object[]) => {
+  const config = mkdtempSync(join(scratch, "last-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({
+      jobs: [{ command: "bash /x/h.sh", heartbeat: "ops-h", name: "ops-h", runtime: "herdr" }],
+    }),
+  )
+  const child = Bun.spawnSync(["python3", "-I", "-c", LAST, upPy, JSON.stringify(steps)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      HOME: scratch,
+      PATH: SYS_PATH,
+      PLAYGROUND_DATA_DIR: dataOf(config),
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const out = JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!) as {
+    calls: string[][]
+    said: string[]
+  }
+  return { ...out, ops, told: out.calls.map((c) => c[2]) }
+}
+
+// PG-2878: herdr closes a dead job's pane with it, so a restart tells ops the job's last line, from once.py's ops/<job>.last, once per line
+test("a job restarted three times on the same last line tells ops once, and a new last line tells it again, each a private line kept out of up.log and the printed line", () => {
+  const unreadable = "vault: cache unreadable: no cached copy"
+  const { calls, ops, said, told } = lastOf([
+    { last: unreadable },
+    { last: unreadable },
+    { last: unreadable },
+    { last: "made-up: a new reason" },
+  ])
+  expect(told).toEqual([
+    `ops-h stopped, and ops-up started it again; its last line: ${unreadable}`,
+    "ops-h stopped, and ops-up started it again; its last line: made-up: a new reason",
+  ])
+  // ops-tick sends each printed line to ops in public, so the printed line keeps the last line out
+  expect(said).toEqual(Array(4).fill("started ops-h in herdr (no heartbeat)"))
+  expect(statSync(join(ops, "up-last-lines.json")).mode & 0o777).toBe(0o600)
+  expect(calls.map((c) => c.at(-1))).toEqual(["private", "private"])
+  expect(readFileSync(join(ops, "up.log"), "utf8")).not.toContain("cache unreadable")
+})
+
+test("a last line written before the job's last start is never told, and one with no file keeps today's line", () => {
+  const { said, told } = lastOf([{}, { age: 3600, last: "made-up: yesterday's death" }])
+  expect(told).toEqual([])
+  expect(said).toEqual([
+    "started ops-h in herdr (no heartbeat)",
+    "started ops-h in herdr (no heartbeat)",
+  ])
+})
+
+test("a last line is told at 200 characters at most", () => {
+  const { told } = lastOf([{ last: "y".repeat(300) }])
+  expect(told).toEqual([
+    `ops-h stopped, and ops-up started it again; its last line: ${"y".repeat(200)}`,
+  ])
 })
 
 // #2203: on Linux systemd holds the job as a user unit of the same label, so the report names that unit
