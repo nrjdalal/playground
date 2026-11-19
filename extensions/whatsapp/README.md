@@ -22,7 +22,7 @@ A reply arrives after the time it takes to type it, 3 characters a second, so a 
 ## Quiet hours
 
 From `wa.quietStartHour` to `wa.quietEndHour` in your zone (`clock.ownerZone`), 12 am to 6 am unless you set them, a reply reaches you while you have read or written in the last hour.
-Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; an urgent alert reaches you at any hour ([ADR 0039](../../.agents/adr/0039-quiet-hours-hold-replies-for-one-catch-up.md)).
+Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; a status update is held as the newest alone, and an urgent alert reaches you at any hour ([ADR 0039](../../.agents/adr/0039-quiet-hours-hold-replies-for-one-catch-up.md)).
 Set both to the same hour for no quiet window.
 
 ## What you can send

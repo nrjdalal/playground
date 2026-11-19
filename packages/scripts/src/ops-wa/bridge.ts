@@ -1007,7 +1007,7 @@ export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 // Quiet hours: the window's start and end hours in the owner's zone, wa.quietStartHour, wa.quietEndHour and clock.ownerZone.
 export type Quiet = { end: number; start: number; zone: string }
 // quiet.json, the sender's chain's: each text held in quiet hours, oldest first, until the catch-up sends them
-type Held = { at: number; body: string }
+type Held = { at: number; body: string; status?: true }
 const quietFile = (dir: string) => join(dir, "quiet.json")
 // inside the window, a reply goes out only within this long of the owner's last read or message
 export const QUIET_IDLE_MS = HOUR
@@ -1196,13 +1196,18 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    // in quiet hours a new message to the owner waits: a text is held for the catch-up and counts as the dispatcher's answer, anything else is refused; an edit, a delete and an urgent alert go as before
+    // in quiet hours a new message to the owner waits: a text is held for the catch-up and counts as the dispatcher's answer, a status replaces the one held before it and answers nothing, anything else is refused; an edit, a delete and an urgent alert go as before
     if (kind === "reply" && !extra.edit && !extra.delete) {
       if (await quietNow(now)) {
         if (extra.file || extra.location || extra.quote) throw new Error(QUIET_WAITS)
         const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
-        await writeOwn(quietFile(io.dir), { held: [...held, { at: now, body }] })
-        await writeOwn(sendsFile(io.dir), { sends: [...(await recent(now)), now] })
+        await writeOwn(quietFile(io.dir), {
+          held: extra.status
+            ? [...held.filter((h) => !h.status), { at: now, body, status: true }]
+            : [...held, { at: now, body }],
+        })
+        if (!extra.status)
+          await writeOwn(sendsFile(io.dir), { sends: [...(await recent(now)), now] })
         lastIds = []
         return { ids: [], said: HELD }
       }
@@ -1319,7 +1324,7 @@ export function sender(
         return { ids: [id], said: "edited the live status" }
       }
     }
-    const out = await sendNow(text, "reply", undefined, {})
+    const out = await sendNow(text, "reply", undefined, { status: true })
     if (out.ids[0]) await writeOwn(statusFile(io.dir), { at: io.now(), id: out.ids[0], text })
     return failed !== undefined
       ? {

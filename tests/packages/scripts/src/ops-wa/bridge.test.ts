@@ -2229,6 +2229,30 @@ describe("quiet hours (#2887)", () => {
     expect(texts(h).slice(-2)).toEqual([expect.stringContaining("second"), "third"])
   })
 
+  test("a night of held statuses leaves the newest alone for the catch-up, and none counts as a send", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    const status = (body: string) => h.send(body, "reply", undefined, { status: true })
+    expect(await status("3 PRs in review")).toContain("held for quiet hours")
+    const answeredAt = h.advance(15 * MIN)
+    await h.send("the train is green")
+    h.advance(15 * MIN)
+    expect(await status("2 PRs in review")).toContain("held for quiet hours")
+    h.advance(15 * MIN)
+    expect(await status("1 PR in review")).toContain("held for quiet hours")
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["the train is green", "1 PR in review"])
+    const { sends } = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(sends).toEqual([answeredAt])
+    await read(h, h.advance(0))
+    await h.pass()
+    const catchUp = texts(h).at(-1)!
+    expect(catchUp).toContain("the train is green")
+    expect(catchUp).toContain("1 PR in review")
+    expect(catchUp).not.toContain("2 PRs in review")
+    expect(catchUp).not.toContain("3 PRs in review")
+    expect(await held(h.dir)).toEqual([])
+  })
+
   test("the held texts go out at the window's end as one catch-up message, oldest first", async () => {
     const h = await night()
     h.advance(61 * MIN)
