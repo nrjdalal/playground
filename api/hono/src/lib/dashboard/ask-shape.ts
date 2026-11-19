@@ -5,6 +5,7 @@ import {
   progressItems,
 } from "@packages/config/inbox"
 import { placedKindOf } from "@packages/config/kinds"
+import { uiSpec } from "@packages/config/ui-spec"
 
 // An Inbox ask reads the way chat talks to the owner: a picture of the point first, with a one-sentence note under it (the plain-words skill), then short bullets, then its options, in its `options` and `deny` labels.
 
@@ -129,6 +130,36 @@ export function progressRefusal(input: unknown): string | null {
           ? "has a percent outside 0 to 100"
           : `has the state "${fault.state}", not ${STATES}`
     return `${at} ${why}: "${fault.text}"; ${shape}`
+  }
+  return null
+}
+
+// A ui block, its content between its fences, in order.
+const UI_LANGUAGE = "ui"
+
+const uiBlocks = (text: string): string[] => {
+  const blocks: string[] = []
+  let block: string[] | null = null
+  let inside = false
+  for (const line of text.split("\n")) {
+    const fence = line.match(/^\s*```\s*(\S*)/)
+    if (fence) {
+      if (inside && block) blocks.push(block.join("\n"))
+      block = !inside && fence[1] === UI_LANGUAGE ? [] : null
+      inside = !inside
+    } else if (block) block.push(line)
+  }
+  return blocks
+}
+
+// Pure: why bun run ask refuses an ask's or a read-only update's text, whose card would draw a ui block it cannot parse into a progress or a steps object: the first block's reason, or null when every block parses.
+export function uiRefusal(input: unknown): string | null {
+  const preview = isRecord(input) ? input.preview : undefined
+  if (!isRecord(preview) || typeof preview.text !== "string") return null
+  if (preview.type !== "ask" && !(isRecord(input) && input.kind === "update")) return null
+  for (const block of uiBlocks(preview.text)) {
+    const result = uiSpec(block)
+    if ("reason" in result) return result.reason
   }
   return null
 }

@@ -9,6 +9,7 @@ import {
   progressRefusal,
   PROSE_LIMIT,
   shapeHints,
+  uiRefusal,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
 import {
   deleteRefusal,
@@ -19,7 +20,6 @@ import {
   inboxInputSchema,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { ASK_CODE_COLUMNS } from "../../../../../../packages/config/src/inbox"
-import { uiRefusal } from "../../../../../../packages/config/src/ui-spec"
 
 const PROSE =
   "The export job ends at a hundred rows because the limit is fixed in the query, and the fix reads the real row count instead; it has run on dev since the twenty-fourth with no errors, and a single commit reverts it if anything goes wrong once it reaches staging or main, so I would like to port it to both today."
@@ -334,7 +334,7 @@ describe("uiRefusal", () => {
   const update = (text: string) => ({ kind: "update", preview: { outcome: "merged", text } })
   const block = (...json: string[]) => ["```ui", ...json, "```", "", "- One line."].join("\n")
 
-  test("passes a good steps and progress spec, and a plain prose or progress card, on an ask and an update (PG-2722)", () => {
+  test("passes a good steps and progress spec, and a plain prose or progress card, on an ask and an update", () => {
     const steps = block(
       JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "done" }] }),
     )
@@ -355,7 +355,7 @@ describe("uiRefusal", () => {
     expect(uiRefusal(ask("```ui\n{ not json\n```"))).toContain("no JSON")
   })
 
-  test("names the first bad block's type, prop, percent, or status, on an ask and an edit's update (PG-2722)", () => {
+  test("names the first bad block's type, prop, percent, or status, on an ask and an edit's update", () => {
     expect(uiRefusal(ask(block(JSON.stringify({ type: "bogus" }))))).toContain(
       'the ui block holds an unknown type "bogus"',
     )
