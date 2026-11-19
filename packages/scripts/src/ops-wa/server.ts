@@ -4,7 +4,7 @@ import { join } from "node:path"
 import type { Kind, Out, Who } from "./bridge"
 import type { Extra } from "./outbound"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, delete?, edit?, file?, location?, quote?, source?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, the rest a send's Extra (outbound.ts), `location` as [latitude, longitude], with a file, a location or a delete the body may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, or {settingPropose: {key, value}} in, a session's proposal, {sent, ids?, note?} or {refusal} out, `ids` the sent messages' ids, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, delete?, edit?, file?, location?, quote?, source?, status?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, the rest a send's Extra (outbound.ts), `location` as [latitude, longitude], with a file, a location or a delete the body may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, or {settingPropose: {key, value}} in, a session's proposal, {sent, ids?, note?} or {refusal} out, `ids` the sent messages' ids, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
 type Reply = { ids?: string[]; note?: string; refusal?: string; sent?: true }
@@ -50,6 +50,7 @@ export function serve(
           settingPropose?: { key?: unknown; value?: unknown }
           settingSet?: { id?: unknown; key?: unknown; value?: unknown }
           source?: unknown
+          status?: unknown
           to?: unknown
         } = {}
         try {
@@ -102,6 +103,7 @@ export function serve(
             file: word(asked.file),
             location: typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined,
             quote: word(asked.quote),
+            status: asked.status === true ? true : undefined,
           }).filter(([, v]) => v !== undefined),
         )
         if (

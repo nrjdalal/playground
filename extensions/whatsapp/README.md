@@ -28,6 +28,7 @@ Without them a voice note or video reaches the dispatcher as not transcribed, wi
 
 The dispatcher can send you a photo, a video, a document or a voice note too: it puts the file in `<data>/wa/outbox/` and sends it with `playground wa send --file <path>`, its reply as the caption ([ADR 0036](../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)); no file outside that folder goes.
 It can also send a location, quote your message in its reply, and fix or take back a message it sent ([ADR 0037](../../.agents/adr/0037-wa-send-sends-a-location-a-quote-an-edit-and-a-delete.md)); for the quote, ops-wa keeps your words and the alert number's on this Mac, and a message 24 hours old is quoted no more; its words leave once the next message comes in.
+Its 15-minute update is one status message it edits in place while that one is under 15 minutes old, WhatsApp's edit window, and fewer than 5 messages have come after it; past either, the update goes as a new message, and an update whose words have not changed sends nothing.
 
 ## Inbox cards on WhatsApp
 
