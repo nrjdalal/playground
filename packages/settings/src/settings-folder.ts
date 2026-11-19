@@ -13,7 +13,16 @@ import {
   writeFiles,
   writeRoot,
 } from "./folder"
-import { fromStored, jobKey, jobSchema, MAC_ONLY, orgJob, orgJobKey, retiredJobKey } from "./jobs"
+import {
+  fromStored,
+  jobKey,
+  JOBS,
+  jobSchema,
+  orgJob,
+  orgJobKey,
+  retiredJobKey,
+  runsOn,
+} from "./jobs"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
 import { secretIn } from "./secrets"
 import {
@@ -77,7 +86,9 @@ const byScopeKey = (a: Row, b: Row) => (`${a.scope} ${a.key}` < `${b.scope} ${b.
 // Every key with its default, every row, and the values a session of your login reads (each merge field's row over its default), which Settings > Jobs shows; a MAC_ONLY job's key on darwin alone, since the render gives it no row elsewhere.
 export const listSettings = (data: string, platform: string = process.platform) => {
   const rows = settingRows(data).sort(byScopeKey)
-  const elsewhere = platform === "darwin" ? [] : MAC_ONLY.map(jobKey)
+  const elsewhere = Object.keys(JOBS)
+    .filter((name) => !runsOn(name, platform))
+    .map(jobKey)
   return {
     keys: settingFields()
       .filter(({ key }) => !elsewhere.includes(key))
