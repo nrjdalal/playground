@@ -278,6 +278,7 @@ const main = async () => {
     check,
     confirm: (text, reaction) => confirm(owned, text, reaction),
     dir,
+    draft: (body) => send.out(body, "reply").then((out) => out.ids),
     escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),
     log: (line) => console.log(line),

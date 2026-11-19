@@ -106,6 +106,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (to === "dispatcher") relayed.push(text)
     },
     card: (text: string) => (mode.pins ? send.card(text) : send(text).then(() => undefined)),
+    draft: (body: string) => send.out(body, "reply").then((out) => out.ids),
     pin: async (id: string, off?: boolean) => {
       if (mode.pins) await send.pin(id, off)
     },
@@ -1113,9 +1114,7 @@ describe("Inbox cards on WhatsApp", () => {
     expect(h.texts()).toEqual([expect.stringContaining("#i12"), "📥 Card 40\n📥 Card 41"])
     await h.pass()
     expect(h.texts()).toHaveLength(2)
-    open.push(
-      card(42, { kind: "draft" }, { text: "a reply", to: "a thread", type: undefined } as never),
-    )
+    open.push(card(42, {}, { scope: undefined }))
     await h.pass()
     expect(h.texts().at(-1)).toBe("📥 Card 40\n📥 Card 41\n📥 Card 42")
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
@@ -2015,6 +2014,163 @@ describe("quoted replies (#2799)", () => {
     await expect(h.send("x", "reply", undefined, { quote: old.key.id })).rejects.toThrow(
       "is kept to quote",
     )
+  })
+})
+
+// An org-scoped draft in the Inbox: its words, its thread and who it goes to, all made up, and when its poster last changed it.
+const POSTED = "2026-11-11T02:00:00.000Z"
+const draftCard = (ref: number) =>
+  card(
+    ref,
+    { kind: "draft", updatedAt: POSTED },
+    {
+      approve: undefined,
+      deny: undefined,
+      link: "https://example.com/thread/1",
+      scope: "zyx-org",
+      text: "Shipped the fix, thanks for the wait.",
+      to: "#made-up-channel",
+      type: "draft",
+    },
+  )
+const DRAFT_TEXT =
+  "*Card 20*\nShipped the fix, thanks for the wait.\nIt goes to #made-up-channel: https://example.com/thread/1.\nReply send to this message to post it as written, or reply to it with your own words to post those instead. #i20"
+// A reply that quotes the draft's message, as the owner's phone sends one.
+const replyTo = async (
+  h: Awaited<ReturnType<typeof withCards>>,
+  text: string,
+  from = OWNER,
+  quoted = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`,
+) => {
+  const before = h.fake.sent.length
+  h.fake.upsert([
+    {
+      ...h.fake.message(jid(from), ""),
+      message: {
+        extendedTextMessage: {
+          contextInfo: { quotedMessage: { conversation: DRAFT_TEXT }, stanzaId: quoted },
+          text,
+        },
+      },
+    },
+  ])
+  await h.settle()
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
+}
+
+describe("Inbox drafts on WhatsApp (#2873)", () => {
+  test("an open draft reaches the owner's chat once with its reply line, kept out of the waiting line and recorded at 0600", async () => {
+    const h = await withCards([draftCard(20)])
+    expect(h.texts()).toEqual([DRAFT_TEXT])
+    await h.pass()
+    expect(h.texts()).toEqual([DRAFT_TEXT])
+    expect(statSync(join(h.dir, "drafts.json")).mode & 0o777).toBe(0o600)
+  })
+
+  test("a reply of send posts the draft as written through the Inbox's Send, and says so", async () => {
+    const h = await withCards([draftCard(20)])
+    const relayed = h.relayed.length
+    expect(await replyTo(h, "Send")).toEqual(["Sent #i20 as written."])
+    expect(h.answers).toEqual([{ answer: { action: "send", seen: POSTED }, id: "id-20" }])
+    expect(h.relayed).toHaveLength(relayed)
+  })
+
+  test("a reply in the owner's own words posts those words in the draft's place", async () => {
+    const h = await withCards([draftCard(20)])
+    expect(await replyTo(h, "  Fixed now, thanks!  ")).toEqual(["Sent #i20 with your words."])
+    expect(h.answers).toEqual([
+      { answer: { action: "send", seen: POSTED, text: "Fixed now, thanks!" }, id: "id-20" },
+    ])
+  })
+
+  test("a draft sent in the Inbox first makes a later reply say already sent, and posts nothing", async () => {
+    const h = await withCards([draftCard(20)])
+    h.open[0]!.status = "sent"
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 is already sent or settled in the Inbox, so this posts nothing.",
+    ])
+    expect(h.answers).toEqual([])
+  })
+
+  test("a refusal by the draft's gate comes back as one line, and the draft stays open", async () => {
+    const h = await withCards([draftCard(20)])
+    h.inbox.answer = async () => "the text holds a word the leak check refuses"
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 was not sent: the text holds a word the leak check refuses. Send it in the Inbox.",
+    ])
+    expect(h.open[0]!.status).toBe("open")
+  })
+
+  test("a draft its poster changed after it came posts nothing on a reply to the old words, and its new words come next", async () => {
+    const h = await withCards([draftCard(20)])
+    const old = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`
+    h.open[0]!.preview.text = "Shipped the fix tonight."
+    h.open[0]!.updatedAt = "2026-11-11T02:30:00.000Z"
+    expect(await replyTo(h, "send", OWNER, old)).toEqual([
+      "#i20 changed after it came here, so this posts nothing; its new words come next.",
+    ])
+    expect(h.answers).toEqual([])
+    await h.pass()
+    const fresh = h.fake.sent.findIndex((s) => s.content.text?.includes("Shipped the fix tonight."))
+    expect(fresh).toBeGreaterThan(-1)
+    expect(await replyTo(h, "send", OWNER, `m${fresh + 1}`)).toEqual(["Sent #i20 as written."])
+    expect(h.answers).toEqual([
+      { answer: { action: "send", seen: "2026-11-11T02:30:00.000Z" }, id: "id-20" },
+    ])
+  })
+
+  test("a draft whose send fails goes on the next pass, and one the sender refuses never goes, logged once", async () => {
+    const refused = draftCard(21)
+    refused.preview.text = `token ghp_${"a".repeat(36)}`
+    const ib = inboxOf([draftCard(20), refused])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async () => {
+      throw new Error("the socket dropped")
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    expect(h.fake.sent).toEqual([])
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent.flatMap((s) => s.content.text ?? [])).toEqual([DRAFT_TEXT])
+    expect(h.logs.filter((line) => line.includes("#i21"))).toHaveLength(1)
+  })
+
+  test("a draft with files posts nothing from WhatsApp", async () => {
+    const draft = draftCard(20)
+    draft.preview.attachments = [{ name: "made-up.png" }]
+    const h = await withCards([draft])
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 was not sent: it holds files, which go only from the Inbox. Send it in the Inbox.",
+    ])
+    expect(h.answers).toEqual([])
+  })
+
+  test("the alert number's or a stranger's reply quoting the draft posts nothing", async () => {
+    const h = await withCards([draftCard(20)], undefined, ALERT)
+    await replyTo(h, "send", ALERT)
+    await replyTo(h, "send", STRANGER)
+    expect(h.answers).toEqual([])
+    expect(h.open[0]!.status).toBe("open")
+  })
+
+  test("a reaction on the draft's message posts nothing", async () => {
+    const h = await withCards([draftCard(20)])
+    const id = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`
+    h.fake.upsert([
+      {
+        ...h.fake.message(jid(OWNER), ""),
+        message: {
+          reactionMessage: { key: { fromMe: true, id, remoteJid: jid(OWNER) }, text: "👍" },
+        },
+      },
+    ])
+    await h.settle()
+    expect(h.answers).toEqual([])
+    expect(h.open[0]!.status).toBe("open")
   })
 })
 
