@@ -12,11 +12,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
-  GH_HANGS,
   GH_STALE_MS,
+  GH_TIMEOUT_MS,
   ghAuthPath,
   ghDown,
   ghRead,
+  ghTimedOut,
 } from "../../../../packages/scripts/src/gh-read"
 
 // A scratch folder holding a fake gh first on PATH, which records each call in called and answers as gh.sh says, and a data folder the beat's result is read from.
@@ -56,11 +57,45 @@ test("a passing gh reads its stdout, and a failing one its exit code", () => {
   expect(ghRead(["api", "x"])).toEqual({ code: 1, out: "" })
 })
 
-test("a gh that hangs past the cap is stopped and reads unreachable", () => {
+test("a gh that hangs past the cap stops and reads the timeout", () => {
   fakeGh("exec sleep 30")
   const start = Date.now()
-  expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({ unreachable: GH_HANGS })
+  expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({
+    unreachable: ghTimedOut(300),
+  })
   expect(Date.now() - start).toBeLessThan(5_000)
+})
+
+// ghTimedOut(10 s) is the read-past-cap answer every gh caller reports, so it is pinned first.
+test("ghTimedOut reports the cap in seconds", () => {
+  expect(ghTimedOut(GH_TIMEOUT_MS)).toBe("gh timed out after 10 s")
+})
+
+// Written by the faked gh during the sleep, after ghRead's own ghDown(), so the read reaches the timeout branch.
+test("a read past the cap keeps the keyring words while a fresh beat names a keyring failure", () => {
+  const at = new Date().toISOString()
+  fakeGh(
+    `mkdir -p "$PLAYGROUND_DATA_DIR/ops/tick"\n` +
+      `echo '{"at":"${at}","ok":false,"reason":"gh hangs: keyring locked, try again"}' > "$PLAYGROUND_DATA_DIR/ops/tick/gh-auth.json"\n` +
+      `exec sleep 30`,
+  )
+  expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({
+    unreachable: "gh hangs: keyring locked, try again",
+  })
+  expect(existsSync(called)).toBe(true)
+})
+
+// Too old to trust a keyring failure, a past-cap read reports the timeout.
+test("a stale keyring result on file reads the timeout", () => {
+  fakeGh("exec sleep 30")
+  lastProbe(
+    false,
+    new Date(Date.now() - GH_STALE_MS - 60_000),
+    "gh hangs: keyring locked, try again",
+  )
+  expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({
+    unreachable: ghTimedOut(300),
+  })
 })
 
 test("a fresh failed result stops the read with no gh call", () => {
