@@ -9,6 +9,13 @@ export type Pending = { at: number; body: string; due: number; ids: string[]; so
 // pending/, one 0600 file per alert by its send time, so a restart keeps each alert and its deadline: the sender writes a file, and the bridge's queue alone removes one.
 export const pendingDir = (dir: string) => join(dir, "pending")
 export const DEFAULT_DELAY_MINUTES = 3
+
+// last-alert.json, 0600: the last urgent alert's send time, its outcome and the outcome's time, which wa status prints with no body and no number
+export type Last = { at: number; outcome: string; when: number }
+export const lastFile = (dir: string) => join(dir, "last-alert.json")
+const keepLast = (dir: string, last: Last) => writeOwn(lastFile(dir), last)
+// a failure's reason with any run of 6 or more digits masked, so no number reaches wa status
+const masked = (reason: string) => reason.replace(/\d{6,}/g, "<number>")
 export const CHECK_TIMEOUT_MS = 20_000
 
 export async function keepPending(dir: string, pending: Pending) {
@@ -32,9 +39,21 @@ export async function pendingOf(dir: string): Promise<{ file: string; pending: P
 }
 
 // The owner's reaction on any part of a pending alert handles it; true when one was.
-export async function reacted(dir: string, id: string): Promise<boolean> {
+export async function reacted(
+  dir: string,
+  id: string,
+  now: number,
+  log: (line: string) => void,
+): Promise<boolean> {
   const hit = (await pendingOf(dir)).filter(({ pending }) => pending.ids.includes(id))
   for (const { file } of hit) await unlink(file).catch(() => {})
+  const latest = hit.at(-1)
+  if (latest)
+    await keepLast(dir, {
+      at: latest.pending.at,
+      outcome: "handled by the owner's reaction",
+      when: now,
+    }).catch((error: Error) => log(`ops-wa: the last alert's outcome: ${error.message}`))
   return hit.length > 0
 }
 
@@ -78,16 +97,36 @@ export async function escalations(io: EscalateIo) {
       pending.source !== undefined && io.check
         ? await io.check(pending.source, pending.at).catch(() => false)
         : false
+    let outcome = "handled at its source"
     if (handled)
       io.log(`ops-wa: the alert of ${sent} was handled at its source, so it stays with the owner`)
     else
-      await io.escalate(pending.body).then(
-        (said) => io.log(`ops-wa: the alert of ${sent} went to the second number: ${said}`),
-        (error: Error) =>
-          io.log(`ops-wa: the alert of ${sent} did not reach the second number: ${error.message}`),
+      outcome = await io.escalate(pending.body).then(
+        (said) => {
+          io.log(`ops-wa: the alert of ${sent} went to the second number: ${said}`)
+          return "sent to the second number"
+        },
+        (error: Error) => {
+          io.log(`ops-wa: the alert of ${sent} did not reach the second number: ${error.message}`)
+          return `send to the second number failed: ${masked(error.message)}`
+        },
       )
     await unlink(file).catch(() => {})
+    // written after the unlink, so a failed write never sends the alert again
+    await keepLast(io.dir, { at: pending.at, outcome, when: io.now() }).catch((error: Error) =>
+      io.log(`ops-wa: the last alert's outcome: ${error.message}`),
+    )
   }
+}
+
+// wa status's line for the last alert's outcome, none before the first
+export const lastLines = async (dir: string): Promise<string[]> => {
+  const last = await readOwn<Last | null>(lastFile(dir), null)
+  return last
+    ? [
+        `last alert: the alert of ${new Date(last.at).toISOString()}, at ${new Date(last.when).toISOString()}: ${last.outcome}`,
+      ]
+    : []
 }
 
 // wa status's lines for the pending alerts.
