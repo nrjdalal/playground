@@ -499,6 +499,27 @@ describe("the live status (#2861)", () => {
     expect(await live(h)).toMatchObject({ id: "m2", text: "2 PRs in review" })
   })
 
+  test("a good edit whose state write fails sends no second status", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    const path = join(h.dir, "status.json")
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      const sent = await real(to, content)
+      // a folder where status.json was, so the write after the edit cannot land
+      if ("edit" in content) {
+        rmSync(path)
+        mkdirSync(join(path, "x"), { recursive: true })
+      }
+      return sent
+    }
+    await expect(h.sender("2 PRs in review", "reply", { status: true })).rejects.toThrow()
+    expect(h.fake.sent.map((s) => s.content)).toEqual([
+      { linkPreview: null, text: "3 PRs in review" },
+      { edit: key("m1"), linkPreview: null, text: "2 PRs in review" },
+    ])
+  })
+
   test("a status goes to the owner's chat alone, as text alone in one message, and nothing else goes", async () => {
     const h = await harness()
     for (const [kind, extra, body, why] of [

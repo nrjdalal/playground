@@ -1111,31 +1111,39 @@ export function sender(
   const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {
     const shape = extraRefusal(extra, body)
     if (shape) throw new Error(shape)
-    if (kind === "guest") throw new Error("a status goes to the owner's chat alone")
-    if (kind !== "reply") throw new Error("wa alert sends text alone")
+    if (kind !== "reply")
+      throw new Error(
+        kind === "guest" ? "a status goes to the owner's chat alone" : "wa alert sends text alone",
+      )
     const text = body.trim()
     if (split(toWhatsApp(text)).length > 1)
       throw new Error(`a status fits one message, ${SEND.partChars} characters`)
-    const live = await readOwn<Live>(statusFile(io.dir), {})
-    if (live.id && live.text === text)
+    const { at, id, text: was } = await readOwn<Live>(statusFile(io.dir), {})
+    if (id && was === text)
       return { ids: [], said: "unchanged: the live status already reads this" }
     const now = io.now()
     let failed: string | undefined
-    if (live.id && live.at !== undefined && now - live.at < EDIT_MS) {
+    if (id && at !== undefined && now - at < EDIT_MS) {
       const owner = jidOf(io.owner)
       const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
       const own = (await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})).messages ?? []
       const after =
-        kept.filter((k) => k.who === "owner" && k.at > live.at!).length +
-        own.filter((o) => o.jid === owner && o.id !== live.id && o.at > live.at!).length
-      if (after < STATUS_SCROLL)
-        try {
-          await sendNow(text, "reply", undefined, { edit: live.id })
-          await writeOwn(statusFile(io.dir), { ...live, text })
-          return { ids: [live.id], said: "edited the live status" }
-        } catch (error) {
-          failed = (error as Error).message
-        }
+        kept.filter((k) => k.who === "owner" && k.at > at).length +
+        own.filter((o) => o.jid === owner && o.id !== id && o.at > at).length
+      // only the edit's own failure falls back to a new message; the state's write after a good edit throws as it is
+      const edited =
+        after < STATUS_SCROLL &&
+        (await sendNow(text, "reply", undefined, { edit: id }).then(
+          () => true,
+          (error: Error) => {
+            failed = error.message
+            return false
+          },
+        ))
+      if (edited) {
+        await writeOwn(statusFile(io.dir), { at, id, text })
+        return { ids: [id], said: "edited the live status" }
+      }
     }
     const out = await sendNow(text, "reply", undefined, {})
     if (out.ids[0]) await writeOwn(statusFile(io.dir), { at: io.now(), id: out.ids[0], text })
