@@ -88,3 +88,12 @@ test("the worker template starts in the worktree and gives every file tool its a
   expect(fileLine).toContain("never a repo-relative one")
   expect(fileLine).toContain("since a relative path lands in the main checkout")
 })
+
+// issue 2864: a fork started to send a report costs its own context and its send can arrive empty
+test("the worker template has a worker send its own report, with no Agent or fork for it", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  const line =
+    text.split("\n").find((l) => l.startsWith("Send each report to your lead yourself")) ?? ""
+  expect(line).toContain("by `SendMessage`, in one call")
+  expect(line).toContain("with no Agent or fork started for it")
+})
