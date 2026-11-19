@@ -315,6 +315,7 @@ const main = async () => {
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
     poll: send.poll,
+    remind: send.remind,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),
