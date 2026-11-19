@@ -249,6 +249,34 @@ describe.skipIf(!dockerUp())("an answer from WhatsApp, on the inbox store", () =
     ).toMatchObject({ ok: false })
   })
 
+  test("a draft its poster changed after it went to WhatsApp takes no send naming the old words, and one naming the new", async () => {
+    const item = await post(DRAFT, "draft")
+    const edited = await store.editItem(db, item.id, {
+      from: "builder",
+      kind: "draft",
+      preview: { ...DRAFT, text: "a fix lands tomorrow" },
+      title: "Merge tonight?",
+    })
+    if (!edited.ok) throw new Error(edited.message)
+    const { data, write } = scratch()
+    expect(
+      await whatsappAnswer(db, write({ action: "send", id: item.id, seen: item.updatedAt }), {
+        data,
+        deliver,
+      }),
+    ).toEqual({ message: "This item changed since you read it; read it again", ok: false })
+    expect((await store.getItem(db, item.id))?.status).toBe("open")
+    await whatsappAnswer(
+      db,
+      write({ action: "send", id: item.id, seen: edited.item.updatedAt }, "b.json"),
+      {
+        data,
+        deliver,
+      },
+    )
+    expect((await store.getItem(db, item.id))?.status).toBe("sent")
+  })
+
   test("a send takes no decision, and an approve takes no draft", async () => {
     const decision = await post({ scope: "factory", text: "Merge the fix?", type: "ask" })
     const draft = await post(DRAFT, "draft")

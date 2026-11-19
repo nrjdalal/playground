@@ -2007,11 +2007,12 @@ describe("quoted replies (#2799)", () => {
   })
 })
 
-// An org-scoped draft in the Inbox: its words, its thread and who it goes to, all made up.
+// An org-scoped draft in the Inbox: its words, its thread and who it goes to, all made up, and when its poster last changed it.
+const POSTED = "2026-11-11T02:00:00.000Z"
 const draftCard = (ref: number) =>
   card(
     ref,
-    { kind: "draft" },
+    { kind: "draft", updatedAt: POSTED },
     {
       approve: undefined,
       deny: undefined,
@@ -2060,7 +2061,7 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     const h = await withCards([draftCard(20)])
     const relayed = h.relayed.length
     expect(await replyTo(h, "Send")).toEqual(["Sent #i20 as written."])
-    expect(h.answers).toEqual([{ answer: { action: "send" }, id: "id-20" }])
+    expect(h.answers).toEqual([{ answer: { action: "send", seen: POSTED }, id: "id-20" }])
     expect(h.relayed).toHaveLength(relayed)
   })
 
@@ -2068,7 +2069,7 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     const h = await withCards([draftCard(20)])
     expect(await replyTo(h, "  Fixed now, thanks!  ")).toEqual(["Sent #i20 with your words."])
     expect(h.answers).toEqual([
-      { answer: { action: "send", text: "Fixed now, thanks!" }, id: "id-20" },
+      { answer: { action: "send", seen: POSTED, text: "Fixed now, thanks!" }, id: "id-20" },
     ])
   })
 
@@ -2088,6 +2089,24 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
       "#i20 was not sent: the text holds a word the leak check refuses. Send it in the Inbox.",
     ])
     expect(h.open[0]!.status).toBe("open")
+  })
+
+  test("a draft its poster changed after it came posts nothing on a reply to the old words, and its new words come next", async () => {
+    const h = await withCards([draftCard(20)])
+    const old = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`
+    h.open[0]!.preview.text = "Shipped the fix tonight."
+    h.open[0]!.updatedAt = "2026-11-11T02:30:00.000Z"
+    expect(await replyTo(h, "send", OWNER, old)).toEqual([
+      "#i20 changed after it came here, so this posts nothing; its new words come next.",
+    ])
+    expect(h.answers).toEqual([])
+    await h.pass()
+    const fresh = h.fake.sent.findIndex((s) => s.content.text?.includes("Shipped the fix tonight."))
+    expect(fresh).toBeGreaterThan(-1)
+    expect(await replyTo(h, "send", OWNER, `m${fresh + 1}`)).toEqual(["Sent #i20 as written."])
+    expect(h.answers).toEqual([
+      { answer: { action: "send", seen: "2026-11-11T02:30:00.000Z" }, id: "id-20" },
+    ])
   })
 
   test("a draft with files posts nothing from WhatsApp", async () => {
