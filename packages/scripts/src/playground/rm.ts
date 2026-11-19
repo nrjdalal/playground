@@ -59,6 +59,7 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
+  let reasonGiven = false
   let worktree = false
   let discard = false
   let pr: string | undefined
@@ -66,8 +67,10 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let peer: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
-    if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
-    else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
+    if (word === "--reason" && words[i + 1] !== undefined) {
+      reason = words[++i]!
+      reasonGiven = true
+    } else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
       card = words[++i]!
     else if (word === "--peer" && words[i + 1] !== undefined && peer === undefined)
       peer = words[++i]!
@@ -84,7 +87,8 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     (pr !== undefined && !worktree) ||
     (card !== undefined && worktree) ||
     (peer !== undefined && card === undefined) ||
-    (peer !== undefined && worktree)
+    (peer !== undefined && worktree) ||
+    (peer !== undefined && reasonGiven)
     ? { error: RM_USAGE }
     : {
         ...(card === undefined ? {} : { card }),
@@ -530,6 +534,7 @@ async function removeApproved(
     return 1
   }
   // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
+  const session = await deps.session()
   if (args.peer !== undefined) {
     if (!deps.peer) {
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
@@ -537,14 +542,17 @@ async function removeApproved(
     }
     const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
-      console.error(`playground: ${args.peer}: ${ran.out.trim() || "the peer did not answer"}`)
+      const said = ran.out.trim().replace(/^playground: /, "")
+      const refused = said || "the peer did not answer"
+      // a plain refusal (exit 1) stays quiet, as a local one does; a protected or tripwire one (exit 3), silence or a failed ssh reaches the dispatcher
+      if (ran.code !== 1 || !said) deps.notify(`${session}: ${refused}`)
+      console.error(`playground: ${args.peer}: ${refused}`)
       return 1
     }
     console.log(ran.out.trim())
     return 0
   }
   const approved = { bytes: pick.bytes, card }
-  const session = await deps.session()
   let line: string
   if (isWeights(args.path, deps.home, folders)) {
     const done = deleteWeights(

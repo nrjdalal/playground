@@ -23,6 +23,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
   const dir = join(data, "whatsapp")
   const fake = fakeSocket()
   const logs: string[] = []
+  const relayed: string[] = []
   const mode = {
     alert: setup.alert ?? ALERT,
     checked: [] as [string, number][],
@@ -57,7 +58,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
     escalate: (body) => send(body, "escalate"),
     log: (line) => logs.push(line),
     on: async () => true,
-    relay: async () => {},
+    relay: async (_to: string, text: string) => void relayed.push(text),
     reply: send,
     stuck: async () => null,
   })
@@ -69,6 +70,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
     fake,
     logs,
     mode,
+    relayed,
     pass: async () => {
       watched.pass()
       await watched.idle()
@@ -142,6 +144,7 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     h.advance(5 * MINUTE)
     await h.pass()
     expect(h.toAlert()).toEqual([])
+    expect(h.relayed.filter((l) => l.includes("reacts"))).toEqual([])
   })
 
   test("an owner message on another topic handles nothing, so it still goes on", async () => {
@@ -151,6 +154,7 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     h.fake.upsert([h.fake.message(jid(OWNER), "what is for lunch?")])
     await h.settle()
     await h.react("some-other-message")
+    expect(h.relayed.at(-1)).toContain("reacts 👍 on the message some-other-message")
     h.advance(MINUTE)
     await h.pass()
     expect(h.toAlert()).toEqual(["ops-tick is down"])
