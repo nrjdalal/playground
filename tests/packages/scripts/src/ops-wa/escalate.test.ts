@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { bridge, sender, statusOf } from "../../../../../packages/scripts/src/ops-wa/bridge"
-import { lastFile, pendingDir, runCheck } from "../../../../../packages/scripts/src/ops-wa/escalate"
+import {
+  lastFile,
+  pendingDir,
+  runCheck,
+  sentFile,
+} from "../../../../../packages/scripts/src/ops-wa/escalate"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { ALERT, fakeSocket, jid, OWNER, SPARE } from "./fake-socket"
 
@@ -368,6 +373,25 @@ describe("wa status's last alert line", () => {
         /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner alone: the alert number has never written to this number$/,
       ),
     ])
+    expect(statSync(sentFile(h.dir)).mode & 0o777).toBe(0o600)
+    expect(await Bun.file(sentFile(h.dir)).text()).not.toContain("a practice alert")
+  })
+
+  test("a --now-both alert that reaches the owner and fails on the alert number shows both, its number masked", async () => {
+    const h = await ready()
+    const sendMessage = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to: string, content: unknown) => {
+      if (to === jid(ALERT)) throw new Error(`no route to ${to}`)
+      return sendMessage(to, content as never)
+    }
+    await expect(h.send("a practice alert", "alert")).rejects.toThrow("no route")
+    const lines = await last(h)
+    expect(lines).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner, then the send to the alert number failed: no route to <number>@s\.whatsapp\.net$/,
+      ),
+    ])
+    expect(lines.join("\n")).not.toContain(ALERT.slice(1))
   })
 })
 

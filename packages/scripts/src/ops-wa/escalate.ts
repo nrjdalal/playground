@@ -18,7 +18,7 @@ const keepLast = (dir: string, last: Last) => writeOwn(lastFile(dir), last)
 export const sentFile = (dir: string) => join(dir, "alert-sent.json")
 export const keepSent = (dir: string, last: Last) => writeOwn(sentFile(dir), last)
 // a failure's reason with any run of 6 or more digits masked, so no number reaches wa status
-const masked = (reason: string) => reason.replace(/\d{6,}/g, "<number>")
+export const masked = (reason: string) => reason.replace(/\d{6,}/g, "<number>")
 export const CHECK_TIMEOUT_MS = 20_000
 
 export async function keepPending(dir: string, pending: Pending) {

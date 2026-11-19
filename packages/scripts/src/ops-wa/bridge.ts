@@ -40,6 +40,7 @@ import {
   keepPending,
   keepSent,
   lastLines,
+  masked,
   pendingLines,
   reacted,
 } from "./escalate"
@@ -1368,6 +1369,7 @@ export function sender(
       ).filter(([, p]) => now - p.at < OWNER_WINDOW_MS),
     )
     const ids: string[] = []
+    const reached: string[] = []
     for (const t of going) {
       const key = target
         ? undefined
@@ -1402,8 +1404,16 @@ export function sender(
           partials[key] = { at: done?.at ?? now, ids: sent, parts }
           await writeOwn(partialFile(io.dir), { partials })
         }
+        // an alert that fails keeps its outcome too, with each number it reached first
+        if (alert)
+          await keepSent(io.dir, {
+            at: now,
+            outcome: `${reached.length > 0 ? `sent to ${reached.join(" and ")}, then the send` : "the send"} to ${t.who} failed: ${masked((error as Error).message)}`,
+            when: io.now(),
+          }).catch(() => {})
         throw error
       }
+      reached.push(t.who)
       ids.push(...sent)
       if (key && done) {
         delete partials[key]
