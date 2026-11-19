@@ -4,7 +4,7 @@
 Every CYCLE seconds it reads the screen of every live Claude Code session herdr runs (`herdr pane list`, then
 `herdr pane read --source visible` per pane), and matches the blocking states: the
 usage-limit dialog, a permission prompt, a picker (AskUserQuestion, plan approval), the folder-trust and MCP-server dialogs, and
-"Please run /login". The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
+"Please run /login". A compacting pane is not one of these: its "esc to interrupt" footer makes blocked() return at once, so compaction is read separately (compaction()). The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
 resume record names, else the machine's own login, says it has room (and was written in the last 15 minutes: room());
 it checks 5s later that the dialog cleared and no limit line before its reset
 still shows. Nothing else is ever answered (no permission prompt is cancelled; the managers handle
@@ -12,6 +12,8 @@ it"): a limit dialog with no room sends a probe's block to its spawner alone (li
 block goes to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
+A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
+screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or a 100% line), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock, since those counts move while the pane works; the local model's count does not advance while compaction runs, so for it the 10-minute line reads the frozen count unchanged for those 10 minutes.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
