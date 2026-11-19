@@ -535,10 +535,7 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     Object.entries(state.sent ?? {}).filter(([, s]) => now - s.at < CARD_KEEP_MS),
   )
   let held = state.held
-  // a pin past its 7 days is WhatsApp's own to drop
-  let pins = ((await readOwn<{ pins?: Pin[] }>(pinsFile(io.dir), {})).pins ?? []).filter(
-    (p) => now - p.at < PIN_MS,
-  )
+  let pins = await pinsOf(io.dir, now)
   try {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
@@ -574,6 +571,21 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     await writeOwn(cardsFile(io.dir), { held, sent })
     await writeOwn(pinsFile(io.dir), { pins })
   }
+}
+
+// The pins kept in pins.json; a pin past its 7 days is WhatsApp's own to drop.
+const pinsOf = async (dir: string, now: number) =>
+  ((await readOwn<{ pins?: Pin[] }>(pinsFile(dir), {})).pins ?? []).filter(
+    (p) => now - p.at < PIN_MS,
+  )
+
+// The unpin step of a pass with WhatsApp mode off: a decision settled in the Inbox still comes unpinned, as an urgent alert still goes.
+async function unpins(io: Io & Mode, inbox: Inbox, pin: NonNullable<Mode["pin"]>) {
+  const pins = await pinsOf(io.dir, io.now())
+  if (pins.length === 0) return
+  await writeOwn(pinsFile(io.dir), {
+    pins: await unpinSettled(pin, pins, await inbox.open(), io.log),
+  })
 }
 
 // Takes the pin off each decision no longer open, keeping a pin whose removal failed for the next pass.
@@ -616,7 +628,7 @@ async function pinOne(
   }
 }
 
-// One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat.
+// One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat; with mode off, a settled decision's unpin alone, inside those 24 hours.
 async function pass(io: Io & Mode) {
   // an urgent alert goes on whether WhatsApp mode is on or off
   if (io.escalate)
@@ -671,6 +683,12 @@ async function pass(io: Io & Mode) {
       if (io.inbox && ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
         await cards(io, io.inbox).catch((error: Error) =>
           io.log(`ops-wa: the Inbox's cards: ${error.message}`),
+        )
+    } else if (io.inbox && io.pin) {
+      const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+      if (ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
+        await unpins(io, io.inbox, io.pin).catch((error: Error) =>
+          io.log(`ops-wa: the settled decisions' unpins: ${error.message}`),
         )
     }
   } finally {

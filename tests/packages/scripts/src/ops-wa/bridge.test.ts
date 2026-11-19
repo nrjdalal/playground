@@ -1286,10 +1286,8 @@ describe("an open decision stays pinned (#2847)", () => {
     ["a WhatsApp answer", (h) => say(h, "1 #i12")],
     ["a WhatsApp vote", (h) => vote(h, ["2. Hold it"])],
     ["an Inbox answer", async (h) => void (h.open[0]!.status = "denied")],
-    // a settle, an ack and a resolve each close the card, so it leaves ask open
-    ["an Inbox settle", async (h) => void h.open.splice(0, 1)],
-    ["an ack", async (h) => void h.open.splice(0, 1)],
-    ["a resolve", async (h) => void h.open.splice(0, 1)],
+    // a settle, an ack and a resolve each close the card, so it leaves the open list
+    ["an Inbox settle, an ack or a resolve", async (h) => void h.open.splice(0, 1)],
   ]
   for (const [route, settle] of routes)
     test(`${route} takes the pin off on the next pass`, async () => {
@@ -1305,6 +1303,32 @@ describe("an open decision stays pinned (#2847)", () => {
       ])
       expect(await h.kept()).toEqual([])
     })
+
+  test("with WhatsApp mode off, a decision settled in the Inbox comes unpinned on the next pass, and nothing else goes", async () => {
+    const h = await withPins([card(12), card(13)])
+    const sent = h.fake.sent.length
+    const [first] = h.pins().map((p) => p.content.pin)
+    h.mode.on = false
+    h.open.splice(0, 1)
+    h.open.push(card(14))
+    await h.pass()
+    expect(h.fake.sent.slice(sent).map((s) => s.content)).toEqual([{ pin: first, type: 2 }])
+    expect((await h.kept()).map((p) => p.ref)).toEqual([13])
+    h.advance(HOUR)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(sent + 1)
+  })
+
+  test("with WhatsApp mode off and the owner's 24 hours past, a settled pin stays until the owner writes", async () => {
+    const h = await withPins([card(12)])
+    const sent = h.fake.sent.length
+    h.mode.on = false
+    h.open.splice(0, 1)
+    h.advance(25 * HOUR)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(sent)
+    expect(await h.kept()).toHaveLength(1)
+  })
 
   test("a 4th decision takes the oldest pin off first, since WhatsApp keeps 3", async () => {
     const h = await withPins([card(1), card(2), card(3), card(4)])
