@@ -57,5 +57,5 @@ A key a guard reads, such as a policy line or a job, asks you on WhatsApp first,
 
 ## Settings a session proposes
 
-A session that needs a guarded setting changed asks you the same question, "set <key> to <value>? yes or no", with the whole value, and your `yes` within 10 minutes sets it as your own act ([ADR 0041](../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
-`no`, any other reply or silence leaves it as it was. Only one question waits at a time, and a masked key, such as a phone number, comes to you as an Inbox card instead, since the question would show its last 4 alone.
+A session that needs a guarded setting changed asks you "set <key> to <value>? Reply yes or no", with the whole value, and your `yes` within 10 minutes sets it as your own act ([ADR 0041](../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
+Reply to the question itself, or send a plain `yes` while it is the last message you got; when something else came after your last message, a plain `yes` goes to the dispatcher instead and the question still waits. `no`, any other reply or silence leaves it as it was. Only one question waits at a time, and a masked key, such as a phone number, comes to you as an Inbox card instead, since the question would show its last 4 alone.
