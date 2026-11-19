@@ -517,17 +517,76 @@ test("a sharded model's four loose shards under models/ are one item end to end:
   })
 })
 
-// A versioned install keeps its current one under the version entry's keep link, the old ones under the dir; nightly lists the old ones, not the keep or its target, and not recorded (PG-2865).
-test("a versioned install: the old version under its entry's dir is listed, the keep link and its live target are not, and the old version is not recorded", async () => {
+// A versioned install keeps its current one under the version entry's keep link, the old ones under the dir; nightly lists each old version as one version dir, not the keep, its target, or a file under the old version (PG-2865).
+test("a versioned install lists each old version as its own version dir, never the kept current, the link, or a file under the old version (PG-2865)", async () => {
   const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
-  const old = join(at("probe-install"), "v1", "model.gguf")
-  const current = join(at("probe-install"), "current", "model.gguf")
+  const dir = at("probe-install")
+  const old = join(dir, "v1")
+  const current = join(dir, "current")
   const keep = at("probe-install/link")
+  const oldFile = join(dir, "v1", "model.gguf")
   const { items } = await measureUnused(places)
-  const listed = items.find((i) => i.path === old)
-  expect(listed).toEqual({ bytes: 300 * MB, kind: "weights", path: old, recorded: false })
+  expect(items.find((i) => i.path === old)).toEqual({
+    bytes: 300 * MB,
+    kind: "version",
+    path: old,
+    recorded: false,
+  })
   expect(items.some((i) => i.path === current)).toBe(false)
   expect(items.some((i) => i.path === keep)).toBe(false)
+  expect(items.some((i) => i.path === oldFile)).toBe(false)
+})
+
+// A versioned install lists each .old-* folder under the entry's dir as a version dir, never a .desktop-backup one (PG-2865).
+test("a versioned install lists each .old-* folder as a version dir, never a .desktop-backup one (PG-2865)", async () => {
+  const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
+  const dir = at("probe-install")
+  mkdirSync(join(dir, ".old-20261101"), { recursive: true })
+  sized(join(dir, ".old-20261101", "model.gguf"), 100 * MB)
+  mkdirSync(join(dir, ".desktop-backup"), { recursive: true })
+  sized(join(dir, ".desktop-backup", "data.bin"), 50 * MB)
+  const { items } = await measureUnused(places)
+  expect(items.find((i) => i.path === join(dir, ".old-20261101"))).toEqual({
+    bytes: 100 * MB,
+    kind: "version",
+    path: join(dir, ".old-20261101"),
+    recorded: false,
+  })
+  expect(items.some((i) => i.path === join(dir, ".desktop-backup"))).toBe(false)
+})
+
+// A versioned install whose keep link is missing lists nothing under the dir, and records the dir unread (PG-2865).
+test("a versioned install whose keep link is missing lists nothing under the dir, and records the dir unread (PG-2865)", async () => {
+  const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
+  const dir = at("probe-install")
+  const keep = at("probe-install/link")
+  rmSync(keep, { force: true })
+  const { items, versionsUnread } = await measureUnused(places)
+  expect(items.some((i) => i.path === dir)).toBe(false)
+  expect(items.some((i) => i.path === join(dir, "v1", "model.gguf"))).toBe(false)
+  expect(versionsUnread).toEqual([dir])
+})
+
+// A versioned install whose keep link names a gone folder lists nothing under the dir, and records the dir unread (PG-2865).
+test("a versioned install whose keep link names a gone folder lists nothing under the dir, and records the dir unread (PG-2865)", async () => {
+  const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
+  const dir = at("probe-install")
+  rmSync(join(dir, "current"), { recursive: true, force: true })
+  const { items, versionsUnread } = await measureUnused(places)
+  expect(items.some((i) => i.path === dir)).toBe(false)
+  expect(items.some((i) => i.path === join(dir, "v1", "model.gguf"))).toBe(false)
+  expect(versionsUnread).toEqual([dir])
+})
+
+// A folder beside the version entry's dir, outside it, lists nothing as a version (PG-2865).
+test("a folder beside the version entry's dir, outside it, lists nothing as a version (PG-2865)", async () => {
+  const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
+  const rollback = at("probe-install-rollback")
+  mkdirSync(join(rollback, "v2"), { recursive: true })
+  sized(join(rollback, "v2", "model.gguf"), 120 * MB)
+  const { items } = await measureUnused(places)
+  expect(items.some((i) => i.path === rollback)).toBe(false)
+  expect(items.some((i) => i.path === join(rollback, "v2", "model.gguf"))).toBe(false)
 })
 
 // Without a version entry, a keep link and its target on disk list nothing new.

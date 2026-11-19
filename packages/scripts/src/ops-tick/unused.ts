@@ -27,7 +27,7 @@ const WEIGHTS = /\.(gguf|safetensors)$/
 const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
 const REHEARSAL = /^rehearse\d+$/
 
-export const KINDS = ["image", "rehearsal", "run", "weights"] as const
+export const KINDS = ["image", "rehearsal", "run", "version", "weights"] as const
 export type UnusedKind = (typeof KINDS)[number]
 // unknownAge: an image with no last tag time, listed by nightly-clean only once its own first-seen date is IMAGE_UNUSED_DAYS old.
 export type Unused = {
@@ -39,8 +39,8 @@ export type Unused = {
   shards?: string[]
   unknownAge?: true
 }
-// What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights.
-export type Measured = { imagesUnread?: true; items: Unused[] }
+// What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights; versionsUnread lists each version entry's dir whose keep link is missing or names a gone folder, so the nightly check records them.
+export type Measured = { imagesUnread?: true; items: Unused[]; versionsUnread?: string[] }
 export type Machine = (Measured & { machine: string }) | { machine: string; why: string }
 
 // What a measure reads: the data folder (its record and scratchpads), the home folder (~/models), the clock and docker through run.
