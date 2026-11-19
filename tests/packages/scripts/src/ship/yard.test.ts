@@ -5,10 +5,13 @@ import { join } from "node:path"
 
 import {
   BOT_ROUTE,
+  decisionArg,
+  decisionSource,
   type Launch,
   launchAbove,
   opsLaunch,
   type Project,
+  prSource,
   schemaChanges,
   type SchemaSource,
   shipYard,
@@ -249,6 +252,41 @@ describe("ship:yard's schema stop", () => {
         ...SCHEMA,
       ]),
     ).toEqual(SCHEMA)
+  })
+})
+
+describe("ship:yard's schema source parsers", () => {
+  test("prSource, fed a merged PR with a ReviewBot shape review from any author and a dump path, clears", () => {
+    const source = prSource(
+      JSON.stringify({
+        body: "#2819 shape reviewed, dump at ~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
+        comments: [
+          {
+            author: { login: "nrjdalal" },
+            body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
+          },
+        ],
+        state: "MERGED",
+      }),
+    )
+    // the match's character class has no `~`, so it keeps the path's `/.playground` start, not the source `~`
+    expect(source).toEqual({
+      dumpPath: "/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
+      kind: "pr",
+      merged: true,
+      shapeReview: true,
+    })
+  })
+
+  test("decisionSource, fed an approved Inbox decision, is approved", () => {
+    expect(decisionSource(JSON.stringify({ status: "approved" }))).toEqual({
+      approved: true,
+      kind: "decision",
+    })
+  })
+
+  test("decisionArg, for a #iN value, is the bare id `i123`", () => {
+    expect(decisionArg("#i123")).toBe("i123")
   })
 })
 
