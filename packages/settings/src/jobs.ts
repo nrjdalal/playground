@@ -215,6 +215,10 @@ export const RETIRED: readonly string[] = ["ops-awake"]
 // The jobs that run on macOS alone: renderJobs leaves each out on any other platform, so there it is no job and nothing restarts it.
 export const MAC_ONLY: readonly string[] = ["ops-keep-awake"]
 
+// Whether a job runs on this platform: a MAC_ONLY one on darwin alone; renderJobs and listSettings both read it.
+export const runsOn = (name: string, platform: string) =>
+  platform === "darwin" || !MAC_ONLY.includes(name)
+
 // A job's old setting keys: the switch imports jobs.json under its old names before the migration renames them.
 const OLD_KEYS: Record<string, string[]> = { "ops-dashboard": ["jobs.opsDesk"] }
 
@@ -327,7 +331,7 @@ export const renderJobs = (
   }
   const jobs: Record<string, unknown>[] = [
     ...Object.entries(JOBS)
-      .filter(([name]) => platform === "darwin" || !MAC_ONLY.includes(name))
+      .filter(([name]) => runsOn(name, platform))
       .map(([name, fallback]) => {
         const set = jobSchema.safeParse(fromStored(values[jobKey(name)]))
         return row(name, set.success ? set.data : fallback)
