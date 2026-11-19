@@ -24,7 +24,14 @@ import {
   waitingLine,
   waits,
 } from "./cards"
-import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
+import {
+  DEFAULT_DELAY_MINUTES,
+  escalations,
+  keepPending,
+  lastLines,
+  pendingLines,
+  reacted,
+} from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
 import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
@@ -297,7 +304,7 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id))) {
+  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id, io.now()))) {
     io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }
@@ -794,6 +801,7 @@ export async function statusOf(
       : line("owner", "wa.owner", "", undefined),
     numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
     ...(await pendingLines(dir)),
+    ...(await lastLines(dir)),
   ]
 }
 
