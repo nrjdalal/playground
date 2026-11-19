@@ -86,6 +86,8 @@ export async function moveToLoopback(
   docker: Run,
   wait: (ms: number) => Promise<void> = Bun.sleep,
   dumpDir: string = dataDir(),
+  dumpUser: string = "postgres",
+  dumpDb: string = "postgres",
 ): Promise<string[]> {
   const old = `${name}-old`
   if ((await docker(["inspect", old])).code === 0) {
@@ -104,9 +106,9 @@ export async function moveToLoopback(
     "pg_dump",
     "-Fc",
     "-U",
-    "postgres",
+    dumpUser,
     "-d",
-    "postgres",
+    dumpDb,
     "-f",
     insidePath,
   ])
@@ -181,6 +183,10 @@ export async function moveIfExposed(
   } catch (error) {
     if (!(error instanceof GuardError) || error.failure !== "exposed" || !error.located) return []
     const { owner, target } = error.located
-    return moveToLoopback(owner.name, target.port, docker, wait, dumpDir)
+    const parsed = new URL(url)
+    // the user and the database from the URL, "postgres" when the URL names none (a first-run's `postgres://postgres@localhost` has a user, an empty pathname has neither)
+    const dumpUser = parsed.username || "postgres"
+    const dumpDb = parsed.pathname.replace(/^\//, "") || "postgres"
+    return moveToLoopback(owner.name, target.port, docker, wait, dumpDir, dumpUser, dumpDb)
   }
 }
