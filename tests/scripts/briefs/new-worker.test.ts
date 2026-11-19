@@ -97,3 +97,12 @@ test("the worker template has a worker send its own report, with no Agent or for
   expect(line).toContain("by `SendMessage`, in one call")
   expect(line).toContain("with no Agent or fork started for it")
 })
+
+// issue 2864: a scratch run carries its env on its own command, never an export
+test("the worker template has a scratch run carry its environment on its own command, never an export", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  const line = text.split("\n").find((l) => l.includes("Bun.spawnSync")) ?? ""
+  expect(line).toContain("env PLAYGROUND_DATA_DIR=<scratch> bun")
+  expect(line).toContain("`Bun.spawnSync`'s `env`")
+  expect(line).toContain("each Bash call starts a fresh shell")
+})
