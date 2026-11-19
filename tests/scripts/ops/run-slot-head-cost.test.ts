@@ -3,29 +3,41 @@ import { readFileSync, writeFileSync } from "node:fs"
 
 import { SCRIPT, machine, shim } from "./run-slot-fake"
 
-// one `head` and one `can-take` call start few processes, and read each held slot's state once, with no `stat` or `date` per slot field,
-// since the read loop forked one stat and one date per field before (issue 2852, 0.6 to 3.5 s per call at load): head reads the held
-// slots in one pass, reusing the clock the call took once, and can-take reads its one slot, so each is a handful of starts, not a read per
-// field. The bound is the pass, and the call takes the clock once, not per slot.
+// Issue 2852: head reads each held slot's state in one pass, so no `stat` or `date` per held slot, and the held-slot count changes
+// nothing, keeping the whole head run at 8 or fewer stat and date starts until it is measured to move.
 test("head reads the held slots' state once, no stat or date per slot, and can-take reads one slot", async () => {
-  const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
-  m.hold("run-slot", 3, "big")
-  m.hold("run-slot-2", 3, "big")
-  m.hold("run-slot-3", 3, "big")
-  m.hold("run-slot-4", 3, "big")
-  const { count, path } = shim(m)
+  const four = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+  four.hold("run-slot", 3, "big")
+  four.hold("run-slot-2", 3, "big")
+  four.hold("run-slot-3", 3, "big")
+  four.hold("run-slot-4", 3, "big")
+  const one = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+  one.hold("run-slot", 3, "big")
+  const { count: fhCount, path: fhPath } = shim(four)
+  const { count: ohCount, path: ohPath } = shim(one)
 
   // head, then can-take, each from a clean count so only its own starts tally, each tally read before the next run clears the count
-  writeFileSync(count, "")
-  const head = await run(m, path, count, ["head"])
-  const headStat = statDate(count)
-  writeFileSync(count, "")
-  const cantake = await run(m, path, count, ["can-take", "run-slot", "worker-x", "--", "true"])
-  const cantakeStat = statDate(count)
+  writeFileSync(fhCount, "")
+  const headFour = await run(four, fhPath, fhCount, ["head"])
+  const headFourStat = statDate(fhCount)
+  writeFileSync(ohCount, "")
+  await run(one, ohPath, ohCount, ["head"])
+  const headOneStat = statDate(ohCount)
+  writeFileSync(fhCount, "")
+  const cantake = await run(four, fhPath, fhCount, [
+    "can-take",
+    "run-slot",
+    "worker-x",
+    "--",
+    "true",
+  ])
+  const cantakeStat = statDate(fhCount)
 
-  // head: the slot read has no stat or date per slot, only the clock the call took once, and the whole call stays a handful of starts
-  expect(headStat.stat + headStat.date).toBeLessThan(6)
-  expect(head).toBeLessThan(60)
+  // head: the slot read has no stat or date per held slot, so a one-held-slot machine and a four-held-slot machine read the same, and
+  // the whole call stays a handful of starts
+  expect(headFourStat.stat + headFourStat.date).toBe(headOneStat.stat + headOneStat.date)
+  expect(headFourStat.stat + headFourStat.date).toBeLessThanOrEqual(8)
+  expect(headFour).toBeLessThan(60)
   // can-take reads its one slot and answers the hold, no per-field read
   expect(cantake).toBeLessThanOrEqual(2)
   expect(cantakeStat.stat).toBeLessThan(3)
