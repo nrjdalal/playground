@@ -1147,7 +1147,7 @@ export function sender(
     }
     const out = await sendNow(text, "reply", undefined, {})
     if (out.ids[0]) await writeOwn(statusFile(io.dir), { at: io.now(), id: out.ids[0], text })
-    return failed
+    return failed !== undefined
       ? {
           ...out,
           said: `${out.said}: the live status's edit failed (${failed}), so this one is live now`,

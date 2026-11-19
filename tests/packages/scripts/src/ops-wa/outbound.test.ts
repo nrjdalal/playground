@@ -513,7 +513,9 @@ describe("the live status (#2861)", () => {
       }
       return sent
     }
-    await expect(h.sender("2 PRs in review", "reply", { status: true })).rejects.toThrow()
+    await expect(h.sender("2 PRs in review", "reply", { status: true })).rejects.toThrow(
+      "status.json",
+    )
     expect(h.fake.sent.map((s) => s.content)).toEqual([
       { linkPreview: null, text: "3 PRs in review" },
       { edit: key("m1"), linkPreview: null, text: "2 PRs in review" },
