@@ -37,6 +37,7 @@ import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
 import { outboxDir } from "./outbound"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
+import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
 import { votedOptions } from "./votes"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
@@ -169,6 +170,8 @@ const main = async () => {
     return runCheck(file.path, source, at)
   }
   await ownFolder(dir)
+  // ADR 0032's numbers.json, which kept.json replaced, goes at start, so no phone number outlives its 24 hours there (ADR 0035)
+  await unlink(join(dir, "numbers.json")).catch(() => {})
   await ownFolder(outboxDir(data))
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
@@ -235,11 +238,20 @@ const main = async () => {
     )
     return was
   }
+  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035)
+  const owned = {
+    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    dir,
+    log: (line: string) => console.log(line),
+    now: Date.now,
+    tell: (line: string) => send(line, "reply"),
+  }
   serve(
     path,
     send,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
     send.react,
+    (id, key, value) => settingSet(owned, id, key, value),
   )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
@@ -251,6 +263,7 @@ const main = async () => {
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
     check,
+    confirm: (text, reaction) => confirm(owned, text, reaction),
     dir,
     escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),

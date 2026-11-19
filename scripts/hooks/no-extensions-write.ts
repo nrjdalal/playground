@@ -2072,14 +2072,26 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
   const positional: (string | undefined)[] = []
   let dry = false
   let scoped = false
+  const options: string[] = []
+  let ownerId: string | undefined
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
-    if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
-    else if (word?.startsWith("--")) {
+    if (word !== undefined && switches.includes(word)) {
+      dry ||= word === "--dry-run"
+      options.push(word)
+    } else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope")
+      if (word === "--from-owner-msg") ownerId = rest[k + 1]
+      options.push(word)
       k++
     } else positional.push(word)
   }
+  // --from-owner-msg <id> as the call's one option, beside the key and value alone, so a CLI from before the flag stops at its missing --reason before it writes
+  const ownerMsg =
+    options.length === 1 &&
+    options[0] === "--from-owner-msg" &&
+    !!ownerId &&
+    positional.length === 2
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry
@@ -2088,6 +2100,8 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
+    // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
+    if (verb === "set" && ownerMsg) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]

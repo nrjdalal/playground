@@ -5,7 +5,7 @@ import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
 import { forwardLine } from "../stuck-alert"
-import { keepNumber } from "./alert-set"
+import { keepMessage } from "./alert-set"
 import {
   answered,
   answerOf,
@@ -80,6 +80,8 @@ export type Mode = {
   inbox?: Inbox
   // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
+  confirm?: (text: string, reaction?: string) => Promise<boolean>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
@@ -307,7 +309,7 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   await ownFolder(io.dir)
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
   const id = m.key.id
-  const kept = !!text && !!id && (await keepNumber(io.dir, id, text, at, io.owner))
+  const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   if (!(await io.on())) {
     // one reply an hour at most, so a run of messages while it is off gets one answer; offAt is written first, so a failed reply waits out the hour too
@@ -316,17 +318,20 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
-  if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   const reply = io.inbox && text ? replyOf(text) : null
-  if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
-    return answerCard(io, io.inbox!, reply)
+  const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
+  // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
+  const asked = reaction ? (reaction.text ?? "") : undefined
+  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? "", asked))) return
+  if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
+  if (toCard) return answerCard(io, io.inbox!, reply!)
   // a line about another message names only that one's id, the one wa react --id takes
   const when = `${new Date(at).toISOString()}${idOf(said?.about ? undefined : m.key.id)}`
   const phrase =
     said?.phrase ??
     (await saved(io, m, message, at)) ??
     `holds ${media}, which ops-wa does not read yet: say so to the owner.`
-  const line = `The owner's WhatsApp at ${when} ${phrase}\n${said?.notice ? NOTICE : `${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`}`
+  const line = `The owner's WhatsApp at ${when} ${phrase}\n${said?.notice ? NOTICE : `${text && id ? `${idLine(id)}\n` : ""}${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`}`
   await io.relay("dispatcher", line)
   if (said?.notice) return
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
@@ -354,6 +359,10 @@ async function seen(io: Io & Mode, m: Incoming, who: Who, at: number) {
       .react?.("👀", { auto: true, id })
       .catch((error: Error) => io.log(`ops-wa: no 👀 on a message: ${error.message}`))
 }
+
+// The note on every owner text message, so the dispatcher can set a setting whose value it names when the owner asks (ADR 0035).
+export const idLine = (id: string) =>
+  `Its message id is ${id}: when it asks for a setting it names the value of, run playground settings set <key> <value> --from-owner-msg ${id}.`
 
 // The note on an owner message whose one number ops-wa kept, so the dispatcher can set it as the second number when the owner asks.
 export const keptLine = (id: string) =>
