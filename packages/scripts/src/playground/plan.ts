@@ -422,11 +422,18 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
+// A pid's own start time, now minus its elapsed (parseEtime), so a pid started after the pid file's mtime is another process that reused it.
+export const parseEtime = (_e: string): number => {
+  throw new Error("not built yet")
+}
+
 // Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
 export const stepQueued = (
   pid: string | undefined,
   alive: (pid: number) => boolean,
   runs: string[],
+  _fileMtime = 0,
+  _pidStart = 0,
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
