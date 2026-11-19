@@ -69,6 +69,21 @@ const SCHEMA = /^packages\/db\/(?:drizzle|src\/schema)\//
 export const schemaChanges = (files: string[]): string[] =>
   files.filter((file) => SCHEMA.test(file))
 
+// A PR's JSON from `gh pr view --json state,comments,body`, parsed into its source shape: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
+export const prSource = (json: string): SchemaSource | null => {
+  throw new Error(`prSource not built: ${json}`)
+}
+
+// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
+export const decisionSource = (json: string): SchemaSource | null => {
+  throw new Error(`decisionSource not built: ${json}`)
+}
+
+// The Inbox `ask get` argv for a #iN value: its id, so the reader the live dashboard checkout runs gets `i123` for `#i123`.
+export const decisionArg = (value: string): string => {
+  throw new Error(`decisionArg not built: ${value}`)
+}
+
 // The live host's two checks, each its URL and the status it answers when the deploy serves.
 export const hostChecks = (host: string): [string, number][] => [
   [`${host}/api/health`, 200],
@@ -98,39 +113,39 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
   // step 4 makes the tag on GitHub alone, so the step fetches both tags before it reads them
   await io.fetch([since, args.tag])
   const schema = schemaChanges(await io.changed(since, args.tag))
-  if (!schema.length) {
-    // the tag changes no schema or migration, so the step continues either way
-  } else if (!args.schemaCleared) {
-    io.err(
-      `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path)`,
-    )
-    return 1
-  } else if (!/^#i\d+$/.test(args.schemaCleared) && !/^PR#\d+$/.test(args.schemaCleared)) {
-    io.err(
-      `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path); run it again naming one`,
-    )
-    return 1
-  } else {
-    const source = await io.schemaCleared(args.schemaCleared)
-    if (!source) {
-      const decision = /^#i\d+$/.test(args.schemaCleared)
+  if (schema.length) {
+    if (!args.schemaCleared) {
       io.err(
-        `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path in its body`,
+        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path)`,
       )
       return 1
-    }
-    if (source.kind === "decision") {
-      if (!source.approved) {
+    } else if (!/^#i\d+$/.test(args.schemaCleared) && !/^PR#\d+$/.test(args.schemaCleared)) {
+      io.err(
+        `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path); run it again naming one`,
+      )
+      return 1
+    } else {
+      const source = await io.schemaCleared(args.schemaCleared)
+      if (!source) {
+        const decision = /^#i\d+$/.test(args.schemaCleared)
         io.err(
-          `ship:yard: ${args.schemaCleared} is an open or denied Inbox decision, so it does not clear the schema ${args.tag} changes; take it through step 0, then run again once the owner has approved it`,
+          `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path in its body`,
         )
         return 1
       }
-    } else if (!source.merged || !source.shapeReview || !source.dumpPath) {
-      io.err(
-        `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path in its body`,
-      )
-      return 1
+      if (source.kind === "decision") {
+        if (!source.approved) {
+          io.err(
+            `ship:yard: ${args.schemaCleared} is an open or denied Inbox decision, so it does not clear the schema ${args.tag} changes; take it through step 0, then run again once the owner has approved it`,
+          )
+          return 1
+        }
+      } else if (!source.merged || !source.shapeReview || !source.dumpPath) {
+        io.err(
+          `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path in its body`,
+        )
+        return 1
+      }
     }
   }
   const dir = await io.worktree(args.tag)
@@ -260,7 +275,7 @@ if (import.meta.main) {
       fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) })
         .then((response) => response.status)
         .catch(() => 0),
-    // A PR reads its verdict, merge state and body through gh; a decision reads its status through the Inbox reader playground ask uses. A read that fails returns null, so the step fails closed.
+    // A PR reads its verdict, merge state and body through gh; a decision reads its status through the Inbox reader playground ask uses. Each is parsed by a pure source, and a read that fails returns null, so the step fails closed.
     schemaCleared: async (value) => {
       const pr = /^PR#(\d+)$/.exec(value)
       if (pr) {
@@ -269,45 +284,17 @@ if (import.meta.main) {
           stdout: "pipe",
         })
         if (ran.exitCode !== 0) return null
-        try {
-          const data = JSON.parse(ran.stdout.toString()) as {
-            body?: string
-            comments?: { author?: { login?: string }; body?: string }[]
-            state?: string
-          }
-          const shapeReview = (data.comments ?? []).some(
-            (comment) =>
-              comment.author?.login === "ReviewBot" && /shape review/i.test(comment.body ?? ""),
-          )
-          const dump = /[\w./-]+\.(?:sql|dump)\b/.exec(data.body ?? "")
-          return {
-            kind: "pr",
-            merged: data.state === "MERGED",
-            shapeReview,
-            dumpPath: dump ? dump[0] : undefined,
-          }
-        } catch {
-          return null
-        }
+        return prSource(ran.stdout.toString())
       }
-      const decision = /^#i(\d+)$/.exec(value)
-      if (decision) {
-        // the decision's status comes through the Inbox reader the live dashboard checkout runs; no checkout, no read, so the step fails closed
-        if (!live) return null
-        const ran = Bun.spawnSync(["bun", "run", "ask", "get", decision[1]!], {
-          cwd: live,
-          stderr: "pipe",
-          stdout: "pipe",
-        })
-        if (ran.exitCode !== 0) return null
-        try {
-          const data = JSON.parse(ran.stdout.toString()) as { status?: string }
-          return { kind: "decision", approved: data.status === "approved" }
-        } catch {
-          return null
-        }
-      }
-      return null
+      // the decision's status comes through the Inbox reader the live dashboard checkout runs; no checkout, no read, so the step fails closed
+      if (!live) return null
+      const ran = Bun.spawnSync(["bun", "run", "ask", "get", decisionArg(value)], {
+        cwd: live,
+        stderr: "pipe",
+        stdout: "pipe",
+      })
+      if (ran.exitCode !== 0) return null
+      return decisionSource(ran.stdout.toString())
     },
     worktree: async (at) => {
       const dir = join(worktrees, `yard-ship-${at}`)
