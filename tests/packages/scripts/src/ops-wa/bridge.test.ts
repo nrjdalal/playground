@@ -1757,7 +1757,7 @@ describe("reactions (#2755)", () => {
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 
-  test("a message with no reply still goes on to the assistant seat, and the dispatcher's wa react 👀 is its answer", async () => {
+  test("a message with no reply still goes on to the assistant seat at 3 minutes, and the dispatcher's wa react 👀 holds that timer", async () => {
     const h = harness()
     said(h, jid(OWNER), "is it green?")
     await h.settle()
@@ -1770,6 +1770,28 @@ describe("reactions (#2755)", () => {
     h.advance(3 * 60_000)
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT, "dispatcher"])
+  })
+
+  test("a 👀'd message still goes to the assistant seat once the dispatcher reads stuck with no reply sent", async () => {
+    const h = harness()
+    said(h, jid(OWNER), "what broke overnight?")
+    await h.settle()
+    await h.send.react("👀", {})
+    h.mode.stuck = { at: "2026-11-11T03:01:00.000Z", state: "stuck" }
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
+  test("a 👀'd message with a reply sent stays with the dispatcher, stuck or not", async () => {
+    const h = harness()
+    said(h, jid(OWNER), "what broke overnight?")
+    await h.settle()
+    await h.send.react("👀", {})
+    await h.send("the nightly build, fixed now")
+    h.mode.stuck = { at: "2026-11-11T03:01:00.000Z", state: "stuck" }
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 })
 

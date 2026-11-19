@@ -9,7 +9,7 @@ By [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR st
 - **ops-wa sets no reaction of its own.** It keeps each handed-on message's id for `wa react`, the last 50 in `messages.json`, and reacts on none.
 - **👀 is the dispatcher's, for a reply that takes a while.** It sets it with `playground wa react 👀 --id <id>`, then replies when it can. A quick answer goes as the reply alone.
 - **✅ is unchanged.** The dispatcher sets it with `playground wa react ✅` when no reply is needed, and it replaces a 👀 the dispatcher set, as a second reaction from the same sender does.
-- **Every `wa react` on the owner's message is the dispatcher's answer.** It counts in `sends.json`, 👀 included, so the failover leaves a message the dispatcher has marked as seen.
+- **A 👀 holds the 3-minute timer alone.** A ✅ or any other `wa react` on the owner's message is the dispatcher's answer in `sends.json`. A 👀 is kept apart, in `eyes.json`, and holds back only the hand-on after 3 minutes with no reply: while the dispatcher reads stuck or failed and has sent no reply, a 👀'd message still goes to the assistant seat.
 
 ## Consequences
 

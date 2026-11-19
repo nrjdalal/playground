@@ -123,9 +123,11 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
+// the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
+const eyesFile = (dir: string) => join(dir, "eyes.json")
 // ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
 const oursFile = (dir: string) => join(dir, "ours.json")
 type Ours = { id: string; text: string }
@@ -563,10 +565,13 @@ async function pass(io: Io & Mode) {
   try {
     if (await io.on()) {
       const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
+      const eyes = (await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})).eyes ?? []
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
       const blocked = waiting.length > 0 ? await io.stuck() : null
       const working = !blocked && waiting.length > 0 && (await io.busy())
-      const { due, why } = handOn(waiting, (h) => (now - h.at) / 1000, blocked, working)
+      // a 👀 holds the 3-minute timer alone, so a stuck or failed dispatcher still hands on a message it has not answered
+      const timed = blocked ? waiting : waiting.filter((h) => !eyes.some((at) => at >= h.at))
+      const { due, why } = handOn(timed, (h) => (now - h.at) / 1000, blocked, working)
       const to = due.length > 0 ? await io.assistant() : undefined
       for (const h of due) {
         if (!to) {
@@ -946,7 +951,7 @@ export function sender(
     chain = run.catch(() => {})
     return run
   }
-  // a reaction on a kept message of the last 24 hours, the latest of who's or the one named by its id, one send with the gap and no typing time, which counts as the dispatcher's answer on the owner's message
+  // a reaction on a kept message of the last 24 hours, the latest of who's or the one named by its id, one send with the gap and no typing time
   const reactNow = async (emoji: string, on: { id?: string; who?: Who }) => {
     const now = io.now()
     const { messages = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
@@ -965,9 +970,21 @@ export function sender(
         "that message is over 24 hours old, and ops-wa reacts only inside its 24 hours",
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
-    await paced(target.who === "owner" ? await recent(now) : null, SEND.gapMs, target.jid, {
-      react: { key, text: emoji },
-    })
+    // on the owner's message a ✅ or any other reaction is the dispatcher's answer, and a 👀 says a reply is coming, so it holds the 3-minute timer alone
+    const eyes = target.who === "owner" && emoji === "👀"
+    await paced(
+      target.who === "owner" && !eyes ? await recent(now) : null,
+      SEND.gapMs,
+      target.jid,
+      {
+        react: { key, text: emoji },
+      },
+    )
+    if (eyes) {
+      const at = io.now()
+      const { eyes: list = [] } = await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})
+      await writeOwn(eyesFile(io.dir), { eyes: [...list.filter((e) => at - e < HOUR), at] })
+    }
     return "sent"
   }
   // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
