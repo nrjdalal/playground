@@ -106,6 +106,19 @@ describe("once.py's last stderr line", () => {
     expect(await new Response(job.stdout).text()).toBe("done\n")
   })
 
+  test("the job's stderr file, a regular file, is emptied past 1 MiB, so a job that runs for weeks never fills the disk, while its lines still reach the pane", async () => {
+    const job = once(
+      "ops-t5",
+      "sh -c 'yes 0123456789012345678901234567890123456789 | head -n 80000 >&2; echo last-of-many >&2; sleep 0.5'",
+    )
+    const pane = new Response(job.stderr).text()
+    expect(await job.exited).toBe(0)
+    await gone(await readerPid("ops-t5"))
+    expect(statSync(join(opsDir, "ops-t5.stderr")).size).toBeLessThan(1 << 20)
+    expect(await pane).toEndWith("last-of-many\n")
+    expect(readFileSync(join(opsDir, "ops-t5.last"), "utf8")).toBe("last-of-many")
+  })
+
   test("a start drops the last copy's line, so a stale one never stands for this copy", async () => {
     await Bun.write(join(opsDir, "ops-t4.last"), "an old line from yesterday")
     const job = once("ops-t4", "sh -c 'exit 0'")
