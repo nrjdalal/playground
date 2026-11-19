@@ -584,7 +584,14 @@ async function cards(io: Io & Mode, inbox: Inbox) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
         const { poll, rows, text } = cardOf(card, terms)
-        const textId = io.card ? await io.card(text) : void (await io.reply(text))
+        let textId: string | undefined
+        try {
+          textId = io.card ? await io.card(text) : void (await io.reply(text))
+        } catch (error) {
+          // a card in quiet hours stays unsent, so it goes out whole, poll and pin, at a later pass
+          if ((error as Error).message === QUIET_WAITS) continue
+          throw error
+        }
         sent[card.ref] = { at: io.now(), id: card.id, rows }
         // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
         if (poll && io.poll)
@@ -1103,7 +1110,7 @@ export function sender(
     const read = (await ownerReadAt(io.dir, io.owner)) ?? 0
     return now - Math.max(ownerAt, read) >= QUIET_IDLE_MS
   }
-  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; a catch-up that fails keeps them
+  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; it answers nothing, as each held text counted when it was held, so the owner's message that set it off still waits for its answer; a catch-up that fails keeps them
   const catchUpNow = async () => {
     const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
     const now = io.now()
@@ -1112,7 +1119,7 @@ export function sender(
     const zone = (await io.quiet?.())?.zone ?? "UTC"
     await writeOwn(quietFile(io.dir), { held: [] })
     try {
-      await sendNow(catchUpOf(held, zone), "reply", undefined, {})
+      await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
     } catch (error) {
       await writeOwn(quietFile(io.dir), { held })
       throw error
@@ -1137,6 +1144,7 @@ export function sender(
     kind: Kind,
     source: string | undefined,
     extra: Extra,
+    answers = true,
   ): Promise<Out> => {
     const shape = extraRefusal(extra, body)
     if (shape) throw new Error(shape)
@@ -1249,7 +1257,7 @@ export function sender(
         // a text or a caption waits its typing time; a file with none goes on the gap alone
         const typed = wordsOf(content)
         const id = await paced(
-          t.jid === jidOf(io.owner) ? sends : null,
+          t.jid === jidOf(io.owner) && answers ? sends : null,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
           content,
@@ -1389,9 +1397,10 @@ export function sender(
     (body: string, kind: Kind = "reply", source?: string, extra: Extra = {}): Promise<string> =>
       queued(() => anySend(body, kind, source, extra)).then((out) => out.said),
     {
-      // a card's text to the owner, giving its first message's id, which a decision's pin names
+      // a card's text to the owner, giving its first message's id, which a decision's pin names; in quiet hours the card waits whole, its poll and pin with it
       card: (body: string) =>
         queued(async () => {
+          if (await quietNow(io.now())) throw new Error(QUIET_WAITS)
           await sendNow(body, "reply", undefined, {})
           return lastIds[0]
         }),

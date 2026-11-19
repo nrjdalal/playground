@@ -2229,6 +2229,46 @@ describe("quiet hours (#2887)", () => {
     expect(texts(h).slice(-2)).toEqual([expect.stringContaining("second"), "third"])
   })
 
+  test("the catch-up answers nothing, so the owner's message that set it off still goes to the assistant seat in 3 minutes", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("the train is green")
+    h.advance(MIN)
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    await h.pass()
+    expect(texts(h).at(-1)).toContain("the train is green")
+    h.advance(3 * MIN)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toContain(ASSISTANT)
+    expect(h.routed.at(-1)!.text).toContain("is it green?")
+  })
+
+  test("a decision card waits whole in quiet hours, and goes out with its poll and pin once the owner reads or writes", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.mode.pins = true
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    const poll = h.fake.sent.find((s) => s.content.poll)
+    expect(poll).toBeDefined()
+    expect(
+      h.fake.sent.some(
+        (s) => (s.content.pin as OwnKey | undefined)?.id === `m${h.fake.sent.indexOf(poll!) + 1}`,
+      ),
+    ).toBe(true)
+  })
+
   test("a night of held statuses leaves the newest alone for the catch-up, and none counts as a send", async () => {
     const h = await night()
     h.advance(61 * MIN)
