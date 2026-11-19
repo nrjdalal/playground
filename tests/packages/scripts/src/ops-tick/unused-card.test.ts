@@ -352,6 +352,19 @@ test("an answered card removes each Remove still listed at its size here, sends 
   expect(night.card).toBeUndefined()
 })
 
+test("an approved card whose picks are still pending reads through the joined output and removes them this night", async () => {
+  const items = offered([here(weights)], HOME, out, {})
+  const { deps, removed, setPosted } = inbox({
+    answer: { at: LATER, choice: "approve" },
+    status: "approved",
+  })
+  setPosted({ from: "ops", ...cardOf(items) })
+  const night = await cardNight([here(weights)], HOME, { card: { at: WROTE, id: ID, items } }, deps)
+  expect(removed).toEqual([weights.path])
+  expect(night.card).toBeUndefined()
+  expect(night.said).toContain(`removed ${weights.path}:`)
+})
+
 test("a kept item stays off the next card, and comes back on one once its size changes", async () => {
   const { deps } = inbox({ answer: { choice: "deny" }, status: "denied" })
   const items = offered([here(image)], HOME, out, {})
