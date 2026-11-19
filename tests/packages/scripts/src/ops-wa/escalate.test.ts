@@ -5,10 +5,10 @@ import { join } from "node:path"
 
 import { bridge, sender, statusOf } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import {
+  alertSentFile,
   lastFile,
   pendingDir,
   runCheck,
-  sentFile,
 } from "../../../../../packages/scripts/src/ops-wa/escalate"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { ALERT, fakeSocket, jid, OWNER, SPARE } from "./fake-socket"
@@ -373,8 +373,8 @@ describe("wa status's last alert line", () => {
         /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner alone: the alert number has never written to this number$/,
       ),
     ])
-    expect(statSync(sentFile(h.dir)).mode & 0o777).toBe(0o600)
-    expect(await Bun.file(sentFile(h.dir)).text()).not.toContain("a practice alert")
+    expect(statSync(alertSentFile(h.dir)).mode & 0o777).toBe(0o600)
+    expect(await Bun.file(alertSentFile(h.dir)).text()).not.toContain("a practice alert")
   })
 
   test("a --now-both alert that reaches the owner and fails on the alert number shows both, its number masked", async () => {

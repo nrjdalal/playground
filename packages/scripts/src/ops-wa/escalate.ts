@@ -15,8 +15,8 @@ export type Last = { at: number; outcome: string; when: number }
 export const lastFile = (dir: string) => join(dir, "last-alert.json")
 const keepLast = (dir: string, last: Last) => writeOwn(lastFile(dir), last)
 // alert-sent.json, 0600, the sender's chain's: the same for the last alert that never went pending, a --now-both one or one that reached one number alone, its outcome kept as it went
-export const sentFile = (dir: string) => join(dir, "alert-sent.json")
-export const keepSent = (dir: string, last: Last) => writeOwn(sentFile(dir), last)
+export const alertSentFile = (dir: string) => join(dir, "alert-sent.json")
+export const keepSent = (dir: string, last: Last) => writeOwn(alertSentFile(dir), last)
 // a failure's reason with any run of 6 or more digits masked, so no number reaches wa status
 export const masked = (reason: string) => reason.replace(/\d{6,}/g, "<number>")
 export const CHECK_TIMEOUT_MS = 20_000
@@ -126,7 +126,7 @@ export async function escalations(io: EscalateIo) {
 export const lastLines = async (dir: string): Promise<string[]> => {
   const [settled, sent] = await Promise.all([
     readOwn<Last | null>(lastFile(dir), null),
-    readOwn<Last | null>(sentFile(dir), null),
+    readOwn<Last | null>(alertSentFile(dir), null),
   ])
   const last = [settled, sent].filter((l): l is Last => l !== null).sort((a, b) => b.at - a.at)[0]
   return last
