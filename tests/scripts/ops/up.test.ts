@@ -225,7 +225,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
   mkdirSync(ops, { recursive: true })
   const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
-  const now = Date.now() / 1000
+  // each start a minute old: made before the job stopped, as ops-restart's TERM'd job's was
+  const now = Date.now() / 1000 - 60
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": now, "ops-y": now }))
   const env = {
     CLAUDE_CONFIG_DIR: config,
@@ -266,6 +267,57 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
     "ops-z",
     "ops-x",
   ])
+})
+
+// Loads up.py and runs main() with the arguments after its path, every job down, each start appended to the file named first rather than made.
+const RACE = `${LOAD}import fcntl
+up.healthy = lambda job: (False, "process gone")
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (0, "")
+path = sys.argv[2]
+up.start = lambda job: open(path, "a").write(job["name"] + "\\n") or True
+up.herdr = lambda: ("/x/herdr", "")
+sys.argv = sys.argv[3:]
+up.main()
+`
+
+// PG-2882: on an accept, each job of the item restarts itself through up.py --restarted <job>; the first pass starts both, so the second job's own pass, under up.lock right behind it, must not drop that fresh start and start the job again.
+test("two jobs' --restarted passes at once start each job once, the second start skipped and logged", async () => {
+  const config = mkdtempSync(join(scratch, "race-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
+  // both last started an hour ago, past GRACE, so either pass starts both
+  const old = Date.now() / 1000 - 3600
+  writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": old, "ops-y": old }))
+  const starts = join(ops, "starts.txt")
+  const env = {
+    CLAUDE_CONFIG_DIR: config,
+    PLAYGROUND_DATA_DIR: join(config, "playground"),
+    HOME: scratch,
+    PATH: SYS_PATH,
+    ...SYSTEMD_ENV,
+  }
+  const pass = (name: string) =>
+    Bun.spawn(["python3", "-I", "-c", RACE, upPy, starts, "up.py", "--restarted", name], {
+      env,
+      stderr: "pipe",
+      stdout: "ignore",
+    })
+  const passes = [pass("ops-x"), pass("ops-y")]
+  for (const p of passes) {
+    expect(await new Response(p.stderr).text()).toBe("")
+    expect(await p.exited).toBe(0)
+  }
+  expect(readFileSync(starts, "utf8").split("\n").filter(Boolean).sort()).toEqual([
+    "ops-x",
+    "ops-y",
+  ])
+  expect(readFileSync(join(ops, "up.log"), "utf8")).toMatch(
+    /another pass started ops-[xy] \d+s before this restart was asked; not starting it again/,
+  )
 })
 
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
