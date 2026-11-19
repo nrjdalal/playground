@@ -85,8 +85,8 @@ const safeParse = (json: string): unknown => {
   }
 }
 
-// The dump path's extension, which a dump or the migration SQL is named with: the class excludes `~`, so a `~/.playground` path extracts from the `/` right after it, not the source `~`.
-const DUMP_RE = /[\w./-]+\.(?:sql|dump)\b/
+// A dump's path, which `~/.playground` anchors: the leading `~` is a home path, never a packages/db migration, so a schema PR's migration .sql never clears a dump that carries one.
+const DUMP_RE = /~[\w./-]*\.(?:sql|dump)\b/
 
 // A shape review's banner, whose first line starts with these words, matched from any author, not just the ReviewBot login.
 const SHAPE_RE = /^## ReviewBot · shape review( · at [0-9a-f]+)?/
@@ -101,10 +101,11 @@ export const prSource = (json: string): SchemaSource | null => {
   return { dumpPath: dump[0], kind: "pr", merged: true, shapeReview: true }
 }
 
-// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
+// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
 export const decisionSource = (json: string): SchemaSource | null => {
   const read = safeParse(json)
-  if (!read || typeof read !== "object") return null
+  if (!read || typeof read !== "object" || (read as { kind?: string }).kind !== "decision")
+    return null
   return { approved: (read as { status?: string }).status === "approved", kind: "decision" }
 }
 
