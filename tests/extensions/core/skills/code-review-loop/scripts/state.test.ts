@@ -1362,12 +1362,15 @@ test("10 touched-tests: the repo's own scanners read as scanners and its fixture
   )
 })
 
-test("10 touched-tests: a test that walks imports with scanImports( is listed for a change it reaches through the graph (#2625", () => {
+// split the word so this file's own text is not a match; each written value is whole
+test("10 touched-tests: a test that walks imports with Bun's Transpiler is listed for a change it reaches through the graph (#2625", () => {
   const repo = scratch()
+  const walker =
+    'for (const { path } of new Bun.Transpiler({ loader: "ts" }).scan' +
+    "Imports(text)) log(path)\n"
   scratchRepo(repo, {
     "scripts/ops/optimizer/idle_sessions.ts": "x\n",
-    "tests/packages/scripts/src/ops-outbox/drain.test.ts":
-      'for (const { path } of new Bun.Transpiler({ loader: "ts" }).scanImports(text)) log(path)\n',
+    "tests/packages/scripts/src/ops-outbox/drain.test.ts": walker,
   })
   writeFiles(repo, { "scripts/ops/optimizer/idle_sessions.ts": "y\n" })
   git(repo, "commit", "-qam", "change idle")
