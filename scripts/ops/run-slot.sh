@@ -19,7 +19,7 @@ ARGS=("$@")
 # LANES is capacity()'s one lanes verdict for a count (lanes_now), and HELD5 its one load5 verdict (load5_held), so a value from the caller's env would steer every slot check outside a count
 unset LANES HELD5
 # a waiter that runs a newer copy hands it its first ask's time, so the runs log has one ask and the whole wait; the command never sees it
-# the clock this call reads once: its seconds feed ASKED and every age the read path, its ISO form the switch lines (issue 2852: the read loop ran a `date` per switch and per slot field, so a head at load took a second or more)
+# the clock this call reads once, then `clock` moves it by SECONDS: its seconds feed ASKED and every age the read path, its ISO form the switch lines (issue 2852: the read loop ran a `date` per switch and per slot field, so a head at load took a second or more)
 now=$(date -u +%s' '%FT%TZ); NOW=${now%% *}; NOW_ISO=${now#* }
 T0=$((NOW - SECONDS)) ISO_AT=$NOW
 REREAD=""
