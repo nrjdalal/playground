@@ -458,6 +458,21 @@ test("a card reads when ask's picked line on stderr follows its JSON in the join
     ).toEqual(card)
 })
 
+// A card read fails while the fix lands (PG-2958): bun's echo of the ask script's command line sits between the JSON and the picked line.
+test("a card reads when bun's echo of the ask script's command line sits between its JSON and the picked line", async () => {
+  const card = { status: "approved", updatedAt: WROTE }
+  for (const json of [JSON.stringify(card, null, 2), JSON.stringify(card)])
+    expect(
+      await readCard(
+        async () => ({
+          code: 0,
+          out: `${json}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${ID}"\nask: picked A: Remove\n`,
+        }),
+        ID,
+      ),
+    ).toEqual(card)
+})
+
 test("a card that does not read stays for the next night, and one the Inbox no longer holds is let go", async () => {
   const items = offered([here(image)], HOME, out, {})
   const unread = await cardNight(
