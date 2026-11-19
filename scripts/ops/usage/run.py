@@ -350,8 +350,9 @@ while True:
         result = "waiting: no Claude account yet; add one in the Dashboard"
     else:
         result = ("error: " + "; ".join(problems))[:120]
-    if data and problems:
-        detail += " (" + "; ".join(problems)[:200] + ")"
+    # the stored login's error takes the result, so the cycle's other problems stay in the detail, with or without a reading
+    if problems and (data or result.startswith("error: stored login")):
+        detail = (detail + " (" + "; ".join(problems)[:200] + ")").strip()
     # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
     if cost_problem:
         detail += f" ({cost_problem})"
