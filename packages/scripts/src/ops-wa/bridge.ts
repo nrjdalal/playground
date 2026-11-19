@@ -647,6 +647,8 @@ async function pass(io: Io & Mode) {
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
+  const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+  const inWindow = ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS
   // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
   try {
     if (await io.on()) {
@@ -676,29 +678,21 @@ async function pass(io: Io & Mode) {
           }
           h.settled = true
         }
-      const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
       // a window with no owner message handed on and no send to the owner since the last line asks for nothing, so a quiet chat gets no update
       const since = watch.updateAt ?? 0
       const moved = handed.some((h) => h.at > since) || sends.some((at) => at > since)
-      if (
-        ownerAt !== undefined &&
-        now - ownerAt <= OWNER_WINDOW_MS &&
-        now - Math.max(since, ownerAt) >= UPDATE_MS &&
-        moved
-      ) {
+      if (inWindow && now - Math.max(since, ownerAt!) >= UPDATE_MS && moved) {
         await io.relay("dispatcher", updateLine((await policyOf(io)).reply))
         watch.updateAt = now
       }
-      if (io.inbox && ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
+      if (io.inbox && inWindow)
         await cards(io, io.inbox).catch((error: Error) =>
           io.log(`ops-wa: the Inbox's cards: ${error.message}`),
         )
-    } else if (io.inbox && io.pin) {
-      const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
-      if (ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
-        await unpins(io, io.inbox, io.pin).catch((error: Error) =>
-          io.log(`ops-wa: the settled decisions' unpins: ${error.message}`),
-        )
+    } else if (io.inbox && io.pin && inWindow) {
+      await unpins(io, io.inbox, io.pin).catch((error: Error) =>
+        io.log(`ops-wa: the settled decisions' unpins: ${error.message}`),
+      )
     }
   } finally {
     await ownFolder(io.dir)
