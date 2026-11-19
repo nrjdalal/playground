@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -73,8 +81,9 @@ describe("once.py's last stderr line", () => {
     return !alive(pid)
   }
 
-  test("a job that dies leaves its last non-empty stderr line, cut to 200 characters, in a 0600 file, its stderr still reaching the pane", async () => {
+  test("a job that dies leaves its last non-empty stderr line, cut to 200 characters, in a 0600 file, its stderr file 0600 too and its stderr still reaching the pane", async () => {
     await Bun.write(join(opsDir, "keep"), "")
+    writeFileSync(join(opsDir, "ops-t1.stderr"), "an older copy's stderr\n", { mode: 0o644 })
     const long = "x".repeat(300)
     const job = once(
       "ops-t1",
@@ -85,6 +94,7 @@ describe("once.py's last stderr line", () => {
     const last = readFileSync(join(opsDir, "ops-t1.last"), "utf8")
     expect(last).toBe(`vault: cache unreadable: ${long}`.slice(0, 200))
     expect(statSync(join(opsDir, "ops-t1.last")).mode & 0o777).toBe(0o600)
+    expect(statSync(join(opsDir, "ops-t1.stderr")).mode & 0o777).toBe(0o600)
     expect(await new Response(job.stderr).text()).toContain("vault: cache unreadable:")
   })
 

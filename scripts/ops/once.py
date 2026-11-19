@@ -103,6 +103,7 @@ def keep_last_line(job):
     except FileNotFoundError:
         pass
     fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_APPEND, 0o600)
+    os.fchmod(fd, 0o600)
     pane, job_pid = os.dup(2), os.getpid()
     reader = os.fork()
     if reader == 0:
