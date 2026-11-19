@@ -294,6 +294,10 @@ const cycle = async (
     alerts: read("ops/alerts-usage.json"),
     beat: read("ops/beat.json"),
     status: read("ops/usage/stored-login-status.json"),
+    // the file's mtime comes from the OS clock, which the clock-ahead pass leaves alone, as it leaves run.py's own
+    statusMtime: existsSync(join(home, ".playground", "ops/usage/stored-login-status.json"))
+      ? statSync(join(home, ".playground", "ops/usage/stored-login-status.json")).mtimeMs
+      : null,
     stored: read("ops/usage/stored-login.json"),
     usage: read("usage.json"),
   }
@@ -333,13 +337,13 @@ test("with Claude Code's own login alone, usage.json holds its reading, as befor
 
 // #2863: spawn.sh lets one start through on the own login's stale reading only while this file says its token expired, so it never reads the Keychain itself
 test("an expired stored token is written to stored-login-status.json, and no stored-login.json is written", async () => {
-  const { status, stored } = await cycle("expired", {
+  const { status, statusMtime, stored } = await cycle("expired", {
     added: ["added@example.org"],
     expired: true,
     login: true,
   })
   expect(status).toMatchObject({ tokenExpired: true })
-  expect(Number.isNaN(Date.parse(status.writtenAt))).toBe(false)
+  expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
   expect(stored).toBeNull()
 })
 
