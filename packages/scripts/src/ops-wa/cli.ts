@@ -170,6 +170,8 @@ const main = async () => {
     return runCheck(file.path, source, at)
   }
   await ownFolder(dir)
+  // ADR 0032's numbers.json, which kept.json replaced, goes at start, so no phone number outlives its 24 hours there (ADR 0035)
+  await unlink(join(dir, "numbers.json")).catch(() => {})
   await ownFolder(outboxDir(data))
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
