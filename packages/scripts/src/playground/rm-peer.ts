@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import { deleteWeights, isWeights, type Roots } from "@packages/safe-delete"
@@ -32,6 +32,20 @@ const gateRecord = async (path: string, deps: RmPeerDeps): Promise<string[] | nu
   return folders
 }
 
+// The read-only --bytes gate: a file on this peer's record or under a recorded folder, so the near end reads a size and deletes nothing, without a weights extension (a read-only count has no delete to guard, and one recorded path's size is safe to read), a file neither on the record nor under a recorded folder refused, so the far end never reads one it should not.
+const gateRead = async (path: string, deps: RmPeerDeps): Promise<string[] | null> => {
+  const { entries } = await readRecord(deps.data).catch(() => ({ entries: [] }))
+  if (entries.some((entry) => entry.path === path))
+    return entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
+  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
+  const abs = resolve(path)
+  if (!folders.some((folder) => abs === folder || abs.startsWith(folder + sep))) {
+    console.error(`playground: ${path} is not on the machine record, so it stays`)
+    return null
+  }
+  return folders
+}
+
 // The peer's far end: <path> <bytes> <card>, or why the bytes or card do not read, a path on the record or under a recorded folder at its exact size, re-checked on this peer and deleted with the same deleteWeights, its record entry dropped.
 export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<number> {
   if (words[0] === "--bytes") {
@@ -39,7 +53,7 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
       console.error(`playground: ${RM_PEER_USAGE}`)
       return 2
     }
-    const folders = await gateRecord(words[1], deps)
+    const folders = await gateRead(words[1], deps)
     if (!folders) return 1
     const size = setBytes(words[1])
     if (size === 0) {

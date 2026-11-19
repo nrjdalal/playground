@@ -2560,10 +2560,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
           ? { code: 0, out: "7\n" }
           : { code: 0, out: "Deleted the weights on the peer" },
     )
-    const { code, out } = await rmTold(
-      [base.repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-      deps,
-    )
+    const { code, out } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
     expect(code).toBe(0)
     expect(out.join("\n")).toContain("Deleted the weights on the peer")
     expect(spy.seen).toEqual([
@@ -2580,10 +2577,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
     const { deps, spy } = decisionMachine(base, withWhat(`spark-b:${off}`), undefined, async () => {
       throw new Error("the peer responder must not run when the path is not model weights")
     })
-    const { code, err } = await rmTold(
-      [base.repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-      deps,
-    )
+    const { code, err } = await rmTold([off, "--card", CARD, "--peer", "spark-b"], deps)
     expect(code).toBe(1)
     expect(err.join("\n")).toContain("is not model weights")
     expect(spy.seen).toEqual([])
@@ -2603,10 +2597,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
             }
           : { code: 0, out: "Deleted the weights on the peer" },
     )
-    const { code, err } = await rmTold(
-      [base.repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-      deps,
-    )
+    const { code, err } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
     expect(code).toBe(1)
     expect(err.join("\n")).toContain(`spark-b: ${base.repo} is not on the machine record`)
     expect(spy.seen).toHaveLength(1)
@@ -2620,6 +2611,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
     const shard = (i: number) => join(folder, `m-${String(i).padStart(5, "0")}-of-00002.gguf`)
     file(shard(1), "01234")
     file(shard(2), "012")
+    file(join(folder, "blobs", "b"), "weights")
     writeFileSync(
       join(m.deps.data, "machine-record.json"),
       JSON.stringify({
@@ -2652,7 +2644,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
       told: m.told,
       repo: folder,
     }
-    const { deps } = decisionMachine(base, withWhat(folder))
+    const { deps } = decisionMachine(base, withWhat(shard(1)))
     const { code, out } = await rmTold(
       [shard(1), "--card", CARD, "--reason", "nightly-clean"],
       deps,
@@ -2674,10 +2666,7 @@ describe("runRm --card on an approved delete decision (#2895)", () => {
           ? { code: 2, out: `playground: ${RM_PEER_USAGE}` }
           : { code: 0, out: "Deleted the weights on the peer" },
     )
-    const { code, err } = await rmTold(
-      [base.repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-      deps,
-    )
+    const { code, err } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
     expect(code).toBe(1)
     expect(err.join("\n")).toContain("spark-b: usage:")
     expect(spy.seen).toHaveLength(1)
