@@ -137,7 +137,7 @@ export const jidOf = (e164: string) => `${e164.replace(/^\+/, "")}@s.whatsapp.ne
 export const OFF =
   "WhatsApp mode is off, so this message goes no further. Turn it on in Playground's Settings, under Extensions."
 export const updateLine = (policy: string) =>
-  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. ${replyLine(policy)}`
+  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. Send it with playground wa send --status, which edits the one live status message. ${replyLine(policy)}`
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
@@ -894,6 +894,11 @@ type Own = { at: number; id: string; jid: string }
 const ownFile = (dir: string) => join(dir, "own.json")
 // WhatsApp takes an edit in a message's first 15 minutes.
 const EDIT_MS = 15 * 60_000
+// status.json, the sender's chain's: the live status in the owner's chat, by its id, its words and its first send's time, which WhatsApp's edit window counts from.
+type Live = { at?: number; id?: string; text?: string }
+const statusFile = (dir: string) => join(dir, "status.json")
+// The owner's chat messages after the live status, the owner's and ours, at which it has scrolled away.
+const STATUS_SCROLL = 5
 
 const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa never starts a chat"
 
@@ -1103,6 +1108,48 @@ export function sender(
         : "sent",
     }
   }
+  // the live status: one message in the owner's chat, edited in place while WhatsApp takes an edit and it has not scrolled away, else sent anew as the live one; an unchanged status sends nothing
+  const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
+    if (kind === "guest") throw new Error("a status goes to the owner's chat alone")
+    if (kind !== "reply") throw new Error("wa alert sends text alone")
+    const text = body.trim()
+    if (split(toWhatsApp(text)).length > 1)
+      throw new Error(`a status fits one message, ${SEND.partChars} characters`)
+    const live = await readOwn<Live>(statusFile(io.dir), {})
+    if (live.id && live.text === text)
+      return { ids: [], said: "unchanged: the live status already reads this" }
+    const now = io.now()
+    let failed: string | undefined
+    if (live.id && live.at !== undefined && now - live.at < EDIT_MS) {
+      const owner = jidOf(io.owner)
+      const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+      const own = (await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})).messages ?? []
+      const after =
+        kept.filter((k) => k.who === "owner" && k.at > live.at!).length +
+        own.filter((o) => o.jid === owner && o.id !== live.id && o.at > live.at!).length
+      if (after < STATUS_SCROLL)
+        try {
+          await sendNow(text, "reply", undefined, { edit: live.id })
+          await writeOwn(statusFile(io.dir), { ...live, text })
+          return { ids: [live.id], said: "edited the live status" }
+        } catch (error) {
+          failed = (error as Error).message
+        }
+    }
+    const out = await sendNow(text, "reply", undefined, {})
+    if (out.ids[0]) await writeOwn(statusFile(io.dir), { at: io.now(), id: out.ids[0], text })
+    return failed
+      ? {
+          ...out,
+          said: `${out.said}: the live status's edit failed (${failed}), so this one is live now`,
+        }
+      : out
+  }
+  // a send, or the live status when its extra marks it
+  const anySend = (body: string, kind: Kind, source: string | undefined, extra: Extra) =>
+    extra.status ? statusNow(body, kind, extra) : sendNow(body, kind, source, extra)
   const queued = <T>(job: () => Promise<T>): Promise<T> => {
     const run = chain.then(job)
     chain = run.catch(() => {})
@@ -1147,7 +1194,7 @@ export function sender(
   return Object.assign(
     // source: what a checker reads for an alert to the owner first; extra: a file, a location, a quote, an edit or a delete beside the body (outbound.ts)
     (body: string, kind: Kind = "reply", source?: string, extra: Extra = {}): Promise<string> =>
-      queued(() => sendNow(body, kind, source, extra)).then((out) => out.said),
+      queued(() => anySend(body, kind, source, extra)).then((out) => out.said),
     {
       // a card's text to the owner, giving its first message's id, which a decision's pin names
       card: (body: string) =>
@@ -1157,7 +1204,7 @@ export function sender(
         }),
       // the same send, with the ids of the messages it sent, which an edit or a delete names
       out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
-        queued(() => sendNow(body, kind, source, extra)),
+        queued(() => anySend(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
       react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>

@@ -766,6 +766,12 @@ describe("WhatsApp mode", () => {
     )
   })
 
+  test("the update line names wa send --status, the one live status message (#2861)", () => {
+    expect(UPDATE).toContain(
+      "Send it with playground wa send --status, which edits the one live status message.",
+    )
+  })
+
   test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message or a send queues it", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
