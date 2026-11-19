@@ -614,6 +614,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
   const expiredLogin =
     (
       opts: {
+        fiveHour?: { resetsInHours: number; used: number }
         marker?: string
         markerAge?: number
         resetsInHours?: number
@@ -630,6 +631,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
         JSON.stringify({
           account: "own@example.com",
           rate_limits: {
+            ...(opts.fiveHour && {
+              five_hour: {
+                resets_at: new Date(
+                  Date.now() + opts.fiveHour.resetsInHours * 3_600_000,
+                ).toISOString(),
+                used_percentage: opts.fiveHour.used,
+              },
+            }),
             seven_day: {
               resets_at: new Date(
                 Date.now() + (opts.resetsInHours ?? 120) * 3_600_000,
@@ -699,6 +708,18 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(markers(r).sort()).toEqual([markerName(staleAt), markerName(staleAt, 2)])
   })
 
+  test("a stale 5-hour window whose reset has passed is no cap on that start", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv,
+      script,
+      undefined,
+      expiredLogin({ fiveHour: { resetsInHours: -2, used: 95 } }),
+    )
+    expect(r.code).toBe(0)
+  })
+
   test("a fresh reading is judged as before, whatever marker an earlier stale one left", async () => {
     const written = minutesAgo(0)
     const r = await spawn(
@@ -743,6 +764,11 @@ describe("the capacity gate refuses and spawns nothing", () => {
       "48 hours is the most a reading counts",
     ],
     ["a reading over the 98% backstop", { week: 99 }, "the week is at 99%"],
+    [
+      "a 5-hour window still over its cap",
+      { fiveHour: { resetsInHours: 2, used: 95 } },
+      "the 5-hour window is at 95%",
+    ],
   ])(
     "--account naming the own login is refused on its stale reading for %s",
     async (_, opts, reason) => {

@@ -887,7 +887,7 @@ try:
             readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
-        # an --account start on the own login whose stored-login.json is stale only because ops-usage finds its token expired (stored-login-status.json, which run.py writes each run) passes once on that last reading, judged on judge()'s line while it is at most 48 hours old and its week has not reset: that start's Claude Code refreshes the token, and ops-usage's next run writes a fresh reading; the one start is a marker keyed on the reading's writtenAt, made with O_EXCL on a real start (never --check), so a second start on the same reading waits for that fresh one.
+        # an --account start on the own login whose stored-login.json is stale only because ops-usage finds its token expired (stored-login-status.json, which run.py writes each run) passes once on that last reading, judged on judge()'s line while it is at most 48 hours old and its week has not reset: that start's Claude Code refreshes the token, and ops-usage's next run writes a fresh reading; the one start is a numbered marker keyed on the reading's writtenAt, made with O_EXCL on a real start (never --check), so a second start on the same reading waits for that fresh one, or 30 minutes, after which one more may try, in case the start never reached Claude Code.
         one_start = None
 
         def expired_start(stored, stale):
@@ -905,12 +905,24 @@ try:
             fix = "Run Claude Code on this login once, so it refreshes the token."
             if resets <= now:
                 return "stored-login.json", {}, f"{cause}, and its week has reset since ({resets:%a %H:%M} UTC), so that reading is an old week's. {fix}", None
+            five = stored["rate_limits"].get("five_hour")
+            try:
+                five_over = isinstance(five, dict) and from_iso(five["resets_at"]) <= now
+            except (KeyError, TypeError, ValueError):
+                five_over = False
+            if five_over:
+                stored = dict(stored, rate_limits={k: v for k, v in stored["rate_limits"].items() if k != "five_hour"})
             seen, detail = judge("stored-login.json", stored, 48 * 60, f"48 hours is the most a reading counts while its token has expired. {fix}")
             if detail:
                 return "stored-login.json", seen, f"{cause}: {detail}", None
-            marker = os.path.join(data_dir, "ops", "usage", f"own-login-start-{int(written.timestamp())}.json")
-            if os.path.exists(marker):
-                return "stored-login.json", seen, f"{cause}, and one start already went on it ({os.path.basename(marker)}), so the next waits for the fresh reading ops-usage writes once that start's Claude Code has refreshed the token. {fix}", None
+            folder, prefix = os.path.join(data_dir, "ops", "usage"), f"own-login-start-{int(written.timestamp())}-"
+            taken = sorted(int(n[len(prefix):-5]) for n in os.listdir(folder) if n.startswith(prefix) and n.endswith(".json") and n[len(prefix):-5].isdigit())
+            if taken:
+                last = os.path.join(folder, f"{prefix}{taken[-1]}.json")
+                since = int((now.timestamp() - os.stat(last).st_mtime) // 60)
+                if since < 30:
+                    return "stored-login.json", seen, f"{cause}, and one start already went on it {since} minutes ago ({os.path.basename(last)}), so the next waits for the fresh reading ops-usage writes once that start's Claude Code has refreshed the token, or for 30 minutes on that start. {fix}", None
+            marker = os.path.join(folder, f"{prefix}{taken[-1] + 1 if taken else 1}.json")
             return f"stored-login.json, written {age} minutes ago: its token expired, so this one start lets Claude Code refresh it", seen, None, marker
 
         usage, detail = load("usage.json")
