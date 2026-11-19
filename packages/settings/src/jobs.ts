@@ -4,7 +4,7 @@ import { z } from "zod"
 import { CORE } from "./rendered"
 import { defineSettings } from "./settings"
 
-// The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist, and on Linux its systemd user unit, from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
+// The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist, and on Linux its systemd user unit, from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting, and on a Mac a third, ops-keep-awake, so an idle Mac stays awake with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
 // A job row as a write takes it, every field named and none it does not have; a stored row reads through fromStored first.
 export const jobSchema = z.strictObject({
   callsModel: z.boolean(),
@@ -77,7 +77,7 @@ const launchd = (name: string, job: Pick<Job, "description" | "schedule">): Job 
 const bunJob = (name: string, root = "{checkout}") =>
   `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`
 
-// The jobs Playground ships, each off until the owner turns it on but the Dashboard's own; A to Z.
+// The jobs Playground ships, each off until the owner turns it on but the Dashboard's own, ops-usage and, on a Mac, ops-keep-awake; A to Z.
 export const JOBS: Record<string, Job> = {
   // Its sync runs in its script's checkout, so it runs from the Dashboard's, which holds the database's .env.
   "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
@@ -112,6 +112,13 @@ export const JOBS: Record<string, Job> = {
     description:
       "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 },
+  }),
+  // caffeinate -i holds off idle sleep and -s system sleep on AC power, so an idle Mac keeps its ops jobs running while the display still sleeps and locks; it needs no sudo and sets no pmset value.
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description:
+      "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true },
   }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description:
@@ -205,6 +212,9 @@ export const JOBS: Record<string, Job> = {
 // The jobs Playground shipped and no longer does, A to Z: renderJobs turns an existing row of one off, so its teardown stops it on every install, its stored jobs.<camelName> row reads as no org's job and settings reset clears it, and the board and the sweep leave it out.
 export const RETIRED: readonly string[] = ["ops-awake"]
 
+// The jobs that run on macOS alone: renderJobs leaves each out on any other platform, so there it is no job and nothing restarts it.
+export const MAC_ONLY: readonly string[] = ["ops-keep-awake"]
+
 // A job's old setting keys: the switch imports jobs.json under its old names before the migration renames them.
 const OLD_KEYS: Record<string, string[]> = { "ops-dashboard": ["jobs.opsDesk"] }
 
@@ -288,12 +298,13 @@ const unitOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist and systemd user unit by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, and a RETIRED one kept paused, so the runner stops it; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, a MAC_ONLY job on darwin alone, and an enabled launchd job's plist and systemd user unit by label. Each value reads as a stored row (fromStored). A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, and a RETIRED one kept paused, so the runner stops it; one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
   fill: Fill,
   org: Record<string, OrgJob> | null = {},
+  platform: string = process.platform,
 ): { jobs: Record<string, unknown>[]; plists: Map<string, string>; units: Map<string, string> } => {
   const plists = new Map<string, string>()
   const units = new Map<string, string>()
@@ -315,10 +326,12 @@ export const renderJobs = (
     }
   }
   const jobs: Record<string, unknown>[] = [
-    ...Object.entries(JOBS).map(([name, fallback]) => {
-      const set = jobSchema.safeParse(fromStored(values[jobKey(name)]))
-      return row(name, set.success ? set.data : fallback)
-    }),
+    ...Object.entries(JOBS)
+      .filter(([name]) => platform === "darwin" || !MAC_ONLY.includes(name))
+      .map(([name, fallback]) => {
+        const set = jobSchema.safeParse(fromStored(values[jobKey(name)]))
+        return row(name, set.success ? set.data : fallback)
+      }),
     ...Object.entries(org ?? {}).map(([name, job]) => row(name, job)),
   ]
   const known = new Set([...Object.keys(JOBS), ...Object.keys(org ?? {})])

@@ -22,10 +22,10 @@ const fill = {
   path: "/usr/bin:/bin",
 }
 
-const ON_BY_DEFAULT = ["ops-dashboard", "ops-usage"]
+const ON_BY_DEFAULT = ["ops-dashboard", "ops-keep-awake", "ops-usage"]
 
 describe("the job registry", () => {
-  test("each shipped job is a jobs.<camelName> setting, off by default but the Dashboard's and the usage read", () => {
+  test("each shipped job is a jobs.<camelName> setting, off by default but the Dashboard's, the usage read and, on a Mac, keep-awake", () => {
     expect(jobKey("ops-merge-train")).toBe("jobs.opsMergeTrain")
     const keys = settingFields().map(({ key }) => key)
     for (const [name, job] of Object.entries(JOBS)) {
@@ -35,8 +35,9 @@ describe("the job registry", () => {
     expect(Object.keys(JOBS)).toEqual([...Object.keys(JOBS)].sort())
   })
 
-  test("a fresh install renders every job paused but the Dashboard's and the usage read, with its placeholders filled", () => {
-    const { jobs, plists } = renderJobs({}, [], fill)
+  test("a fresh install renders every job paused but the Dashboard's, the usage read and, on a Mac, keep-awake, with its placeholders filled", () => {
+    // on macOS, which renders every registry job, a macOS-alone one too
+    const { jobs, plists } = renderJobs({}, [], fill, {}, "darwin")
     expect(jobs.map((job) => job.name)).toEqual(Object.keys(JOBS))
     expect(jobs.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual(
       ON_BY_DEFAULT,
@@ -236,6 +237,39 @@ describe("the job registry", () => {
         orgJobs([{ key: jobKey(name), scope: "tester", value: { enabled: true } }], "tester", {}),
       ).toEqual({ jobs: {}, refused: [] })
     }
+  })
+
+  test("the keep-awake job renders on macOS alone, holding caffeinate in a terminal, and on any other platform is no job (#2906)", () => {
+    const on = { [jobKey("ops-keep-awake")]: { ...JOBS["ops-keep-awake"]!, enabled: true } }
+    const awake = (platform: string) =>
+      renderJobs(on, [], fill, {}, platform).jobs.find((job) => job.name === "ops-keep-awake")
+    expect(awake("darwin")).toEqual({
+      callsModel: false,
+      command: "/b/bun --no-env-file /c/packages/scripts/src/ops-keep-awake/cli.ts --data /d",
+      cwd: "/c",
+      description: expect.any(String),
+      heartbeat: "ops-keep-awake",
+      name: "ops-keep-awake",
+      runtime: "herdr",
+      schedule: { always: true },
+    })
+    expect(awake("linux")).toBeUndefined()
+    // on by default on a Mac, with no setting, and off by its own setting, as any job; on Linux no row either way
+    const fresh = (platform: string, values = {}) =>
+      renderJobs(values, [], fill, {}, platform).jobs.find((job) => job.name === "ops-keep-awake")
+    expect(fresh("darwin")).toMatchObject({ name: "ops-keep-awake" })
+    expect(fresh("darwin")).not.toHaveProperty("disabled")
+    const off = settingsFor(
+      [{ key: jobKey("ops-keep-awake"), scope: "me", value: { enabled: false } }],
+      "me",
+    ).values
+    expect(fresh("darwin", off)).toMatchObject({ disabled: true })
+    expect(fresh("linux")).toBeUndefined()
+    // a row an older pass left is dropped too, so up.py has nothing to start there
+    const left = { heartbeat: "ops-keep-awake", name: "ops-keep-awake" }
+    expect(renderJobs(on, [left], fill, {}, "linux").jobs.map((job) => job.name)).not.toContain(
+      "ops-keep-awake",
+    )
   })
 
   test("a write with an unknown key is refused, as one with a runtime other than herdr is", () => {
