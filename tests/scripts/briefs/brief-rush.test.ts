@@ -83,3 +83,16 @@ describe("brief-rush points to testing.md's Traps for a red-first stub (#2854)",
     expect(rush).toContain("agents/testing.md#traps")
   })
 })
+
+// issue 2854: the GLM rule also pins the bundled-code check, a local or GLM worker puts new code where no hook bundle carries it, checked before each commit
+describe("brief-rush.md's GLM rule pins the bundled-code check for a local or GLM worker (#2854)", () => {
+  test("new code goes where no scripts/hooks/*.ts imports, checked with git grep and hooks-bundle before each commit", async () => {
+    const rush = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = rush.split("\n").find((l) => l.startsWith("- New code goes in a module")) ?? ""
+    expect(line).toContain("`scripts/hooks/*.ts` imports")
+    expect(line).toContain("git grep -l")
+    expect(line).toContain("hooks-bundle.ts --check")
+    expect(line).toContain("no-glm-heavy-path")
+    expect(line).toContain("a local session")
+  })
+})
