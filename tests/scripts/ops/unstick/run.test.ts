@@ -767,7 +767,7 @@ clock[0] += 200
 run.cycle(state)
 print(json.dumps(sent))
 `
-  // issue 2839: each run-slot.sh head or can-take forks about 170 processes, 0.6 to 3.5 s apiece on a loaded Mac (measured), and this case makes 8
+  // issue 2839: each run-slot.sh head or can-take forks about 170 processes, 0.6 to 3.5 s apiece on a loaded Mac (measured), and this case makes 8: 8 x 3.5 s is 28 s, within 2 s of the 30 s default, so 60 s
   test("sends once per episode, and again for a new head ticket", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
@@ -837,7 +837,7 @@ clock[0] += 200
 run.cycle(state)
 print(json.dumps(sent))
 `
-  // issue 2839: 7 run-slot.sh calls at up to 3.5 s apiece, as the case above
+  // issue 2839: 7 run-slot.sh calls at up to 3.5 s apiece, as the case above: 7 x 3.5 s is 24.5 s, so 60 s
   test("sends the could-take line when the holder ends and the same head can take it", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
