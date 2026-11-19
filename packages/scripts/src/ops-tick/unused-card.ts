@@ -223,7 +223,7 @@ export const peerCommand = (item: CardItem, card: string): string =>
   item.kind === "image"
     ? `docker image rm ${item.id ?? item.path.replace(/^docker image /, "")}`
     : item.kind === "weights"
-      ? `playground rm --card ${card} --peer ${item.machine} ${item.path}`
+      ? `playground rm --card ${card} --peer ${item.machine} '${item.path.replaceAll("'", `'\\''`)}'`
       : `playground rm ${item.path} --reason "nightly-clean card ${card}"`
 
 // One night of the card: an answered card's Remove picks still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, every other item kept at its size, and the card closed; an open card is edited in place to tonight's items, or settled with none; then a new card is posted for what is left, from the ops manager's name. Returns the card and kept to save, the log's words (none on a night with no card), and each line for Ops.
