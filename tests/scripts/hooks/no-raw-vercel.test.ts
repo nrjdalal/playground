@@ -385,7 +385,7 @@ const YARD_SHIP: [string, string][] = [
   ["by its script", "bun run ship:yard v0.0.111"],
   ["after a cd", "cd /Users/x/playground && bun run ship:yard v0.0.111 --since v0.0.110"],
   ["through run-slot", "~/.playground/ops/run-slot.sh ops-ship -- bun run ship:yard v0.0.111"],
-  ["by its file", "bun packages/scripts/src/ship/yard.ts v0.0.111 --schema-cleared i123"],
+  ["by its file", "bun packages/scripts/src/ship/yard.ts v0.0.111 --schema-cleared PR#123"],
   ["by its file's full path", "bun /Users/x/playground/packages/scripts/src/ship/yard.ts v0.0.111"],
   ["by its script with no run", "bun ship:yard v0.0.111"],
   ["by its file after run", "bun run packages/scripts/src/ship/yard.ts v0.0.111"],

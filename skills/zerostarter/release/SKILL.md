@@ -167,7 +167,7 @@ Then end step 1's freeze with `bun run ship:freeze --end`.
 Then deploy the hosted Yard from the tag with `bun run ship:yard vX.Y.Z` (`packages/scripts/src/ship/yard.ts`), the Ops lead's call alone: no-raw-vercel reads it as a production move, and the step itself stops unless the claude process it runs under is the Ops lead's (`PLAYGROUND_ROLE` lead, the roster's ops kind, read from that process), naming what it found.
 It fetches the tag, deploys the API and then the web with `vercel deploy --prod` from a detached worktree at the tag, checks the live host after each (`/api/health` answers 200, `/api/v1/yard/channels` answers 401 with no token), records the tag in the data folder's `ops/yard-tag`, and removes the worktree.
 Its ids and hosts are the live dashboard checkout's `.env` keys `.env.example` lists under the step, and it names each one unset.
-When the tag changes `packages/db`'s schema or migrations since the recorded tag, it stops, naming the files: take the change through the db-migration skill's step 0, then run it again with `--schema-cleared <Inbox id>` naming that decision.
+When the tag changes `packages/db`'s schema or migrations since the recorded tag, it stops, naming the files: take the change through the db-migration skill's step 0, then run it again with `--schema-cleared`, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from `~/` in its body (the additive path).
 With no record yet it stops once and asks for `--since <the tag live now>`.
 A failed deploy or check stops it before the next project, naming the URL and the status it answered: send that line up the chain.
 
