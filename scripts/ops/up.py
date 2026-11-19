@@ -44,6 +44,7 @@ REGISTRY = (
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
+NO_HOLDER_GRACE = 70  # a start that left no holder never ran once.py, so 70 s is enough for it to write a heartbeat and recover, one step past the 60 s the --restarted drop still needs
 START_WINDOW = 10  # a start this close before a --restarted call, or after it, came from another pass after the job stopped, so that call keeps it
 DOWN_PASSES = 3  # a launchd job unhealthy this many passes in a row is told to ops once, since launchd is not bringing it back
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
@@ -419,8 +420,9 @@ def up(quiet):
                 log(f"{job['name']} is paused; stopped its loop, pid {holder}")
             continue
         start_at = starts.get(job["name"]) or 0
-        # a job started this recently is left alone, but its grace ends when it recorded a later start or the machine booted after it, so a dead job restarts on the first pass after a reboot
-        if job["name"] == skip or (time.time() - start_at < GRACE and not grace_ended(job, start_at)):
+        # a job started this recently is left alone, but its grace ends when it recorded a later start or the machine booted after it, so a dead job restarts on the first pass after a reboot. A herdr start that left no holder never ran once.py, so it gets 70 s, not the 600 s grace, and with GRACE 0 it is left to itself.
+        grace = 0 if not GRACE else (NO_HOLDER_GRACE if is_herdr(job) and not holder else GRACE)
+        if job["name"] == skip or (time.time() - start_at < grace and not grace_ended(job, start_at)):
             continue
         ok, why = healthy(job)
         # a heartbeat pid counts only with a holder to stop, or for a job ops-up never starts; with neither, a start would run a second copy beside it

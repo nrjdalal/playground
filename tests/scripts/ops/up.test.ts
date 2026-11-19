@@ -149,7 +149,8 @@ print(json.dumps({"started": started}))
 `
 
 // Loads up.py and runs main() with a job that has no holder (once.py never ran for it), every job down, each start recorded rather than made. The harness takes BOOT from the env so only a boot after the recorded start ends the grace.
-const NO_HOLDER = `${LOAD}started = []
+const NO_HOLDER = `${LOAD}import os
+started = []
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None
@@ -167,7 +168,8 @@ print(json.dumps({"started": started}))
 `
 
 // Like NO_HOLDER, but one job's holder (once.py) is running, pid 5101, so up.py keeps its full grace.
-const WITH_HOLDER = `${LOAD}started = []
+const WITH_HOLDER = `${LOAD}import os
+started = []
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: 5101
@@ -507,7 +509,7 @@ for answer in json.loads(sys.argv[2]):
 print(json.dumps(calls))
 `
 
-// a start recorded 90 s ago left no holder (once.py never ran for it), so up.py ends its grace past 60 s and starts it again in that pass.
+// a start recorded 90 s ago left no holder (once.py never ran for it), so up.py ends its grace past 70 s and starts it again in that pass.
 test("a job 90 s into its grace with no holder is started again", () => {
   const config = mkdtempSync(join(scratch, "no-holder-90s-"))
   const ops = join(dataOf(config), "ops")
@@ -548,7 +550,7 @@ test("a job 90 s into its grace with no holder is started again", () => {
   ])
 })
 
-// a start recorded 30 s ago left no holder, so up.py still holds it inside the 60 s grace and starts nothing in that pass.
+// a start recorded 30 s ago left no holder, so up.py still holds it inside the 70 s grace and starts nothing in that pass.
 test("a job 30 s into its grace with no holder is left alone", () => {
   const config = mkdtempSync(join(scratch, "no-holder-30s-"))
   const ops = join(dataOf(config), "ops")
