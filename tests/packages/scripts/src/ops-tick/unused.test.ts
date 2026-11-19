@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
   utimesSync,
   writeFileSync,
@@ -18,6 +19,7 @@ import {
   measured,
   measureUnused,
   peerUnusedArgv,
+  recordedBy,
   shardSets,
   type Unused,
   unusedEverywhere,
@@ -62,7 +64,7 @@ const INSPECT = [
 ].join("\n")
 
 // A scratch home: a data folder whose record holds ~/.bun, the clone and ~/probe-local-model/gguf, ~/models with a kept and a dropped hf repo, one old test row and one fresh, Ops' rehearse142, and a clone whose .env names one peer; every argv its run is handed is kept.
-const setUp = (dashboard = false) => {
+const setUp = (dashboard = false, version?: { dir: string; keep: string }) => {
   const home = mkdtempSync(join(tmpdir(), "unused-"))
   homes.push(home)
   const data = join(home, ".playground")
@@ -83,14 +85,41 @@ const setUp = (dashboard = false) => {
     undo: "rm",
     why: "seed",
   })
+  const versionDir = version ? join(home, version.dir) : null
+  const versionKeep = version ? join(home, version.keep) : null
+  const versionEntry = versionDir
+    ? {
+        added: "2026-11-17",
+        by: "ops",
+        keep: versionKeep,
+        kind: "version",
+        path: versionDir,
+        undo: "rm",
+        why: "seed",
+      }
+    : null
   mkdirSync(data, { recursive: true })
   writeFileSync(
     join(data, "machine-record.json"),
     JSON.stringify({
       baseline: [],
-      entries: [entry(at(".bun")), entry(repo), entry(at("probe-local-model/gguf"))],
+      entries: [
+        ...(versionEntry ? [versionEntry] : []),
+        entry(at(".bun")),
+        entry(repo),
+        entry(at("probe-local-model/gguf")),
+      ],
     }),
   )
+  if (versionDir && versionKeep) {
+    const target = join(versionDir, "current")
+    mkdirSync(join(versionDir, "v1"), { recursive: true })
+    sized(join(versionDir, "v1", "model.gguf"), 300 * MB)
+    mkdirSync(target, { recursive: true })
+    sized(join(target, "model.gguf"), 300 * MB)
+    mkdirSync(dirname(versionKeep), { recursive: true })
+    symlinkSync(target, versionKeep)
+  }
   sized(at(".bun/install/cache/big.tgz"), 900 * MB)
   sized(join(repo, "weights-like.gguf.txt"), 900 * MB)
   mkdirSync(join(models, "ornith"), { recursive: true })
@@ -486,4 +515,55 @@ test("a sharded model's four loose shards under models/ are one item end to end:
     recorded: false,
     shards,
   })
+})
+
+// A versioned install keeps its current one under the version entry's keep link, the old ones under the dir; nightly lists the old ones, not the keep or its target, and not recorded (PG-2865).
+test("a versioned install: the old version under its entry's dir is listed, the keep link and its live target are not, and the old version is not recorded", async () => {
+  const { at, places } = setUp(false, { dir: "probe-install", keep: "probe-install/link" })
+  const old = join(at("probe-install"), "v1", "model.gguf")
+  const current = join(at("probe-install"), "current", "model.gguf")
+  const keep = at("probe-install/link")
+  const { items } = await measureUnused(places)
+  const listed = items.find((i) => i.path === old)
+  expect(listed).toEqual({ bytes: 300 * MB, kind: "weights", path: old, recorded: false })
+  expect(items.some((i) => i.path === current)).toBe(false)
+  expect(items.some((i) => i.path === keep)).toBe(false)
+})
+
+// Without a version entry, a keep link and its target on disk list nothing new.
+test("no version entry: a keep link and the target it names list nothing", async () => {
+  const { at, places } = setUp(false)
+  const keep = at("probe-install/link")
+  const target = at("probe-install/current")
+  mkdirSync(target, { recursive: true })
+  sized(join(target, "model.gguf"), 400 * MB)
+  mkdirSync(dirname(keep), { recursive: true })
+  symlinkSync(target, keep)
+  const { items } = await measureUnused(places)
+  expect(items.some((i) => i.path === target)).toBe(false)
+  expect(items.some((i) => i.path === keep)).toBe(false)
+})
+
+// The record holds a versioned install's dir, so an old version under it is not recorded, and the card never removes one for the install's own sake (PG-2865).
+test("recordedBy: an old version under a version entry is not recorded, a folder entry still is", () => {
+  const at = (rel: string) => join("unit", rel)
+  const version = {
+    added: "2026-11-17",
+    by: "ops",
+    keep: at("probe-install/link"),
+    kind: "version" as const,
+    path: at("probe-install"),
+    undo: "rm",
+    why: "seed",
+  }
+  const folder = {
+    added: "2026-11-17",
+    by: "ops",
+    kind: "folder" as const,
+    path: at("probe-local-model/gguf"),
+    undo: "rm",
+    why: "seed",
+  }
+  expect(recordedBy([version], join(at("probe-install"), "v1", "model.gguf"))).toBe(false)
+  expect(recordedBy([folder], at("probe-local-model/gguf/GLM-Flash.gguf"))).toBe(true)
 })

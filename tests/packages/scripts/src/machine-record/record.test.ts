@@ -219,6 +219,13 @@ describe("the daily check (PG-2538)", () => {
       "unreadable: docker image vllm/vllm-openai:v0.32.0",
     ])
   })
+
+  test("a version entry's dir is held, so the daily check names it, never a path under it", async () => {
+    const dir = join(home, "models", "probe-install")
+    mkdirSync(join(dir, "v1"), { recursive: true })
+    await seed(data, [entry(dir, { kind: "version", keep: join(dir, "link") })], places())
+    expect(await check(data, places())).toEqual([])
+  })
 })
 
 describe("the record's writes (PG-2538)", () => {
