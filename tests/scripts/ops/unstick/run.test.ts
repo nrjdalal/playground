@@ -1467,6 +1467,39 @@ describe("ops-unstick's slot alerts", () => {
     ])
   })
 
+  // a bare suite in the same session as a held run both climb to the session's own claude, but the bare run holds no slot and stays outside
+  const siblingHeld = () => {
+    const rows = [
+      "  999481      1 claude",
+      "  999482 999481 /bin/zsh -c run-slot",
+      "  999483 999482 bash /x/.playground/ops/run-slot.sh worker-x -- bun run test:file a",
+      "  999484 999483 bun run test:file tests/a.test.ts /x/.claude/worktrees/pg-1-held",
+      "  999485 999481 /bin/zsh -c bare",
+      "  999486 999485 bun run test:file tests/b.test.ts /x/.claude/worktrees/pg-2-bare",
+    ]
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot"), { recursive: true })
+    writeFileSync(join(ops, "run-slot.holder"), "worker-x 999483 2026-11-01T13:00:00Z 1 small\n")
+    return { config, rows }
+  }
+
+  // a bare suite beside a held run in the same session climbs to the same claude but holds no slot, so it stays outside-slot
+  test("a bare suite beside a held run in the same session stays outside-slot", async () => {
+    const { config, rows } = siblingHeld()
+    const jobs = await call(config, "heavy_jobs", rows)
+    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999486", where: "pg-2-bare" }])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+      {
+        at,
+        kind: "outside-slot",
+        line: "a suite runs outside the run slots (pid 999486); use run-slot.sh",
+        name: "pg-2-bare",
+        since: at,
+      },
+    ])
+  })
+
   for (const slot of ["run-slot-commit", "run-slot-model-2"])
     test(`a suite under ${slot}'s holder reads as inside a slot`, async () => {
       expect(await call(held(slot), "heavy_jobs", committing("999441"))).toEqual([
