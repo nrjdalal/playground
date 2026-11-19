@@ -256,10 +256,10 @@ describe("ship:yard's schema stop", () => {
 })
 
 describe("ship:yard's schema source parsers", () => {
-  test("prSource, fed a merged PR with a ReviewBot shape review from any author and a dump path, clears", () => {
+  test("prSource, a merged PR naming a migration and a dump, clears on the dump's path", () => {
     const source = prSource(
       JSON.stringify({
-        body: "#2819 shape reviewed, dump at ~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
+        body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql, dump at ~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump`,
         comments: [
           {
             author: { login: "nrjdalal" },
@@ -269,20 +269,39 @@ describe("ship:yard's schema source parsers", () => {
         state: "MERGED",
       }),
     )
-    // the match's character class has no `~`, so it keeps the path's `/.playground` start, not the source `~`
     expect(source).toEqual({
-      dumpPath: "/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
+      dumpPath: "~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
       kind: "pr",
       merged: true,
       shapeReview: true,
     })
   })
 
-  test("decisionSource, fed an approved Inbox decision, is approved", () => {
-    expect(decisionSource(JSON.stringify({ status: "approved" }))).toEqual({
+  test("prSource, a merged PR naming only a packages/db migration, returns null", () => {
+    const source = prSource(
+      JSON.stringify({
+        body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql`,
+        comments: [
+          {
+            author: { login: "nrjdalal" },
+            body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
+          },
+        ],
+        state: "MERGED",
+      }),
+    )
+    expect(source).toBeNull()
+  })
+
+  test("decisionSource, an approved Inbox decision, is approved", () => {
+    expect(decisionSource(JSON.stringify({ kind: "decision", status: "approved" }))).toEqual({
       approved: true,
       kind: "decision",
     })
+  })
+
+  test("decisionSource, an approved item of another kind, returns null", () => {
+    expect(decisionSource(JSON.stringify({ kind: "ticket", status: "approved" }))).toBeNull()
   })
 
   test("decisionArg, for a #iN value, is the bare id `i123`", () => {
