@@ -18,6 +18,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A `reveal` card carries only the item's full `service` and a `why`, a plain line: its title takes step 5, then step 9; the card fetches the value on the owner's own click, so it appears nowhere in the item either.
 
 An `ask` or an update about the factory's own work carries `scope: "factory"`, so it can reach the owner on WhatsApp too; an org's work names its org, and a card with no scope stays in the Inbox alone (asks.md, ADR 0024).
+A card held for a later start carries `planned: true`, so it waits on the Planned shelf; its poster clears it with `playground ask start <id|#iN>` when it is due, leaving the shelf and staying open (the field is in asks.md's ask shape).
 
 Every decision and draft then takes step 10 once the owner answers; an update gets no answer, so it ends at step 9.
 
