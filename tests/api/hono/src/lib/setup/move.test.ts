@@ -257,6 +257,25 @@ describe("moveIfExposed", () => {
     // the move's note names the dump's path, which the roll's line carries
     expect(lines.some((line) => line.includes(name))).toBe(true)
   })
+
+  test("a database the URL names with another user and database dumps those, not the default postgres", async () => {
+    const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+    const docker = fakeDocker("0.0.0.0")
+    await moveIfExposed(
+      `postgres://admin:${SECRET}@localhost:${PORT}/shop`,
+      docker.run,
+      (url) => locate(url, docker.sync),
+      noWait,
+      dumpDir,
+    )
+    const dumpCall = docker.calls.find(([verb, , sub]) => verb === "exec" && sub === "pg_dump")
+    // the dump carries the URL's user and database, not the "postgres" fallback
+    expect(dumpCall).toBeDefined()
+    expect(dumpCall).toContain("-U")
+    expect(dumpCall).toContain("admin")
+    expect(dumpCall).toContain("-d")
+    expect(dumpCall).toContain("shop")
+  })
 })
 
 describe("moveToLoopback", () => {
