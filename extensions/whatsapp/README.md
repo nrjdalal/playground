@@ -25,6 +25,12 @@ From `wa.quietStartHour` to `wa.quietEndHour` in your zone (`clock.ownerZone`), 
 Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; a status update is held as the newest alone, and an urgent alert reaches you at any hour ([ADR 0040](../../.agents/adr/0040-quiet-hours-hold-replies-for-one-catch-up.md)).
 Set both to the same hour for no quiet window.
 
+## The 22-hour reminder
+
+ops-wa can reply only within 24 hours of your last message.
+At 22 hours it sends you one line asking for any reply, so updates keep coming; each new message of yours opens a new 24 hours with its own reminder.
+When 22 hours falls in quiet hours, the line goes when they end, if the 24 hours are still open.
+
 ## What you can send
 
 A photo, voice note, video or document you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with its caption, a document's name, or a voice note's or video's words; it stays out of the attachments folder.
@@ -40,7 +46,7 @@ Its 15-minute update is one status message it edits in place while that one is u
 
 While WhatsApp mode is on and you have written in the last 24 hours, ops-wa sends you each open `ask` decision and update its poster scoped to the factory (`scope: "factory"`) from the Inbox once, with its choices numbered: reply `1 #i12` to pick choice 1 on #i12, and ops-wa answers it as the card's own button would, recorded as from WhatsApp ([ADR 0024](../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)).
 A card with choices also comes as a poll: tap a choice, and your vote answers the card as typing its number would; a changed vote finds the card answered already ([ADR 0029](../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)).
-A decision stays pinned in your chat until it settles, on WhatsApp or in the Inbox, with WhatsApp mode on or off; one that settles once your 24 hours have passed comes off when you next write. At most 3 stay pinned, the oldest coming off first.
+A decision stays pinned in your chat until it settles, on WhatsApp or in the Inbox, with WhatsApp mode on or off; one that settles once your 24 hours have passed comes off within a minute of your next message. At most 3 stay pinned, the oldest coming off first.
 Every other card stays in the Inbox, named by its title alone as `📥 <title>`, at most 5 then `📥 +N more in the Inbox`, and a title holding a term the Inbox keeps back only in that count: a card with no scope or another scope than the factory's, a secret, a delete, a budget, a ship, a schema, a ticket and a Slack message. A card is named only while it still asks, the Inbox tab's test: open, not replied, and awake.
 Each open draft comes to you too, once, as written, with where it goes and a line on how to reply; the sender refuses token shapes ([ADR 0039](../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
 Reply `send` to that message to post it as written, or reply to it with your own words to post those instead; a Send in the Inbox and a reply on WhatsApp settle each other, and a draft with files goes from the Inbox alone.
