@@ -600,6 +600,49 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
+  // #2863: an expired token stops ops-usage's stored-login reading, so login-flip's fresh probe of the same login judges it
+  const staleWithProbe = (probe: object) => (home: string) => {
+    storedLogin("own@example.com", 20, 120)(home)
+    probedFiles({ "own@example.com": probe }, {})(home)
+  }
+
+  test("--account naming the own login starts on it while its stored-login.json is stale and a fresh probe shows room", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--account", "own@example.com"],
+      [],
+      { CLAUDE_JSON: ownLogin, PACE_OFF_UNTIL: offUntilUtc, USAGE_JSON: factoryUsage(10) },
+      script,
+      undefined,
+      staleWithProbe(probed(73)),
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "--account own@example.com is this machine's own login, so it starts there, the split skipped: its week is at 73% (login-flip.json seen)",
+    )
+    expect(launchOf(r)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN")
+  })
+
+  test.each([
+    ["stale", probed(30, 90), "stored-login.json was written 120 minutes ago"],
+    ["over its 5-hour cap", { ...probed(30), five: 95 }, "the 5-hour window is at 95%"],
+  ])(
+    "--account naming the own login is refused while its stored-login.json is stale and its probe is %s",
+    async (_, probe, reason) => {
+      const r = await spawn(
+        ["worker", "worker-brave-otter", "b.md", "--account", "own@example.com"],
+        [],
+        { CLAUDE_JSON: ownLogin, PACE_OFF_UNTIL: offUntilUtc, USAGE_JSON: factoryUsage(10) },
+        script,
+        undefined,
+        staleWithProbe(probe),
+      )
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain(`--account own@example.com, this machine's own login: `)
+      expect(r.err).toContain(reason)
+    },
+  )
+
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
     const raw = JSON.stringify(usage({ rate_limits: { seven_day: usage().rate_limits.seven_day } }))
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { USAGE_JSON: raw })
