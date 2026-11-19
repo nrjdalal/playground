@@ -9,11 +9,11 @@ You are a worker or a runner that the owner started from their terminal with `pl
 ## Standing lines
 
 Every worker and runner works under the lines below, a worker its lead started with a brief of its own included: that brief has it read this file and adds only its item's own steps and rules.
-Start in your worktree: `cd <worktree>` before any other command, with `<worktree>` the worktree's absolute path, so a shell that resumes in the main checkout moves nothing there.
-Give every file tool (Edit, Write, Read) the worktree's absolute path, never a repo-relative one, since a relative path lands in the main checkout.
 
 Cut a worktree by its absolute path under the main checkout's `.claude/worktrees/`, as AGENTS.md's worktree rule says, so none nests in another.
 A worker started with `--sandbox` starts in the worktree spawn.sh made for it instead, and branches and pushes there as playbook's SPAWN.md, --sandbox, says, since the sandbox refuses `git worktree add` and a write to `.git/config`.
+Your first command once your worktree exists is `cd <worktree>`, its absolute path, and you run it again after every resume, since a resumed shell starts in the folder you launched in, the main checkout.
+Give every file tool (Edit, Write, Read) the worktree's absolute path, never a repo-relative one, since a relative path lands in the main checkout.
 A worktree that commits, a docs-only one included, still runs `bun install` through run-slot before its first commit: lefthook's hook runs the worktree's own `node_modules/.bin/lefthook`, and the commit stops without it. A review worktree that only reads needs no install.
 A worktree whose commit stages any file but Markdown passes pre-commit's env-keys step by the `dev` skill's Start: one that runs a stack starts its own `.env` from `.env.example` with `BETTER_AUTH_SECRET` set, and one that runs no stack commits under `env NODE_ENV=production SKIP_ENV_VALIDATION=true`.
 No Co-Authored-By trailer on any commit: AGENTS.md forbids it and wins over the harness's attribution reminder. Every commit and push runs its hooks, since they check its message, its text and its terms before a reviewer spends a round on them.
@@ -34,7 +34,6 @@ A worker's commands leave the owner's running factory alone: a test stubs the li
 On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refused, so stop and report to your lead, who staffs it by brief-rush's GLM rule (`scripts/briefs/brief-rush.md`).
 On the local model (`--backend local`), put each line of a long agent doc exactly where the brief's file:line says, as its own line, and ask your lead when the spot doesn't match.
 Your worktree's Python venv is its own, made with `uv sync --frozen` through run-slot; a run never borrows another worktree's, since cleanup can remove a borrowed one mid-run.
-After a resume your shell starts in the folder you launched in, the main checkout, so `cd` to your worktree by its absolute path before any write.
 
 Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
 When your reviewer asks for a ruling, send it to your lead and build on the lead's answer, since a checker confirms a relayed ruling with the lead before it bends a step, so a ruling of your own costs a round.

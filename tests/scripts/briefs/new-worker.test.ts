@@ -72,9 +72,15 @@ test("the worker template's Standing lines hold the lead's standing brief rules"
 test("the worker template starts in the worktree and gives every file tool its absolute path", async () => {
   const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
   const standing = text.slice(text.indexOf("## Standing lines"))
-  const stepLine = standing.split("\n").find((l) => l.includes("Start in your worktree")) ?? ""
-  expect(stepLine).toContain("`cd <worktree>` before any other command")
-  expect(stepLine).toContain("`<worktree>` the worktree's absolute path")
+  const lines = standing.split("\n")
+  const cut = lines.findIndex((l) => l.startsWith("Cut a worktree by its absolute path"))
+  const step = lines.findIndex((l) =>
+    l.startsWith("Your first command once your worktree exists is `cd <worktree>`"),
+  )
+  expect(cut).toBeGreaterThan(-1)
+  expect(step).toBeGreaterThan(cut)
+  expect(lines[step]).toContain("`cd <worktree>`, its absolute path")
+  expect(lines[step]).toContain("again after every resume")
   const fileLine = standing.split("\n").find((l) => l.startsWith("Give every file tool")) ?? ""
   expect(fileLine).toContain(
     "Give every file tool (Edit, Write, Read) the worktree's absolute path",

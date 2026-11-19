@@ -17,7 +17,7 @@ Plan: send the Builder 3 lines (files, done list, ETA) before building, then bui
 
 How:
 
-- Worktree: <main checkout>/.claude/worktrees/<slice-id> by its absolute path, as AGENTS.md's worktree rule says, from the latest origin/canary, then bun install. Branch `<key>-<ticket>-<slug>`, the org's ticket key lowercased, as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
+- Worktree: <main checkout>/.claude/worktrees/<slice-id> by its absolute path, as AGENTS.md's worktree rule says, from the latest origin/canary. Your first command once it exists is `cd <worktree>`, its absolute path, and you run it again after every resume, since a resumed shell starts in the main checkout. Then bun install. Branch `<key>-<ticket>-<slug>`, the org's ticket key lowercased, as the slice file says. Write its .env before the first commit (NODE_ENV, POSTGRES_URL for your own loopback container with fake rows, BETTER_AUTH_SECRET). Never touch :65521 or the live dashboard.
 - Commit in the foreground.
 - Before you report ready, run `bun run check-types` at the repo root, with your stack stopped. `tsc --noEmit` in web/next skips the tests' tsconfigs (one PR went red on check-types:tests that way).
 - Memory is tight: run your stack only while driving it (bun run dev:stop after), `docker stop` your DB when idle, and close agent-browser sessions when done. If the Builder sends "pause Docker", stop at once and confirm.
@@ -35,7 +35,6 @@ How:
 
 Standing lines:
 
-- Start in your worktree: `cd <worktree>` before any other command, with `<worktree>` the worktree's absolute path, so a shell that resumes in the main checkout moves nothing there.
 - Give every file tool (Edit, Write, Read) the worktree's absolute path, never a repo-relative one, since a relative path lands in the main checkout.
 - Remix icons only: no emoji, no inline SVG, no other icon library.
 - Live numbers that tick (readings, timers, countdowns, counts): `font-mono tabular-nums` at their natural width, with no padStart and no fixed min-width, so each number sits right after its icon (this replaces the old fixed-width rule).
