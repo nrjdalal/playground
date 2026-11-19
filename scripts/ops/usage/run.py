@@ -330,7 +330,7 @@ while True:
         write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
     detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
-    # a missing factory reading fails, and so does a stored login that has read nothing for 15 minutes, by stored-login.json's writtenAt or else this run's start, since an --account start on it waits on that reading; one with no Claude Code login at all (NoLogin) keeps the beat it had. The cause is cut so the fix fits beat.py's 120 characters
+    # a missing factory reading fails, and so does a stored login that has read nothing for 15 minutes, by stored-login.json's writtenAt or else this run's start, since an --account start on it waits on that reading, but while its seat token carries it (below); one with no Claude Code login at all (NoLogin) keeps the beat it had. The cause is cut so the fix fits beat.py's 120 characters
     try:
         last = json.load(open(STORED))["writtenAt"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -361,7 +361,8 @@ while True:
     elif no_login and not FACTORY and len(problems) == 1:
         result = "waiting: no Claude account yet; add one in the Dashboard"
     else:
-        result = ("error: " + "; ".join(p for p in problems if not (seat and p.startswith("stored login:"))))[:120]
+        rest = [p for p in problems if not (seat and p.startswith("stored login:"))]
+        result = ("error: " + "; ".join(rest))[:120] if rest else "ok"
     # the stored login's error takes the result, or the seat token carries it out of the result, so the cycle's problems stay in the detail, with or without a reading
     if problems and (data or seat or result.startswith("error: stored login")):
         detail = (detail + " (" + "; ".join(problems)[:200] + ")").strip()
