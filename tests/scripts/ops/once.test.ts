@@ -60,25 +60,39 @@ describe("once.py's last stderr line", () => {
   const opsDir = join(data, "ops")
   const once = (job: string, command: string) =>
     Bun.spawn(["python3", "-I", join(ops, "once.py"), job, command], {
+      detached: true,
       env: { ...process.env, CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data },
       stderr: "pipe",
       stdout: "pipe",
     })
+  // the reader file reads empty while a start holds it, so this waits for a pid, never signalling 0, the test's own group
   const readerPid = async (job: string) => {
-    for (let i = 0; i < 50 && !existsSync(join(opsDir, `${job}.reader`)); i++) await Bun.sleep(100)
-    return Number(readFileSync(join(opsDir, `${job}.reader`), "utf8").trim())
+    const read = () => {
+      try {
+        return Number(readFileSync(join(opsDir, `${job}.reader`), "utf8").trim())
+      } catch {
+        return 0
+      }
+    }
+    for (let i = 0; i < 50 && !(read() > 0); i++) await Bun.sleep(100)
+    const pid = read()
+    if (!(pid > 0)) throw new Error(`${job}: no reader pid`)
+    return pid
   }
-  const alive = (pid: number) => {
+  const groupOf = (pid: number) =>
+    Number(Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]).stdout.toString().trim())
+  // the job leads its own process group (detached), so an empty group is the reader gone, a check no reused pid can pass (.agents/testing.md)
+  const groupAlive = (pgid: number) => {
     try {
-      process.kill(pid, 0)
+      process.kill(-pgid, 0)
       return true
     } catch {
       return false
     }
   }
-  const gone = async (pid: number) => {
-    for (let i = 0; i < 50 && alive(pid); i++) await Bun.sleep(100)
-    return !alive(pid)
+  const gone = async (pgid: number) => {
+    for (let i = 0; i < 50 && groupAlive(pgid); i++) await Bun.sleep(100)
+    return !groupAlive(pgid)
   }
 
   test("a job that dies leaves its last non-empty stderr line, cut to 200 characters, in a 0600 file, its stderr file 0600 too and its stderr still reaching the pane", async () => {
@@ -90,7 +104,7 @@ describe("once.py's last stderr line", () => {
       `sh -c 'echo first >&2; echo "vault: cache unreadable: ${long}" >&2; echo >&2; exit 2'`,
     )
     expect(await job.exited).toBe(2)
-    expect(await gone(await readerPid("ops-t1"))).toBe(true)
+    expect(await gone(job.pid)).toBe(true)
     const last = readFileSync(join(opsDir, "ops-t1.last"), "utf8")
     expect(last).toBe(`vault: cache unreadable: ${long}`.slice(0, 200))
     expect(statSync(join(opsDir, "ops-t1.last")).mode & 0o777).toBe(0o600)
@@ -98,12 +112,46 @@ describe("once.py's last stderr line", () => {
     expect(await new Response(job.stderr).text()).toContain("vault: cache unreadable:")
   })
 
+  // a herdr job leads its pty's session, so its exit hangs up the terminal's foreground group, the reader included (measured on the live jobs: ps reads the job's pid as its own pgid and tpgid)
+  test("a job that leads its pty's session, as in a herdr pane, still leaves the line it wrote as it died, and its reader still ends", async () => {
+    const driver = [
+      "import os, sys",
+      "pid, master = os.forkpty()",
+      "if pid == 0: os.execvp('python3', ['python3', '-I'] + sys.argv[1:])",
+      "print(pid, flush=True)",
+      "while True:",
+      "    try: b = os.read(master, 65536)",
+      "    except OSError: break",
+      "    if not b: break",
+      "os.waitpid(pid, 0)",
+    ].join("\n")
+    const pane = Bun.spawn(
+      [
+        "python3",
+        "-I",
+        "-c",
+        driver,
+        join(ops, "once.py"),
+        "ops-t6",
+        "sh -c 'echo early-line >&2; sleep 1; echo DEATH-reason >&2; exit 3'",
+      ],
+      { env: { ...process.env, CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data }, stdout: "pipe" },
+    )
+    expect(await pane.exited).toBe(0)
+    const leader = Number((await new Response(pane.stdout).text()).trim())
+    const last = join(opsDir, "ops-t6.last")
+    for (let i = 0; i < 30 && readFileSync(last, "utf8") !== "DEATH-reason"; i++)
+      await Bun.sleep(100)
+    expect(readFileSync(last, "utf8")).toBe("DEATH-reason")
+    expect(await gone(leader)).toBe(true)
+  })
+
   test("the reader, by its own pid, ends once the job has, and never outlives it", async () => {
     const job = once("ops-t2", "sh -c 'sleep 1; echo bye >&2'")
     const reader = await readerPid("ops-t2")
-    expect(alive(reader)).toBe(true)
+    expect(groupOf(reader)).toBe(job.pid)
     expect(await job.exited).toBe(0)
-    expect(await gone(reader)).toBe(true)
+    expect(await gone(job.pid)).toBe(true)
   })
 
   test("a reader that dies leaves the job running: its stderr writes neither block nor kill it", async () => {
@@ -123,7 +171,7 @@ describe("once.py's last stderr line", () => {
     )
     const pane = new Response(job.stderr).text()
     expect(await job.exited).toBe(0)
-    await gone(await readerPid("ops-t5"))
+    expect(await gone(job.pid)).toBe(true)
     const file = readFileSync(join(opsDir, "ops-t5.stderr"), "latin1")
     expect(file.length).toBeLessThan(1 << 20)
     expect(file.includes("\0")).toBe(false)
@@ -136,7 +184,7 @@ describe("once.py's last stderr line", () => {
     await Bun.write(join(opsDir, "ops-t4.last"), "an old line from yesterday")
     const job = once("ops-t4", "sh -c 'exit 0'")
     expect(await job.exited).toBe(0)
-    await gone(await readerPid("ops-t4"))
+    expect(await gone(job.pid)).toBe(true)
     expect(existsSync(join(opsDir, "ops-t4.last"))).toBe(false)
   })
 })
