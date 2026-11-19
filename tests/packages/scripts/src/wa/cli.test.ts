@@ -421,6 +421,31 @@ describe("playground wa send's structure (#2799)", () => {
     }
   })
 
+  test("hands --status to ops-wa, and prints whether the live status was edited or sent", async () => {
+    const { body, data } = machine("3 PRs in review\n")
+    const got: [string, string, unknown][] = []
+    const server = serve(socketPath(data), async (b, kind, _source, extra) => {
+      got.push([b, kind, extra])
+      return { ids: ["m1"], said: got.length === 1 ? "sent" : "edited the live status" }
+    })
+    try {
+      expect(await wa(data, ["send", "--status", body])).toEqual({
+        code: 0,
+        out: "wa send: sent (id m1)",
+      })
+      expect(await wa(data, ["send", "--status", body])).toEqual({
+        code: 0,
+        out: "wa send: edited the live status (id m1)",
+      })
+      expect(got).toEqual([
+        ["3 PRs in review", "reply", { status: true }],
+        ["3 PRs in review", "reply", { status: true }],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
   test("refuses a bad location, two extras and a bodiless edit before ops-wa", async () => {
     const { body, data } = machine("x")
     const got: string[] = []
