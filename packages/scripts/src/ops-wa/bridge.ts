@@ -1096,7 +1096,6 @@ const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa neve
 // What a send is: a reply to the owner, an urgent alert to both numbers at once, an urgent alert to the owner first that goes on to the alert number unless handled, that later send itself, or a reply to the alert number as a guest.
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
 // Quiet hours: the window's start and end hours in the owner's zone, wa.quietStartHour, wa.quietEndHour and clock.ownerZone.
 export type Quiet = { end: number; start: number; zone: string }
 // quiet.json, the sender's chain's: each text held in quiet hours, oldest first, until the catch-up sends them
@@ -1137,6 +1136,7 @@ export const catchUpOf = (held: Held[], zone: string): string => {
 const wordsOf = (content: Content) =>
   "text" in content ? content.text : "caption" in content ? content.caption : undefined
 
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
@@ -1196,20 +1196,15 @@ export function sender(
     const read = (await ownerReadAt(io.dir, io.owner)) ?? 0
     return now - Math.max(ownerAt, read) >= QUIET_IDLE_MS
   }
-  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; it answers nothing, as each held text counted when it was held, so the owner's message that set it off still waits for its answer; a catch-up that fails keeps them
+  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; it answers nothing, as each held text counted when it was held, so the owner's message that set it off still waits for its answer; the texts are cleared once it has gone, so a catch-up that fails or a restart in its typing wait keeps them
   const catchUpNow = async () => {
     const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
     const now = io.now()
     if (held.length === 0 || (await quietNow(now))) return
     if (windowLeft((await readOwn<Wrote>(ownerFile(io.dir), {})).ownerAt, now) === 0) return
     const zone = (await io.quiet?.())?.zone ?? "UTC"
+    await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
     await writeOwn(quietFile(io.dir), { held: [] })
-    try {
-      await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
-    } catch (error) {
-      await writeOwn(quietFile(io.dir), { held })
-      throw error
-    }
   }
   const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
@@ -1306,7 +1301,7 @@ export function sender(
         return { ids: [], said: HELD }
       }
       // the held texts go first, so the owner reads them in the order they were written
-      await catchUpNow()
+      if (answers) await catchUpNow()
     }
     const jid = going[0]!.jid
     const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})

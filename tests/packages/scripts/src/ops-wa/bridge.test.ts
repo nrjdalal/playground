@@ -2542,4 +2542,33 @@ describe("quiet hours (#2887)", () => {
     ])
     expect(await held(h.dir)).toEqual([])
   })
+
+  test("a restart inside the catch-up's typing wait keeps the held texts", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("kept through the wait")
+    const fake = fakeSocket()
+    const now = START + 7 * 60 * MIN
+    fake.setClock(() => now)
+    let waiting!: () => void
+    const reached = new Promise<void>((resolve) => (waiting = resolve))
+    // a wait that never ends, as a process stopped mid-wait never sends
+    const stopped = sender({
+      dir: h.dir,
+      device: SPARE,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => QUIET,
+      random: () => 0.5,
+      sleep: () => {
+        waiting()
+        return new Promise<void>(() => {})
+      },
+      sock: fake.sock,
+    })
+    void stopped.catchUp()
+    await reached
+    expect(fake.sent).toEqual([])
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["kept through the wait"])
+  })
 })
