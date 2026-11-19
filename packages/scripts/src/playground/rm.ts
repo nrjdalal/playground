@@ -584,17 +584,14 @@ async function removeApproved(
 ): Promise<number> {
   // The nightly-clean's Remove on this card, read first; a string is its refusal.
   const picks = deps.approvals ? await deps.approvals(card) : null
-  // The pick the path is approved at, or why it stays: the nightly-clean's Remove
-  // on this card, or the delete decision's when the card holds none.
+  // The pick the path is approved at, or why it stays: the nightly-clean's Remove on this card, or the delete decision's when it gives no pick for it.
   let chosen: { bytes: number } | string
-  if (picks && Array.isArray(picks)) {
-    const machine = args.peer ?? deps.machine
-    const pick = picks.find((p) => p.path === args.path && p.machine === machine)
-    chosen = pick
-      ? { bytes: pick.bytes }
-      : `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`
-  } else if (picks !== null) {
-    chosen = `playground: card ${card} did not read: ${picks}`
+  const machine = args.peer ?? deps.machine
+  const pick = Array.isArray(picks)
+    ? picks.find((p) => p.path === args.path && p.machine === machine)
+    : undefined
+  if (pick) {
+    chosen = { bytes: pick.bytes }
   } else {
     const said = await deletePick(args, card, deps)
     chosen = typeof said === "string" ? `playground: ${said}` : said
