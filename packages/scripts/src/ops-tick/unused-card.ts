@@ -1,5 +1,6 @@
 import { picksOf } from "@packages/config/inbox"
 
+import { askItemText } from "../ops-job/ask-item"
 import { MIN_LIST_BYTES, type Machine, type Unused } from "./unused"
 
 // The owner's one Inbox card for each machine's unused space: nightly-clean posts it, edits it in place while it stands open, and once answered removes each Remove pick by its own handle; `playground rm --card` reads the same card to check its approval itself.
@@ -180,14 +181,11 @@ const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 // An Inbox id as ask new prints it, the one form a card id takes.
 export const CARD_ID = /^[0-9a-f-]{36}$/
 
-// The card's JSON alone: ask get puts its `ask: picked` line on stderr, which a run joining both streams (ops-job's) leaves after it.
-const cardJson = (out: string) => out.slice(out.indexOf("{")).replace(/(?:\n+ask: [^\n]*)+\s*$/, "")
-
 // One card read by `bun run ask get <id>`, or ask's last line when it did not read.
 export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAnswer | string> => {
   const read = await ask(["get", id])
   try {
-    if (read.code === 0) return JSON.parse(cardJson(read.out)) as CardAnswer
+    if (read.code === 0) return JSON.parse(askItemText(read.out)) as CardAnswer
   } catch {}
   return lastLine(read.out) || `exit ${read.code}`
 }
