@@ -797,6 +797,10 @@ const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa neve
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
 // The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// the words a send carries, a text or a file's caption, which its typing time and ours.json read
+const wordsOf = (content: Content) =>
+  "text" in content ? content.text : "caption" in content ? content.caption : undefined
+
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
@@ -822,10 +826,11 @@ export function sender(
     } | null
     last = io.now()
     const id = sent?.key?.id
-    if (id && "text" in content) {
+    const words = wordsOf(content)
+    if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
       await writeOwn(oursFile(io.dir), {
-        messages: [...messages, { id, text: content.text }].slice(-50),
+        messages: [...messages, { id, text: words }].slice(-50),
       })
     }
     if (sends) {
@@ -918,7 +923,7 @@ export function sender(
     for (const t of going)
       for (const [k, content] of messages.entries()) {
         // a text or a caption waits its typing time; a file with none goes on the gap alone
-        const typed = "text" in content ? content.text : "caption" in content ? content.caption : ""
+        const typed = wordsOf(content)
         const id = await paced(
           t.jid === jidOf(io.owner) ? sends : null,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
