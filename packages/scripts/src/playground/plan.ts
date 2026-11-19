@@ -424,17 +424,34 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
-// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+// A pid's elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), in seconds, so its own start is now minus this.
+export const parseEtime = (elapsed: string): number => {
+  const parts = elapsed.split("-")
+  const days = parts.length > 1 ? Number(parts[0]) : 0
+  const hms = parts[parts.length - 1].split(":")
+  let secs = 0
+  if (hms.length === 3) secs = Number(hms[0]) * 3600 + Number(hms[1]) * 60 + Number(hms[2])
+  else if (hms.length === 2) secs = Number(hms[0]) * 60 + Number(hms[1])
+  return days * 86400 + secs
+}
+
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line back 5 s past the file's mtime, and the pid is not another that reused it, read as reused only once it clears the mtime by more than 2 s.
 export const stepQueued = (
   pid: string | undefined,
   alive: (pid: number) => boolean,
   runs: string[],
+  fileMtime = 0,
+  pidStart = 0,
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  // the pid's elapsed prints to whole seconds, so its start reads up to a second late
+  if (pidStart > fileMtime + 2000) return false
+  // run-slot can log start before the echo writes the file, so a start line can come before the file exists
   return !runs.some((line) => {
     const words = line.split(" ")
-    return words[1] === "start" && words[3] === String(n)
+    if (words[1] !== "start" || words[3] !== String(n)) return false
+    return Date.parse(words[0]) >= fileMtime - 5000
   })
 }
 
@@ -444,21 +461,22 @@ export const rollTimedOut = (
   load5: number,
   queued = false,
 ): { done: string; ok: boolean } => {
+  const waitingWhy = "phase" in last && last.phase === "waiting" ? last.why : undefined
+  const stillQueuedLine =
+    waitingWhy !== undefined && /^prebuild \w+ still queued after /.test(waitingWhy)
   const why =
-    "phase" in last && last.phase === "waiting"
-      ? last.why
-      : queued
-        ? "the roll's next step is still queued in run-slot"
-        : undefined
-  return why !== undefined
-    ? {
-        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
-        ok: true,
-      }
-    : {
-        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
-        ok: false,
-      }
+    waitingWhy ?? (queued ? "the roll's next step is still queued in run-slot" : undefined)
+  // a still-queued prebuild line reads waiting only when the step is still queued, else the failure; any other still-queued line, and a load or run-slot line, wait
+  if (why === undefined || (stillQueuedLine && !queued)) {
+    return {
+      done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+      ok: false,
+    }
+  }
+  return {
+    done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+    ok: true,
+  }
 }
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.

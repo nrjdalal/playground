@@ -1,5 +1,5 @@
 import "@packages/env/aliases"
-import { readdirSync, readFileSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -19,6 +19,7 @@ import { inRecordedForm } from "../../../../api/hono/src/lib/sessions/proc-start
 import { portlessCa, portlessDir } from "../portless-ca"
 import {
   dashboardBeatOf,
+  parseEtime,
   staleBeat,
   stepQueued,
   type DashboardBeat,
@@ -221,19 +222,26 @@ export const linesSince = async (file: string, offset: number): Promise<string[]
 // The dashboard's supervisor state folder (scripts/ops/dashboard/supervisor.sh), which records each child's pid and logs each roll.
 export const opsDashboard = (): string => join(dataDir(), "ops", "dashboard")
 
-const pidAlive = (file: string): boolean => {
+// A pid still runs here, since the only signal-free liveness probe (kill with signal 0) raises an error when the pid is gone: the dashboard folder, a prebuild.pid and a heartbeat all read alive this way.
+export const alive = (pid: number): boolean => {
   try {
-    process.kill(Number.parseInt(readFileSync(file, "utf8"), 10), 0)
+    process.kill(pid, 0)
     return true
   } catch {
     return false
   }
 }
 
+const pidAlive = (file: string): boolean => alive(Number.parseInt(readFileSync(file, "utf8"), 10))
+
 // The follower the supervisor started, by the pid it recorded; nothing reads the dashboard's database.
 export const followerRunning = (): boolean => pidAlive(join(opsDashboard(), "dashboard-ingest.pid"))
 
-// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid and the last 3000 lines of run-slot.runs.log.
+// The pid's own elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), read with ps so the dashboard can derive the pid's own start from it.
+const etime = (pid: string): string =>
+  Bun.spawnSync(["ps", "-o", "etime=", "-p", pid], { stdout: "pipe" }).stdout.toString().trim()
+
+// Whether the supervisor's current prebuild step still queues in run-slot (stepQueued), from its prebuild.pid, the last 3000 lines of run-slot.runs.log and the pid's own start; a prebuild.pid the supervisor's rm -f dropped between the read and the stat reads not queued.
 export const prebuildQueued = (): boolean => {
   const read = (path: string) => {
     try {
@@ -242,19 +250,21 @@ export const prebuildQueued = (): boolean => {
       return undefined
     }
   }
+  const pidFile = join(opsDashboard(), "prebuild.pid")
   const runs = (read(join(dataDir(), "ops", "run-slot.runs.log")) ?? "").split("\n").slice(-3000)
-  return stepQueued(
-    read(join(opsDashboard(), "prebuild.pid")),
-    (pid) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    },
-    runs,
-  )
+  const pid = (read(pidFile) ?? "").trim()
+  let fileMtime = 0
+  if (pid) {
+    try {
+      fileMtime = statSync(pidFile).mtimeMs
+    } catch {
+      // the supervisor's rm -f prebuild.pid can drop the file between the read and the stat, so a gone file reads not queued
+      return false
+    }
+  }
+  // the pid's own start is now minus parseEtime of its elapsed, and the file's own time its mtime, so a pid that started after the file that names it is another process that reused it and stepQueued reads it not queued
+  const pidStart = pid ? Date.now() - parseEtime(etime(pid)) * 1000 : 0
+  return stepQueued(pid || undefined, alive, runs, fileMtime, pidStart)
 }
 
 // The ops-dashboard job's heartbeat: its age, its cycle and whether the pid that wrote it still runs; null with no file that reads.
@@ -265,14 +275,7 @@ export const dashboardBeat = (now = Date.now()): DashboardBeat | null => {
   } catch {
     return null
   }
-  return dashboardBeatOf(json, now, (pid) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch {
-      return false
-    }
-  })
+  return dashboardBeatOf(json, now, alive)
 }
 
 // The supervisor itself: the ops-dashboard job's heartbeat, fresh within three cycles, from a pid still running.

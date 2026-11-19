@@ -15,6 +15,7 @@ import {
   liveBranch,
   linesSince,
   liveSessions,
+  prebuildQueued,
   upHolds,
   webUp,
 } from "../../../../../packages/scripts/src/playground/probe"
@@ -408,5 +409,25 @@ describe("upHolds", () => {
     const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
     writeOps(data, { "ops-dashboard": start }, beat)
     expect(withData(data, () => upHolds(start * 1000 + 700_000))).toBe(false)
+  })
+})
+
+describe("prebuildQueued when the pid file is gone", () => {
+  const withData = (data: string, read: () => boolean): boolean => {
+    const saved = process.env.PLAYGROUND_DATA_DIR
+    try {
+      process.env.PLAYGROUND_DATA_DIR = data
+      return read()
+    } finally {
+      if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = saved
+    }
+  }
+
+  // #2658 item 3: the supervisor's rm -f prebuild.pid can drop the file between the read and the stat, so a gone pid file reads not queued instead of throwing
+  test("a prebuild.pid the supervisor removed reads not queued, not a throw", () => {
+    const data = join(dir, "prebuild-gone")
+    mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
+    expect(withData(data, () => prebuildQueued())).toBe(false)
   })
 })
