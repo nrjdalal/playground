@@ -25,6 +25,12 @@ From `wa.quietStartHour` to `wa.quietEndHour` in your zone (`clock.ownerZone`), 
 Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; a status update is held as the newest alone, and an urgent alert reaches you at any hour ([ADR 0040](../../.agents/adr/0040-quiet-hours-hold-replies-for-one-catch-up.md)).
 Set both to the same hour for no quiet window.
 
+## The 22-hour reminder
+
+ops-wa can reply only within 24 hours of your last message.
+At 22 hours it sends you one line asking for any reply, so updates keep coming; each new message of yours opens a new 24 hours with its own reminder.
+When 22 hours falls in quiet hours, the line goes when they end, if the 24 hours are still open.
+
 ## What you can send
 
 A photo, voice note, video or document you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with its caption, a document's name, or a voice note's or video's words; it stays out of the attachments folder.

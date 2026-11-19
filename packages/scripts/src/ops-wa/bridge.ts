@@ -127,6 +127,8 @@ export type Mode = {
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
+  // sends the owner one line at 22 hours of the owner's 24 asking for any reply, once a window; a bridge with none sends none
+  remind?: () => Promise<void>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
   // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
@@ -168,7 +170,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, sent.json, eyes.json, partial.json, quiet.json and status.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, sent.json, eyes.json, partial.json, quiet.json, remind.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -809,6 +811,12 @@ async function pass(io: Io & Mode) {
   // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
   try {
     if (await io.on()) {
+      if (io.remind)
+        await io
+          .remind()
+          .catch((error: Error) =>
+            io.log(`ops-wa: the reminder before the 24 hours end: ${error.message}`),
+          )
       const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
       const eyes = (await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})).eyes ?? []
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
@@ -1134,6 +1142,12 @@ type Held = { at: number; body: string; status?: true }
 const quietFile = (dir: string) => join(dir, "quiet.json")
 // inside the window, a reply goes out only within this long of the owner's last read or message
 export const QUIET_IDLE_MS = HOUR
+// remind.json, the sender's chain's: the owner's message whose window the last reminder was for, so each window gets one
+const remindFile = (dir: string) => join(dir, "remind.json")
+// the reminder goes this long after the owner's last message, 2 hours before ops-wa can no longer reply
+export const REMIND_MS = 22 * HOUR
+const REMIND =
+  "This chat can reply only within 24 hours of your last message, and those 24 hours end soon. Send any reply to keep updates coming."
 const HELD =
   "held for quiet hours: the owner has read or written nothing in the last hour, so it goes out in one catch-up once the owner reads or writes, or when the quiet hours end"
 const QUIET_WAITS =
@@ -1245,6 +1259,17 @@ export function sender(
     const zone = (await io.quiet?.())?.zone ?? "UTC"
     await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
     await writeOwn(quietFile(io.dir), { held: [] })
+  }
+  // one line a window at 22 hours, while the window is open and outside quiet hours, so the owner can keep it open with any reply; in quiet hours it waits for their end
+  const remindNow = async () => {
+    const now = io.now()
+    const { ownerAt } = await readOwn<Wrote>(ownerFile(io.dir), {})
+    if (ownerAt === undefined || now - ownerAt < REMIND_MS || windowLeft(ownerAt, now) === 0) return
+    const q = await io.quiet?.()
+    if (q && inQuiet(now, q)) return
+    if ((await readOwn<{ for?: number }>(remindFile(io.dir), {})).for === ownerAt) return
+    await sendNow(REMIND, "reply", undefined, {})
+    await writeOwn(remindFile(io.dir), { for: ownerAt })
   }
   const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
@@ -1576,6 +1601,7 @@ export function sender(
         queued(() => anySend(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
+      remind: () => queued(remindNow),
       react: (emoji: string, on: { id?: string; who?: Who }) => queued(() => reactNow(emoji, on)),
     },
   )
