@@ -32,7 +32,12 @@ export type Entry = {
 }
 
 // baseline: what the watched places held at the seed, so the first check names only what came after.
-export type MachineRecord = { baseline: string[]; entries: Entry[] }
+// known: a path the OS made, recorded with its reason so the daily check skips it, added by record known.
+export type MachineRecord = {
+  baseline: string[]
+  entries: Entry[]
+  known: { path: string; why: string }[]
+}
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
@@ -94,19 +99,31 @@ const isEntry = (value: unknown): value is Entry => {
   )
 }
 
+// A known path with its reason, so the daily check skips it, recorded by record known.
+const isKnown = (value: unknown): value is { path: string; why: string } => {
+  const known = value as { path: string; why: string }
+  return (
+    typeof known === "object" &&
+    known !== null &&
+    typeof known.path === "string" &&
+    typeof known.why === "string"
+  )
+}
+
 // The record, empty before the seed; a file that does not read throws, so no write replaces it.
 export async function readRecord(data: string): Promise<MachineRecord> {
   const file = Bun.file(recordPath(data))
-  if (!(await file.exists())) return { baseline: [], entries: [] }
+  if (!(await file.exists())) return { baseline: [], entries: [], known: [] }
   const parsed = JSON.parse(await file.text()) as Partial<MachineRecord>
   if (
     !Array.isArray(parsed.baseline) ||
     !parsed.baseline.every((path) => typeof path === "string") ||
     !Array.isArray(parsed.entries) ||
-    !parsed.entries.every(isEntry)
+    !parsed.entries.every(isEntry) ||
+    (parsed.known !== undefined && (!Array.isArray(parsed.known) || !parsed.known.every(isKnown)))
   )
     throw new Error(`${recordPath(data)} is not a machine record`)
-  return { baseline: parsed.baseline, entries: parsed.entries }
+  return { baseline: parsed.baseline, entries: parsed.entries, known: parsed.known ?? [] }
 }
 
 // Written whole under a temp name, then renamed into place, so a reader meets the old record or the new one.
@@ -117,6 +134,7 @@ const write = async (data: string, record: MachineRecord) =>
       {
         baseline: [...new Set(record.baseline)].sort(),
         entries: [...record.entries].sort((a, b) => a.path.localeCompare(b.path)),
+        known: [...record.known].sort((a, b) => a.path.localeCompare(b.path)),
       },
       null,
       2,
@@ -125,6 +143,16 @@ const write = async (data: string, record: MachineRecord) =>
 
 // A path as the record keeps it: no trailing slash, so a folder named with one matches its listing.
 export const plain = (path: string): string => (path.length > 1 ? path.replace(/\/+$/, "") : path)
+
+// A path the OS made (for example a systemd unit snapd put under ~/.config): record it with its reason so the daily check skips it, and add it to the baseline. A path already known, or none new, leaves the record untouched.
+export async function addKnown(data: string, path: string, why: string): Promise<string> {
+  const record = await readRecord(data)
+  const knownPaths = new Set(record.known.map((known) => known.path))
+  const known = plain(path)
+  if (!knownPaths.has(known))
+    await write(data, { ...record, known: [...record.known, { path: known, why }] })
+  return known
+}
 
 // Adds each entry whose path the record lacks and returns their paths; a path it holds already changes nothing, and with nothing new the file is not written.
 export async function addEntries(data: string, entries: Entry[]): Promise<string[]> {
@@ -219,9 +247,10 @@ export function findings(
 ): string[] {
   const held = new Set(record.entries.map((entry) => entry.path))
   const before = new Set(record.baseline)
+  const knownPaths = new Set(record.known.map((known) => known.path))
   const lines: string[] = []
   for (const path of now.seen) {
-    if (held.has(path) || before.has(path)) continue
+    if (held.has(path) || before.has(path) || knownPaths.has(path)) continue
     const placed = path.startsWith("/") && !homes.some((home) => inside(path, home))
     lines.push(`${placed ? "misplaced" : "unrecorded"}: ${path}`)
   }
