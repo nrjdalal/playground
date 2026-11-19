@@ -287,8 +287,8 @@ async function otherClones(
   return { clones: clonesAt(leaves, n, main), n, pr: target.pr }
 }
 
-// Pure: the live reviewer and tester rows a roster's text has on a PR, as their pr or in their prs list, by name; null when the text holds no agents list.
-export const checkersOf = (text: string, pr: string): string[] | null => {
+// Pure: the live reviewer and tester rows a roster's text has on a PR, as their pr, or, while prsToo, in their prs list, by name; null when the text holds no agents list.
+export const checkersOf = (text: string, pr: string, prsToo = true): string[] | null => {
   try {
     const { agents } = JSON.parse(text) as { agents: unknown }
     if (!Array.isArray(agents)) return null
@@ -296,7 +296,7 @@ export const checkersOf = (text: string, pr: string): string[] | null => {
       (a: { kind?: unknown; name?: unknown; pr?: unknown; prs?: unknown; status?: unknown }) =>
         a &&
         typeof a.name === "string" &&
-        (a.pr === pr || (Array.isArray(a.prs) && a.prs.includes(pr))) &&
+        (a.pr === pr || (prsToo && Array.isArray(a.prs) && a.prs.includes(pr))) &&
         STATUSES.live.includes(String(a.status)) &&
         CLONES[kindOf(a.name, a.kind) ?? ""]
           ? [a.name]
@@ -348,7 +348,7 @@ export async function unsavedLive(
 // What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
 export type CleanupDeps = {
   carry?: (item: Carried) => Promise<void>
-  checkers?: (pr: string) => Promise<string[] | null>
+  checkers?: (pr: string, prsToo: boolean) => Promise<string[] | null>
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   finished: (path: string, pr?: string) => Promise<boolean>
@@ -534,12 +534,13 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       await mkdir(dirname(CARRIED), { recursive: true })
       await appendFile(CARRIED, `${JSON.stringify(item)}\n`)
     },
-    checkers: async (pr) =>
+    checkers: async (pr, prsToo) =>
       checkersOf(
         await Bun.file(join(rm.data, "roster.json"))
           .text()
           .catch(() => ""),
         pr,
+        prsToo,
       ),
     containers: async () => {
       const { code, out } = await runIn(["docker", "ps", "-a", "--format", "{{.Names}}"])
@@ -672,7 +673,8 @@ export const cleanupLive =
     const kept = checkers && (await otherClones(target, deps.main))
     if (checkers && kept?.clones.length) {
       const { clones, n, pr } = kept
-      const others = (await checkers(pr))?.filter((name) => name !== target.name)
+      const done = await deps.finished(clones[0]!, target.pr)
+      const others = (await checkers(pr, !done))?.filter((name) => name !== target.name)
       for (const dir of clones)
         lines.push(
           !others

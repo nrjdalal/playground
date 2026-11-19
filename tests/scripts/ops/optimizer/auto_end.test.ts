@@ -1603,6 +1603,92 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     )
   })
 
+  // PG-2937: a checker holds PR n's clone while its pr is n, or n is in its prs and n is neither merged nor closed; a merged n drops the prs-listed checker, and a failed read holds
+  test("a merged #7 is no longer held by a checker whose pr is #8, only its own clones going", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => true,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `removed ${p}`),
+    ])
+  })
+
+  test("an open #7 is still held by a checker whose pr is #8, listed only in its prs", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => false,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
+  test("a #7 whose state fails to read is held, the failed read being neither merged nor closed", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => finishedOf(null),
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
+  test("a merged #7 is still held by a checker whose own pr is #7, its pr counting on its own", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [{ name: "q7wz2b-tester", pr: url, status: "working" }],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => true,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
   // #2407: safe-delete's cap of 3 moves a minute for each charged name, as a count; each move's name and each carried move kept
   const capped = (deps: CleanupDeps, spent: Record<string, number> = {}) => {
     const charged: string[] = []
