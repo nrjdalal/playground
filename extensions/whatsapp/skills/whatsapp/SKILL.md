@@ -26,7 +26,7 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
    Done when the line reads `wa send: sent` (a new live status, or one after a failed edit), `wa send: edited the live status` or `wa send: unchanged`, or the Inbox update's id; with no change in the factory's work since your last message, send no status at all.
 
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat, but for the alert number the owner approved, which takes a reply at any time; a refusal names its reason.
-`playground wa status` prints whether each number has written or been approved, and whether a reply can go to it now.
+`playground wa status` prints whether each number has written or been approved, whether a reply can go to it now, when the owner last read ops-wa's messages, and whether the last alert to the alert number was delivered and read.
 `playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
 ops-wa sends each text part, and a file's caption, after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
