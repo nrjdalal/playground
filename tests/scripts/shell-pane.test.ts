@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { inboxInputSchema } from "../../api/hono/src/lib/dashboard/inbox"
 import { dataDir } from "../../packages/env/src/data-dir"
-import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../packages/scripts/src/trace-count/kinds"
 import { GUARDS } from "../../scripts/hooks/guards"
 import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
@@ -24,11 +24,17 @@ import {
   run,
   UNTYPED,
 } from "../../scripts/shell-pane"
+import { originCheckout } from "../machine"
 import { ALLOWED, type Paths, REFUSED_FORMS } from "./hooks/fixtures/refused-forms"
 import { storeWith } from "./hooks/render-set"
 import { git } from "./hooks/scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..")
+// A stub origin list, the same on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 // The pane's folder: a worktree of the main checkout the guards read, as a session's pane opens in its own worktree, here or on CI's checkout.
 const MAIN = mainCheckout(CHECKOUT)
 const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
@@ -77,8 +83,8 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-outside-pr-code": ["bun test"],
   "no-prepare-write": ["gh pr create --fill"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
-  "no-protected-push": [`git push https://github.com/${UNSET_REPOS.public[0]}.git main`],
-  "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
+  "no-protected-push": [`git push https://github.com/${REPOS.public[0]}.git main`],
+  "no-public-leak": [`gh pr comment 1 --repo ${REPOS.public[0]} --body "$X"`],
   "no-raw-vercel": ["vercel env pull"],
   "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
   "no-unslotted-run": ["bun run test"],
