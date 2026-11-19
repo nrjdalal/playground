@@ -1,7 +1,7 @@
 import { lstat, realpath } from "node:fs/promises"
 import { basename, extname, join, sep } from "node:path"
 
-import type { AnyMessageContent } from "baileys"
+import type { AnyMessageContent, proto } from "baileys"
 
 // The one folder wa send takes a file from, beside the media folder and outside whatsapp/, so a file goes over WhatsApp only once a session has put it there (ADR 0036).
 export const outboxDir = (data: string) => join(data, "wa", "outbox")
@@ -23,7 +23,7 @@ const TYPES: Record<string, { kind: Kind; mimetype: string; text?: true }> = {
 }
 const TYPE_NAMES = Object.keys(TYPES).join(", ")
 
-// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, an image, a video or a document with its caption, an audio file as a voice note, which takes none, a poll of one choice, whose secret ops-wa makes itself so it can read the owner's vote, or a reaction on a kept message.
+// What ops-wa sends, each shape one Baileys takes (Fits checks it): text, an image, a video or a document with its caption, an audio file as a voice note, which takes none, a poll of one choice, whose secret ops-wa makes itself so it can read the owner's vote, a reaction on a kept message, or a pin of our own message, or its removal.
 type Fits<T extends AnyMessageContent> = T
 export type Content = Fits<
   | { linkPreview: null; text: string }
@@ -33,7 +33,20 @@ export type Content = Fits<
   | { audio: Buffer; mimetype: string; ptt: true }
   | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
   | { react: { key: { fromMe: false; id: string; remoteJid: string }; text: string } }
+  | { pin: OwnKey; time?: typeof PIN_SECONDS; type: proto.PinInChat.Type }
 >
+
+// One of our own sent messages, by the key a pin names.
+type OwnKey = { fromMe: true; id: string; remoteJid: string }
+// A pin lasts 7 days, one of the three spans WhatsApp offers.
+export const PIN_SECONDS = 604_800
+// proto.PinInChat.Type's two values, written here so the build reads baileys' types alone.
+const PIN_FOR_ALL = 1 as proto.PinInChat.Type
+const UNPIN_FOR_ALL = 2 as proto.PinInChat.Type
+
+// Pure: the pin of our own message in its chat for 7 days, or with off its removal.
+export const pinOf = (key: OwnKey, off = false): Content =>
+  off ? { pin: key, type: UNPIN_FOR_ALL } : { pin: key, time: PIN_SECONDS, type: PIN_FOR_ALL }
 
 export type Outbound = { bytes: Buffer; kind: Kind; mimetype: string; name: string; text?: string }
 
