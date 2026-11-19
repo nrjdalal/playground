@@ -615,7 +615,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       opts: {
         ended?: string
         expired?: boolean
-        listed?: boolean
+        listed?: boolean | "pool"
         seat?: Seat
         statusAge?: number
         stored?: "missing" | number
@@ -639,7 +639,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
         writeFileSync(
           join(usageDir(home), "login-flip.json"),
           JSON.stringify({
-            accounts: [opts.listed === false ? "factory@example.com" : "own@example.com"],
+            ...(opts.listed === "pool"
+              ? { rotation: { pool: [{ account: "own@example.com", ending: false }] } }
+              : { accounts: [opts.listed === false ? "factory@example.com" : "own@example.com"] }),
             seen: seat && {
               "own@example.com": {
                 at: Date.now() / 1000 - (seat.readAge ?? 5) * 60,
@@ -885,9 +887,63 @@ describe("the capacity gate refuses and spawns nothing", () => {
     const r = await spawn(ownStart, [], ownEnv(), script, undefined, ownFiles({ listed: false }))
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
-      "ops-usage probes only the accounts login-flip.json lists, and it does not list own@example.com: add it to usage.accounts so login-flip lists it",
+      "ops-usage probes only the accounts login-flip.json lists, and it does not list own@example.com: add it to usage.accounts, or to login-flip.json's accounts while that list is set",
     )
     expect(r.err).not.toContain("ops-usage probes it every 14 minutes")
+  })
+
+  test("a seat login-flip.json's rotation pool lists, with no accounts list, is one ops-usage probes", async () => {
+    const r = await spawn(ownStart, [], ownEnv(), script, undefined, ownFiles({ listed: "pool" }))
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("ops-usage probes it every 14 minutes; wait for its next run")
+    expect(r.err).not.toContain("ops-usage probes only the accounts login-flip.json lists")
+  })
+
+  // a machine whose one login is Claude Code's own: usage.json is that login's reading, so its stale-file refusal names the expired token too
+  test.each([
+    ["a bare start", ["worker", "worker-brave-otter", "b.md"]],
+    ["an --account start on the own login", ownStart],
+  ])(
+    "on a one-login machine, %s refused on a stale usage.json names the expired access token",
+    async (_, args) => {
+      const r = await spawn(
+        args,
+        [],
+        {
+          CLAUDE_JSON: ownLogin,
+          PACE_OFF_UNTIL: offUntilUtc,
+          USAGE_JSON: login("own@example.com", 20, minutesAgo(30)),
+        },
+        script,
+        undefined,
+        ownFiles({ expired: true, stored: "missing" }),
+      )
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain(
+        `usage.json was written 30 minutes ago (writtenAt), 15 is its limit. It reads nothing because ${expiredLine}`,
+      )
+      expect(r.err).not.toContain("wait for its next run")
+    },
+  )
+
+  test("on a one-login machine with no expired token, a stale usage.json keeps the wait line", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      {
+        CLAUDE_JSON: ownLogin,
+        PACE_OFF_UNTIL: offUntilUtc,
+        USAGE_JSON: login("own@example.com", 20, minutesAgo(30)),
+      },
+      script,
+      undefined,
+      ownFiles({ stored: "missing" }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "usage.json was written 30 minutes ago (writtenAt), 15 is its limit. The ops-usage job writes it every 5 minutes; wait for its next run",
+    )
   })
 
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {

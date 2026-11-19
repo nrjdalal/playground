@@ -415,6 +415,31 @@ test("an ended stored login's error line keeps its fix whole within 120 characte
   expect(beat.result.length).toBeLessThanOrEqual(120)
 })
 
+test("at exactly 15 minutes with no stored-login reading, the beat already fails", async () => {
+  const { beat } = await cycle("expired-15", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 15,
+  })
+  expect(beat.result).toStartWith(
+    "error: stored login read nothing for 15 min (access token expired)",
+  )
+})
+
+test("the stored login's error beat keeps the cycle's other problems in its detail, though no usage.json is written", async () => {
+  const { beat, usage } = await cycle("expired-refused", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    probeUrl: "http://127.0.0.1:8/v1/messages",
+    storedAge: 20,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+  expect(beat.detail).toContain("added account: RuntimeError: no reading of added@example.org")
+  expect(usage).toBeNull()
+})
+
 test("an expired stored token whose last reading is under 15 minutes old still beats ok", async () => {
   const { beat } = await cycle("expired-fresh", {
     added: ["added@example.org"],
