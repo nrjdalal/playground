@@ -1946,10 +1946,11 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
 
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
-  # read again just before the rmdir, so a waiter that freed and took the slot meanwhile keeps it
+  # read again just before the rmdir, so a waiter that freed and took the slot meanwhile keeps it; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
   local line dir
-  line=$(cat "$1.holder" 2>/dev/null); dir=$(stamp "$1")
+  line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
+  dir=$(stamp "$1")
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 

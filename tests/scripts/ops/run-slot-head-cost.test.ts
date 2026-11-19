@@ -27,7 +27,7 @@ test("head reads the held slots' state once, no stat or date per slot, and can-t
   expect(headStat.stat + headStat.date).toBeLessThan(6)
   expect(head).toBeLessThan(60)
   // can-take reads its one slot and answers the hold, no per-field read
-  expect(cantake).toBeLessThan(6)
+  expect(cantake).toBeLessThanOrEqual(2)
   expect(cantakeStat.stat).toBeLessThan(3)
 })
 
