@@ -40,6 +40,7 @@ import { publicDraftRefusal } from "@/lib/dashboard/public-draft"
 import { linkShipPrs, repoOfRemote } from "@/lib/dashboard/ship-links"
 import { whatsappAnswer } from "@/lib/dashboard/whatsapp-answer"
 import { livePair, mainCheckoutOf, othersLiveDashboard } from "@/lib/dev/launch"
+import { org } from "@/lib/org"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
@@ -281,9 +282,10 @@ if (command === "new" || command === "edit") {
   // a ui block draws as a card only when it parses into a progress or a steps object, so one that does not is refused before it posts
   const badUi = uiRefusal(input)
   if (badUi) fail(badUi)
-  // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720)
+  // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720); the daily ledger card posts beside it
   if (command === "new") {
-    const refusal = progressCardRefusal(input, await inflightCard(db))
+    const ledger = org.ledger.title
+    const refusal = progressCardRefusal(input, await inflightCard(db, ledger), ledger)
     if (refusal) fail(refusal)
   }
   // a draft with no link is a public post's, which goes out in the owner's own words alone (the public rule): scripts/hooks/public-draft.ts reads it with the leak guards' own finders, as a child

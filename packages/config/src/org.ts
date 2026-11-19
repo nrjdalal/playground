@@ -49,6 +49,8 @@ export const orgSchema = z.object({
         "each peer name is listed once, in any case",
       ),
   }),
+  // The daily ledger card's title prefix: a dispatcher card titled with it, alone or followed by ": " and a day, posts beside the dispatcher's one progress card.
+  ledger: z.object({ title: z.string().default("Firefighting") }),
   // The local models the hosted session can switch to (none by default, so a copy names no model) and the one server that serves them, the tunnel's loopback port by default.
   local: z.object({
     models: z.array(localModelSchema).default([]),
@@ -97,6 +99,7 @@ export const orgOf = (env: Env): Org =>
       key: envValue(env, "PLAYGROUND_PEER_KEY"),
       peers: peersOf(envValue(env, "PLAYGROUND_PEERS")),
     },
+    ledger: { title: envValue(env, "PLAYGROUND_LEDGER_TITLE") },
     local: {
       models: localModelsOf(envValue(env, "PLAYGROUND_LOCAL_MODELS")),
       url: envValue(env, "PLAYGROUND_LOCAL_MODEL_URL"),

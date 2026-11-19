@@ -69,7 +69,7 @@ import {
   ROOT_TIMEOUT_MS,
   stepArgv,
 } from "../system/root"
-import { holdsProgressBlock, type InflightCard, isDispatcher } from "./ask-shape"
+import { holdsProgressBlock, type InflightCard, isDispatcher, isLedgerTitle } from "./ask-shape"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
@@ -1876,15 +1876,21 @@ export async function postOrEdit(
   return edited.ok ? { ...edited, edited: true } : edited
 }
 
-// The dispatcher's one open in-flight card: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720).
-export async function inflightCard(db: Database): Promise<InflightCard> {
-  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
-  const card = rows
-    .map(toItem)
-    .find(
-      (item) => isDispatcher(item.from) && stillEditable(item) && holdsProgressBlock(item.preview),
-    )
+// Pure: the dispatcher's one open in-flight card among items newest first: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720); nor is the daily ledger card, which posts beside it.
+export function inflightOf(items: InboxItem[], ledger: string): InflightCard {
+  const card = items.find(
+    (item) =>
+      isDispatcher(item.from) &&
+      stillEditable(item) &&
+      holdsProgressBlock(item.preview) &&
+      !isLedgerTitle(item.title, ledger),
+  )
   return card ? { ref: card.ref, title: card.title } : null
+}
+
+export async function inflightCard(db: Database, ledger: string): Promise<InflightCard> {
+  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
+  return inflightOf(rows.map(toItem), ledger)
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
