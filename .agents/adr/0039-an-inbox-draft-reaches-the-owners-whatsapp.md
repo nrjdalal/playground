@@ -14,5 +14,5 @@ By [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR st
 
 ## Consequences
 
-- A draft's words reach the owner's phone as written, unredacted, since the owner reads each word before it posts. The sender still refuses a token shape.
+- An org-scoped draft reaches the owner's own WhatsApp, as written; the sender refuses token shapes.
 - The answers folder, its file checks and its once-only delete stay as 0024 set them.

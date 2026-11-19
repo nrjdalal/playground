@@ -35,7 +35,7 @@ While WhatsApp mode is on and you have written in the last 24 hours, ops-wa send
 A card with choices also comes as a poll: tap a choice, and your vote answers the card as typing its number would; a changed vote finds the card answered already ([ADR 0029](../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)).
 A decision stays pinned in your chat until it settles, on WhatsApp or in the Inbox, with WhatsApp mode on or off; one that settles once your 24 hours have passed comes off when you next write. At most 3 stay pinned, the oldest coming off first.
 Every other card stays in the Inbox, named by its title alone as `📥 <title>`, at most 5 then `📥 +N more in the Inbox`, and a title holding a term the Inbox keeps back only in that count: a card with no scope or another scope than the factory's, a secret, a delete, a budget, a ship, a schema, a ticket and a Slack message. A card is named only while it still asks, the Inbox tab's test: open, not replied, and awake.
-Each open draft comes to you too, once: its words as written, where it goes, and a line on how to reply ([ADR 0039](../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
+Each open draft comes to you too, once, as written, with where it goes and a line on how to reply; the sender refuses token shapes ([ADR 0039](../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
 Reply `send` to that message to post it as written, or reply to it with your own words to post those instead; a Send in the Inbox and a reply on WhatsApp settle each other, and a draft with files goes from the Inbox alone.
 A card that goes reads `[hidden]` for every name, handle, company term, Slack id, Linear key, email and token, and its files stay in the Inbox.
 
