@@ -527,6 +527,9 @@ export const rmPeerCommand = (path: string, bytes: number, card: string): string
     ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
   ].join(" ")
 
+// The peer's read-only byte-count command, same quoting as the delete, its real body next.
+export const rmPeerBytesCommand = (_path: string): string => ""
+
 // The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
 const approvedWeights = (
   path: string,
