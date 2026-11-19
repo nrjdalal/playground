@@ -552,14 +552,8 @@ describe("the slot-stuck alert", () => {
   const queue = (held: boolean, { older = false, took = false } = {}) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
-    const bin = join(config, "bin")
+    const { bin } = machine()
     mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
-    mkdirSync(bin)
-    writeFileSync(
-      join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
-    )
-    chmodSync(join(bin, "sysctl"), 0o755)
     for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
     if (held) {
       mkdirSync(join(ops, "run-slot-2"))
@@ -609,6 +603,7 @@ run.notify = lambda text, to="dispatcher": sent.append([to, text])
 run.log = lambda line: None
 for fn in ("stall", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts", "capped_alert"):
     setattr(run, fn, lambda *a, **k: [])
+run.heavy_cap = lambda: 4  # heavy_cap's run-slot.sh slots is a call no case here tests (issue 2839)
 run.herdr_sessions = lambda: []
 run.moving = lambda now_t=None: None
 os.makedirs(run.HERE, exist_ok=True)
@@ -619,7 +614,7 @@ run.cycle(state)
 alerts = json.load(open(os.path.join(run.OPS, "alerts-pending.json")))["alerts"]
 print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "sent": sent}))
 `
-  // two cycles over an ops folder `setup` fills, with `path` ahead of the run's PATH for a fake machine's load
+  // two cycles over an ops folder `setup` fills, with `path` ahead of the run's PATH for a fake machine's load, a load-2 one by default, so this Mac's own load never picks the path run-slot.sh takes (issue 2839)
   const cycled = async (setup: (ops: string) => void, path?: string) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
@@ -630,7 +625,7 @@ print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "s
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: process.env.HOME,
-        PATH: path ? `${path}:${process.env.PATH}` : process.env.PATH,
+        PATH: `${path ?? machine().bin}:${process.env.PATH}`,
         RUN_SLOT_SIZE: "medium",
         TZ: "UTC",
         UV_CACHE_DIR: process.env.UV_CACHE_DIR,
@@ -705,14 +700,8 @@ print(json.dumps({"alerts": [a for a in alerts if a["kind"] == "slot-stuck"], "s
   test("names the free slot no waiter fits, with the head's own ticket units", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
-    const bin = join(config, "bin")
+    const { bin } = machine()
     mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
-    mkdirSync(bin)
-    writeFileSync(
-      join(bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
-    )
-    chmodSync(join(bin, "sysctl"), 0o755)
     for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
     mkdirSync(join(ops, "run-slot-2"))
     writeFileSync(
@@ -754,6 +743,7 @@ run.notify = lambda text, to="dispatcher": sent.append([to, text])
 run.log = lambda line: None
 for fn in ("stall", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts", "capped_alert"):
     setattr(run, fn, lambda *a, **k: [])
+run.heavy_cap = lambda: 4  # heavy_cap's run-slot.sh slots is a call no case here tests (issue 2839)
 run.herdr_sessions = lambda: []
 run.moving = lambda now_t=None: None
 os.makedirs(run.HERE, exist_ok=True)
@@ -777,6 +767,7 @@ clock[0] += 200
 run.cycle(state)
 print(json.dumps(sent))
 `
+  // issue 2839: each run-slot.sh head or can-take forks about 170 processes, 0.6 to 3.5 s apiece on a loaded Mac (measured), and this case makes 8
   test("sends once per episode, and again for a new head ticket", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
@@ -793,7 +784,7 @@ print(json.dumps(sent))
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: process.env.HOME,
-        PATH: process.env.PATH,
+        PATH: `${machine().bin}:${process.env.PATH}`,
         TZ: "UTC",
         UV_CACHE_DIR: process.env.UV_CACHE_DIR,
         UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
@@ -814,7 +805,7 @@ print(json.dumps(sent))
     expect(sent[0][1]).toContain("run-slot-2 holds 3 units")
     expect(sent[0][1]).not.toContain("could take")
     expect(sent[1][1]).toContain("worker-big2")
-  })
+  }, 60_000)
 
   // the same episode's kind change: after the no-fit send the holder in run-slot-2 ends, the same head's can-take passes,
   // and the could-take line sends too, once, the two lines keyed per kind on the episode the head ticket holds
@@ -830,6 +821,7 @@ run.notify = lambda text, to="dispatcher": sent.append([to, text])
 run.log = lambda line: None
 for fn in ("stall", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts", "capped_alert"):
     setattr(run, fn, lambda *a, **k: [])
+run.heavy_cap = lambda: 4  # heavy_cap's run-slot.sh slots is a call no case here tests (issue 2839)
 run.herdr_sessions = lambda: []
 run.moving = lambda now_t=None: None
 os.makedirs(run.HERE, exist_ok=True)
@@ -845,6 +837,7 @@ clock[0] += 200
 run.cycle(state)
 print(json.dumps(sent))
 `
+  // issue 2839: 7 run-slot.sh calls at up to 3.5 s apiece, as the case above
   test("sends the could-take line when the holder ends and the same head can take it", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
@@ -862,7 +855,7 @@ print(json.dumps(sent))
         CLAUDE_CONFIG_DIR: config,
         PLAYGROUND_DATA_DIR: join(config, "playground"),
         HOME: process.env.HOME,
-        PATH: process.env.PATH,
+        PATH: `${machine().bin}:${process.env.PATH}`,
         TZ: "UTC",
         UV_CACHE_DIR: process.env.UV_CACHE_DIR,
         UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
@@ -884,7 +877,7 @@ print(json.dumps(sent))
     expect(sent[0][1]).not.toContain("could take")
     expect(sent[1][1]).toContain("worker-big")
     expect(sent[1][1]).toContain("could take it and takes nothing")
-  })
+  }, 60_000)
 
   // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
   test("watches the queue's head, so an older big ticket behind a newer medium one fires nothing", async () => {
