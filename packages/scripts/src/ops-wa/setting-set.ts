@@ -221,7 +221,7 @@ async function onlyQuestion(io: SettingSetIo, own: string[], since: number) {
 }
 
 // The owner's next message after the question settles it: a yes within 10 minutes applies the waiting setting, and anything else, or a yes after 10 minutes, drops it; true when the message was a yes or a no, which goes no further, and false for any other, which goes on as before.
-// A proposal's yes or no settles it only when it quotes the question, or quotes nothing while its question and lines are all he got since his previous typed message; any other yes or no settles nothing, leaves it waiting and goes on to the dispatcher (ADR 0041).
+// A proposal's yes or no settles it only when it quotes the question or a line about it, or quotes nothing while its question and lines are all he got since his previous typed message; any other yes or no settles nothing, leaves it waiting and goes on to the dispatcher (ADR 0041).
 export const confirm = (
   io: SettingSetIo,
   text: string,
@@ -257,7 +257,8 @@ async function settle(
     const own = [pending.id, ...(pending.lines ?? [])]
     const plain =
       answered.quoted === undefined && (await onlyQuestion(io, own, answered.since ?? 0))
-    if (answered.quoted !== pending.id && !plain) return false
+    const quotedOwn = answered.quoted !== undefined && own.includes(answered.quoted)
+    if (!quotedOwn && !plain) return false
   }
   await writeOwn(confirmFile(io.dir), {})
   if (late || (!YES.has(said) && said !== "no")) return false

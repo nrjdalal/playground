@@ -777,6 +777,18 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       expect(yesReached(c.relayed)).toBe(false)
     })
 
+    test("a yes quoting the reply-yes line a 👍 got applies it, since that line is the proposal's own", async () => {
+      const o = owned()
+      const c = await chat(o)
+      const asked = await c.question()
+      await c.reacts(asked, "👍")
+      const line = `m${c.fake.sent.length}`
+      await c.send("shall I go ahead?", "reply")
+      await c.says("yes", line)
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+      expect(yesReached(c.relayed)).toBe(false)
+    })
+
     test("a reaction taken back after another send leaves that send counted, so a plain yes goes on to the dispatcher", async () => {
       const o = owned()
       const c = await chat(o)
