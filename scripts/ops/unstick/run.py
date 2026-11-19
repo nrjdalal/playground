@@ -13,7 +13,7 @@ block goes to the session's manager (alert_to), each through the outbox at first
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
 A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
-screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or a 100% line), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock, since those counts move while the pane works; the local model's count does not advance while compaction runs, so for it the 10-minute line reads the frozen count unchanged for those 10 minutes.
+screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or an invalid_request), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock, since those counts move while the pane works; the local model's count does not advance while compaction runs, so for it the 10-minute line reads the frozen count unchanged for those 10 minutes.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
@@ -50,8 +50,8 @@ KINDS = [
     ("mcp", re.compile(r"new MCP servers? found|MCP servers? found in", re.I)),
     ("picker", re.compile(r"Enter to select|Would you like to proceed\?|↑/↓ to navigate|Esc to cancel · Tab", re.I)),
 ]
-# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on "Compacting conversation". A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
-COMPACT = re.compile(r"Compacting conversation")
+# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on the compaction spinner line, the lowest such line taken. A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
+COMPACT = re.compile(r"^\s*.\s*Compacting conversation…\s*\(\s*\d")
 PROMPT_TOO_LONG = re.compile(r"Prompt is too long", re.I)
 INVALID_STOP = re.compile(r"invalid_request", re.I)
 TOKEN_RE = re.compile(r"↓\s*([0-9]+(?:\.[0-9]+)?[kmb]?)", re.I)
@@ -614,7 +614,7 @@ def compaction(lines):
     """The compaction the screen shows or None: the "Compacting conversation" line, its spinner's ↓ N (frozen when the compaction stalls), and
     whether a "Prompt is too long" or invalid_request stop sits above it. A hang is alerted on first sight, since the hung one on 2026-11-19 ran
     shorter than a healthy compaction, so wall-clock alone cannot tell it apart from one that is just still working."""
-    idx = next((i for i, l in enumerate(lines) if COMPACT.search(l)), None)
+    idx = next((i for i in range(len(lines) - 1, -1, -1) if COMPACT.search(lines[i])), None)
     if idx is None:
         return None
     tick = next((TOKEN_RE.search(l) for l in lines[idx:] if TOKEN_RE.search(l)), None)
