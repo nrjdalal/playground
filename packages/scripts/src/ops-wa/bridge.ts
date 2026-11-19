@@ -38,7 +38,9 @@ import {
   DEFAULT_DELAY_MINUTES,
   escalations,
   keepPending,
+  keepSent,
   lastLines,
+  masked,
   pendingLines,
   reacted,
 } from "./escalate"
@@ -170,7 +172,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, sent.json, eyes.json, partial.json, quiet.json, remind.json and status.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, last-alert.json, messages.json and receipts.json the bridge's queue, alert-sent.json, sends.json, sent.json, eyes.json, partial.json, quiet.json, remind.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -1404,6 +1406,7 @@ export function sender(
       ).filter(([, p]) => now - p.at < OWNER_WINDOW_MS),
     )
     const ids: string[] = []
+    const reached: string[] = []
     for (const t of going) {
       const key = target
         ? undefined
@@ -1438,8 +1441,16 @@ export function sender(
           partials[key] = { at: done?.at ?? now, ids: sent, parts }
           await writeOwn(partialFile(io.dir), { partials })
         }
+        // an alert that fails keeps its outcome too, with each number it reached first
+        if (alert)
+          await keepSent(io.dir, {
+            at: now,
+            outcome: `${reached.length > 0 ? `sent to ${reached.join(" and ")}, then the send` : "the send"} to ${t.who} failed: ${masked((error as Error).message)}`,
+            when: io.now(),
+          }).catch(() => {})
         throw error
       }
+      reached.push(t.who)
       ids.push(...sent)
       if (key && done) {
         delete partials[key]
@@ -1456,13 +1467,25 @@ export function sender(
       await writeOwn(partialFile(io.dir), { partials })
     }
     lastIds = ids
+    // an alert that never goes pending keeps its outcome as it goes, so wa status shows the newest alert's; a failed write leaves the send as it went
+    const settled = async (said: string): Promise<Out> => {
+      if (alert)
+        await keepSent(io.dir, {
+          at: now,
+          outcome:
+            said !== "sent"
+              ? said
+              : going.length > 1
+                ? "sent to both numbers at once"
+                : `sent to ${going[0]!.who} alone`,
+          when: io.now(),
+        }).catch(() => {})
+      return { ids, said }
+    }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return {
-          ids,
-          said: "sent to the owner alone: the alert number has never written to this number",
-        }
+        return settled("sent to the owner alone: the alert number has never written to this number")
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
@@ -1472,12 +1495,11 @@ export function sender(
       }
     }
     const left = to.find((t) => !t.open)
-    return {
-      ids,
-      said: left
+    return settled(
+      left
         ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
         : "sent",
-    }
+    )
   }
   // the live status: one message in the owner's chat, edited in place while WhatsApp takes an edit and it has not scrolled away, else sent anew as the live one; an unchanged status sends nothing
   const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {
