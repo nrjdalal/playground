@@ -2013,6 +2013,9 @@ describe("delivery and read receipts (#2868)", () => {
   const SERVER_ACK = 2
   const DELIVERED = 3
   const READ = 4
+  // a voice note's played, past READ, and a send that failed
+  const PLAYED = 5
+  const ERROR = 0
   // a 1:1 chat's receipt, as Baileys gives it on messages.update: the message's key and its new status at the receipt's time in seconds
   const receipt = (id: string, status: number, at: number, chat = jid(OWNER), fromMe = true) => ({
     key: { fromMe, id, remoteJid: chat },
@@ -2044,11 +2047,15 @@ describe("delivery and read receipts (#2868)", () => {
     expect(await ownerReadAt(h.dir, OWNER)).toBe(START + 120_000)
   })
 
-  test("a read with no delivered before it counts as both, a receipt with no time takes the clock, and a second read moves neither", async () => {
+  test("a read or a played with no delivered before it counts as both, a receipt with no time takes the clock, and a second read moves neither", async () => {
     const h = await talking()
     await h.send("first")
     await h.send("second")
-    h.fake.emit("messages.update", [receipt("m1", READ, START + 60_000)])
+    await h.send("third")
+    h.fake.emit("messages.update", [
+      receipt("m1", READ, START + 60_000),
+      receipt("m3", PLAYED, START + 2 * 60_000),
+    ])
     h.fake.emit("messages.update", [
       { ...receipt("m2", DELIVERED, 0), update: { status: DELIVERED } },
     ])
@@ -2056,14 +2063,15 @@ describe("delivery and read receipts (#2868)", () => {
     h.advance(60_000)
     h.fake.emit("messages.update", [receipt("m1", READ, START + 5 * 60_000)])
     await h.settle()
-    const clock = h.fake.sent[1]!.at
+    const clock = h.fake.sent[2]!.at
     expect(await kept(h.dir)).toEqual([
       { delivered: START + 60_000, id: "m1", read: START + 60_000 },
       { delivered: clock, id: "m2" },
+      { delivered: START + 2 * 60_000, id: "m3", read: START + 2 * 60_000 },
     ])
   })
 
-  test("a receipt for a message ops-wa did not send is ignored: another device's, the spare phone's read of the owner's message, a server's ack and an edit's update", async () => {
+  test("a receipt for a message ops-wa did not send is ignored: another device's, the spare phone's read of the owner's message, a server's ack, an error and an edit's update", async () => {
     const h = await talking()
     await h.send("on it")
     const theirs = h.fake.message(jid(OWNER), "and this?")
@@ -2073,6 +2081,7 @@ describe("delivery and read receipts (#2868)", () => {
       receipt("sent-from-the-spare-phone", READ, START),
       receipt(theirs.key.id, READ, START, jid(OWNER), false),
       receipt("m1", SERVER_ACK, START),
+      receipt("m1", ERROR, START),
       { key: { fromMe: true, id: "m1", remoteJid: jid(OWNER) }, update: { message: null } },
     ])
     await h.settle()
