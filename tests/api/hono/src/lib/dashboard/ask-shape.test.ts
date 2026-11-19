@@ -5,6 +5,7 @@ import {
   ASK_EXAMPLES,
   isAskExampleKind,
   isDispatcher,
+  isLedgerTitle,
   progressCardRefusal,
   progressRefusal,
   PROSE_LIMIT,
@@ -16,7 +17,9 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/delete-targets"
 import {
   attachmentSourceSchema,
+  type InboxItem,
   inboxInputSchema,
+  inflightOf,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { ASK_CODE_COLUMNS } from "../../../../../../packages/config/src/inbox"
 
@@ -417,5 +420,55 @@ describe("progressCardRefusal", () => {
       },
     )
     expect(refusal).toContain("#i5")
+  })
+
+  test("passes the daily ledger card, its title the ledger prefix or the prefix and a day, while the dispatcher's own card is open", () => {
+    const open = { ref: 5, title: "Job" }
+    const card = block("Mac reads | 40 | x | 1:00 pm")
+    expect(progressCardRefusal(update(card, "Ledger: 20 Nov"), open, "Ledger")).toBeNull()
+    expect(progressCardRefusal(update(card, "Ledger"), open, "Ledger")).toBeNull()
+  })
+
+  test("still refuses a second ordinary card from the dispatcher, and a ledger-titled card from any other poster", () => {
+    const open = { ref: 5, title: "Job" }
+    const card = block("Mac reads | 40 | x | 1:00 pm")
+    expect(progressCardRefusal(update(card, "Other"), open, "Ledger")).toContain("#i5")
+    expect(progressCardRefusal(update(card, "Ledgers"), open, "Ledger")).toContain("#i5")
+    expect(
+      progressCardRefusal(update(card, "Ledger: 20 Nov", "worker-envy"), open, "Ledger"),
+    ).toContain("not one a poster may start")
+  })
+})
+
+describe("isLedgerTitle", () => {
+  test("is the prefix alone or the prefix, a colon and a space, then more", () => {
+    expect(isLedgerTitle("Ledger", "Ledger")).toBe(true)
+    expect(isLedgerTitle("Ledger: 20 Nov", "Ledger")).toBe(true)
+    expect(isLedgerTitle("Ledgers", "Ledger")).toBe(false)
+    expect(isLedgerTitle("Ledger:20 Nov", "Ledger")).toBe(false)
+    expect(isLedgerTitle("The Ledger", "Ledger")).toBe(false)
+  })
+})
+
+describe("inflightOf", () => {
+  const item = (ref: number, title: string, from = "dispatcher") =>
+    ({
+      answer: null,
+      from,
+      kind: "update",
+      preview: { outcome: "finding", text: "```progress\nMac reads | 40 | x | 1:00 pm\n```" },
+      ref,
+      title,
+    }) as unknown as InboxItem
+
+  test("skips the daily ledger card, so the dispatcher's own card behind it is the one in flight", () => {
+    expect(inflightOf([item(9, "Ledger: 20 Nov"), item(5, "Job")], "Ledger")).toEqual({
+      ref: 5,
+      title: "Job",
+    })
+  })
+
+  test("is null when the ledger card is the dispatcher's only progress card", () => {
+    expect(inflightOf([item(9, "Ledger"), item(7, "Job", "worker-envy")], "Ledger")).toBeNull()
   })
 })
