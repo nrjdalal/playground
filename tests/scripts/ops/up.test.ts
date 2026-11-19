@@ -270,8 +270,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
   mkdirSync(ops, { recursive: true })
   const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
-  // each start a minute old: made before the job stopped, as ops-restart's TERM'd job's was
-  const now = pyNow() - 60
+  // a start 30 s old is older than START_WINDOW (10 s), so --restarted drops it, and younger than the 60 s no-holder grace, so a plain pass still holds it
+  const now = pyNow() - 30
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": now, "ops-y": now }))
   const env = {
     CLAUDE_CONFIG_DIR: config,
@@ -509,7 +509,7 @@ for answer in json.loads(sys.argv[2]):
 print(json.dumps(calls))
 `
 
-// a start recorded 90 s ago left no holder (once.py never ran for it), so up.py ends its grace past 70 s and starts it again in that pass.
+// a start recorded 90 s ago left no holder (once.py never ran for it), so up.py ends its grace past 60 s and starts it again in that pass.
 test("a job 90 s into its grace with no holder is started again", () => {
   const config = mkdtempSync(join(scratch, "no-holder-90s-"))
   const ops = join(dataOf(config), "ops")
@@ -550,7 +550,7 @@ test("a job 90 s into its grace with no holder is started again", () => {
   ])
 })
 
-// a start recorded 30 s ago left no holder, so up.py still holds it inside the 70 s grace and starts nothing in that pass.
+// a start recorded 30 s ago left no holder, so up.py still holds it inside the 60 s grace and starts nothing in that pass.
 test("a job 30 s into its grace with no holder is left alone", () => {
   const config = mkdtempSync(join(scratch, "no-holder-30s-"))
   const ops = join(dataOf(config), "ops")
