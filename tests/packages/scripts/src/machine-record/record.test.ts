@@ -251,10 +251,10 @@ describe("the daily check (PG-2538)", () => {
 })
 
 describe("OS-made systemd links (#2963)", () => {
-  const etcRoot = join(root, "etc")
-  const usrRoot = join(root, "usr")
-  const osRoots = [etcRoot, usrRoot]
-  const user = join(home, ".config", "systemd", "user")
+  let etcRoot: string
+  let usrRoot: string
+  let osRoots: string[]
+  let user: string
 
   const systemd = async () =>
     (await check(data, places({ osRoots }))).filter((line) =>
@@ -262,6 +262,10 @@ describe("OS-made systemd links (#2963)", () => {
     )
 
   beforeEach(() => {
+    etcRoot = join(root, "etc")
+    usrRoot = join(root, "usr")
+    osRoots = [etcRoot, usrRoot]
+    user = join(home, ".config", "systemd", "user")
     mkdirSync(user, { recursive: true })
     mkdirSync(etcRoot, { recursive: true })
     mkdirSync(usrRoot, { recursive: true })
