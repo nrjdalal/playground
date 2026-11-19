@@ -1,10 +1,11 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
   hostedLogin,
+  machineHostedLogin,
   type SeatIo,
   seatIo,
   seatService,
@@ -33,8 +34,12 @@ describe("storedLoginOf", () => {
     })
   })
 
-  test("a missing file, or one naming another account, is empty", () => {
+  test("a missing file, one that does not read, or one naming another account, is empty, in spawn.sh's load() words", () => {
     expect(storedLoginOf(EMAIL, null, null, NOW)).toEqual({
+      cause: "it cannot read ops/usage/stored-login.json (no such file)",
+      state: "empty",
+    })
+    expect(storedLoginOf(EMAIL, "{", null, NOW)).toEqual({
       cause: "it cannot read ops/usage/stored-login.json (does not read)",
       state: "empty",
     })
@@ -121,6 +126,16 @@ describe("hostedLogin", () => {
     expect(hostedLogin(io({}, null), "/data")).toEqual({})
   })
 
+  test("a stack that reads a fixture keeps today's start, and the Keychain is never read", () => {
+    const asked: [string, string][] = []
+    expect(machineHostedLogin(io({}, TOKEN, asked), "/data", () => false)).toEqual({})
+    expect(asked).toEqual([])
+    expect(machineHostedLogin(io({}, TOKEN), "/data", () => true)).toEqual({
+      email: EMAIL,
+      token: TOKEN,
+    })
+  })
+
   test("a config that names no account keeps today's start", () => {
     expect(hostedLogin({ ...io({}, TOKEN), config: () => null }, "/data")).toEqual({})
   })
@@ -139,7 +154,9 @@ exit 44
   )
   chmodSync(join(bin, "security"), 0o755)
   const path = process.env.PATH
-  process.env.PATH = `${bin}:${path}`
+  beforeAll(() => {
+    process.env.PATH = `${bin}:${path}`
+  })
   afterAll(() => {
     process.env.PATH = path
     rmSync(dir, { force: true, recursive: true })

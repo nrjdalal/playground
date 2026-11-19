@@ -321,7 +321,7 @@ export class SdkHost {
     this.loginCause = login.token ? null : (login.cause ?? null)
     if (login.token)
       console.error(
-        `${SDK_PROBE} starts on ${login.email}'s seat token: the stored login reads no live reading`,
+        `${SDK_PROBE} starts on ${login.email}'s seat token: the stored login has no live reading`,
       )
     if (this.loginCause) console.error(`${SDK_PROBE}: ${this.loginCause}`)
     const stream = this.deps.query({

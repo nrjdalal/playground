@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -44,6 +43,8 @@ export function storedLoginOf(
   const ended = status?.loginEnded
   if (typeof ended === "string" && ended && statusAge !== null && statusAge < STORED_LIMIT_MINUTES)
     return { cause: `its Claude Code login has ended (loginEnded: ${ended})`, state: "ended" }
+  if (storedText === null)
+    return { cause: `it cannot read ${STORED} (no such file)`, state: "empty" }
   const stored = parse(storedText)
   if (!stored) return { cause: `it cannot read ${STORED} (does not read)`, state: "empty" }
   const named = stored.account
@@ -112,21 +113,34 @@ export const seatService = (data: string): string | null => {
   }
 }
 
+// How long the Keychain read may take before it reads as no token, since the hosted session's start waits on it.
+export const SEAT_READ_MS = 5_000
+
 export const seatIo: SeatIo = {
   config: () => readText(claudeConfigFile()),
   now: Date.now,
   read: readText,
   seat: (service, email) => {
-    const run = spawnSync("security", ["find-generic-password", "-s", service, "-a", email, "-w"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-    const token = run.status === 0 ? run.stdout.trim() : ""
+    const run = Bun.spawnSync(
+      ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
+      {
+        // PATH as it reads now, which Bun would otherwise take from the start
+        env: process.env,
+        stderr: "ignore",
+        stdin: "ignore",
+        stdout: "pipe",
+        timeout: SEAT_READ_MS,
+      },
+    )
+    const token = run.exitCode === 0 ? run.stdout.toString().trim() : ""
     return token || null
   },
   service: () => seatService(dataDir()),
 }
 
 // The login for this machine's hosted session; a stack that reads a fixture keeps today's start on the stored login, so it never reaches the real Keychain.
-export const machineHostedLogin = (io: SeatIo = seatIo, data: string = dataDir()): HostedLogin =>
-  readsLive() ? hostedLogin(io, data) : {}
+export const machineHostedLogin = (
+  io: SeatIo = seatIo,
+  data: string = dataDir(),
+  live: () => boolean = readsLive,
+): HostedLogin => (live() ? hostedLogin(io, data) : {})

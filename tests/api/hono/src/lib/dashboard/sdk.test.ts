@@ -296,6 +296,26 @@ describe("the hosted session's start", () => {
     }
   })
 
+  test("a start on a local model never asks for a login, so no seat token reaches its server", () => {
+    const dir = scratch()
+    try {
+      const { calls, query } = fakeQuery()
+      let asked = 0
+      const login = () => {
+        asked += 1
+        return { email: "owner@example.test", token: `made-up-seat-${crypto.randomUUID()}` }
+      }
+      new SdkHost({ ...deps(query), login }).start(dir, CLAUDE, "default", {
+        id: LOCAL.models[0]!.id,
+        url: LOCAL.url,
+      })
+      expect(asked).toBe(0)
+      expect(calls[0]?.options.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined()
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a start with an ended login and no seat token runs as before, its row shows the expired login, and the log names the cause", () => {
     const dir = scratch()
     const cause =
