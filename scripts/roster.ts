@@ -493,15 +493,15 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
   console.log(names.join("\n"))
 }
 
-// The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it.
+// The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it. A rotation that fails never blocks the write, so each step is caught and skipped.
 async function keepVersions(path: string): Promise<void> {
   for (let n = 4; n >= 1; n--) {
     const from = `${path}.${n}`
-    if (existsSync(from)) await rename(from, `${path}.${n + 1}`)
+    if (existsSync(from)) await rename(from, `${path}.${n + 1}`).catch(() => {})
   }
   if (existsSync(path)) {
-    await copyFile(path, `${path}.1`)
-    await chmod(`${path}.1`, 0o600)
+    await copyFile(path, `${path}.1`).catch(() => {})
+    await chmod(`${path}.1`, 0o600).catch(() => {})
   }
 }
 
