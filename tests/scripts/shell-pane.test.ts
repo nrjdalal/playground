@@ -99,7 +99,7 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
-// A store whose policy makes the stub repo public to no-public-leak, which judges the row's target against publicRepo before its own origin, and whose list is valid but empty, since its refusal reads the write's body as unread text rather than a hit in its terms.
+// A store whose policy makes the stub repo public, since no-public-leak reads its target from factory.publicRepo; its term list is empty, since the row is refused for its unread body, not for a term.
 const PUBLIC = storeWith(
   join(SCRATCH, "public"),
   {
@@ -132,11 +132,10 @@ writeFileSync(
   join(PREPARE, "playground", "roster.json"),
   JSON.stringify({ agents: [{ mode: "prepare", name: "worker-made-up-1" }] }),
 )
-// The folder a guard's case runs in, where it is not the worktree. The origin guards read this checkout's origin, so it is the stub checkout.
+// The folder a guard's case runs in, where it is not the worktree: no-protected-push reads the stub checkout's origin.
 const CWDS: Record<string, string> = {
   "no-glm-heavy-path": GLM_REPO,
   "no-protected-push": ORIGIN_REPO,
-  "no-public-leak": ORIGIN_REPO,
 }
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
@@ -151,7 +150,7 @@ const ENVS: Record<string, Record<string, string>> = {
     CLAUDE_CONFIG_DIR: PREPARE,
     PLAYGROUND_DATA_DIR: join(PREPARE, "playground"),
   },
-  // The guard read mode holds: no row here is a write, but the repo it targets is still guarded to it, so it still cannot read its body before it runs.
+  // no-public-leak reads the PUBLIC store.
   "no-public-leak": { PLAYGROUND_DATA_DIR: PUBLIC },
 }
 
