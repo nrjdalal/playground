@@ -257,7 +257,7 @@ const main = async () => {
     log: (line: string) => console.log(line),
     now: Date.now,
     question: (line: string) => send.card(line),
-    tell: (line: string) => send(line, "reply"),
+    tell: (line: string) => send.out(line, "reply").then((out) => out.ids),
   }
   serve(
     path,

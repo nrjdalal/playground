@@ -636,7 +636,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
         sock: fake.sock,
       })
       o.io.question = (line: string) => send.card(line)
-      o.io.tell = (line: string) => send(line, "reply")
+      o.io.tell = (line: string) => send.out(line, "reply").then((out) => out.ids)
       const relayed: string[] = []
       const w = bridge({
         alert: async () => ALERT,
@@ -668,12 +668,27 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
         ])
         await w.idle()
       }
+      // the owner's reaction on a message by its id, or with no emoji, a reaction taken back
+      const reacts = async (on: string, emoji: string) => {
+        fake.upsert([
+          {
+            ...fake.message(jid(OWNER), "", { id: `own${++n}` }),
+            message: {
+              reactionMessage: {
+                key: { fromMe: true, id: on, remoteJid: jid(OWNER) },
+                text: emoji,
+              },
+            },
+          },
+        ])
+        await w.idle()
+      }
       await says("hi")
       const question = async () => {
         await settingPropose(o.io, "wa.guestPolicy", "status only")
         return `m${fake.sent.length}`
       }
-      return { fake, question, relayed, says, send }
+      return { fake, question, reacts, relayed, says, send }
     }
     const yesReached = (relayed: string[]) => relayed.some((line) => line.includes("reads: yes"))
 
@@ -748,6 +763,31 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       await c.says("yes")
       expect(stored(o.data)).toEqual({})
       expect(yesReached(c.relayed)).toBe(true)
+    })
+
+    test("a 👍 on the question gets the reply-yes line, and the plain yes that line asks for applies it", async () => {
+      const o = owned()
+      const c = await chat(o)
+      const asked = await c.question()
+      const before = c.fake.sent.length
+      await c.reacts(asked, "👍")
+      expect(c.fake.sent.length).toBe(before + 1)
+      await c.says("yes")
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+      expect(yesReached(c.relayed)).toBe(false)
+    })
+
+    test("a reaction taken back after another send leaves that send counted, so a plain yes goes on to the dispatcher", async () => {
+      const o = owned()
+      const c = await chat(o)
+      const asked = await c.question()
+      await c.send("shall I go ahead?", "reply")
+      await c.reacts(asked, "")
+      await c.says("yes")
+      expect(stored(o.data)).toEqual({})
+      expect(yesReached(c.relayed)).toBe(true)
+      await c.says("yes", asked)
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
     })
 
     test("a text held in quiet hours is no new message until its catch-up goes out", async () => {

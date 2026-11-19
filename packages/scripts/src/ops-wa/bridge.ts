@@ -363,9 +363,10 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
-  // his message before this one, which a plain answer to a proposal reads (ADR 0041)
-  const before = (await readOwn<Wrote>(ownerFile(io.dir), {})).ownerAt
-  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
+  // his typed message before this one, which a plain answer to a proposal counts from (ADR 0041); a reaction, an edit or a delete moves ownerAt alone
+  const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+  const before = owner.typedAt ?? owner.ownerAt
+  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner), !said?.about)
   const id = m.key.id
   const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
@@ -442,12 +443,31 @@ export const keptLine = (id: string) =>
   `ops-wa kept the one phone number in it: when the owner asks for it to be the second number, run playground wa alert-set --from-owner-msg ${id}.`
 
 // What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
-type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }
-async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?: string) {
+type Wrote = {
+  alertAt?: number
+  firstAt?: number
+  jid?: string
+  ownerAt?: number
+  typedAt?: number
+}
+// typed: a message he wrote, not a reaction, an edit or a delete, which moves typedAt too
+async function wrote(
+  path: string,
+  key: "alertAt" | "ownerAt",
+  at: number,
+  jid?: string,
+  typed = false,
+) {
   const before = await readOwn<Wrote>(path, {})
   const same = before.jid === jid
   const firstAt = same ? (before.firstAt ?? before[key] ?? at) : at
-  await writeOwn(path, { firstAt, [key]: at, ...(jid && { jid }) })
+  const typedAt = typed ? at : same ? before.typedAt : undefined
+  await writeOwn(path, {
+    firstAt,
+    [key]: at,
+    ...(jid && { jid }),
+    ...(typedAt !== undefined && { typedAt }),
+  })
 }
 // a file from before chats were named, the owner's alone, counts as the current number's
 const firstOf = (w: Wrote, jid?: string) =>

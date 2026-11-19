@@ -19,9 +19,17 @@ import { seedAlert } from "./seed"
 // confirm.json, ops-wa's alone: the one setting a guarded key waits to apply on, until the owner's yes within CONFIRM_MS (ADR 0035); a session's proposal waits there too, its id the question's own (ADR 0041)
 export const confirmFile = (dir: string) => join(dir, "confirm.json")
 export const CONFIRM_MS = 10 * 60_000
-type Pending = { at: number; id: string; key: string; proposed?: true; value: string }
+// lines: the ids of ops-wa's own lines about a proposal after its question, which a plain yes counts as the proposal's
+type Pending = {
+  at: number
+  id: string
+  key: string
+  lines?: string[]
+  proposed?: true
+  value: string
+}
 
-// sent.json, the sender's chain's: each new message ops-wa sent the owner, by its id and time, the last 50, so a plain answer to a proposal can tell whether the question is the one message he got since his previous one (ADR 0041); an edit, a delete, a reaction and a pin add no message, so none is kept
+// sent.json, the sender's chain's: each new message ops-wa sent the owner, by its id and time, the last 50, so a plain answer to a proposal can tell whether the proposal's own messages are all he got since his previous typed one (ADR 0041); an edit, a delete, a reaction and a pin add no message, so none is kept
 export const sentFile = (dir: string) => join(dir, "sent.json")
 export type NewMessage = { at: number; id: string }
 
@@ -108,7 +116,8 @@ export type SettingSetIo = {
   // one line to the owner's WhatsApp, the id of the message it sent back
   question: (line: string) => Promise<string | undefined>
   // one line to the owner's WhatsApp
-  tell: (line: string) => Promise<unknown>
+  // the ids of the messages the line went out as, where the sender gives them
+  tell: (line: string) => Promise<readonly string[] | void>
 }
 
 async function applied(io: SettingSetIo, key: string, value: string, id: string, proposed = false) {
@@ -205,14 +214,14 @@ const answer = (text: string) =>
     .toLowerCase()
     .replace(/[.!]+$/, "")
 
-// Whether the question is the one new message ops-wa sent the owner since his previous message, so a plain yes can only be answering it.
-async function onlyQuestion(io: SettingSetIo, id: string, since: number) {
+// Whether the proposal's own messages, its question and the lines about it, are all ops-wa sent the owner since his previous typed message, so a plain yes can only be answering it.
+async function onlyQuestion(io: SettingSetIo, own: string[], since: number) {
   const { messages = [] } = await readOwn<{ messages?: NewMessage[] }>(sentFile(io.dir), {})
-  return messages.every((sent) => sent.at <= since || sent.id === id)
+  return messages.every((sent) => sent.at <= since || own.includes(sent.id))
 }
 
 // The owner's next message after the question settles it: a yes within 10 minutes applies the waiting setting, and anything else, or a yes after 10 minutes, drops it; true when the message was a yes or a no, which goes no further, and false for any other, which goes on as before.
-// A proposal's yes or no settles it only when it quotes the question, or quotes nothing while the question is the one message he got since his previous one; any other yes or no settles nothing, leaves it waiting and goes on to the dispatcher (ADR 0041).
+// A proposal's yes or no settles it only when it quotes the question, or quotes nothing while its question and lines are all he got since his previous typed message; any other yes or no settles nothing, leaves it waiting and goes on to the dispatcher (ADR 0041).
 export const confirm = (
   io: SettingSetIo,
   text: string,
@@ -228,19 +237,26 @@ async function settle(
 ): Promise<boolean> {
   const pending = await readOwn<Partial<Pending>>(confirmFile(io.dir), {})
   if (!pending.key || !pending.id || pending.value === undefined) return false
-  // a reaction is no typed yes, so the question still waits, and an emoji, a 👍 meant as yes included, gets one line saying so
+  // a reaction is no typed yes, so the question still waits, and an emoji, a 👍 meant as yes included, gets one line saying so; a proposal keeps that line's ids as its own, so it is no other message to a plain yes
   if (reaction !== undefined) {
-    if (reaction && io.now() - (pending.at ?? 0) < CONFIRM_MS)
-      await io
+    if (reaction && io.now() - (pending.at ?? 0) < CONFIRM_MS) {
+      const ids = await io
         .tell(`not set: reply yes to set ${pending.key}`)
-        .catch((error: Error) => io.log(`ops-wa: the reaction line: ${error.message}`))
+        .catch((error: Error) => void io.log(`ops-wa: the reaction line: ${error.message}`))
+      if (pending.proposed && ids?.length)
+        await writeOwn(confirmFile(io.dir), {
+          ...pending,
+          lines: [...(pending.lines ?? []), ...ids],
+        })
+    }
     return false
   }
   const said = answer(text)
   const late = io.now() - (pending.at ?? 0) >= CONFIRM_MS
   if (pending.proposed && !late && (YES.has(said) || said === "no")) {
+    const own = [pending.id, ...(pending.lines ?? [])]
     const plain =
-      answered.quoted === undefined && (await onlyQuestion(io, pending.id, answered.since ?? 0))
+      answered.quoted === undefined && (await onlyQuestion(io, own, answered.since ?? 0))
     if (answered.quoted !== pending.id && !plain) return false
   }
   await writeOwn(confirmFile(io.dir), {})
