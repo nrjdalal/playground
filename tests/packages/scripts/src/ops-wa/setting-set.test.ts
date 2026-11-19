@@ -399,6 +399,39 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
   })
 
+  test("a reaction from the owner drops the waiting setting", async () => {
+    const o = owned()
+    const h = watched(o)
+    await asked(o, h)
+    const reactionMessage = {
+      key: { fromMe: true, id: "ours1", remoteJid: jid(OWNER) },
+      text: "👍",
+    }
+    h.fake.upsert([
+      { ...h.fake.message(jid(OWNER), "", { id: "own2" }), message: { reactionMessage } },
+    ])
+    await h.settle()
+    h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
+    await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+  })
+
+  test("a value the owner's message only quotes is not held, so its id refuses", async () => {
+    const o = owned()
+    const h = watched(o)
+    const extendedTextMessage = {
+      contextInfo: { quotedMessage: { conversation: "status only" }, stanzaId: "m1" },
+      text: "set the guest policy to this",
+    }
+    h.fake.upsert([
+      { ...h.fake.message(jid(OWNER), "", { id: "own1" }), message: { extendedTextMessage } },
+    ])
+    await h.settle()
+    expect(h.relayed[0]).toContain("It answers the message that reads: status only")
+    await expect(settingSet(o.io, "own1", "wa.guestPolicy", "status only")).rejects.toThrow()
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+  })
+
   test("a yes from the second number or a stranger applies nothing", async () => {
     const o = owned()
     const h = watched(o)
