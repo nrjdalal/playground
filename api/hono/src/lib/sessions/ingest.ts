@@ -518,7 +518,7 @@ export async function ingestRollout(
     return null
   }
   const [known] = await db.select().from(claudeTranscript).where(eq(claudeTranscript.path, path))
-  const sameInode = known && known.dev === stat.dev && known.ino === stat.ino
+  const sameInode = known && known.ino === stat.ino
   if (sameInode && isCompressed(path)) return { entries: 0, id: known.sessionId }
   let bytes = sliceOf(path)
   let read = options

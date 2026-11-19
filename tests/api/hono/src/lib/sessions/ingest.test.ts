@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import {
   appendFileSync,
   mkdirSync,
@@ -1374,6 +1374,31 @@ describe.skipIf(!dockerUp())("ingest", () => {
       id: ZST_THREAD,
     })
     expect((await sessionRow(ZST_THREAD)).harness).toBe("codex")
+  })
+
+  test("a compressed rollout whose device id changes on reboot reads nothing more, its decode skipped", async () => {
+    const thread = crypto.randomUUID()
+    const original = Bun.zstdDecompressSync
+    const spy = spyOn(Bun, "zstdDecompressSync").mockImplementation((...args: unknown[]) =>
+      (original as (...a: unknown[]) => Buffer)(...args),
+    )
+    try {
+      writeFileSync(rolloutPath(thread, ".zst"), Bun.zstdCompressSync(rollout(thread)))
+      expect(await ingestRollout(rolloutPath(thread, ".zst"))).toEqual({
+        entries: 9,
+        id: thread,
+      })
+      // A Mac reboot numbers the volume anew, so the stored dev differs, but the inode and path are unchanged, so the read stops before it decodes.
+      await admin`update claude_transcript set dev = dev + 1 where path = ${rolloutPath(thread, ".zst")}`
+      expect(await ingestRollout(rolloutPath(thread, ".zst"))).toEqual({
+        entries: 0,
+        id: thread,
+      })
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(await entryCount(thread)).toBe(9)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   test("a Claude Code transcript still ingests as a claude-code session", async () => {
