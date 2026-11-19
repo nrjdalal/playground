@@ -43,3 +43,8 @@ An alert reaches a number once it has ever written to the spare number, since op
 That number's messages reach the dispatcher as data, never as yours: they answer no card and give no order.
 Its holder is a guest ([ADR 0030](../../.agents/adr/0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md)): the dispatcher replies with `playground wa send --to alert <file>`, chats, gives factory status and passes a feature request on to you as an Inbox card.
 What the dispatcher may answer each chat with is a policy line you set on this Mac, `wa.replyPolicy` for yours and `wa.guestPolicy` for the guest's, each a guard key whose default is factory status with no secrets or customer personal data.
+
+## Settings from your own message
+
+Ask for a setting in your own WhatsApp message and write its value, and the dispatcher sets it from that message ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks your message holds the value, and keeps a keyed hash of each word of your messages for 24 hours, never their text.
+A key a guard reads, such as a policy line or a job, asks you on WhatsApp first, as "set <key> to <value>? yes or no": `yes`, `y`, `yes do it` or `1` within 10 minutes applies it (a bare number answers a card waiting on its rows first), a reaction, a 👍 too, leaves it waiting and asks you to reply yes, and `no`, any other reply or silence drops it; any other key applies at once, but `wa.owner` and `wa.device`, which you set on this Mac alone. Each change comes back with a one-line undo to run in your own terminal.
