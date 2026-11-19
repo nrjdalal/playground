@@ -20,10 +20,13 @@ export type Card = {
     approve?: string
     attachments?: unknown[]
     deny?: string
+    // a draft's place: its thread's link, and who it goes to by a short name
+    link?: string
     options?: { description?: string; label: string }[]
     questions?: unknown[]
     scope?: string
     text?: string
+    to?: string
     type?: string
   }
   ref: number
