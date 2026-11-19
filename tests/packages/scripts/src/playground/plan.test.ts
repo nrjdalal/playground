@@ -653,7 +653,8 @@ describe("rollOutcome", () => {
         phase: "waiting",
         why: "prebuild build still queued after 1200s; it keeps waiting",
       })
-      expect(rollTimedOut(rollOutcome(log, []), 18).ok).toBe(true)
+      // #2658 item 1: a still-queued prebuild line reads waiting only while the step is still queued (cli passes prebuildQueued(), here true)
+      expect(rollTimedOut(rollOutcome(log, []), 18, true).ok).toBe(true)
     })
 
     test("still waiting at 30 minutes reads as waiting and passes, never Failed, since the roll goes on by itself", () => {

@@ -422,24 +422,34 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
-// A pid's own start time, now minus its elapsed (parseEtime), so a pid started after the pid file's mtime is another process that reused it.
-export const parseEtime = (_e: string): number => {
-  throw new Error("not built yet")
+// A pid's elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), in seconds, so its own start is now minus this.
+export const parseEtime = (elapsed: string): number => {
+  const parts = elapsed.split("-")
+  const days = parts.length > 1 ? Number(parts[0]) : 0
+  const hms = parts[parts.length - 1].split(":")
+  let secs = 0
+  if (hms.length === 3) secs = Number(hms[0]) * 3600 + Number(hms[1]) * 60 + Number(hms[2])
+  else if (hms.length === 2) secs = Number(hms[0]) * 60 + Number(hms[1])
+  return days * 86400 + secs
 }
 
-// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line for it, and the pid is not another process that reused it. It reads not queued when the pid started after the file that names it, and counts only start lines at or after the pid file's mtime.
 export const stepQueued = (
   pid: string | undefined,
   alive: (pid: number) => boolean,
   runs: string[],
-  _fileMtime = 0,
-  _pidStart = 0,
+  fileMtime = 0,
+  pidStart = 0,
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  // a pid whose own start is later than the file that names it is another process that reused it, so it reads not queued
+  if (pidStart > fileMtime) return false
+  // count only start lines at or after the pid file's mtime, as slot_step counts only lines after its mark
   return !runs.some((line) => {
     const words = line.split(" ")
-    return words[1] === "start" && words[3] === String(n)
+    if (words[1] !== "start" || words[3] !== String(n)) return false
+    return Date.parse(words[0]) >= fileMtime
   })
 }
 
@@ -449,12 +459,18 @@ export const rollTimedOut = (
   load5: number,
   queued = false,
 ): { done: string; ok: boolean } => {
+  const waitingWhy = "phase" in last && last.phase === "waiting" ? last.why : undefined
+  const stillQueuedLine =
+    waitingWhy !== undefined && /^prebuild \w+ still queued after /.test(waitingWhy)
   const why =
-    "phase" in last && last.phase === "waiting"
-      ? last.why
-      : queued
-        ? "the roll's next step is still queued in run-slot"
-        : undefined
+    waitingWhy ?? (queued ? "the roll's next step is still queued in run-slot" : undefined)
+  // a still-queued prebuild line reads waiting only when the step is still queued, else the failure; any other still-queued line, and a load or run-slot line, wait
+  if (why === undefined || (stillQueuedLine && !queued)) {
+    return {
+      done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+      ok: false,
+    }
+  }
   return why !== undefined
     ? {
         done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
