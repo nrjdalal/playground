@@ -1,18 +1,24 @@
 import { chmodSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
-import type { Kind, Who } from "./bridge"
+import type { Kind, Out, Who } from "./bridge"
+import type { Extra } from "./outbound"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, file?, source?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, `file` a path in the outbox (outbound.ts), the body then its caption and may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, {sent, note?} or {refusal} out, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, delete?, edit?, file?, location?, quote?, source?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, the rest a send's Extra (outbound.ts), `location` as [latitude, longitude], with a file, a location or a delete the body may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, {sent, ids?, note?} or {refusal} out, `ids` the sent messages' ids, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
-type Reply = { note?: string; refusal?: string; sent?: true }
+type Reply = { ids?: string[]; note?: string; refusal?: string; sent?: true }
 
 type React = (emoji: string, on: { id?: string; who?: Who }) => Promise<string>
 
 export function serve(
   path: string,
-  send: (body: string, kind: Kind, source?: string, file?: string) => Promise<string>,
+  send: (
+    body: string,
+    kind: Kind,
+    source: string | undefined,
+    extra: Extra,
+  ) => Promise<string | Out>,
   alertSet?: (id: string) => Promise<string>,
   react?: React,
   settingSet?: (id: string, key: string, value: string) => Promise<string>,
@@ -33,8 +39,12 @@ export function serve(
           alert?: unknown
           alertSet?: unknown
           body?: unknown
+          delete?: unknown
+          edit?: unknown
           file?: unknown
           id?: unknown
+          location?: unknown
+          quote?: unknown
           react?: unknown
           settingSet?: { id?: unknown; key?: unknown; value?: unknown }
           source?: unknown
@@ -70,8 +80,21 @@ export function serve(
             (error: Error) => answer({ refusal: error.message }),
           )
         const { body } = asked
-        const file = typeof asked.file === "string" && asked.file ? asked.file : undefined
-        if (typeof body !== "string" || (!body.trim() && !file))
+        const word = (v: unknown) => (typeof v === "string" && v ? v : undefined)
+        const [lat, lon] = Array.isArray(asked.location) ? asked.location : []
+        const extra: Extra = Object.fromEntries(
+          Object.entries({
+            delete: word(asked.delete),
+            edit: word(asked.edit),
+            file: word(asked.file),
+            location: typeof lat === "number" && typeof lon === "number" ? { lat, lon } : undefined,
+            quote: word(asked.quote),
+          }).filter(([, v]) => v !== undefined),
+        )
+        if (
+          typeof body !== "string" ||
+          (!body.trim() && !extra.file && !extra.location && !extra.delete)
+        )
           return answer({ refusal: "an empty body" })
         const kind =
           asked.alert === true
@@ -82,8 +105,15 @@ export function serve(
                 ? "guest"
                 : "reply"
         const source = typeof asked.source === "string" && asked.source ? asked.source : undefined
-        send(body, kind, kind === "first" ? source : undefined, file).then(
-          (said) => answer(said === "sent" ? { sent: true } : { note: said, sent: true }),
+        send(body, kind, kind === "first" ? source : undefined, extra).then(
+          (out) => {
+            const { ids, said } = typeof out === "string" ? { ids: [], said: out } : out
+            answer({
+              ...(ids.length > 0 && { ids }),
+              ...(said !== "sent" && { note: said }),
+              sent: true,
+            })
+          },
           (error: Error) => answer({ refusal: error.message }),
         )
       },
@@ -104,7 +134,7 @@ export const request = (
   kind: Exclude<Kind, "escalate"> = "reply",
   timeoutMs = 600_000,
   source?: string,
-  file?: string,
+  extra: Extra = {},
 ) =>
   ask(
     path,
@@ -116,7 +146,8 @@ export const request = (
           : kind === "guest"
             ? { body, to: "alert" }
             : { body }),
-      ...(file && { file }),
+      ...extra,
+      ...(extra.location && { location: [extra.location.lat, extra.location.lon] }),
     },
     timeoutMs,
   )

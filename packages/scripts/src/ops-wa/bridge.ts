@@ -27,7 +27,17 @@ import {
 import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
-import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
+import {
+  type Content,
+  type Extra,
+  extraRefusal,
+  messagesOf,
+  outboxDir,
+  type OwnKey,
+  PIN_SECONDS,
+  pinOf,
+  readOutbound,
+} from "./outbound"
 import { alertSeedFile } from "./seed"
 import type { Vote, votedOptions } from "./votes"
 
@@ -72,16 +82,20 @@ export type Mode = {
   on: () => Promise<boolean>
   reply: (body: string) => Promise<string>
   stuck: () => Promise<Stuck>
+  // sends a card's text to the owner and gives its first message's id, which a decision's pin names; a bridge with none sends it through reply and pins only a poll
+  card?: (body: string) => Promise<string | undefined>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
+  confirm?: (text: string, reaction?: string) => Promise<boolean>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
   escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
   inbox?: Inbox
   // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
-  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
-  confirm?: (text: string, reaction?: string) => Promise<boolean>
+  // pins our own message in the owner's chat for 7 days, or with off takes the pin away; a bridge with none pins nothing
+  pin?: (id: string, off?: boolean) => Promise<void>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
@@ -140,6 +154,12 @@ const alertFile = (dir: string) => join(dir, "alert.json")
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
+// Each open decision's pin in the owner's chat: its message id, its card and when it was pinned, so it comes off once the card settles.
+const pinsFile = (dir: string) => join(dir, "pins.json")
+type Pin = { at: number; id: string; ref: number }
+// WhatsApp keeps 3 pins in a chat, and drops one after its 7 days.
+const PIN_MAX = 3
+const PIN_MS = PIN_SECONDS * 1000
 // bravo marks a message past its hand-on to the assistant seat, and settled one whose send-on through Ops was decided, sent or not, so each goes once.
 type Handed = { at: number; bravo?: true; line: string; settled?: true }
 // A dispatcher whose alerts-wait is down hears the owner only through the relay's backstop, minutes late, so a line it has not answered in this long goes on through Ops.
@@ -343,16 +363,21 @@ export const NOTICE = "No reply is needed."
 
 // Whose message a reaction answers: the owner's, or the alert number's, a guest's.
 export type Who = "alert" | "owner"
-// The messages handed on, the last 50, so wa react finds the latest or one by its id.
-type Kept = { at: number; id: string; jid: string; who: Who }
+// The messages handed on, the last 50, so wa react finds the latest or one by its id, and wa send --quote its words, kept 24 hours.
+type Kept = { at: number; id: string; jid: string; text?: string; who: Who }
 const messagesFile = (dir: string) => join(dir, "messages.json")
 // A handed-on message is kept for wa react; the owner's then gets 👀, seen and a reply coming, which the dispatcher's ✅ replaces once no reply is needed (ADR 0031); the 👀 is not awaited, so a long reply's typing time never holds the next message back.
 async function seen(io: Io & Mode, m: Incoming, who: Who, at: number) {
   const { id, remoteJid } = m.key
   if (!id || !remoteJid) return
   const { messages = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+  const message = m.message ?? {}
+  const text = textOf(message) ?? mediaOf(message)
+  const fresh = messages.map(({ text: words, ...k }) =>
+    at - k.at < OWNER_WINDOW_MS && words !== undefined ? { ...k, text: words } : k,
+  )
   await writeOwn(messagesFile(io.dir), {
-    messages: [...messages, { at, id, jid: remoteJid, who }].slice(-50),
+    messages: [...fresh, { at, id, jid: remoteJid, text, who }].slice(-50),
   })
   if (who === "owner")
     void io
@@ -534,15 +559,18 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     Object.entries(state.sent ?? {}).filter(([, s]) => now - s.at < CARD_KEEP_MS),
   )
   let held = state.held
+  let pins = await pinsOf(io.dir, now)
   try {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
+    // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
+    if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
     const kept: Card[] = []
     for (const card of open) {
       if (!terms || !goesOut(card, terms)) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
         const { poll, rows, text } = cardOf(card, terms)
-        await io.reply(text)
+        const textId = io.card ? await io.card(text) : void (await io.reply(text))
         sent[card.ref] = { at: io.now(), id: card.id, rows }
         // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
         if (poll && io.poll)
@@ -551,6 +579,10 @@ async function cards(io: Io & Mode, inbox: Inbox) {
           } catch (error) {
             io.log(`ops-wa: a card's poll: ${(error as Error).message}`)
           }
+        // a decision stays pinned until it settles, the poll when one went and else its text; an update asks nothing and takes none
+        const id = card.kind === "decision" ? (sent[card.ref]!.poll?.id ?? textId) : undefined
+        if (id && io.pin)
+          pins = await pinOne(io.pin, pins, { at: io.now(), id, ref: card.ref }, io.log)
       }
     }
     const key = kept
@@ -561,10 +593,66 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     held = key
   } finally {
     await writeOwn(cardsFile(io.dir), { held, sent })
+    await writeOwn(pinsFile(io.dir), { pins })
   }
 }
 
-// One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat.
+// The pins kept in pins.json; a pin past its 7 days is WhatsApp's own to drop.
+const pinsOf = async (dir: string, now: number) =>
+  ((await readOwn<{ pins?: Pin[] }>(pinsFile(dir), {})).pins ?? []).filter(
+    (p) => now - p.at < PIN_MS,
+  )
+
+// The unpin step of a pass with WhatsApp mode off: a decision settled in the Inbox still comes unpinned, as an urgent alert still goes.
+async function unpins(io: Io & Mode, inbox: Inbox, pin: NonNullable<Mode["pin"]>) {
+  const pins = await pinsOf(io.dir, io.now())
+  if (pins.length === 0) return
+  await writeOwn(pinsFile(io.dir), {
+    pins: await unpinSettled(pin, pins, await inbox.open(), io.log),
+  })
+}
+
+// Takes the pin off each decision no longer open, keeping a pin whose removal failed for the next pass.
+async function unpinSettled(
+  pin: NonNullable<Mode["pin"]>,
+  pins: Pin[],
+  open: Card[],
+  log: (line: string) => void,
+): Promise<Pin[]> {
+  const asking = new Set(open.filter((card) => card.status === "open").map((card) => card.ref))
+  const kept: Pin[] = []
+  for (const p of pins)
+    if (asking.has(p.ref)) kept.push(p)
+    else
+      await pin(p.id, true).catch((error: Error) => {
+        log(`ops-wa: #i${p.ref}'s unpin: ${error.message}`)
+        kept.push(p)
+      })
+  return kept
+}
+
+// Pins a decision, taking the oldest pin off first while WhatsApp's 3 are taken; a pin that fails leaves the decision unpinned.
+async function pinOne(
+  pin: NonNullable<Mode["pin"]>,
+  pins: Pin[],
+  next: Pin,
+  log: (line: string) => void,
+): Promise<Pin[]> {
+  const kept = [...pins]
+  try {
+    while (kept.length >= PIN_MAX) {
+      await pin(kept[0]!.id, true)
+      kept.shift()
+    }
+    await pin(next.id)
+    return [...kept, next]
+  } catch (error) {
+    log(`ops-wa: #i${next.ref}'s pin: ${(error as Error).message}`)
+    return kept
+  }
+}
+
+// One pass while WhatsApp mode is on: the failover to the assistant seat (handOn), the 15-minute update and the Inbox's cards, the last two only while the owner has written in the last 24 hours, since ops-wa never starts a chat; with mode off, a settled decision's unpin alone, inside those 24 hours.
 async function pass(io: Io & Mode) {
   // an urgent alert goes on whether WhatsApp mode is on or off
   if (io.escalate)
@@ -574,6 +662,8 @@ async function pass(io: Io & Mode) {
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
+  const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+  const inWindow = ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS
   // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
   try {
     if (await io.on()) {
@@ -603,23 +693,21 @@ async function pass(io: Io & Mode) {
           }
           h.settled = true
         }
-      const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
       // a window with no owner message handed on and no send to the owner since the last line asks for nothing, so a quiet chat gets no update
       const since = watch.updateAt ?? 0
       const moved = handed.some((h) => h.at > since) || sends.some((at) => at > since)
-      if (
-        ownerAt !== undefined &&
-        now - ownerAt <= OWNER_WINDOW_MS &&
-        now - Math.max(since, ownerAt) >= UPDATE_MS &&
-        moved
-      ) {
+      if (inWindow && now - Math.max(since, ownerAt!) >= UPDATE_MS && moved) {
         await io.relay("dispatcher", updateLine((await policyOf(io)).reply))
         watch.updateAt = now
       }
-      if (io.inbox && ownerAt !== undefined && now - ownerAt <= OWNER_WINDOW_MS)
+      if (io.inbox && inWindow)
         await cards(io, io.inbox).catch((error: Error) =>
           io.log(`ops-wa: the Inbox's cards: ${error.message}`),
         )
+    } else if (io.inbox && io.pin && inWindow) {
+      await unpins(io, io.inbox, io.pin).catch((error: Error) =>
+        io.log(`ops-wa: the settled decisions' unpins: ${error.message}`),
+      )
     }
   } finally {
     await ownFolder(io.dir)
@@ -799,6 +887,13 @@ export async function statusOf(
 
 // A poll that went out: its message id and its secret in base64, which its votes are encrypted with.
 export type PollSent = { id: string; secret: string }
+// What a send answers: who it reached, and the ids of the messages it sent.
+export type Out = { ids: string[]; said: string }
+// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat and time, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one.
+type Own = { at: number; id: string; jid: string }
+const ownFile = (dir: string) => join(dir, "own.json")
+// WhatsApp takes an edit in a message's first 15 minutes.
+const EDIT_MS = 15 * 60_000
 
 const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa never starts a chat"
 
@@ -820,6 +915,8 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
+  // the ids of the last send's messages, read on the chain right after it, so a card's text gives its id for a pin
+  let lastIds: string[] = []
   // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
@@ -838,8 +935,12 @@ export function sender(
     const words = wordsOf(content)
     if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      // an edit gives the edited message its new words, so a reaction on it reads them
+      const edited = "edit" in content ? content.edit.id : undefined
       await writeOwn(oursFile(io.dir), {
-        messages: [...messages, { id, text: words }].slice(-50),
+        messages: edited
+          ? messages.map((m) => (m.id === edited ? { ...m, text: words } : m))
+          : [...messages, { id, text: words }].slice(-50),
       })
     }
     if (sends) {
@@ -869,11 +970,15 @@ export function sender(
   const sendNow = async (
     body: string,
     kind: Kind,
-    source?: string,
-    path?: string,
-  ): Promise<string> => {
+    source: string | undefined,
+    extra: Extra,
+  ): Promise<Out> => {
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
+    if (kind !== "reply" && kind !== "guest" && Object.keys(extra).length > 0)
+      throw new Error("wa alert sends text alone")
     // the outbox sits beside whatsapp/ in the data folder
-    const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
+    const file = extra.file ? await readOutbound(outboxDir(dirname(io.dir)), extra.file) : undefined
     const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
     const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
@@ -926,7 +1031,34 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    const messages = messagesOf(split(toWhatsApp(body)), file)
+    const jid = going[0]!.jid
+    const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+    const who: Who = kind === "guest" ? "alert" : "owner"
+    const quoted = extra.quote ? kept.find((k) => k.id === extra.quote && k.who === who) : undefined
+    if (extra.quote && !quoted?.text)
+      throw new Error(`no message ${extra.quote} from ${going[0]!.who} is kept to quote`)
+    // seen() drops old words only when the next message comes, so a quote checks the age itself, as a reaction does
+    if (quoted && now - quoted.at >= OWNER_WINDOW_MS)
+      throw new Error(
+        "that message is over 24 hours old, and ops-wa quotes only inside its 24 hours",
+      )
+    const own = (await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})).messages ?? []
+    const target = extra.edit ?? extra.delete
+    const mine = target ? own.find((o) => o.id === target && o.jid === jid) : undefined
+    if (target && !mine)
+      throw new Error(
+        `message ${target} is not one ops-wa sent to ${going[0]!.who}, so it cannot be ${extra.edit ? "edited" : "deleted"}`,
+      )
+    if (extra.edit && now - mine!.at > EDIT_MS)
+      throw new Error("WhatsApp edits a message only in its first 15 minutes")
+    const key: OwnKey | undefined = mine && { fromMe: true, id: mine.id, remoteJid: jid }
+    const messages = messagesOf(split(toWhatsApp(body)), {
+      ...(extra.delete && { delete: key }),
+      ...(extra.edit && { edit: key }),
+      file,
+      location: extra.location,
+      ...(quoted && { quote: { id: quoted.id, jid: quoted.jid, text: quoted.text! } }),
+    })
     const sends = await recent(now)
     const ids: string[] = []
     for (const t of going)
@@ -940,21 +1072,36 @@ export function sender(
           content,
           typed ? typingMs(typed.length, io.random) : 0,
         )
-        if (id) ids.push(id)
+        // kept as each part goes, so a part already sent can be taken back when a later one fails
+        if (id && !target) {
+          ids.push(id)
+          own.push({ at: io.now(), id, jid: t.jid })
+          await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
+        }
       }
+    lastIds = ids
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return "sent to the owner alone: the alert number has never written to this number"
+        return {
+          ids,
+          said: "sent to the owner alone: the alert number has never written to this number",
+        }
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
-      return `sent to the owner; the alert number gets it at ${new Date(due).toISOString().slice(11, 16)}Z unless it is handled`
+      return {
+        ids,
+        said: `sent to the owner; the alert number gets it at ${new Date(due).toISOString().slice(11, 16)}Z unless it is handled`,
+      }
     }
     const left = to.find((t) => !t.open)
-    return left
-      ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
-      : "sent"
+    return {
+      ids,
+      said: left
+        ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
+        : "sent",
+    }
   }
   const queued = <T>(job: () => Promise<T>): Promise<T> => {
     const run = chain.then(job)
@@ -990,11 +1137,28 @@ export function sender(
     )
     return "sent"
   }
-  // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
+  // a card's decision pinned in the owner's chat for 7 days, or with off unpinned: the gap alone, no typing time, never counted as an answer, and inside the owner's 24 hours alone
+  const pinNow = async (id: string, off: boolean) => {
+    const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+    if (windowLeft(owner.ownerAt, io.now()) === 0) throw new Error(NO_CHAT)
+    const remoteJid = jidOf(io.owner)
+    await paced(null, SEND.gapMs, remoteJid, pinOf({ fromMe: true, id, remoteJid }, off))
+  }
   return Object.assign(
-    (body: string, kind: Kind = "reply", source?: string, path?: string): Promise<string> =>
-      queued(() => sendNow(body, kind, source, path)),
+    // source: what a checker reads for an alert to the owner first; extra: a file, a location, a quote, an edit or a delete beside the body (outbound.ts)
+    (body: string, kind: Kind = "reply", source?: string, extra: Extra = {}): Promise<string> =>
+      queued(() => sendNow(body, kind, source, extra)).then((out) => out.said),
     {
+      // a card's text to the owner, giving its first message's id, which a decision's pin names
+      card: (body: string) =>
+        queued(async () => {
+          await sendNow(body, "reply", undefined, {})
+          return lastIds[0]
+        }),
+      // the same send, with the ids of the messages it sent, which an edit or a delete names
+      out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
+        queued(() => sendNow(body, kind, source, extra)),
+      pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
       react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>
         queued(() => reactNow(emoji, on)),
