@@ -40,7 +40,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, checkout, factory_login, setting  # noqa: E402
+from beat import beat, checkout, factory_login, has_token, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -339,9 +339,21 @@ while True:
         quiet = int((time.time() - datetime.datetime.fromisoformat(str(last).replace("Z", "+00:00")).timestamp()) // 60)
     except ValueError:
         quiet = 0
-    if failed is not None and not no_login and quiet >= 15:
+    quiet_stored = failed is not None and not no_login and quiet >= 15
+    cause = ("access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}") if quiet_stored else None
+    # a quiet stored login whose seat token login-flip.json's seen read fresh (via token, under 60 minutes, its item still in the Keychain) runs every start on that token, as spawn.sh's seat start judges it, so the beat stays ok and its detail names the login
+    seat = None
+    if quiet_stored:
+        try:
+            own = json.load(open(STORED)).get("account")
+        except (OSError, ValueError, AttributeError):
+            own = None
+        entries = (flip_file() or {}).get("seen")
+        s = next((r for a, r in entries.items() if isinstance(a, str) and a.lower() == own.lower() and isinstance(r, dict)), None) if isinstance(own, str) and isinstance(entries, dict) else None
+        if s and s.get("via") == "token" and isinstance(s.get("at"), (int, float)) and time.time() - s["at"] < 3600 and has_token(own, SERVICE):
+            seat = f"{own}'s stored login reads nothing ({cause}), so it runs on its seat token, read {int((time.time() - s['at']) // 60)} min ago"
+    if quiet_stored and not seat:
         fix = "; the owner's /login brings it back" if isinstance(failed, (LoginEnded, TokenExpired)) else ""
-        cause = "access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}"
         head = f"error: stored login read nothing for {quiet} min ("
         result = head + cause[: 120 - len(head) - len(fix) - 1] + ")" + fix
     elif data and not any(p.startswith("factory") for p in problems):
@@ -356,5 +368,7 @@ while True:
     # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
     if cost_problem:
         detail += f" ({cost_problem})"
+    if seat:
+        detail = f"{seat}. {detail}".strip()
     beat("ops-usage", os.getpid(), STARTED, CYCLE, result, {"detail": detail})
     time.sleep(CYCLE)
