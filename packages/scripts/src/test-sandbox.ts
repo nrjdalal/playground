@@ -107,7 +107,31 @@ const readable = () => {
   }
 }
 const timings = update || readable() ? [`--timings=${TIMINGS}`] : []
-const args = process.argv.slice(2)
+// bun flags whose value may follow as its own word (`bun test --help`), A to Z; each is joined to its value here, as `bun test` reads `flag=value`, so no later step reads the value as a path or a name filter
+const takesValue = new Set([
+  "--coverage-dir",
+  "--coverage-reporter",
+  "--max-concurrency",
+  "--parallel-delay",
+  "--path-ignore-patterns",
+  "--reporter",
+  "--reporter-outfile",
+  "--rerun-each",
+  "--retry",
+  "--seed",
+  "--shard",
+  "--test-name-pattern",
+  "--timeout",
+  "--timings",
+  "-t",
+])
+const args: string[] = []
+for (const arg of process.argv.slice(2)) {
+  const flag = args.at(-1)
+  if (flag !== undefined && takesValue.has(flag) && !arg.startsWith("-"))
+    args[args.length - 1] = `${flag}=${arg}`
+  else args.push(arg)
+}
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
@@ -173,40 +197,8 @@ const bunTargets: string[] = []
 const pyTargets: [label: string, file: string][] = []
 const unrunnable: [label: string, reason: string][] = []
 const seenPy = new Set<string>()
-// 2770: bun flags that take a value, listed by `bun test --help` and kept in alphabetical order; test:file passes a flag through only when its value follows, so the value is not read as a name filter
-const takesValue = new Set([
-  "--bail",
-  "--changed",
-  "--coverage-dir",
-  "--coverage-reporter",
-  "--max-concurrency",
-  "--parallel",
-  "--parallel-delay",
-  "--path-ignore-patterns",
-  "--reporter",
-  "--reporter-outfile",
-  "--rerun-each",
-  "--retry",
-  "--seed",
-  "--shard",
-  "--timings",
-  "--timeout",
-  "--test-name-pattern",
-  "-t",
-])
-for (let i = 0; i < paths.length; i++) {
-  const arg = paths[i]
+for (const arg of paths) {
   if (arg.startsWith("-")) {
-    // 2770: a flag that takes a value, like -t name, needs its value beside it, so test:file passes both to bun, not the value as a name filter
-    if (!arg.includes("=") && takesValue.has(arg)) {
-      bunTargets.push(arg)
-      const next = paths[i + 1]
-      if (next && !next.startsWith("-")) {
-        bunTargets.push(next)
-        i++
-      }
-      continue
-    }
     bunTargets.push(arg)
     continue
   }
@@ -324,7 +316,7 @@ if (pyRan) {
     }
   }
 }
-// 2770: a run with no Python path printed a Python line, so the summary only names the count when there is one
+// a run with no Python path printed a Python line, so the summary only names the count when there is one
 const pyClause =
   pyTargets.length > 0
     ? `, ${pyTargets.length} ${pyTargets.length === 1 ? "Python test" : "Python tests"} ${
