@@ -595,7 +595,7 @@ async function deletePick(
   return { bytes: setBytes(args.path) }
 }
 
-// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
+// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card, or an approved delete decision, names it, on this machine or a peer, at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
   card: string,
