@@ -888,24 +888,36 @@ try:
             readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
-        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended, which run.py writes to stored-login-status.json) starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
+        # why the own login's stored reading reads nothing, from run.py's stored-login-status.json while it is under 15 minutes old: its Claude Code login ended (loginEnded), or its access token expired (tokenExpired), which Claude Code refreshes only while it runs
+        login_status, _ = load("ops/usage/stored-login-status.json")
+        try:
+            status_fresh = (now - from_iso(login_status["writtenAt"])).total_seconds() < 15 * 60
+        except (KeyError, TypeError, ValueError):
+            status_fresh = False
+        login_ended = login_status["loginEnded"] if status_fresh and isinstance(login_status.get("loginEnded"), str) and login_status["loginEnded"] else None
+        token_expired = "its Claude Code access token has expired (stored-login-status.json tokenExpired), and Claude Code refreshes it only while it runs: opening Claude Code refreshes it, the owner's /login brings it back, and `playground accounts add` keeps a seat token for it" if status_fresh and not login_ended and login_status.get("tokenExpired") is True else None
+        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended) starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
         def seat_start(email, stale):
-            status, _ = load("ops/usage/stored-login-status.json")
-            try:
-                ended = status["loginEnded"] if (now - from_iso(status["writtenAt"])).total_seconds() < 15 * 60 and isinstance(status["loginEnded"], str) and status["loginEnded"] else None
-            except (KeyError, TypeError, ValueError):
-                ended = None
             service = os.environ.get("KEYCHAIN_SERVICE", "")
-            if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode and os.environ.get("SANDBOX_RUNTIME") != "1":
-                if ended:
-                    return "stored-login.json", {}, f"its Claude Code login has ended (loginEnded: {ended}), and the Keychain holds no {service} item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it", False
-                return "stored-login.json", {}, stale, False
-            name, later = "login-flip.json seen", "ops-usage probes it every 14 minutes; wait for its next run and try again"
+            if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
+                if os.environ.get("SANDBOX_RUNTIME") == "1":
+                    print(f"spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the {service} item for {email}", file=sys.stderr)
+                elif login_ended:
+                    return "stored-login.json", {}, f"its Claude Code login has ended (loginEnded: {login_ended}), and the Keychain holds no {service} item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it", False
+                else:
+                    return "stored-login.json", {}, stale, False
             flip, _ = load("ops/usage/login-flip.json")
+            # run.py probes each account login-flip.json's accounts lists, else its rotation pool's, so a seat on neither list is never read
+            listed = flip.get("accounts") if isinstance(flip, dict) else None
+            if not listed and isinstance(flip, dict) and isinstance(flip.get("rotation"), dict) and isinstance(flip["rotation"].get("pool"), list):
+                listed = [e.get("account") for e in flip["rotation"]["pool"] if isinstance(e, dict)]
+            probed = isinstance(listed, list) and any(isinstance(a, str) and a.lower() == email.lower() for a in listed)
+            name = "login-flip.json seen"
+            later = "ops-usage probes it every 14 minutes; wait for its next run and try again" if probed else f"ops-usage probes only the accounts login-flip.json lists, and it does not list {email}: add it to usage.accounts so login-flip lists it"
             entries = flip.get("seen") if isinstance(flip, dict) else None
             s = next((r for a, r in entries.items() if isinstance(a, str) and a.lower() == email.lower() and isinstance(r, dict)), None) if isinstance(entries, dict) else None
             if s is None:
-                return name, {}, f"{'its Claude Code login has ended (loginEnded: ' + ended + ')' if ended else stale}, and login-flip.json holds no seen reading of {email} to judge its seat token by. {later}", False
+                return name, {}, f"{'its Claude Code login has ended (loginEnded: ' + login_ended + ')' if login_ended else stale.rstrip('.')}, and login-flip.json holds no seen reading of {email} to judge its seat token by. {later}", False
             rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
             if isinstance(s.get("five"), (int, float)):
                 rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
@@ -936,7 +948,11 @@ try:
             named = stored.get("account") if isinstance(stored, dict) else None
             if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
                 stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
-            stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
+            # an expired access token is the stale reading's cause, named in place of a run to wait for
+            stored_writer = f"It reads nothing because {token_expired}." if token_expired else writer
+            if stored_detail and stored is None and token_expired:
+                stored_detail = f"{stored_detail}. {stored_writer}"
+            stored_seen, stored_detail = judge(name, stored, 15, stored_writer) if not stored_detail else ({}, stored_detail)
             stored_name = "stored-login.json"
             if own_pick and stored_detail and not stored_seen:
                 stored_name, stored_seen, stored_detail, on_seat = seat_start(runs_on, stored_detail)
