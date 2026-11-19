@@ -4,7 +4,7 @@
 Every CYCLE seconds it reads the screen of every live Claude Code session herdr runs (`herdr pane list`, then
 `herdr pane read --source visible` per pane), and matches the blocking states: the
 usage-limit dialog, a permission prompt, a picker (AskUserQuestion, plan approval), the folder-trust and MCP-server dialogs, and
-"Please run /login". The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
+"Please run /login". A compacting pane is not one of these: its "esc to interrupt" footer makes blocked() return at once, so compaction is read separately (compaction()). The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
 resume record names, else the machine's own login, says it has room (and was written in the last 15 minutes: room());
 it checks 5s later that the dialog cleared and no limit line before its reset
 still shows. Nothing else is ever answered (no permission prompt is cancelled; the managers handle
@@ -12,6 +12,8 @@ it"): a limit dialog with no room sends a probe's block to its spawner alone (li
 block goes to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
+A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
+screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or an invalid_request), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock, since those counts move while the pane works; the local model's count does not advance while compaction runs, so for it the 10-minute line reads the frozen count unchanged for those 10 minutes.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
@@ -48,6 +50,11 @@ KINDS = [
     ("mcp", re.compile(r"new MCP servers? found|MCP servers? found in", re.I)),
     ("picker", re.compile(r"Enter to select|Would you like to proceed\?|↑/↓ to navigate|Esc to cancel · Tab", re.I)),
 ]
+# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on the compaction spinner line, the lowest such line taken. A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
+COMPACT = re.compile(r"^\s*.\s*Compacting conversation…\s*\(\s*\d")
+PROMPT_TOO_LONG = re.compile(r"Prompt is too long", re.I)
+INVALID_STOP = re.compile(r"invalid_request", re.I)
+TOKEN_RE = re.compile(r"↓\s*([0-9]+(?:\.[0-9]+)?[kmb]?)", re.I)
 # The limit dialog proper (a menu under its question), as against the one-line notice a turn prints when it stops on the limit.
 # A factory session by its name: an old name's prefix (worker-greed), or an <id>-<kind> name's last word (k3m9px-worker), as kindOfName in packages/config/src/kinds.ts reads it.
 FACTORY = re.compile(r"^(?:(worker|reviewer|tester|runner|probe)-.|[23456789bcdfghjkmnpqrstvwxyz]{6}-(worker|reviewer|tester|runner|probe)$)")
@@ -591,15 +598,41 @@ def limit_line(lines):
 
 
 def read_block(lines, s):
-    """The screen's block, its line and its limit line (limit_line's pair, or None): a live menu first, else a limit line before its reset
-    is a usage-limit block ("⎿ You've hit your weekly limit · resets Oct 20 at 9:30pm" sat unseen on 5 sessions)."""
+    """The screen's block, its line and its limit line (limit_line's pair, or None), plus the compaction it shows or None: a live menu first,
+    else a limit line before its reset is a usage-limit block ("⎿ You've hit your weekly limit · resets Oct 20 at 9:30pm" sat unseen on 5 sessions);
+    the compaction is "Compacting conversation" with its spinner's ↓ N and whether a hang sits above it (a compaction that hangs is not one of the KINDS, since blocked() bails on its "esc to interrupt" footer)."""
     kind, line = blocked(lines)
     stuck = None if kind else limit_line(lines)
     if stuck and transcript_live(s):
         stuck = None  # the limit line is old scrollback: the session wrote a transcript line in the last minute (dispatcher, 13 Oct)
     if stuck and stuck[1] <= 120:
         kind, line = "usage-limit", stuck[0]  # paused on the limit until its reset
-    return kind, line, stuck
+    return kind, line, stuck, compaction(lines)
+
+
+def compaction(lines):
+    """The compaction the screen shows or None: the "Compacting conversation" line, its spinner's ↓ N (frozen when the compaction stalls), and
+    whether a "Prompt is too long" or invalid_request stop sits above it. A hang is alerted on first sight, since the hung one on 2026-11-19 ran
+    shorter than a healthy compaction, so wall-clock alone cannot tell it apart from one that is just still working."""
+    idx = next((i for i in range(len(lines) - 1, -1, -1) if COMPACT.search(lines[i])), None)
+    if idx is None:
+        return None
+    tick = next((TOKEN_RE.search(l) for l in lines[idx:] if TOKEN_RE.search(l)), None)
+    firstsight = any(
+        PROMPT_TOO_LONG.search(l) or INVALID_STOP.search(l) for l in lines[:idx]
+    )
+    return [lines[idx].strip()[:100], tick_count(tick.group(1)) if tick else None, firstsight]
+
+
+def tick_count(raw):
+    """The spinner's ↓ N as one number, so a frozen count is a like-for-like compare (1.8k and 1800 are the same) or None when the tick is gone.
+    A token count is whole, so a 1.8k spinner and a 1800 one compare equal, and 1.8 * 1000's float round-off lands on 1800."""
+    if not raw:
+        return None
+    n = raw
+    val = float(n[:-1]) if n[-1].lower() in "kmb" else float(n)
+    val *= {"k": 1e3, "m": 1e6, "b": 1e9}.get(n[-1].lower(), 1)
+    return int(round(val))
 
 
 def dialog_room(name, lines):
@@ -906,6 +939,17 @@ def session_account(name):
         return None
 
 
+def is_local(name):
+    """Whether the named session runs on the machine's local model, the same ~/.playground/backends/<name> account file session_account reads for "glm":
+    it is local when that file is "claude-code local", else the session is not (a local model cannot be told apart from a healthy compaction by time alone,
+    so only it is held to a frozen token count, see the compaction branch in the pass loop)."""
+    try:
+        with open(os.path.join(LW, "backends", name)) as f:
+            return f.read().split() == ["claude-code", "local"]
+    except OSError:
+        return False
+
+
 def readings():
     """Each account's newest reading, from usage.json, every usage-<name>.json and usage.json's storedLogin, a week alone that takes the
     reset of its account's own file while that reset is ahead, since no running job keeps the own login's file fresh."""
@@ -1042,7 +1086,41 @@ def cycle(state):
             state["unreadable"][s["surface_id"]] = name
             continue
         state.setdefault("unreadable", {}).pop(s["surface_id"], None)
-        kind, line, stuck = read_block(lines, s)
+        kind, line, stuck, comp = read_block(lines, s)
+        if comp is not None:
+            key = f"{s['surface_id']}:compacting"
+            prev = state["blocks"].get(key, {})
+            is_loc = is_local(name)
+            block = {
+                "account": session_account(name),
+                "alerted": prev.get("alerted", 0),
+                "count": comp[1],
+                "countSince": prev.get("countSince", now_t) if comp[1] == prev.get("count") else now_t,
+                "kind": "compacting",
+                "line": comp[0],
+                "name": name,
+                "since": prev.get("since", now_t),
+                "surface": s["surface_id"],
+                "workspace": s["workspace_id"],
+            }
+            # a hang is alerted on first sight, since wall-clock alone cannot tell it apart from a healthy compaction
+            if comp[2] and not prev.get("alerted"):
+                block["alerted"] = now_t
+                notify(f"{name} is compacting, but a stop sits above the line: {comp[0]}", to=alert_to(name, s.get("transcript_path")))
+                log(f"{name}: compaction a hang sits above the line: {comp[0]}")
+            # stuck past 10 minutes: a local session's ↓ count has not moved, a non-local one has held the pane since it started; re-alerted every REALERT
+            frozen = is_loc and comp[1] is not None and comp[1] == prev.get("count")
+            hold = (now_t - block["countSince"] >= 600) if frozen else (not is_loc and now_t - block["since"] >= 600)
+            if hold and now_t - prev.get("alerted", 0) >= REALERT:
+                block["alerted"] = now_t
+                if frozen:
+                    detail = f"{comp[0]} (the spinner's ↓ count is frozen at {comp[1]} for {ago(block['countSince'])})"
+                else:
+                    detail = f"{comp[0]} (compacting for {ago(block['since'])})"
+                notify(f"{name} is compacting, stuck past 10 minutes: {detail}", to=alert_to(name, s.get("transcript_path")))
+                log(f"{name}: compaction stuck past 10 minutes: {detail}")
+            blocks[key] = block
+            continue
         if not kind:
             if stuck:
                 key = f"{s['surface_id']}:usage-limit-stuck"
