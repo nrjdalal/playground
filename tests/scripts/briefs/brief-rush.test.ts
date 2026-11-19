@@ -122,3 +122,15 @@ describe("brief-rush.md's stacked-PR line pins the retarget-to-canary CI step (#
     expect(line).toContain("so CI runs at the head that merges")
   })
 })
+
+// issue 2864: a local worker that compacts twice without a commit is respawned on one-step briefs, each a single step with its own completion criterion, with the next step sent only after the report
+describe("brief-rush.md's one-step line respawns a local worker that compacted twice on one-step briefs (#2864)", () => {
+  test("a local worker that compacts twice without a commit is respawned on one-step briefs", async () => {
+    const rush = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = rush.split("\n").find((l) => l.startsWith("- A local worker that compacts")) ?? ""
+    expect(line).toContain("compacts twice without a commit")
+    expect(line).toContain("respawned on one-step briefs")
+    expect(line).toContain("each a single step with its own completion criterion")
+    expect(line).toContain("with the next step sent only after its report")
+  })
+})
