@@ -16,7 +16,7 @@ A saved number shows by its last 4 digits alone, and an empty field keeps it; th
 
 ## Reactions and pace
 
-Each message of yours the dispatcher gets shows 👀, seen with a reply coming, and turns to ✅ when it needs no reply ([ADR 0031](../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
+A message of yours the dispatcher needs a while to answer shows 👀, seen with a reply coming, and one that needs no reply shows ✅; a quick answer comes as the reply alone ([ADR 0038](../../.agents/adr/0038-the-dispatcher-sets-the-eyes-reaction.md)).
 A reply arrives after the time it takes to type it, 3 characters a second, so a long one takes up to a minute per part.
 
 ## What you can send
