@@ -32,7 +32,7 @@ HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os
 OPS = os.path.dirname(HERE)
 OUT = os.path.join(os.path.dirname(OPS), "usage.json")
 STORED = os.path.join(HERE, "stored-login.json")
-STATUS = os.path.join(HERE, "stored-login-status.json")  # why the stored login read nothing when its Claude Code login has ended, which spawn.sh reads in place of the Keychain
+STATUS = os.path.join(HERE, "stored-login-status.json")  # why the stored login read nothing, its Claude Code login ended (loginEnded) or its access token expired (tokenExpired), which spawn.sh reads in place of the Keychain
 FLIP = os.path.join(HERE, "login-flip.json")
 CYCLE = 300
 PROBE_EVERY, FRESH_FOR = 840, 1800
@@ -63,6 +63,10 @@ def write(path, data):
 
 
 class NoLogin(RuntimeError):
+    pass
+
+
+class TokenExpired(RuntimeError):
     pass
 
 
@@ -102,7 +106,7 @@ def stored_login():
     if o.get("refreshTokenExpiresAt") and o["refreshTokenExpiresAt"] / 1000 < time.time():
         raise LoginEnded("refresh token expired")
     if o.get("expiresAt", 0) / 1000 < time.time():
-        raise RuntimeError("access token expired; waiting for Claude Code to refresh it")
+        raise TokenExpired("access token expired; waiting for Claude Code to refresh it")
     # the account is read every cycle, with the token it goes with: the owner switches logins, and a cached email names the wrong account
     account = (get("profile", o["accessToken"]).get("account") or {}).get("email")
     u = get("usage", o["accessToken"])
@@ -278,16 +282,16 @@ while True:
     except SystemExit as e:
         problems.append(f"usage.accounts: {e}")
         FACTORY = None  # no list known, so no account counts as removed this cycle
-    ended = None
+    failed = None
     try:
         stored = stored_login()
         write(STORED, stored)
         write_stored(stored)
     except Exception as e:
-        no_login, ended = isinstance(e, NoLogin), getattr(e, "reason", None) if isinstance(e, LoginEnded) else None
+        no_login, failed = isinstance(e, NoLogin), e
         problems.append(f"stored login: {type(e).__name__}: {e}")
     try:
-        write(STATUS, {"loginEnded": ended, "writtenAt": iso(time.time())})
+        write(STATUS, {"loginEnded": failed.reason if isinstance(failed, LoginEnded) else None, "tokenExpired": isinstance(failed, TokenExpired), "writtenAt": iso(time.time())})
     except OSError as e:
         problems.append(f"stored login status: {type(e).__name__}: {e}")
     flip = flip_file() or {}
@@ -326,15 +330,29 @@ while True:
         write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
     detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
-    # an expired stored token is expected while every session runs on another account's token, so only a missing factory reading fails; with no account at all, the job waits for one
-    if data and not any(p.startswith("factory") for p in problems):
+    # a missing factory reading fails, and so does a stored login that has read nothing for 15 minutes, by stored-login.json's writtenAt or else this run's start, since an --account start on it waits on that reading; one with no Claude Code login at all (NoLogin) keeps the beat it had. The cause is cut so the fix fits beat.py's 120 characters
+    try:
+        last = json.load(open(STORED))["writtenAt"]
+    except (OSError, ValueError, KeyError, TypeError):
+        last = STARTED
+    try:
+        quiet = int((time.time() - datetime.datetime.fromisoformat(str(last).replace("Z", "+00:00")).timestamp()) // 60)
+    except ValueError:
+        quiet = 0
+    if failed is not None and not no_login and quiet >= 15:
+        fix = "; the owner's /login brings it back" if isinstance(failed, (LoginEnded, TokenExpired)) else ""
+        cause = "access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}"
+        head = f"error: stored login read nothing for {quiet} min ("
+        result = head + cause[: 120 - len(head) - len(fix) - 1] + ")" + fix
+    elif data and not any(p.startswith("factory") for p in problems):
         result = "ok"
     elif no_login and not FACTORY and len(problems) == 1:
         result = "waiting: no Claude account yet; add one in the Dashboard"
     else:
         result = ("error: " + "; ".join(problems))[:120]
-    if data and problems:
-        detail += " (" + "; ".join(problems)[:200] + ")"
+    # the stored login's error takes the result, so the cycle's other problems stay in the detail, with or without a reading
+    if problems and (data or result.startswith("error: stored login")):
+        detail = (detail + " (" + "; ".join(problems)[:200] + ")").strip()
     # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
     if cost_problem:
         detail += f" ({cost_problem})"
