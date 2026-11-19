@@ -618,7 +618,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
         marker?: string
         markerAge?: number
         resetsInHours?: number
-        status?: { age: number; tokenExpired: boolean } | null
+        status?: { age: number; loginEnded?: string; tokenExpired: boolean } | null
         week?: number
         written?: string
       } = {},
@@ -653,7 +653,11 @@ describe("the capacity gate refuses and spawns nothing", () => {
       if (status)
         writeFileSync(
           join(usageDir(home), "stored-login-status.json"),
-          JSON.stringify({ tokenExpired: status.tokenExpired, writtenAt: minutesAgo(status.age) }),
+          JSON.stringify({
+            loginEnded: status.loginEnded ?? null,
+            tokenExpired: status.tokenExpired,
+            writtenAt: minutesAgo(status.age),
+          }),
         )
       if (opts.marker) {
         const path = join(usageDir(home), markerName(opts.marker))
@@ -778,6 +782,32 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(r.err).toContain("--account own@example.com, this machine's own login: ")
       expect(r.err).toContain(reason)
       expect(markers(r)).toEqual(opts?.marker ? [markerName(opts.marker)] : [])
+    },
+  )
+
+  test.each<[string, Parameters<typeof expiredLogin>[0]]>([
+    ["on a stale reading, before its one start", {}],
+    ["on a fresh reading", { written: minutesAgo(0) }],
+  ])(
+    "--account naming the own login is refused %s while ops-usage finds that login ended, naming the owner's /login",
+    async (_, opts) => {
+      const r = await spawn(
+        ownStart,
+        [],
+        ownEnv,
+        script,
+        undefined,
+        expiredLogin({
+          ...opts,
+          status: { age: 0, loginEnded: "time_limit", tokenExpired: false },
+        }),
+      )
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain(
+        "--account own@example.com, this machine's own login: its Claude Code login has ended (loginEnded: time_limit), so a session on it would stop at a sign-in prompt. The owner's /login in Claude Code brings it back",
+      )
+      expect(markers(r)).toEqual([])
     },
   )
 

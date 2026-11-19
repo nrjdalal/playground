@@ -242,6 +242,7 @@ const cycle = async (
   name: string,
   opts: {
     added: string[]
+    ended?: boolean
     expired?: boolean
     factory?: string
     login: boolean
@@ -266,10 +267,18 @@ const cycle = async (
   if (opts.factory)
     writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
   const login = JSON.stringify({
-    claudeAiOauth: {
-      accessToken: "made-up",
-      expiresAt: opts.expired ? 1_000_000_000_000 : 4_000_000_000_000,
-    },
+    claudeAiOauth: opts.ended
+      ? {
+          accessToken: "",
+          expiresAt: 0,
+          loginEnded: "time_limit",
+          refreshToken: "",
+          refreshTokenExpiresAt: 1_000_000_000_000,
+        }
+      : {
+          accessToken: "made-up",
+          expiresAt: opts.expired ? 1_000_000_000_000 : 4_000_000_000_000,
+        },
   })
   writeFileSync(
     join(stubs, "security"),
@@ -342,14 +351,24 @@ test("an expired stored token is written to stored-login-status.json, and no sto
     expired: true,
     login: true,
   })
-  expect(status).toMatchObject({ tokenExpired: true })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: true })
   expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
   expect(stored).toBeNull()
 })
 
+test("an ended stored login is written to stored-login-status.json as loginEnded, not as an expired token", async () => {
+  const { beat, status } = await cycle("ended", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ loginEnded: "time_limit", tokenExpired: false })
+  expect(beat.detail).toContain("stored login: LoginEnded: ")
+})
+
 test("a good stored read writes tokenExpired false", async () => {
   const { status, stored } = await cycle("unexpired", { added: [], login: true })
-  expect(status).toMatchObject({ tokenExpired: false })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: false })
   expect(stored.account).toBe("stored@example.org")
 })
 
