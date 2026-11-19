@@ -144,12 +144,12 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
   if (schema.length) {
     if (!args.schemaCleared) {
       io.err(
-        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path)`,
+        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path)`,
       )
       return 1
     } else if (!/^#i\d+$/.test(args.schemaCleared) && !/^PR#\d+$/.test(args.schemaCleared)) {
       io.err(
-        `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path); run it again naming one`,
+        `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path); run it again naming one`,
       )
       return 1
     } else {
@@ -157,7 +157,7 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
       if (!source) {
         const decision = /^#i\d+$/.test(args.schemaCleared)
         io.err(
-          `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path in its body`,
+          `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path from \x60~/\x60 in its body`,
         )
         return 1
       }
@@ -170,7 +170,7 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
         }
       } else if (!source.merged || !source.shapeReview || !source.dumpPath) {
         io.err(
-          `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path in its body`,
+          `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body`,
         )
         return 1
       }
@@ -216,7 +216,7 @@ token), then records the tag in the data folder's ops/yard-tag and removes the w
 It runs under the Ops lead's claude process alone (its PLAYGROUND_ROLE lead, the roster's
 ops kind), read from that process and never this call's environment. It stops
 when the tag changes packages/db's schema or migrations since the recorded tag, until
---schema-cleared names a good source, either #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path), and with no record until --since names the tag live now.
+--schema-cleared names a good source, either #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path), and with no record until --since names the tag live now.
 The ids and hosts come from the environment, else the live dashboard checkout's .env:
 ${KEYS.join(", ")}.`
 
