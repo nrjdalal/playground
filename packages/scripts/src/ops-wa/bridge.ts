@@ -625,11 +625,12 @@ async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft
       const version = `${card.id} ${card.updatedAt}`
       if (card.kind !== "draft" || !waits(card, now) || went.has(version)) continue
       const body = draftOf(card)
-      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox; any other failed send is tried again next pass
+      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox; any other failed send is tried again next pass, and one in quiet hours waits unlogged
       const refusal = refusalOf(body)
       const ids = refusal
         ? [`none-${card.id}`]
         : await send(body).catch((error: Error) => {
+            if (error.message === QUIET_WAITS) return null
             io.log(`ops-wa: #i${card.ref}'s draft waits for the next pass: ${error.message}`)
             return null
           })
@@ -1490,6 +1491,12 @@ export function sender(
           return lastIds[0]
         }),
       catchUp: () => queued(catchUpNow),
+      // a draft's text to the owner, giving the ids a reply to it names; in quiet hours it waits whole, as a card does
+      draft: (body: string) =>
+        queued(async () => {
+          if (await quietNow(io.now())) throw new Error(QUIET_WAITS)
+          return (await sendNow(body, "reply", undefined, {})).ids
+        }),
       // the same send, with the ids of the messages it sent, which an edit or a delete names
       out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
         queued(() => anySend(body, kind, source, extra)),

@@ -106,7 +106,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (to === "dispatcher") relayed.push(text)
     },
     card: (text: string) => (mode.pins ? send.card(text) : send(text).then(() => undefined)),
-    draft: (body: string) => send.out(body, "reply").then((out) => out.ids),
+    draft: send.draft,
     pin: async (id: string, off?: boolean) => {
       if (mode.pins) await send.pin(id, off)
     },
@@ -2423,6 +2423,29 @@ describe("quiet hours (#2887)", () => {
         (s) => (s.content.pin as OwnKey | undefined)?.id === `m${h.fake.sent.indexOf(poll!) + 1}`,
       ),
     ).toBe(true)
+  })
+
+  test("a draft waits whole in quiet hours, unsent and unheld, and goes out once with its ids when the owner reads or writes", async () => {
+    const h = harness(inboxOf([draftCard(20)]).inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    expect(h.logs.join("\n")).not.toContain("draft")
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    await h.pass()
+    expect(texts(h).filter((t) => t === DRAFT_TEXT)).toHaveLength(1)
+    const { sent } = (await Bun.file(join(h.dir, "drafts.json")).json()) as {
+      sent: Record<string, { ref: number }>
+    }
+    expect(Object.values(sent).map((d) => d.ref)).toEqual([20])
   })
 
   test("a night of held statuses leaves the newest alone for the catch-up, and none counts as a send", async () => {
