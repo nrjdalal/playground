@@ -521,7 +521,7 @@ test("a job 90 s into its grace with no holder is started again", () => {
     runtime: "herdr",
   }
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(pyNow())
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-relay": now - 90 }))
   writeFileSync(
     join(ops, "ops-relay.json"),
@@ -557,7 +557,7 @@ test("a job 30 s into its grace with no holder is left alone", () => {
   mkdirSync(ops, { recursive: true })
   const job = { command: "bash /x/ops-x.sh", heartbeat: "ops-x", name: "ops-x", runtime: "herdr" }
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(pyNow())
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": now - 30 }))
   writeFileSync(
     join(ops, "ops-x.json"),
@@ -591,7 +591,7 @@ test("a job 90 s into its grace with a live holder is left alone", () => {
   mkdirSync(ops, { recursive: true })
   const job = { command: "bash /x/ops-y.sh", heartbeat: "ops-y", name: "ops-y", runtime: "herdr" }
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(pyNow())
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-y": now - 90 }))
   writeFileSync(
     join(ops, "ops-y.json"),
@@ -630,7 +630,7 @@ test("a start once.py never ran is restarted 90 s on though its lock files are o
     runtime: "herdr",
   }
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(pyNow())
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-relay": now - 90 }))
   // once.py never opened these, so they carry the times of the start before the lost one
   for (const file of [
