@@ -116,11 +116,22 @@ export const freedOf = (
     : undefined
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
+// An Inbox delete decision as rm reads it: its answer, when it was answered and last edited, and its what (null when it holds none)
+export type DeleteDecision = {
+  answer: string
+  answeredAt: string
+  editedAt: string
+  kind: string
+  what: string | null
+}
+
 export type RmDeps = {
   // Each Remove the owner picked on a nightly-clean card, read from the Inbox by its id, or why it did not read; absent where no Inbox is read, which refuses every --card.
   approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
+  // The Inbox delete decision the nightly-clean's delete path reads by its card id, or why the Inbox did not read; a string means the Inbox did not read.
+  decision?: (card: string) => Promise<DeleteDecision | string>
   defaultBranch: (at: string) => string | null
   home: string
   // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
