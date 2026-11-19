@@ -341,7 +341,7 @@ while True:
         quiet = 0
     quiet_stored = failed is not None and not no_login and quiet >= 15
     cause = ("access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}") if quiet_stored else None
-    # a quiet stored login whose seat token login-flip.json's seen read fresh (via token, under 60 minutes, its item still in the Keychain) runs every start on that token, as spawn.sh's seat start judges it, so the beat stays ok and its detail names the login
+    # a quiet stored login whose seat token login-flip.json's seen read fresh (via token, under 60 minutes, its item still in the Keychain) runs every start on that token, the probe spawn.sh's seat start reads, so the beat stays ok and its detail names the login; another failing reading then beats its own error, the stored login's problem left to the detail
     seat = None
     if quiet_stored:
         try:
@@ -361,9 +361,9 @@ while True:
     elif no_login and not FACTORY and len(problems) == 1:
         result = "waiting: no Claude account yet; add one in the Dashboard"
     else:
-        result = ("error: " + "; ".join(problems))[:120]
-    # the stored login's error takes the result, so the cycle's other problems stay in the detail, with or without a reading
-    if problems and (data or result.startswith("error: stored login")):
+        result = ("error: " + "; ".join(p for p in problems if not (seat and p.startswith("stored login:"))))[:120]
+    # the stored login's error takes the result, or the seat token carries it out of the result, so the cycle's problems stay in the detail, with or without a reading
+    if problems and (data or seat or result.startswith("error: stored login")):
         detail = (detail + " (" + "; ".join(problems)[:200] + ")").strip()
     # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
     if cost_problem:
