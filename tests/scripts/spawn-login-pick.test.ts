@@ -693,6 +693,19 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
+  test("a stale stored reading under the gate cannot pass a start its seat's fresh reading refuses", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ week: 99 }),
+      script,
+      undefined,
+      ownFiles({ week: 20 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("the week is at 99% (usage.json accounts seven_day.used_percentage)")
+  })
+
   test("with no seat item, an ended Claude Code login refuses its --account start, naming the owner's /login and playground accounts add", async () => {
     const r = await spawn(
       ownStart,
