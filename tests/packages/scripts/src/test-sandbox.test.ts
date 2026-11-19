@@ -769,6 +769,79 @@ test("a folder holding only Python tests runs them as Python tests, not through 
   expect(stderr).toContain("1 Python test passed")
 }, 180_000)
 
+// 2848: a mixed folder is sent to bun, and each of its Python tests is added to the Python run, so both run and the summary counts 1 Python test
+test("a mixed folder runs its bun and Python tests, and the summary counts 1 Python test (#2848)", async () => {
+  const dir = join(DIR, "mixed")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  // a bun test bun runs as it always has, and a Python test bun would read green on, so only the folder routing that adds the .py to pyTargets makes both run
+  writeFileSync(
+    join(dir, "tests", "x", "a.test.ts"),
+    'import { test } from "bun:test"\ntest("a", () => {})\n',
+  )
+  writeFileSync(join(dir, "tests", "x", "test_a.py"), 'import sys\nprint("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x"], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 pass")
+  expect(stderr).toContain("running Python test tests/x/test_a.py")
+  expect(stderr).toContain("1 Python test passed")
+}, 180_000)
+
+// 2848: a mixed folder's failing Python test is added to pyTargets, so it fails the run like a failing bun test
+test("a mixed folder's failing Python test fails the run, naming it (#2848)", async () => {
+  const dir = join(DIR, "mixed-fail")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(
+    join(dir, "tests", "x", "a.test.ts"),
+    'import { test } from "bun:test"\ntest("a", () => {})\n',
+  )
+  // a .py bun would read green on the other files, so one that exits 1 is the failing case, and its FAIL line names it, as test:file's grep reads
+  writeFileSync(
+    join(dir, "tests", "x", "test_fail.py"),
+    'import sys\nprint("FAIL boom", flush=True)\nsys.exit(1)\n',
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x"], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).not.toBe(0)
+  expect(stderr).toContain("tests/x/test_fail.py")
+  expect(stderr).toMatch(/Python test .* failed/)
+}, 180_000)
+
+// 2848: a bare run sends the mixed folder to bun alone, as today, and leaves its Python tests to the summary, naming how many it left out and the command that runs them
+test("a bare run runs bun's tests alone and names the Python tests it leaves out, with the command that runs them (#2848)", async () => {
+  const dir = join(DIR, "no-args-py")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  // a red bun test makes the run fail, so bun running it alone is heard, while the two Python tests are left out and named by the summary
+  writeFileSync(join(dir, "tests", "x", "red.test.ts"), redTest)
+  writeFileSync(join(dir, "tests", "x", "test_a.py"), 'print("ok", flush=True)\n')
+  writeFileSync(join(dir, "tests", "x", "test_b.py"), 'print("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).not.toBe(0)
+  expect(stderr).toContain("parallel pass failed")
+  expect(stderr).toContain("2 Python tests left out")
+  expect(stderr).toContain("bun run test:file tests")
+  expect(stderr).not.toContain("running Python test")
+}, 180_000)
+
 // 2770: seenPy was keyed by the path as given, so one Python file named by both its absolute and relative path ran twice; it is now deduped by its real path (#2858)
 test("one Python test named by both relative and absolute path runs once (#2770)", async () => {
   const dir = join(DIR, "py-twice")

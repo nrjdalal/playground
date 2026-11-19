@@ -140,6 +140,8 @@ for (const arg of process.argv.slice(2)) {
     args[args.length - 1] = `${flag}=${arg}`
   else args.push(arg)
 }
+// a bare run (no path) defaults to tests, and is the only case that leaves a mixed folder's Python tests to the summary, naming the command that runs them
+const bareRun = args.length === 0
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
@@ -206,6 +208,8 @@ const pyTargets: [label: string, file: string][] = []
 const unrunnable: [label: string, reason: string][] = []
 // each Python test keyed by its real path, so a linked folder and its real one, as macOS's /var and /private/var, name one file once (issue 2858)
 const seenPy = new Set<string>()
+// a bare run's mixed folder is sent to bun alone; each of its Python tests is collected here so the summary names how many were left out, and the command that runs them
+const leftOutPy: string[] = []
 for (const arg of paths) {
   if (arg.startsWith("-")) {
     bunTargets.push(arg)
@@ -232,7 +236,15 @@ for (const arg of paths) {
               pyTargets.push([full, relative("tests", full)])
             }
         } else if (bun.length > 0) {
+          // a mixed folder is sent to bun, and each of its Python tests is added so both run; a bare run leaves the Python tests to the summary instead (issue 2848)
           bunTargets.push(arg)
+          if (bareRun) for (const full of py) leftOutPy.push(relative("tests", full))
+          else
+            for (const full of py)
+              if (!seenPy.has(realpathSync(full))) {
+                seenPy.add(realpathSync(full))
+                pyTargets.push([full, relative("tests", full)])
+              }
         } else unrunnable.push([arg, "no test in folder at"])
       } else unrunnable.push([arg, "no test file at"])
     } catch {
@@ -332,10 +344,15 @@ const pyClause =
         !pyRan ? "skipped" : pyFailed.length ? "failed" : "passed"
       }`
     : ""
+// a bare run leaves a mixed folder's Python tests to bun alone, so the summary names how many were left out, and the command that runs them when the folder is named explicitly
+const leftOutClause =
+  leftOutPy.length > 0
+    ? `, ${leftOutPy.length} ${leftOutPy.length === 1 ? "Python test is" : "Python tests are"} left out, run bun run test:file tests to run them`
+    : ""
 console.error(
   `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${
     alone === 0 ? "passed" : `failed (exit ${alone})`
-  }${pyClause}`,
+  }${pyClause}${leftOutClause}`,
 )
 dropScratch()
 process.exit(parallel || alone || pyFailed.length)
