@@ -13,6 +13,7 @@ import {
   type Inbox,
   type Media,
   NOTICE,
+  ownerReadAt,
   type Policy,
   OFF,
   REPLY,
@@ -2121,5 +2122,145 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     await h.settle()
     expect(h.answers).toEqual([])
     expect(h.open[0]!.status).toBe("open")
+  })
+})
+
+describe("delivery and read receipts (#2868)", () => {
+  // WhatsApp's statuses on messages.update, proto.WebMessageInfo.Status
+  const SERVER_ACK = 2
+  const DELIVERED = 3
+  const READ = 4
+  // a voice note's played, past READ, and a send that failed
+  const PLAYED = 5
+  const ERROR = 0
+  // a 1:1 chat's receipt, as Baileys gives it on messages.update: the message's key and its new status at the receipt's time in seconds
+  const receipt = (id: string, status: number, at: number, chat = jid(OWNER), fromMe = true) => ({
+    key: { fromMe, id, remoteJid: chat },
+    update: { messageTimestamp: Math.floor(at / 1000), status },
+  })
+  const kept = async (dir: string) =>
+    (
+      (await Bun.file(join(dir, "receipts.json"))
+        .json()
+        .catch(() => ({}))) as { receipts?: unknown[] }
+    ).receipts ?? []
+  const talking = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    return h
+  }
+
+  test("a delivered, then a read receipt for a message ops-wa sent is kept with both times, to its owner alone", async () => {
+    const h = await talking()
+    await h.send("on it")
+    h.fake.emit("messages.update", [receipt("m1", DELIVERED, START + 60_000)])
+    h.fake.emit("messages.update", [receipt("m1", READ, START + 120_000)])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([
+      { delivered: START + 60_000, id: "m1", read: START + 120_000 },
+    ])
+    expect(statSync(join(h.dir, "receipts.json")).mode & 0o777).toBe(0o600)
+    expect(await ownerReadAt(h.dir, OWNER)).toBe(START + 120_000)
+  })
+
+  test("a read or a played with no delivered before it counts as both, a receipt with no time takes the clock, and a second read moves neither", async () => {
+    const h = await talking()
+    await h.send("first")
+    await h.send("second")
+    await h.send("third")
+    h.fake.emit("messages.update", [
+      receipt("m1", READ, START + 60_000),
+      receipt("m3", PLAYED, START + 2 * 60_000),
+    ])
+    h.fake.emit("messages.update", [
+      { ...receipt("m2", DELIVERED, 0), update: { status: DELIVERED } },
+    ])
+    await h.settle()
+    h.advance(60_000)
+    h.fake.emit("messages.update", [receipt("m1", READ, START + 5 * 60_000)])
+    await h.settle()
+    const clock = h.fake.sent[2]!.at
+    expect(await kept(h.dir)).toEqual([
+      { delivered: START + 60_000, id: "m1", read: START + 60_000 },
+      { delivered: START + 2 * 60_000, id: "m3", read: START + 2 * 60_000 },
+      { delivered: clock, id: "m2" },
+    ])
+  })
+
+  test("a receipt for a message ops-wa did not send is ignored: another device's, the spare phone's read of the owner's message, a server's ack, an error and an edit's update", async () => {
+    const h = await talking()
+    await h.send("on it")
+    const theirs = h.fake.message(jid(OWNER), "and this?")
+    h.fake.upsert([theirs])
+    await h.settle()
+    h.fake.emit("messages.update", [
+      receipt("sent-from-the-spare-phone", READ, START),
+      receipt(theirs.key.id, READ, START, jid(OWNER), false),
+      receipt("m1", SERVER_ACK, START),
+      receipt("m1", ERROR, START),
+      { key: { fromMe: true, id: "m1", remoteJid: jid(OWNER) }, update: { message: null } },
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([])
+    expect(await ownerReadAt(h.dir, OWNER)).toBeUndefined()
+  })
+
+  test("a receipt from a guest's chat, a stranger's or a group's, is ignored", async () => {
+    const h = await talking()
+    await h.send("on it")
+    h.fake.emit("messages.update", [
+      receipt("to-a-stranger", READ, START, jid(STRANGER)),
+      receipt("to-a-group", READ, START, groupJid("120363000000000001")),
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([])
+  })
+
+  test("wa status prints the owner's last read time, and whether the last alert to the alert number was delivered and read", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi"), h.fake.message(jid(ALERT), "hello")])
+    await h.settle()
+    const status = () => statusOf(h.dir, { alert: ALERT, owner: OWNER }, START + HOUR)
+    expect((await status()).join("\n")).not.toContain("read ops-wa's messages")
+    await h.send("ops-tick is down", "alert")
+    const went = new Date(h.fake.sent[1]!.at).toISOString()
+    expect(await status()).toContain(
+      `alert ••••0003: the last alert went at ${went}; not delivered yet`,
+    )
+    h.fake.emit("messages.update", [
+      receipt("m1", READ, START + 60_000),
+      receipt("m2", DELIVERED, START + 2 * 60_000, jid(ALERT)),
+    ])
+    await h.settle()
+    expect(await status()).toEqual(
+      expect.arrayContaining([
+        "owner ••••0001: read ops-wa's messages last at 2026-11-11T03:01:00.000Z",
+        `alert ••••0003: the last alert went at ${went}; delivered at 2026-11-11T03:02:00.000Z, not read yet`,
+      ]),
+    )
+    // a guest reply to the alert number after it is no alert, so the line still names the alert
+    await h.send("thanks", "guest")
+    h.fake.emit("messages.update", [receipt("m2", READ, START + 3 * 60_000, jid(ALERT))])
+    await h.settle()
+    expect(await status()).toContain(
+      `alert ••••0003: the last alert went at ${went}; delivered at 2026-11-11T03:02:00.000Z, read at 2026-11-11T03:03:00.000Z`,
+    )
+    // the alert number's read is not the owner's
+    expect(await ownerReadAt(h.dir, OWNER)).toBe(START + 60_000)
+  })
+
+  test("the receipt path is receive-only: it makes no socket call, so nothing is marked read and no presence or receipt goes out", async () => {
+    const h = await talking()
+    await h.send("on it")
+    const before = h.fake.sent.length
+    h.fake.emit("messages.update", [
+      receipt("m1", DELIVERED, START + 60_000),
+      receipt("m1", READ, START + 120_000),
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toHaveLength(1)
+    expect(h.fake.sent).toHaveLength(before)
+    expect(h.fake.calls).toEqual([])
   })
 })
