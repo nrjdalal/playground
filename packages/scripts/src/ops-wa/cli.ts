@@ -10,6 +10,7 @@ import {
   loginOf,
   readPolicy,
   readRendered,
+  ruleSettings,
   setSetting,
   whatsappSettings,
 } from "@packages/settings"
@@ -205,6 +206,16 @@ const main = async () => {
     dir,
     now: Date.now,
     owner,
+    // the quiet window, read afresh for each send, so the owner's change reaches a running ops-wa
+    quiet: async () => {
+      const read = await readPolicy(data)
+      const settings = read.settings ?? { schemaVersion: 1, values: {} }
+      return {
+        end: whatsappSettings.get(settings, "wa.quietEndHour"),
+        start: whatsappSettings.get(settings, "wa.quietStartHour"),
+        zone: ruleSettings.get(settings, "clock.ownerZone"),
+      }
+    },
     sleep: Bun.sleep,
     sock: {
       ev: { on: () => {} },
@@ -263,6 +274,7 @@ const main = async () => {
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
     card: send.card,
+    catchUp: send.catchUp,
     check,
     confirm: (text, reaction) => confirm(owned, text, reaction),
     dir,

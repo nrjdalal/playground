@@ -89,6 +89,8 @@ export type Mode = {
   stuck: () => Promise<Stuck>
   // sends a card's text to the owner and gives its first message's id, which a decision's pin names; a bridge with none sends it through reply and pins only a poll
   card?: (body: string) => Promise<string | undefined>
+  // sends the texts held in quiet hours as one catch-up, once the owner may be written to again; a bridge with none holds nothing
+  catchUp?: () => Promise<void>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
   // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
@@ -144,7 +146,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, eyes.json and quiet.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -660,6 +662,10 @@ async function pass(io: Io & Mode) {
     await escalations({ ...io, escalate: io.escalate }).catch((error: Error) =>
       io.log(`ops-wa: the pending alerts: ${error.message}`),
     )
+  if (io.catchUp)
+    await io
+      .catchUp()
+      .catch((error: Error) => io.log(`ops-wa: the quiet hours' catch-up: ${error.message}`))
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
@@ -981,6 +987,42 @@ const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa neve
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
 // The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// Quiet hours: the window's start and end hours in the owner's zone, wa.quietStartHour, wa.quietEndHour and clock.ownerZone.
+export type Quiet = { end: number; start: number; zone: string }
+// quiet.json, the sender's chain's: each text held in quiet hours, oldest first, until the catch-up sends them
+type Held = { at: number; body: string }
+const quietFile = (dir: string) => join(dir, "quiet.json")
+// inside the window, a reply goes out only within this long of the owner's last read or message
+export const QUIET_IDLE_MS = HOUR
+const HELD =
+  "held for quiet hours: the owner has read or written nothing in the last hour, so it goes out in one catch-up once the owner reads or writes, or when the quiet hours end"
+const QUIET_WAITS =
+  "quiet hours: the owner has read or written nothing in the last hour, and only a text waits for the catch-up; send this once the owner reads or writes, or after the quiet hours"
+// Pure: whether a time falls in the quiet window by its hour in the zone; a window whose start and end are the same hour is none, and one past midnight wraps.
+export const inQuiet = (at: number, q: Quiet): boolean => {
+  if (q.start === q.end) return false
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      hourCycle: "h23",
+      timeZone: q.zone,
+    }).format(at),
+  )
+  return q.start < q.end ? hour >= q.start && hour < q.end : hour >= q.start || hour < q.end
+}
+// Pure: the one catch-up message, each held text under the time it was held, in the owner's zone.
+export const catchUpOf = (held: Held[], zone: string): string => {
+  const time = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: zone,
+  })
+  return [
+    "Held in quiet hours, oldest first:",
+    ...held.map((h) => `${time.format(h.at)}\n${h.body}`),
+  ].join("\n\n")
+}
+
 // the words a send carries, a text or a file's caption, which its typing time and ours.json read
 const wordsOf = (content: Content) =>
   "text" in content ? content.text : "caption" in content ? content.caption : undefined
@@ -990,6 +1032,8 @@ export function sender(
     // wa.alertDelayMinutes, read afresh for each alert
     delay?: () => Promise<number>
     device: string
+    // the quiet window, read afresh for each send; a sender with none, or one that reads none, has no quiet hours
+    quiet?: () => Promise<Quiet | undefined>
     sock: Sock
   },
 ) {
@@ -1034,12 +1078,36 @@ export function sender(
     ((await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []).filter(
       (at) => now - at < HOUR,
     )
+  // whether a message to the owner waits now: inside the quiet window, with no read or message from the owner in the last hour (ADR 0039)
+  const quietNow = async (now: number) => {
+    const q = await io.quiet?.()
+    if (!q || !inQuiet(now, q)) return false
+    const { ownerAt = 0 } = await readOwn<Wrote>(ownerFile(io.dir), {})
+    const read = (await ownerReadAt(io.dir, io.owner)) ?? 0
+    return now - Math.max(ownerAt, read) >= QUIET_IDLE_MS
+  }
+  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; a catch-up that fails keeps them
+  const catchUpNow = async () => {
+    const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
+    const now = io.now()
+    if (held.length === 0 || (await quietNow(now))) return
+    if (windowLeft((await readOwn<Wrote>(ownerFile(io.dir), {})).ownerAt, now) === 0) return
+    const zone = (await io.quiet?.())?.zone ?? "UTC"
+    await writeOwn(quietFile(io.dir), { held: [] })
+    try {
+      await sendNow(catchUpOf(held, zone), "reply", undefined, {})
+    } catch (error) {
+      await writeOwn(quietFile(io.dir), { held })
+      throw error
+    }
+  }
   const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
     if (refusal) throw new Error(refusal)
     const now = io.now()
     const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
     if (windowLeft(owner.ownerAt, now) === 0) throw new Error(NO_CHAT)
+    if (await quietNow(now)) throw new Error(QUIET_WAITS)
     const sends = await recent(now)
     const messageSecret = crypto.getRandomValues(new Uint8Array(32))
     const poll = { messageSecret, name, selectableCount: 1 as const, values }
@@ -1111,6 +1179,19 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
+    // in quiet hours a new message to the owner waits: a text is held for the catch-up and counts as the dispatcher's answer, anything else is refused; an edit, a delete and an urgent alert go as before
+    if (kind === "reply" && !extra.edit && !extra.delete) {
+      if (await quietNow(now)) {
+        if (extra.file || extra.location || extra.quote) throw new Error(QUIET_WAITS)
+        const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
+        await writeOwn(quietFile(io.dir), { held: [...held, { at: now, body }] })
+        await writeOwn(sendsFile(io.dir), { sends: [...(await recent(now)), now] })
+        lastIds = []
+        return { ids: [], said: HELD }
+      }
+      // the held texts go first, so the owner reads them in the order they were written
+      await catchUpNow()
+    }
     const jid = going[0]!.jid
     const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
     const who: Who = kind === "guest" ? "alert" : "owner"
@@ -1242,6 +1323,7 @@ export function sender(
           await sendNow(body, "reply", undefined, {})
           return lastIds[0]
         }),
+      catchUp: () => queued(catchUpNow),
       // the same send, with the ids of the messages it sent, which an edit or a delete names
       out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
         queued(() => sendNow(body, kind, source, extra)),
