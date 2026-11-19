@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -300,6 +300,17 @@ describe("wa status's last alert line", () => {
     ])
     expect(statSync(lastFile(h.dir)).mode & 0o777).toBe(0o600)
     expect(await Bun.file(lastFile(h.dir)).text()).not.toContain("practice")
+  })
+
+  test("a last-alert write that fails still sends to the second number once", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first", "test:2026-11-11T03:00Z")
+    mkdirSync(lastFile(h.dir), { recursive: true })
+    h.advance(3 * MINUTE)
+    await h.pass()
+    h.advance(MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a practice alert"])
   })
 
   test("a failed send names its reason with the number masked", async () => {

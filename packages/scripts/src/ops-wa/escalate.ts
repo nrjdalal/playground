@@ -106,8 +106,11 @@ export async function escalations(io: EscalateIo) {
           return `send to the second number failed: ${masked(error.message)}`
         },
       )
-    await keepLast(io.dir, { at: pending.at, outcome, when: io.now() })
     await unlink(file).catch(() => {})
+    // written after the unlink, so a failed write never sends the alert again
+    await keepLast(io.dir, { at: pending.at, outcome, when: io.now() }).catch((error: Error) =>
+      io.log(`ops-wa: the last alert's outcome: ${error.message}`),
+    )
   }
 }
 
