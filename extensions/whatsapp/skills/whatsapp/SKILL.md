@@ -37,7 +37,8 @@ A file of any other type, or outside the outbox, is refused, and a text document
 - `--location <lat>,<lon>` sends a location, the body its name and optional.
 - `--quote <id>` quotes the owner's message of that id (the guest's, with `--to alert`), the id its handed-on line names, in the last 24 hours.
 - `--edit <id>` replaces the text of a message `wa send` sent, in its first 15 minutes, and `--delete <id>` deletes one for everyone, with no body.
-  Each send prints the ids of the messages it sent, `wa send: sent (id <id>)`, and an edit or a delete takes one of those ids alone.
+
+Each send prints the ids of the messages it sent, `wa send: sent (id <id>)`, and an edit or a delete takes one of those ids alone.
 
 A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 

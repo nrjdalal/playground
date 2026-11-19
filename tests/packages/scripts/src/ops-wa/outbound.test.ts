@@ -278,6 +278,25 @@ describe("wa send's structure (#2799)", () => {
     ])
   })
 
+  test("a quote of a kept message 24 hours old is refused, its words still in messages.json", async () => {
+    const h = await harness()
+    await writeOwn(join(h.dir, "messages.json"), {
+      messages: [
+        {
+          at: START - 24 * 3_600_000,
+          id: "old1",
+          jid: jid(OWNER),
+          text: "old words",
+          who: "owner",
+        },
+      ],
+    })
+    await expect(h.sender("late", "reply", { quote: "old1" })).rejects.toThrow(
+      "that message is over 24 hours old, and ops-wa quotes only inside its 24 hours",
+    )
+    expect(h.fake.sent).toEqual([])
+  })
+
   test("a quote of an unknown id, or of the other chat's message, is refused, and nothing goes", async () => {
     const h = await harness()
     await kept(h)

@@ -809,6 +809,11 @@ export function sender(
     const quoted = extra.quote ? kept.find((k) => k.id === extra.quote && k.who === who) : undefined
     if (extra.quote && !quoted?.text)
       throw new Error(`no message ${extra.quote} from ${going[0]!.who} is kept to quote`)
+    // seen() drops old words only when the next message comes, so a quote checks the age itself, as a reaction does
+    if (quoted && now - quoted.at >= OWNER_WINDOW_MS)
+      throw new Error(
+        "that message is over 24 hours old, and ops-wa quotes only inside its 24 hours",
+      )
     const ours = await readOwn<{ messages?: Own[] }>(oursFile(io.dir), {})
     const target = extra.edit ?? extra.delete
     const own = target ? ours.messages?.find((o) => o.id === target && o.jid === jid) : undefined
