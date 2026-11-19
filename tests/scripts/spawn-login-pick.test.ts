@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -600,256 +600,147 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
-  // #2863: while ops-usage finds the own login's token expired, one --account start on that login passes on its last stored reading, since that start's Claude Code refreshes the token; a marker keyed on the reading's writtenAt holds a second for 30 minutes, after which, with no fresh reading since, one more may try
+  // #2863: an --account start on the own login whose stored-login.json reads nothing (stale, missing, or its Claude Code login ended) starts on its seat token, judged by usage.json's accounts reading of it
   const ownStart = ["worker", "worker-brave-otter", "b.md", "--account", "own@example.com"]
-  const ownEnv = {
+  const usageDir = (home: string) => join(home, ".playground", "ops", "usage")
+  const seatUsage = (row?: { readAge?: number; week: number }) =>
+    JSON.stringify({
+      ...JSON.parse(factoryUsage(10)),
+      ...(row && {
+        accounts: {
+          "own@example.com": {
+            readAt: minutesAgo(row.readAge ?? 5),
+            week: row.week,
+            weekReset: Math.floor(Date.now() / 1000) + 5 * 86_400,
+          },
+        },
+      }),
+    })
+  const ownEnv = (row?: { readAge?: number; week: number }, env: object = {}) => ({
     CLAUDE_JSON: ownLogin,
     PACE_OFF_UNTIL: offUntilUtc,
-    USAGE_JSON: factoryUsage(10),
-  }
-  const staleAt = minutesAgo(600)
-  const markerName = (written: string, n = 1) =>
-    `own-login-start-${Math.floor(Date.parse(written) / 1000)}-${n}.json`
-  const usageDir = (home: string) => join(home, ".playground", "ops", "usage")
-  const expiredLogin =
+    USAGE_JSON: seatUsage(row),
+    ...env,
+  })
+  const ownFiles =
     (
-      opts: {
-        fiveHour?: { resetsInHours: number; used: number }
-        marker?: string
-        markerAge?: number
-        resetsInHours?: number
-        status?: { age: number; loginEnded?: string; tokenExpired: boolean } | null
-        week?: number
-        written?: string
-      } = {},
+      opts: { ended?: string; statusAge?: number; stored?: "missing" | number; week?: number } = {},
     ) =>
     (home: string) => {
       mkdirSync(usageDir(home), { recursive: true })
-      const written = opts.written ?? staleAt
+      if (opts.stored !== "missing")
+        storedLogin("own@example.com", opts.week ?? 20, opts.stored ?? 600)(home)
       writeFileSync(
-        join(usageDir(home), "stored-login.json"),
+        join(usageDir(home), "stored-login-status.json"),
         JSON.stringify({
-          account: "own@example.com",
-          rate_limits: {
-            ...(opts.fiveHour && {
-              five_hour: {
-                resets_at: new Date(
-                  Date.now() + opts.fiveHour.resetsInHours * 3_600_000,
-                ).toISOString(),
-                used_percentage: opts.fiveHour.used,
-              },
-            }),
-            seven_day: {
-              resets_at: new Date(
-                Date.now() + (opts.resetsInHours ?? 120) * 3_600_000,
-              ).toISOString(),
-              used_percentage: opts.week ?? 20,
-            },
-          },
-          writtenAt: written,
+          loginEnded: opts.ended ?? null,
+          writtenAt: minutesAgo(opts.statusAge ?? 0),
         }),
       )
-      const status = opts.status === undefined ? { age: 0, tokenExpired: true } : opts.status
-      if (status)
-        writeFileSync(
-          join(usageDir(home), "stored-login-status.json"),
-          JSON.stringify({
-            loginEnded: status.loginEnded ?? null,
-            tokenExpired: status.tokenExpired,
-            writtenAt: minutesAgo(status.age),
-          }),
-        )
-      if (opts.marker) {
-        const path = join(usageDir(home), markerName(opts.marker))
-        writeFileSync(path, JSON.stringify({ writtenAt: opts.marker }))
-        const at = new Date(Date.now() - (opts.markerAge ?? 0) * 60_000)
-        utimesSync(path, at, at)
-      }
     }
-  const markers = (r: { home: string }) =>
-    readdirSync(usageDir(r.home)).filter((name) => name.startsWith("own-login-start-"))
+  const seatLine =
+    "--account own@example.com is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at 76% (usage.json accounts)"
 
-  test("--account naming the own login starts on it once on its stale reading while ops-usage finds its token expired, and leaves a 0600 marker", async () => {
-    const r = await spawn(ownStart, [], ownEnv, script, undefined, expiredLogin())
-    expect(r.code).toBe(0)
-    expect(r.out).toMatch(
-      /--account own@example\.com is this machine's own login, so it starts there, the split skipped: its week is at 20% \(stored-login\.json, written 6\d\d minutes ago: its token expired, so this one start lets Claude Code refresh it\)/,
-    )
-    expect(launchOf(r)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN")
-    expect(markers(r)).toEqual([markerName(staleAt)])
-    expect(statSync(join(usageDir(r.home), markerName(staleAt))).mode & 0o777).toBe(0o600)
-  })
+  test.each<[string, Parameters<typeof ownFiles>[0]]>([
+    ["its stored reading is stale", {}],
+    ["it has no stored reading", { stored: "missing" }],
+    ["its Claude Code login has ended", { ended: "time_limit", stored: 600 }],
+  ])(
+    "--account naming the own login starts on its seat token while %s, judged by usage.json's accounts reading",
+    async (_, files) => {
+      const r = await spawn(ownStart, [], ownEnv({ week: 76 }), script, undefined, ownFiles(files))
+      expect(r.code).toBe(0)
+      expect(r.out).toContain(seatLine)
+      expect(r.security).toContain(
+        "find-generic-password -s playground-claude-oauth -a own@example.com",
+      )
+      expect(launchOf(r)).toContain("-a own@example.com -w")
+      expect(launchOf(r)).toContain("CLAUDE_CODE_OAUTH_TOKEN")
+      expect(execLine(r, "worker-brave-otter")).toContain("--account own@example.com")
+      expect(capacityLog(r)).toEqual([
+        expect.objectContaining({
+          readings: expect.objectContaining({ account: "own@example.com", week: 76 }),
+          verdict: "pass",
+        }),
+      ])
+    },
+  )
 
-  test("--check passes that start and writes no marker", async () => {
-    const r = await spawn([...ownStart, "--check"], [], ownEnv, script, undefined, expiredLogin())
-    expect(r.code).toBe(0)
-    expect(markers(r)).toEqual([])
-  })
-
-  test("a marker from an earlier stale reading holds no start on a newer one", async () => {
-    const r = await spawn(
-      ownStart,
-      [],
-      ownEnv,
-      script,
+  test.each<[string, Parameters<typeof ownEnv>[0], string]>([
+    [
+      "its accounts reading is over the 98% backstop",
+      { week: 99 },
+      "the week is at 99% (usage.json accounts seven_day.used_percentage)",
+    ],
+    [
+      "its accounts reading is over an hour old",
+      { readAge: 61, week: 20 },
+      "usage.json accounts was written 61 minutes ago (writtenAt), 60 is its limit",
+    ],
+    [
+      "usage.json holds no accounts reading of it",
       undefined,
-      expiredLogin({ marker: minutesAgo(3000) }),
-    )
-    expect(r.code).toBe(0)
-    expect(markers(r)).toContain(markerName(staleAt))
-  })
-
-  test("a marker 31 minutes old, with no fresh reading since, lets one more start through and leaves the next marker", async () => {
-    const r = await spawn(
-      ownStart,
-      [],
-      ownEnv,
-      script,
-      undefined,
-      expiredLogin({ marker: staleAt, markerAge: 31 }),
-    )
-    expect(r.code).toBe(0)
-    expect(markers(r).sort()).toEqual([markerName(staleAt), markerName(staleAt, 2)])
-  })
-
-  test("a stale 5-hour window whose reset has passed is no cap on that start", async () => {
-    const r = await spawn(
-      ownStart,
-      [],
-      ownEnv,
-      script,
-      undefined,
-      expiredLogin({ fiveHour: { resetsInHours: -2, used: 95 } }),
-    )
-    expect(r.code).toBe(0)
-  })
-
-  test("a fresh reading is judged as before, whatever marker an earlier stale one left", async () => {
-    const written = minutesAgo(0)
-    const r = await spawn(
-      ownStart,
-      [],
-      ownEnv,
-      script,
-      undefined,
-      expiredLogin({ marker: staleAt, written }),
-    )
-    expect(r.code).toBe(0)
-    expect(r.out).toContain("the split skipped: its week is at 20% (stored-login.json)")
-    expect(markers(r)).toEqual([markerName(staleAt)])
-  })
-
-  test.each<[string, Parameters<typeof expiredLogin>[0], string]>([
-    [
-      "a second start on the same stale reading",
-      { marker: staleAt },
-      "one start already went on it",
-    ],
-    [
-      "a start 29 minutes after the last one on it",
-      { marker: staleAt, markerAge: 29 },
-      "one start already went on it 29 minutes ago",
-    ],
-    [
-      "no expired token in ops-usage's status",
-      { status: { age: 0, tokenExpired: false } },
-      "(writtenAt), 15 is its limit",
-    ],
-    ["no ops-usage status", { status: null }, "(writtenAt), 15 is its limit"],
-    [
-      "a stale ops-usage status",
-      { status: { age: 20, tokenExpired: true } },
-      "(writtenAt), 15 is its limit",
-    ],
-    ["a week reset since the reading", { resetsInHours: -1 }, "its week has reset since"],
-    [
-      "a reading over 48 hours old",
-      { written: minutesAgo(48 * 60 + 1) },
-      "48 hours is the most a reading counts",
-    ],
-    ["a reading over the 98% backstop", { week: 99 }, "the week is at 99%"],
-    [
-      "a 5-hour window still over its cap",
-      { fiveHour: { resetsInHours: 2, used: 95 } },
-      "the 5-hour window is at 95%",
+      "usage.json holds no accounts reading of own@example.com to judge its seat token by",
     ],
   ])(
-    "--account naming the own login is refused on its stale reading for %s",
-    async (_, opts, reason) => {
-      const r = await spawn(ownStart, [], ownEnv, script, undefined, expiredLogin(opts))
+    "--account naming the own login is refused on its seat token when %s",
+    async (_, row, reason) => {
+      const r = await spawn(ownStart, [], ownEnv(row), script, undefined, ownFiles())
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("--account own@example.com, this machine's own login: ")
       expect(r.err).toContain(reason)
-      expect(markers(r)).toEqual(opts?.marker ? [markerName(opts.marker)] : [])
     },
   )
 
-  test.each<[string, Parameters<typeof expiredLogin>[0]]>([
-    ["on a stale reading, before its one start", {}],
-    ["on a fresh reading", { written: minutesAgo(0) }],
-  ])(
-    "--account naming the own login is refused %s while ops-usage finds that login ended, naming the owner's /login",
-    async (_, opts) => {
-      const r = await spawn(
-        ownStart,
-        [],
-        ownEnv,
-        script,
-        undefined,
-        expiredLogin({
-          ...opts,
-          status: { age: 0, loginEnded: "time_limit", tokenExpired: false },
-        }),
-      )
-      expect(r.code).not.toBe(0)
-      expect(placing(r)).toEqual([])
-      expect(r.err).toContain(
-        "--account own@example.com, this machine's own login: its Claude Code login has ended (loginEnded: time_limit), so a session on it would stop at a sign-in prompt. The owner's /login in Claude Code brings it back",
-      )
-      expect(markers(r)).toEqual([])
-    },
-  )
-
-  test("the stale reading is judged by the week pace while it is on", async () => {
+  test("with no seat item, an ended Claude Code login refuses its --account start, naming the owner's /login and playground accounts add", async () => {
     const r = await spawn(
       ownStart,
       [],
-      { CLAUDE_JSON: ownLogin, USAGE_JSON: factoryUsage(10) },
+      ownEnv({ week: 20 }, { FAKE_NO_ITEM: "1" }),
       script,
       undefined,
-      expiredLogin({ resetsInHours: 120, week: 40 }),
+      ownFiles({ ended: "time_limit" }),
     )
     expect(r.code).not.toBe(0)
-    expect(r.err).toContain("the week is at 40%")
-    expect(r.err).toContain("past 14.3 points a day")
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(
+      "--account own@example.com, this machine's own login: its Claude Code login has ended (loginEnded: time_limit), and the Keychain holds no playground-claude-oauth item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it",
+    )
   })
 
-  test("a fresh stored reading over the gate stays the judge, though login-flip's seen entry for the login shows room", async () => {
+  test.each<[string, Parameters<typeof ownFiles>[0]]>([
+    ["a live login's stale reading", {}],
+    ["an ended login whose status is over 15 minutes old", { ended: "time_limit", statusAge: 20 }],
+  ])("with no seat item, %s is refused as stale, as before", async (_, files) => {
     const r = await spawn(
       ownStart,
       [],
-      { CLAUDE_JSON: ownLogin, USAGE_JSON: factoryUsage(10) },
+      ownEnv({ week: 20 }, { FAKE_NO_ITEM: "1" }),
       script,
       undefined,
-      (h) => {
-        expiredLogin({ week: 40, written: minutesAgo(0) })(h)
-        probedFiles({ "own@example.com": probed(10, 0) }, {})(h)
-      },
+      ownFiles(files),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "ops/usage/stored-login.json was written 600 minutes ago (writtenAt), 15 is its limit",
+    )
+  })
+
+  test("a fresh stored reading over the gate stays the judge, with no seat start, though usage.json's accounts reading shows room", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      { CLAUDE_JSON: ownLogin, USAGE_JSON: seatUsage({ week: 10 }) },
+      script,
+      undefined,
+      ownFiles({ stored: 0, week: 40 }),
     )
     expect(r.code).not.toBe(0)
     expect(r.err).toContain(
       "the week is at 40% (ops/usage/stored-login.json seven_day.used_percentage)",
     )
-  })
-
-  test("login-flip's seen entry for the own login is no fresh reading of it", async () => {
-    const r = await spawn(ownStart, [], ownEnv, script, undefined, (h) => {
-      expiredLogin({ status: null })(h)
-      probedFiles({ "own@example.com": { ...probed(20, 0), via: undefined } }, {})(h)
-    })
-    expect(r.code).not.toBe(0)
-    expect(r.err).toContain("(writtenAt), 15 is its limit")
+    expect(r.security).toBeUndefined()
   })
 
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {

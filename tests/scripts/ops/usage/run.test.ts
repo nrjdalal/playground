@@ -344,31 +344,31 @@ test("with Claude Code's own login alone, usage.json holds its reading, as befor
   expect(usage.account).toBe("stored@example.org")
 })
 
-// #2863: spawn.sh lets one start through on the own login's stale reading only while this file says its token expired, so it never reads the Keychain itself
-test("an expired stored token is written to stored-login-status.json, and no stored-login.json is written", async () => {
+// #2863: spawn.sh learns that the own login's Claude Code login has ended from this file alone, so it never reads Claude Code's credentials
+test("an expired stored token writes stored-login-status.json with no loginEnded, and no stored-login.json", async () => {
   const { status, statusMtime, stored } = await cycle("expired", {
     added: ["added@example.org"],
     expired: true,
     login: true,
   })
-  expect(status).toMatchObject({ loginEnded: null, tokenExpired: true })
+  expect(status).toMatchObject({ loginEnded: null })
   expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
   expect(stored).toBeNull()
 })
 
-test("an ended stored login is written to stored-login-status.json as loginEnded, not as an expired token", async () => {
+test("an ended stored login writes its reason to stored-login-status.json as loginEnded", async () => {
   const { beat, status } = await cycle("ended", {
     added: ["added@example.org"],
     ended: true,
     login: true,
   })
-  expect(status).toMatchObject({ loginEnded: "time_limit", tokenExpired: false })
+  expect(status).toMatchObject({ loginEnded: "time_limit" })
   expect(beat.detail).toContain("stored login: LoginEnded: ")
 })
 
-test("a good stored read writes tokenExpired false", async () => {
+test("a good stored read writes no loginEnded", async () => {
   const { status, stored } = await cycle("unexpired", { added: [], login: true })
-  expect(status).toMatchObject({ loginEnded: null, tokenExpired: false })
+  expect(status).toMatchObject({ loginEnded: null })
   expect(stored.account).toBe("stored@example.org")
 })
 

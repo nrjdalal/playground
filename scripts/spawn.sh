@@ -887,44 +887,6 @@ try:
             readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
-        # an --account start on the own login whose stored-login.json is stale only because ops-usage finds its token expired (stored-login-status.json, which run.py writes each run) passes once on that last reading, judged on judge()'s line while it is at most 48 hours old and its week has not reset: that start's Claude Code refreshes the token, and ops-usage's next run writes a fresh reading; the one start is a numbered marker keyed on the reading's writtenAt, made with O_EXCL on a real start (never --check), so a second start on the same reading waits for that fresh one, or 30 minutes, after which one more may try, in case the start never reached Claude Code.
-        one_start = None
-
-        def expired_start(stored, stale):
-            status, _ = load("ops/usage/stored-login-status.json")
-            try:
-                expired = status["tokenExpired"] is True and (now - from_iso(status["writtenAt"])).total_seconds() < 15 * 60
-                written = from_iso(stored["writtenAt"])
-                resets = from_iso(stored["rate_limits"]["seven_day"]["resets_at"])
-            except (KeyError, TypeError, ValueError):
-                expired = False
-            if not expired:
-                return "stored-login.json", {}, stale, None
-            age = int((now - written).total_seconds() // 60)
-            cause = f"its token has expired (ops/usage/stored-login-status.json tokenExpired), so ops-usage reads nothing and stored-login.json was written {age} minutes ago"
-            fix = "Run Claude Code on this login once, so it refreshes the token."
-            if resets <= now:
-                return "stored-login.json", {}, f"{cause}, and its week has reset since ({resets:%a %H:%M} UTC), so that reading is an old week's. {fix}", None
-            five = stored["rate_limits"].get("five_hour")
-            try:
-                five_over = isinstance(five, dict) and from_iso(five["resets_at"]) <= now
-            except (KeyError, TypeError, ValueError):
-                five_over = False
-            if five_over:
-                stored = dict(stored, rate_limits={k: v for k, v in stored["rate_limits"].items() if k != "five_hour"})
-            seen, detail = judge("stored-login.json", stored, 48 * 60, f"48 hours is the most a reading counts while its token has expired. {fix}")
-            if detail:
-                return "stored-login.json", seen, f"{cause}: {detail}", None
-            folder, prefix = os.path.join(data_dir, "ops", "usage"), f"own-login-start-{int(written.timestamp())}-"
-            taken = sorted(int(n[len(prefix):-5]) for n in os.listdir(folder) if n.startswith(prefix) and n.endswith(".json") and n[len(prefix):-5].isdigit())
-            if taken:
-                last = os.path.join(folder, f"{prefix}{taken[-1]}.json")
-                since = int((now.timestamp() - os.stat(last).st_mtime) // 60)
-                if since < 30:
-                    return "stored-login.json", seen, f"{cause}, and one start already went on it {since} minutes ago ({os.path.basename(last)}), so the next waits for the fresh reading ops-usage writes once that start's Claude Code has refreshed the token, or for 30 minutes on that start. {fix}", None
-            marker = os.path.join(folder, f"{prefix}{taken[-1] + 1 if taken else 1}.json")
-            return f"stored-login.json, written {age} minutes ago: its token expired, so this one start lets Claude Code refresh it", seen, None, marker
-
         usage, detail = load("usage.json")
         own = usage.get("account") if isinstance(usage, dict) else None
         writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
@@ -934,7 +896,7 @@ try:
         else:
             seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
         logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
-        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account (but for expired_start's one start below), and the factory becomes a login --account reaches.
+        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
         try:
             with open(own_config) as f:
                 runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
@@ -947,10 +909,7 @@ try:
             if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
                 stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
             stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
-            stored_name = "stored-login.json"
-            if own_pick and stored_detail and not stored_seen and isinstance(named, str) and named.lower() == runs_on.lower():
-                stored_name, stored_seen, stored_detail, one_start = expired_start(stored, stored_detail)
-            logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+            logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -991,15 +950,6 @@ try:
             if logins[0][4]:
                 readings.update(logins[0][3])
                 refuse("usage", f"--account {own_pick}, this machine's own login: {logins[0][4]}")
-            if one_start and not check:
-                try:
-                    fd = os.open(one_start, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                except FileExistsError:
-                    refuse("usage", f"--account {own_pick}, this machine's own login: another start has just taken the one start its stale reading allows ({os.path.basename(one_start)})")
-                except OSError as e:
-                    refuse("usage", f"--account {own_pick}, this machine's own login: it cannot write {one_start} ({e.strerror}), the marker that holds a second start on its stale reading")
-                with os.fdopen(fd, "w") as f:
-                    json.dump({"startedAt": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "writtenAt": stored["writtenAt"]}, f)
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
