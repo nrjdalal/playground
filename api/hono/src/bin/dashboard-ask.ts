@@ -5,6 +5,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
+import { uiRefusal } from "@packages/config/ui-spec"
 import { createDatabase } from "@packages/db"
 import { env } from "@packages/env/db"
 import { factorySettings, readPolicyOrDefaults, ruleSettings } from "@packages/settings"
@@ -271,6 +272,9 @@ if (command === "new" || command === "edit") {
   // a progress block draws as bars only when every line reads, so one that does not is refused before it posts
   const badProgress = progressRefusal(input)
   if (badProgress) fail(badProgress)
+  // a ui block draws as a card only when it parses into a progress or a steps object, so one that does not is refused before it posts (PG-2722)
+  const badUi = uiRefusal(input)
+  if (badUi) fail(badUi)
   // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720)
   if (command === "new") {
     const refusal = progressCardRefusal(input, await inflightCard(db))
