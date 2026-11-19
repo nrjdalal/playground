@@ -674,7 +674,7 @@ export const cmdDelta = (worktree: string, base: string, old: string, neu: strin
   console.log(kind === "BASE-MERGE" ? kind : `OWN: ${moved.join(" ")}`)
 }
 
-const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\("
+const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\(|scanImports\\("
 const SCAN_RE = new RegExp(SCAN_TS)
 const skipQuoted = (text: string, from: number, close: string): number => {
   let j = from
