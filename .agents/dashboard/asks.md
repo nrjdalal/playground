@@ -242,6 +242,7 @@
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own item's title and preview in place, until it closes, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
   bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster closes its own update once it has settled (a cleared alert, a finished progress card); until then it stays editable by its poster, unless the owner presses its Dismiss; an edit after his Done brings it back unread
+  bun run ask start <id|#i41>   # the poster clears its card's planned flag, so it leaves the Planned shelf and stays open and answerable, its version moving; it takes any card, a decision, a draft or an update
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
   bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024)
   ```
@@ -252,6 +253,7 @@
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   or a `questions` list of 2 to 20 entries for a card that asks one question at a time, each `{question, options, recommended?}` with its own 1 to 5 `options` and an optional `recommended` index into them, never beside `options`, `approve` or `deny`,
+  an optional `planned` that holds the card for the Planned shelf, cleared by `ask start` (`startItem`), and left out on a card that is not planned,
   and optional `attachments` and `scope`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
   `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `clone` (`repos`, `why`, below), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `own` (`key`, `own`, `scope`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
