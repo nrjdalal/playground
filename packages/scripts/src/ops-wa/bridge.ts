@@ -72,6 +72,8 @@ export type Mode = {
   on: () => Promise<boolean>
   reply: (body: string) => Promise<string>
   stuck: () => Promise<Stuck>
+  // sends a card's text to the owner and gives its first message's id, which a decision's pin names; a bridge with none sends it through reply and pins only a poll
+  card?: (body: string) => Promise<string | undefined>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
@@ -80,12 +82,10 @@ export type Mode = {
   inbox?: Inbox
   // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
-  // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
-  policy?: () => Promise<Policy | undefined>
-  // sends a card's text to the owner and gives its first message's id, which a decision's pin names; a bridge with none sends it through reply and pins only a poll
-  card?: (body: string) => Promise<string | undefined>
   // pins our own message in the owner's chat for 7 days, or with off takes the pin away; a bridge with none pins nothing
   pin?: (id: string, off?: boolean) => Promise<void>
+  // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
+  policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
   // a reaction on a kept message, the sender's; a bridge with none sets no 👀

@@ -250,6 +250,7 @@ const main = async () => {
     alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
+    card: send.card,
     check,
     dir,
     escalate: (body) => send(body, "escalate"),
@@ -275,6 +276,7 @@ const main = async () => {
       )
     },
     owner,
+    pin: send.pin,
     // the policy lines are read afresh for each message, so the owner's set reaches a running ops-wa; settings that refuse leave the default
     policy: async () => {
       const read = await readPolicy(data)
@@ -286,8 +288,6 @@ const main = async () => {
         : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
-    card: send.card,
-    pin: send.pin,
     poll: send.poll,
     react: send.react,
     reply: send,
