@@ -2,10 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
+import { targetWords } from "@packages/config/delete-targets"
 import { managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import {
+  bytesOf,
   type Clone,
   deleteWeights,
   isAgentBrowser,
@@ -551,6 +553,27 @@ const approvedWeights = (
   return { paths: done.paths, size: done.size, shards: set.length }
 }
 
+// The pick an approved delete decision gives for a path, or why it gives none: the card must be a delete the owner approved after its last edit, whose what names the path whole, as <machine>:/path for a peer.
+async function deletePick(
+  args: { path: string; peer?: string },
+  card: string,
+  deps: RmDeps,
+): Promise<{ bytes: number } | string> {
+  const d = deps.decision ? await deps.decision(card) : "no Inbox is read here"
+  if (typeof d === "string") return `card ${card} did not read: ${d}`
+  if (d.kind !== "delete") return `card ${card} is not a delete decision, so ${args.path} stays`
+  if (d.answer !== "yes") return `card ${card} is not approved, so ${args.path} stays`
+  if (d.what === null) return `card ${card} names no path in its what, so ${args.path} stays`
+  if (d.answeredAt < d.editedAt)
+    return `card ${card} was edited after its answer, so ${args.path} stays until the owner answers it again`
+  const word = args.peer === undefined ? args.path : `${args.peer}:${args.path}`
+  if (!targetWords(d.what).includes(word))
+    return `card ${card} does not name ${word} as one whole path, so it stays`
+  if (args.peer !== undefined)
+    return `card ${card}: a peer's delete waits for its far end, so ${word} stays`
+  return { bytes: bytesOf(args.path) }
+}
+
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
@@ -559,17 +582,25 @@ async function removeApproved(
   roots: Roots,
   deps: RmDeps,
 ): Promise<number> {
-  const picks = deps.approvals ? await deps.approvals(card) : "no Inbox is read here"
-  if (typeof picks === "string") {
-    console.error(`playground: card ${card} did not read: ${picks}`)
-    return 1
+  // The nightly-clean's Remove on this card, read first; a string is its refusal.
+  const picks = deps.approvals ? await deps.approvals(card) : null
+  // The pick the path is approved at, or why it stays: the nightly-clean's Remove
+  // on this card, or the delete decision's when the card holds none.
+  let chosen: { bytes: number } | string
+  if (picks && Array.isArray(picks)) {
+    const machine = args.peer ?? deps.machine
+    const pick = picks.find((p) => p.path === args.path && p.machine === machine)
+    chosen = pick
+      ? { bytes: pick.bytes }
+      : `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`
+  } else if (picks !== null) {
+    chosen = `playground: card ${card} did not read: ${picks}`
+  } else {
+    const said = await deletePick(args, card, deps)
+    chosen = typeof said === "string" ? `playground: ${said}` : said
   }
-  const machine = args.peer ?? deps.machine
-  const pick = picks.find((p) => p.path === args.path && p.machine === machine)
-  if (!pick) {
-    console.error(
-      `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`,
-    )
+  if (typeof chosen === "string") {
+    console.error(chosen)
     return 1
   }
   // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
@@ -579,7 +610,7 @@ async function removeApproved(
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
       return 1
     }
-    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
+    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, chosen.bytes, card))
     if (ran.code !== 0) {
       const said = ran.out.trim().replace(/^playground: /, "")
       const refused = said || "the peer did not answer"
@@ -591,7 +622,7 @@ async function removeApproved(
     console.log(ran.out.trim())
     return 0
   }
-  const approved = { bytes: pick.bytes, card }
+  const approved = { bytes: chosen.bytes, card }
   let line: string
   let drop: string[]
   if (isWeights(args.path, deps.home, folders)) {

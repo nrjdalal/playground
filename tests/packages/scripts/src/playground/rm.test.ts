@@ -2523,7 +2523,7 @@ const withWhat = (what: string | null): DeleteDecision => ({
   answer: "yes",
   answeredAt: "2026-11-01T00:00:00Z",
   editedAt: "2026-11-01T00:00:00Z",
-  kind: "Delete",
+  kind: "delete",
   what,
 })
 
