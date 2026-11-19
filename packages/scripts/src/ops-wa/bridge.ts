@@ -741,7 +741,7 @@ export function bridge(io: Io & Mode) {
         for (const m of messages) queue(() => inbound(io, m, sock.user))
       })
       sock.ev.on("messages.update", (updates) => {
-        const seen = updates.flatMap(seenOf(io.now()))
+        const seen = updates.flatMap(receiptsOf(io.now()))
         if (seen.length > 0) queue(() => keepReceipts(io.dir, seen))
       })
       sock.ev.on("call", (calls) => {
@@ -915,7 +915,7 @@ const receiptsFile = (dir: string) => join(dir, "receipts.json")
 const DELIVERED = 3
 const READ = 4
 // Pure: the receipts in a messages.update for messages from this number, at the receipt's own time or now; a read is a delivery too. Baileys sends a group's receipts on message-receipt.update, and ops-wa sends to no group.
-const seenOf =
+const receiptsOf =
   (now: number) =>
   ({ key, update }: Update): Receipt[] => {
     const status = update.status ?? 0
