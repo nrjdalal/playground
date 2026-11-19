@@ -39,7 +39,8 @@ A line ending `No reply is needed.` (a delete, or the owner's reaction on a repl
 
 ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card that still asks, open, not replied, and awake, as one `📥 <title>` line each, at most 5 then `📥 +N more in the Inbox` ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
 A card with choices also goes as a WhatsApp poll ([ADR 0029](../../../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)), and the owner's vote counts as that row's number typed.
-Each decision that goes stays pinned in the owner's chat, its poll or else its text, until it settles by any route, a WhatsApp answer, an Inbox answer, a settle, an ack or a resolve; at most 3 stay pinned, the oldest coming off first.
+Each decision that goes stays pinned in the owner's chat, its poll or else its text, until it settles by any route, a WhatsApp answer, an Inbox answer, a settle, an ack or a resolve, with WhatsApp mode on or off; at most 3 stay pinned, the oldest coming off first.
+A pin comes off only inside the owner's 24 hours, so one that settles after them comes off at the owner's next message.
 The owner's reply naming a card (`1 #i12`) or vote goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
 A number alone or an id alone reaches you only while no card that went out waits on its choices, so read it as the owner's answer to your own question.
 
