@@ -69,20 +69,47 @@ const SCHEMA = /^packages\/db\/(?:drizzle|src\/schema)\//
 export const schemaChanges = (files: string[]): string[] =>
   files.filter((file) => SCHEMA.test(file))
 
+// A PR as `gh pr view --json state,comments,body` sends it, its fields read here.
+type PrJson = {
+  body: string
+  comments?: { author: { login?: string }; body: string }[]
+  state?: string
+}
+
+// A JSON parse that returns undefined on bad input, so a source treats a read it cannot trust as unreadable.
+const safeParse = (json: string): unknown => {
+  try {
+    return JSON.parse(json)
+  } catch {
+    return undefined
+  }
+}
+
+// The dump path's extension, which a dump or the migration SQL is named with: the class excludes `~`, so a `~/.playground` path extracts from the `/` right after it, not the source `~`.
+const DUMP_RE = /[\w./-]+\.(?:sql|dump)\b/
+
+// A shape review's banner, whose first line starts with these words, matched from any author, not just the ReviewBot login.
+const SHAPE_RE = /^## ReviewBot · shape review( · at [0-9a-f]+)?/
+
 // A PR's JSON from `gh pr view --json state,comments,body`, parsed into its source shape: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
 export const prSource = (json: string): SchemaSource | null => {
-  throw new Error(`prSource not built: ${json}`)
+  const read = safeParse(json) as PrJson | undefined
+  if (!read || read.state !== "MERGED" || !Array.isArray(read.comments)) return null
+  if (!read.comments.some((comment) => SHAPE_RE.test(comment.body))) return null
+  const dump = DUMP_RE.exec(read.body)
+  if (!dump) return null
+  return { dumpPath: dump[0], kind: "pr", merged: true, shapeReview: true }
 }
 
 // An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
 export const decisionSource = (json: string): SchemaSource | null => {
-  throw new Error(`decisionSource not built: ${json}`)
+  const read = safeParse(json)
+  if (!read || typeof read !== "object") return null
+  return { approved: (read as { status?: string }).status === "approved", kind: "decision" }
 }
 
 // The Inbox `ask get` argv for a #iN value: its id, so the reader the live dashboard checkout runs gets `i123` for `#i123`.
-export const decisionArg = (value: string): string => {
-  throw new Error(`decisionArg not built: ${value}`)
-}
+export const decisionArg = (value: string): string => value.replace(/^#/, "")
 
 // The live host's two checks, each its URL and the status it answers when the deploy serves.
 export const hostChecks = (host: string): [string, number][] => [
