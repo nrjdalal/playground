@@ -249,7 +249,7 @@ const cycle = async (
     loginExit?: number
     noSeat?: boolean
     probeUrl?: string
-    seat?: { age: number; via?: null }
+    seat?: { account?: string; age: number; via?: null }
     storedAge?: number
   },
 ) => {
@@ -295,7 +295,7 @@ const cycle = async (
         ...(opts.factory && { factory: opts.factory }),
         ...(opts.seat && {
           seen: {
-            "stored@example.org": {
+            [opts.seat.account ?? "stored@example.org"]: {
               at: seatAt(),
               ...(opts.seat.via !== null && { via: "token" }),
               week: 30,
@@ -493,6 +493,29 @@ test("a seat probe 59 minutes old still carries the ended login, so the beat sta
     storedAge: 600,
   })
   expect(beat.result).toBe("ok")
+})
+
+test("with the seat token carrying the ended login and no other account to read, the beat is ok", async () => {
+  const { beat } = await cycle("seat-alone", {
+    added: [],
+    ended: true,
+    login: true,
+    seat: { age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toBe("ok")
+  expect(beat.detail).toContain("so it runs on its seat token")
+})
+
+test("a fresh seat probe of another account carries nothing, so the ended stored login beats its error", async () => {
+  const { beat } = await cycle("seat-other", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    seat: { account: "added@example.org", age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
 })
 
 test("with the seat token carrying the ended login, a refused factory read beats its own error, the stored login left to the detail", async () => {
