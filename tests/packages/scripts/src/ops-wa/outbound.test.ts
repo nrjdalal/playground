@@ -97,6 +97,14 @@ describe("wa send's files (#2783)", () => {
     ])
   })
 
+  test("a file's caption is kept in ours.json, so the owner's reaction on the file names its words; a file with none is not", async () => {
+    const h = await harness()
+    await h.send("the new board", "reply", h.file("board.png"))
+    await h.send("", "reply", h.file("shot.jpg"))
+    const { messages } = await Bun.file(join(h.data, "whatsapp", "ours.json")).json()
+    expect(messages).toEqual([{ id: "m1", text: "the new board" }])
+  })
+
   test("a caption waits its typing time as a text does, and a file with no caption goes on the gap alone", async () => {
     const h = await harness()
     const caption = "the new board, with this week's three changes"

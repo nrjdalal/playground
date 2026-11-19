@@ -53,3 +53,21 @@ describe("brief-rush.md's merge and scratch lines run as written", () => {
     expect(line).toContain("`<session name>-*` or `<session name>.*`")
   })
 })
+
+// issue 2825: the brief starts in the worktree by absolute path and gives every file tool that path
+describe("brief-rush.md starts in the worktree and gives every file tool its absolute path (#2825)", () => {
+  test("the worktree step cds into the worktree first, and every file tool gets its absolute path", async () => {
+    const text = await read(join("scripts/briefs", "brief-rush.md"))
+    const stepLine = text.split("\n").find((l) => l.startsWith("- Worktree:")) ?? ""
+    expect(stepLine).toContain(
+      "Your first command once it exists is `cd <worktree>`, its absolute path",
+    )
+    expect(stepLine).toContain("again after every resume")
+    const fileLine = text.split("\n").find((l) => l.startsWith("- Give every file tool")) ?? ""
+    expect(fileLine).toContain(
+      "Give every file tool (Edit, Write, Read) the worktree's absolute path",
+    )
+    expect(fileLine).toContain("never a repo-relative one")
+    expect(fileLine).toContain("since a relative path lands in the main checkout")
+  })
+})

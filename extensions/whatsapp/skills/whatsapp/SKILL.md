@@ -19,8 +19,8 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
    When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
-2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way.
-   Done when the update is sent, or nothing has changed since the last one and the reply says so.
+2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
+   Done when the update is sent, or nothing has changed and nothing is sent.
 
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat, but for the alert number the owner approved, which takes a reply at any time; a refusal names its reason.
 `playground wa status` prints whether each number has written or been approved, and whether a reply can go to it now.
@@ -32,14 +32,15 @@ To send a file, put it in `<data>/wa/outbox/` and add `--file <absolute path>`: 
 An image (`jpg`, `jpeg`, `png`), a video (`mp4`) or a document (`pdf`, `txt`, `md`, `csv`, `json`) carries the body as its caption; a voice note (`ogg`, `opus`) takes none, so the body goes before it as text.
 A file of any other type, or outside the outbox, is refused, and a text document is read for a token shape as a body is.
 
-A photo or voice note from the owner arrives as a path in `<data>/wa/media/`: read the photo there with the Read tool, and take a voice note's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
+A photo, voice note, video or document from the owner arrives as a path in `<data>/wa/media/`: read a photo or document there with the Read tool, and take a voice note's or video's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
+A line ending `No reply is needed.` (a delete, or the owner's reaction on a reply) asks no `wa send`.
 
 ## Inbox cards on WhatsApp
 
 ops-wa sends the owner the open `ask` decisions and updates posted with `scope: "factory"` from the Inbox itself, each once, redacted, its choices numbered, and every other card that still asks, open, not replied, and awake, as one `📥 <title>` line each, at most 5 then `📥 +N more in the Inbox` ([ADR 0024](../../../../.agents/adr/0024-the-owners-whatsapp-answers-an-inbox-card.md)); leave a card's words out of a `wa send`, since ops-wa's copy is the one that went through the allowlist.
 A card with choices also goes as a WhatsApp poll ([ADR 0029](../../../../.agents/adr/0029-the-owners-poll-vote-answers-an-inbox-card.md)), and the owner's vote counts as that row's number typed.
 The owner's reply naming a card (`1 #i12`) or vote goes to ops-wa alone, never to you: it answers the card through `bun run ask whatsapp`, and its poster reads the answer as any Inbox answer, with `via: "whatsapp"` on it.
-A number alone or an id alone reaches you only while no card that went out waits on its choices, so read it as the owner's answer to your own question.
+A number alone or an id alone reaches you only while no card that went out waits on its choices and no setting question of ops-wa's waits (below), so read it as the owner's answer to your own question.
 
 ## The alert number
 
@@ -57,3 +58,11 @@ That number's holder is a guest ([ADR 0030](../../../../.agents/adr/0030-the-sec
 Answer a guest with `playground wa send --to alert <absolute path>`, at any time once the owner approved that number, else within 24 hours of their last message, within the guest's policy line: chat and factory status; post a feature request to the owner as one Inbox card, and run tasks on the owner's word alone.
 Done when `wa send --to alert` prints `wa send: sent`, or the feature request's Inbox card has its id.
 `wa send --to alert` refuses a reply holding an email address or a phone number, so customer personal data stays with the owner.
+
+## A setting from the owner's message
+
+Each owner text line names its message id. When the owner's own WhatsApp asks for a setting and writes its value, run `playground settings set <key> <value> --from-owner-msg <id>` with the value as the message spells it ([ADR 0035](../../../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks the message holds the value and writes the key itself.
+A key a guard reads waits for the owner's yes to ops-wa's own plain question on WhatsApp within 10 minutes, which ops-wa asks and reads alone, so leave the question out of your reply; any other key applies at once, and ops-wa sends the owner its undo.
+While that question waits and no card waits on its choices, the owner's next message settles it: a yes (`yes`, `y`, `yes do it`, `1`) or a `no` stays with ops-wa and never reaches you, a reaction leaves it waiting and ops-wa tells the owner to reply yes, and any other message drops the question and reaches you as usual.
+`wa.owner` and `wa.device` refuse here, since they name the WhatsApp that proves the owner; point the owner to the Settings card for them.
+Done when it prints `set <key>` with its undo or `asked the owner on WhatsApp to confirm`, or its refusal goes to the owner as the reply.

@@ -67,3 +67,24 @@ test("the worker template's Standing lines hold the lead's standing brief rules"
   expect(standing).toContain("-handoff.md` (mode 600) with every push")
   expect(standing).toContain("**signal** and **slots** rules")
 })
+
+// issue 2825: the brief starts in the worktree by absolute path and gives every file tool that path
+test("the worker template starts in the worktree and gives every file tool its absolute path", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  const standing = text.slice(text.indexOf("## Standing lines"))
+  const lines = standing.split("\n")
+  const cut = lines.findIndex((l) => l.startsWith("Cut a worktree by its absolute path"))
+  const step = lines.findIndex((l) =>
+    l.startsWith("Your first command once your worktree exists is `cd <worktree>`"),
+  )
+  expect(cut).toBeGreaterThan(-1)
+  expect(step).toBeGreaterThan(cut)
+  expect(lines[step]).toContain("`cd <worktree>`, its absolute path")
+  expect(lines[step]).toContain("again after every resume")
+  const fileLine = standing.split("\n").find((l) => l.startsWith("Give every file tool")) ?? ""
+  expect(fileLine).toContain(
+    "Give every file tool (Edit, Write, Read) the worktree's absolute path",
+  )
+  expect(fileLine).toContain("never a repo-relative one")
+  expect(fileLine).toContain("since a relative path lands in the main checkout")
+})
