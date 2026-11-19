@@ -32,6 +32,7 @@ HERE = os.path.join((os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os
 OPS = os.path.dirname(HERE)
 OUT = os.path.join(os.path.dirname(OPS), "usage.json")
 STORED = os.path.join(HERE, "stored-login.json")
+STATUS = os.path.join(HERE, "stored-login-status.json")  # why the stored login read nothing when its Claude Code login has ended, which spawn.sh reads in place of the Keychain
 FLIP = os.path.join(HERE, "login-flip.json")
 CYCLE = 300
 PROBE_EVERY, FRESH_FOR = 840, 1800
@@ -65,6 +66,12 @@ class NoLogin(RuntimeError):
     pass
 
 
+class LoginEnded(RuntimeError):
+    def __init__(self, reason):
+        super().__init__(f"Claude Code's login has ended ({reason}); the owner's /login brings it back")
+        self.reason = reason
+
+
 def oauth():
     r = subprocess.run(["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "Claude Code-credentials", "-w"], capture_output=True, text=True, timeout=15)
     # 44 is security's item-not-found; a locked or denied Keychain is a failure, not a missing login
@@ -90,6 +97,10 @@ def window(w):
 
 def stored_login():
     o = oauth()
+    if o.get("loginEnded"):
+        raise LoginEnded(o["loginEnded"])
+    if o.get("refreshTokenExpiresAt") and o["refreshTokenExpiresAt"] / 1000 < time.time():
+        raise LoginEnded("refresh token expired")
     if o.get("expiresAt", 0) / 1000 < time.time():
         raise RuntimeError("access token expired; waiting for Claude Code to refresh it")
     # the account is read every cycle, with the token it goes with: the owner switches logins, and a cached email names the wrong account
@@ -267,13 +278,18 @@ while True:
     except SystemExit as e:
         problems.append(f"usage.accounts: {e}")
         FACTORY = None  # no list known, so no account counts as removed this cycle
+    ended = None
     try:
         stored = stored_login()
         write(STORED, stored)
         write_stored(stored)
     except Exception as e:
-        no_login = isinstance(e, NoLogin)
+        no_login, ended = isinstance(e, NoLogin), getattr(e, "reason", None) if isinstance(e, LoginEnded) else None
         problems.append(f"stored login: {type(e).__name__}: {e}")
+    try:
+        write(STATUS, {"loginEnded": ended, "writtenAt": iso(time.time())})
+    except OSError as e:
+        problems.append(f"stored login status: {type(e).__name__}: {e}")
     flip = flip_file() or {}
     resolved = resolved_factory(flip)
     try:

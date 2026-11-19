@@ -1028,6 +1028,43 @@ describe("the beats that send no line", () => {
     expect(log).not.toContain("left for load")
   })
 
+  test("the trash purge passes a batch it cannot remove, names it once in its log and stays ok (#2918)", async () => {
+    const ops = scratch()
+    const trash = join(ops, "..", "trash")
+    const now = new Date("2026-11-02T12:17:00Z")
+    const item = join(trash, "20261019T000000Z-x", "1", "item")
+    mkdirSync(dirname(item), { recursive: true })
+    writeFileSync(item, "x")
+    mkdirSync(join(trash, "20261020T000000Z-s", "1"), { recursive: true })
+    const lock = (on: boolean) =>
+      process.platform === "darwin"
+        ? Bun.spawnSync(["chflags", on ? "uchg" : "nouchg", item])
+        : chmodSync(dirname(item), on ? 0o555 : 0o755)
+    lock(true)
+    try {
+      const { ctx, sent } = fake(ops, now)
+      await trashPurge(
+        undefined,
+        () => 100e9,
+        async () => {},
+      )(ctx)
+      await trashPurge(
+        undefined,
+        () => 100e9,
+        async () => {},
+      )(ctx)
+      expect(sent).toEqual([])
+      const log = (await Bun.file(join(ops, "log", "trash-purge.log")).text()).trim().split("\n")
+      expect(log).toHaveLength(2)
+      expect(log[0]).toMatch(
+        /removed 1 \(20261020T000000Z-s\), cannot remove 20261019T000000Z-x \(E[A-Z]+\)$/,
+      )
+      expect(log[1]).not.toContain("20261019T000000Z-x")
+    } finally {
+      lock(false)
+    }
+  })
+
   test("the trash purge strips rebuildables from the batches it keeps", async () => {
     const ops = scratch()
     const trash = join(ops, "..", "trash")

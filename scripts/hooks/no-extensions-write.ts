@@ -1033,7 +1033,7 @@ const EXT_DRY = new Set(["add", "import", "init"])
 // Each command's bare switches, as its parseWords call names them; every other -- word takes the next word as its value.
 const SWITCHES: Record<string, string[]> = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"],
+  settings: ["--dry-run", "--propose"],
 }
 
 // Whether a word is the playground CLI in any one of the folders it may be read from: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed; in a folder the hook cannot read, a relative word is the CLI by its last part alone (playground, cli or cli.ts).
@@ -2092,6 +2092,8 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     options[0] === "--from-owner-msg" &&
     !!ownerId &&
     positional.length === 2
+  // --propose as the call's one option, beside the key and value alone: ops-wa asks the owner and writes on his yes, and a CLI from before the flag stops at it needing a value (ADR 0041)
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry
@@ -2102,6 +2104,7 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
     // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
     if (verb === "set" && ownerMsg) return
+    if (verb === "set" && proposal) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]
