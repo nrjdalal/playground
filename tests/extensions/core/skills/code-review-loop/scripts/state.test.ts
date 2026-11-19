@@ -1363,7 +1363,7 @@ test("10 touched-tests: the repo's own scanners read as scanners and its fixture
 })
 
 // split the word so this file's own text is not a match; each written value is whole
-test("10 touched-tests: a test that walks imports with Bun's Transpiler is listed for a change it reaches through the graph (#2625", () => {
+test("10 touched-tests: a test that walks imports with Bun's Transpiler is listed for a change it reaches through the graph (#2625)", () => {
   const repo = scratch()
   const walker =
     'for (const { path } of new Bun.Transpiler({ loader: "ts" }).scan' +
