@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
@@ -600,7 +600,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
-  // #2863: while ops-usage finds the own login's token expired, one --account start on that login passes on its last stored reading, since that start's Claude Code refreshes the token; a marker keyed on the reading's writtenAt holds a second
+  // #2863: while ops-usage finds the own login's token expired, one --account start on that login passes on its last stored reading, since that start's Claude Code refreshes the token; a marker keyed on the reading's writtenAt holds a second for 30 minutes, after which, with no fresh reading since, one more may try
   const ownStart = ["worker", "worker-brave-otter", "b.md", "--account", "own@example.com"]
   const ownEnv = {
     CLAUDE_JSON: ownLogin,
@@ -608,13 +608,14 @@ describe("the capacity gate refuses and spawns nothing", () => {
     USAGE_JSON: factoryUsage(10),
   }
   const staleAt = minutesAgo(600)
-  const markerName = (written: string) =>
-    `own-login-start-${Math.floor(Date.parse(written) / 1000)}.json`
+  const markerName = (written: string, n = 1) =>
+    `own-login-start-${Math.floor(Date.parse(written) / 1000)}-${n}.json`
   const usageDir = (home: string) => join(home, ".playground", "ops", "usage")
   const expiredLogin =
     (
       opts: {
         marker?: string
+        markerAge?: number
         resetsInHours?: number
         status?: { age: number; tokenExpired: boolean } | null
         week?: number
@@ -645,11 +646,12 @@ describe("the capacity gate refuses and spawns nothing", () => {
           join(usageDir(home), "stored-login-status.json"),
           JSON.stringify({ tokenExpired: status.tokenExpired, writtenAt: minutesAgo(status.age) }),
         )
-      if (opts.marker)
-        writeFileSync(
-          join(usageDir(home), markerName(opts.marker)),
-          JSON.stringify({ writtenAt: opts.marker }),
-        )
+      if (opts.marker) {
+        const path = join(usageDir(home), markerName(opts.marker))
+        writeFileSync(path, JSON.stringify({ writtenAt: opts.marker }))
+        const at = new Date(Date.now() - (opts.markerAge ?? 0) * 60_000)
+        utimesSync(path, at, at)
+      }
     }
   const markers = (r: { home: string }) =>
     readdirSync(usageDir(r.home)).filter((name) => name.startsWith("own-login-start-"))
@@ -684,6 +686,19 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(markers(r)).toContain(markerName(staleAt))
   })
 
+  test("a marker 31 minutes old, with no fresh reading since, lets one more start through and leaves the next marker", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv,
+      script,
+      undefined,
+      expiredLogin({ marker: staleAt, markerAge: 31 }),
+    )
+    expect(r.code).toBe(0)
+    expect(markers(r).sort()).toEqual([markerName(staleAt), markerName(staleAt, 2)])
+  })
+
   test("a fresh reading is judged as before, whatever marker an earlier stale one left", async () => {
     const written = minutesAgo(0)
     const r = await spawn(
@@ -704,6 +719,11 @@ describe("the capacity gate refuses and spawns nothing", () => {
       "a second start on the same stale reading",
       { marker: staleAt },
       "one start already went on it",
+    ],
+    [
+      "a start 29 minutes after the last one on it",
+      { marker: staleAt, markerAge: 29 },
+      "one start already went on it 29 minutes ago",
     ],
     [
       "no expired token in ops-usage's status",
