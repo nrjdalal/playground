@@ -276,6 +276,24 @@ describe("moveIfExposed", () => {
     expect(dumpCall).toContain("-d")
     expect(dumpCall).toContain("shop")
   })
+
+  test("a percent-encoded user decodes to the dump's -U, not the encoded form", async () => {
+    const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+    const docker = fakeDocker("0.0.0.0")
+    await moveIfExposed(
+      `postgres://a%40b:${SECRET}@localhost:${PORT}/shop`,
+      docker.run,
+      (url) => locate(url, docker.sync),
+      noWait,
+      dumpDir,
+    )
+    // the decodeURIComponent strips the %40, so the -U carries a@b, never the encoded a%40b
+    const dumpCall = docker.calls.find(([verb, , sub]) => verb === "exec" && sub === "pg_dump")
+    expect(dumpCall).toBeDefined()
+    expect(dumpCall).toContain("-U")
+    expect(dumpCall).toContain("a@b")
+    expect(dumpCall).not.toContain("a%40b")
+  })
 })
 
 describe("moveToLoopback", () => {
