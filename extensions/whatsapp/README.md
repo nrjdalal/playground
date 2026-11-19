@@ -50,3 +50,8 @@ What the dispatcher may answer each chat with is a policy line you set on this M
 
 Ask for a setting in your own WhatsApp message and write its value, and the dispatcher sets it from that message ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks your message holds the value, and keeps a keyed hash of each word of your messages for 24 hours, never their text.
 A key a guard reads, such as a policy line or a job, asks you on WhatsApp first, as "set <key> to <value>? yes or no": `yes`, `y`, `yes do it` or `1` within 10 minutes applies it (a bare number answers a card waiting on its rows first), a reaction, a 👍 too, leaves it waiting and asks you to reply yes, and `no`, any other reply or silence drops it; any other key applies at once, but `wa.owner` and `wa.device`, which you set on this Mac alone. Each change comes back with a one-line undo to run in your own terminal.
+
+## Settings a session proposes
+
+A session that needs a guarded setting changed asks you the same question, "set <key> to <value>? yes or no", with the whole value, and your `yes` within 10 minutes sets it as your own act ([ADR 0041](../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
+`no`, any other reply or silence leaves it as it was. Only one question waits at a time, and a masked key, such as a phone number, comes to you as an Inbox card instead, since the question would show its last 4 alone.
