@@ -254,7 +254,9 @@ async function moveQueueEta(entry: Agent, eta: string): Promise<void> {
     data = (await Bun.file(qpath).json()) as QueueFile
   } catch (error) {
     // The roster write still lands, so the lead sets etaMerge by hand.
-    console.error(`roster.ts: ${qpath}: ${error.message}; set its etaMerge by hand`)
+    console.error(
+      `roster.ts: ${qpath}: ${error instanceof Error ? error.message : String(error)}; set its etaMerge by hand`,
+    )
     return
   }
   const queue = Array.isArray(data.queue) ? data.queue : null
@@ -265,7 +267,9 @@ async function moveQueueEta(entry: Agent, eta: string): Promise<void> {
     await writeAtomic(qpath, JSON.stringify(data, null, 2))
   } catch (error) {
     // The roster write still lands, so the lead sets etaMerge by hand.
-    console.error(`roster.ts: ${qpath}: ${error.message}; set its etaMerge by hand`)
+    console.error(
+      `roster.ts: ${qpath}: ${error instanceof Error ? error.message : String(error)}; set its etaMerge by hand`,
+    )
   }
 }
 
