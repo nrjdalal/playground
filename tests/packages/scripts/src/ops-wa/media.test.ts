@@ -39,6 +39,18 @@ describe("where a photo or voice note is kept", () => {
     expect(extensionOf(mime)).toBe(extension)
   })
 
+  test.each([
+    ["application/pdf", "Report.PDF", "pdf"],
+    ["application/x-made-up", "plan.docx", "docx"],
+    ["application/pdf", "no extension", "pdf"],
+    [undefined, "no extension", "bin"],
+  ])(
+    "%s named %s is kept as .%s: the name's own extension wins, lowercased",
+    (mime, name, extension) => {
+      expect(extensionOf(mime, name)).toBe(extension)
+    },
+  )
+
   test("each one is a new file, mode 600, in a folder of mode 700", async () => {
     const dir = join(scratch(), "wa", "media")
     const at = Date.parse("2026-11-11T19:00:00Z")
