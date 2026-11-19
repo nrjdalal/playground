@@ -78,3 +78,17 @@ describe("an urgent alert's delay and checker (#2776)", () => {
     expect(GUARD_SETTING_KEYS).toContain("wa.alertCheck")
   })
 })
+
+describe("quiet hours (#2887)", () => {
+  test("wa.quietStartHour and wa.quietEndHour default to 0 and 6, take a whole hour from 0 to 23, and are no guard keys", () => {
+    const none = { schemaVersion: 1, values: {} } as never
+    expect(whatsappSettings.get(none, "wa.quietStartHour")).toBe(0)
+    expect(whatsappSettings.get(none, "wa.quietEndHour")).toBe(6)
+    for (const key of ["wa.quietEndHour", "wa.quietStartHour"] as const) {
+      expect(checkSetting(key, 23)).toMatchObject({ ok: true, value: 23 })
+      for (const bad of [-1, 24, 2.5, "6"])
+        expect(checkSetting(key, bad)).toMatchObject({ ok: false })
+      expect(GUARD_SETTING_KEYS).not.toContain(key)
+    }
+  })
+})
