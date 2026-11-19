@@ -87,3 +87,7 @@ describe("bun run verify memory flags an index a start loads only in part (#1484
     ).toEqual([])
   })
 })
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
+})

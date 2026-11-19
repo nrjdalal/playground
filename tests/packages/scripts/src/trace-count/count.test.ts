@@ -678,3 +678,7 @@ describe("the pull request's list gate", () => {
     expect(listKindsIn("plain words", LIST)).toEqual([])
   })
 })
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
+})

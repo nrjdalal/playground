@@ -2691,3 +2691,7 @@ describe("the reminder before the owner's 24 hours close (#2905)", () => {
     expect(h.fake.sent).toEqual([])
   })
 })
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
+})
