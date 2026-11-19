@@ -92,14 +92,13 @@ const modelTexts = async (models: string): Promise<string> => {
   return texts.join("\n")
 }
 
-// Weights no model folder names, each versioned install's own dir read the way folders are, each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit), in a recorded folder, or under a versioned install's dir, where the install's keep link and its live target are skipped so only the old versions list.
+// Weights no model folder names, each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit), in a recorded folder, or under a versioned install's dir, whose dir is skipped since its old versions list as folders.
 const weights = (
   home: string,
   folders: string[],
   data: string,
   named: string,
   versionDirs: string[] = [],
-  skip: string[] = [],
 ): string[] => {
   const models = join(home, "models")
   const hub = join(models, "hf", "hub")
@@ -109,14 +108,14 @@ const weights = (
     .map((name) => join(hub, name))
   const roots = [
     models,
-    ...[...folders, ...versionDirs].filter(
+    ...folders.filter(
       (f) => f !== home && !inside(f, models) && !inside(f, data) && !basename(f).startsWith("."),
     ),
   ]
   const files = [
     ...new Set(
       roots.flatMap((root) =>
-        weightFiles(root, [...skip, join(models, "hf"), join(models, "kit")]),
+        weightFiles(root, [...versionDirs, join(models, "hf"), join(models, "kit")]),
       ),
     ),
   ]
@@ -217,6 +216,28 @@ const targetOf = (link: string): string => {
   return rel.startsWith("/") ? rel : join(dirname(link), rel)
 }
 
+// Each version entry's old versions: every folder in its dir but the one its keep link resolves to, the keep link itself, and a dot folder other than .old-*; a link is never followed, and a keep link that is missing or names a folder that is gone lists nothing and names the dir as unread.
+const versions = (entries: Entry[]): { paths: string[]; unread: string[] } => {
+  const paths: string[] = []
+  const unread: string[] = []
+  for (const e of entries) {
+    if (e.kind !== "version" || typeof e.keep !== "string") continue
+    const keep = stat(e.keep) ? targetOf(e.keep) : null
+    if (keep === null || !stat(keep)) {
+      unread.push(e.path)
+      continue
+    }
+    for (const name of list(e.path)) {
+      const path = join(e.path, name)
+      const st = stat(path)
+      if (!st?.isDirectory() || path === keep || path === e.keep) continue
+      if (name.startsWith(".") && !name.startsWith(".old-")) continue
+      paths.push(path)
+    }
+  }
+  return { paths, unread }
+}
+
 // Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under. A version entry holds nothing, so a versioned install's own old version is recorded only by the daily check, and everything else held, an entry whose path it is or names, so the card never marks it Remove.
 export const recordedBy = (entries: Entry[], path: string): boolean =>
   entries.some(
@@ -277,14 +298,9 @@ export const shardSets = (items: Unused[]): Unused[] => {
 export async function measureUnused(places: Places): Promise<Measured> {
   const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
   const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
-  // Each version entry's dir is walked like a folder; its keep link, when it is there, and the live target it names are skipped so only the old versions list.
+  // Each version entry's dir, which the weights walk skips, since its old versions list as folders below.
   const versionDirs = entries.filter((e) => e.kind === "version").map((e) => e.path)
-  const skip: string[] = []
-  for (const e of entries) {
-    if (e.kind === "version" && typeof e.keep === "string" && stat(e.keep)) {
-      skip.push(e.keep, targetOf(e.keep))
-    }
-  }
+  const vs = versions(entries)
   const named = await modelTexts(join(places.home, "models"))
   const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
   const found = await images(places, named)
@@ -294,12 +310,17 @@ export async function measureUnused(places: Places): Promise<Measured> {
         ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
         ...listed("rehearsal", rehearsals(places.data)),
         ...listed("run", runs(places.home, places.now)),
-        ...listed("weights", weights(places.home, folders, places.data, named, versionDirs, skip)),
+        ...listed("version", vs.paths),
+        ...listed("weights", weights(places.home, folders, places.data, named, versionDirs)),
       ],
       entries,
     ),
   )
-  return found ? { items } : { imagesUnread: true, items }
+  return {
+    ...(found ? {} : { imagesUnread: true }),
+    items,
+    ...(vs.unread.length ? { versionsUnread: vs.unread } : {}),
+  }
 }
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
