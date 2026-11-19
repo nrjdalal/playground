@@ -33,7 +33,14 @@ import {
   type DraftSent,
   draftSent,
 } from "./drafts"
-import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
+import {
+  DEFAULT_DELAY_MINUTES,
+  escalations,
+  keepPending,
+  lastLines,
+  pendingLines,
+  reacted,
+} from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
 import {
@@ -336,7 +343,11 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id))) {
+  if (
+    reaction?.key?.id &&
+    reaction.text &&
+    (await reacted(io.dir, reaction.key.id, io.now(), io.log))
+  ) {
     io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }
@@ -924,7 +935,7 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, whether a reply can go to it now, as the sender decides, the receipts' lines and the pending alerts.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, whether a reply can go to it now, as the sender decides, the receipts' lines, each pending alert and the last alert's outcome.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
@@ -963,6 +974,7 @@ export async function statusOf(
     numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
     ...(await receiptLines(dir, numbers)),
     ...(await pendingLines(dir)),
+    ...(await lastLines(dir)),
   ]
 }
 
