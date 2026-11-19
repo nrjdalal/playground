@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -399,6 +399,144 @@ describe("wa send's structure (#2799)", () => {
     await expect(h.sender("x", "alert", { quote: "own1" })).rejects.toThrow(
       "wa alert sends text alone",
     )
+    expect(h.fake.sent).toEqual([])
+  })
+})
+
+describe("the live status (#2861)", () => {
+  const live = async (h: Awaited<ReturnType<typeof harness>>) =>
+    (await Bun.file(join(h.dir, "status.json")).json()) as { at: number; id: string; text: string }
+  const key = (id: string) => ({ fromMe: true, id, remoteJid: jid(OWNER) })
+
+  test("the first status goes as a new message, kept live in status.json at 600", async () => {
+    const h = await harness()
+    expect(await h.sender.out("3 PRs in review", "reply", { status: true })).toEqual({
+      ids: ["m1"],
+      said: "sent",
+    })
+    expect(h.fake.sent.map((s) => s.content)).toEqual([
+      { linkPreview: null, text: "3 PRs in review" },
+    ])
+    expect(await live(h)).toEqual({ at: h.fake.sent[0]!.at, id: "m1", text: "3 PRs in review" })
+    expect(statSync(join(h.dir, "status.json")).mode & 0o777).toBe(0o600)
+  })
+
+  test("a changed status edits the live message, which keeps its first send's time", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    const at = (await live(h)).at
+    h.advance(10 * 60_000)
+    expect(await h.sender.out("2 PRs in review, 1 merged", "reply", { status: true })).toEqual({
+      ids: ["m1"],
+      said: "edited the live status",
+    })
+    expect(h.fake.sent.at(-1)!.content).toEqual({
+      edit: key("m1"),
+      linkPreview: null,
+      text: "2 PRs in review, 1 merged",
+    })
+    expect(await live(h)).toEqual({ at, id: "m1", text: "2 PRs in review, 1 merged" })
+  })
+
+  test("an unchanged status makes no socket call", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    h.advance(20 * 60_000)
+    expect(await h.sender.out("3 PRs in review\n", "reply", { status: true })).toEqual({
+      ids: [],
+      said: "unchanged: the live status already reads this",
+    })
+    expect(h.fake.sent).toHaveLength(1)
+  })
+
+  test("a live status past WhatsApp's 15-minute edit window gets a new message, which becomes live", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    h.advance(15 * 60_000)
+    await h.sender("2 PRs in review", "reply", { status: true })
+    expect(h.fake.sent.at(-1)!.content).toEqual({ linkPreview: null, text: "2 PRs in review" })
+    expect(await live(h)).toMatchObject({ id: "m2", text: "2 PRs in review" })
+  })
+
+  test("a live status with 5 messages after it in the owner's chat has scrolled away, and 4 do not", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    for (const n of [1, 2, 3]) {
+      h.advance(1_000)
+      await h.sender(`reply ${n}`, "reply")
+    }
+    h.advance(1_000)
+    await writeOwn(join(h.dir, "messages.json"), {
+      messages: [
+        { at: START - 60_000, id: "old1", jid: jid(OWNER), text: "before it", who: "owner" },
+        { at: START + 60_000, id: "own1", jid: jid(OWNER), text: "thanks", who: "owner" },
+        { at: START + 60_000, id: "gst1", jid: jid(ALERT), text: "any news?", who: "alert" },
+      ],
+    })
+    await h.sender("2 PRs in review", "reply", { status: true })
+    expect(h.fake.sent.at(-1)!.content).toMatchObject({ edit: key("m1") })
+    await h.sender("reply 4", "reply")
+    await h.sender("1 PR in review", "reply", { status: true })
+    expect(h.fake.sent.at(-1)!.content).toEqual({ linkPreview: null, text: "1 PR in review" })
+    expect(await live(h)).toMatchObject({ id: "m7", text: "1 PR in review" })
+  })
+
+  test("a failed edit falls back to a new message, which becomes live", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      if ("edit" in content) throw new Error("made-up edit failure")
+      return real(to, content)
+    }
+    expect(await h.sender("2 PRs in review", "reply", { status: true })).toBe(
+      "sent: the live status's edit failed (made-up edit failure), so this one is live now",
+    )
+    expect(h.fake.sent.map((s) => s.content)).toEqual([
+      { linkPreview: null, text: "3 PRs in review" },
+      { linkPreview: null, text: "2 PRs in review" },
+    ])
+    expect(await live(h)).toMatchObject({ id: "m2", text: "2 PRs in review" })
+  })
+
+  test("a good edit whose state write fails sends no second status", async () => {
+    const h = await harness()
+    await h.sender("3 PRs in review", "reply", { status: true })
+    const path = join(h.dir, "status.json")
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      const sent = await real(to, content)
+      // a folder where status.json was, so the write after the edit cannot land
+      if ("edit" in content) {
+        rmSync(path)
+        mkdirSync(join(path, "x"), { recursive: true })
+      }
+      return sent
+    }
+    await expect(h.sender("2 PRs in review", "reply", { status: true })).rejects.toThrow(
+      "status.json",
+    )
+    expect(h.fake.sent.map((s) => s.content)).toEqual([
+      { linkPreview: null, text: "3 PRs in review" },
+      { edit: key("m1"), linkPreview: null, text: "2 PRs in review" },
+    ])
+  })
+
+  test("a status goes to the owner's chat alone, as text alone in one message, and nothing else goes", async () => {
+    const h = await harness()
+    for (const [kind, extra, body, why] of [
+      ["guest", { status: true }, "hi", "a status goes to the owner's chat alone"],
+      ["first", { status: true }, "hi", "wa alert sends text alone"],
+      ["reply", { quote: "own1", status: true }, "hi", "a status is text alone"],
+      ["reply", { status: true }, " ", "a status takes a body"],
+      [
+        "reply",
+        { status: true },
+        "x".repeat(SEND.partChars + 1),
+        `a status fits one message, ${SEND.partChars} characters`,
+      ],
+    ] as const)
+      await expect(h.sender(body, kind, extra)).rejects.toThrow(why)
     expect(h.fake.sent).toEqual([])
   })
 })
