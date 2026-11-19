@@ -2238,6 +2238,96 @@ test.each<[string, Picks | null, string]>([
   expect(existsSync(repo)).toBe(true)
 })
 
+// A mkdtemp machine whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out.
+type ShardState = {
+  deps: RmDeps
+  repo: string
+  shard: (i: number) => string
+  size: number
+  total: number
+}
+const shardedMachine = (symlinks: number[] = []): ShardState => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) => join(repo, `model-${String(i).padStart(5, "0")}-of-00004.gguf`)
+  const size = 50
+  const entries: {
+    added: string
+    by: string
+    kind: string
+    path: string
+    undo: string
+    why: string
+  }[] = []
+  for (let i = 1; i <= 4; i++) {
+    const here = shard(i)
+    mkdirSync(dirname(here), { recursive: true })
+    if (symlinks.includes(i)) {
+      writeFileSync(join(repo, `target-${i}`), "real")
+      symlinkSync(join(repo, `target-${i}`), here)
+    } else {
+      writeFileSync(here, "")
+      truncateSync(here, size)
+    }
+    entries.push({
+      added: "2026-11-17",
+      by: "ops",
+      kind: "folder",
+      path: here,
+      undo: "rm",
+      why: "seed",
+    })
+  }
+  writeFileSync(join(m.deps.data, "machine-record.json"), JSON.stringify({ baseline: [], entries }))
+  return {
+    ...m,
+    deps: {
+      ...m.deps,
+      machine: "spark-a",
+      approvals: async () => [{ bytes: size * 4, machine: "spark-a", path: shard(1) }],
+    },
+    repo,
+    shard,
+    size,
+    total: size * 4,
+  }
+}
+
+test("runRm --card deletes an approved sharded set whole: every shard at the set's total, and every record entry dropped", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, out } = await rmTold([shard(1), "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(false)
+  expect(out.join("\n")).toContain(
+    `Deleted the 4 shards outright (${total} bytes), as card ${CARD} approved on this machine`,
+  )
+  expect(out.join("\n")).toContain("its machine record entries are dropped")
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test("runRm --card refuses a sharded set whose total no longer matches the pick, deleting none", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: total + 50, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 4 shards at 200 bytes")
+  expect(err.join("\n")).toContain("approved it at 250")
+  expect(existsSync(shard(1))).toBe(true)
+})
+
+test("runRm --card refuses a sharded set whose one shard is a symlink, deleting none", async () => {
+  const { deps, shard } = shardedMachine([4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 3 shards at 150 bytes")
+  expect(err.join("\n")).toContain("approved it at 200")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
 // A peer's far end: run-slot's ssh, a closure a test injects so the stub records the command.
 type PeerRun = { machine: string; command: string }
 const peerRun = (out: { code: number; out: string }) => {
