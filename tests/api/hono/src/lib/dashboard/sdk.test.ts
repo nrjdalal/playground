@@ -271,6 +271,54 @@ describe("the hosted session's start", () => {
     }
   })
 
+  test("a start whose login is the own account's seat token carries it in its environment alone: no log line, row or file holds it", () => {
+    const dir = scratch()
+    const token = `made-up-seat-${crypto.randomUUID()}`
+    const logged: unknown[][] = []
+    const error = console.error
+    console.error = (...args: unknown[]) => void logged.push(args)
+    try {
+      const { calls, query } = fakeQuery()
+      const host = new SdkHost({
+        ...deps(query),
+        login: () => ({ email: "owner@example.test", token }),
+      })
+      host.start(dir, CLAUDE, "default")
+      expect(calls[0]?.options.env).toEqual({ ...hostedEnv(), CLAUDE_CODE_OAUTH_TOKEN: token })
+      expect(JSON.stringify(logged)).not.toContain(token)
+      expect(JSON.stringify(logged)).toContain("owner@example.test's seat token")
+      expect(JSON.stringify(host.worker())).not.toContain(token)
+      expect(host.worker()?.loginExpired).toBeUndefined()
+      expect(readFileSync(join(dir, SESSION_FILE), "utf8")).not.toContain(token)
+    } finally {
+      console.error = error
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a start with an ended login and no seat token runs as before, its row shows the expired login, and the log names the cause", () => {
+    const dir = scratch()
+    const cause =
+      "its Claude Code login has ended (loginEnded: time_limit), and the Keychain holds no acme-claude item for it to start on"
+    const logged: unknown[][] = []
+    const error = console.error
+    console.error = (...args: unknown[]) => void logged.push(args)
+    try {
+      const { calls, query } = fakeQuery()
+      const host = new SdkHost({
+        ...deps(query),
+        login: () => ({ cause, email: "owner@example.test" }),
+      })
+      host.start(dir, CLAUDE, "default")
+      expect(calls[0]?.options.env).toEqual(hostedEnv())
+      expect(host.worker()?.loginExpired).toBe(true)
+      expect(JSON.stringify(logged)).toContain(cause)
+    } finally {
+      console.error = error
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("a restart before its first message starts the same id afresh, since a session with no transcript cannot be resumed", () => {
     const dir = scratch()
     try {
