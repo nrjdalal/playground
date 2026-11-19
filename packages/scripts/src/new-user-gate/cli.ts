@@ -399,13 +399,13 @@ export const gateDrift = (diffCode: number, sha: string): string | null =>
 export const postgresUrl = (env: string): string =>
   (/^POSTGRES_URL=(.*)/m.exec(env)?.[1] || "").trim()
 
-// Pure: the port a postgres:// URL names, or NaN when the URL names none.
+// Pure: the port a postgres:// URL names, or NaN when the URL names none or does not parse, so step 2 fails with its own detail and screenshot.
 export const urlPort = (url: string): number => {
-  const port = new URL(url).port
+  const port = URL.parse(url)?.port
   return port ? Number(port) : NaN
 }
 
-// Pure: the host ports a `docker port` list binds, like 0.0.0.0:33210->5432, de-duped.
+// Pure: the host ports `docker port <name> 5432` prints, one per line like 127.0.0.1:33210 or [::]:33210, de-duped.
 export const hostPorts = (out: string): number[] =>
   Array.from(
     new Set(
@@ -439,10 +439,10 @@ export const ownDatabaseVerdict = ({
   error,
   made,
   own,
-  port,
-  ports,
   saved,
   seeded,
+  port,
+  ports,
   refused,
 }: {
   error: string
@@ -658,7 +658,6 @@ export const clean = (box: string, home: string, portless = PORTLESS, docker = "
     run([docker, "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
   )
-  // the gate labels its own box's containers, so the clean removes those by label, plus the box's own containers by name
   for (const name of [...names, ...own]) run([docker, "rm", "-fv", name])
   dropBox(box)
 }
@@ -743,7 +742,6 @@ const main = async (args: string[]) => {
     const own = boxContainer(box)
     const seeded = run(seedArgv(home, own), { env: boxEnv(home) })
     await check("first run starts the database with one click", async () => {
-      // fail closed: with no live.container of its own the click would reuse the host's live database
       if (seeded.code !== 0) {
         return ownDatabaseVerdict({
           error: (seeded.err || seeded.out).trim().slice(-200),

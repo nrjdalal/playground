@@ -744,6 +744,23 @@ describe("the box's own database", () => {
     })
   })
 
+  test("a saved URL that names no port fails, since no host port of the box's own containers matches it", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: NaN,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port NaN is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
+
   test("a refused docker call fails even with a saved URL on a host port of the box's own container", () => {
     expect(
       ownDatabaseVerdict({
@@ -771,14 +788,16 @@ describe("from the host's own docker and the desk's .env", () => {
     expect(postgresUrl("# nothing set\n")).toBe("")
   })
 
-  test("urlPort takes the port a postgres:// URL names, and NaN when it names none", () => {
+  test("urlPort takes the port a postgres:// URL names, and NaN when it names none or does not parse", () => {
     expect(urlPort("postgres://gate:pw@127.0.0.1:45313/db")).toBe(45313)
     expect(urlPort("postgres://gate:pw@127.0.0.1/db")).toBeNaN()
+    expect(urlPort("postgres://gate:p#w@127.0.0.1:45313/db")).toBeNaN()
+    expect(urlPort("")).toBeNaN()
   })
 
   test("hostPorts takes the host ports a docker port list binds, de-duped", () => {
-    expect(hostPorts("0.0.0.0:33210->5432\n[::]:45313->5432\n")).toEqual([33210, 45313])
-    expect(hostPorts("0.0.0.0:33210->5432\n0.0.0.0:33210->5432\n")).toEqual([33210])
+    expect(hostPorts("127.0.0.1:33210\n[::]:45313\n")).toEqual([33210, 45313])
+    expect(hostPorts("0.0.0.0:33210\n[::]:33210\n")).toEqual([33210])
     expect(hostPorts("\n")).toEqual([])
   })
 })
