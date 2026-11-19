@@ -37,6 +37,7 @@ A decision stays pinned in your chat until it settles, on WhatsApp or in the Inb
 Every other card stays in the Inbox, named by its title alone as `📥 <title>`, at most 5 then `📥 +N more in the Inbox`, and a title holding a term the Inbox keeps back only in that count: a card with no scope or another scope than the factory's, a secret, a delete, a budget, a ship, a schema, a ticket and a Slack message. A card is named only while it still asks, the Inbox tab's test: open, not replied, and awake.
 Each open draft comes to you too, once, as written, with where it goes and a line on how to reply; the sender refuses token shapes ([ADR 0039](../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
 Reply `send` to that message to post it as written, or reply to it with your own words to post those instead; a Send in the Inbox and a reply on WhatsApp settle each other, and a draft with files goes from the Inbox alone.
+A draft changed after it came to you comes again with its new words, and a reply to the old message posts nothing.
 A card that goes reads `[hidden]` for every name, handle, company term, Slack id, Linear key, email and token, and its files stay in the Inbox.
 
 ## Alerts to a second number
