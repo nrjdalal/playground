@@ -415,6 +415,13 @@ test("a machine's lines: the log's totals by kind, the outbox's items with recor
   })
 })
 
+test("an unread version dir names the dir in the log's total, the same call without it does not (PG-2865)", () => {
+  expect(linesOf({ items: [], machine: "m", versionsUnread: ["/x/v"] }, "/x").total).toBe(
+    "m unused 0.0 GB; versions not read: ~/v",
+  )
+  expect(linesOf({ items: [], machine: "m" }, "/x").total).toBe("m unused 0.0 GB")
+})
+
 test("shardSets: four shards of one model merge into one item, sized as the total, carrying every shard path", () => {
   const stem = "/me/models/hf/hub/models--nvidia--Qwen"
   const shards = [
