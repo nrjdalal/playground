@@ -316,7 +316,7 @@ test("two jobs' --restarted passes at once start each job once, the second start
     "ops-y",
   ])
   expect(readFileSync(join(ops, "up.log"), "utf8")).toMatch(
-    /another pass started ops-[xy] \d+s before this restart was asked; not starting it again/,
+    /another pass started ops-[xy] within 10s of this restart's call; not starting it again/,
   )
 })
 

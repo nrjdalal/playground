@@ -7,7 +7,8 @@ install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
-                             back no job ops-restart stopped (packages/scripts/src/ops-restart)
+                             back no job ops-restart stopped (packages/scripts/src/ops-restart); a start made START_WINDOW
+                             or less before the call is kept and logged, since another pass started the job after it stopped
   up.py --sessions           list, never run, the commands that bring the factory's Claude sessions back
 
 Any other argument is refused with the usage line, exit 1, and runs no pass.
@@ -42,6 +43,7 @@ REGISTRY = (
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
+START_WINDOW = 10  # a start this close before a --restarted call came after the job stopped, from another pass, so that call keeps it
 DOWN_PASSES = 3  # a launchd job unhealthy this many passes in a row is told to ops once, since launchd is not bringing it back
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid
@@ -610,6 +612,8 @@ def main():
     if args == ["--sessions"]:
         sessions()
         return
+    # read before the lock's wait: a start after this, or just before it, came from another pass after the job stopped
+    asked = time.time()
     restarted = args[1].split(",") if len(args) == 2 and args[0] == "--restarted" else []
     if args and not restarted:
         print("usage: up.py [--restarted <a,b> | --sessions]", file=sys.stderr)
@@ -627,6 +631,10 @@ def main():
         except Exception:
             starts = {}
         for name in restarted:
+            # an accept restarts each of its jobs by its own --restarted call, and the first call's pass starts them all
+            if starts.get(name, 0) >= asked - START_WINDOW:
+                log(f"another pass started {name} within {START_WINDOW}s of this restart's call; not starting it again")
+                continue
             starts.pop(name, None)
         with open(STARTS, "w") as f:
             json.dump(starts, f)
