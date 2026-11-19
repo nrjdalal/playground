@@ -11,7 +11,7 @@
   It reads only files, so it needs no herdr socket.
   On a fixture stack, once the backfill is in, it writes the fixture's made-up threads and tags their lines (`seedFixtureThreads`, `.agents/dashboard/asks.md`); on any other source it writes none.
   The API's start seeds the same threads (`seedFixtureThreadsAtStart`) while the table is empty, before ingest's first run.
-  A transcript replaced under its path (a new inode) or cut shorter is read again from 0 and its rows replaced (`ingestFile` in `api/hono/src/lib/sessions/ingest.ts`).
+  A file whose inode or head changed, or that is cut shorter than its offset, is read again from 0 and its rows replaced (`ingestFile` in `api/hono/src/lib/sessions/ingest.ts`); the stored device id is not read, so a Mac reboot's new device id does not make the file look new.
   A thread-tagged row stays through that wipe at a negative seq until a re-read line with its uuid takes it, keeping its tag, and the read that reaches the file's end deletes the tagged rows the new file dropped, so a reader stopped part way keeps every tag and its next pass carries on.
 - The runner hosting the dashboard keeps the follower running beside `bun run dev`, from the same checkout (its `.env` points at the dashboard's Postgres), as a second background task with its own log.
   The first start backfills every transcript (about 30s for 450 files) before it follows:
