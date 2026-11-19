@@ -25,6 +25,16 @@ import {
   waits,
 } from "./cards"
 import {
+  DRAFT_FILES,
+  draftAlready,
+  draftAnswerOf,
+  draftChanged,
+  draftNotSent,
+  draftOf,
+  type DraftSent,
+  draftSent,
+} from "./drafts"
+import {
   DEFAULT_DELAY_MINUTES,
   escalations,
   keepPending,
@@ -100,6 +110,8 @@ export type Mode = {
   check?: (source: string, at: number) => Promise<boolean>
   // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
   confirm?: (text: string, reaction?: string) => Promise<boolean>
+  // sends a draft's text to the owner and gives the ids of its messages, which a reply to it names; a bridge with none sends no draft
+  draft?: (body: string) => Promise<string[]>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
   escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
@@ -128,7 +140,9 @@ export type Inbox = {
   // the answer recorded through the Inbox's own route, or why not
   answer: (
     id: string,
-    answer: { action: "approve" | "deny"; option?: number },
+    answer:
+      | { action: "approve" | "deny"; option?: number }
+      | { action: "send"; seen?: string; text?: string },
   ) => Promise<string | undefined>
   open: () => Promise<Card[]>
   // undefined while no-public-leak's list cannot be read, so no card goes out
@@ -165,6 +179,9 @@ const alertFile = (dir: string) => join(dir, "alert.json")
 // cards.json, the bridge's queue's too: each card sent by its ref, and the ids the last waiting line counted
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
+// drafts.json: each draft sent to the owner's chat, by the id of each of its messages, so a reply to any of them answers that draft
+const draftsFile = (dir: string) => join(dir, "drafts.json")
+type Drafts = { sent?: Record<string, DraftSent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
 // Each open decision's pin in the owner's chat: its message id, its card and when it was pinned, so it comes off once the card settles.
 const pinsFile = (dir: string) => join(dir, "pins.json")
@@ -354,6 +371,15 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
+  // a reply to a draft's message answers that draft, as the Inbox's Send does, and goes no further
+  const quoted = (
+    (message.extendedTextMessage as Part)?.contextInfo as { stanzaId?: string | null } | undefined
+  )?.stanzaId
+  const draft =
+    quoted && text && io.inbox
+      ? (await readOwn<Drafts>(draftsFile(io.dir), {})).sent?.[quoted]
+      : undefined
+  if (draft) return answerDraft(io, io.inbox!, draft, text!)
   const reply = io.inbox && text ? replyOf(text) : null
   const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
   // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
@@ -563,6 +589,59 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   )
 }
 
+// The owner's reply to a draft's message: "send" posts it as written and other words post in its place, through the Inbox's own Send, whose checks run as they do there; one line back says what happened. A draft no longer open, or one with files, posts nothing from here.
+async function answerDraft(io: Io & Mode, inbox: Inbox, draft: DraftSent, text: string) {
+  const say = (line: string) =>
+    io.reply(line).catch((error: Error) => io.log(`ops-wa: a draft reply's line: ${error.message}`))
+  const card = (await inbox.open().catch(() => [] as Card[])).find((c) => c.id === draft.id)
+  if (!card || card.status !== "open") return say(draftAlready(draft.ref))
+  if (card.preview.attachments?.length) return say(draftNotSent(draft.ref, DRAFT_FILES))
+  // a draft its poster changed after it came here posts nothing, and the next pass sends its new words
+  if (card.updatedAt !== draft.seen) return say(draftChanged(draft.ref))
+  const answer = draftAnswerOf(text)
+  const why = await inbox
+    .answer(draft.id, { action: "send", seen: draft.seen, ...answer })
+    .catch((error: Error) => error.message)
+  return say(
+    why === undefined
+      ? draftSent(draft.ref, answer.text !== undefined)
+      : draftNotSent(draft.ref, why),
+  )
+}
+
+// The drafts step of a pass: each open draft that still waits on the owner goes to the owner's own chat once, and again each time its poster changes it, with the line that says how a reply answers it.
+async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft"]>) {
+  const now = io.now()
+  const sent = Object.fromEntries(
+    Object.entries((await readOwn<Drafts>(draftsFile(io.dir), {})).sent ?? {}).filter(
+      ([, d]) => now - d.at < CARD_KEEP_MS,
+    ),
+  )
+  const went = new Set(Object.values(sent).map((d) => `${d.id} ${d.seen}`))
+  try {
+    for (const card of open) {
+      const version = `${card.id} ${card.updatedAt}`
+      if (card.kind !== "draft" || !waits(card, now) || went.has(version)) continue
+      const body = draftOf(card)
+      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox; any other failed send is tried again next pass
+      const refusal = refusalOf(body)
+      const ids = refusal
+        ? [`none-${card.id}`]
+        : await send(body).catch((error: Error) => {
+            io.log(`ops-wa: #i${card.ref}'s draft waits for the next pass: ${error.message}`)
+            return null
+          })
+      if (refusal) io.log(`ops-wa: #i${card.ref}'s draft stays in the Inbox: ${refusal}`)
+      if (!ids) continue
+      for (const id of ids)
+        sent[id] = { at: io.now(), id: card.id, ref: card.ref, seen: card.updatedAt }
+      went.add(version)
+    }
+  } finally {
+    await writeOwn(draftsFile(io.dir), { sent })
+  }
+}
+
 // The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting message, a 📥 line per card by its title, sent when the cards it names change.
 async function cards(io: Io & Mode, inbox: Inbox) {
   const now = io.now()
@@ -576,8 +655,14 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
     if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
+    if (io.draft)
+      await drafts(io, open, io.draft).catch((error: Error) =>
+        io.log(`ops-wa: the Inbox's drafts: ${error.message}`),
+      )
     const kept: Card[] = []
     for (const card of open) {
+      // a draft that went to the owner's chat stands there, not in the waiting line
+      if (card.kind === "draft" && io.draft) continue
       if (!terms || !goesOut(card, terms)) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {

@@ -20,15 +20,20 @@ export type Card = {
     approve?: string
     attachments?: unknown[]
     deny?: string
+    // a draft's place: its thread's link, and who it goes to by a short name
+    link?: string
     options?: { description?: string; label: string }[]
     questions?: unknown[]
     scope?: string
     text?: string
+    to?: string
     type?: string
   }
   ref: number
   status: string
   title: string
+  // when its poster last changed it, which a draft's send names so it posts only the words the owner read
+  updatedAt?: string
 }
 
 // What a card that went out keeps, so a reply naming it answers the row the owner read: its id, when it went, and each row's go and label as sent.
