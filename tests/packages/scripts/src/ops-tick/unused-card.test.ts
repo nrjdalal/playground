@@ -484,7 +484,7 @@ test("a card that does not read stays for the next night, and one the Inbox no l
       ask: async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" }),
     },
   )
-  expect(unread.card).toEqual({ id: ID, items })
+  expect(unread.card).toEqual({ id: ID, items, unread: 1 })
   const gone = await cardNight([here()], HOME, { card: { id: ID, items } }, inbox().deps)
   expect(gone.card).toBeUndefined()
 })
