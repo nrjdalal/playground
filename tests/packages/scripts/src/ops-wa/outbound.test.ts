@@ -330,6 +330,32 @@ describe("wa send's structure (#2799)", () => {
     expect((await h.sender.out("", "reply", { delete: "m1" })).ids).toEqual([])
   })
 
+  test("an edit gives the edited message its new words in ours.json, so a reaction on it reads them, and adds no row of its own", async () => {
+    const h = await harness()
+    await h.sender("the bord is green", "reply")
+    await h.sender("the board is green", "reply", { edit: "m1" })
+    const { messages } = await Bun.file(join(h.dir, "ours.json")).json()
+    expect(messages).toEqual([{ id: "m1", text: "the board is green" }])
+  })
+
+  test("a part sent before a later part fails is kept in own.json, so it can still be deleted", async () => {
+    const h = await harness()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("dropped")
+      return real(to, content)
+    }
+    const long = ["a", "b"].map((c) => c.repeat(SEND.partChars - 10)).join("\n\n")
+    await expect(h.sender(long, "reply")).rejects.toThrow("dropped")
+    expect(h.fake.sent).toHaveLength(1)
+    h.fake.sock.sendMessage = real
+    expect(await h.sender("", "reply", { delete: "m1" })).toBe("sent")
+    expect(h.fake.sent.at(-1)!.content).toEqual({
+      delete: { fromMe: true, id: "m1", remoteJid: jid(OWNER) },
+    })
+  })
+
   test("an edit or a delete of a message that is not ours is refused, and nothing goes", async () => {
     const h = await harness()
     await kept(h)

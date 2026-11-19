@@ -849,8 +849,12 @@ export function sender(
     const words = wordsOf(content)
     if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      // an edit gives the edited message its new words, so a reaction on it reads them
+      const edited = "edit" in content ? content.edit.id : undefined
       await writeOwn(oursFile(io.dir), {
-        messages: [...messages, { id, text: words }].slice(-50),
+        messages: edited
+          ? messages.map((m) => (m.id === edited ? { ...m, text: words } : m))
+          : [...messages, { id, text: words }].slice(-50),
       })
     }
     if (sends) {
@@ -952,16 +956,16 @@ export function sender(
       throw new Error(
         "that message is over 24 hours old, and ops-wa quotes only inside its 24 hours",
       )
-    const ours = await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})
+    const own = (await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})).messages ?? []
     const target = extra.edit ?? extra.delete
-    const own = target ? ours.messages?.find((o) => o.id === target && o.jid === jid) : undefined
-    if (target && !own)
+    const mine = target ? own.find((o) => o.id === target && o.jid === jid) : undefined
+    if (target && !mine)
       throw new Error(
         `message ${target} is not one ops-wa sent to ${going[0]!.who}, so it cannot be ${extra.edit ? "edited" : "deleted"}`,
       )
-    if (extra.edit && now - own!.at > EDIT_MS)
+    if (extra.edit && now - mine!.at > EDIT_MS)
       throw new Error("WhatsApp edits a message only in its first 15 minutes")
-    const key: OwnKey | undefined = own && { fromMe: true, id: own.id, remoteJid: jid }
+    const key: OwnKey | undefined = mine && { fromMe: true, id: mine.id, remoteJid: jid }
     const messages = messagesOf(split(toWhatsApp(body)), {
       ...(extra.delete && { delete: key }),
       ...(extra.edit && { edit: key }),
@@ -982,12 +986,13 @@ export function sender(
           content,
           typed ? typingMs(typed.length, io.random) : 0,
         )
+        // kept as each part goes, so a part already sent can be taken back when a later one fails
         if (id && !target) {
           ids.push(id)
-          ours.messages = [...(ours.messages ?? []), { at: io.now(), id, jid: t.jid }]
+          own.push({ at: io.now(), id, jid: t.jid })
+          await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
         }
       }
-    if (ids.length > 0) await writeOwn(ownFile(io.dir), { messages: ours.messages!.slice(-50) })
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
