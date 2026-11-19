@@ -56,6 +56,7 @@ import {
   readOutbound,
 } from "./outbound"
 import { alertSeedFile } from "./seed"
+import { type Answered, type NewMessage, sentFile } from "./setting-set"
 import type { Vote, votedOptions } from "./votes"
 
 type Key = {
@@ -108,8 +109,8 @@ export type Mode = {
   card?: (body: string) => Promise<string | undefined>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
-  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
-  confirm?: (text: string, reaction?: string) => Promise<boolean>
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm); answered names the message it quotes and the time of his message before it
+  confirm?: (text: string, reaction?: string, answered?: Answered) => Promise<boolean>
   // sends a draft's text to the owner and gives the ids of its messages, which a reply to it names; a bridge with none sends no draft
   draft?: (body: string) => Promise<string[]>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
@@ -165,7 +166,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, eyes.json and status.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, sent.json, eyes.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -360,6 +361,8 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
+  // his message before this one, which a plain answer to a proposal reads (ADR 0041)
+  const before = (await readOwn<Wrote>(ownerFile(io.dir), {})).ownerAt
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
   const id = m.key.id
   const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
@@ -384,7 +387,12 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
   // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
   const asked = reaction ? (reaction.text ?? "") : undefined
-  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? "", asked))) return
+  if (
+    !(toCard && bare(reply!)) &&
+    io.confirm &&
+    (await io.confirm(text ?? "", asked, { quoted: quoted ?? undefined, since: before ?? 0 }))
+  )
+    return
   if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   if (toCard) return answerCard(io, io.inbox!, reply!)
   // a line about another message names only that one's id, the one wa react --id takes
@@ -1114,6 +1122,15 @@ export function sender(
     } | null
     last = io.now()
     const id = sent?.key?.id
+    // a new message in the owner's chat, which a plain answer to a proposal counts (ADR 0041); an edit, a delete, a reaction and a pin add none
+    if (
+      id &&
+      jid === jidOf(io.owner) &&
+      !["delete", "edit", "pin", "react"].some((k) => k in content)
+    ) {
+      const { messages = [] } = await readOwn<{ messages?: NewMessage[] }>(sentFile(io.dir), {})
+      await writeOwn(sentFile(io.dir), { messages: [...messages, { at: last, id }].slice(-50) })
+    }
     const words = wordsOf(content)
     if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})

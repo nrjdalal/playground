@@ -19,7 +19,7 @@ import {
   wordKey,
   wordKeyFile,
 } from "../../../../../packages/scripts/src/ops-wa/alert-set"
-import { bridge, type Inbox } from "../../../../../packages/scripts/src/ops-wa/bridge"
+import { bridge, type Inbox, sender } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { type Card, NO_ID } from "../../../../../packages/scripts/src/ops-wa/cards"
 import { serve, socketPath } from "../../../../../packages/scripts/src/ops-wa/server"
 import {
@@ -30,10 +30,11 @@ import {
   holds,
   settingPropose,
   settingSet,
+  type SettingSetIo,
 } from "../../../../../packages/scripts/src/ops-wa/setting-set"
 import { type Io, runStore } from "../../../../../packages/scripts/src/playground/store"
 import { scopeDir } from "../../../../../packages/settings/src/rendered"
-import { ALERT, fakeSocket, jid, OWNER, STRANGER } from "./fake-socket"
+import { ALERT, fakeSocket, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
 
@@ -70,7 +71,7 @@ const owned = (data = join(scratch, `data-${n++}`)) => {
   const logged: string[] = []
   let now = START
   let questions = 0
-  const io = {
+  const io: SettingSetIo = {
     apply: (key: string, value: string, id: string, proposed?: boolean) =>
       applyOwnerSetting(data, key, value, id, proposed),
     dir,
@@ -286,7 +287,7 @@ describe("settings set --propose, a session's proposal", () => {
     const o = owned()
     const said = await settingPropose(o.io, "wa.replyPolicy", "factory status only")
     expect(said).toContain("asked the owner on WhatsApp to confirm wa.replyPolicy")
-    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? yes or no"])
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? Reply yes or no"])
     expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
     expect(await confirm(o.io, "yes")).toBe(true)
     expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
@@ -338,7 +339,7 @@ describe("settings set --propose, a session's proposal", () => {
     await expect(settingPropose(o.io, "wa.guestPolicy", "status only")).rejects.toThrow(
       "the question on wa.replyPolicy (a session's proposal) still waits",
     )
-    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? yes or no"])
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? Reply yes or no"])
     expect(await confirm(o.io, "yes")).toBe(true)
     expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
     expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
@@ -352,7 +353,7 @@ describe("settings set --propose, a session's proposal", () => {
     expect(await confirm(o.io, "yes")).toBe(false)
     expect(stored(o.data)).toEqual({})
     await settingPropose(o.io, "wa.guestPolicy", "status only")
-    expect(o.told[2]).toBe("set wa.guestPolicy to status only? yes or no")
+    expect(o.told[2]).toBe("set wa.guestPolicy to status only? Reply yes or no")
   })
 
   test("a yes after 10 minutes sets nothing, and the proposal no longer blocks a new one", async () => {
@@ -363,6 +364,16 @@ describe("settings set --propose, a session's proposal", () => {
     expect(stored(o.data)).toEqual({})
     await settingPropose(o.io, "wa.guestPolicy", "status only")
     expect(o.told).toHaveLength(2)
+  })
+
+  test("two proposals that land together cannot both pass the one-open check", async () => {
+    const o = owned()
+    const both = await Promise.allSettled([
+      settingPropose(o.io, "wa.replyPolicy", "factory status only"),
+      settingPropose(o.io, "wa.guestPolicy", "status only"),
+    ])
+    expect(both.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"])
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? Reply yes or no"])
   })
 
   test("while either kind of confirm waits the other is refused, naming the open one, and the yes applies only the one its question named", async () => {
@@ -600,7 +611,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       } finally {
         server.stop(true)
       }
-      expect(o.told).toEqual(["set wa.guestPolicy to status only? yes or no"])
+      expect(o.told).toEqual(["set wa.guestPolicy to status only? Reply yes or no"])
       expect(stored(data)).toEqual({})
       const h = watched(o)
       h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own1" })])
@@ -608,6 +619,135 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       expect(stored(data)["wa.guestPolicy"]).toBe("status only")
       expect(o.told.at(-1)).toContain("to undo: playground settings reset wa.guestPolicy")
       expect(h.relayed).toEqual([])
+    })
+
+    // The real sender and the bridge on one fake socket, so what counts as a new message in the owner's chat is what the sender sends: the owner writes first, which opens his chat and is the message a plain answer counts from.
+    const chat = async (o: ReturnType<typeof owned>) => {
+      const fake = fakeSocket()
+      fake.setClock(() => o.io.now())
+      const send = sender({
+        alert: async () => ALERT,
+        device: SPARE,
+        dir: o.dir,
+        now: o.io.now,
+        owner: OWNER,
+        random: () => 0.5,
+        sleep: async (ms) => void o.advance(ms),
+        sock: fake.sock,
+      })
+      o.io.question = (line: string) => send.card(line)
+      o.io.tell = (line: string) => send(line, "reply")
+      const relayed: string[] = []
+      const w = bridge({
+        alert: async () => ALERT,
+        assistant: async () => undefined,
+        busy: async () => false,
+        confirm: (text, reaction, answered) => confirm(o.io, text, reaction, answered),
+        dir: o.dir,
+        log: () => {},
+        now: o.io.now,
+        on: async () => true,
+        owner: OWNER,
+        relay: async (_: string, text: string) => void relayed.push(text),
+        reply: async () => "sent",
+        sleep: async () => {},
+        stuck: async () => null,
+      })
+      w.attach(fake.sock)
+      let n = 0
+      // the owner's text, plain or quoting a message by its id
+      const says = async (text: string, quoting?: string) => {
+        const id = `own${++n}`
+        fake.upsert([
+          quoting
+            ? {
+                ...fake.message(jid(OWNER), "", { id }),
+                message: { extendedTextMessage: { contextInfo: { stanzaId: quoting }, text } },
+              }
+            : fake.message(jid(OWNER), text, { id }),
+        ])
+        await w.idle()
+      }
+      await says("hi")
+      const question = async () => {
+        await settingPropose(o.io, "wa.guestPolicy", "status only")
+        return `m${fake.sent.length}`
+      }
+      return { fake, question, relayed, says, send }
+    }
+    const yesReached = (relayed: string[]) => relayed.some((line) => line.includes("reads: yes"))
+
+    test("a yes quoting the question applies it, whatever was sent after it", async () => {
+      const o = owned()
+      const c = await chat(o)
+      const asked = await c.question()
+      await c.send("a made-up update", "reply")
+      await c.says("yes", asked)
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+      expect(yesReached(c.relayed)).toBe(false)
+    })
+
+    test("a plain yes applies it while the question is the one message since the owner's last", async () => {
+      const o = owned()
+      const c = await chat(o)
+      await c.question()
+      await c.says("yes")
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+      expect(yesReached(c.relayed)).toBe(false)
+    })
+
+    test("a plain yes with another message sent since the owner's last sets nothing, reaches the dispatcher, and the proposal still waits", async () => {
+      const o = owned()
+      const c = await chat(o)
+      await c.send("shall I go ahead?", "reply")
+      const asked = await c.question()
+      await c.says("yes")
+      expect(stored(o.data)).toEqual({})
+      expect(yesReached(c.relayed)).toBe(true)
+      await c.says("yes", asked)
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+    })
+
+    test("a yes quoting another message sets nothing and reaches the dispatcher", async () => {
+      const o = owned()
+      const c = await chat(o)
+      await c.send("shall I go ahead?", "reply")
+      const other = `m${c.fake.sent.length}`
+      await c.question()
+      await c.says("yes", other)
+      expect(stored(o.data)).toEqual({})
+      expect(yesReached(c.relayed)).toBe(true)
+    })
+
+    test("the live status edited after the question adds no message, so a plain yes still applies it", async () => {
+      const o = owned()
+      const c = await chat(o)
+      await c.send.out("3 PRs in review", "reply", undefined, { status: true })
+      await c.says("ok")
+      await c.question()
+      expect(
+        await c.send.out("2 PRs in review", "reply", undefined, { status: true }),
+      ).toMatchObject({
+        said: "edited the live status",
+      })
+      await c.says("yes")
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+    })
+
+    test("a new status message after the question makes a plain yes go on to the dispatcher", async () => {
+      const o = owned()
+      const c = await chat(o)
+      await c.question()
+      expect(
+        await c.send.out("3 PRs in review", "reply", undefined, { status: true }),
+      ).toMatchObject({
+        said: "sent",
+      })
+      const live = (await Bun.file(join(o.dir, "status.json")).json()) as { id: string }
+      expect(live.id).toBe(`m${c.fake.sent.length}`)
+      await c.says("yes")
+      expect(stored(o.data)).toEqual({})
+      expect(yesReached(c.relayed)).toBe(true)
     })
 
     test("a yes from the second number or a stranger sets nothing, and the proposal still waits for the owner's", async () => {
