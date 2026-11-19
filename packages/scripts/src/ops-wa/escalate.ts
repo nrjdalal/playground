@@ -39,7 +39,12 @@ export async function pendingOf(dir: string): Promise<{ file: string; pending: P
 }
 
 // The owner's reaction on any part of a pending alert handles it; true when one was.
-export async function reacted(dir: string, id: string, now: number): Promise<boolean> {
+export async function reacted(
+  dir: string,
+  id: string,
+  now: number,
+  log: (line: string) => void,
+): Promise<boolean> {
   const hit = (await pendingOf(dir)).filter(({ pending }) => pending.ids.includes(id))
   for (const { file } of hit) await unlink(file).catch(() => {})
   const latest = hit.at(-1)
@@ -48,7 +53,7 @@ export async function reacted(dir: string, id: string, now: number): Promise<boo
       at: latest.pending.at,
       outcome: "handled by the owner's reaction",
       when: now,
-    })
+    }).catch((error: Error) => log(`ops-wa: the last alert's outcome: ${error.message}`))
   return hit.length > 0
 }
 

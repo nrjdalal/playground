@@ -324,7 +324,11 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id, io.now()))) {
+  if (
+    reaction?.key?.id &&
+    reaction.text &&
+    (await reacted(io.dir, reaction.key.id, io.now(), io.log))
+  ) {
     io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }

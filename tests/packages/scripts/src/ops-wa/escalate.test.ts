@@ -313,6 +313,19 @@ describe("wa status's last alert line", () => {
     expect(h.toAlert()).toEqual(["a practice alert"])
   })
 
+  test("a last-alert write that fails on a reaction is logged as such, and the alert stays with the owner", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    mkdirSync(lastFile(h.dir), { recursive: true })
+    h.advance(2 * MINUTE)
+    await h.react("m1")
+    expect(h.logs.some((line) => line.startsWith("ops-wa: the last alert's outcome:"))).toBe(true)
+    expect(h.logs.some((line) => line.includes("not handed on"))).toBe(false)
+    h.advance(5 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual([])
+  })
+
   test("a failed send names its reason with the number masked", async () => {
     const h = await ready()
     await h.send("a practice alert", "first")
