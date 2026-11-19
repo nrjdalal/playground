@@ -17,7 +17,7 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
    ops-wa has already reacted 👀 on it (seen, a reply is coming); a message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces the 👀 (got it); with no `--id` it lands on the owner's latest message, which may be a later one ([ADR 0031](../../../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
-   When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
+   When its line does not start with `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
    Done when the update is sent, or nothing has changed and nothing is sent.
@@ -31,6 +31,14 @@ It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a
 To send a file, put it in `<data>/wa/outbox/` and add `--file <absolute path>`: `playground wa send [--to alert] --file <path> [<body file>]` ([ADR 0036](../../../../.agents/adr/0036-wa-send-carries-a-file-from-the-outbox.md)).
 An image (`jpg`, `jpeg`, `png`), a video (`mp4`) or a document (`pdf`, `txt`, `md`, `csv`, `json`) carries the body as its caption; a voice note (`ogg`, `opus`) takes none, so the body goes before it as text.
 A file of any other type, or outside the outbox, is refused, and a text document is read for a token shape as a body is.
+
+`wa send` takes one more shape beside the body ([ADR 0037](../../../../.agents/adr/0037-wa-send-sends-a-location-a-quote-an-edit-and-a-delete.md)):
+
+- `--location <lat>,<lon>` sends a location, the body its name and optional.
+- `--quote <id>` quotes the owner's message of that id (the guest's, with `--to alert`), the id its handed-on line names, in the last 24 hours.
+- `--edit <id>` replaces the text of a message `wa send` sent, in its first 15 minutes, and `--delete <id>` deletes one for everyone, with no body.
+
+Each send prints the ids of the messages it sent, `wa send: sent (id <id>)`, or `(ids <id>, <id>)` for several, and an edit or a delete takes one of those ids alone.
 
 A photo, voice note, video or document from the owner arrives as a path in `<data>/wa/media/`: read a photo or document there with the Read tool, and take a voice note's or video's words from the line itself, or, when the line says it was not transcribed, ask the owner to write it out.
 A line ending `No reply is needed.` (a delete, or the owner's reaction on a reply) asks no `wa send`.
