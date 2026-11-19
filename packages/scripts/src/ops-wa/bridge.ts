@@ -622,11 +622,17 @@ async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft
     for (const card of open) {
       const version = `${card.id} ${card.updatedAt}`
       if (card.kind !== "draft" || !waits(card, now) || went.has(version)) continue
-      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox
-      const ids = await send(draftOf(card)).catch((error: Error) => {
-        io.log(`ops-wa: #i${card.ref}'s draft stays in the Inbox: ${error.message}`)
-        return [`none-${card.id}`]
-      })
+      const body = draftOf(card)
+      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox; any other failed send is tried again next pass
+      const refusal = refusalOf(body)
+      const ids = refusal
+        ? [`none-${card.id}`]
+        : await send(body).catch((error: Error) => {
+            io.log(`ops-wa: #i${card.ref}'s draft waits for the next pass: ${error.message}`)
+            return null
+          })
+      if (refusal) io.log(`ops-wa: #i${card.ref}'s draft stays in the Inbox: ${refusal}`)
+      if (!ids) continue
       for (const id of ids)
         sent[id] = { at: io.now(), id: card.id, ref: card.ref, seen: card.updatedAt }
       went.add(version)
