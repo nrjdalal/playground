@@ -8,11 +8,11 @@ import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { CARD_ID } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
-import { removeSet, shardSet } from "./shards"
+import { removeSet, setBytes, shardSet } from "./shards"
 
 // The far end of an approved removal on a peer's own machine, run from there by the ssh `peerArgv` shapes: <path> <bytes> <card>, a path on the record or under a recorded folder at the card's exact size, re-checked here before the same deleteWeights drops it.
 export const RM_PEER_USAGE =
-  "usage: playground rm --card <id> --peer <machine> <path> (a far end takes <path> <bytes> <card>)"
+  "usage: playground rm --card <id> --peer <machine> <path> (a far end takes <path> <bytes> <card>); or --bytes <path>, a read-only size, no delete"
 
 export type RmPeerDeps = {
   data: string
@@ -21,8 +21,34 @@ export type RmPeerDeps = {
   session: () => Promise<string> | string
 }
 
+// One record-or-weights gate both modes share, so its refusal and its exit 1 live in one place: the recorded folders when this path is on this peer's record, or isWeights accepts it under ~/models or a recorded folder, else null.
+const gateRecord = async (path: string, deps: RmPeerDeps): Promise<string[] | null> => {
+  const { entries } = await readRecord(deps.data).catch(() => ({ entries: [] }))
+  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
+  if (!entries.some((entry) => entry.path === path) && !isWeights(path, deps.home, folders)) {
+    console.error(`playground: ${path} is not on the machine record, so it stays`)
+    return null
+  }
+  return folders
+}
+
 // The peer's far end: <path> <bytes> <card>, or why the bytes or card do not read, a path on the record or under a recorded folder at its exact size, re-checked on this peer and deleted with the same deleteWeights, its record entry dropped.
 export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<number> {
+  if (words[0] === "--bytes") {
+    if (words.length < 2) {
+      console.error(`playground: ${RM_PEER_USAGE}`)
+      return 2
+    }
+    const folders = await gateRecord(words[1], deps)
+    if (!folders) return 1
+    const size = setBytes(words[1])
+    if (size === 0) {
+      console.error(`playground: ${words[1]} holds no bytes here, so it stays`)
+      return 1
+    }
+    console.log(String(size))
+    return 0
+  }
   if (words.length < 3) {
     console.error(`playground: ${RM_PEER_USAGE}`)
     return 2
@@ -37,13 +63,8 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     console.error(`playground: ${card} is not an Inbox card id`)
     return 2
   }
-  // recorded: the path is on this peer's own machine record, or isWeights accepts it under ~/models or a recorded folder, so the peer uses the one shared rule
-  const { entries } = await readRecord(deps.data).catch(() => ({ entries: [] }))
-  const folders = entries.filter((entry) => entry.kind === "folder").map((entry) => entry.path)
-  if (!entries.some((entry) => entry.path === path) && !isWeights(path, deps.home, folders)) {
-    console.error(`playground: ${path} is not on the machine record, so it stays`)
-    return 1
-  }
+  const folders = await gateRecord(path, deps)
+  if (!folders) return 1
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   const session = await deps.session()
   const set = shardSet(path)

@@ -35,6 +35,15 @@ export const shardSet = (path: string): string[] | null => {
   return set.length > 0 ? set : null
 }
 
+// The set's total size: the sum of every shard's bytes when this path names a shard set, else the one path's own bytes, so both ends agree on a shard's size.
+export const setBytes = (path: string): number => {
+  const set = shardSet(path)
+  if (!set) return bytesOf(path)
+  let total = 0
+  for (const p of set) total += bytesOf(p)
+  return total
+}
+
 // The shard set removed whole, each shard checked before any delete: the sizes summed, a mismatch refused, each shard a real file, not protected and model weights, and only then each at its own size, so one shard that is refused leaves the rest.
 export const removeSet = (
   set: string[],

@@ -7,7 +7,6 @@ import { managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import {
-  bytesOf,
   type Clone,
   deleteWeights,
   isAgentBrowser,
@@ -39,7 +38,7 @@ import {
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
-import { removeSet, shardSet } from "./shards"
+import { removeSet, setBytes, shardSet } from "./shards"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -527,8 +526,13 @@ export const rmPeerCommand = (path: string, bytes: number, card: string): string
     ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
   ].join(" ")
 
-// The peer's read-only byte-count command, same quoting as the delete, its real body next.
-export const rmPeerBytesCommand = (_path: string): string => ""
+// The peer's read-only byte-count command, same quoting as the delete, the near end sends it before the delete so the far end returns the path's size on that machine.
+export const rmPeerBytesCommand = (path: string): string =>
+  [
+    "packages/scripts/src/playground/rm-peer.ts",
+    "--bytes",
+    `'${path.replaceAll("'", `'\\''`)}'`,
+  ].join(" ")
 
 // The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
 const approvedWeights = (
@@ -560,6 +564,7 @@ const approvedWeights = (
 async function deletePick(
   args: { path: string; peer?: string },
   card: string,
+  folders: string[],
   deps: RmDeps,
 ): Promise<{ bytes: number } | string> {
   const d = deps.decision ? await deps.decision(card) : "no Inbox is read here"
@@ -572,9 +577,22 @@ async function deletePick(
   const word = args.peer === undefined ? args.path : `${args.peer}:${args.path}`
   if (!targetWords(d.what).includes(word))
     return `card ${card} does not name ${word} as one whole path, so it stays`
-  if (args.peer !== undefined)
-    return `card ${card}: a peer's delete waits for its far end, so ${word} stays`
-  return { bytes: bytesOf(args.path) }
+  if (args.peer !== undefined) {
+    if (!isWeights(args.path, deps.home, folders))
+      return `card ${card}: ${word} is not model weights, so a peer delete stays`
+    if (!deps.peer) return `${args.path} is on ${args.peer}, not this machine, so it stays`
+    const ran = await deps.peer(args.peer, rmPeerBytesCommand(args.path))
+    if (ran.code !== 0) {
+      const said = ran.out.trim().replace(/^playground: /, "") || "the peer did not answer"
+      return `${args.peer}: ${said}`
+    }
+    const text = ran.out.trim()
+    const n = Number(text)
+    if (!/^\d+$/.test(text) || n <= 0)
+      return `${args.peer} printed no byte count for ${args.path}, so it stays`
+    return { bytes: n }
+  }
+  return { bytes: setBytes(args.path) }
 }
 
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
@@ -596,7 +614,7 @@ async function removeApproved(
       ? { bytes: pick.bytes }
       : `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`
   } else {
-    const said = await deletePick(args, card, deps)
+    const said = await deletePick(args, card, folders, deps)
     chosen = typeof said === "string" ? `playground: ${said}` : said
   }
   if (typeof chosen === "string") {
