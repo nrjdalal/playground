@@ -12,6 +12,7 @@ export default defineConfig({
     "src/site.ts",
     "src/ssh-probe.ts",
     "src/threads.ts",
+    "src/ui-spec.ts",
     "src/verdicts.ts",
   ],
   minify: true,

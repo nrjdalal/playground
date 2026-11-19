@@ -59,6 +59,11 @@
       "bun": "./src/threads.ts",
       "default": "./dist/threads.mjs"
     },
+    "./ui-spec": {
+      "types": "./dist/ui-spec.d.mts",
+      "bun": "./src/ui-spec.ts",
+      "default": "./dist/ui-spec.mjs"
+    },
     "./verdicts": {
       "types": "./dist/verdicts.d.mts",
       "bun": "./src/verdicts.ts",
