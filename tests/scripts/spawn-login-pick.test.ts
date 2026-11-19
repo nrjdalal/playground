@@ -693,6 +693,26 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
+  test("the seat item is looked up under usage.keychainService, the service the launch reads it from", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv(
+        { week: 76 },
+        { SETTINGS_JSON: JSON.stringify({ "usage.keychainService": "made-up-seat-service" }) },
+      ),
+      script,
+      undefined,
+      ownFiles(),
+    )
+    expect(r.code).toBe(0)
+    expect(r.security).toContain("find-generic-password -s made-up-seat-service -a own@example.com")
+    expect(r.security?.join("\n")).not.toContain("playground-claude-oauth")
+    expect(launchOf(r)).toContain(
+      "find-generic-password -s made-up-seat-service -a own@example.com -w",
+    )
+  })
+
   test("a stale stored reading under the gate cannot pass a start its seat's fresh reading refuses", async () => {
     const r = await spawn(
       ownStart,
