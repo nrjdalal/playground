@@ -1,3 +1,8 @@
+import { chmodSync } from "node:fs"
+import { join } from "node:path"
+
+import { dataDir } from "@packages/env/data-dir"
+
 import { GuardError, locate } from "@/lib/sessions/guard"
 import type { Run } from "@/lib/setup/container"
 
@@ -80,6 +85,7 @@ export async function moveToLoopback(
   port: number,
   docker: Run,
   wait: (ms: number) => Promise<void> = Bun.sleep,
+  dumpDir: string = dataDir(),
 ): Promise<string[]> {
   const old = `${name}-old`
   if ((await docker(["inspect", old])).code === 0) {
@@ -88,6 +94,33 @@ export async function moveToLoopback(
   const inspected = await docker(["inspect", name])
   if (inspected.code !== 0) throw new MoveError(`docker inspect ${name} failed: ${said(inspected)}`)
   const kept = keptOf(inspected.stdout, port)
+  // The live database is dumped into the data folder before the container stops, in three calls through the same docker Run: dump inside the container (a 265 MB binary is not read through stdout), copy it out, and clear the container's copy. A failure stops here and names the step, the container left running.
+  const filename = `pg_dump_${new Date().toISOString().replace(/[:.]/g, "-")}.dump`
+  const dumpPath = join(dumpDir, filename)
+  const insidePath = join("/tmp", filename)
+  const dumped = await docker([
+    "exec",
+    name,
+    "pg_dump",
+    "-Fc",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-f",
+    insidePath,
+  ])
+  if (dumped.code !== 0)
+    throw new MoveError(
+      `the dump of ${name} failed: ${said(dumped)}, so ${name} is left running, untouched`,
+    )
+  const copied = await docker(["cp", `${name}:${insidePath}`, dumpPath])
+  if (copied.code !== 0)
+    throw new MoveError(
+      `copying the dump of ${name} failed: ${said(copied)}, so ${name} is left running, untouched`,
+    )
+  chmodSync(dumpPath, 0o600)
+  await docker(["exec", name, "rm", "-f", insidePath])
   const stopped = await docker(["stop", name])
   if (stopped.code !== 0) throw new MoveError(`docker stop ${name} failed: ${said(stopped)}`)
   let renamed = false
@@ -129,6 +162,7 @@ export async function moveToLoopback(
   }
   return [
     `Moved the database ${name} onto 127.0.0.1:${port} alone, keeping its data`,
+    `its dump is ${dumpPath}`,
     `${old} is stopped and kept; once the Dashboard reads its data, remove it with: ${removeLine(name)}`,
   ]
 }
@@ -139,6 +173,7 @@ export async function moveIfExposed(
   docker: Run,
   find: (url: string) => unknown = locate,
   wait?: (ms: number) => Promise<void>,
+  dumpDir: string = dataDir(),
 ): Promise<string[]> {
   try {
     find(url)
@@ -146,6 +181,6 @@ export async function moveIfExposed(
   } catch (error) {
     if (!(error instanceof GuardError) || error.failure !== "exposed" || !error.located) return []
     const { owner, target } = error.located
-    return moveToLoopback(owner.name, target.port, docker, wait)
+    return moveToLoopback(owner.name, target.port, docker, wait, dumpDir)
   }
 }
