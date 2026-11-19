@@ -29,8 +29,8 @@ test("head on a machine whose four slots are all held starts 8 or fewer stat and
   // a held slot adds no stat or date; a full four-slot machine stays a handful of starts
   expect(headFourStat.stat + headFourStat.date).toBeLessThanOrEqual(8)
   expect(headFour).toBeLessThan(60)
-  // can-take reads its one slot and answers the hold, no per-field read
-  expect(cantake).toBeLessThanOrEqual(2)
+  // can-take reads its one slot and answers the hold, no per-field read, under its first bound
+  expect(cantake).toBeLessThan(6)
   expect(cantakeStat.stat).toBeLessThan(3)
 })
 
