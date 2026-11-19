@@ -2115,6 +2115,26 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     ])
   })
 
+  test("a draft whose send fails goes on the next pass, and one the sender refuses never goes, logged once", async () => {
+    const refused = draftCard(21)
+    refused.preview.text = `token ghp_${"a".repeat(36)}`
+    const ib = inboxOf([draftCard(20), refused])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async () => {
+      throw new Error("the socket dropped")
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    expect(h.fake.sent).toEqual([])
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent.flatMap((s) => s.content.text ?? [])).toEqual([DRAFT_TEXT])
+    expect(h.logs.filter((line) => line.includes("#i21"))).toHaveLength(1)
+  })
+
   test("a draft with files posts nothing from WhatsApp", async () => {
     const draft = draftCard(20)
     draft.preview.attachments = [{ name: "made-up.png" }]
