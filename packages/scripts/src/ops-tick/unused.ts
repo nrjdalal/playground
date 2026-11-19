@@ -1,6 +1,6 @@
-import { lstatSync, readdirSync } from "node:fs"
+import { lstatSync, readdirSync, readlinkSync } from "node:fs"
 import { homedir, hostname } from "node:os"
-import { basename, join, sep } from "node:path"
+import { basename, dirname, join, sep } from "node:path"
 
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
@@ -10,7 +10,7 @@ import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/re
 import { mainCheckout } from "../main-checkout"
 import { peersOf } from "./peers"
 
-// The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
+// The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad, plus the old versions of a versioned install while its keep link and live target stay off. It only reads, here and on a peer over one fixed ssh, and an item the machine record marks recorded, never a versioned install's own old version.
 
 // Ops' cleanup list, Thresholds (bundles/cleanup-list.md): an image no container uses and not pulled or run in 7 days is unused.
 export const IMAGE_UNUSED_DAYS = 7
@@ -92,8 +92,15 @@ const modelTexts = async (models: string): Promise<string> => {
   return texts.join("\n")
 }
 
-// Weights no model folder names: each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit) or in a recorded folder outside the data folder and the home's dot folders.
-const weights = (home: string, folders: string[], data: string, named: string): string[] => {
+// Weights no model folder names, each versioned install's own dir read the way folders are, each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit), in a recorded folder, or under a versioned install's dir, where the install's keep link and its live target are skipped so only the old versions list.
+const weights = (
+  home: string,
+  folders: string[],
+  data: string,
+  named: string,
+  versionDirs: string[] = [],
+  skip: string[] = [],
+): string[] => {
   const models = join(home, "models")
   const hub = join(models, "hf", "hub")
   const repos = list(hub)
@@ -102,13 +109,15 @@ const weights = (home: string, folders: string[], data: string, named: string): 
     .map((name) => join(hub, name))
   const roots = [
     models,
-    ...folders.filter(
+    ...[...folders, ...versionDirs].filter(
       (f) => f !== home && !inside(f, models) && !inside(f, data) && !basename(f).startsWith("."),
     ),
   ]
   const files = [
     ...new Set(
-      roots.flatMap((root) => weightFiles(root, [join(models, "hf"), join(models, "kit")])),
+      roots.flatMap((root) =>
+        weightFiles(root, [...skip, join(models, "hf"), join(models, "kit")]),
+      ),
     ),
   ]
   return [...repos, ...files]
@@ -202,10 +211,18 @@ const rehearsals = (data: string): string[] => {
   )
 }
 
-// Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under.
+// Pure: a link's target as an absolute path, so the versioned install's keep link names the live target to keep off the unused list.
+const targetOf = (link: string): string => {
+  const rel = readlinkSync(link)
+  return rel.startsWith("/") ? rel : join(dirname(link), rel)
+}
+
+// Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under. A version entry holds nothing, so a versioned install's own old version is recorded only by the daily check, and everything else held, an entry whose path it is or names, so the card never marks it Remove.
 export const recordedBy = (entries: Entry[], path: string): boolean =>
   entries.some(
-    (e) => inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path)),
+    (e) =>
+      e.kind !== "version" &&
+      (inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path))),
   )
 
 // Each listed path measured, largest first; a path that is gone by its measure (removed after it was listed, such as by a delete running at the same time) is skipped, counted nowhere. An image keeps the size docker gave it.
@@ -260,6 +277,14 @@ export const shardSets = (items: Unused[]): Unused[] => {
 export async function measureUnused(places: Places): Promise<Measured> {
   const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
   const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
+  // Each version entry's dir is walked like a folder; its keep link, when it is there, and the live target it names are skipped so only the old versions list.
+  const versionDirs = entries.filter((e) => e.kind === "version").map((e) => e.path)
+  const skip: string[] = []
+  for (const e of entries) {
+    if (e.kind === "version" && typeof e.keep === "string" && stat(e.keep)) {
+      skip.push(e.keep, targetOf(e.keep))
+    }
+  }
   const named = await modelTexts(join(places.home, "models"))
   const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
   const found = await images(places, named)
@@ -269,7 +294,7 @@ export async function measureUnused(places: Places): Promise<Measured> {
         ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
         ...listed("rehearsal", rehearsals(places.data)),
         ...listed("run", runs(places.home, places.now)),
-        ...listed("weights", weights(places.home, folders, places.data, named)),
+        ...listed("weights", weights(places.home, folders, places.data, named, versionDirs, skip)),
       ],
       entries,
     ),

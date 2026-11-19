@@ -19,12 +19,13 @@ import { factoryHomes, readPolicyOrDefaults, writeAtomically } from "@packages/s
 
 export const RECORD_FILE = "machine-record.json"
 
-export const KINDS = ["container", "file", "folder", "image", "link"] as const
+export const KINDS = ["container", "file", "folder", "image", "link", "version"] as const
 export type Kind = (typeof KINDS)[number]
 
 export type Entry = {
   added: string
   by: string
+  keep?: string
   kind: Kind
   path: string
   undo: string
@@ -88,6 +89,7 @@ const isEntry = (value: unknown): value is Entry => {
     typeof entry === "object" &&
     entry !== null &&
     KINDS.includes(entry.kind) &&
+    (entry.kind !== "version" || typeof entry.keep === "string") &&
     ["added", "by", "path", "undo", "why"].every(
       (key) => typeof entry[key as keyof Entry] === "string",
     )
