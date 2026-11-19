@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -768,7 +769,7 @@ test("a folder holding only Python tests runs them as Python tests, not through 
   expect(stderr).toContain("1 Python test passed")
 }, 180_000)
 
-// 2770: seenPy was keyed by the path as given, so one Python file named by both its absolute and relative path ran twice; it is now deduped by its absolute path
+// 2770: seenPy was keyed by the path as given, so one Python file named by both its absolute and relative path ran twice; it is now deduped by its real path (#2858)
 test("one Python test named by both relative and absolute path runs once (#2770)", async () => {
   const dir = join(DIR, "py-twice")
   mkdirSync(join(dir, "tests", "x"), { recursive: true })
@@ -781,6 +782,33 @@ test("one Python test named by both relative and absolute path runs once (#2770)
     stdout: "ignore",
     timeout: 120_000,
   })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 Python test passed")
+  expect(stderr).not.toContain("2 Python test")
+}, 180_000)
+
+// 2858: seenPy keyed a path by resolve(), so a file named through a linked folder and through its real one ran twice, as macOS's /var and /private/var name one file; it is now keyed by its real path
+test("one Python test named through a linked folder and its real folder runs once (#2858)", async () => {
+  const dir = join(DIR, "py-linked")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(join(dir, "tests", "x", "test_ok.py"), 'print("ok", flush=True)\n')
+  symlinkSync(join(dir, "tests", "x"), join(dir, "tests", "linked"))
+  const run = Bun.spawn(
+    [
+      "bun",
+      SCRIPT,
+      join(dir, "tests", "x", "test_ok.py"),
+      join(dir, "tests", "linked", "test_ok.py"),
+    ],
+    {
+      cwd: dir,
+      env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 120_000,
+    },
+  )
   const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
   expect(code).toBe(0)
   expect(stderr).toContain("1 Python test passed")
