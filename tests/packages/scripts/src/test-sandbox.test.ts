@@ -837,7 +837,7 @@ test("a bare run runs bun's tests alone and names the Python tests it leaves out
   const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
   expect(code).not.toBe(0)
   expect(stderr).toContain("parallel pass failed")
-  expect(stderr).toContain("2 Python tests left out")
+  expect(stderr).toContain("2 Python tests are left out")
   expect(stderr).toContain("bun run test:file tests")
   expect(stderr).not.toContain("running Python test")
 }, 180_000)
