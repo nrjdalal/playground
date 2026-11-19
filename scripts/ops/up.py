@@ -20,8 +20,9 @@ executable an update deleted, or whose heartbeat pid does while a holder or laun
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
 herdr closes a job's pane the moment its job exits, so a restart reads why the job stopped from ops/<job>.last, the last
-stderr line once.py's reader kept, when it was written after the job's last start: the line joins the started line, and
-notify.sh tells ops once per job until the line changes (ops/up-last-lines.json, 0600) or the job is healthy again.
+stderr line once.py's reader kept, when it was written after the job's last start, and a private notify.sh line tells
+ops once per job until the line changes (ops/up-last-lines.json, 0600) or the job is healthy again; the printed started
+line leaves it out, since ops-tick sends every printed line to ops in public.
 """
 import calendar, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
 
@@ -479,11 +480,9 @@ def up(quiet):
         told = re.sub(r"\d+m old", "stale", why)
         # read before the start, whose once.py drops the line: herdr closed the dead job's pane, so this file holds why it stopped
         last = last_line(job["name"], start_at)
-        if last:
-            told = f"{told}; its last line: {last}"
-            # a job's error can carry a key's name or a token's piece, so the line stays out of up.log and alerts.log, as in its 0600 files
-            if told_last(job["name"], last):
-                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60, {**os.environ, "NOTIFY_PRIVATE": "1"})
+        # a job's error can carry a key's name or a token's piece, so the line goes to ops in private alone: ops-tick sends every printed line in public
+        if last and told_last(job["name"], last):
+            run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60, {**os.environ, "NOTIFY_PRIVATE": "1"})
         # only a job that started waits out GRACE; a failed start is tried again on the next pass; stamped before the start, so a line the new copy writes at once is never read as older than it
         at = time.time()
         if start(job):
