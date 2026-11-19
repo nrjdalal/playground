@@ -854,7 +854,7 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides; then each pending alert and the last alert's outcome.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
