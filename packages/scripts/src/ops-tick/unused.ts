@@ -23,6 +23,8 @@ export const KEEP_IMAGES = ["redis:alpine"]
 
 export const UNUSED_CLI = "packages/scripts/src/ops-tick/unused.ts"
 const WEIGHTS = /\.(gguf|safetensors)$/
+// A sharded weights file: its stem, shard index and total (5-digit, so a lexicographic order is a numeric one) and extension.
+const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
 const REHEARSAL = /^rehearse\d+$/
 
 export const KINDS = ["image", "rehearsal", "run", "weights"] as const
@@ -227,9 +229,31 @@ export const measured = (
     })
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
 
-// Built: merge one shard set into one item, every other item unchanged, sorted as measured sorts it.
-export const shardSets = (_items: Unused[]): Unused[] => {
-  throw new Error("not built yet")
+// Pure: one shard set's weights into one item, every other item unchanged, sorted as measured sorts it (bytes down, then path). Each weights file whose path is `stem-<shard>-of-<total>.<ext>` groups by stem, total and extension: the stem holds the folder, the shard index is only the order. The set becomes one item, kind weights, path the lowest shard's, shards every path A to Z, bytes their sum, recorded true when any shard is recorded, so a sharded model is one line on the nightly clean, sized as the whole set.
+export const shardSets = (items: Unused[]): Unused[] => {
+  const sets = new Map<string, Unused[]>()
+  const rest: Unused[] = []
+  for (const item of items) {
+    const m = item.kind === "weights" ? SHARD.exec(item.path) : null
+    if (m) {
+      const [, stem, , total, ext] = m
+      const key = [stem, total, ext].join("\u0000")
+      sets.set(key, [...(sets.get(key) ?? []), item])
+    } else rest.push(item)
+  }
+  const merged: Unused[] = [...sets.entries()].flatMap(([, members]) => {
+    const byPath = [...members].sort((a, b) => a.path.localeCompare(b.path))
+    return [
+      {
+        bytes: members.reduce((n, i) => n + i.bytes, 0),
+        kind: "weights",
+        path: byPath[0]!.path,
+        recorded: members.some((i) => i.recorded),
+        shards: byPath.map((i) => i.path),
+      },
+    ]
+  })
+  return [...rest, ...merged].sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
 }
 
 // This machine's unused space, largest first.
@@ -239,14 +263,16 @@ export async function measureUnused(places: Places): Promise<Measured> {
   const named = await modelTexts(join(places.home, "models"))
   const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
   const found = await images(places, named)
-  const items = measured(
-    [
-      ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
-      ...listed("rehearsal", rehearsals(places.data)),
-      ...listed("run", runs(places.home, places.now)),
-      ...listed("weights", weights(places.home, folders, places.data, named)),
-    ],
-    entries,
+  const items = shardSets(
+    measured(
+      [
+        ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
+        ...listed("rehearsal", rehearsals(places.data)),
+        ...listed("run", runs(places.home, places.now)),
+        ...listed("weights", weights(places.home, folders, places.data, named)),
+      ],
+      entries,
+    ),
   )
   return found ? { items } : { imagesUnread: true, items }
 }

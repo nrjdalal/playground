@@ -1,3 +1,5 @@
+import { sep } from "node:path"
+
 import { picksOf } from "@packages/config/inbox"
 
 import { MIN_LIST_BYTES, type Machine, type Unused } from "./unused"
@@ -54,6 +56,17 @@ export const questionOf = (item: CardItem): string =>
 
 const QUESTION = /^Remove `(.+)` on ([A-Za-z0-9._-]+), (\d+) bytes \([\d.]+ GB\)\?$/
 
+// A sharded set's note, so its line names the model's file stem and the shard count: the number of shards, the set's total, and the file's stem.
+const shardedNote = (item: CardItem): string => {
+  const total = Number(/-\d{5}-of-(\d{5})\.(gguf|safetensors)$/.exec(item.path)?.[1] ?? 0)
+  const stem =
+    item.path
+      .replace(/-\d{5}-of-\d{5}\.(gguf|safetensors)$/, "")
+      .split(sep)
+      .at(-1) ?? ""
+  return ` ${item.shards!.length} of ${total} shards, ${stem}`
+}
+
 const removeRow = (item: CardItem) => ({
   description: `${
     item.kind === "weights"
@@ -61,7 +74,9 @@ const removeRow = (item: CardItem) => ({
       : item.kind === "image"
         ? "docker image rm removes it; a pull brings it back."
         : "Moved to the trash; playground rm --restore brings it back for 7 days."
-  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}`,
+  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}${
+    item.shards ? shardedNote(item) : ""
+  }`,
   label: "Remove",
 })
 
@@ -83,13 +98,14 @@ export const offered = (
             .filter((i) => !KIT_RECORD.some((rel) => inside(i.path, `${home}/${rel}`)))
             .filter((i) => i.kind !== "rehearsal" || out(i.path))
             .filter((i) => kept[keyOf({ machine: m.machine, path: i.path })] !== i.bytes)
-            .map(({ bytes, id, kind, path, recorded }) => ({
+            .map(({ bytes, id, kind, path, recorded, shards }) => ({
               bytes,
               ...(id ? { id } : {}),
               kind,
               machine: m.machine,
               path,
               ...(recorded ? { recorded: true as const } : {}),
+              ...(shards ? { shards } : {}),
             })),
     )
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
