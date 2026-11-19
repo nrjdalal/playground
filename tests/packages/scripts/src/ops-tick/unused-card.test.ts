@@ -524,3 +524,14 @@ test("a sharded set missing a shard is still one item, its line naming the shard
   expect(line).toContain(stem)
   expect(line).toContain("shards 00002 of 00004")
 })
+
+test("a version item's card words it as an old version brought back from the trash (PG-2865)", () => {
+  const line = (
+    cardOf([{ bytes: 300 * MB, kind: "version", machine: "m", path: "/x/v/v1" }]).preview as {
+      options: { description: string }[]
+    }
+  ).options[0]!.description
+  expect(line).toBe(
+    "An old version of /x/v, not the live one. Moved to the trash; playground rm --restore brings it back for 7 days.",
+  )
+})

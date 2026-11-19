@@ -1,6 +1,6 @@
-import { lstatSync, readdirSync } from "node:fs"
+import { lstatSync, readdirSync, readlinkSync } from "node:fs"
 import { homedir, hostname } from "node:os"
-import { basename, join, sep } from "node:path"
+import { basename, dirname, join, sep } from "node:path"
 
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
@@ -10,7 +10,7 @@ import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/re
 import { mainCheckout } from "../main-checkout"
 import { peersOf } from "./peers"
 
-// The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
+// The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad, plus each version entry's old version folders, `.old-*` ones included, its keep link, the folder it names and any other dot folder excluded, and a dir whose keep link does not read named as not read. It only reads, here and on a peer over one fixed ssh, and an item the machine record marks recorded, never a versioned install's own old version.
 
 // Ops' cleanup list, Thresholds (bundles/cleanup-list.md): an image no container uses and not pulled or run in 7 days is unused.
 export const IMAGE_UNUSED_DAYS = 7
@@ -27,7 +27,7 @@ const WEIGHTS = /\.(gguf|safetensors)$/
 const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
 const REHEARSAL = /^rehearse\d+$/
 
-export const KINDS = ["image", "rehearsal", "run", "weights"] as const
+export const KINDS = ["image", "rehearsal", "run", "version", "weights"] as const
 export type UnusedKind = (typeof KINDS)[number]
 // unknownAge: an image with no last tag time, listed by nightly-clean only once its own first-seen date is IMAGE_UNUSED_DAYS old.
 export type Unused = {
@@ -39,8 +39,8 @@ export type Unused = {
   shards?: string[]
   unknownAge?: true
 }
-// What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights.
-export type Measured = { imagesUnread?: true; items: Unused[] }
+// What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights; versionsUnread lists each version entry's dir whose keep link is missing or names a gone folder, so the nightly check records them.
+export type Measured = { imagesUnread?: true; items: Unused[]; versionsUnread?: string[] }
 export type Machine = (Measured & { machine: string }) | { machine: string; why: string }
 
 // What a measure reads: the data folder (its record and scratchpads), the home folder (~/models), the clock and docker through run.
@@ -92,8 +92,14 @@ const modelTexts = async (models: string): Promise<string> => {
   return texts.join("\n")
 }
 
-// Weights no model folder names: each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit) or in a recorded folder outside the data folder and the home's dot folders.
-const weights = (home: string, folders: string[], data: string, named: string): string[] => {
+// Weights no model folder names, each repo in ~/models/hf/hub (models--<org>--<name>) whose <org>/<name> no model text holds, then each weights file elsewhere under ~/models (past hf/ and the test kit), in a recorded folder, or under a versioned install's dir, whose dir is skipped since its old versions list as folders.
+const weights = (
+  home: string,
+  folders: string[],
+  data: string,
+  named: string,
+  versionDirs: string[] = [],
+): string[] => {
   const models = join(home, "models")
   const hub = join(models, "hf", "hub")
   const repos = list(hub)
@@ -108,7 +114,9 @@ const weights = (home: string, folders: string[], data: string, named: string): 
   ]
   const files = [
     ...new Set(
-      roots.flatMap((root) => weightFiles(root, [join(models, "hf"), join(models, "kit")])),
+      roots.flatMap((root) =>
+        weightFiles(root, [...versionDirs, join(models, "hf"), join(models, "kit")]),
+      ),
     ),
   ]
   return [...repos, ...files]
@@ -202,10 +210,40 @@ const rehearsals = (data: string): string[] => {
   )
 }
 
-// Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under.
+// Pure: a link's target as an absolute path, so the versioned install's keep link names the live target to keep off the unused list.
+const targetOf = (link: string): string => {
+  const rel = readlinkSync(link)
+  return rel.startsWith("/") ? rel : join(dirname(link), rel)
+}
+
+// Each version entry's old versions: every folder in its dir but the one its keep link resolves to, the keep link itself, and a dot folder other than .old-*; a link is never followed, and a keep link that is missing or names a folder that is gone lists nothing and names the dir as unread.
+const versions = (entries: Entry[]): { paths: string[]; unread: string[] } => {
+  const paths: string[] = []
+  const unread: string[] = []
+  for (const e of entries) {
+    if (e.kind !== "version" || typeof e.keep !== "string") continue
+    const keep = stat(e.keep) ? targetOf(e.keep) : null
+    if (keep === null || !stat(keep)) {
+      unread.push(e.path)
+      continue
+    }
+    for (const name of list(e.path)) {
+      const path = join(e.path, name)
+      const st = stat(path)
+      if (!st?.isDirectory() || path === keep || path === e.keep) continue
+      if (name.startsWith(".") && !name.startsWith(".old-")) continue
+      paths.push(path)
+    }
+  }
+  return { paths, unread }
+}
+
+// Pure: whether the record holds a path, as its own entry or a folder (or glob) it sits under. A version entry holds nothing, so a versioned install's own old version is recorded only by the daily check, and everything else held, an entry whose path it is or names, so the card never marks it Remove.
 export const recordedBy = (entries: Entry[], path: string): boolean =>
   entries.some(
-    (e) => inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path)),
+    (e) =>
+      e.kind !== "version" &&
+      (inside(path, e.path) || (e.path.includes("*") && new Bun.Glob(e.path).match(path))),
   )
 
 // Each listed path measured, largest first; a path that is gone by its measure (removed after it was listed, such as by a delete running at the same time) is skipped, counted nowhere. An image keeps the size docker gave it.
@@ -260,6 +298,9 @@ export const shardSets = (items: Unused[]): Unused[] => {
 export async function measureUnused(places: Places): Promise<Measured> {
   const { entries } = await readRecord(places.data).catch(() => ({ entries: [] as Entry[] }))
   const folders = entries.filter((e) => e.kind === "folder").map((e) => e.path)
+  // Each version entry's dir, which the weights walk skips, since its old versions list as folders below.
+  const versionDirs = entries.filter((e) => e.kind === "version").map((e) => e.path)
+  const vs = versions(entries)
   const named = await modelTexts(join(places.home, "models"))
   const listed = (kind: UnusedKind, paths: string[]) => paths.map((path) => ({ kind, path }))
   const found = await images(places, named)
@@ -269,12 +310,17 @@ export async function measureUnused(places: Places): Promise<Measured> {
         ...(found ?? []).map((i) => ({ ...i, kind: "image" as const })),
         ...listed("rehearsal", rehearsals(places.data)),
         ...listed("run", runs(places.home, places.now)),
-        ...listed("weights", weights(places.home, folders, places.data, named)),
+        ...listed("version", vs.paths),
+        ...listed("weights", weights(places.home, folders, places.data, named, versionDirs)),
       ],
       entries,
     ),
   )
-  return found ? { items } : { imagesUnread: true, items }
+  return {
+    ...(found ? {} : { imagesUnread: true }),
+    items,
+    ...(vs.unread.length ? { versionsUnread: vs.unread } : {}),
+  }
 }
 
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`
@@ -298,7 +344,9 @@ export const linesOf = (
     return of.length ? [`${kind} ${gb(sum(of))}`] : []
   })
   const leftovers = small.length ? [`small leftovers ${small.length} at ${mb(sum(small))}`] : []
-  const total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
+  let total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
+  if (found.versionsUnread?.length)
+    total += `; versions not read: ${found.versionsUnread.map((d) => tilde(d, home)).join(", ")}`
   const items = big.map(
     (i) =>
       `${i.kind} ${tilde(i.path, home)} ${gb(i.bytes)}${i.recorded ? " recorded" : ""}${i.unknownAge ? " age unknown" : ""}`,
