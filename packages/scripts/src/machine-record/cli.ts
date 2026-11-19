@@ -7,6 +7,7 @@ import { mainCheckout } from "../main-checkout"
 import { FOOTPRINT_NOTE, seedEntries, undoNote } from "./notes"
 import {
   addEntries,
+  addKnown,
   check,
   dropPaths,
   type Entry,
@@ -23,6 +24,7 @@ import {
 export const USAGE = `usage: playground record add <path> --kind <${KINDS.join("|")}> --why "<why>" --undo "<undo>" [--by <who>]
        playground record add --stdin            (a JSON list of entries, the form a peer's add takes over ssh)
        an undo with a delete word (rm, rmdir, docker rm -fv) goes in through --stdin < entry.json, a JSON list holding the entry, since the no-raw-delete hook reads a quoted --undo value as a command
+       playground record known <path> --why "<who made it>" (an OS-made path, so the daily check skips it)
        playground record drop <path>
        playground record seed [--machine <name>] [--notes <folder>]
        playground record check
@@ -147,6 +149,14 @@ export async function runRecord(words: string[], io: RecordIo): Promise<number> 
     const added = await addEntries(io.data, entries)
     for (const path of added) io.out(`recorded ${path}`)
     if (!added.length) io.out("already recorded")
+    return 0
+  }
+  if (verb === "known") {
+    if (bare.length !== 1) return usage(io, "known takes one path")
+    const why = named.get("why")
+    if (!why) return usage(io, "known needs its --why")
+    const recorded = await addKnown(io.data, bare[0], why)
+    io.out(`known ${recorded}`)
     return 0
   }
   if (verb === "drop") {

@@ -24,6 +24,7 @@ import {
 } from "../../../../../packages/scripts/src/machine-record/notes"
 import {
   addEntries,
+  addKnown,
   check,
   dropPaths,
   type Entry,
@@ -219,6 +220,26 @@ describe("the daily check (PG-2538)", () => {
       "unreadable: docker image vllm/vllm-openai:v0.32.0",
     ])
   })
+
+  test("a known path the OS made gives no finding, and addKnown keeps the daily check clean", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    expect(await check(data, places())).toEqual([`misplaced: ${made}`])
+    expect(await addKnown(data, made, "the OS snapd made it")).toEqual(made)
+    expect(await check(data, places())).toEqual([])
+  })
+
+  test("recording one known path does not suppress a sibling the factory adds later", async () => {
+    await seed(data, [], places())
+    const known = join(home, ".config", "snapd")
+    const sibling = join(home, ".config", "apt")
+    mkdirSync(known)
+    expect(await check(data, places())).toEqual([`misplaced: ${known}`])
+    expect(await addKnown(data, known, "the OS snapd made it")).toEqual(known)
+    mkdirSync(sibling)
+    expect(await check(data, places())).toEqual([`misplaced: ${sibling}`])
+  })
 })
 
 describe("the record's writes (PG-2538)", () => {
@@ -286,6 +307,25 @@ describe("playground record (PG-2538)", () => {
     expect(checked).toEqual([`misplaced: ${join(home, ".cache", "new")}`])
     expect(await runRecord(["drop", path], io([]))).toBe(0)
     expect(await runRecord(["drop", path], io([]))).toBe(1)
+  })
+
+  test("known records a path with its reason, a second run keeps one known, and without --why it exits 2", async () => {
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    const lines: string[] = []
+    expect(await runRecord(["known", made, "--why", "the OS snapd made it"], io(lines))).toBe(0)
+    expect(lines).toContain(`known ${made}`)
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+    expect(await runRecord(["known", made, "--why", "again"], io([]))).toBe(0)
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+    expect(await runRecord(["known", made], io(lines))).toBe(2)
+    expect(lines.some((l) => l.startsWith("err: playground record: known needs its --why"))).toBe(
+      true,
+    )
+    expect(await runRecord(["known"], io(lines))).toBe(2)
+    expect(lines.some((l) => l.startsWith("err: playground record: known takes one path"))).toBe(
+      true,
+    )
   })
 
   test("add --stdin takes a peer's JSON list, its ~/ paths read under this home", async () => {
