@@ -3,7 +3,11 @@ import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import {
+  GATE_LABEL,
+  stubs,
+  usageReading,
+} from "../../../../../packages/scripts/src/new-user-gate/stubs"
 
 const box = realpathSync(mkdtempSync(join(tmpdir(), "gate-stubs-")))
 afterAll(() => rmSync(box, { force: true, recursive: true }))
@@ -36,7 +40,28 @@ test("the box's systemctl and loginctl refuse every call and log it, so the box'
   expect(calls).toContain("loginctl enable-linger 1000\n")
 })
 
-describe("the gate's bunx stand-in", () => {
+describe("the gate's pglaunch stand-in", () => {
+  test("starts a labelled container published on loopback alone, and prints what first run reads as pglaunch's", () => {
+    const { code, out } = call(
+      "bunx",
+      "--bun",
+      "pglaunch@5.5.7",
+      "-k",
+      "-n",
+      "playground-dashboard-db",
+    )
+    expect(code).toBe(0)
+    // the two lines parseLaunch in api/hono/src/lib/setup/container.ts reads from pglaunch: the started name, a dash and 4 letters as the live dashboard's name rule takes, and the URL
+    expect(out).toBe(
+      'name "playground-dashboard-db-gate :54321" started\npostgres://postgres:postgres@localhost:54321/postgres\n',
+    )
+    const run = readFileSync(join(box, "docker.log"), "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("run "))
+    expect(run).toContain(`--label ${GATE_LABEL}`)
+    expect(run).toContain("-p 127.0.0.1::5432")
+  })
+
   test("hands every other bunx call to the real one", () => {
     expect(call("bunx", "portless", "get", "playground").out).toBe("real portless get playground\n")
   })
