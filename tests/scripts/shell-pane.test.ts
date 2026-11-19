@@ -30,11 +30,13 @@ import { storeWith } from "./hooks/render-set"
 import { git } from "./hooks/scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..")
-// A stub origin list, the same on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
-const REPOS = reposOf(
-  { schemaVersion: 1, values: {} },
-  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+// One stub checkout on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const ORIGIN_REPO = originCheckout(
+  mkdtempSync(join(tmpdir(), "pg-2616-origin")),
+  "example-owner/example-repo",
 )
+// A stub origin list built from that checkout, so the guard rows name the made-up repo, not the running checkout's.
+const REPOS = reposOf({ schemaVersion: 1, values: {} }, ORIGIN_REPO)
 // The pane's folder: a worktree of the main checkout the guards read, as a session's pane opens in its own worktree, here or on CI's checkout.
 const MAIN = mainCheckout(CHECKOUT)
 const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
@@ -97,6 +99,20 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
+// A store whose policy makes the stub repo public to no-public-leak, which judges the row's target against publicRepo before its own origin, and whose list is valid but empty, since its refusal reads the write's body as unread text rather than a hit in its terms.
+const PUBLIC = storeWith(
+  join(SCRATCH, "public"),
+  {
+    "no-public-leak.json": JSON.stringify({
+      companies: [],
+      handles: [],
+      linearKeys: [],
+      names: [],
+      slackIds: [],
+    }),
+  },
+  { "factory.publicRepo": "example-owner/example-repo" },
+)
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one, for that guard's case to run in.
 const GLM_REPO = join(SCRATCH, "glm-repo")
 git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
@@ -116,8 +132,12 @@ writeFileSync(
   join(PREPARE, "playground", "roster.json"),
   JSON.stringify({ agents: [{ mode: "prepare", name: "worker-made-up-1" }] }),
 )
-// The folder a guard's case runs in, where it is not the worktree.
-const CWDS: Record<string, string> = { "no-glm-heavy-path": GLM_REPO }
+// The folder a guard's case runs in, where it is not the worktree. The origin guards read this checkout's origin, so it is the stub checkout.
+const CWDS: Record<string, string> = {
+  "no-glm-heavy-path": GLM_REPO,
+  "no-protected-push": ORIGIN_REPO,
+  "no-public-leak": ORIGIN_REPO,
+}
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },
@@ -131,6 +151,8 @@ const ENVS: Record<string, Record<string, string>> = {
     CLAUDE_CONFIG_DIR: PREPARE,
     PLAYGROUND_DATA_DIR: join(PREPARE, "playground"),
   },
+  // The guard read mode holds: no row here is a write, but the repo it targets is still guarded to it, so it still cannot read its body before it runs.
+  "no-public-leak": { PLAYGROUND_DATA_DIR: PUBLIC },
 }
 
 // Runs `body` with `vars` set on the process, an undefined one unset, then puts each back.
