@@ -34,6 +34,7 @@ import { runCheck } from "./escalate"
 import { keepAlive, ownFolder, releaseLock, SOCKET, takeLock, writeOwn } from "./habits"
 import { life, type LinkSock, pairingCard, unguarded } from "./life"
 import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
+import { outboxDir } from "./outbound"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
 import { votedOptions } from "./votes"
@@ -168,6 +169,7 @@ const main = async () => {
     return runCheck(file.path, source, at)
   }
   await ownFolder(dir)
+  await ownFolder(outboxDir(data))
   const lock = join(dir, "lock")
   // a holder is a live ops-wa, so a pid the OS gave to another program frees the lock
   const holder = await takeLock(lock, process.pid, (pid) => {

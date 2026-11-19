@@ -61,8 +61,8 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
-playground wa send [--to alert] <file>
-                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; it refuses a body holding a token shape (bun run wa)
+playground wa send [--to alert] [--file <path>] [<file>]
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; with --file, an image, a document, a video or a voice note from the data folder's wa/outbox/, the reply its caption and optional; it refuses a body holding a token shape (bun run wa)
 playground wa alert [--now-both] [--source <kind>:<ref>] <file>
                       send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, to the owner's WhatsApp at once and to the wa.alert number after wa.alertDelayMinutes unless the owner reacts or wa.alertCheck reads its source as handled, or to both at once with --now-both (bun run wa)
 playground wa react <emoji> [--to alert] [--id <id>]
