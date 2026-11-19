@@ -453,7 +453,7 @@ up.once.running = lambda name, marker: None
 up.herdr = lambda: ("/x/herdr", "")
 up.healthy = lambda job: (False, "no heartbeat")
 up.start = lambda job: True
-up.run = lambda argv, timeout=60: (calls.append(argv) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+up.run = lambda argv, timeout=60, env=None: (calls.append(argv + ["private" if (env or {}).get("NOTIFY_PRIVATE") == "1" else "public"]) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
 up.print = lambda line: said.append(line)
 for step in json.loads(sys.argv[2]):
     path = os.path.join(up.OPS, "ops-h.last")
@@ -495,9 +495,9 @@ const lastOf = (steps: object[]) => {
 }
 
 // PG-2878: herdr closes a dead job's pane with it, so a restart tells ops the job's last line, from once.py's ops/<job>.last, once per line
-test("a job restarted three times on the same last line tells ops once, and a new last line tells it again", () => {
+test("a job restarted three times on the same last line tells ops once, and a new last line tells it again, each a private line kept out of up.log", () => {
   const unreadable = "vault: cache unreadable: no cached copy"
-  const { ops, said, told } = lastOf([
+  const { calls, ops, said, told } = lastOf([
     { last: unreadable },
     { last: unreadable },
     { last: unreadable },
@@ -514,6 +514,8 @@ test("a job restarted three times on the same last line tells ops once, and a ne
     "started ops-h in herdr (no heartbeat; its last line: made-up: a new reason)",
   ])
   expect(statSync(join(ops, "up-last-lines.json")).mode & 0o777).toBe(0o600)
+  expect(calls.map((c) => c.at(-1))).toEqual(["private", "private"])
+  expect(readFileSync(join(ops, "up.log"), "utf8")).not.toContain("cache unreadable")
 })
 
 test("a last line written before the job's last start is never told, and one with no file keeps today's line", () => {

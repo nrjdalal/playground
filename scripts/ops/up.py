@@ -64,17 +64,17 @@ def log(msg):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {msg}\n")
 
 
-def run_streams(argv, timeout=60):
+def run_streams(argv, timeout=60, env=None):
     """(exit code, stdout, stderr) of the command, its streams apart, as a caller that reads one alone needs."""
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
         return r.returncode, r.stdout or "", r.stderr or ""
     except Exception as e:
         return 1, "", str(e)
 
 
-def run(argv, timeout=60):
-    code, out, err = run_streams(argv, timeout)
+def run(argv, timeout=60, env=None):
+    code, out, err = run_streams(argv, timeout, env)
     return code, out + err
 
 
@@ -481,12 +481,13 @@ def up(quiet):
         last = last_line(job["name"], start_at)
         if last:
             told = f"{told}; its last line: {last}"
-            log(f"{job['name']} last line: {last}")
+            # a job's error can carry a key's name or a token's piece, so the line stays out of up.log and alerts.log, as in its 0600 files
             if told_last(job["name"], last):
-                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60)
-        # only a job that started waits out GRACE; a failed start is tried again on the next pass
+                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60, {**os.environ, "NOTIFY_PRIVATE": "1"})
+        # only a job that started waits out GRACE; a failed start is tried again on the next pass; stamped before the start, so a line the new copy writes at once is never read as older than it
+        at = time.time()
         if start(job):
-            starts[job["name"]] = time.time()
+            starts[job["name"]] = at
             with open(STARTS, "w") as f:
                 json.dump(starts, f)
             if not quiet:
