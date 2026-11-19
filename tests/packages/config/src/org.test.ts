@@ -6,6 +6,7 @@ describe("orgOf", () => {
   test("with nothing set, every value is a generic default, and no integration is read", () => {
     expect(orgOf({})).toEqual({
       cluster: { key: undefined, peers: [] },
+      ledger: { title: "Firefighting" },
       local: { models: [], url: "http://127.0.0.1:18000" },
       owner: { name: "Owner" },
       work: { label: "Work", org: undefined },
@@ -15,6 +16,7 @@ describe("orgOf", () => {
   test("a full config reads every key", () => {
     expect(
       orgOf({
+        PLAYGROUND_LEDGER_TITLE: "Ledger",
         PLAYGROUND_LOCAL_MODEL_URL: "http://127.0.0.1:18001",
         PLAYGROUND_LOCAL_MODELS: "M=ornith-1.5-122b-nvfp4",
         PLAYGROUND_OWNER_NAME: "Merritt",
@@ -28,6 +30,7 @@ describe("orgOf", () => {
         key: "/home/you/.ssh/cluster",
         peers: [{ name: "machine-b", target: "you@10.0.0.2" }],
       },
+      ledger: { title: "Ledger" },
       local: {
         models: [{ id: "ornith-1.5-122b-nvfp4", label: "M" }],
         url: "http://127.0.0.1:18001",

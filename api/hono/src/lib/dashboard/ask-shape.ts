@@ -176,8 +176,16 @@ export function isDispatcher(from: string | null | undefined): boolean {
 // The dispatcher's one open in-flight card, its newest item it may still edit that holds a progress block, so a second card or another poster's names it (PG-2720).
 export type InflightCard = { ref: number; title: string } | null
 
-// Pure: why bun run ask refuses a progress card: only the dispatcher's first card or its same-title twin passes.
-export function progressCardRefusal(input: unknown, inFlight: InflightCard): string | null {
+// Pure: whether a title is the daily ledger card's, its prefix (org.ledger.title) alone or followed by ": " and a day, which posts beside the dispatcher's one card.
+export const isLedgerTitle = (title: string, ledger: string): boolean =>
+  title === ledger || title.startsWith(`${ledger}: `)
+
+// Pure: why bun run ask refuses a progress card: only the dispatcher's first card, its same-title twin or its daily ledger card passes.
+export function progressCardRefusal(
+  input: unknown,
+  inFlight: InflightCard,
+  ledger?: string,
+): string | null {
   if (!isRecord(input)) return null
   const preview = input.preview
   if (!isRecord(preview) || typeof preview.text !== "string") return null
@@ -191,6 +199,7 @@ export function progressCardRefusal(input: unknown, inFlight: InflightCard): str
   if (isDispatcher(from)) {
     if (!inFlight) return null
     if (title === inFlight.title) return null
+    if (ledger !== undefined && isLedgerTitle(title, ledger)) return null
     return `a progress block is the dispatcher's one card, not one to start twice: yours is #i${inFlight.ref}, so add this job as a row on it with \`playground ask edit #i${inFlight.ref}\`, or post under its title, "${inFlight.title}"`
   }
   // a progress card is the dispatcher's, not one another poster may start
