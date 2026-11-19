@@ -82,18 +82,22 @@ export async function readOutbound(outbox: string, path: string): Promise<Outbou
   return { bytes, kind, mimetype, name, ...(type.text && { text: bytes.toString("utf8") }) }
 }
 
-// What a send carries beside its body, one at most, a quote beside text alone: a file from the outbox, a location, a kept message it quotes, or an edit or a delete of one of our own messages, each by its id.
+// What a send carries beside its body, one at most, a quote beside text alone: a file from the outbox, a location, a kept message it quotes, an edit or a delete of one of our own messages, each by its id, or the mark that it is the live status (bridge.ts).
 export type Extra = {
   delete?: string
   edit?: string
   file?: string
   location?: { lat: number; lon: number }
   quote?: string
+  status?: true
 }
 
 // Pure: why a send's extra cannot go with its body, or undefined.
 export const extraRefusal = (extra: Extra, body: string): string | undefined => {
-  const { delete: gone, edit, file, location, quote } = extra
+  const { delete: gone, edit, file, location, quote, status } = extra
+  if (status && (gone ?? edit ?? file ?? location ?? quote) !== undefined)
+    return "a status is text alone"
+  if (status && !body.trim()) return "a status takes a body"
   if ([gone, edit, file, location].filter((x) => x !== undefined).length > 1)
     return "a send takes one of a file, a location, an edit and a delete"
   if (quote !== undefined && (gone ?? edit ?? file ?? location) !== undefined)
