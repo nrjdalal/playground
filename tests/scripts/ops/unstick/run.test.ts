@@ -837,7 +837,7 @@ clock[0] += 200
 run.cycle(state)
 print(json.dumps(sent))
 `
-  // issue 2839: 7 run-slot.sh calls at up to 3.5 s apiece, as the case above: 7 x 3.5 s is 24.5 s, so 60 s
+  // issue 2839: 7 run-slot.sh calls, as the case above; with this 60 s taken out it ran past 30 s alone at load5 22 (measured), so 60 s
   test("sends the could-take line when the holder ends and the same head can take it", async () => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
