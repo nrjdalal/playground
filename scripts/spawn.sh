@@ -902,6 +902,20 @@ try:
                 runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
         except Exception:
             runs_on = None
+        try:
+            with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+                flip_seen = json.load(f).get("seen") or {}
+        except Exception:
+            flip_seen = {}
+        flip_seen = flip_seen if isinstance(flip_seen, dict) else {}
+        FLIP = "login-flip.json seen"
+
+        def judge_probe(s):
+            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+            if isinstance(s.get("five"), (int, float)):
+                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+            return judge(FLIP, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+
         if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
             name = "ops/usage/stored-login.json"
             stored, stored_detail = load(name)
@@ -909,7 +923,14 @@ try:
             if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
                 stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
             stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
-            logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+            stored_name = "stored-login.json"
+            # a stored-login.json with no reading, as when the login's token has expired and ops-usage reads nothing, gives way to login-flip's probe of the same login while that probe is fresh
+            probe = next((s for e, s in flip_seen.items() if isinstance(e, str) and e.lower() == runs_on.lower() and isinstance(s, dict)), None)
+            if stored_detail and not stored_seen and probe is not None:
+                probe_seen, probe_detail = judge_probe(probe)
+                if probe_seen:
+                    stored_name, stored_seen, stored_detail = FLIP, probe_seen, probe_detail
+            logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -927,20 +948,11 @@ try:
             if detail is None:
                 known.add(email.lower())
         # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
-        try:
-            with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
-                flip_seen = json.load(f).get("seen") or {}
-        except Exception:
-            flip_seen = {}
-        for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+        for email, s in sorted(flip_seen.items()):
             if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
                 continue
-            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
-            if isinstance(s.get("five"), (int, float)):
-                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
-            name = "login-flip.json seen"
-            seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
-            logins.append((email, name, email, seen, detail))
+            seen, detail = judge_probe(s)
+            logins.append((email, FLIP, email, seen, detail))
             if detail is None:
                 known.add(email.lower())
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
