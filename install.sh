@@ -380,7 +380,7 @@ Playground installs into $DIR. Outside it, it writes only in:
   Claude Code's user settings  the home skill set, installed with claude plugin install
   $HOME/.claude.json  Claude Code's yes to trusting $DIR, the one its folder question records
   $startup  a PATH line for each tool it installs off your PATH, once$service
-Every ops job starts off but the Dashboard's own and the usage read, so nothing goes into $HOME/Library/LaunchAgents.
+Every ops job starts off but the Dashboard's own, the usage read and, on a Mac, keep-awake, so nothing goes into $HOME/Library/LaunchAgents.
 EOF
 
   # A clone goes through the gh login when there is one, else git clones it over https. Either clones main, the shipped branch, whatever the repo's default is.
