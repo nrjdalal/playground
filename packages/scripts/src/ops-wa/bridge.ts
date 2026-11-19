@@ -144,7 +144,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, eyes.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
