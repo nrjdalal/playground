@@ -2275,4 +2275,17 @@ print(json.dumps(sent))
     const sent = await compact([compaction("1.8k"), ["⏺ Working on the fix."]], 2, 1200, false)
     expect(sent, "nothing").toEqual([])
   })
+
+  // A pane quoting the phrase on a tool output line and prose only, with no real spinner line, must match no compaction and so raises nothing.
+  test("a pane that only quotes the phrase on a tool line and prose raises nothing", async () => {
+    const quoted = [
+      "  ? Esc to interrupt",
+      "────────────────────────────────────────",
+      "⎿  Compacting conversation: a running summary is not in progress",
+      "   the log names the phrase again below the tool output as plain prose",
+      "  ? esc to interrupt",
+    ]
+    const sent = await compact([quoted, quoted], 2, 1200, false)
+    expect(sent, "nothing").toEqual([])
+  })
 })
