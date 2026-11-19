@@ -328,3 +328,120 @@ describe("playground wa alert-set", () => {
       expect((await wa(data, args)).code).toBe(2)
   })
 })
+
+describe("playground wa send --file (#2783)", () => {
+  test("hands the file's path to ops-wa beside the body, to the owner or as a guest's reply, and alone with no body", async () => {
+    const { body, data } = machine("the new board\n")
+    const shot = join(data, "wa", "outbox", "board.png")
+    mkdirSync(join(data, "wa", "outbox"), { recursive: true })
+    writeFileSync(shot, "made-up bytes")
+    const got: [string, string, string | undefined][] = []
+    const server = serve(socketPath(data), async (b, kind, _source, extra) => {
+      got.push([b, kind, extra.file])
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["send", "--file", shot, body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--to", "alert", "--file", shot, body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--file", shot])).toEqual({ code: 0, out: "wa send: sent" })
+      expect(got).toEqual([
+        ["the new board", "reply", shot],
+        ["the new board", "guest", shot],
+        ["", "reply", shot],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("takes the file by its absolute path alone, and wa alert takes none", async () => {
+    const { body, data } = machine("hi")
+    const got: string[] = []
+    const server = serve(socketPath(data), async (b) => {
+      got.push(b)
+      return "sent"
+    })
+    try {
+      for (const args of [
+        ["send", "--file", "board.png", body],
+        ["send", "--file", join(data, "gone.png"), body],
+        ["send", "--file"],
+        ["alert", "--file", body, body],
+      ]) {
+        const { code, out } = await wa(data, args)
+        expect(code).toBe(2)
+        expect(out).toContain("playground wa send [--to alert] --file <path> [<file>]")
+      }
+      expect(got).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
+describe("playground wa send's structure (#2799)", () => {
+  test("hands a location, a quote, an edit and a delete to ops-wa, and prints the ids ops-wa sent", async () => {
+    const { body, data } = machine("Made-up Cafe\n")
+    const got: [string, string, unknown][] = []
+    const server = serve(socketPath(data), async (b, kind, _source, extra) => {
+      got.push([b, kind, extra])
+      return { ids: got.length === 1 ? ["m1", "m2"] : got.length === 2 ? ["m3"] : [], said: "sent" }
+    })
+    try {
+      expect(await wa(data, ["send", "--location", "12.5,-45.25", body])).toEqual({
+        code: 0,
+        out: "wa send: sent (ids m1, m2)",
+      })
+      expect(await wa(data, ["send", "--to", "alert", "--quote", "own1", body])).toEqual({
+        code: 0,
+        out: "wa send: sent (id m3)",
+      })
+      expect(await wa(data, ["send", "--edit", "m3", body])).toEqual({
+        code: 0,
+        out: "wa send: sent",
+      })
+      expect(await wa(data, ["send", "--delete", "m3"])).toEqual({ code: 0, out: "wa send: sent" })
+      expect(got).toEqual([
+        ["Made-up Cafe", "reply", { location: { lat: 12.5, lon: -45.25 } }],
+        ["Made-up Cafe", "guest", { quote: "own1" }],
+        ["Made-up Cafe", "reply", { edit: "m3" }],
+        ["", "reply", { delete: "m3" }],
+      ])
+    } finally {
+      server.stop(true)
+    }
+  })
+
+  test("refuses a bad location, two extras and a bodiless edit before ops-wa", async () => {
+    const { body, data } = machine("x")
+    const got: string[] = []
+    const server = serve(socketPath(data), async (b) => {
+      got.push(b)
+      return "sent"
+    })
+    try {
+      expect(await wa(data, ["send", "--location", "91,0", body])).toEqual({
+        code: 1,
+        out: "wa send: a location takes a latitude from -90 to 90 and a longitude from -180 to 180",
+      })
+      expect((await wa(data, ["send", "--location", "1,2,3", body])).code).toBe(1)
+      expect((await wa(data, ["send", "--location", "north", body])).code).toBe(1)
+      expect(await wa(data, ["send", "--edit", "m1", "--delete", "m1", body])).toEqual({
+        code: 1,
+        out: "wa send: a send takes one of a file, a location, an edit and a delete",
+      })
+      expect((await wa(data, ["send", "--edit", "m1"])).code).toBe(2)
+      expect((await wa(data, ["send", "--quote"])).code).toBe(2)
+      expect((await wa(data, ["alert", "--quote", "own1", body])).code).toBe(2)
+      expect(got).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+  })
+})

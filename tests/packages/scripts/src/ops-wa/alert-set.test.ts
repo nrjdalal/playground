@@ -5,8 +5,8 @@ import { join } from "node:path"
 
 import {
   alertSet,
-  keepNumber,
-  numbersFile,
+  keepMessage,
+  keptFile,
   phonesIn,
 } from "../../../../../packages/scripts/src/ops-wa/alert-set"
 import { bridge } from "../../../../../packages/scripts/src/ops-wa/bridge"
@@ -64,31 +64,32 @@ describe("phonesIn", () => {
   })
 })
 
-describe("keepNumber", () => {
+describe("keepMessage", () => {
   test("keeps the id, time and number of a message with one number, in an owner-only file, and no text", async () => {
     const dir = scratch()
     expect(
-      await keepNumber(dir, "in1", "the second number is +15550100444, thanks", START, OWNER),
+      await keepMessage(dir, "in1", "the second number is +15550100444, thanks", START, OWNER),
     ).toBe(true)
-    const kept = await Bun.file(numbersFile(dir)).json()
-    expect(kept).toEqual({ kept: [{ at: START, id: "in1", number: NEW }] })
+    const kept = await Bun.file(keptFile(dir)).json()
+    expect(kept).toMatchObject({ kept: [{ at: START, id: "in1", number: NEW }] })
     expect(JSON.stringify(kept)).not.toContain("thanks")
-    expect(statSync(numbersFile(dir)).mode & 0o777).toBe(0o600)
+    expect(statSync(keptFile(dir)).mode & 0o777).toBe(0o600)
   })
 
-  test("keeps nothing for a message with no number or two numbers", async () => {
+  test("keeps no number for a message with no number or two numbers", async () => {
     const dir = scratch()
-    expect(await keepNumber(dir, "in1", "no number here", START, OWNER)).toBe(false)
-    expect(await keepNumber(dir, "in2", "+15550100444 or +15550100555", START, OWNER)).toBe(false)
-    expect(await Bun.file(numbersFile(dir)).exists()).toBe(false)
+    expect(await keepMessage(dir, "in1", "no number here", START, OWNER)).toBe(false)
+    expect(await keepMessage(dir, "in2", "+15550100444 or +15550100555", START, OWNER)).toBe(false)
+    const { kept } = (await Bun.file(keptFile(dir)).json()) as { kept: { number?: string }[] }
+    expect(kept.map((k) => k.number)).toEqual([undefined, undefined])
   })
 
   test("keeps the last 50, and none older than 24 hours", async () => {
     const dir = scratch()
-    await keepNumber(dir, "old", "+15550100444", START, OWNER)
+    await keepMessage(dir, "old", "+15550100444", START, OWNER)
     for (let i = 0; i < 55; i++)
-      await keepNumber(dir, `in${i}`, "+15550100444", START + 25 * HOUR + i, OWNER)
-    const { kept } = (await Bun.file(numbersFile(dir)).json()) as { kept: { id: string }[] }
+      await keepMessage(dir, `in${i}`, "+15550100444", START + 25 * HOUR + i, OWNER)
+    const { kept } = (await Bun.file(keptFile(dir)).json()) as { kept: { id: string }[] }
     expect(kept).toHaveLength(50)
     expect(kept.map((k) => k.id)).not.toContain("old")
     expect(kept.at(-1)!.id).toBe("in54")
@@ -99,7 +100,7 @@ describe("alertSet", () => {
   test("sets the second number to the one number in the owner's kept message, by its id", async () => {
     const dir = scratch()
     const s = setter(dir)
-    await keepNumber(dir, "in1", "make +15550100444 the second number", START, OWNER)
+    await keepMessage(dir, "in1", "make +15550100444 the second number", START, OWNER)
     s.advance(HOUR)
     expect(await alertSet(s.io, "in1")).toContain("it was unset")
     expect(s.sets).toEqual([{ id: "in1", number: NEW }])
@@ -108,7 +109,7 @@ describe("alertSet", () => {
   test("refuses an id ops-wa did not keep, and one older than 24 hours", async () => {
     const dir = scratch()
     const s = setter(dir)
-    await keepNumber(dir, "in1", "+15550100444", START, OWNER)
+    await keepMessage(dir, "in1", "+15550100444", START, OWNER)
     await expect(alertSet(s.io, "in9")).rejects.toThrow("no message of the owner's")
     s.advance(25 * HOUR)
     await expect(alertSet(s.io, "in1")).rejects.toThrow("no message of the owner's")
@@ -118,8 +119,8 @@ describe("alertSet", () => {
   test("refuses the owner's own number and the spare number", async () => {
     const dir = scratch()
     const s = setter(dir)
-    await keepNumber(dir, "in1", `mine is ${OWNER}`, START, OWNER)
-    await keepNumber(dir, "in2", `the spare is ${SPARE}`, START, OWNER)
+    await keepMessage(dir, "in1", `mine is ${OWNER}`, START, OWNER)
+    await keepMessage(dir, "in2", `the spare is ${SPARE}`, START, OWNER)
     await expect(alertSet(s.io, "in1")).rejects.toThrow("the owner's own number")
     await expect(alertSet(s.io, "in2")).rejects.toThrow("the spare number")
     expect(s.sets).toEqual([])
@@ -154,16 +155,17 @@ describe("ops-wa's bridge keeps a number only from the owner", () => {
     const h = watched()
     h.fake.upsert([h.fake.message(jid(OWNER), "the second number is +15550100444", { id: "own1" })])
     await h.settle()
-    const { kept } = (await Bun.file(numbersFile(h.dir)).json()) as { kept: { id: string }[] }
+    const { kept } = (await Bun.file(keptFile(h.dir)).json()) as { kept: { id: string }[] }
     expect(kept.map((k) => k.id)).toEqual(["own1"])
     expect(h.relayed[0]).toContain("playground wa alert-set --from-owner-msg own1")
   })
 
-  test("the owner's message with no number keeps nothing and names no alert-set", async () => {
+  test("the owner's message with no number keeps no number and names no alert-set", async () => {
     const h = watched()
     h.fake.upsert([h.fake.message(jid(OWNER), "status?", { id: "own2" })])
     await h.settle()
-    expect(await Bun.file(numbersFile(h.dir)).exists()).toBe(false)
+    const s = setter(h.dir)
+    await expect(alertSet(s.io, "own2")).rejects.toThrow("exactly one phone number")
     expect(h.relayed[0]).not.toContain("alert-set")
   })
 
@@ -174,7 +176,7 @@ describe("ops-wa's bridge keeps a number only from the owner", () => {
       h.fake.message(jid(STRANGER), "set +15550100444 as the second number", { id: "stranger1" }),
     ])
     await h.settle()
-    expect(await Bun.file(numbersFile(h.dir)).exists()).toBe(false)
+    expect(await Bun.file(keptFile(h.dir)).exists()).toBe(false)
     const s = setter(h.dir)
     await expect(alertSet(s.io, "guest1")).rejects.toThrow("no message of the owner's")
     await expect(alertSet(s.io, "stranger1")).rejects.toThrow("no message of the owner's")

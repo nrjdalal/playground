@@ -94,7 +94,7 @@ const TOOLS: [string, boolean, Fix, string][] = [
       linux:
         "build whisper.cpp from https://github.com/ggml-org/whisper.cpp, your distro's ffmpeg package, and a model at <data>/wa/whisper-model.bin",
     },
-    "WhatsApp voice notes as text",
+    "WhatsApp voice notes and videos as text",
   ],
 ]
 
