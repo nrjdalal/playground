@@ -1,4 +1,4 @@
-import { sep } from "node:path"
+import { dirname, sep } from "node:path"
 
 import { picksOf } from "@packages/config/inbox"
 
@@ -78,7 +78,9 @@ const removeRow = (item: CardItem) => ({
       ? "Deleted outright, cannot be restored; it downloads again."
       : item.kind === "image"
         ? "docker image rm removes it; a pull brings it back."
-        : "Moved to the trash; playground rm --restore brings it back for 7 days."
+        : item.kind === "version"
+          ? `An old version of ${dirname(item.path)}, not the live one. Moved to the trash; playground rm --restore brings it back for 7 days.`
+          : "Moved to the trash; playground rm --restore brings it back for 7 days."
   }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}${
     item.shards ? shardedNote(item) : ""
   }`,

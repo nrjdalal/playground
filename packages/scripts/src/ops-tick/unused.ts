@@ -344,7 +344,9 @@ export const linesOf = (
     return of.length ? [`${kind} ${gb(sum(of))}`] : []
   })
   const leftovers = small.length ? [`small leftovers ${small.length} at ${mb(sum(small))}`] : []
-  const total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
+  let total = `${found.machine} unused ${gb(sum(found.items))}${kinds.length + leftovers.length ? ` (${[...kinds, ...leftovers].join(", ")})` : ""}`
+  if (found.versionsUnread?.length)
+    total += `; versions not read: ${found.versionsUnread.map((d) => tilde(d, home)).join(", ")}`
   const items = big.map(
     (i) =>
       `${i.kind} ${tilde(i.path, home)} ${gb(i.bytes)}${i.recorded ? " recorded" : ""}${i.unknownAge ? " age unknown" : ""}`,
