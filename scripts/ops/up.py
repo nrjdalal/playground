@@ -19,6 +19,9 @@ nothing is ever selected by name or pattern. A launchd job is only reported, onc
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
+herdr closes a job's pane the moment its job exits, so a restart reads why the job stopped from ops/<job>.last, the last
+stderr line once.py's reader kept, when it was written after the job's last start: the line joins the started line, and
+notify.sh tells ops once per job until the line changes (ops/up-last-lines.json, 0600) or the job is healthy again.
 """
 import calendar, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
 
@@ -50,6 +53,7 @@ import ptable
 OPS = once.OPS
 LOG = os.path.join(OPS, "up.log")
 STARTS = os.path.join(OPS, "up-state.json")
+LAST_TOLD = os.path.join(OPS, "up-last-lines.json")  # each job's last line already told to ops
 
 HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")
 HERDR_SESSION = os.environ.get("PLAYGROUND_HERDR_SESSION") or os.environ.get("DESK_HERDR_SESSION") or "playground"
@@ -193,6 +197,33 @@ def stale_of(holder, beat, gone):
     if beat in gone:
         return f"holds pid {beat}, which runs a deleted executable ({gone[beat]})"
     return ""
+
+
+def last_line(name, since):
+    """The job's last stderr line, as once.py's reader kept it, when written after the job's last start (since), else ""."""
+    path = os.path.join(OPS, f"{name}.last")
+    try:
+        if os.path.getmtime(path) < since:
+            return ""
+        return open(path).read().strip()[: once.LAST_MAX]
+    except OSError:
+        return ""
+
+
+def told_last(name, line):
+    """Record line as the job's last line told to ops, line None forgetting it; True when it differs from the one told before."""
+    try:
+        told = json.load(open(LAST_TOLD))
+    except Exception:
+        told = {}
+    if told.get(name) == line:
+        return False
+    if line is None:
+        told.pop(name)
+    else:
+        told[name] = line
+    once.private(LAST_TOLD, json.dumps(told))
+    return line is not None
 
 
 def herdr():
@@ -394,6 +425,9 @@ def up(quiet):
             ok, why = False, stale
         if ok:
             starts.get("_down", {}).pop(job["name"], None)
+            # a healthy job's told line is forgotten, so a later stop on the same line is told again
+            if os.path.exists(LAST_TOLD):
+                told_last(job["name"], None)
             continue
         binary = None
         if is_herdr(job):
@@ -443,6 +477,13 @@ def up(quiet):
         log(f"{job['name']} unhealthy ({why}); starting")
         # the printed line is told to ops once until it changes, so a heartbeat's age stays out of it
         told = re.sub(r"\d+m old", "stale", why)
+        # read before the start, whose once.py drops the line: herdr closed the dead job's pane, so this file holds why it stopped
+        last = last_line(job["name"], start_at)
+        if last:
+            told = f"{told}; its last line: {last}"
+            log(f"{job['name']} last line: {last}")
+            if told_last(job["name"], last):
+                run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60)
         # only a job that started waits out GRACE; a failed start is tried again on the next pass
         if start(job):
             starts[job["name"]] = time.time()
