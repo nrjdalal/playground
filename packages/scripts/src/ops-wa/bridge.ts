@@ -51,7 +51,12 @@ type Key = {
 export type Incoming = { key: Key; message?: Record<string, unknown> | null }
 export type Upsert = { messages: Incoming[]; type: string }
 export type Call = { from: string; status: string }
-type Events = { call: Call[]; "messages.upsert": Upsert }
+// a 1:1 chat's receipt, as Baileys gives it: the message's key and its status, with the receipt's time in seconds
+export type Update = {
+  key: Key
+  update: { messageTimestamp?: number | null; status?: number | null }
+}
+type Events = { call: Call[]; "messages.update": Update[]; "messages.upsert": Upsert }
 // The calls ops-wa makes on a Baileys socket, so a test hands it a fake one.
 export type Sock = {
   ev: { on<K extends keyof Events>(name: K, fn: (arg: Events[K]) => void): void }
@@ -139,7 +144,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -729,6 +734,10 @@ export function bridge(io: Io & Mode) {
         if (type !== "notify") return
         for (const m of messages) queue(() => inbound(io, m, sock.user))
       })
+      sock.ev.on("messages.update", (updates) => {
+        const seen = updates.flatMap(seenOf(io.now()))
+        if (seen.length > 0) queue(() => keepReceipts(io.dir, seen))
+      })
       sock.ev.on("call", (calls) => {
         for (const c of calls) if (c.status === "offer") queue(() => drop(io, "call", c.from))
       })
@@ -843,7 +852,7 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, whether a reply can go to it now, as the sender decides, the receipts' lines and the pending alerts.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
@@ -880,6 +889,7 @@ export async function statusOf(
       ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies(windowLeft(owner.ownerAt, now), "its 24 hours for replies are over until it writes")}`
       : line("owner", "wa.owner", "", undefined),
     numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
+    ...(await receiptLines(dir, numbers)),
     ...(await pendingLines(dir)),
   ]
 }
@@ -888,9 +898,80 @@ export async function statusOf(
 export type PollSent = { id: string; secret: string }
 // What a send answers: who it reached, and the ids of the messages it sent.
 export type Out = { ids: string[]; said: string }
-// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat and time, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one.
-type Own = { at: number; id: string; jid: string }
+// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat, time and kind, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one, and a receipt is kept for ours alone.
+type Own = { at: number; id: string; jid: string; kind?: Kind }
 const ownFile = (dir: string) => join(dir, "own.json")
+
+// receipts.json, the bridge's queue's: the delivered and read times WhatsApp sends for each message in own.json, kept only while own.json keeps that message; ops-wa only reads them, and marks nothing read and sends no receipt or presence of its own
+type Receipt = { delivered?: number; id: string; read?: number }
+const receiptsFile = (dir: string) => join(dir, "receipts.json")
+// proto.WebMessageInfo.Status's DELIVERY_ACK and READ; PLAYED, a voice note's, is past READ
+const DELIVERED = 3
+const READ = 4
+// Pure: the receipts in a messages.update for messages from this number, at the receipt's own time or now; a read is a delivery too. Baileys sends a group's receipts on message-receipt.update, and ops-wa sends to no group.
+const seenOf =
+  (now: number) =>
+  ({ key, update }: Update): Receipt[] => {
+    const status = update.status ?? 0
+    if (!key.fromMe || !key.id || status < DELIVERED) return []
+    const at = update.messageTimestamp ? update.messageTimestamp * 1000 : now
+    return [{ delivered: at, id: key.id, ...(status >= READ && { read: at }) }]
+  }
+// each receipt for a message ops-wa sent, matched by its id alone, since a chat's id can come as its LID; the first delivered and the first read time stay
+async function keepReceipts(dir: string, seen: Receipt[]) {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const ours = seen.filter((s) => own.some((o) => o.id === s.id))
+  if (ours.length === 0) return
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  for (const s of ours) {
+    const had = receipts.find((r) => r.id === s.id)
+    if (!had) receipts.push(s)
+    else {
+      had.delivered ??= s.delivered
+      if (s.read !== undefined) had.read ??= s.read
+    }
+  }
+  await writeOwn(receiptsFile(dir), {
+    receipts: receipts.filter((r) => own.some((o) => o.id === r.id)),
+  })
+}
+// each message ops-wa sent to a number, with its receipts, oldest first
+const sentTo = async (dir: string, number: string) => {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  return own
+    .filter((o) => o.jid === jidOf(number))
+    .map((o) => ({ ...o, ...receipts.find((r) => r.id === o.id) }))
+}
+// The owner's last read: the latest read time WhatsApp sent for a message ops-wa sent the owner, or undefined before any; quiet hours reads it.
+export async function ownerReadAt(dir: string, owner: string): Promise<number | undefined> {
+  const reads = (await sentTo(dir, owner)).flatMap((o) => (o.read === undefined ? [] : [o.read]))
+  return reads.length === 0 ? undefined : Math.max(...reads)
+}
+// wa status's receipt lines, each only once there is something to say: the owner's last read, and the last alert to the alert number with its delivered and read times
+async function receiptLines(dir: string, numbers: { alert: string; owner: string }) {
+  const iso = (at: number) => new Date(at).toISOString()
+  const read = numbers.owner ? await ownerReadAt(dir, numbers.owner) : undefined
+  const alert = numbers.alert
+    ? (await sentTo(dir, numbers.alert)).filter((o) => o.kind && o.kind !== "guest").at(-1)
+    : undefined
+  return [
+    ...(read === undefined
+      ? []
+      : [
+          `owner ${String(shownValue("wa.owner", numbers.owner))}: read ops-wa's messages last at ${iso(read)}`,
+        ]),
+    ...(alert === undefined
+      ? []
+      : [
+          `alert ${String(shownValue("wa.alert", numbers.alert))}: the last alert went at ${iso(alert.at)}; ${
+            alert.delivered === undefined
+              ? "not delivered yet"
+              : `delivered at ${iso(alert.delivered)}, ${alert.read === undefined ? "not read yet" : `read at ${iso(alert.read)}`}`
+          }`,
+        ]),
+  ]
+}
 // WhatsApp takes an edit in a message's first 15 minutes.
 const EDIT_MS = 15 * 60_000
 
@@ -1074,7 +1155,7 @@ export function sender(
         // kept as each part goes, so a part already sent can be taken back when a later one fails
         if (id && !target) {
           ids.push(id)
-          own.push({ at: io.now(), id, jid: t.jid })
+          own.push({ at: io.now(), id, jid: t.jid, kind })
           await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
         }
       }
