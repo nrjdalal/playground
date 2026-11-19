@@ -205,6 +205,12 @@ test("an argument up.py does not know is refused with its usage and runs no pass
     })
 })
 
+// up.py's own clock, which the clock-ahead pass leaves real, so a start the test records is as old to up.py as the test means it.
+const pyNow = () =>
+  Number(
+    Bun.spawnSync(["python3", "-I", "-c", "import time; print(time.time())"]).stdout.toString(),
+  )
+
 // Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
 const RESTARTED = `${LOAD}started = []
 up.healthy = lambda job: (False, "no heartbeat")
@@ -226,7 +232,7 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
   const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
   // each start a minute old: made before the job stopped, as ops-restart's TERM'd job's was
-  const now = Date.now() / 1000 - 60
+  const now = pyNow() - 60
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": now, "ops-y": now }))
   const env = {
     CLAUDE_CONFIG_DIR: config,
@@ -290,7 +296,7 @@ test("two jobs' --restarted passes at once start each job once, the second start
   const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
   // both last started an hour ago, past GRACE, so either pass starts both
-  const old = Date.now() / 1000 - 3600
+  const old = pyNow() - 3600
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": old, "ops-y": old }))
   const starts = join(ops, "starts.txt")
   const env = {
