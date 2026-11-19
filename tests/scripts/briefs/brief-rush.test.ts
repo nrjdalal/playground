@@ -71,3 +71,16 @@ describe("brief-rush.md starts in the worktree and gives every file tool its abs
     expect(fileLine).toContain("since a relative path lands in the main checkout")
   })
 })
+
+// issue 2854: a red-first commit that calls an export not built yet first commits a typed, throwing stub
+describe("brief-rush points to testing.md's Traps for a red-first stub (#2854)", () => {
+  test("a red-first commit that calls an export not built yet stubs it, typed and throwing, with any new field optional", async () => {
+    const testing = await read(join(".agents", "testing.md"))
+    expect(testing).toContain(
+      "a red-first commit whose rows call an export not built yet first commits a stub of it, its exports typed and a body that throws",
+    )
+    const rush = await read(join("scripts/briefs", "brief-rush.md"))
+    expect(rush).toContain("a typed, throwing stub with any new field optional")
+    expect(rush).toContain("agents/testing.md#traps")
+  })
+})
