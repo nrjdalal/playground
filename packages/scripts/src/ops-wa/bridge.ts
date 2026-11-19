@@ -38,6 +38,7 @@ import {
   DEFAULT_DELAY_MINUTES,
   escalations,
   keepPending,
+  keepSent,
   lastLines,
   pendingLines,
   reacted,
@@ -1419,13 +1420,25 @@ export function sender(
       await writeOwn(partialFile(io.dir), { partials })
     }
     lastIds = ids
+    // an alert that never goes pending keeps its outcome as it goes, so wa status shows the newest alert's; a failed write leaves the send as it went
+    const settled = async (said: string): Promise<Out> => {
+      if (alert)
+        await keepSent(io.dir, {
+          at: now,
+          outcome:
+            said !== "sent"
+              ? said
+              : going.length > 1
+                ? "sent to both numbers at once"
+                : `sent to ${going[0]!.who} alone`,
+          when: io.now(),
+        }).catch(() => {})
+      return { ids, said }
+    }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return {
-          ids,
-          said: "sent to the owner alone: the alert number has never written to this number",
-        }
+        return settled("sent to the owner alone: the alert number has never written to this number")
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
@@ -1435,12 +1448,11 @@ export function sender(
       }
     }
     const left = to.find((t) => !t.open)
-    return {
-      ids,
-      said: left
+    return settled(
+      left
         ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
         : "sent",
-    }
+    )
   }
   // the live status: one message in the owner's chat, edited in place while WhatsApp takes an edit and it has not scrolled away, else sent anew as the live one; an unchanged status sends nothing
   const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {

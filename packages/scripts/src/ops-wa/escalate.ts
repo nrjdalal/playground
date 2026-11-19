@@ -10,10 +10,13 @@ export type Pending = { at: number; body: string; due: number; ids: string[]; so
 export const pendingDir = (dir: string) => join(dir, "pending")
 export const DEFAULT_DELAY_MINUTES = 3
 
-// last-alert.json, 0600: the last urgent alert's send time, its outcome and the outcome's time, which wa status prints with no body and no number
+// last-alert.json, 0600, the bridge's queue's: the last pending alert's send time, its outcome and the outcome's time, which wa status prints with no body and no number
 export type Last = { at: number; outcome: string; when: number }
 export const lastFile = (dir: string) => join(dir, "last-alert.json")
 const keepLast = (dir: string, last: Last) => writeOwn(lastFile(dir), last)
+// alert-sent.json, 0600, the sender's chain's: the same for the last alert that never went pending, a --now-both one or one that reached one number alone, its outcome kept as it went
+export const sentFile = (dir: string) => join(dir, "alert-sent.json")
+export const keepSent = (dir: string, last: Last) => writeOwn(sentFile(dir), last)
 // a failure's reason with any run of 6 or more digits masked, so no number reaches wa status
 const masked = (reason: string) => reason.replace(/\d{6,}/g, "<number>")
 export const CHECK_TIMEOUT_MS = 20_000
@@ -119,9 +122,13 @@ export async function escalations(io: EscalateIo) {
   }
 }
 
-// wa status's line for the last alert's outcome, none before the first
+// wa status's line for the newest alert's outcome, by its send time from either file, none before the first
 export const lastLines = async (dir: string): Promise<string[]> => {
-  const last = await readOwn<Last | null>(lastFile(dir), null)
+  const [settled, sent] = await Promise.all([
+    readOwn<Last | null>(lastFile(dir), null),
+    readOwn<Last | null>(sentFile(dir), null),
+  ])
+  const last = [settled, sent].filter((l): l is Last => l !== null).sort((a, b) => b.at - a.at)[0]
   return last
     ? [
         `last alert: the alert of ${new Date(last.at).toISOString()}, at ${new Date(last.when).toISOString()}: ${last.outcome}`,

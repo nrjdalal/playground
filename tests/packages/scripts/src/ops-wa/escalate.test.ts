@@ -342,6 +342,33 @@ describe("wa status's last alert line", () => {
     ])
     expect(lines.join("\n")).not.toContain(ALERT.slice(1))
   })
+
+  test("a --now-both alert shows as the newest alert, over an older alert whose outcome came after it", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    h.advance(MINUTE)
+    expect(await h.send("a second practice alert", "alert")).toBe("sent")
+    h.advance(3 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a second practice alert", "a practice alert"])
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:01:\d\d\.\d{3}Z, at 2026-11-11T03:01:\d\d\.\d{3}Z: sent to both numbers at once$/,
+      ),
+    ])
+  })
+
+  test("an alert held back because the alert number has never written shows that it reached the owner alone", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    await h.send("a practice alert", "first")
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner alone: the alert number has never written to this number$/,
+      ),
+    ])
+  })
 })
 
 describe("the checker wa.alertCheck names", () => {
