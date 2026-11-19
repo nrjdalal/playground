@@ -12,7 +12,7 @@ SIGPIPE, and a forked reader (its pid in ops/<job>.reader) copies that file to t
 to LAST_MAX characters, in ops/<job>.last (0600): herdr closes a job's pane the moment the job exits, so ops-up reads why a
 job died there. A start drops the last copy's line first, and the reader ends once the job has.
 """
-import fcntl, json, os, shlex, subprocess, sys
+import fcntl, json, os, shlex, signal, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from beat import ops_dir
@@ -64,8 +64,8 @@ def private(path, text):
     os.replace(path + ".tmp", path)
 
 
-def read_stderr(log, last, pane, job_pid, poll=0.2):
-    """Copy the job's stderr file onto the pane as it grows and keep its last non-empty line in last, until the job has exited (this reader then has another parent) and the file is read to its end."""
+def read_stderr(log, last, pane, job_pid, reader=None, poll=0.2):
+    """Copy the job's stderr file onto the pane as it grows and keep its last non-empty line in last while the reader file names this process, until the job has exited (this reader then has another parent) and the file is read to its end."""
     offset, rest, kept = 0, b"", None
     with open(log, "rb") as f:
         while True:
@@ -81,10 +81,11 @@ def read_stderr(log, last, pane, job_pid, poll=0.2):
                 except OSError:
                     pass
             *lines, rest = (rest + chunk).split(b"\n")
+            rest = rest[-4 * LAST_MAX :]
             if ended and rest:
                 lines, rest = lines + [rest], b""
             said = next((l.decode(errors="replace").strip() for l in reversed(lines) if l.strip()), None)
-            if said is not None and said[:LAST_MAX] != kept:
+            if said is not None and said[:LAST_MAX] != kept and ours(reader):
                 kept = said[:LAST_MAX]
                 private(last, kept)
             if offset > LOG_MAX:
@@ -95,9 +96,19 @@ def read_stderr(log, last, pane, job_pid, poll=0.2):
             __import__("time").sleep(poll)
 
 
+def ours(reader):
+    """True while the reader file names this process, so an old copy's reader, still draining after a new copy has started, writes no line over the new copy's."""
+    try:
+        return reader is None or open(reader).read().strip() == str(os.getpid())
+    except OSError:
+        return False
+
+
 def keep_last_line(job):
     """Send this process's stderr, the job's once it execs, to its file, and fork the reader that keeps its last line."""
-    log, last = os.path.join(OPS, f"{job}.stderr"), os.path.join(OPS, f"{job}.last")
+    log, last, mine = (os.path.join(OPS, f"{job}.{end}") for end in ("stderr", "last", "reader"))
+    # this copy holds the reader file before it drops the last line, so the old copy's reader writes nothing after the drop
+    private(mine, "")
     try:
         os.remove(last)
     except FileNotFoundError:
@@ -108,11 +119,13 @@ def keep_last_line(job):
     reader = os.fork()
     if reader == 0:
         os.close(fd)
+        # in a herdr pane the job leads its pty's session, so its exit hangs up the reader too, before it reads the dying line
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
         try:
-            read_stderr(log, last, pane, job_pid)
+            private(mine, f"{os.getpid()}\n")
+            read_stderr(log, last, pane, job_pid, mine)
         finally:
             os._exit(0)
-    private(os.path.join(OPS, f"{job}.reader"), f"{reader}\n")
     os.close(pane)
     os.dup2(fd, 2)
     os.close(fd)

@@ -80,7 +80,11 @@ describe("once.py's last stderr line", () => {
     return pid
   }
   const groupOf = (pid: number) =>
-    Number(Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]).stdout.toString().trim())
+    Number(
+      Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)])
+        .stdout.toString()
+        .trim(),
+    )
   // the job leads its own process group (detached), so an empty group is the reader gone, a check no reused pid can pass (.agents/testing.md)
   const groupAlive = (pgid: number) => {
     try {
@@ -135,14 +139,17 @@ describe("once.py's last stderr line", () => {
         "ops-t6",
         "sh -c 'echo early-line >&2; sleep 1; echo DEATH-reason >&2; exit 3'",
       ],
-      { env: { ...process.env, CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data }, stdout: "pipe" },
+      {
+        env: { ...process.env, CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data },
+        stdout: "pipe",
+      },
     )
     expect(await pane.exited).toBe(0)
     const leader = Number((await new Response(pane.stdout).text()).trim())
     const last = join(opsDir, "ops-t6.last")
-    for (let i = 0; i < 30 && readFileSync(last, "utf8") !== "DEATH-reason"; i++)
-      await Bun.sleep(100)
-    expect(readFileSync(last, "utf8")).toBe("DEATH-reason")
+    const read = () => (existsSync(last) ? readFileSync(last, "utf8") : "")
+    for (let i = 0; i < 30 && read() !== "DEATH-reason"; i++) await Bun.sleep(100)
+    expect(read()).toBe("DEATH-reason")
     expect(await gone(leader)).toBe(true)
   })
 
