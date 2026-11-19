@@ -248,6 +248,7 @@ const cycle = async (
     login: boolean
     loginExit?: number
     probeUrl?: string
+    storedAge?: number
   },
 ) => {
   const home = join(scratch, name)
@@ -264,6 +265,21 @@ const cycle = async (
     "usage.keychainService": "made-up-service",
   }
   writeFileSync(join(ops, "beat.py"), beatModule(settings))
+  // a stored-login.json from an earlier run, its writtenAt by the OS clock run.py reads, which the clock-ahead pass leaves alone: a file's mtime gives it
+  if (opts.storedAge !== undefined) {
+    const stored = join(ops, "usage", "stored-login.json")
+    writeFileSync(stored, "{}")
+    const at = new Date(statSync(stored).mtimeMs - opts.storedAge * 60_000)
+    writeFileSync(
+      stored,
+      JSON.stringify({
+        account: "stored@example.org",
+        rate_limits: { seven_day: { resets_at: 4_000_000_000, used_percentage: 20 } },
+        source: "oauth/usage",
+        writtenAt: `${at.toISOString().slice(0, 19)}Z`,
+      }),
+    )
+  }
   if (opts.factory)
     writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
   const login = JSON.stringify({
@@ -351,7 +367,7 @@ test("an expired stored token writes stored-login-status.json with no loginEnded
     expired: true,
     login: true,
   })
-  expect(status).toMatchObject({ loginEnded: null })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: true })
   expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
   expect(stored).toBeNull()
 })
@@ -362,14 +378,51 @@ test("an ended stored login writes its reason to stored-login-status.json as log
     ended: true,
     login: true,
   })
-  expect(status).toMatchObject({ loginEnded: "time_limit" })
+  expect(status).toMatchObject({ loginEnded: "time_limit", tokenExpired: false })
   expect(beat.detail).toContain("stored login: LoginEnded: ")
 })
 
 test("a good stored read writes no loginEnded", async () => {
   const { status, stored } = await cycle("unexpired", { added: [], login: true })
-  expect(status).toMatchObject({ loginEnded: null })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: false })
   expect(stored.account).toBe("stored@example.org")
+})
+
+// #2863: the heartbeat fails once the stored login has read nothing for 15 minutes, so the board shows it, while another account's reading keeps usage.json fresh
+test("an expired stored token beats error after 15 minutes with no stored-login reading, naming the cause and the fix in 120 characters", async () => {
+  const { beat } = await cycle("expired-stale", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 20,
+  })
+  expect(beat.result).toMatch(
+    /^error: stored login read nothing for 2[01] min \(access token expired\); the owner's \/login brings it back$/,
+  )
+  expect(beat.result.length).toBeLessThanOrEqual(120)
+})
+
+test("an ended stored login's error line keeps its fix whole within 120 characters, however long it has read nothing", async () => {
+  const { beat } = await cycle("ended-stale", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    storedAge: 100_000,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+  expect(beat.result).toContain("login ended")
+  expect(beat.result).toEndWith("); the owner's /login brings it back")
+  expect(beat.result.length).toBeLessThanOrEqual(120)
+})
+
+test("an expired stored token whose last reading is under 15 minutes old still beats ok", async () => {
+  const { beat } = await cycle("expired-fresh", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 10,
+  })
+  expect(beat.result).toBe("ok")
 })
 
 test("with no account at all, the job beats waiting, not an error, and writes no usage.json", async () => {

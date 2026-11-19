@@ -614,6 +614,8 @@ describe("the capacity gate refuses and spawns nothing", () => {
     (
       opts: {
         ended?: string
+        expired?: boolean
+        listed?: boolean
         seat?: Seat
         statusAge?: number
         stored?: "missing" | number
@@ -628,15 +630,17 @@ describe("the capacity gate refuses and spawns nothing", () => {
         join(usageDir(home), "stored-login-status.json"),
         JSON.stringify({
           loginEnded: opts.ended ?? null,
+          tokenExpired: opts.expired ?? false,
           writtenAt: minutesAgo(opts.statusAge ?? 0),
         }),
       )
       const seat = opts.seat
-      if (seat)
+      if (seat || opts.listed !== undefined)
         writeFileSync(
           join(usageDir(home), "login-flip.json"),
           JSON.stringify({
-            seen: {
+            accounts: [opts.listed === false ? "factory@example.com" : "own@example.com"],
+            seen: seat && {
               "own@example.com": {
                 at: Date.now() / 1000 - (seat.readAge ?? 5) * 60,
                 ...(seat.five !== undefined && {
@@ -652,6 +656,8 @@ describe("the capacity gate refuses and spawns nothing", () => {
           }),
         )
     }
+  const expiredLine =
+    "its Claude Code access token has expired (stored-login-status.json tokenExpired), and Claude Code refreshes it only while it runs: opening Claude Code refreshes it, the owner's /login brings it back, and `playground accounts add` keeps a seat token for it"
   const seatLine =
     "--account own@example.com is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at 76% (login-flip.json seen)"
 
@@ -751,6 +757,9 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(r.code).toBe(0)
     expect(r.out).toContain(seatLine)
     expect(launchOf(r)).toContain("-a own@example.com -w")
+    expect(r.err).toContain(
+      "spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the playground-claude-oauth item for own@example.com",
+    )
   })
 
   test("a stale stored reading under the gate cannot pass a start its seat's fresh reading refuses", async () => {
@@ -814,6 +823,71 @@ describe("the capacity gate refuses and spawns nothing", () => {
       "the week is at 40% (ops/usage/stored-login.json seven_day.used_percentage)",
     )
     expect(r.security).toBeUndefined()
+  })
+
+  // #2863: the refusal names the expired access token, which run.py writes to stored-login-status.json as tokenExpired
+  test("with no seat item, an expired access token refuses the own login's --account start, naming the cause and the fix", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ FAKE_NO_ITEM: "1" }),
+      script,
+      undefined,
+      ownFiles({ expired: true, seat: { week: 20 } }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("--account own@example.com, this machine's own login: ")
+    expect(r.err).toContain(expiredLine)
+  })
+
+  test("an expired access token with no seen reading of the seat names the cause before the missing reading", async () => {
+    const r = await spawn(ownStart, [], ownEnv(), script, undefined, ownFiles({ expired: true }))
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(expiredLine)
+    expect(r.err).toContain(
+      "login-flip.json holds no seen reading of own@example.com to judge its seat token by",
+    )
+  })
+
+  test("a bare start's stale own login names its expired access token in the usage gate's line", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md"],
+      [],
+      { CLAUDE_JSON: ownLogin, PACE_OFF_UNTIL: offUntilUtc, USAGE_JSON: factoryUsage(99) },
+      script,
+      undefined,
+      ownFiles({ expired: true }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("the usage gate holds it: every login is over it:")
+    expect(r.err).toContain(
+      "ops/usage/stored-login.json was written 600 minutes ago (writtenAt), 15 is its limit. ",
+    )
+    expect(r.err).toContain(expiredLine)
+  })
+
+  test("a tokenExpired status over 15 minutes old names no cause, as a live login's stale reading", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ FAKE_NO_ITEM: "1" }),
+      script,
+      undefined,
+      ownFiles({ expired: true, statusAge: 20 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).not.toContain("tokenExpired")
+    expect(r.err).toContain("The ops-usage job writes it every 5 minutes; wait for its next run")
+  })
+
+  test("a seat ops-usage never probes, being in neither login-flip.json's accounts nor its pool, names usage.accounts, not a run to wait for", async () => {
+    const r = await spawn(ownStart, [], ownEnv(), script, undefined, ownFiles({ listed: false }))
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "ops-usage probes only the accounts login-flip.json lists, and it does not list own@example.com: add it to usage.accounts so login-flip lists it",
+    )
+    expect(r.err).not.toContain("ops-usage probes it every 14 minutes")
   })
 
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
