@@ -489,6 +489,30 @@ test("a card that does not read stays for the next night, and one the Inbox no l
   expect(gone.card).toBeUndefined()
 })
 
+// A card that reads as unread holds another night, and a second night in a row it is sent to Ops (PG-2958).
+test("a card unread a second night in a row sends Ops one line naming it, and the first night sends none", async () => {
+  const items = offered([here(image)], HOME, out, {})
+  const ask = async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" })
+  const first = await cardNight(
+    [here(image)],
+    HOME,
+    { card: { id: ID, items } },
+    { ...inbox().deps, ask },
+  )
+  expect(first.ops).toEqual([])
+  expect(first.card?.unread).toBe(1)
+  const second = await cardNight(
+    [here(image)],
+    HOME,
+    { card: first.card! },
+    { ...inbox().deps, ask },
+  )
+  expect(second.card?.unread).toBe(2)
+  expect(second.ops).toEqual([
+    `card ${ID} unread two nights in a row: ERR_POSTGRES_CONNECTION_REFUSED`,
+  ])
+})
+
 test("a card holds CARD_MAX questions at most, the largest first", () => {
   const many = Array.from({ length: CARD_MAX + 3 }, (_, i) => ({
     ...image,
