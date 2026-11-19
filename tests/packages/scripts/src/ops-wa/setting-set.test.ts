@@ -282,7 +282,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       alert: async () => ALERT,
       assistant: async () => undefined,
       busy: async () => false,
-      confirm: (text) => confirm(o.io, text),
+      confirm: (text, reaction) => confirm(o.io, text, reaction),
       dir: o.dir,
       inbox,
       log: () => {},
@@ -399,7 +399,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
     expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
   })
 
-  test("a reaction from the owner drops the waiting setting", async () => {
+  test("a reaction from the owner, a 👍 meant as yes included, sets nothing, tells the owner to reply yes, and the setting still waits", async () => {
     const o = owned()
     const h = watched(o)
     await asked(o, h)
@@ -411,9 +411,11 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       { ...h.fake.message(jid(OWNER), "", { id: "own2" }), message: { reactionMessage } },
     ])
     await h.settle()
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+    expect(o.told.at(-1)).toBe("not set: reply yes to set wa.guestPolicy")
     h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own3" })])
     await h.settle()
-    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+    expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
   })
 
   test("a value the owner's message only quotes is not held, so its id refuses", async () => {

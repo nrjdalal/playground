@@ -119,9 +119,17 @@ const answer = (text: string) =>
     .replace(/[.!]+$/, "")
 
 // The owner's next message after the question settles it: a yes within 10 minutes applies the waiting setting, and anything else, or a yes after 10 minutes, drops it; true when the message was a yes or a no, which goes no further, and false for any other, which goes on as before.
-export async function confirm(io: SettingSetIo, text: string): Promise<boolean> {
+export async function confirm(io: SettingSetIo, text: string, reaction?: string): Promise<boolean> {
   const pending = await readOwn<Partial<Pending>>(confirmFile(io.dir), {})
   if (!pending.key || !pending.id || pending.value === undefined) return false
+  // a reaction is no typed yes, so the question still waits, and an emoji, a 👍 meant as yes included, gets one line saying so
+  if (reaction !== undefined) {
+    if (reaction && io.now() - (pending.at ?? 0) < CONFIRM_MS)
+      await io
+        .tell(`not set: reply yes to set ${pending.key}`)
+        .catch((error: Error) => io.log(`ops-wa: the reaction line: ${error.message}`))
+    return false
+  }
   await writeOwn(confirmFile(io.dir), {})
   const said = answer(text)
   const late = io.now() - (pending.at ?? 0) >= CONFIRM_MS

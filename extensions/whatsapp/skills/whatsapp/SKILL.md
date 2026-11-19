@@ -63,6 +63,6 @@ Done when `wa send --to alert` prints `wa send: sent`, or the feature request's 
 
 Each owner text line names its message id. When the owner's own WhatsApp asks for a setting and writes its value, run `playground settings set <key> <value> --from-owner-msg <id>` with the value as the message spells it ([ADR 0035](../../../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks the message holds the value and writes the key itself.
 A key a guard reads waits for the owner's yes to ops-wa's own plain question on WhatsApp within 10 minutes, which ops-wa asks and reads alone, so leave the question out of your reply; any other key applies at once, and ops-wa sends the owner its undo.
-While that question waits and no card waits on its choices, the owner's next message settles it: a yes (`yes`, `y`, `yes do it`, `1`) or a `no` stays with ops-wa and never reaches you, and any other message drops the question and reaches you as usual.
+While that question waits and no card waits on its choices, the owner's next message settles it: a yes (`yes`, `y`, `yes do it`, `1`) or a `no` stays with ops-wa and never reaches you, a reaction leaves it waiting and ops-wa tells the owner to reply yes, and any other message drops the question and reaches you as usual.
 `wa.owner` and `wa.device` refuse here, since they name the WhatsApp that proves the owner; point the owner to the Settings card for them.
 Done when it prints `set <key>` with its undo or `asked the owner on WhatsApp to confirm`, or its refusal goes to the owner as the reply.

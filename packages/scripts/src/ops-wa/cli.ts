@@ -263,7 +263,7 @@ const main = async () => {
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
     check,
-    confirm: (text) => confirm(owned, text),
+    confirm: (text, reaction) => confirm(owned, text, reaction),
     dir,
     escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),

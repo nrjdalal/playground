@@ -81,7 +81,7 @@ export type Mode = {
   // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
   // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
-  confirm?: (text: string) => Promise<boolean>
+  confirm?: (text: string, reaction?: string) => Promise<boolean>
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
@@ -320,8 +320,9 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   }
   const reply = io.inbox && text ? replyOf(text) : null
   const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
-  // a bare number goes to a card waiting on its rows first, leaving a waiting setting as it is; any other owner message, a vote, photo, voice note, reaction or delete included, settles it
-  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? ""))) return
+  // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
+  const asked = reaction ? (reaction.text ?? "") : undefined
+  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? "", asked))) return
   if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   if (toCard) return answerCard(io, io.inbox!, reply!)
   // a line about another message names only that one's id, the one wa react --id takes
