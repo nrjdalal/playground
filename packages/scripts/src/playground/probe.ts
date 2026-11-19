@@ -254,7 +254,16 @@ export const prebuildQueued = (): boolean => {
   const runs = (read(join(dataDir(), "ops", "run-slot.runs.log")) ?? "").split("\n").slice(-3000)
   // the pid's own start is now minus parseEtime of its elapsed, and the file's own time its mtime, so a pid that started after the file that names it is another process that reused it and stepQueued reads it not queued
   const pid = (read(pidFile) ?? "").trim()
-  const fileMtime = pid ? statSync(pidFile).mtimeMs : 0
+  // the pid's own start is now minus parseEtime of its elapsed, and the file's own time its mtime, so a pid that started after the file that names it is another process that reused it and stepQueued reads it not queued
+  let fileMtime = 0
+  if (pid) {
+    try {
+      fileMtime = statSync(pidFile).mtimeMs
+    } catch {
+      // the supervisor's rm -f prebuild.pid can drop the file between the read and the stat, so a gone file reads not queued
+      return false
+    }
+  }
   const pidStart = pid ? Date.now() - parseEtime(etime(pid)) * 1000 : 0
   return stepQueued(pid || undefined, alive, runs, fileMtime, pidStart)
 }

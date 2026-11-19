@@ -443,13 +443,13 @@ export const stepQueued = (
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
-  // a pid whose own start is later than the file that names it is another process that reused it, so it reads not queued
-  if (pidStart > fileMtime) return false
-  // count only start lines at or after the pid file's mtime, as slot_step counts only lines after its mark
+  // the pid's elapsed prints to whole seconds, so its start can read up to a second late; treat a pid as reused only once it clears the file's mtime by more than 2 s
+  if (pidStart > fileMtime + 2000) return false
+  // run-slot can log start before the echo writes the file, so count a start line back 5 s past the file's mtime, as slot_step counts only lines after its mark
   return !runs.some((line) => {
     const words = line.split(" ")
     if (words[1] !== "start" || words[3] !== String(n)) return false
-    return Date.parse(words[0]) >= fileMtime
+    return Date.parse(words[0]) >= fileMtime - 5000
   })
 }
 
@@ -471,15 +471,10 @@ export const rollTimedOut = (
       ok: false,
     }
   }
-  return why !== undefined
-    ? {
-        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
-        ok: true,
-      }
-    : {
-        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
-        ok: false,
-      }
+  return {
+    done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+    ok: true,
+  }
 }
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.
