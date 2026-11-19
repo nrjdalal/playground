@@ -15,6 +15,7 @@ import {
   NOTICE,
   ownerReadAt,
   type Policy,
+  type Quiet,
   OFF,
   REPLY,
   sender,
@@ -73,6 +74,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     printedAt: undefined as number | undefined,
     // whether a decision's pin goes out, on in the pins' tests alone, so every other test reads its texts as they were
     pins: false,
+    // the quiet window as ops-wa reads it afresh, none unless a test sets one, so every other test sends as it did
+    quiet: undefined as Quiet | undefined,
   }
   let now = START
   fake.setClock(() => now)
@@ -88,11 +91,12 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       now += ms
     },
   }
-  const send = sender({ ...base, device: SPARE, sock: fake.sock })
+  const send = sender({ ...base, device: SPARE, quiet: async () => mode.quiet, sock: fake.sock })
   const watched = bridge({
     ...base,
     assistant: async () => mode.seat,
     busy: async () => mode.busy,
+    catchUp: send.catchUp,
     log: (line) => logs.push(line),
     on: async () => mode.on,
     relay: async (to: string, text: string, isData?: boolean) => {
@@ -102,7 +106,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (to === "dispatcher") relayed.push(text)
     },
     card: (text: string) => (mode.pins ? send.card(text) : send(text).then(() => undefined)),
-    draft: (body: string) => send.out(body, "reply").then((out) => out.ids),
+    draft: send.draft,
     pin: async (id: string, off?: boolean) => {
       if (mode.pins) await send.pin(id, off)
     },
@@ -2353,5 +2357,264 @@ describe("delivery and read receipts (#2868)", () => {
     expect(await kept(h.dir)).toHaveLength(1)
     expect(h.fake.sent).toHaveLength(before)
     expect(h.fake.calls).toEqual([])
+  })
+})
+
+describe("quiet hours (#2887)", () => {
+  const MIN = 60_000
+  const QUIET: Quiet = { end: 6, start: 0, zone: "UTC" }
+  // the chat starts at 03:00 UTC with the owner's message and ops-wa's m1, and the quiet window then runs from hour 0 to hour 6 UTC
+  const night = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    await h.send("sleep well")
+    h.mode.quiet = { ...QUIET }
+    return h
+  }
+  // the owner's read of ops-wa's m1, as WhatsApp's receipt brings it
+  const read = (h: Awaited<ReturnType<typeof night>>, at: number) => {
+    h.fake.emit("messages.update", [
+      {
+        key: { fromMe: true, id: "m1", remoteJid: jid(OWNER) },
+        update: { messageTimestamp: Math.floor(at / 1000), status: 4 },
+      },
+    ])
+    return h.settle()
+  }
+  const texts = (h: Awaited<ReturnType<typeof night>>) => h.fake.sent.map((s) => s.content.text)
+  const held = async (dir: string) =>
+    (
+      (await Bun.file(join(dir, "quiet.json"))
+        .json()
+        .catch(() => ({}))) as { held?: { at: number; body: string }[] }
+    ).held ?? []
+
+  test("inside the window, a message goes out while the owner read in the last hour", async () => {
+    const h = await night()
+    h.advance(90 * MIN)
+    await read(h, START + 60 * MIN)
+    expect(await h.send("the train is green")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("the train is green")
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("with the last read or reply 61 minutes back, a text is held in the owner's own file, and a poll or a file waits for the owner", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    expect(await h.send("the train is green")).toContain("held for quiet hours")
+    expect(h.fake.sent).toHaveLength(before)
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["the train is green"])
+    expect(statSync(join(h.dir, "quiet.json")).mode & 0o777).toBe(0o600)
+    await expect(h.send.poll("pick one", ["a", "b"])).rejects.toThrow("quiet hours")
+    await expect(
+      h.send("a spot", "reply", undefined, { location: { lat: 1.5, lon: 2.5 } }),
+    ).rejects.toThrow("quiet hours")
+    expect(h.fake.sent).toHaveLength(before)
+  })
+
+  test("a new read or reply opens the hour again, and the held texts go out first, as one catch-up", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("first")
+    await read(h, h.advance(0))
+    await h.pass()
+    expect(texts(h).at(-1)).toContain("first")
+    expect(await held(h.dir)).toEqual([])
+    h.advance(61 * MIN)
+    await h.send("second")
+    expect(texts(h).at(-1)).not.toContain("second")
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    expect(await h.send("third")).toBe("sent")
+    expect(texts(h).slice(-2)).toEqual([expect.stringContaining("second"), "third"])
+  })
+
+  test("the catch-up answers nothing, so the owner's message that set it off still goes to the assistant seat in 3 minutes", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("the train is green")
+    h.advance(MIN)
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    await h.pass()
+    expect(texts(h).at(-1)).toContain("the train is green")
+    h.advance(3 * MIN)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toContain(ASSISTANT)
+    expect(h.routed.at(-1)!.text).toContain("is it green?")
+  })
+
+  test("a decision card waits whole in quiet hours, and goes out with its poll and pin once the owner reads or writes", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.mode.pins = true
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    const poll = h.fake.sent.find((s) => s.content.poll)
+    expect(poll).toBeDefined()
+    expect(
+      h.fake.sent.some(
+        (s) => (s.content.pin as OwnKey | undefined)?.id === `m${h.fake.sent.indexOf(poll!) + 1}`,
+      ),
+    ).toBe(true)
+  })
+
+  test("a draft waits whole in quiet hours, unsent and unheld, and goes out once with its ids when the owner reads or writes", async () => {
+    const h = harness(inboxOf([draftCard(20)]).inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    expect(h.logs.join("\n")).not.toContain("draft")
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    await h.pass()
+    expect(texts(h).filter((t) => t === DRAFT_TEXT)).toHaveLength(1)
+    const { sent } = (await Bun.file(join(h.dir, "drafts.json")).json()) as {
+      sent: Record<string, { ref: number }>
+    }
+    expect(Object.values(sent).map((d) => d.ref)).toEqual([20])
+  })
+
+  test("a night of held statuses leaves the newest alone for the catch-up, and none counts as a send", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    const status = (body: string) => h.send(body, "reply", undefined, { status: true })
+    expect(await status("3 PRs in review")).toContain("held for quiet hours")
+    const answeredAt = h.advance(15 * MIN)
+    await h.send("the train is green")
+    h.advance(15 * MIN)
+    expect(await status("2 PRs in review")).toContain("held for quiet hours")
+    h.advance(15 * MIN)
+    expect(await status("1 PR in review")).toContain("held for quiet hours")
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["the train is green", "1 PR in review"])
+    const { sends } = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(sends).toEqual([answeredAt])
+    await read(h, h.advance(0))
+    await h.pass()
+    const catchUp = texts(h).at(-1)!
+    expect(catchUp).toContain("the train is green")
+    expect(catchUp).toContain("1 PR in review")
+    expect(catchUp).not.toContain("2 PRs in review")
+    expect(catchUp).not.toContain("3 PRs in review")
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("the held texts go out at the window's end as one catch-up message, oldest first", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("first")
+    h.advance(30 * MIN)
+    await h.send("second")
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    h.advance(2 * 60 * MIN)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before + 1)
+    const catchUp = texts(h).at(-1)!
+    expect(catchUp.startsWith("Held in quiet hours, oldest first:")).toBe(true)
+    expect(catchUp.indexOf("first")).toBeLessThan(catchUp.indexOf("second"))
+    expect(await held(h.dir)).toEqual([])
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before + 1)
+  })
+
+  test("an urgent alert goes out at 3 am with no activity", async () => {
+    const h = await night()
+    h.advance(24 * 60 * MIN)
+    expect(await h.send("ops-tick is down", "alert")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("ops-tick is down")
+  })
+
+  test("outside the window, a message goes out as before", async () => {
+    const h = await night()
+    h.advance(4 * 60 * MIN)
+    expect(await h.send("good morning")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("good morning")
+  })
+
+  test("the settings move the window: its hours and the owner's zone are read for each send", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    h.mode.quiet = { end: 2, start: 22, zone: "UTC" }
+    expect(await h.send("late hours")).toBe("sent")
+    h.mode.quiet = { ...QUIET, zone: "Asia/Kolkata" }
+    expect(await h.send("morning there")).toBe("sent")
+    h.mode.quiet = { end: 12, start: 9, zone: "Asia/Kolkata" }
+    expect(await h.send("held there")).toContain("held for quiet hours")
+    h.mode.quiet = { end: 0, start: 0, zone: "UTC" }
+    expect(await h.send("no window")).not.toContain("held")
+  })
+
+  test("the held texts are kept across a restart, and a new ops-wa sends them as the catch-up", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("kept through a restart")
+    const fake = fakeSocket()
+    let now = START + 3 * 60 * MIN
+    fake.setClock(() => now)
+    const again = sender({
+      dir: h.dir,
+      device: SPARE,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => QUIET,
+      random: () => 0.5,
+      sleep: async (ms: number) => void (now += ms),
+      sock: fake.sock,
+    })
+    await again.catchUp()
+    expect(fake.sent.map((s) => s.content.text)).toEqual([
+      expect.stringContaining("kept through a restart"),
+    ])
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("a restart inside the catch-up's typing wait keeps the held texts", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("kept through the wait")
+    const fake = fakeSocket()
+    const now = START + 7 * 60 * MIN
+    fake.setClock(() => now)
+    let waiting!: () => void
+    const reached = new Promise<void>((resolve) => (waiting = resolve))
+    // a wait that never ends, as a process stopped mid-wait never sends
+    const stopped = sender({
+      dir: h.dir,
+      device: SPARE,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => QUIET,
+      random: () => 0.5,
+      sleep: () => {
+        waiting()
+        return new Promise<void>(() => {})
+      },
+      sock: fake.sock,
+    })
+    void stopped.catchUp()
+    await reached
+    expect(fake.sent).toEqual([])
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["kept through the wait"])
   })
 })
