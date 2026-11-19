@@ -262,6 +262,7 @@ const main = async () => {
     alert,
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
+    card: send.card,
     check,
     confirm: (text, reaction) => confirm(owned, text, reaction),
     dir,
@@ -288,6 +289,7 @@ const main = async () => {
       )
     },
     owner,
+    pin: send.pin,
     // the policy lines are read afresh for each message, so the owner's set reaches a running ops-wa; settings that refuse leave the default
     policy: async () => {
       const read = await readPolicy(data)

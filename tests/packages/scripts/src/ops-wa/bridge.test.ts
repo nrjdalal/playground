@@ -70,6 +70,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     // whether the dispatcher's alerts-wait runs, and when it last handed over an alert, as its cursor's time
     waiter: true,
     printedAt: undefined as number | undefined,
+    // whether a decision's pin goes out, on in the pins' tests alone, so every other test reads its texts as they were
+    pins: false,
   }
   let now = START
   fake.setClock(() => now)
@@ -97,6 +99,10 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (mode.fails && text.includes(mode.fails)) throw new Error("the relay failed")
       routed.push({ text, to })
       if (to === "dispatcher") relayed.push(text)
+    },
+    card: (text: string) => (mode.pins ? send.card(text) : send(text).then(() => undefined)),
+    pin: async (id: string, off?: boolean) => {
+      if (mode.pins) await send.pin(id, off)
     },
     poll: send.poll,
     reply: send,
@@ -1208,6 +1214,153 @@ describe("an Inbox card as a poll (#2752)", () => {
     h.fake.upsert([h.fake.message(jid(OWNER), "1 #i12")])
     await h.settle()
     expect(ib.answers).toEqual([{ answer: { action: "approve" }, id: "id-12" }])
+  })
+})
+
+// The key of a message ops-wa sent, as a pin names it.
+type OwnKey = { fromMe: boolean; id: string; remoteJid: string }
+// The owner writes first, then one pass sends the cards with their pins on.
+const withPins = async (open: Card[], alert?: string) => {
+  const ib = inboxOf(open)
+  const h = harness(ib.inbox, undefined, alert)
+  h.mode.pins = true
+  h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+  await h.settle()
+  await h.pass()
+  const pins = () =>
+    h.fake.sent.flatMap((s) =>
+      s.content.pin
+        ? [{ ...s, content: s.content as { pin: OwnKey; time?: number; type: number } }]
+        : [],
+    )
+  const kept = async () =>
+    ((await Bun.file(join(h.dir, "pins.json")).json()) as { pins: { id: string; ref: number }[] })
+      .pins
+  const polls = () => h.fake.sent.flatMap((s) => (s.content.poll ? [s] : []))
+  const texts = () => h.fake.sent.flatMap((s) => s.content.text ?? [])
+  return { ...h, ...ib, kept, pins, polls, texts }
+}
+const idOf = (h: Awaited<ReturnType<typeof withPins>>, s: (typeof h.fake.sent)[number]) =>
+  `m${h.fake.sent.indexOf(s) + 1}`
+
+describe("an open decision stays pinned (#2847)", () => {
+  test("a decision's poll is pinned in the owner's chat for 7 days, a gap after it with no typing wait, and kept in pins.json at 600", async () => {
+    const h = await withPins([card(12)])
+    const poll = h.fake.sent.find((s) => s.content.poll)!
+    const [pin, ...more] = h.pins()
+    expect(more).toEqual([])
+    expect(pin!.jid).toBe(jid(OWNER))
+    expect(pin!.content).toEqual({
+      pin: { fromMe: true, id: idOf(h, poll), remoteJid: jid(OWNER) },
+      time: 604_800,
+      type: 1,
+    })
+    expect(pin!.at - poll.at).toBe(SEND.gapMs)
+    expect(await h.kept()).toMatchObject([{ id: idOf(h, poll), ref: 12 }])
+    expect(statSync(join(h.dir, "pins.json")).mode & 0o777).toBe(0o600)
+    const kept = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(kept.sends).toHaveLength(2)
+  })
+
+  test("an open decision stays pinned from pass to pass", async () => {
+    const h = await withPins([card(12)])
+    h.advance(HOUR)
+    await h.pass()
+    expect(h.pins()).toHaveLength(1)
+    expect(await h.kept()).toHaveLength(1)
+  })
+
+  const routes: [string, (h: Awaited<ReturnType<typeof withPins>>) => Promise<unknown>][] = [
+    ["a WhatsApp answer", (h) => say(h, "1 #i12")],
+    ["a WhatsApp vote", (h) => vote(h, ["2. Hold it"])],
+    ["an Inbox answer", async (h) => void (h.open[0]!.status = "denied")],
+    // a settle, an ack and a resolve each close the card, so it leaves the open list
+    ["an Inbox settle, an ack or a resolve", async (h) => void h.open.splice(0, 1)],
+  ]
+  for (const [route, settle] of routes)
+    test(`${route} takes the pin off on the next pass`, async () => {
+      const h = await withPins([card(12)])
+      const pinned = h.pins()[0]!.content.pin
+      await settle(h)
+      await h.settle()
+      expect(h.pins()).toHaveLength(1)
+      await h.pass()
+      expect(h.pins().map((p) => p.content)).toEqual([
+        { pin: pinned, time: 604_800, type: 1 },
+        { pin: pinned, type: 2 },
+      ])
+      expect(await h.kept()).toEqual([])
+    })
+
+  test("with WhatsApp mode off, a decision settled in the Inbox comes unpinned on the next pass, and nothing else goes", async () => {
+    const h = await withPins([card(12), card(13)])
+    const sent = h.fake.sent.length
+    const [first] = h.pins().map((p) => p.content.pin)
+    h.mode.on = false
+    h.open.splice(0, 1)
+    h.open.push(card(14))
+    await h.pass()
+    expect(h.fake.sent.slice(sent).map((s) => s.content)).toEqual([{ pin: first, type: 2 }])
+    expect((await h.kept()).map((p) => p.ref)).toEqual([13])
+    h.advance(HOUR)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(sent + 1)
+  })
+
+  test("with WhatsApp mode off and the owner's 24 hours past, a settled pin stays until the owner writes", async () => {
+    const h = await withPins([card(12)])
+    const sent = h.fake.sent.length
+    h.mode.on = false
+    h.open.splice(0, 1)
+    h.advance(25 * HOUR)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(sent)
+    expect(await h.kept()).toHaveLength(1)
+  })
+
+  test("a 4th decision takes the oldest pin off first, since WhatsApp keeps 3", async () => {
+    const h = await withPins([card(1), card(2), card(3), card(4)])
+    const polls = h.fake.sent.filter((s) => s.content.poll).map((s) => idOf(h, s))
+    expect(h.pins().map((p) => [p.content.pin.id, p.content.type])).toEqual([
+      [polls[0], 1],
+      [polls[1], 1],
+      [polls[2], 1],
+      [polls[0], 2],
+      [polls[3], 1],
+    ])
+    expect((await h.kept()).map((p) => p.ref)).toEqual([2, 3, 4])
+  })
+
+  test("an update asks nothing and takes no pin", async () => {
+    const h = await withPins([card(12, { kind: "update" }, { type: undefined })])
+    expect(h.pins()).toEqual([])
+  })
+
+  test("a decision whose poll failed pins its text", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.mode.pins = true
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (content.poll) throw new Error("made-up poll failure")
+      return real(to, content)
+    }
+    await h.pass()
+    const text = h.fake.sent.find((s) => s.content.text?.startsWith("*Card 12*"))!
+    const pin = h.fake.sent.find((s) => s.content.pin)!
+    expect((pin.content.pin as { id: string }).id).toBe(`m${h.fake.sent.indexOf(text) + 1}`)
+  })
+
+  test("the alert number's chat takes no pin", async () => {
+    const h = await withPins([card(12), card(13)], ALERT)
+    h.fake.upsert([h.fake.message(jid(ALERT), "hi")])
+    await h.settle()
+    await h.send("noted", "guest")
+    await h.pass()
+    expect(h.pins().length).toBeGreaterThan(0)
+    expect(h.pins().every((p) => p.jid === jid(OWNER))).toBe(true)
   })
 })
 
