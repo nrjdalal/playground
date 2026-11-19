@@ -286,6 +286,8 @@ const main = async () => {
         : { guest: DEFAULT_POLICY, reply: DEFAULT_POLICY }
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
+    card: send.card,
+    pin: send.pin,
     poll: send.poll,
     react: send.react,
     reply: send,
