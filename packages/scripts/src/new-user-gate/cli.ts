@@ -20,7 +20,8 @@ import { networkChangedWait } from "../agent-browser-retry"
 import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
-import { stubs, usageReading } from "./stubs"
+import { BOX_LABEL } from "./docker"
+import { GATE_LABEL, stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -221,7 +222,9 @@ const prep = (box: string, sha: string) => {
   mkdirSync(join(box, "stubs"), { recursive: true })
   mkdirSync(join(box, "shots"), { recursive: true })
   mkdirSync(home, { recursive: true })
-  for (const [name, text] of Object.entries(stubs(box, realBin("bunx"), realBin("curl")))) {
+  for (const [name, text] of Object.entries(
+    stubs(box, realBin("bunx"), realBin("curl"), realBin("docker")),
+  )) {
     writeFileSync(join(box, "stubs", name), text)
     chmodSync(join(box, "stubs", name), 0o755)
   }
@@ -375,6 +378,23 @@ export const boxContainers = (listed: string, name: string): string[] =>
     .map((line) => line.trim())
     .filter((c) => c.startsWith(`${name}-`) && /^[0-9a-zA-Z]{4}$/.test(c.slice(name.length + 1)))
 
+// Pure: step 2's FAIL detail when calls.log's text holds a call the box's docker refused (docker.ts), or null when it holds none.
+export const dockerRefusal = (calls: string): string | null => {
+  const refused = calls
+    .split("\n")
+    .filter((line) => line.startsWith("docker refused "))
+    .map((line) => line.slice("docker refused ".length))
+  return refused.length
+    ? `the box's docker refused ${refused.join("; ")}, a container or call the box did not make`
+    : null
+}
+
+// Pure: why the gate refuses to run from a checkout whose gate code is not the sha's, or null when it is: an older gate's box once reached the live dashboard's database.
+export const gateDrift = (diffCode: number, sha: string): string | null =>
+  diffCode === 0
+    ? null
+    : `this checkout's packages/scripts/src/new-user-gate/ differs from ${sha.slice(0, 7)}'s, so its box is not the one that sha ships; run the gate from a checkout at that sha: git worktree add --detach <dir> ${sha.slice(0, 7)}, bun install there, then bun run --cwd <dir> gate:new-user ${sha.slice(0, 7)}`
+
 // Pure: the POSTGRES_URL a dotenv file sets, or "" when it sets none.
 export const postgresUrl = (env: string): string =>
   (/^POSTGRES_URL=(.*)/m.exec(env)?.[1] || "").trim()
@@ -423,6 +443,7 @@ export const ownDatabaseVerdict = ({
   ports,
   saved,
   seeded,
+  refused,
 }: {
   error: string
   made: number
@@ -431,10 +452,14 @@ export const ownDatabaseVerdict = ({
   seeded: boolean
   port?: number
   ports?: number[]
+  refused?: string | null
 }): { detail: string; ok: boolean } => {
   // fail closed: with no live.container of its own the click would reuse the host's live database
   if (!seeded) {
     return { detail: `the box could not set its own live.container ${own}: ${error}`, ok: false }
+  }
+  if (refused) {
+    return { detail: `the box did not make its own database: ${refused}`, ok: false }
   }
   if (saved.ok && made === 0) {
     return {
@@ -607,7 +632,7 @@ const waitForRoom = async () => {
 }
 
 // Stops what the box started, each by its own handle: herdr's servers (whose panes run the ops jobs) through ops-herdr's own stop, the supervisor by the pid its job wrote, the dashboard's stack by the process groups procs.sh recorded, the box's proxy through portless on its own port, since a bare stop probes 443, 80 and 1355 and stops the machine's proxy there, and the gate's containers by the names its label lists.
-export const clean = (box: string, home: string, portless = PORTLESS) => {
+export const clean = (box: string, home: string, portless = PORTLESS, docker = "docker") => {
   const env = boxEnv(home)
   const desk = join(home, "playground", ".claude", "worktrees", "desk")
   const checkout = existsSync(desk) ? desk : join(home, "playground")
@@ -624,12 +649,17 @@ export const clean = (box: string, home: string, portless = PORTLESS) => {
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
+  const names = [GATE_LABEL, `${BOX_LABEL}=${basename(box)}`].flatMap((label) =>
+    run([docker, "ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
+      .out.split("\n")
+      .filter(Boolean),
+  )
   const own = boxContainers(
-    run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out,
+    run([docker, "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
   )
-  // the box starts its own containers with docker, so the clean removes those by name; the gate sets no label any more
-  for (const name of own) run(["docker", "rm", "-fv", name])
+  // the gate labels its own box's containers, so the clean removes those by label, plus the box's own containers by name
+  for (const name of [...names, ...own]) run([docker, "rm", "-fv", name])
   dropBox(box)
 }
 
@@ -658,6 +688,15 @@ const main = async (args: string[]) => {
   const full = run(["git", "rev-parse", `${fromTag ?? sha}^{commit}`], { cwd: REPO }).out.trim()
   if (!full) {
     console.error(`gate: ${sha} is no commit in this checkout`)
+    return 2
+  }
+  const drift = gateDrift(
+    run(["git", "diff", "--quiet", full, "--", "packages/scripts/src/new-user-gate"], { cwd: REPO })
+      .code,
+    full,
+  )
+  if (drift) {
+    console.error(`gate: ${drift}`)
     return 2
   }
   const keep = args.includes("--keep")
@@ -725,17 +764,20 @@ const main = async (args: string[]) => {
           } catch {}
         },
       )
-      const names = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      const made = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
+      const calls = join(box, "calls.log")
+      const refused = dockerRefusal(existsSync(calls) ? readFileSync(calls, "utf8") : "")
       const port = saved.ok ? urlPort(postgresUrl(readFileSync(env, "utf8"))) : NaN
-      const ports = names.flatMap((name) => hostPorts(run(["docker", "port", name, "5432"]).out))
+      const ports = made.flatMap((name) => hostPorts(run(["docker", "port", name, "5432"]).out))
       const verdict = ownDatabaseVerdict({
         error: "",
-        made: names.length,
+        made: made.length,
         own,
         saved,
         seeded: true,
         port,
         ports,
+        refused,
       })
       return {
         ...verdict,
