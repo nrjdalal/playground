@@ -274,11 +274,8 @@ if (command === "new" || command === "edit") {
   if (badProgress) fail(badProgress)
   // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720); the daily ledger card posts beside it
   if (command === "new") {
-    const refusal = progressCardRefusal(
-      input,
-      await inflightCard(db, org.ledger.title),
-      org.ledger.title,
-    )
+    const ledger = org.ledger.title
+    const refusal = progressCardRefusal(input, await inflightCard(db, ledger), ledger)
     if (refusal) fail(refusal)
   }
   // a draft with no link is a public post's, which goes out in the owner's own words alone (the public rule): scripts/hooks/public-draft.ts reads it with the leak guards' own finders, as a child

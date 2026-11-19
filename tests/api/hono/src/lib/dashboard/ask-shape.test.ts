@@ -468,7 +468,21 @@ describe("inflightOf", () => {
     })
   })
 
-  test("is null when the ledger card is the dispatcher's only progress card", () => {
+  test("is null when the ledger card is the dispatcher's only progress card, another poster's card never counting", () => {
     expect(inflightOf([item(9, "Ledger"), item(7, "Job", "worker-envy")], "Ledger")).toBeNull()
+  })
+
+  test("with the ledger card open, the dispatcher's own next card posts, and a second one after it is refused", () => {
+    const first = {
+      from: "dispatcher",
+      kind: "update",
+      preview: { outcome: "finding", text: "```progress\nMac reads | 40 | x | 1:00 pm\n```" },
+      title: "Job",
+    }
+    expect(
+      progressCardRefusal(first, inflightOf([item(9, "Ledger")], "Ledger"), "Ledger"),
+    ).toBeNull()
+    const open = inflightOf([item(10, "Job"), item(9, "Ledger")], "Ledger")
+    expect(progressCardRefusal({ ...first, title: "Other" }, open, "Ledger")).toContain("#i10")
   })
 })
