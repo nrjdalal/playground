@@ -474,6 +474,13 @@ def heavy_jobs(rows=None):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
         except (OSError, IndexError):
             pass
+    # owners is the holder and every pid up it, so `pid in owners` counts a run that is itself the holder or started it, never one that merely shares an ancestor with a holder
+    owners = set(holders)
+    for hpid in holders:
+        p, pp = hpid, parent.get(hpid)
+        while pp and pp not in ("0", "1") and pp not in owners:
+            owners.add(pp)
+            pp = parent.get(pp)
     jobs, seen = [], set()
     for pid, cmd in cmds.items():
         # the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper,
@@ -503,8 +510,8 @@ def heavy_jobs(rows=None):
         if (where, "dev" if "dev.ts" in cmd else "suite") in seen:
             continue
         seen.add((where, "dev" if "dev.ts" in cmd else "suite"))
-        # inside a slot when run-slot.sh (the holder pid) is one of its ancestors
-        jobs.append({"inside": bool(holders & set(chain)), "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
+        # inside a slot when the slot's holder is one of its ancestors, or the run itself is the holder or started it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
+        jobs.append({"inside": bool(holders & set(chain)) or pid in owners, "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
     return jobs
 
 
@@ -521,8 +528,8 @@ def heavy_cap():
 
 
 def slot_alerts(jobs, cap, at):
-    """outside-slot for a suite or build with no run-slot holder above it; a dev stack holds no slot (run-slot refuses `bun run dev`) and a
-    self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
+    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors, or the run itself is the holder or started the holder, as commit-slot.ts's pre-commit and pre-push
+    hold run-slot as a child; a dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
     alerts = []
     for j in jobs:
         if not j["inside"] and j["kind"] not in ("ci job", "dev stack"):
