@@ -7,8 +7,9 @@ install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
-                             back no job ops-restart stopped (packages/scripts/src/ops-restart); a start made START_WINDOW
-                             or less before the call is kept and logged, since another pass started the job after it stopped
+                             back no job ops-restart stopped (packages/scripts/src/ops-restart); a start made from START_WINDOW
+                             before the call on, one made while it waits on up.lock included, is kept and logged, since
+                             another pass started the job after it stopped
   up.py --sessions           list, never run, the commands that bring the factory's Claude sessions back
 
 Any other argument is refused with the usage line, exit 1, and runs no pass.
@@ -43,7 +44,7 @@ REGISTRY = (
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
-START_WINDOW = 10  # a start this close before a --restarted call came after the job stopped, from another pass, so that call keeps it
+START_WINDOW = 10  # a start this close before a --restarted call, or after it, came from another pass after the job stopped, so that call keeps it
 DOWN_PASSES = 3  # a launchd job unhealthy this many passes in a row is told to ops once, since launchd is not bringing it back
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid
