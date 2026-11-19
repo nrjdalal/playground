@@ -97,6 +97,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     assistant: async () => mode.seat,
     busy: async () => mode.busy,
     catchUp: send.catchUp,
+    remind: send.remind,
     log: (line) => logs.push(line),
     on: async () => mode.on,
     relay: async (to: string, text: string, isData?: boolean) => {
@@ -2570,5 +2571,71 @@ describe("quiet hours (#2887)", () => {
     await reached
     expect(fake.sent).toEqual([])
     expect((await held(h.dir)).map((m) => m.body)).toEqual(["kept through the wait"])
+  })
+})
+
+describe("the reminder before the owner's 24 hours close (#2905)", () => {
+  // the owner writes at 03:00 UTC, so 22 hours on is 01:00 UTC the next day and the window closes at 03:00
+  const opened = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "away for a while")])
+    await h.settle()
+    return h
+  }
+  const reminders = (h: Awaited<ReturnType<typeof opened>>) =>
+    h.fake.sent.flatMap((s) => s.content.text ?? []).filter((t) => t.includes("24 hours"))
+
+  test("at 22 hours one line asks for any reply, and none goes at 21 hours", async () => {
+    const h = await opened()
+    h.advance(21 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    expect(reminders(h)[0]).toContain("reply")
+  })
+
+  test("past 24 hours the window has closed, and no line goes", async () => {
+    const h = await opened()
+    h.advance(24 * HOUR + 60_000)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("a window gets one line alone, and the owner's next message opens a new window with its own", async () => {
+    const h = await opened()
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(30 * 60_000)
+    await h.pass()
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    h.fake.upsert([h.fake.message(jid(OWNER), "still here")])
+    await h.settle()
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(2)
+  })
+
+  test("at 22 hours inside quiet hours the line waits for their end while the window is open", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 2, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+  })
+
+  test("quiet hours that end after the window closes leave no line", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 6, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(3 * HOUR)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
   })
 })
