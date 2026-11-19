@@ -203,7 +203,7 @@ async function propose(io: SettingSetIo, key: string, value: string) {
     proposed: true,
     value,
   } satisfies Pending)
-  return `asked the owner on WhatsApp to confirm ${name}; it applies on their yes within ${CONFIRM_MS / 60_000} minutes, and a no or silence leaves it as it is`
+  return `asked the owner on WhatsApp to confirm ${name}; it applies on their yes within ${CONFIRM_MS / 60_000} minutes, and a no, any other typed message from the owner, or ${CONFIRM_MS / 60_000} minutes passing clears it`
 }
 
 // The owner's answers to the question: these apply, "no" drops it, and so does any other message
@@ -228,6 +228,14 @@ export const confirm = (
   reaction?: string,
   answered: Answered = {},
 ) => serial(() => settle(io, text, reaction, answered))
+
+// The owner's settings as ops-wa wires them, the socket's set and propose and the bridge's confirm, each passing every argument on, so cli.ts and the tests run one wiring
+export const ownerSettings = (io: SettingSetIo) => ({
+  confirm: (text: string, reaction?: string, answered?: Answered) =>
+    confirm(io, text, reaction, answered),
+  propose: (key: string, value: string) => settingPropose(io, key, value),
+  set: (id: string, key: string, value: string) => settingSet(io, id, key, value),
+})
 
 async function settle(
   io: SettingSetIo,

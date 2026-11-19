@@ -28,6 +28,7 @@ import {
   confirm,
   guarded,
   holds,
+  ownerSettings,
   settingPropose,
   settingSet,
   type SettingSetIo,
@@ -637,12 +638,14 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       })
       o.io.question = (line: string) => send.card(line)
       o.io.tell = (line: string) => send.out(line, "reply").then((out) => out.ids)
+      // the wiring cli.ts runs, so a dropped argument there fails here
+      const settings = ownerSettings(o.io)
       const relayed: string[] = []
       const w = bridge({
         alert: async () => ALERT,
         assistant: async () => undefined,
         busy: async () => false,
-        confirm: (text, reaction, answered) => confirm(o.io, text, reaction, answered),
+        confirm: settings.confirm,
         dir: o.dir,
         log: () => {},
         now: o.io.now,
@@ -685,7 +688,7 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       }
       await says("hi")
       const question = async () => {
-        await settingPropose(o.io, "wa.guestPolicy", "status only")
+        await settings.propose("wa.guestPolicy", "status only")
         return `m${fake.sent.length}`
       }
       return { fake, question, reacts, relayed, says, send }
