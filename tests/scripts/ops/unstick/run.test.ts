@@ -1425,6 +1425,48 @@ describe("ops-unstick's slot alerts", () => {
     "  999443 999442 bun run test:file tests/AGENTS.test.ts /x/.claude/worktrees/pg-334-x",
   ]
 
+  // pre-push's tree as ps shows it: commit-slot.ts holds the commit slot by spawning run-slot.sh, which then runs bun run test:skills
+  const committingHook = () => [
+    `  999471      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check`,
+    "  999472 999471 bash /x/.playground/ops/run-slot.sh commit-PG-2831-commit-slot-check -- bun run test:skills",
+    "  999473 999472 bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check",
+  ]
+  // the commit slot's holder as run-slot.sh writes it, its own pid the child that holds the slot, under the slot name commit-slot.ts acquires
+  const committingHookSlot = () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot-commit"), { recursive: true })
+    writeFileSync(
+      join(ops, "run-slot-commit.holder"),
+      "commit-PG-2831-commit-slot-check 999472 2026-11-01T13:00:00Z 1 small\n",
+    )
+    return config
+  }
+
+  // a pre-push run with no commit slot above it is still outside-slot, its own pid never counts it as inside a slot
+  test("a pre-push run with no commit slot above it is outside-slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", committingHook())
+    expect(jobs).toEqual([
+      { inside: false, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+      {
+        at,
+        kind: "outside-slot",
+        line: `a suite runs outside the run slots (pid 999471); use run-slot.sh`,
+        name: "PG-2831-commit-slot-check",
+        since: at,
+      },
+    ])
+  })
+
+  // a heavy run that commit-slot.ts started, under the commit slot's holder, reads inside a slot, not outside
+  test("a pre-push run under the commit slot's holder reads inside a slot", async () => {
+    expect(await call(committingHookSlot(), "heavy_jobs", committingHook())).toEqual([
+      { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+  })
+
   for (const slot of ["run-slot-commit", "run-slot-model-2"])
     test(`a suite under ${slot}'s holder reads as inside a slot`, async () => {
       expect(await call(held(slot), "heavy_jobs", committing("999441"))).toEqual([
