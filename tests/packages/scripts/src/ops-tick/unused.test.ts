@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   truncateSync,
   utimesSync,
   writeFileSync,
@@ -467,4 +468,22 @@ test("shardSets: an unsharded gguf and an image pass through unchanged, largest 
     { bytes: 5 * GB, id: "sha256:aaa", kind: "image", path: "docker image x:1", recorded: false },
     { bytes: 4 * GB, kind: "weights", path: `${stem}/separate.gguf`, recorded: false },
   ])
+})
+
+test("a sharded model's four loose shards under models/ are one item end to end: measureUnused reads the whole set at its total, each shard path carried", async () => {
+  const { models, places } = setUp()
+  const stem = join(models, "models--nvidia--Qwen-27B-shards")
+  const shards = ["00001", "00002", "00003", "00004"].map((n) => `${stem}-${n}-of-00004.gguf`)
+  // One shard under 100 MiB by its stated size, the rest 200 MiB, so the set reads at its whole total.
+  sized(shards[0]!, 10 * MB)
+  shards.slice(1).forEach((p) => sized(p, 200 * MB))
+  const { items } = await measureUnused(places)
+  const sharded = items.find((i) => i.kind === "weights" && Array.isArray(i.shards))
+  expect(sharded).toEqual({
+    bytes: shards.reduce((sum, p) => sum + statSync(p).size, 0),
+    kind: "weights",
+    path: shards[0]!,
+    recorded: false,
+    shards,
+  })
 })

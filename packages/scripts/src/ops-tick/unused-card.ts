@@ -56,15 +56,20 @@ export const questionOf = (item: CardItem): string =>
 
 const QUESTION = /^Remove `(.+)` on ([A-Za-z0-9._-]+), (\d+) bytes \([\d.]+ GB\)\?$/
 
-// A sharded set's note, so its line names the model's file stem and the shard count: the number of shards, the set's total, and the file's stem.
+// A sharded set's note. A whole set reads "N of N shards"; a set missing a shard names each shard number that is present.
 const shardedNote = (item: CardItem): string => {
-  const total = Number(/-\d{5}-of-(\d{5})\.(gguf|safetensors)$/.exec(item.path)?.[1] ?? 0)
+  const total = /-\d{5}-of-(\d{5})\.(gguf|safetensors)$/.exec(item.path)?.[1] ?? "0"
   const stem =
     item.path
       .replace(/-\d{5}-of-\d{5}\.(gguf|safetensors)$/, "")
       .split(sep)
       .at(-1) ?? ""
-  return ` ${item.shards!.length} of ${total} shards, ${stem}`
+  // The shard numbers that are present, read from each shard path, smallest first.
+  const present = [...item.shards!].map((p) => /-(\d{5})-of-/.exec(p)?.[1] ?? "").sort()
+  const complete = present.length === Number(total) && present.every((n, i) => Number(n) === i + 1)
+  return complete
+    ? ` ${present.length} of ${Number(total)} shards, ${stem}`
+    : ` shards ${present.join(", ")} of ${total}, ${stem}`
 }
 
 const removeRow = (item: CardItem) => ({
