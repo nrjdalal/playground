@@ -13,10 +13,16 @@ export type YardIo = {
   launch: () => Promise<Launch>
   out: (line: string) => void
   readRecord: () => Promise<string | undefined>
+  schemaCleared: (value: string) => Promise<SchemaSource | null>
   status: (url: string) => Promise<number>
   worktree: (tag: string) => Promise<string>
   writeRecord: (tag: string) => Promise<void>
 }
+
+// A --schema-cleared value's source: #iN an Inbox decision the owner approved, PR#N a merged PR with a shape review and a dump path. A null read fails the step closed.
+export type SchemaSource =
+  | { approved: boolean; kind: "decision" }
+  | { dumpPath?: string; kind: "pr"; merged: boolean; shapeReview: boolean }
 
 // The call's launch, as the claude process it runs under was started: that process's PLAYGROUND_ROLE, the roster's kind for its session's registry name, and what the walk found.
 export type Launch = { found: string; kind?: string; role?: string }
@@ -92,11 +98,40 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
   // step 4 makes the tag on GitHub alone, so the step fetches both tags before it reads them
   await io.fetch([since, args.tag])
   const schema = schemaChanges(await io.changed(since, args.tag))
-  if (schema.length && !args.schemaCleared) {
+  if (!schema.length) {
+    // the tag changes no schema or migration, so the step continues either way
+  } else if (!args.schemaCleared) {
     io.err(
-      `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0 first, then run again with --schema-cleared <Inbox id> naming that decision`,
+      `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path)`,
     )
     return 1
+  } else if (!/^#i\d+$/.test(args.schemaCleared) && !/^PR#\d+$/.test(args.schemaCleared)) {
+    io.err(
+      `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path); run it again naming one`,
+    )
+    return 1
+  } else {
+    const source = await io.schemaCleared(args.schemaCleared)
+    if (!source) {
+      const decision = /^#i\d+$/.test(args.schemaCleared)
+      io.err(
+        `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path in its body`,
+      )
+      return 1
+    }
+    if (source.kind === "decision") {
+      if (!source.approved) {
+        io.err(
+          `ship:yard: ${args.schemaCleared} is an open or denied Inbox decision, so it does not clear the schema ${args.tag} changes; take it through step 0, then run again once the owner has approved it`,
+        )
+        return 1
+      }
+    } else if (!source.merged || !source.shapeReview || !source.dumpPath) {
+      io.err(
+        `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path in its body`,
+      )
+      return 1
+    }
   }
   const dir = await io.worktree(args.tag)
   try {
@@ -129,7 +164,7 @@ const KEYS = [
   "YARD_WEB_URL",
 ] as const
 
-const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <Inbox id>]
+const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <#iN | PR#N>]
 
 Deploys the hosted Yard from <tag>, the ship's tag: its API, then its web, each with
 vercel deploy --prod from a detached worktree at the tag, fetched from origin, checking
@@ -138,8 +173,7 @@ token), then records the tag in the data folder's ops/yard-tag and removes the w
 It runs under the Ops lead's claude process alone (its PLAYGROUND_ROLE lead, the roster's
 ops kind), read from that process and never this call's environment. It stops
 when the tag changes packages/db's schema or migrations since the recorded tag, until
---schema-cleared names the db-migration step 0 decision, and with no record until
---since names the tag live now.
+--schema-cleared names a good source, either #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path in its body (the additive path), and with no record until --since names the tag live now.
 The ids and hosts come from the environment, else the live dashboard checkout's .env:
 ${KEYS.join(", ")}.`
 
@@ -226,6 +260,55 @@ if (import.meta.main) {
       fetch(url, { redirect: "manual", signal: AbortSignal.timeout(30_000) })
         .then((response) => response.status)
         .catch(() => 0),
+    // A PR reads its verdict, merge state and body through gh; a decision reads its status through the Inbox reader playground ask uses. A read that fails returns null, so the step fails closed.
+    schemaCleared: async (value) => {
+      const pr = /^PR#(\d+)$/.exec(value)
+      if (pr) {
+        const ran = Bun.spawnSync(["gh", "pr", "view", pr[1]!, "--json", "state,comments,body"], {
+          stderr: "pipe",
+          stdout: "pipe",
+        })
+        if (ran.exitCode !== 0) return null
+        try {
+          const data = JSON.parse(ran.stdout.toString()) as {
+            body?: string
+            comments?: { author?: { login?: string }; body?: string }[]
+            state?: string
+          }
+          const shapeReview = (data.comments ?? []).some(
+            (comment) =>
+              comment.author?.login === "ReviewBot" && /shape review/i.test(comment.body ?? ""),
+          )
+          const dump = /[\w./-]+\.(?:sql|dump)\b/.exec(data.body ?? "")
+          return {
+            kind: "pr",
+            merged: data.state === "MERGED",
+            shapeReview,
+            dumpPath: dump ? dump[0] : undefined,
+          }
+        } catch {
+          return null
+        }
+      }
+      const decision = /^#i(\d+)$/.exec(value)
+      if (decision) {
+        // the decision's status comes through the Inbox reader the live dashboard checkout runs; no checkout, no read, so the step fails closed
+        if (!live) return null
+        const ran = Bun.spawnSync(["bun", "run", "ask", "get", decision[1]!], {
+          cwd: live,
+          stderr: "pipe",
+          stdout: "pipe",
+        })
+        if (ran.exitCode !== 0) return null
+        try {
+          const data = JSON.parse(ran.stdout.toString()) as { status?: string }
+          return { kind: "decision", approved: data.status === "approved" }
+        } catch {
+          return null
+        }
+      }
+      return null
+    },
     worktree: async (at) => {
       const dir = join(worktrees, `yard-ship-${at}`)
       const sha = git(["rev-parse", `${at}^{commit}`]).trim()

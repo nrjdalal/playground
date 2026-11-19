@@ -10,6 +10,7 @@ import {
   opsLaunch,
   type Project,
   schemaChanges,
+  type SchemaSource,
   shipYard,
   type YardArgs,
   type YardIo,
@@ -23,6 +24,7 @@ type Fake = {
   deploys?: Partial<Record<Project, boolean>>
   launch?: Launch
   record?: string
+  schemaCleared?: (value: string) => Promise<SchemaSource | null>
   statuses?: Record<string, number>
 }
 
@@ -51,6 +53,7 @@ const fake = (set: Fake = {}) => {
       set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
     readRecord: async () => record,
+    schemaCleared: async (value) => set.schemaCleared?.(value) ?? Promise.resolve(null),
     status: async (url) => {
       calls.push(`status ${url}`)
       return (
@@ -151,13 +154,90 @@ describe("ship:yard's schema stop", () => {
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
-  test("--schema-cleared naming the decision lets the step go on", async () => {
+  test("--schema-cleared #iN, the owner's approved decision, clears the schema", async () => {
     const { calls, code } = await run(
-      { schemaCleared: "i123" },
-      { changed: SCHEMA, record: "v0.0.110" },
+      { schemaCleared: "#i123" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123" ? { approved: true, kind: "decision" } : Promise.resolve(null),
+      },
     )
     expect(code).toBe(0)
     expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared #iN, an open or denied decision, refuses", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "#i123" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123" ? { approved: false, kind: "decision" } : Promise.resolve(null),
+      },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is an open or denied Inbox decision")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a merged PR with a shape review and a dump path clears the schema", async () => {
+    const { calls, code } = await run(
+      { schemaCleared: "PR#456" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "PR#456"
+            ? { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: true }
+            : Promise.resolve(null),
+      },
+    )
+    expect(code).toBe(0)
+    expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared a PR missing the merge, the review, or the dump refuses", async () => {
+    for (const source of [
+      { dumpPath: "db.dump", kind: "pr", merged: false, shapeReview: true },
+      { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: false },
+      { dumpPath: undefined, kind: "pr", merged: true, shapeReview: true },
+    ] as SchemaSource[]) {
+      const { calls, code, out } = await run(
+        { schemaCleared: "PR#456" },
+        {
+          changed: SCHEMA,
+          record: "v0.0.110",
+          schemaCleared: () => Promise.resolve(source),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+  })
+
+  test("--schema-cleared a free string refuses, naming both valid forms", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "i123" },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("one of two forms: #iN")
+    expect(out()).toContain("PR#N")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a valid form the source cannot read refuses, so the step fails closed", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "#i123" },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is not readable")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
   test("only the schema and the migrations count", () => {
