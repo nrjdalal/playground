@@ -40,7 +40,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, checkout, factory_login, setting  # noqa: E402
+from beat import beat, checkout, factory_login, has_token, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -330,7 +330,7 @@ while True:
         write(os.path.join(OPS, "alerts-usage.json"), {"alerts": out, "writtenAt": data["writtenAt"]})
     five = data and data["rate_limits"].get("five_hour", {}).get("used_percentage")
     detail = f"{data['account']}: 5h {'none' if five is None else f'{five}%'}, 7d {data['rate_limits'].get('seven_day', {}).get('used_percentage')}%" if data else ""
-    # a missing factory reading fails, and so does a stored login that has read nothing for 15 minutes, by stored-login.json's writtenAt or else this run's start, since an --account start on it waits on that reading; one with no Claude Code login at all (NoLogin) keeps the beat it had. The cause is cut so the fix fits beat.py's 120 characters
+    # a missing factory reading fails, and so does a stored login that has read nothing for 15 minutes, by stored-login.json's writtenAt or else this run's start, since an --account start on it waits on that reading, but while its seat token carries it (below); one with no Claude Code login at all (NoLogin) keeps the beat it had. The cause is cut so the fix fits beat.py's 120 characters
     try:
         last = json.load(open(STORED))["writtenAt"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -339,9 +339,21 @@ while True:
         quiet = int((time.time() - datetime.datetime.fromisoformat(str(last).replace("Z", "+00:00")).timestamp()) // 60)
     except ValueError:
         quiet = 0
-    if failed is not None and not no_login and quiet >= 15:
+    quiet_stored = failed is not None and not no_login and quiet >= 15
+    cause = ("access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}") if quiet_stored else None
+    # a quiet stored login whose seat token login-flip.json's seen read fresh (via token, under 60 minutes, its item still in the Keychain) runs every start on that token, the probe spawn.sh's seat start reads, so the beat stays ok and its detail names the login; another failing reading then beats its own error, the stored login's problem left to the detail
+    seat = None
+    if quiet_stored:
+        try:
+            own = json.load(open(STORED)).get("account")
+        except (OSError, ValueError, AttributeError):
+            own = None
+        entries = (flip_file() or {}).get("seen")
+        s = next((r for a, r in entries.items() if isinstance(a, str) and a.lower() == own.lower() and isinstance(r, dict)), None) if isinstance(own, str) and isinstance(entries, dict) else None
+        if s and s.get("via") == "token" and isinstance(s.get("at"), (int, float)) and time.time() - s["at"] < 3600 and has_token(own, SERVICE):
+            seat = f"{own}'s stored login reads nothing ({cause}), so it runs on its seat token, read {int((time.time() - s['at']) // 60)} min ago"
+    if quiet_stored and not seat:
         fix = "; the owner's /login brings it back" if isinstance(failed, (LoginEnded, TokenExpired)) else ""
-        cause = "access token expired" if isinstance(failed, TokenExpired) else f"login ended: {failed.reason}" if isinstance(failed, LoginEnded) else f"{type(failed).__name__}: {failed}"
         head = f"error: stored login read nothing for {quiet} min ("
         result = head + cause[: 120 - len(head) - len(fix) - 1] + ")" + fix
     elif data and not any(p.startswith("factory") for p in problems):
@@ -349,12 +361,15 @@ while True:
     elif no_login and not FACTORY and len(problems) == 1:
         result = "waiting: no Claude account yet; add one in the Dashboard"
     else:
-        result = ("error: " + "; ".join(problems))[:120]
-    # the stored login's error takes the result, so the cycle's other problems stay in the detail, with or without a reading
-    if problems and (data or result.startswith("error: stored login")):
+        rest = [p for p in problems if not (seat and p.startswith("stored login:"))]
+        result = ("error: " + "; ".join(rest))[:120] if rest else "ok"
+    # the stored login's error takes the result, or the seat token carries it out of the result, so the cycle's problems stay in the detail, with or without a reading
+    if problems and (data or seat or result.startswith("error: stored login")):
         detail = (detail + " (" + "; ".join(problems)[:200] + ")").strip()
     # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
     if cost_problem:
         detail += f" ({cost_problem})"
+    if seat:
+        detail = f"{seat}. {detail}".strip()
     beat("ops-usage", os.getpid(), STARTED, CYCLE, result, {"detail": detail})
     time.sleep(CYCLE)
