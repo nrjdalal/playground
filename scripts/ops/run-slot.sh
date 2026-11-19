@@ -19,9 +19,11 @@ ARGS=("$@")
 # LANES is capacity()'s one lanes verdict for a count (lanes_now), and HELD5 its one load5 verdict (load5_held), so a value from the caller's env would steer every slot check outside a count
 unset LANES HELD5
 # a waiter that runs a newer copy hands it its first ask's time, so the runs log has one ask and the whole wait; the command never sees it
+# the clock this call reads once: its seconds feed ASKED and every age the read path, its ISO form the switch lines (issue 2852: the read loop ran a `date` per switch and per slot field, so a head at load took a second or more)
+now=$(date -u +%s' '%FT%TZ); NOW=${now%% *}; NOW_ISO=${now#* }
 REREAD=""
 case "${RUN_SLOT_ASKED:-}" in
-  ''|*[!0-9]*) ASKED=$(date +%s) ;;
+  ''|*[!0-9]*) ASKED=$NOW ;;
   *) ASKED=$RUN_SLOT_ASKED; REREAD=1 ;;
 esac
 unset RUN_SLOT_ASKED
@@ -39,6 +41,9 @@ unset RUN_SLOT_ASK_STAMP
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/null; }
 STAMP=$(stamp "$SELF")
+# the clock this call takes once, reused for every age the read path (issue 2852: the read loop ran a `date` per switch and per slot field, so a head at load took a second or more); switch_on, stale and the reads reuse these instead
+NOW=$(date +%s)
+NOW_ISO=$(date -u +%FT%TZ)
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
 SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
@@ -49,14 +54,14 @@ switch_on() {
   line=$(head -n 1 "$f" 2>/dev/null)
   switch_ends "$1"
   ends=$ENDS
-  now=$(date -u +%FT%TZ)
+  now=$NOW_ISO
   if [ -n "$ends" ]; then
     [[ "$now" < "$ends" ]] && return 0
   else
-    m=$(mtime "$f" || date +%s)
+    m=$(mtime "$f" || printf '%s' "$NOW")
     # an mtime that reads back empty counts as the file gone, rather than as a shell error (4 Nov: the same read in stale printed "syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - m )) -lt 14400 ] && return 0
+    [ $(( NOW - m )) -lt 14400 ] && return 0
   fi
   mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
@@ -105,10 +110,11 @@ stale() {
   if printf '%s' "$pid" | grep -Eq '^[0-9]+$'; then
     ! alive "$pid"
   else
-    m=$(mtime "$1.holder" || mtime "$1" || date +%s)
+    # a caller that read the holder's mtime this pass hands it as $3, so stale takes no stat or date of its own; the read path passes the file's mtime once, no per-field read (issue 2852)
+    if [ "$#" -ge 3 ]; then m=$3; else m=$(mtime "$1.holder" || mtime "$1" || printf '%s' "$NOW"); fi
     # an mtime that reads back empty counts as young, rather than as a shell error (4 Nov: "<epoch> -  : syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - m )) -ge 7200 ]
+    [ $(( NOW - m )) -ge 7200 ]
   fi
 }
 # a setting's value as JSON, as the settings reader in this script's checkout prints it, its default on a machine with no extensions; a reader that cannot answer says why on stderr
