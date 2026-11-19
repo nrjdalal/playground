@@ -242,6 +242,7 @@ const cycle = async (
   name: string,
   opts: {
     added: string[]
+    expired?: boolean
     factory?: string
     login: boolean
     loginExit?: number
@@ -265,7 +266,10 @@ const cycle = async (
   if (opts.factory)
     writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
   const login = JSON.stringify({
-    claudeAiOauth: { accessToken: "made-up", expiresAt: 4_000_000_000_000 },
+    claudeAiOauth: {
+      accessToken: "made-up",
+      expiresAt: opts.expired ? 1_000_000_000_000 : 4_000_000_000_000,
+    },
   })
   writeFileSync(
     join(stubs, "security"),
@@ -289,6 +293,8 @@ const cycle = async (
   return {
     alerts: read("ops/alerts-usage.json"),
     beat: read("ops/beat.json"),
+    status: read("ops/usage/stored-login-status.json"),
+    stored: read("ops/usage/stored-login.json"),
     usage: read("usage.json"),
   }
 }
@@ -323,6 +329,24 @@ test("with Claude Code's own login alone, usage.json holds its reading, as befor
   const { beat, usage } = await cycle("login-only", { added: [], login: true })
   expect(beat.result).toBe("ok")
   expect(usage.account).toBe("stored@example.org")
+})
+
+// #2863: spawn.sh lets one start through on the own login's stale reading only while this file says its token expired, so it never reads the Keychain itself
+test("an expired stored token is written to stored-login-status.json, and stored-login.json keeps its last reading", async () => {
+  const { status, stored } = await cycle("expired", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ tokenExpired: true })
+  expect(Date.now() - Date.parse(status.writtenAt)).toBeLessThan(60_000)
+  expect(stored).toBeNull()
+})
+
+test("a good stored read writes tokenExpired false", async () => {
+  const { status, stored } = await cycle("unexpired", { added: [], login: true })
+  expect(status).toMatchObject({ tokenExpired: false })
+  expect(stored.account).toBe("stored@example.org")
 })
 
 test("with no account at all, the job beats waiting, not an error, and writes no usage.json", async () => {
