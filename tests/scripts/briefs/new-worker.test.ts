@@ -75,7 +75,7 @@ test("the worker template starts in the worktree and gives every file tool its a
   const stepLine = standing.split("\n").find((l) => l.includes("Start in your worktree")) ?? ""
   expect(stepLine).toContain("`cd <worktree>` before any other command")
   expect(stepLine).toContain("`<worktree>` the worktree's absolute path")
-  const fileLine = standing.split("\n").find((l) => l.startsWith("- Give every file tool")) ?? ""
+  const fileLine = standing.split("\n").find((l) => l.startsWith("Give every file tool")) ?? ""
   expect(fileLine).toContain(
     "Give every file tool (Edit, Write, Read) the worktree's absolute path",
   )
