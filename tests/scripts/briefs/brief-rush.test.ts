@@ -96,3 +96,15 @@ describe("brief-rush.md's GLM rule pins the bundled-code check for a local or GL
     expect(line).toContain("a local session")
   })
 })
+
+// issue 2864: a local session reads a file over 300 lines only by grep then sed of at most 80 lines around each hit, never whole, since one read filled its 120k window reading three such files whole and then hung in compaction
+describe("brief-rush.md's local-model rule reads a long file by grep then sed, never whole (#2864)", () => {
+  test("a local session reads over 300 lines only by grep -n, then sed -n of at most 80 lines around each hit, never whole", async () => {
+    const rush = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = rush.split("\n").find((l) => l.startsWith("- Local model rule:")) ?? ""
+    expect(line).toContain("over 300 lines only by `grep -n`")
+    expect(line).toContain("sed -n` of at most 80 lines around each hit")
+    expect(line).toContain("never whole")
+    expect(line).toContain("120k window in about 25 minutes")
+  })
+})
