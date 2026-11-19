@@ -584,6 +584,7 @@
   or a code block other than a `diff` or `progress` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   `bun run ask new` and `ask edit` refuse an ask's or a read-only update's `progress` block whose line holds other than 4 or 5 fields, a percent outside 0 to 100 or a state none of the four, naming the block, the line and its words, and post nothing (`progressRefusal` in `api/hono/src/lib/dashboard/ask-shape.ts`).
   a `progress` block is the dispatcher's one in-flight card, so `ask new` refuses a second of it: a non-dispatcher's card, or the dispatcher's own card a second time, a different title, naming the open one, while `ask edit` carries the dispatcher's card to its end, so a job keeps one card (`progressCardRefusal`, PG-2720).
+  the daily ledger card posts beside it: a dispatcher card whose title is the ledger prefix (`PLAYGROUND_LEDGER_TITLE`, Firefighting, stack.md's org rule) alone or followed by `: ` and a day passes, and is never the in-flight card (`isLedgerTitle`, `inflightOf` in `api/hono/src/lib/dashboard/inbox.ts`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
