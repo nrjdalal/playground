@@ -327,7 +327,21 @@ describe("wa send's structure (#2799)", () => {
       [jid(OWNER), { edit: key, linkPreview: null, text: "the board is green" }],
       [jid(OWNER), { delete: key }],
     ])
-    expect((await h.sender.out("", "reply", { delete: "m1" })).ids).toEqual([])
+  })
+
+  test("a delete takes its message out of own.json and ours.json, so a second delete or an edit of it is refused (#2899)", async () => {
+    const h = await harness()
+    await h.sender("the board is green", "reply")
+    expect(await h.sender("", "reply", { delete: "m1" })).toBe("sent")
+    await expect(h.sender("", "reply", { delete: "m1" })).rejects.toThrow(
+      "message m1 is not one ops-wa sent to the owner, so it cannot be deleted",
+    )
+    await expect(h.sender("the board is red", "reply", { edit: "m1" })).rejects.toThrow(
+      "message m1 is not one ops-wa sent to the owner, so it cannot be edited",
+    )
+    expect((await Bun.file(join(h.dir, "own.json")).json()).messages).toEqual([])
+    expect((await Bun.file(join(h.dir, "ours.json")).json()).messages).toEqual([])
+    expect(h.fake.sent).toHaveLength(2)
   })
 
   test("an edit gives the edited message its new words in ours.json, so a reaction on it reads them, and adds no row of its own", async () => {
@@ -354,6 +368,38 @@ describe("wa send's structure (#2799)", () => {
     expect(h.fake.sent.at(-1)!.content).toEqual({
       delete: { fromMe: true, id: "m1", remoteJid: jid(OWNER) },
     })
+  })
+
+  test("the same send after a failure mid-split sends only its unsent parts, and names every part's id (#2899)", async () => {
+    const h = await harness()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("dropped")
+      return real(to, content)
+    }
+    const long = ["a", "b", "c"].map((c) => c.repeat(SEND.partChars - 10)).join("\n\n")
+    await expect(h.sender.out(long, "reply")).rejects.toThrow("dropped")
+    expect(await h.sender.out(long, "reply")).toEqual({ ids: ["m1", "m2", "m3"], said: "sent" })
+    expect(h.fake.sent.map((s) => s.content.text?.[0])).toEqual(["a", "b", "c"])
+    await h.sender.out(long, "reply")
+    expect(h.fake.sent).toHaveLength(6)
+  })
+
+  test("a part deleted after a failure mid-split goes again with the rest", async () => {
+    const h = await harness()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("dropped")
+      return real(to, content)
+    }
+    const long = ["a", "b"].map((c) => c.repeat(SEND.partChars - 10)).join("\n\n")
+    await expect(h.sender.out(long, "reply")).rejects.toThrow("dropped")
+    h.fake.sock.sendMessage = real
+    await h.sender("", "reply", { delete: "m1" })
+    await h.sender.out(long, "reply")
+    expect(h.fake.sent.slice(2).map((s) => s.content.text?.[0])).toEqual(["a", "b"])
   })
 
   test("an edit or a delete of a message that is not ours is refused, and nothing goes", async () => {
@@ -399,6 +445,8 @@ describe("wa send's structure (#2799)", () => {
     await expect(h.sender("x", "alert", { quote: "own1" })).rejects.toThrow(
       "wa alert sends text alone",
     )
+    // an alert's own refusal comes before the shape's, so a bodiless edit to an alert names the alert (#2899)
+    await expect(h.sender("", "alert", { edit: "m1" })).rejects.toThrow("wa alert sends text alone")
     expect(h.fake.sent).toEqual([])
   })
 })

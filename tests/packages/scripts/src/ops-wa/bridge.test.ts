@@ -1120,6 +1120,29 @@ describe("Inbox cards on WhatsApp", () => {
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
   })
 
+  test("a three-part card whose second part fails sends its first part once, then the other two on the next pass (#2899)", async () => {
+    const long = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([card(12, { kind: "update" }, { text: long })])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts).toHaveLength(3)
+    expect(texts[0]).toStartWith(`*Card 12*\n${"a".repeat(3_000)}`)
+    expect(texts[1]).toBe("b".repeat(3_000))
+    expect(texts[2]).toStartWith("c".repeat(3_000))
+  })
+
   test("a card that goes is redacted first", async () => {
     const h = await withCards([
       card(12, { title: "Ask Quillon Barr" }, { text: `token ghp_${"a".repeat(36)}` }),
@@ -2137,6 +2160,29 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     await h.pass()
     expect(h.fake.sent.flatMap((s) => s.content.text ?? [])).toEqual([DRAFT_TEXT])
     expect(h.logs.filter((line) => line.includes("#i21"))).toHaveLength(1)
+  })
+
+  test("a three-part draft whose second part fails sends its first part once, then the other two, and a reply to any part answers it (#2899)", async () => {
+    const long = draftCard(20)
+    long.preview.text = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([long])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts.map((t) => t.replace("*Card 20*\n", "")[0])).toEqual(["a", "b", "c"])
+    const answer = await replyTo({ ...h, ...ib } as never, "send", OWNER, "m1")
+    expect(answer).toEqual(["Sent #i20 as written."])
   })
 
   test("a draft with files posts nothing from WhatsApp", async () => {
