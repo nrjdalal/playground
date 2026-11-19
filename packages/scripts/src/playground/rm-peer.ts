@@ -17,7 +17,6 @@ export type RmPeerDeps = {
   data: string
   home: string
   main: string
-  notify?: (text: string) => void
   session: () => Promise<string> | string
 }
 
@@ -29,7 +28,7 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
   }
   const [path, bytesText, card] = words
   const bytes = Number(bytesText)
-  if (!Number.isInteger(bytes) || bytes <= 0) {
+  if (!/^\d+$/.test(bytesText) || !Number.isInteger(bytes) || bytes <= 0) {
     console.error(`playground: ${bytesText} is not ${path}'s bytes`)
     return 2
   }
@@ -52,9 +51,9 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
     roots,
   )
   if ("refused" in done) {
-    if (done.kind !== "refused") deps.notify?.(`${session}: ${done.refused}`)
     console.error(`playground: ${done.refused}`)
-    return 1
+    // a protected or tripwire refusal exits 3, so the near end tells the dispatcher of it as a local one does
+    return done.kind === "refused" ? 1 : 3
   }
   const logged = `Deleted ${path} outright (${done.size} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
   const dropped = await dropPaths(deps.data, [path]).catch(() => [])

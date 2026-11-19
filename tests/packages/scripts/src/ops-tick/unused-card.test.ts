@@ -243,7 +243,15 @@ test("a peer's image runs `docker image rm`, a rehearsal a `playground rm` with 
     `playground rm ${rehearsal.path} --reason "nightly-clean card ${ID}"`,
   )
   expect(peerCommand(item(weights), ID)).toBe(
-    `playground rm --card ${ID} --peer peer ${weights.path}`,
+    `playground rm --card ${ID} --peer peer '${weights.path.replaceAll("'", `'\\''`)}'`,
+  )
+  const spaced = { ...weights, path: `${HOME}/models/a b/gguf` }
+  expect(peerCommand(item(spaced), ID)).toBe(
+    `playground rm --card ${ID} --peer peer '/home/me/models/a b/gguf'`,
+  )
+  const quoted = { ...weights, path: `${HOME}/models/it's/gguf` }
+  expect(peerCommand(item(quoted), ID)).toBe(
+    `playground rm --card ${ID} --peer peer '/home/me/models/it'\\''s/gguf'`,
   )
 })
 
