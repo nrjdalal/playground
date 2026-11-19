@@ -78,7 +78,7 @@ export type Mode = {
   escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
   inbox?: Inbox
-  // where a photo or voice note is kept and how it is read; a bridge with none names only its kind
+  // where a photo, voice note, video or document is kept and how it is read; a bridge with none names only its kind
   media?: Media
   // the policy lines from wa.replyPolicy and wa.guestPolicy, read afresh for each message; a bridge with none uses DEFAULT_POLICY for both
   policy?: () => Promise<Policy | undefined>
@@ -125,13 +125,16 @@ export const jidOf = (e164: string) => `${e164.replace(/^\+/, "")}@s.whatsapp.ne
 export const OFF =
   "WhatsApp mode is off, so this message goes no further. Turn it on in Playground's Settings, under Extensions."
 export const updateLine = (policy: string) =>
-  `WhatsApp mode: send the owner an update on the factory's work now. ${replyLine(policy)}`
+  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. ${replyLine(policy)}`
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
 // Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
+// ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
+const oursFile = (dir: string) => join(dir, "ours.json")
+type Ours = { id: string; text: string }
 const handedFile = (dir: string) => join(dir, "handed.json")
 // alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
 const alertFile = (dir: string) => join(dir, "alert.json")
@@ -159,14 +162,13 @@ const chatKind = (jid: string): string | undefined => {
   if (jid.endsWith("@newsletter")) return "newsletter"
 }
 
-// What the dispatcher hears of a message with no text: its kind alone, never its content.
+// What the dispatcher hears of a file it does not read: its kind alone, never its content.
 const MEDIA: Record<string, string> = {
   audioMessage: "a voice note",
-  contactMessage: "a contact",
   documentMessage: "a document",
   imageMessage: "an image",
-  locationMessage: "a location",
   pollUpdateMessage: "a poll vote",
+  ptvMessage: "a video note",
   stickerMessage: "a sticker",
   videoMessage: "a video",
 }
@@ -176,10 +178,103 @@ const mediaOf = (message: Record<string, unknown>): string | undefined =>
     .map((k) => MEDIA[k])
     .find(Boolean)
 
+// The wrappers WhatsApp puts around a message (a disappearing chat's, a view-once one's, a document's with a caption, an edit's), opened to the message inside, as Baileys' own normalizeMessageContent opens them.
+const WRAPS = [
+  "documentWithCaptionMessage",
+  "editedMessage",
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+]
+const unwrap = (message: Record<string, unknown>): Record<string, unknown> => {
+  for (const k of WRAPS) {
+    const inner = (message[k] as { message?: Record<string, unknown> | null } | undefined)?.message
+    if (inner) return unwrap(inner)
+  }
+  return message
+}
+
 const textOf = (message: Record<string, unknown>): string | undefined => {
   if (typeof message.conversation === "string" && message.conversation) return message.conversation
   const extended = message.extendedTextMessage as { text?: unknown } | undefined
   if (typeof extended?.text === "string" && extended.text) return extended.text
+}
+
+type Part = Record<string, unknown> | undefined
+const str = (value: unknown) => (typeof value === "string" && value ? value : undefined)
+// a photo's, video's or document's caption, the words a file carries
+const captionOf = (message: Record<string, unknown>) =>
+  ["imageMessage", "videoMessage", "documentMessage"]
+    .map((k) => str((message[k] as Part)?.caption))
+    .find(Boolean)
+// the words of the message a part quotes, when it answers one: its text, its caption or its kind
+const quoteOf = (part: Part) => {
+  const quoted = (part?.contextInfo as { quotedMessage?: Part } | undefined)?.quotedMessage
+  if (!quoted) return undefined
+  const inner = unwrap(quoted)
+  return textOf(inner) ?? captionOf(inner) ?? mediaOf(inner)
+}
+const answering = (quote: string | undefined) =>
+  quote ? `\nIt answers the message that reads: ${quote}` : ""
+// a vCard's name and numbers, as WhatsApp sends a contact
+const contactOf = (part: Part) => {
+  const vcard = str(part?.vcard) ?? ""
+  // a TEL line, its group prefix (item1.TEL) and any case allowed, as RFC 6350 3.3 does
+  const numbers = [...vcard.matchAll(/^(?:[^.:\n]+\.)?TEL[^:]*:(.+)$/gim)].map((t) => t[1]!.trim())
+  return [str(part?.displayName) ?? "no name", ...numbers].join(", ")
+}
+// WhatsApp's protocol message types for a delete and an edit
+const REVOKE = 0
+const MESSAGE_EDIT = 14
+
+// What the dispatcher hears of a message that is no file to keep, as the words after "The owner's WhatsApp at <time>": its text, with the text it quotes; a sticker by its kind; a location or a contact as text; an edit, a delete or a reaction naming the message it is about, which is never kept for wa react, and a delete or a reaction asks no reply. Undefined for a file or a kind ops-wa does not know.
+export type Said = { about?: true; notice?: true; phrase: string; quote?: string; text?: string }
+async function saidOf(io: Io, message: Record<string, unknown>): Promise<Said | undefined> {
+  const text = textOf(message)
+  if (text) {
+    const quote = quoteOf(message.extendedTextMessage as Part)
+    return { phrase: `reads: ${text}${answering(quote)}`, quote, text }
+  }
+  if (message.stickerMessage) return { phrase: "holds a sticker" }
+  const place = (message.locationMessage ?? message.liveLocationMessage) as Part
+  if (place) {
+    const named = [str(place.name), str(place.address)].filter(Boolean).join(", ")
+    return {
+      phrase: `holds a location: latitude ${place.degreesLatitude}, longitude ${place.degreesLongitude}${named ? `, ${named}` : ""}`,
+    }
+  }
+  if (message.contactMessage)
+    return { phrase: `holds a contact: ${contactOf(message.contactMessage as Part)}` }
+  const contacts = (message.contactsArrayMessage as { contacts?: Part[] } | undefined)?.contacts
+  if (contacts?.length) return { phrase: `holds contacts: ${contacts.map(contactOf).join("; ")}` }
+  const protocol = message.protocolMessage as
+    | { editedMessage?: Part; key?: Key | null; type?: number | null }
+    | undefined
+  const id = protocol?.key?.id
+  if (protocol?.type === REVOKE && id)
+    return { about: true, notice: true, phrase: `deletes its message ${id}` }
+  if (protocol?.type === MESSAGE_EDIT && id) {
+    const inner = protocol.editedMessage ? unwrap(protocol.editedMessage) : undefined
+    const edited = inner && (textOf(inner) ?? captionOf(inner))
+    return edited
+      ? { about: true, phrase: `edits its message ${id} to read: ${edited}` }
+      : undefined
+  }
+  const reaction = message.reactionMessage as { key?: Key | null; text?: string | null } | undefined
+  const on = reaction?.key?.id
+  if (on) {
+    const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+    const ours = messages.find((o) => o.id === on)
+    const target = ours ? `ops-wa's message that reads: ${ours.text}` : `the message ${on}`
+    return {
+      about: true,
+      notice: true,
+      phrase: reaction.text
+        ? `reacts ${reaction.text} on ${target}`
+        : `takes back its reaction on ${target}`,
+    }
+  }
 }
 
 // One line in dropped.log: the time, the kind and the sender's last 4 digits, never the words or the whole number.
@@ -205,19 +300,19 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     if (from(alert)) return fromAlert(io, alert, m)
     return drop(io, "stranger", remoteJid)
   }
-  const message = m.message ?? {}
-  // the owner's reaction on a pending alert handles it, so it stays with the owner (ADR 0034); any other reaction goes no further
+  const message = unwrap(m.message ?? {})
+  // the owner's reaction on a pending alert handles it, so it stays with the owner (ADR 0034); any other reaction reaches the dispatcher as such
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction) {
-    if (reaction.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id)))
-      io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
+  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id))) {
+    io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }
-  const text = textOf(message)
+  const said = await saidOf(io, message)
   const media = mediaOf(message)
-  if (!text && !media) return
+  if (!said && !media) return
+  const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
   await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
@@ -235,14 +330,21 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reply = io.inbox && text ? replyOf(text) : null
   if (reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true))
     return answerCard(io, io.inbox!, reply)
-  const when = `${new Date(at).toISOString()}${idOf(m.key.id)}`
-  const line = text
-    ? `The owner's WhatsApp at ${when} reads: ${text}\n${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`
-    : `The owner's WhatsApp at ${when} ${(await saved(io, m, message, at)) ?? `holds ${media}, which ops-wa does not read yet: say so to the owner.`}\n${replyLine((await policyOf(io)).reply)}`
+  // a line about another message names only that one's id, the one wa react --id takes
+  const when = `${new Date(at).toISOString()}${idOf(said?.about ? undefined : m.key.id)}`
+  const phrase =
+    said?.phrase ??
+    (await saved(io, m, message, at)) ??
+    `holds ${media}, which ops-wa does not read yet: say so to the owner.`
+  const line = `The owner's WhatsApp at ${when} ${phrase}\n${said?.notice ? NOTICE : `${kept ? `${keptLine(id!)}\n` : ""}${replyLine((await policyOf(io)).reply)}`}`
   await io.relay("dispatcher", line)
+  if (said?.notice) return
   await writeOwn(handedFile(io.dir), { ...watch, handed: [...(watch.handed ?? []), { at, line }] })
-  await seen(io, m, "owner", at)
+  if (!said?.about) await seen(io, m, "owner", at)
 }
+
+// A delete or a reaction asks nothing, so it is never handed on to the assistant seat.
+export const NOTICE = "No reply is needed."
 
 // Whose message a reaction answers: the owner's, or the alert number's, a guest's.
 export type Who = "alert" | "owner"
@@ -304,12 +406,12 @@ export const dataLine = (at: number, words: string, id?: string | null, guest = 
 // A message's id in its line, which wa react --id names.
 const idOf = (id: string | null | undefined) => (id ? `, id ${id}` : "")
 
-// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, a photo or voice note by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, no 👀 either, though it is kept for wa react --to alert.
+// The alert number's message: it marks the number as written, so an alert reaches it, and opens its 24 hours for the dispatcher's replies; while WhatsApp mode is on it reaches the dispatcher as data, any file by its kind alone, never kept; it answers no card, and ops-wa itself sends nothing back, no 👀 either, though it is kept for wa react --to alert.
 async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
-  const message = m.message ?? {}
-  const text = textOf(message)
+  const message = unwrap(m.message ?? {})
+  const said = await saidOf(io, message)
   const media = mediaOf(message)
-  if (!text && !media) return
+  if (!said && !media) return
   const at = io.now()
   await ownFolder(io.dir)
   await wrote(alertFile(io.dir), "alertAt", at, jidOf(alert))
@@ -318,38 +420,58 @@ async function fromAlert(io: Io & Mode, alert: string, m: Incoming) {
     "dispatcher",
     dataLine(
       at,
-      text ?? `(it holds ${media}, which ops-wa does not keep)`,
+      said?.text
+        ? `${said.text}${answering(said.quote)}`
+        : `(it ${said?.phrase ?? `holds ${media}, which ops-wa does not keep`})`,
       m.key.id,
       guestLine((await policyOf(io)).guest),
     ),
     true,
   )
-  await seen(io, m, "alert", at)
+  if (!said?.about) await seen(io, m, "alert", at)
 }
 
-// A photo or voice note kept in the media folder, and what the dispatcher hears of it: the path, a photo's caption, a voice note's words or that it was not transcribed; undefined for any other kind, or when it could not be kept.
+// A photo, voice note, video or document kept in the media folder, and what the dispatcher hears of it: the path, a caption, a document's name, and a voice note's or video's words through the same transcriber, or that it was not transcribed; undefined for any other kind, or when it could not be kept.
 async function saved(io: Io & Mode, m: Incoming, message: Record<string, unknown>, at: number) {
-  const kind = message.imageMessage ? "image" : message.audioMessage ? "audio" : undefined
-  if (!io.media || !kind) return undefined
-  const part = (message.imageMessage ?? message.audioMessage) as {
+  const key = [
+    "imageMessage",
+    "audioMessage",
+    "videoMessage",
+    "ptvMessage",
+    "documentMessage",
+  ].find((k) => message[k])
+  if (!io.media || !key) return undefined
+  const part = message[key] as {
     caption?: unknown
+    contextInfo?: unknown
+    fileName?: unknown
     mimetype?: string
   }
   let path: string
   try {
-    path = await keep(io.media.dir, at, part.mimetype, await io.media.download(m))
+    path = await keep(
+      io.media.dir,
+      at,
+      part.mimetype,
+      await io.media.download(m),
+      str(part.fileName),
+    )
   } catch (error) {
-    io.log(`ops-wa: a photo or voice note was not kept: ${(error as Error).message}`)
+    io.log(`ops-wa: ${MEDIA[key]} was not kept: ${(error as Error).message}`)
     return undefined
   }
-  if (kind === "image")
-    return typeof part.caption === "string" && part.caption
-      ? `holds a photo, kept at ${path}, with the words: ${part.caption}`
-      : `holds a photo, kept at ${path}`
+  const caption = str(part.caption) ? `, with the words: ${part.caption}` : ""
+  const answers = answering(quoteOf(part as Part))
+  if (key === "imageMessage") return `holds a photo, kept at ${path}${caption}${answers}`
+  if (key === "documentMessage")
+    return `holds a document${str(part.fileName) ? `, ${part.fileName},` : ""} kept at ${path}${caption}${answers}`
   const words = await io.media.transcribe(path).catch(() => undefined)
-  return words
-    ? `holds a voice note, kept at ${path}, which says: ${words}`
-    : `holds a voice note, not transcribed, kept at ${path}`
+  if (key === "audioMessage")
+    return words
+      ? `holds a voice note, kept at ${path}, which says: ${words}${answers}`
+      : `holds a voice note, not transcribed, kept at ${path}${answers}`
+  const sound = words ? `its sound says: ${words}` : "its sound not transcribed"
+  return `holds ${MEDIA[key]}, kept at ${path}${caption}, ${sound}${answers}`
 }
 
 // A reply with no card id or no number is a card's only while some open card that went out waits on its rows, so the owner's "2" to the dispatcher's own question reaches the dispatcher.
@@ -534,10 +656,14 @@ async function pass(io: Io & Mode) {
           h.settled = true
         }
       const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
+      // a window with no owner message handed on and no send to the owner since the last line asks for nothing, so a quiet chat gets no update
+      const since = watch.updateAt ?? 0
+      const moved = handed.some((h) => h.at > since) || sends.some((at) => at > since)
       if (
         ownerAt !== undefined &&
         now - ownerAt <= OWNER_WINDOW_MS &&
-        now - Math.max(watch.updateAt ?? 0, ownerAt) >= UPDATE_MS
+        now - Math.max(since, ownerAt) >= UPDATE_MS &&
+        moved
       ) {
         await io.relay("dispatcher", updateLine((await policyOf(io)).reply))
         watch.updateAt = now
@@ -732,6 +858,10 @@ const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa neve
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
 // The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// the words a send carries, a text or a file's caption, which its typing time and ours.json read
+const wordsOf = (content: Content) =>
+  "text" in content ? content.text : "caption" in content ? content.caption : undefined
+
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
@@ -744,7 +874,7 @@ export function sender(
   let last = 0
   // the ids of the last send's messages, read on the chain right after it, so a card's text gives its id for a pin
   let lastIds: string[] = []
-  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -758,11 +888,19 @@ export function sender(
       key?: { id?: string | null }
     } | null
     last = io.now()
+    const id = sent?.key?.id
+    const words = wordsOf(content)
+    if (id && words) {
+      const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      await writeOwn(oursFile(io.dir), {
+        messages: [...messages, { id, text: words }].slice(-50),
+      })
+    }
     if (sends) {
       sends.push(last)
       await writeOwn(sendsFile(io.dir), { sends })
     }
-    return sent?.key?.id
+    return id
   }
   // each send's time in the last hour, which the failover reads to tell whether the dispatcher answered
   const recent = async (now: number) =>
@@ -848,9 +986,9 @@ export function sender(
     for (const t of going)
       for (const [k, content] of messages.entries()) {
         // a text or a caption waits its typing time; a file with none goes on the gap alone
-        const typed = "text" in content ? content.text : "caption" in content ? content.caption : ""
+        const typed = wordsOf(content)
         const id = await paced(
-          sends,
+          t.jid === jidOf(io.owner) ? sends : null,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
           content,
@@ -897,9 +1035,14 @@ export function sender(
         "that message is over 24 hours old, and ops-wa reacts only inside its 24 hours",
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
-    await paced(on.auto ? null : await recent(now), SEND.gapMs, target.jid, {
-      react: { key, text: emoji },
-    })
+    await paced(
+      on.auto || target.who !== "owner" ? null : await recent(now),
+      SEND.gapMs,
+      target.jid,
+      {
+        react: { key, text: emoji },
+      },
+    )
     return "sent"
   }
   // a card's decision pinned in the owner's chat for 7 days, or with off unpinned: the gap alone, no typing time, never counted as an answer, and inside the owner's 24 hours alone

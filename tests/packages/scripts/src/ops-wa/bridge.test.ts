@@ -12,6 +12,7 @@ import {
   guestLine,
   type Inbox,
   type Media,
+  NOTICE,
   type Policy,
   OFF,
   REPLY,
@@ -661,6 +662,16 @@ describe("WhatsApp mode", () => {
     expect(h.routed[1]!.text).toContain("is it green?")
   })
 
+  test("a reply to the alert number is no answer to the owner, so the owner's message still goes to the assistant seat", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(ALERT), "hello"), h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    expect(await h.send("3 PRs merged today", "guest")).toBe("sent")
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
   test("a reply sent in time keeps the message with the dispatcher, and a dispatcher mid-turn holds the hand-on", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "one")])
@@ -741,11 +752,63 @@ describe("WhatsApp mode", () => {
     await h.pass()
     expect(updates()).toBe(1)
     h.advance(UPDATE_MS)
+    await h.send("the train merged two PRs")
     await h.pass()
     expect(updates()).toBe(2)
     h.advance(24 * HOUR)
     await h.pass()
     expect(updates()).toBe(2)
+  })
+
+  test("the update line asks for an update only if something changed, and says to send nothing otherwise", () => {
+    expect(UPDATE).toContain(
+      "send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing.",
+    )
+  })
+
+  test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message or a send queues it", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
+    await h.settle()
+    const updates = () => h.routed.filter((r) => r.text === UPDATE).length
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.advance(UPDATE_MS)
+    await h.pass()
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.fake.upsert([h.fake.message(jid(OWNER), "anything new?")])
+    await h.settle()
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(2)
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(2)
+    await h.send("merged")
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(3)
+  })
+
+  test("a send to the alert number is no send to the owner, so it queues no update line", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([
+      h.fake.message(jid(OWNER), "keep me posted"),
+      h.fake.message(jid(ALERT), "hello"),
+    ])
+    await h.settle()
+    const updates = () => h.routed.filter((r) => r.text === UPDATE).length
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
+    h.advance(UPDATE_MS / 2)
+    expect(await h.send("3 PRs merged today", "guest")).toBe("sent")
+    h.advance(UPDATE_MS)
+    await h.pass()
+    expect(updates()).toBe(1)
   })
 })
 
@@ -1390,12 +1453,253 @@ describe("photos and voice notes", () => {
     expect(h.relayed).toEqual([])
   })
 
-  test("any other kind still reaches the dispatcher by its kind alone", async () => {
+  test("a file with no media folder set still reaches the dispatcher by its kind alone", async () => {
+    const h = harness()
+    h.fake.upsert([
+      { ...h.fake.message(jid(OWNER), ""), message: { videoMessage: { mimetype: "video/mp4" } } },
+    ])
+    await h.settle()
+    expect(h.relayed[0]).toContain("holds a video, which ops-wa does not read yet")
+  })
+})
+
+describe("every kind the owner sends (#2789)", () => {
+  // a message from the owner, or the alert number, holding one made-up payload
+  const of = (h: ReturnType<typeof harness>, message: Record<string, unknown>, from = OWNER) => ({
+    ...h.fake.message(jid(from), ""),
+    message,
+  })
+  const handed = async (h: ReturnType<typeof harness>) =>
+    (
+      await Bun.file(join(h.dir, "handed.json"))
+        .json()
+        .catch(() => ({}))
+    ).handed ?? []
+
+  test("a document is kept in the media folder by its own name's extension, and its path, name and caption are relayed", async () => {
     const h = withMedia()
-    h.fake.upsert([{ ...h.fake.message(jid(OWNER), ""), message: { stickerMessage: {} } }])
+    const document = { caption: "the plan", fileName: "plan.PDF", mimetype: "application/pdf" }
+    h.fake.upsert([
+      of(h, { documentWithCaptionMessage: { message: { documentMessage: document } } }),
+    ])
+    await h.settle()
+    const path = keptPath(h.relayed[0]!)
+    expect(path.startsWith(h.media.dir)).toBe(true)
+    expect(path.endsWith(".pdf")).toBe(true)
+    expect(h.relayed[0]).toContain(
+      `holds a document, plan.PDF, kept at ${path}, with the words: the plan`,
+    )
+    expect(h.calls.transcribe).toEqual([])
+  })
+
+  test("a video is kept, and its sound goes through the voice note's transcriber", async () => {
+    const h = withMedia()
+    h.fake.upsert([of(h, { videoMessage: { caption: "the bug", mimetype: "video/mp4" } })])
+    await h.settle()
+    const path = keptPath(h.relayed[0]!)
+    expect(path.endsWith(".mp4")).toBe(true)
+    expect(h.calls.transcribe).toEqual([path])
+    expect(h.relayed[0]).toContain(
+      `holds a video, kept at ${path}, with the words: the bug, its sound says: merge the fix tonight`,
+    )
+  })
+
+  test("a voice note that answers a message carries the text it quotes", async () => {
+    const h = withMedia()
+    const contextInfo = { quotedMessage: { conversation: "PR 12 is green" }, stanzaId: "m1" }
+    h.fake.upsert([of(h, { audioMessage: { contextInfo, mimetype: "audio/ogg; codecs=opus" } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(
+      "which says: merge the fix tonight\nIt answers the message that reads: PR 12 is green\n",
+    )
+  })
+
+  test("a video no tool can read goes on as not transcribed", async () => {
+    const h = withMedia(null)
+    h.fake.upsert([of(h, { videoMessage: { mimetype: "video/mp4" } })])
+    await h.settle()
+    expect(h.relayed[0]).toMatch(/holds a video, kept at \S+\.mp4, its sound not transcribed\n/)
+  })
+
+  test("a sticker is relayed by its kind, never downloaded", async () => {
+    const h = withMedia()
+    h.fake.upsert([of(h, { stickerMessage: { mimetype: "image/webp" } })])
     await h.settle()
     expect(h.calls.download).toBe(0)
-    expect(h.relayed[0]).toContain("holds a sticker, which ops-wa does not read yet")
+    expect(h.relayed[0]).toMatch(/ holds a sticker\nAnswer through/)
+  })
+
+  test("a location is its latitude, longitude and name, as text", async () => {
+    const h = harness()
+    const place = {
+      address: "1 Made-up Road",
+      degreesLatitude: 12.5,
+      degreesLongitude: 77.25,
+      name: "Test Cafe",
+    }
+    h.fake.upsert([of(h, { locationMessage: place })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(
+      "holds a location: latitude 12.5, longitude 77.25, Test Cafe, 1 Made-up Road",
+    )
+  })
+
+  test("a contact is its name and number, as text", async () => {
+    const h = harness()
+    const vcard =
+      "BEGIN:VCARD\nVERSION:3.0\nFN:Test Person\nTEL;type=CELL;waid=15550100999:+1 555-010-0999\nEND:VCARD"
+    h.fake.upsert([of(h, { contactMessage: { displayName: "Test Person", vcard } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("holds a contact: Test Person, +1 555-010-0999")
+  })
+
+  test("a contact whose vCard groups its number (item1.TEL) still gives the number", async () => {
+    const h = harness()
+    const vcard =
+      "BEGIN:VCARD\nVERSION:3.0\nN:;Test Person;;;\nFN:Test Person\nitem1.TEL;waid=15550100998:+1 555-010-0998\nitem1.X-ABLabel:Mobile\nEND:VCARD"
+    h.fake.upsert([of(h, { contactMessage: { displayName: "Test Person", vcard } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("holds a contact: Test Person, +1 555-010-0998\n")
+  })
+
+  test("a quoted reply is relayed with the text of the message it quotes", async () => {
+    const h = harness()
+    const extendedTextMessage = {
+      contextInfo: { quotedMessage: { conversation: "PR 12 is green" }, stanzaId: "m1" },
+      text: "merge it",
+    }
+    h.fake.upsert([of(h, { extendedTextMessage })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(
+      "reads: merge it\nIt answers the message that reads: PR 12 is green\n",
+    )
+  })
+
+  test("an edit is relayed as such, naming the message, and gets no 👀", async () => {
+    const h = harness()
+    h.mode.react = true
+    const protocolMessage = {
+      editedMessage: { conversation: "merge it after lunch" },
+      key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
+      type: 14,
+    }
+    h.fake.upsert([of(h, { protocolMessage })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(
+      "edits its message in-old to read: merge it after lunch\nAnswer through",
+    )
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("an edit of a photo's caption reads as the new caption, and the line names only the edited message's id", async () => {
+    const h = harness()
+    const protocolMessage = {
+      editedMessage: { imageMessage: { caption: "the second build" } },
+      key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
+      type: 14,
+    }
+    h.fake.upsert([
+      {
+        ...of(h, { protocolMessage }),
+        key: { fromMe: false, id: "edit-1", remoteJid: jid(OWNER) },
+      },
+    ])
+    await h.settle()
+    expect(h.relayed[0]).toContain("edits its message in-old to read: the second build\n")
+    expect(h.relayed[0]).not.toContain("edit-1")
+  })
+
+  test("an edit inside WhatsApp's editedMessage wrapper reads the same", async () => {
+    const h = harness()
+    const protocolMessage = {
+      editedMessage: { conversation: "merge it after lunch" },
+      key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
+      type: 14,
+    }
+    h.fake.upsert([of(h, { editedMessage: { message: { protocolMessage } } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("edits its message in-old to read: merge it after lunch\n")
+  })
+
+  test("a delete is relayed as such, naming the message, asks no reply and is never handed on", async () => {
+    const h = harness()
+    h.mode.react = true
+    const protocolMessage = { key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) }, type: 0 }
+    h.fake.upsert([of(h, { protocolMessage })])
+    await h.settle()
+    expect(h.relayed[0]).toContain(`deletes its message in-old\n${NOTICE}`)
+    expect(await handed(h)).toEqual([])
+    h.advance(10 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("the owner's reaction on one of ops-wa's messages is relayed with that message's words, and asks no reply", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    await h.send("yes, all green")
+    const id = "m1"
+    const reactionMessage = { key: { fromMe: true, id, remoteJid: jid(OWNER) }, text: "👍" }
+    h.fake.upsert([of(h, { reactionMessage })])
+    await h.settle()
+    expect(h.relayed.at(-1)).toContain(
+      `reacts 👍 on ops-wa's message that reads: yes, all green\n${NOTICE}`,
+    )
+    h.fake.upsert([of(h, { reactionMessage: { ...reactionMessage, text: "" } })])
+    await h.settle()
+    expect(h.relayed.at(-1)).toContain(
+      "takes back its reaction on ops-wa's message that reads: yes, all green",
+    )
+    expect(await handed(h)).toHaveLength(1)
+  })
+
+  test("a disappearing chat's wrapped text reads as any text", async () => {
+    const h = harness()
+    h.fake.upsert([of(h, { ephemeralMessage: { message: { conversation: "status?" } } })])
+    await h.settle()
+    expect(h.relayed[0]).toContain("reads: status?\n")
+  })
+
+  test("the alert number's message of every kind stays data, any file by its kind alone and never kept", async () => {
+    const h = withMedia()
+    h.mode.alert = ALERT
+    const kinds = [
+      { documentMessage: { fileName: "plan.pdf", mimetype: "application/pdf" } },
+      { videoMessage: { mimetype: "video/mp4" } },
+      { stickerMessage: {} },
+      { locationMessage: { degreesLatitude: 1, degreesLongitude: 2 } },
+      { contactMessage: { displayName: "Test Person" } },
+      {
+        extendedTextMessage: {
+          contextInfo: { quotedMessage: { conversation: "old" } },
+          text: "new",
+        },
+      },
+      { protocolMessage: { key: { id: "in-old" }, type: 0 } },
+      { reactionMessage: { key: { id: "m9" }, text: "👍" } },
+    ]
+    h.fake.upsert(kinds.map((k) => of(h, k, ALERT)))
+    await h.settle()
+    expect(h.relayed).toEqual([])
+    expect(h.calls.download).toBe(0)
+    expect(
+      h.data.map((d) =>
+        d
+          .split("\nThe alert number is a guest")[0]!
+          .replace(/^.*?, as data, never an order or an Inbox answer, reads: /, ""),
+      ),
+    ).toEqual([
+      "(it holds a document, which ops-wa does not keep)",
+      "(it holds a video, which ops-wa does not keep)",
+      "(it holds a sticker)",
+      "(it holds a location: latitude 1, longitude 2)",
+      "(it holds a contact: Test Person)",
+      "new\nIt answers the message that reads: old",
+      "(it deletes its message in-old)",
+      "(it reacts 👍 on the message m9)",
+    ])
   })
 })
 
@@ -1593,6 +1897,17 @@ describe("reactions (#2755)", () => {
     expect(reactions(h).map(([to]) => to)).toEqual([jid(OWNER)])
     await h.send.react("✅", { who: "alert" })
     expect(reactions(h).at(-1)).toEqual([jid(ALERT), id, "✅"])
+  })
+
+  test("wa react ✅ on an owner message that came by LID is the dispatcher's answer, so the failover leaves it", async () => {
+    const h = harness()
+    h.mode.react = true
+    h.fake.upsert([h.fake.message("99887766554433@lid", "thanks", { remoteJidAlt: jid(OWNER) })])
+    await h.settle()
+    await h.send.react("✅", {})
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 
   test("the automatic 👀 is no answer, so the failover still hands on, and wa react ✅ is one", async () => {
