@@ -750,6 +750,74 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       expect(yesReached(c.relayed)).toBe(true)
     })
 
+    test("a text held in quiet hours is no new message until its catch-up goes out", async () => {
+      const o = owned()
+      mkdirSync(o.dir, { recursive: true })
+      writeFileSync(
+        join(o.dir, "owner.json"),
+        JSON.stringify({ jid: jid(OWNER), ownerAt: START - 2 * HOUR }),
+        { mode: 0o600 },
+      )
+      const fake = fakeSocket()
+      fake.setClock(() => o.io.now())
+      const send = sender({
+        alert: async () => ALERT,
+        device: SPARE,
+        dir: o.dir,
+        now: o.io.now,
+        owner: OWNER,
+        quiet: async () => ({ end: 23, start: 0, zone: "UTC" }),
+        random: () => 0.5,
+        sleep: async (ms) => void o.advance(ms),
+        sock: fake.sock,
+      })
+      const sentNow = () =>
+        existsSync(join(o.dir, "sent.json"))
+          ? (JSON.parse(readFileSync(join(o.dir, "sent.json"), "utf8")) as { messages: unknown[] })
+              .messages
+          : []
+      expect(await send("a made-up update", "reply")).toContain("held for quiet hours")
+      expect(fake.sent).toEqual([])
+      expect(sentNow()).toEqual([])
+      writeFileSync(
+        join(o.dir, "owner.json"),
+        JSON.stringify({ jid: jid(OWNER), ownerAt: o.io.now() }),
+        { mode: 0o600 },
+      )
+      await send.catchUp()
+      expect(fake.sent).toHaveLength(1)
+      expect(sentNow()).toEqual([{ at: fake.sent[0]!.at, id: "m1" }])
+    })
+
+    test("a proposal in quiet hours is refused, since its question would be held, and nothing waits", async () => {
+      const o = owned()
+      mkdirSync(o.dir, { recursive: true })
+      writeFileSync(
+        join(o.dir, "owner.json"),
+        JSON.stringify({ jid: jid(OWNER), ownerAt: START - 2 * HOUR }),
+        { mode: 0o600 },
+      )
+      const fake = fakeSocket()
+      fake.setClock(() => o.io.now())
+      const send = sender({
+        alert: async () => ALERT,
+        device: SPARE,
+        dir: o.dir,
+        now: o.io.now,
+        owner: OWNER,
+        quiet: async () => ({ end: 23, start: 0, zone: "UTC" }),
+        random: () => 0.5,
+        sleep: async (ms) => void o.advance(ms),
+        sock: fake.sock,
+      })
+      o.io.question = (line: string) => send.card(line)
+      await expect(settingPropose(o.io, "wa.guestPolicy", "status only")).rejects.toThrow(
+        "quiet hours",
+      )
+      expect(fake.sent).toEqual([])
+      expect(existsSync(join(o.dir, "confirm.json"))).toBe(false)
+    })
+
     test("a yes from the second number or a stranger sets nothing, and the proposal still waits for the owner's", async () => {
       const o = owned()
       const h = watched(o)
