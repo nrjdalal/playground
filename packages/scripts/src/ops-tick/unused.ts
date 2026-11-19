@@ -34,6 +34,7 @@ export type Unused = {
   kind: UnusedKind
   path: string
   recorded: boolean
+  shards?: string[]
   unknownAge?: true
 }
 // What one machine's measure gives: its items, and imagesUnread when docker did not answer, so a night that cannot read the images keeps their first-seen nights.
@@ -225,6 +226,11 @@ export const measured = (
       return [unknownAge ? { ...item, unknownAge } : item]
     })
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
+
+// Built: merge one shard set into one item, every other item unchanged, sorted as measured sorts it.
+export const shardSets = (_items: Unused[]): Unused[] => {
+  throw new Error("not built yet")
+}
 
 // This machine's unused space, largest first.
 export async function measureUnused(places: Places): Promise<Measured> {

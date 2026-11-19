@@ -16,6 +16,7 @@ export type CardItem = {
   machine: string
   path: string
   recorded?: true
+  shards?: string[]
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }

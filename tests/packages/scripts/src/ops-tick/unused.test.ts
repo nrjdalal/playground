@@ -17,6 +17,7 @@ import {
   measured,
   measureUnused,
   peerUnusedArgv,
+  shardSets,
   type Unused,
   unusedEverywhere,
   unusedImages,
@@ -26,6 +27,7 @@ const HERE = hostname().split(".")[0]!
 const NOW = Date.parse("2026-11-18T03:00:00Z")
 const DAY = 86_400_000
 const MB = 1024 ** 2
+const GB = 1024 ** 3
 const homes: string[] = []
 afterAll(() => {
   for (const home of homes) rmSync(home, { force: true, recursive: true })
@@ -381,4 +383,88 @@ test("a machine's lines: the log's totals by kind, the outbox's items with recor
     item: null,
     total: "spark-a566 unused 0.0 GB",
   })
+})
+
+test("shardSets: four shards of one model merge into one item, sized as the total, carrying every shard path", () => {
+  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const shards = [
+    {
+      bytes: 10.4 * MB,
+      kind: "weights" as const,
+      path: `${stem}-00001-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00003-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00004-of-00004.gguf`,
+      recorded: false,
+    },
+  ]
+  const merged = shardSets(shards)
+  expect(merged).toEqual([
+    {
+      bytes: 10.4 * MB + 4 * GB + 4 * GB + 4 * GB,
+      kind: "weights",
+      path: `${stem}-00001-of-00004.gguf`,
+      recorded: false,
+      shards: [
+        `${stem}-00001-of-00004.gguf`,
+        `${stem}-00002-of-00004.gguf`,
+        `${stem}-00003-of-00004.gguf`,
+        `${stem}-00004-of-00004.gguf`,
+      ],
+    },
+  ])
+})
+
+test("shardSets: a lone shard of a set is still one item, carrying that one shard", () => {
+  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const merged = shardSets([
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+    },
+  ])
+  expect(merged).toEqual([
+    {
+      bytes: 4 * GB,
+      kind: "weights",
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+      shards: [`${stem}-00002-of-00004.gguf`],
+    },
+  ])
+})
+
+test("shardSets: an unsharded gguf and an image pass through unchanged, largest first", () => {
+  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const merged = shardSets([
+    { bytes: 4 * GB, kind: "weights" as const, path: `${stem}/separate.gguf`, recorded: false },
+    {
+      bytes: 5 * GB,
+      id: "sha256:aaa",
+      kind: "image" as const,
+      path: "docker image x:1",
+      recorded: false,
+    },
+  ])
+  expect(merged).toEqual([
+    { bytes: 5 * GB, id: "sha256:aaa", kind: "image", path: "docker image x:1", recorded: false },
+    { bytes: 4 * GB, kind: "weights", path: `${stem}/separate.gguf`, recorded: false },
+  ])
 })
