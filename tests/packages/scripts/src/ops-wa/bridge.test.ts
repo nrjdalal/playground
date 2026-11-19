@@ -2066,8 +2066,8 @@ describe("delivery and read receipts (#2868)", () => {
     const clock = h.fake.sent[2]!.at
     expect(await kept(h.dir)).toEqual([
       { delivered: START + 60_000, id: "m1", read: START + 60_000 },
-      { delivered: clock, id: "m2" },
       { delivered: START + 2 * 60_000, id: "m3", read: START + 2 * 60_000 },
+      { delivered: clock, id: "m2" },
     ])
   })
 
