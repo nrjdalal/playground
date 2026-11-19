@@ -106,15 +106,18 @@ describe("once.py's last stderr line", () => {
     expect(await new Response(job.stdout).text()).toBe("done\n")
   })
 
-  test("the job's stderr file, a regular file, is emptied past 1 MiB, so a job that runs for weeks never fills the disk, while its lines still reach the pane", async () => {
+  test("the job's stderr file, a regular file the job appends to, is emptied past 1 MiB with no hole of NULs left behind, so a job that runs for weeks never fills the disk, while its lines still reach the pane", async () => {
     const job = once(
       "ops-t5",
-      "sh -c 'yes 0123456789012345678901234567890123456789 | head -n 80000 >&2; echo last-of-many >&2; sleep 0.5'",
+      "sh -c 'yes 0123456789012345678901234567890123456789 | head -n 80000 >&2; sleep 1; echo last-of-many >&2; sleep 0.5'",
     )
     const pane = new Response(job.stderr).text()
     expect(await job.exited).toBe(0)
     await gone(await readerPid("ops-t5"))
-    expect(statSync(join(opsDir, "ops-t5.stderr")).size).toBeLessThan(1 << 20)
+    const file = readFileSync(join(opsDir, "ops-t5.stderr"), "latin1")
+    expect(file.length).toBeLessThan(1 << 20)
+    expect(file.includes("\0")).toBe(false)
+    expect(file).toEndWith("last-of-many\n")
     expect(await pane).toEndWith("last-of-many\n")
     expect(readFileSync(join(opsDir, "ops-t5.last"), "utf8")).toBe("last-of-many")
   })
