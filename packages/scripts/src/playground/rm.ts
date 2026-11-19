@@ -6,7 +6,6 @@ import { managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import {
-  bytesOf,
   type Clone,
   deleteWeights,
   isAgentBrowser,
@@ -38,7 +37,7 @@ import {
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
-import { shardSet } from "./shards"
+import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -531,23 +530,14 @@ const approvedWeights = (
     const done = deleteWeights(path, opts, roots)
     return "refused" in done ? done : { paths: [path], size: done.size }
   }
-  const sizes = set.map((p) => bytesOf(p))
-  let total = 0
-  for (const size of sizes) total += size
-  if (total !== opts.approved.bytes)
-    return {
-      kind: "refused",
-      refused: `the shard set holds ${set.length} shards at ${total} bytes, and card ${opts.approved.card} approved it at ${opts.approved.bytes}: its size changed, so it stays`,
-    }
-  for (let i = 0; i < set.length; i++) {
-    const done = deleteWeights(
-      set[i]!,
-      { ...opts, approved: { bytes: sizes[i]!, card: opts.approved.card } },
-      roots,
-    )
-    if ("refused" in done) return done
-  }
-  return { paths: set, size: total, shards: set.length }
+  const done = removeSet(
+    set,
+    { bytes: opts.approved.bytes, card: opts.approved.card },
+    { folders: opts.folders, reason: opts.reason, session: opts.session },
+    roots,
+  )
+  if ("refused" in done) return done
+  return { paths: done.paths, size: done.size, shards: set.length }
 }
 
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
@@ -605,7 +595,7 @@ async function removeApproved(
       return 1
     }
     line = done.shards
-      ? `Deleted the ${done.shards} shards outright (${done.size} bytes), as card ${card} approved on this machine`
+      ? `Deleted the ${done.shards} shards outright (${done.size} bytes), as card ${card} approved on this machine; ${join(roots.trash, "deleted.jsonl")} logs it`
       : `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
     drop = done.paths
   } else {

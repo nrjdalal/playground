@@ -2299,7 +2299,7 @@ test("runRm --card deletes an approved sharded set whole: every shard at the set
   expect(code).toBe(0)
   for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(false)
   expect(out.join("\n")).toContain(
-    `Deleted the 4 shards outright (${total} bytes), as card ${CARD} approved on this machine`,
+    `Deleted the 4 shards outright (${total} bytes), as card ${CARD} approved on this machine; ${join(deps.data, "trash", "deleted.jsonl")} logs it`,
   )
   expect(out.join("\n")).toContain("its machine record entries are dropped")
   expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
