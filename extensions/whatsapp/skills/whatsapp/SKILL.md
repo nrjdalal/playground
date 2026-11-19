@@ -19,7 +19,8 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
    A message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces a 👀 (got it); with no `--id` a reaction lands on the owner's latest message, which may be a later one ([ADR 0038](../../../../.agents/adr/0038-the-dispatcher-sets-the-eyes-reaction.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
    A line `wa send: held for quiet hours` means ops-wa keeps the reply for the owner's catch-up, and that reply is done.
-   When its line starts with neither, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
+   When its line starts with neither, it has sent nothing, or only the first parts of a long reply: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
+   The same send again, once it can go, sends only the parts still unsent.
    Done when the command prints `wa send: sent`, `wa send: held for quiet hours` or `wa react: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work with `playground wa send --status <file>`, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
    `--status` keeps one live status message in the owner's chat: it edits the last one in place while that one is under 15 minutes old, WhatsApp's edit window, and fewer than 5 messages have come after it in the owner's chat, and otherwise sends a new one, which becomes the live one; words that have not changed send nothing, and a status longer than one message (3500 characters) is refused.
