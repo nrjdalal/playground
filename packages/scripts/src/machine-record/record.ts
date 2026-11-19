@@ -41,10 +41,11 @@ export type MachineRecord = {
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
-// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders, the root-only ones among them and docker through run, each a test's seam.
+// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders, the root-only ones among them, the OS roots a systemd .wants link may resolve into, and docker through run, each a test's seam.
 export type Places = {
   home: string
   homes: string[]
+  osRoots?: string[]
   rootOnly?: string[]
   run: Run
   system?: string[]

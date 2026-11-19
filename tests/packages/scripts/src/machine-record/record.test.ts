@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -239,6 +247,73 @@ describe("the daily check (PG-2538)", () => {
     expect(await addKnown(data, known, "the OS snapd made it")).toEqual(known)
     mkdirSync(sibling)
     expect(await check(data, places())).toEqual([`misplaced: ${sibling}`])
+  })
+})
+
+describe("OS-made systemd links (#2963)", () => {
+  const etcRoot = join(root, "etc")
+  const usrRoot = join(root, "usr")
+  const osRoots = [etcRoot, usrRoot]
+  const user = join(home, ".config", "systemd", "user")
+
+  const systemd = async () =>
+    (await check(data, places({ osRoots }))).filter((line) =>
+      line.includes(`${home}/.config/systemd`),
+    )
+
+  beforeEach(() => {
+    mkdirSync(user, { recursive: true })
+    mkdirSync(etcRoot, { recursive: true })
+    mkdirSync(usrRoot, { recursive: true })
+  })
+
+  test("a snap preset's links into the stand-in add no finding, and neither do the .wants folders or ~/.config/systemd", async () => {
+    await seed(data, [], places({ osRoots }))
+    const wants1 = join(user, "default.target.wants")
+    const wants2 = join(user, "graphical.target.wants")
+    mkdirSync(wants1, { recursive: true })
+    mkdirSync(wants2, { recursive: true })
+    writeFileSync(join(etcRoot, "a.service"), "")
+    writeFileSync(join(usrRoot, "b.service"), "")
+    linkSync(join(etcRoot, "a.service"), join(wants1, "a.service"))
+    linkSync(join(usrRoot, "b.service"), join(wants2, "b.service"))
+    expect(await systemd()).toEqual([])
+  })
+
+  test("a .wants link into the home folder names that link", async () => {
+    await seed(data, [], places({ osRoots }))
+    const wants = join(user, "default.target.wants")
+    mkdirSync(wants, { recursive: true })
+    mkdirSync(join(home, "models"), { recursive: true })
+    writeFileSync(join(home, "models", "keep.service"), "")
+    linkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
+    expect(await systemd()).toEqual([`misplaced: ${join(wants, "keep.service")}`])
+  })
+
+  test("a dangling .wants link names that link", async () => {
+    await seed(data, [], places({ osRoots }))
+    const wants = join(user, "default.target.wants")
+    mkdirSync(wants, { recursive: true })
+    linkSync(join(home, "does-not-exist.service"), join(wants, "gone.service"))
+    expect(await systemd()).toEqual([`misplaced: ${join(wants, "gone.service")}`])
+  })
+
+  test("a unit file under systemd/user names it", async () => {
+    await seed(data, [], places({ osRoots }))
+    writeFileSync(join(user, "x.service"), "")
+    expect(await systemd()).toEqual([`misplaced: ${join(user, "x.service")}`])
+  })
+
+  test("a mixed .wants folder names only its non-OS link", async () => {
+    await seed(data, [], places({ osRoots }))
+    const wants = join(user, "default.target.wants")
+    mkdirSync(wants, { recursive: true })
+    writeFileSync(join(etcRoot, "a.service"), "")
+    mkdirSync(join(home, "models"), { recursive: true })
+    writeFileSync(join(home, "models", "keep.service"), "")
+    linkSync(join(etcRoot, "a.service"), join(wants, "a.service"))
+    linkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
+    expect(await systemd()).toEqual([`misplaced: ${join(wants, "keep.service")}`])
   })
 })
 
