@@ -1,9 +1,10 @@
 import { appendFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
 import { handOn, type Stuck } from "../ops-job/dispatcher"
+import { forwardLine } from "../stuck-alert"
 import { keepNumber } from "./alert-set"
 import {
   answered,
@@ -26,6 +27,7 @@ import {
 import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
+import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
 import { alertSeedFile } from "./seed"
 import type { Vote, votedOptions } from "./votes"
 
@@ -47,11 +49,6 @@ export type Sock = {
   // the linked device's own chat ids, which a vote on its poll is encrypted with
   user?: { id?: string; lid?: string } | null
 }
-// What ops-wa sends: text, a poll of one choice, whose secret it makes itself so it can read the owner's vote, or a reaction on a kept message.
-export type Content =
-  | { linkPreview: null; text: string }
-  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
-  | { react: { key: { fromMe: false; id: string; remoteJid: string }; text: string } }
 export type Io = {
   // the second number in E.164, wa.alert, read afresh for each send and each message, empty for none: it gets alerts and chats as a guest, and its messages are data
   alert?: () => Promise<string>
@@ -91,6 +88,8 @@ export type Mode = {
   react?: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) => Promise<string>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
+  // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
+  waiter?: (name: string, since: number) => Promise<boolean>
 }
 export type Media = {
   // <data>/wa/media
@@ -136,8 +135,10 @@ const alertFile = (dir: string) => join(dir, "alert.json")
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
-// bravo marks a message past its hand-on to the assistant seat, so it goes once.
-type Handed = { at: number; bravo?: true; line: string }
+// bravo marks a message past its hand-on to the assistant seat, and settled one whose send-on through Ops was decided, sent or not, so each goes once.
+type Handed = { at: number; bravo?: true; line: string; settled?: true }
+// A dispatcher whose alerts-wait is down hears the owner only through the relay's backstop, minutes late, so a line it has not answered in this long goes on through Ops.
+export const FORWARD_MS = 60_000
 type Watch = { handed?: Handed[]; offAt?: number; updateAt?: number }
 
 // The kind of chat a message came from that is no 1:1 chat, which ops-wa drops.
@@ -459,6 +460,18 @@ async function pass(io: Io & Mode) {
         } else await io.relay(to, `Handed on since ${why}. ${h.line}`)
         h.bravo = true
       }
+      // decided once a line, at the first pass past the minute: a waiter that runs or printed since the line came has handed it on, as alerts-wait exits on each print
+      const unsettled = handed.filter(
+        (h) => !h.settled && now - h.at >= FORWARD_MS && !sends.some((at) => at >= h.at),
+      )
+      if (io.waiter)
+        for (const h of unsettled) {
+          if (!(await io.waiter("dispatcher", h.at))) {
+            const { text, to } = forwardLine("dispatcher", h.line)
+            await io.relay(to, text)
+          }
+          h.settled = true
+        }
       const { ownerAt } = await readOwn<{ ownerAt?: number }>(ownerFile(io.dir), {})
       if (
         ownerAt !== undefined &&
@@ -668,7 +681,7 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when it answers, so the auto 👀 is never read as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -706,8 +719,16 @@ export function sender(
     if (!id) throw new Error("WhatsApp gave the poll no id, so its votes cannot be read")
     return { id, secret: Buffer.from(messageSecret).toString("base64") }
   }
-  const sendNow = async (body: string, kind: Kind, source?: string): Promise<string> => {
-    const refusal = refusalOf(body)
+  const sendNow = async (
+    body: string,
+    kind: Kind,
+    source?: string,
+    path?: string,
+  ): Promise<string> => {
+    // the outbox sits beside whatsapp/ in the data folder
+    const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
+    const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
+    const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
     const now = io.now()
     const alert = kind === "alert" || kind === "first"
@@ -718,7 +739,7 @@ export function sender(
       )
     if (kind === "guest") {
       if (!second) throw new Error("no alert number is set (wa.alert)")
-      const why = guestRefusal(body)
+      const why = guestRefusal(words)
       if (why) throw new Error(why)
     }
     if (kind === "escalate" && !second) throw new Error("no alert number is set (wa.alert)")
@@ -758,17 +779,19 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    const parts = split(toWhatsApp(body))
+    const messages = messagesOf(split(toWhatsApp(body)), file)
     const sends = await recent(now)
     const ids: string[] = []
     for (const t of going)
-      for (const [k, part] of parts.entries()) {
+      for (const [k, content] of messages.entries()) {
+        // a text or a caption waits its typing time; a file with none goes on the gap alone
+        const typed = "text" in content ? content.text : "caption" in content ? content.caption : ""
         const id = await paced(
           sends,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
-          { linkPreview: null, text: part },
-          typingMs(part.length, io.random),
+          content,
+          typed ? typingMs(typed.length, io.random) : 0,
         )
         if (id) ids.push(id)
       }
@@ -815,9 +838,10 @@ export function sender(
     })
     return "sent"
   }
+  // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
   return Object.assign(
-    (body: string, kind: Kind = "reply", source?: string): Promise<string> =>
-      queued(() => sendNow(body, kind, source)),
+    (body: string, kind: Kind = "reply", source?: string, path?: string): Promise<string> =>
+      queued(() => sendNow(body, kind, source, path)),
     {
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
       react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>

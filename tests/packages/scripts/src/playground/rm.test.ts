@@ -107,6 +107,15 @@ test.each([
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
 
+test("rm refuses a --reason alongside a --peer, since a far-end removal is the peer's own card", () => {
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "nightly-clean"]),
+  ).toEqual({ error: RM_USAGE })
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "playground rm"]),
+  ).toEqual({ error: RM_USAGE })
+})
+
 const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -2244,10 +2253,10 @@ test("runRm --peer sends one rm-peer command to the named peer and relays its li
   const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
   const record = readFileSync(join(deps.data, "machine-record.json"), "utf8")
-  const { code, out } = await rmTold(
-    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-    { ...deps, peer },
-  )
+  const { code, out } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
   expect(code).toBe(0)
   expect(seen).toEqual([
     {
@@ -2269,25 +2278,54 @@ test("runRm --peer passes a path with a space or a quote to the peer as one word
 test("runRm --peer refuses a pick the card does not name on that peer, and sends no ssh", async () => {
   const { seen, peer } = peerRun({ code: 0, out: "ignored" })
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
-  const { code, err } = await rmTold(
-    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-    { ...deps, peer },
-  )
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
   expect(code).toBe(1)
   expect(err.join("\n")).toContain("holds no Remove answer")
   expect(seen).toEqual([])
   expect(existsSync(repo)).toBe(true)
 })
 
-test("runRm --peer relays a peer's refusal and the path stays", async () => {
-  const { seen, peer } = peerRun({ code: 1, out: "no such path" })
-  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
-  const { code, err } = await rmTold(
-    [repo, "--card", CARD, "--peer", "spark-b", "--reason", "nightly-clean"],
-    { ...deps, peer },
-  )
+test("runRm --peer relays a peer's plain refusal once and tells the dispatcher nothing, as a local one does", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "playground: no such path" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
   expect(code).toBe(1)
-  expect(err.join("\n")).toContain("no such path")
+  expect(told).toEqual([])
+  expect(err).toEqual(["playground: spark-b: no such path"])
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer tells the dispatcher of a peer's protected refusal (exit 3), as a local one does", async () => {
+  const { peer } = peerRun({ code: 3, out: "playground: /m/x.gguf is protected" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], { ...deps, peer })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: /m/x.gguf is protected"])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's silence with the did-not-answer fallback", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: the peer did not answer"])
+  expect(err.join("\n")).toContain("the peer did not answer")
   expect(seen).toEqual([
     {
       machine: "spark-b",

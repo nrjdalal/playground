@@ -148,4 +148,82 @@ describe("the gate box's docker", () => {
     expect(narrow(context, box, listed)).toEqual({ argv: context })
     expect(narrow(["context", "rm", "default"], box, listed)).toHaveProperty("refused")
   })
+
+  test.each([
+    ["a named volume", ["-v", "pgdata:/var/lib/postgresql/data"]],
+    ["a named volume by --mount", ["--mount", "src=pgdata,dst=/x"]],
+    ["a volume by --mount=", ["--mount=type=volume,src=pgdata,dst=/x"]],
+    ["a host path", ["-v", "/:/host"]],
+    ["a host path by --volume=", ["--volume=/Users:/host"]],
+    ["the host network", ["--network", "host"]],
+    ["the host network by --net=", ["--net=host"]],
+    ["a publish past loopback", ["-p", "0.0.0.0::5432"]],
+    ["a flag first run never uses", ["--privileged"]],
+  ])("refuses a run with %s, logged as its flag", (_, flags) => {
+    const argv = ["run", "-d", "--name", `${box}-db-Zz11`, ...flags, "postgres:alpine"]
+    expect(narrow(argv, box, listed)).toEqual({
+      refused: `run ${flags[0] === "-p" ? flags.join(" ") : flags[0]}`,
+    })
+  })
+
+  test.each([
+    [
+      "first run's startArgv",
+      [
+        "--name",
+        `${box}-db-Zz11`,
+        "-d",
+        "-p",
+        "127.0.0.1::5432",
+        "-e",
+        "POSTGRES_USER=postgres",
+        "-e",
+        "POSTGRES_PASSWORD=pw",
+        "-e",
+        "POSTGRES_DB=postgres",
+        "postgres:alpine",
+      ],
+    ],
+    [
+      "the move's loopbackArgv",
+      [
+        "-d",
+        "--name",
+        `${box}-db-Ab12`,
+        "-p",
+        "127.0.0.1:216:5432",
+        "--volumes-from",
+        `${box}-db-Ab12-old`,
+        "--restart",
+        "unless-stopped",
+        "-e",
+        "POSTGRES_PASSWORD=pw",
+        "--label",
+        "k=v",
+        "sha256:abc",
+        "postgres",
+        "-c",
+        "fsync=off",
+      ],
+    ],
+    [
+      "the pglaunch stand-in's run",
+      [
+        "-d",
+        "--name",
+        `${box}-db-gate`,
+        "--label",
+        "playground-gate=1",
+        "-e",
+        "POSTGRES_PASSWORD=postgres",
+        "-p",
+        "127.0.0.1::5432",
+        "postgres:alpine",
+      ],
+    ],
+  ])("takes %s whole, the command after the image included", (_, rest) => {
+    expect(narrow(["run", ...rest], box, listed)).toEqual({
+      argv: ["run", "--label", `${BOX_LABEL}=${box}`, ...rest],
+    })
+  })
 })
