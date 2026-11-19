@@ -275,11 +275,12 @@ const inbox = (answer?: {
         return posted
           ? {
               code: 0,
-              out: JSON.stringify({
+              // ask get's picked line follows the card on stderr of the joined output, so the saved card is read from first brace to last (#2958).
+              out: `${JSON.stringify({
                 ...posted,
                 updatedAt: WROTE,
                 ...(answer ?? { status: "open" }),
-              }),
+              })}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${args[1]}"\nask: picked A: Remove\n`,
             }
           : { code: 1, out: `ask: no inbox item ${args[1]}` }
       return { code: 0, out: "" }
