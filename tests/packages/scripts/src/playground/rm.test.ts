@@ -2316,7 +2316,7 @@ test("runRm --card refuses a sharded set whose total no longer matches the pick,
   expect(code).toBe(1)
   expect(err.join("\n")).toContain("shard set holds 4 shards at 200 bytes")
   expect(err.join("\n")).toContain("approved it at 250")
-  expect(existsSync(shard(1))).toBe(true)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
 test("runRm --card refuses a sharded set whose one shard is a symlink, deleting none", async () => {

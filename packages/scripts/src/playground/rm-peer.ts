@@ -2,12 +2,13 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
-import { deleteWeights, isWeights, type Roots } from "@packages/safe-delete"
+import { bytesOf, deleteWeights, isWeights, type Roots } from "@packages/safe-delete"
 
 import { dropPaths, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
 import { CARD_ID } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
+import { shardSet } from "./shards"
 
 // The far end of an approved removal on a peer's own machine, run from there by the ssh `peerArgv` shapes: <path> <bytes> <card>, a path on the record or under a recorded folder at the card's exact size, re-checked here before the same deleteWeights drops it.
 export const RM_PEER_USAGE =
@@ -45,19 +46,51 @@ export async function runRmPeer(words: string[], deps: RmPeerDeps): Promise<numb
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   const session = await deps.session()
-  const done = deleteWeights(
-    path,
-    { approved: { bytes, card }, folders, reason: `nightly-clean card ${card}`, session },
-    roots,
-  )
-  if ("refused" in done) {
-    console.error(`playground: ${done.refused}`)
-    // a protected or tripwire refusal exits 3, so the near end tells the dispatcher of it as a local one does
-    return done.kind === "refused" ? 1 : 3
+  const set = shardSet(path)
+  if (!set) {
+    const done = deleteWeights(
+      path,
+      { approved: { bytes, card }, folders, reason: `nightly-clean card ${card}`, session },
+      roots,
+    )
+    if ("refused" in done) {
+      console.error(`playground: ${done.refused}`)
+      // a protected or tripwire refusal exits 3, so the near end tells the dispatcher of it as a local one does
+      return done.kind === "refused" ? 1 : 3
+    }
+    const logged = `Deleted ${path} outright (${done.size} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
+    const dropped = await dropPaths(deps.data, [path]).catch(() => [])
+    console.log(dropped.length ? `${logged}; its machine record entry is dropped` : logged)
+    return 0
   }
-  const logged = `Deleted ${path} outright (${done.size} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
-  const dropped = await dropPaths(deps.data, [path]).catch(() => [])
-  console.log(dropped.length ? `${logged}; its machine record entry is dropped` : logged)
+  const sizes = set.map((p) => bytesOf(p))
+  let total = 0
+  for (const size of sizes) total += size
+  if (total !== bytes) {
+    console.error(
+      `playground: the shard set holds ${set.length} shards at ${total} bytes, and card ${card} approved it at ${bytes}: its size changed, so it stays`,
+    )
+    return 1
+  }
+  for (let i = 0; i < set.length; i++) {
+    const done = deleteWeights(
+      set[i]!,
+      {
+        approved: { bytes: sizes[i]!, card },
+        folders,
+        reason: `nightly-clean card ${card}`,
+        session,
+      },
+      roots,
+    )
+    if ("refused" in done) {
+      console.error(`playground: ${done.refused}`)
+      return done.kind === "refused" ? 1 : 3
+    }
+  }
+  const logged = `Deleted the ${set.length} shards outright (${total} bytes), as card ${card} approved on the peer; ${join(roots.trash, "deleted.jsonl")} logs it`
+  const dropped = await dropPaths(deps.data, set).catch(() => [])
+  console.log(dropped.length ? `${logged}; its machine record entries are dropped` : logged)
   return 0
 }
 

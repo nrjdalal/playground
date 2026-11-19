@@ -8,6 +8,7 @@ import { bytesOf } from "@packages/safe-delete"
 
 import { type Entry, peerArgv, readRecord, type Run } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
+import { SHARD } from "../playground/shards"
 import { peersOf } from "./peers"
 
 // The unused space nightly-clean lists on each machine, its card removing only what the owner picks Remove for (unused-card.ts): model weights no model folder names, Docker images no container uses, model-test replay worktrees past their row's end, and ship rehearsals in a scratchpad. It only reads, here and on a peer over one fixed ssh, and an item the machine record holds is marked recorded.
@@ -23,8 +24,6 @@ export const KEEP_IMAGES = ["redis:alpine"]
 
 export const UNUSED_CLI = "packages/scripts/src/ops-tick/unused.ts"
 const WEIGHTS = /\.(gguf|safetensors)$/
-// A sharded weights file: its stem, shard index and total (5-digit, so a lexicographic order is a numeric one) and extension.
-const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
 const REHEARSAL = /^rehearse\d+$/
 
 export const KINDS = ["image", "rehearsal", "run", "weights"] as const
