@@ -1671,3 +1671,77 @@ describe("restore points", () => {
     ).toBe(eta)
   })
 })
+
+// The write lock, which serialises two roster writes so neither drops the other (#2966).
+const lockPathFor = (config: string) => join(config, "playground", "roster.json.lock")
+const isoNow = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
+const lockSet = async (
+  config: string,
+  name: string,
+  eta: string,
+): Promise<{ code: number; err: string }> => {
+  const proc = Bun.spawn(["bun", script, "set", name, `eta=${eta}`], {
+    env: {
+      ...process.env,
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  const code = await proc.exited
+  return { code, err: await new Response(proc.stderr).text() }
+}
+
+describe("the write lock (#2966)", () => {
+  // Two sets on two rows, launched before either is awaited, so both load the same file and race; each round's times are distinct, so a lost change shows on read-back.
+  test("fifty rounds of two overlapping sets each keep both updates", async () => {
+    const config = configWith([
+      { kind: "worker", name: "lock-r0", role: "worker", status: "working", task: "t" },
+      { kind: "worker", name: "lock-r1", role: "worker", status: "working", task: "t" },
+    ])
+    let losing = 0
+    for (let round = 0; round < 50; round++) {
+      const a = inMinutes(60 + round)
+      const b = inMinutes(61 + round)
+      const [r0, r1] = await Promise.all([
+        lockSet(config, "lock-r0", a),
+        lockSet(config, "lock-r1", b),
+      ])
+      expect(r0.code).toBe(0)
+      expect(r1.code).toBe(0)
+      const roster = JSON.parse(
+        readFileSync(join(config, "playground", "roster.json"), "utf8"),
+      ) as RosterFile
+      if (agentOf(roster, "lock-r0")?.eta !== a || agentOf(roster, "lock-r1")?.eta !== b) losing++
+    }
+    expect(losing).toBe(0)
+  })
+
+  // A lock whose pid is gone is stale, so the next write takes it over and leaves none behind.
+  test("a lock left by a process that is gone is taken over", async () => {
+    const config = configWith([WITH_PR])
+    writeFileSync(lockPathFor(config), `999999 ${isoNow()}`)
+    expect(existsSync(lockPathFor(config))).toBe(true)
+    const eta = inMinutes(60)
+    const r = await run(config, ["set", "worker-greed", `eta=${eta}`])
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-greed")?.eta).toBe(eta)
+    expect(existsSync(lockPathFor(config))).toBe(false)
+  })
+
+  // A lock held by a live pid is not stale, so the write waits then refuses, naming the lock, leaving the roster and the lock untouched.
+  test("a live lock makes a write refuse after its wait, naming the lock", async () => {
+    const config = configWith([WITH_PR])
+    writeFileSync(lockPathFor(config), `${process.pid} ${isoNow()}`)
+    const before = readFileSync(join(config, "playground", "roster.json"), "utf8")
+    const start = Date.now()
+    const r = await run(config, ["set", "worker-greed", `eta=${inMinutes(60)}`])
+    const elapsedMs = Date.now() - start
+    expect(r.code).toBe(1)
+    expect(r.err).toContain("roster.json.lock")
+    expect(elapsedMs).toBeLessThan(8000)
+    expect(existsSync(lockPathFor(config))).toBe(true)
+    expect(readFileSync(join(config, "playground", "roster.json"), "utf8")).toBe(before)
+  })
+})
