@@ -11482,7 +11482,7 @@ var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "s
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"]
+  settings: ["--dry-run", "--propose"]
 };
 function isCli(word, dirs) {
   tick();
@@ -12334,6 +12334,7 @@ function cliWrite(words, tuning) {
       positional.push(word);
   }
   const ownerMsg = options.length === 1 && options[0] === "--from-owner-msg" && !!ownerId && positional.length === 2;
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2;
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;
@@ -12343,6 +12344,8 @@ function cliWrite(words, tuning) {
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
     if (verb === "set" && ownerMsg)
+      return;
+    if (verb === "set" && proposal)
       return;
     const job = key.startsWith(JOB_PREFIX);
     if (!GUARD_KEYS.has(key) && !job)

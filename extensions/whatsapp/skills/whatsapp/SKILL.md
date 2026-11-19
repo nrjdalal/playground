@@ -85,3 +85,11 @@ A key a guard reads waits for the owner's yes to ops-wa's own plain question on 
 While that question waits and no card waits on its choices, the owner's next message settles it: a yes (`yes`, `y`, `yes do it`, `1`) or a `no` stays with ops-wa and never reaches you, a reaction leaves it waiting and ops-wa tells the owner to reply yes, and any other message drops the question and reaches you as usual.
 `wa.owner` and `wa.device` refuse here, since they name the WhatsApp that proves the owner; point the owner to the Settings card for them.
 Done when it prints `set <key>` with its undo or `asked the owner on WhatsApp to confirm`, or its refusal goes to the owner as the reply.
+
+## A setting a session proposes
+
+When a session needs a guarded key changed and the owner's message holds no value, as with a plain yes to your question, run `playground settings set <key> <value> --propose` ([ADR 0041](../../../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
+ops-wa asks the owner its own question with the whole value and sets the key on his yes within 10 minutes, so leave the question out of your reply.
+A yes that quotes the question, or the line a reaction on it gets, settles it, and so does a plain yes while the question, and the line a reaction on it gets, are all he got since his last typed message; a yes that quotes another message, or a plain yes after something else went out, reaches you as usual while the question still waits, so answer it as the reply to your own message it is.
+It refuses a key no guard reads (set that one plainly), a masked key (post an Inbox `secret` ask), `wa.owner` and `wa.device`, and any ask while another confirm waits, naming the open one: propose again once that one is settled.
+Done when it prints `asked the owner on WhatsApp to confirm`, or its refusal is acted on as it says.

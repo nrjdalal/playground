@@ -212,7 +212,8 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   in quiet hours (`wa.quietStartHour` to `wa.quietEndHour`, 12 am to 6 am by default) it holds a reply's text once the owner has read or written nothing for an hour and sends the held texts as one catch-up when the owner reads or writes or the window ends, an urgent alert going at any hour (ADR 0040).
   At 22 hours after the owner's last message it sends one line asking for any reply, once a window, so the 24 hours it can reply in stay open.
   For each owner text message it keeps the message's id, time, a keyed hash of each word and its one phone number when it holds exactly one, for 24 hours, so `playground wa alert-set --from-owner-msg <id>` writes `wa.alert` from it and `playground settings set <key> <value> --from-owner-msg <id>` a setting whose value it holds, a guarded key on the owner's yes,
-  each as the owner's act (ADR 0032, ADR 0035).
+  and `playground settings set <key> <value> --propose` a guarded key a session proposes, on the owner's yes to ops-wa's question naming the whole value, never a masked key,
+  each as the owner's act (ADR 0032, ADR 0035, ADR 0041).
   It hands messages on only in WhatsApp mode, the bundled `whatsapp` extension's switch (`ext.bundled`), and otherwise answers the owner once an hour that the mode is off;
   in the mode, a message with no reply in 3 minutes while the dispatcher is not mid-turn and has set no 👀 since it came, or any unanswered one while the dispatcher reads stuck or failed, goes to the session in the assistant seat too,
   a message with no reply in a minute, which the dispatcher's `playground alerts-wait` neither waits for now nor has handed it since it came, goes to Ops to send on by SendMessage, decided once a message (`forwardLine` in `packages/scripts/src/stuck-alert.ts`),
