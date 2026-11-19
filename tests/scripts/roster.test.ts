@@ -1651,4 +1651,23 @@ describe("restore points", () => {
     expect(versionList(data)).toEqual(before)
     if (before1 !== null) expect(readFileSync(versionPath(data, 1), "utf8")).toBe(before1)
   })
+
+  test("a version that cannot be rotated still lets the roster write land", async () => {
+    // .5 is a locked folder, so the rotation's rename of .4 onto it fails; the write must still land regardless.
+    const config = configWith(null)
+    const data = dataOf(config)
+    writeFileSync(versionPath(data, 4), "{}")
+    mkdirSync(versionPath(data, 5), { recursive: true })
+    writeFileSync(join(versionPath(data, 5), "locked"), "x")
+    // .4 exists, so the rotation tries to move it onto the locked .5 and fails; roster.json does not yet exist, the set makes it.
+    const eta = inMinutes(15)
+    const res = await run(config, ["set", "worker-restore", "task=Keep versions", `eta=${eta}`])
+    // The write lands: exit 0, the row holds the new eta, the locked .5 stays a folder.
+    expect(res.code).toBe(0)
+    expect(
+      JSON.parse(readFileSync(join(config, "playground", "roster.json"), "utf8")).agents.find(
+        (a: Agent) => a.name === "worker-restore",
+      )?.eta,
+    ).toBe(eta)
+  })
 })
