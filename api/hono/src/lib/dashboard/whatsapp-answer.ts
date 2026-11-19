@@ -16,8 +16,13 @@ const answerFile = z.union([
     id: z.uuid(),
     option: z.number().int().min(0).optional(),
   }),
-  // a draft's Send from the owner's own chat, with the owner's words in place of the draft's when given
-  z.strictObject({ action: z.literal("send"), id: z.uuid(), text: z.string().min(1).optional() }),
+  // a draft's Send from the owner's own chat, with the owner's words in place of the draft's when given, and seen, the draft's updatedAt as it went there, so changed words are refused
+  z.strictObject({
+    action: z.literal("send"),
+    id: z.uuid(),
+    seen: z.iso.datetime().optional(),
+    text: z.string().min(1).optional(),
+  }),
 ])
 
 type Answered = { line: string; ok: true } | { message: string; ok: false }
@@ -63,7 +68,7 @@ export async function whatsappAnswer(
     db,
     item.id,
     parsed.action === "send"
-      ? { action: "send", text: parsed.text }
+      ? { action: "send", seen: parsed.seen, text: parsed.text }
       : { action: parsed.action, option: parsed.option },
     { actor: { label: "WhatsApp" }, deliver, dispatcher, via: "whatsapp" },
   )

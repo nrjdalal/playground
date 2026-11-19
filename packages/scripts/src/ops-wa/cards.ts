@@ -32,6 +32,8 @@ export type Card = {
   ref: number
   status: string
   title: string
+  // when its poster last changed it, which a draft's send names so it posts only the words the owner read
+  updatedAt?: string
 }
 
 // What a card that went out keeps, so a reply naming it answers the row the owner read: its id, when it went, and each row's go and label as sent.

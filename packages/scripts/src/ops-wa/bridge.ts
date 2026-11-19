@@ -28,6 +28,7 @@ import {
   DRAFT_FILES,
   draftAlready,
   draftAnswerOf,
+  draftChanged,
   draftNotSent,
   draftOf,
   type DraftSent,
@@ -139,7 +140,9 @@ export type Inbox = {
   // the answer recorded through the Inbox's own route, or why not
   answer: (
     id: string,
-    answer: { action: "approve" | "deny"; option?: number } | { action: "send"; text?: string },
+    answer:
+      | { action: "approve" | "deny"; option?: number }
+      | { action: "send"; seen?: string; text?: string },
   ) => Promise<string | undefined>
   open: () => Promise<Card[]>
   // undefined while no-public-leak's list cannot be read, so no card goes out
@@ -593,9 +596,11 @@ async function answerDraft(io: Io & Mode, inbox: Inbox, draft: DraftSent, text: 
   const card = (await inbox.open().catch(() => [] as Card[])).find((c) => c.id === draft.id)
   if (!card || card.status !== "open") return say(draftAlready(draft.ref))
   if (card.preview.attachments?.length) return say(draftNotSent(draft.ref, DRAFT_FILES))
+  // a draft its poster changed after it came here posts nothing, and the next pass sends its new words
+  if (card.updatedAt !== draft.seen) return say(draftChanged(draft.ref))
   const answer = draftAnswerOf(text)
   const why = await inbox
-    .answer(draft.id, { action: "send", ...answer })
+    .answer(draft.id, { action: "send", seen: draft.seen, ...answer })
     .catch((error: Error) => error.message)
   return say(
     why === undefined
@@ -604,7 +609,7 @@ async function answerDraft(io: Io & Mode, inbox: Inbox, draft: DraftSent, text: 
   )
 }
 
-// The drafts step of a pass: each open draft that still waits on the owner goes to the owner's own chat once, with the line that says how a reply answers it.
+// The drafts step of a pass: each open draft that still waits on the owner goes to the owner's own chat once, and again each time its poster changes it, with the line that says how a reply answers it.
 async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft"]>) {
   const now = io.now()
   const sent = Object.fromEntries(
@@ -612,17 +617,19 @@ async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft
       ([, d]) => now - d.at < CARD_KEEP_MS,
     ),
   )
-  const went = new Set(Object.values(sent).map((d) => d.id))
+  const went = new Set(Object.values(sent).map((d) => `${d.id} ${d.seen}`))
   try {
     for (const card of open) {
-      if (card.kind !== "draft" || !waits(card, now) || went.has(card.id)) continue
+      const version = `${card.id} ${card.updatedAt}`
+      if (card.kind !== "draft" || !waits(card, now) || went.has(version)) continue
       // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox
       const ids = await send(draftOf(card)).catch((error: Error) => {
         io.log(`ops-wa: #i${card.ref}'s draft stays in the Inbox: ${error.message}`)
         return [`none-${card.id}`]
       })
-      for (const id of ids) sent[id] = { at: io.now(), id: card.id, ref: card.ref }
-      went.add(card.id)
+      for (const id of ids)
+        sent[id] = { at: io.now(), id: card.id, ref: card.ref, seen: card.updatedAt }
+      went.add(version)
     }
   } finally {
     await writeOwn(draftsFile(io.dir), { sent })

@@ -1,7 +1,7 @@
 import type { Card } from "./cards"
 
-// What a draft that went out keeps, by the id of its WhatsApp message, so the owner's reply to that message answers the Inbox draft it shows: the draft's id and ref, and when it went.
-export type DraftSent = { at: number; id: string; ref: number }
+// What a draft that went out keeps, by the id of its WhatsApp message, so the owner's reply to that message answers the Inbox draft it shows: the draft's id and ref, when it went, and seen, the draft's updatedAt as it went, so a reply posts only those words.
+export type DraftSent = { at: number; id: string; ref: number; seen?: string }
 
 const tag = (ref: number) => `#i${ref}`
 
@@ -27,4 +27,6 @@ export const draftAlready = (ref: number) =>
   `${tag(ref)} is already sent or settled in the Inbox, so this posts nothing.`
 export const draftNotSent = (ref: number, why: string) =>
   `${tag(ref)} was not sent: ${why}. Send it in the Inbox.`
+export const draftChanged = (ref: number) =>
+  `${tag(ref)} changed after it came here, so this posts nothing; its new words come next.`
 export const DRAFT_FILES = "it holds files, which go only from the Inbox"
