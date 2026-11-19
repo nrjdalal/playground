@@ -888,7 +888,7 @@ try:
             readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
-        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended, which run.py writes to stored-login-status.json) starts on the login's seat token under usage.keychainService, as a second login does, judged by usage.json's accounts reading of it; the item's existence alone is checked, with no -w
+        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended, which run.py writes to stored-login-status.json) starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
         def seat_start(email, stale):
             status, _ = load("ops/usage/stored-login-status.json")
             try:
@@ -896,17 +896,23 @@ try:
             except (KeyError, TypeError, ValueError):
                 ended = None
             service = os.environ.get("KEYCHAIN_SERVICE", "")
-            if not service or subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
+            if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode and os.environ.get("SANDBOX_RUNTIME") != "1":
                 if ended:
                     return "stored-login.json", {}, f"its Claude Code login has ended (loginEnded: {ended}), and the Keychain holds no {service} item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it", False
                 return "stored-login.json", {}, stale, False
-            name = "usage.json accounts"
-            usage_now, _ = load("usage.json")
-            accounts = usage_now.get("accounts") if isinstance(usage_now, dict) else None
-            row = next((r for a, r in accounts.items() if isinstance(a, str) and a.lower() == email.lower() and isinstance(r, dict)), None) if isinstance(accounts, dict) else None
-            if row is None:
-                return name, {}, f"{'its Claude Code login has ended (loginEnded: ' + ended + ')' if ended else stale}, and usage.json holds no accounts reading of {email} to judge its seat token by. ops-usage probes it every 14 minutes; wait for its next run and try again", False
-            seen, detail = judge(name, {"rate_limits": {"seven_day": {"used_percentage": row.get("week"), "resets_at": row.get("weekReset")}}, "writtenAt": row.get("readAt")}, 60, "ops-usage probes it every 14 minutes; wait for its next run and try again.")
+            name, later = "login-flip.json seen", "ops-usage probes it every 14 minutes; wait for its next run and try again"
+            flip, _ = load("ops/usage/login-flip.json")
+            entries = flip.get("seen") if isinstance(flip, dict) else None
+            s = next((r for a, r in entries.items() if isinstance(a, str) and a.lower() == email.lower() and isinstance(r, dict)), None) if isinstance(entries, dict) else None
+            if s is None:
+                return name, {}, f"{'its Claude Code login has ended (loginEnded: ' + ended + ')' if ended else stale}, and login-flip.json holds no seen reading of {email} to judge its seat token by. {later}", False
+            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+            if isinstance(s.get("five"), (int, float)):
+                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+            seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, later + ".")
+            limited = s.get("limitedUntil")
+            if detail is None and isinstance(limited, (int, float)) and not isinstance(limited, bool) and limited > now.timestamp():
+                detail = f"its account is limited until {from_iso(limited):%Y-%m-%d %H:%M} UTC (login-flip.json seen limitedUntil)"
             return name, seen, detail, True
 
         usage, detail = load("usage.json")
@@ -1067,7 +1073,7 @@ PY
       pick=${verdict#ok }
       pick=${pick%% *}
       # the own login on its seat token: seat_start checked its item, and check_account refuses the own login by name
-      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; [ "$pick" = "$OWN_LOGIN" ] || check_account; }
+      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ]; then plain_account; else check_account; fi; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
     *) refuse "$verdict" ;;
@@ -1828,10 +1834,13 @@ keychain_has() {
   [ "${SANDBOX_RUNTIME:-}" = 1 ] || return 1
   echo "spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the $1 item for $2" >&2
 }
+# The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
+plain_account() {
+  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+}
 # An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
 check_account() {
-  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
-  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+  plain_account
   ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
   keychain_has "$KEYCHAIN" "$ACCOUNT" || refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }
