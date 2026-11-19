@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1586,5 +1594,61 @@ describe("name", () => {
     const r = await run(configWith([]), ["set", "k3m9px-worker", "task=t"])
     expect(r.code).toBe(0)
     expect(agentOf(r.roster, "k3m9px-worker")).toMatchObject({ name: "k3m9px-worker" })
+  })
+})
+
+describe("restore points", () => {
+  // roster.ts keeps the five versions beside the file, newest first, each 0600, so a lost row comes back from the newest one that holds it.
+  const dataOf = (config: string) => join(config, "playground")
+  const versionPath = (data: string, n: number) => join(data, `roster.json.${n}`)
+  const versionList = (data: string) =>
+    [1, 2, 3, 4, 5, 6].filter((n) => existsSync(versionPath(data, n))).sort((a, b) => a - b)
+  const etaAt = (data: string, n: number) =>
+    JSON.parse(readFileSync(versionPath(data, n), "utf8")).agents.find(
+      (a: Agent) => a.name === "worker-restore",
+    )?.eta
+
+  test("six writes keep the five versions before the latest, newest first, each 0600", async () => {
+    // A config folder of its own with no roster yet, so the first set makes the row and each set keeps the versions before it.
+    const config = configWith(null)
+    const data = dataOf(config)
+    const etas = [
+      inMinutes(60),
+      inMinutes(50),
+      inMinutes(40),
+      inMinutes(30),
+      inMinutes(20),
+      inMinutes(10),
+    ]
+    // The first set makes the row and needs task=; each set then sets a different eta, so each version holds a distinct time.
+    await run(config, ["set", "worker-restore", "task=Keep versions", `eta=${etas[0]}`])
+    for (let i = 1; i < etas.length; i++)
+      await run(config, ["set", "worker-restore", `eta=${etas[i]}`])
+    // The five versions before the latest exist, the sixth does not.
+    expect(versionList(data)).toEqual([1, 2, 3, 4, 5])
+    expect(existsSync(versionPath(data, 6))).toBe(false)
+    // Newest first: .1 holds the fifth call, .5 the first.
+    expect(etaAt(data, 1)).toBe(etas[4])
+    expect(etaAt(data, 5)).toBe(etas[0])
+    // Each version is mode 0600.
+    for (let n = 1; n <= 5; n++) expect(statSync(versionPath(data, n)).mode & 0o777).toBe(0o600)
+  })
+
+  test("a refused call leaves the versions as they were", async () => {
+    // A config folder of its own with no roster yet, so the two good sets are the only writes.
+    const config = configWith(null)
+    const data = dataOf(config)
+    await run(config, ["set", "worker-restore", "task=Keep versions", `eta=${inMinutes(30)}`])
+    await run(config, ["set", "worker-restore", `eta=${inMinutes(20)}`])
+    const before = versionList(data)
+    const before1 = existsSync(versionPath(data, 1))
+      ? readFileSync(versionPath(data, 1), "utf8")
+      : null
+    // A key the roster does not know is refused before the write, so nothing is written and no version is added.
+    const refused = await run(config, ["set", "worker-restore", "nosuchkey=1"])
+    expect(refused.code).not.toBe(0)
+    // The versions are unchanged: none added, and .1 still the same text when one existed.
+    expect(versionList(data)).toEqual(before)
+    if (before1 !== null) expect(readFileSync(versionPath(data, 1), "utf8")).toBe(before1)
   })
 })
