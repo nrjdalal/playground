@@ -108,3 +108,17 @@ describe("brief-rush.md's local-model rule reads a long file by grep then sed, n
     expect(line).toContain("120k window in about 25 minutes")
   })
 })
+
+// issue 2864: the brief has no stacked-PR step yet, so a line beside its PR lines pins one, since the PR's CI workflows run only on a PR into canary or main and a retarget fires edited which starts neither
+describe("brief-rush.md's stacked-PR line pins the retarget-to-canary CI step (#2864)", () => {
+  test("a stacked PR gets no CI until it targets canary, then retargets to canary, merges it in and pushes", async () => {
+    const rush = await read(join("scripts/briefs", "brief-rush.md"))
+    const line = rush.split("\n").find((l) => l.startsWith("- A stacked PR gets no CI")) ?? ""
+    expect(line).toContain("gets no CI until it targets `canary`")
+    expect(line).toContain("`auto-check-build.yml` and `auto-test.yml`")
+    expect(line).toContain("a PR into `canary` or `main`")
+    expect(line).toContain("a retarget fires `edited`")
+    expect(line).toContain("merge `origin/canary` in")
+    expect(line).toContain("so CI runs at the head that merges")
+  })
+})
