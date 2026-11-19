@@ -31,6 +31,7 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
 `playground wa status` prints whether each number has written or been approved, whether a reply can go to it now, when the owner last read ops-wa's messages, whether the last alert to the alert number was delivered and read, each pending alert and when it goes on, and the last alert's outcome with its times: handled by the owner's reaction, handled at its source, sent to the second number, or `send to the second number failed: <reason>`.
 `playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
 In quiet hours, `wa.quietStartHour` to `wa.quietEndHour` in the owner's zone (12 am to 6 am by default), a reply goes out while the owner has read or written in the last hour; after that ops-wa holds its text and sends the held texts as one catch-up when the owner reads or writes, or the window ends, and refuses a poll, a file, a location or a quote until then, while an urgent `wa alert` goes at any hour ([ADR 0040](../../../../.agents/adr/0040-quiet-hours-hold-replies-for-one-catch-up.md)).
+ops-wa sends the owner one line of its own at 22 hours after the owner's last message, asking for any reply so updates keep coming, once a window and after quiet hours while the window is open; a reply to it is a message like any other.
 ops-wa sends each text part, and a file's caption, after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
 
@@ -84,3 +85,11 @@ A key a guard reads waits for the owner's yes to ops-wa's own plain question on 
 While that question waits and no card waits on its choices, the owner's next message settles it: a yes (`yes`, `y`, `yes do it`, `1`) or a `no` stays with ops-wa and never reaches you, a reaction leaves it waiting and ops-wa tells the owner to reply yes, and any other message drops the question and reaches you as usual.
 `wa.owner` and `wa.device` refuse here, since they name the WhatsApp that proves the owner; point the owner to the Settings card for them.
 Done when it prints `set <key>` with its undo or `asked the owner on WhatsApp to confirm`, or its refusal goes to the owner as the reply.
+
+## A setting a session proposes
+
+When a session needs a guarded key changed and the owner's message holds no value, as with a plain yes to your question, run `playground settings set <key> <value> --propose` ([ADR 0041](../../../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
+ops-wa asks the owner its own question with the whole value and sets the key on his yes within 10 minutes, so leave the question out of your reply.
+A yes that quotes the question, or the line a reaction on it gets, settles it, and so does a plain yes while the question, and the line a reaction on it gets, are all he got since his last typed message; a yes that quotes another message, or a plain yes after something else went out, reaches you as usual while the question still waits, so answer it as the reply to your own message it is.
+It refuses a key no guard reads (set that one plainly), a masked key (post an Inbox `secret` ask), `wa.owner` and `wa.device`, and any ask while another confirm waits, naming the open one: propose again once that one is settled.
+Done when it prints `asked the owner on WhatsApp to confirm`, or its refusal is acted on as it says.

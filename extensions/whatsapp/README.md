@@ -25,6 +25,12 @@ From `wa.quietStartHour` to `wa.quietEndHour` in your zone (`clock.ownerZone`), 
 Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; a status update is held as the newest alone, and an urgent alert reaches you at any hour ([ADR 0040](../../.agents/adr/0040-quiet-hours-hold-replies-for-one-catch-up.md)).
 Set both to the same hour for no quiet window.
 
+## The 22-hour reminder
+
+ops-wa can reply only within 24 hours of your last message.
+At 22 hours it sends you one line asking for any reply, so updates keep coming; each new message of yours opens a new 24 hours with its own reminder.
+When 22 hours falls in quiet hours, the line goes when they end, if the 24 hours are still open.
+
 ## What you can send
 
 A photo, voice note, video or document you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with its caption, a document's name, or a voice note's or video's words; it stays out of the attachments folder.
@@ -60,3 +66,8 @@ What the dispatcher may answer each chat with is a policy line you set on this M
 
 Ask for a setting in your own WhatsApp message and write its value, and the dispatcher sets it from that message ([ADR 0035](../../.agents/adr/0035-the-owners-own-whatsapp-message-sets-a-setting.md)): ops-wa checks your message holds the value, and keeps a keyed hash of each word of your messages for 24 hours, never their text.
 A key a guard reads, such as a policy line or a job, asks you on WhatsApp first, as "set <key> to <value>? yes or no": `yes`, `y`, `yes do it` or `1` within 10 minutes applies it (a bare number answers a card waiting on its rows first), a reaction, a 👍 too, leaves it waiting and asks you to reply yes, and `no`, any other reply or silence drops it; any other key applies at once, but `wa.owner` and `wa.device`, which you set on this Mac alone. Each change comes back with a one-line undo to run in your own terminal.
+
+## Settings a session proposes
+
+A session that needs a guarded setting changed asks you "set <key> to <value>? Reply yes or no", with the whole value, and your `yes` within 10 minutes sets it as your own act ([ADR 0041](../../.agents/adr/0041-a-sessions-proposed-setting-is-set-by-the-owners-yes.md)).
+Reply to the question itself or to its "not set" line, or send a plain `yes` while it is the last message you got (the "not set" line a reaction on it gets counts as part of it); when something else came after your last typed message, a plain `yes` goes to the dispatcher instead and the question still waits. `no`, any other typed message from you, or 10 minutes passing clears it and leaves the key as it was. Only one question waits at a time, and a masked key, such as a phone number, comes to you as an Inbox card instead, since the question would show its last 4 alone.

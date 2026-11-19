@@ -242,6 +242,8 @@ const cycle = async (
   name: string,
   opts: {
     added: string[]
+    ended?: boolean
+    expired?: boolean
     factory?: string
     login: boolean
     loginExit?: number
@@ -265,7 +267,18 @@ const cycle = async (
   if (opts.factory)
     writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
   const login = JSON.stringify({
-    claudeAiOauth: { accessToken: "made-up", expiresAt: 4_000_000_000_000 },
+    claudeAiOauth: opts.ended
+      ? {
+          accessToken: "",
+          expiresAt: 0,
+          loginEnded: "time_limit",
+          refreshToken: "",
+          refreshTokenExpiresAt: 1_000_000_000_000,
+        }
+      : {
+          accessToken: "made-up",
+          expiresAt: opts.expired ? 1_000_000_000_000 : 4_000_000_000_000,
+        },
   })
   writeFileSync(
     join(stubs, "security"),
@@ -289,6 +302,12 @@ const cycle = async (
   return {
     alerts: read("ops/alerts-usage.json"),
     beat: read("ops/beat.json"),
+    status: read("ops/usage/stored-login-status.json"),
+    // the file's mtime comes from the OS clock, which the clock-ahead pass leaves alone, as it leaves run.py's own
+    statusMtime: existsSync(join(home, ".playground", "ops/usage/stored-login-status.json"))
+      ? statSync(join(home, ".playground", "ops/usage/stored-login-status.json")).mtimeMs
+      : null,
+    stored: read("ops/usage/stored-login.json"),
     usage: read("usage.json"),
   }
 }
@@ -323,6 +342,34 @@ test("with Claude Code's own login alone, usage.json holds its reading, as befor
   const { beat, usage } = await cycle("login-only", { added: [], login: true })
   expect(beat.result).toBe("ok")
   expect(usage.account).toBe("stored@example.org")
+})
+
+// #2863: spawn.sh learns that the own login's Claude Code login has ended from this file alone, so it never reads Claude Code's credentials
+test("an expired stored token writes stored-login-status.json with no loginEnded, and no stored-login.json", async () => {
+  const { status, statusMtime, stored } = await cycle("expired", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ loginEnded: null })
+  expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
+  expect(stored).toBeNull()
+})
+
+test("an ended stored login writes its reason to stored-login-status.json as loginEnded", async () => {
+  const { beat, status } = await cycle("ended", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ loginEnded: "time_limit" })
+  expect(beat.detail).toContain("stored login: LoginEnded: ")
+})
+
+test("a good stored read writes no loginEnded", async () => {
+  const { status, stored } = await cycle("unexpired", { added: [], login: true })
+  expect(status).toMatchObject({ loginEnded: null })
+  expect(stored.account).toBe("stored@example.org")
 })
 
 test("with no account at all, the job beats waiting, not an error, and writes no usage.json", async () => {
