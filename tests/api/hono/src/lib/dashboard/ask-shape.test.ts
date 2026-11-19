@@ -10,14 +10,12 @@ import {
   PROSE_LIMIT,
   shapeHints,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
-import {
-  deleteRefusal,
-  targetWords,
-} from "../../../../../../api/hono/src/lib/dashboard/delete-targets"
+import { deleteRefusal } from "../../../../../../api/hono/src/lib/dashboard/delete-targets"
 import {
   attachmentSourceSchema,
   inboxInputSchema,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import { targetWords } from "../../../../../../packages/config/src/delete-targets"
 import { ASK_CODE_COLUMNS } from "../../../../../../packages/config/src/inbox"
 
 const PROSE =

@@ -1,5 +1,7 @@
 import { join, resolve } from "node:path"
 
+import { targetWords } from "@packages/config/delete-targets"
+
 // What the check reads on this machine: the poster's folder and home, the main checkout's worktrees folder (null outside a checkout), and whether a path is there.
 export type TargetDeps = {
   cwd: string
@@ -7,13 +9,6 @@ export type TargetDeps = {
   home: string
   worktrees: string | null
 }
-
-// Pure: each word of a delete's what, stripped of the quotes and punctuation around it.
-export const targetWords = (what: string): string[] =>
-  what
-    .split(/\s+/)
-    .map((word) => word.replace(/^[`'"(]+|[`'",.;:)]+$/g, "").replace(/(.)\/$/, "$1"))
-    .filter((word) => word !== "")
 
 // The targets a delete's what names by a short name, each with the full path to write: a relative or ~ path that is there, or a worktree's bare folder name (a word of dots alone, as a stray ./, is prose), unless that full path stands in the what beside it.
 export function shortTargets(what: string, deps: TargetDeps): { full: string; word: string }[] {
