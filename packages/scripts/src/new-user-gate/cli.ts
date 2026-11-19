@@ -50,7 +50,7 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
-// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count and each step that did not pass.
+// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count, each step that did not pass, and each step that passed with a `no shot:` shot named by its reason.
 export const verdictLine = (sha: string, steps: Step[]): string => {
   const short = steps.length < STEP_COUNT
   const unsure = steps.filter((s) => s.inconclusive).length
@@ -60,6 +60,13 @@ export const verdictLine = (sha: string, steps: Step[]): string => {
     `${steps.filter((s) => s.ok).length} of ${STEP_COUNT} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
     ...steps.flatMap((s, i) =>
       s.ok ? [] : [`${i + 1}. ${s.name}${s.detail ? `: ${s.detail.replace(/\s+/g, " ")}` : ""}`],
+    ),
+    ...steps.flatMap((s, i) =>
+      s.ok && s.shot && s.shot.startsWith("no shot: ")
+        ? [
+            `${i + 1}. ${s.name}: no shot (${s.shot.replace(/^no shot: /, "").replace(/\s+/g, " ")})`,
+          ]
+        : [],
     ),
     ...(short ? [`stopped after ${steps.length} of ${STEP_COUNT} steps`] : []),
   ]
