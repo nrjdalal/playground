@@ -600,6 +600,222 @@ describe("the capacity gate refuses and spawns nothing", () => {
     },
   )
 
+  // #2863: an --account start on the own login whose stored-login.json reads nothing (stale, missing, or its Claude Code login ended) starts on its seat token, judged by login-flip.json's seen reading of it, as a probed login is
+  const ownStart = ["worker", "worker-brave-otter", "b.md", "--account", "own@example.com"]
+  const usageDir = (home: string) => join(home, ".playground", "ops", "usage")
+  type Seat = { five?: number; limitedFor?: number; readAge?: number; week: number }
+  const ownEnv = (env: object = {}) => ({
+    CLAUDE_JSON: ownLogin,
+    PACE_OFF_UNTIL: offUntilUtc,
+    USAGE_JSON: factoryUsage(10),
+    ...env,
+  })
+  const ownFiles =
+    (
+      opts: {
+        ended?: string
+        seat?: Seat
+        statusAge?: number
+        stored?: "missing" | number
+        week?: number
+      } = {},
+    ) =>
+    (home: string) => {
+      mkdirSync(usageDir(home), { recursive: true })
+      if (opts.stored !== "missing")
+        storedLogin("own@example.com", opts.week ?? 20, opts.stored ?? 600)(home)
+      writeFileSync(
+        join(usageDir(home), "stored-login-status.json"),
+        JSON.stringify({
+          loginEnded: opts.ended ?? null,
+          writtenAt: minutesAgo(opts.statusAge ?? 0),
+        }),
+      )
+      const seat = opts.seat
+      if (seat)
+        writeFileSync(
+          join(usageDir(home), "login-flip.json"),
+          JSON.stringify({
+            seen: {
+              "own@example.com": {
+                at: Date.now() / 1000 - (seat.readAge ?? 5) * 60,
+                ...(seat.five !== undefined && {
+                  five: seat.five,
+                  fiveReset: Date.now() / 1000 + 3600,
+                }),
+                ...(seat.limitedFor && { limitedUntil: Date.now() / 1000 + seat.limitedFor * 60 }),
+                via: "token",
+                week: seat.week,
+                weekReset: Date.now() / 1000 + 5 * 86_400,
+              },
+            },
+          }),
+        )
+    }
+  const seatLine =
+    "--account own@example.com is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at 76% (login-flip.json seen)"
+
+  test.each<[string, Parameters<typeof ownFiles>[0]]>([
+    ["its stored reading is stale", {}],
+    ["it has no stored reading", { stored: "missing" }],
+    ["its Claude Code login has ended", { ended: "time_limit", stored: 600 }],
+  ])(
+    "--account naming the own login starts on its seat token while %s, judged by login-flip.json's seen reading",
+    async (_, files) => {
+      const r = await spawn(
+        ownStart,
+        [],
+        ownEnv(),
+        script,
+        undefined,
+        ownFiles({ seat: { five: 30, week: 76 }, ...files }),
+      )
+      expect(r.code).toBe(0)
+      expect(r.out).toContain(seatLine)
+      expect(r.security).toContain(
+        "find-generic-password -s playground-claude-oauth -a own@example.com",
+      )
+      expect(launchOf(r)).toContain("-a own@example.com -w")
+      expect(launchOf(r)).toContain("CLAUDE_CODE_OAUTH_TOKEN")
+      expect(execLine(r, "worker-brave-otter")).toContain("--account own@example.com")
+      expect(capacityLog(r)).toEqual([
+        expect.objectContaining({
+          readings: expect.objectContaining({ account: "own@example.com", week: 76 }),
+          verdict: "pass",
+        }),
+      ])
+    },
+  )
+
+  test.each<[string, Seat | undefined, string]>([
+    [
+      "its seen reading is over the 98% backstop",
+      { week: 99 },
+      "the week is at 99% (login-flip.json seen seven_day.used_percentage)",
+    ],
+    [
+      "its 5-hour window is at 95%",
+      { five: 95, week: 20 },
+      "the 5-hour window is at 95% (login-flip.json seen five_hour.used_percentage), 90 is its cap",
+    ],
+    ["its account is limited", { limitedFor: 30, week: 20 }, "its account is limited until "],
+    [
+      "its seen reading is over an hour old",
+      { readAge: 61, week: 20 },
+      "login-flip.json seen was written 61 minutes ago (writtenAt), 60 is its limit",
+    ],
+    [
+      "login-flip.json holds no seen reading of it",
+      undefined,
+      "login-flip.json holds no seen reading of own@example.com to judge its seat token by",
+    ],
+  ])(
+    "--account naming the own login is refused on its seat token when %s",
+    async (_, seat, reason) => {
+      const r = await spawn(ownStart, [], ownEnv(), script, undefined, ownFiles({ seat }))
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain("--account own@example.com, this machine's own login: ")
+      expect(r.err).toContain(reason)
+    },
+  )
+
+  test("the seat item is looked up under usage.keychainService, the service the launch reads it from", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({
+        SETTINGS_JSON: JSON.stringify({ "usage.keychainService": "made-up-seat-service" }),
+      }),
+      script,
+      undefined,
+      ownFiles({ seat: { week: 76 } }),
+    )
+    expect(r.code).toBe(0)
+    expect(r.security).toContain("find-generic-password -s made-up-seat-service -a own@example.com")
+    expect(r.security?.join("\n")).not.toContain("playground-claude-oauth")
+    expect(launchOf(r)).toContain(
+      "find-generic-password -s made-up-seat-service -a own@example.com -w",
+    )
+  })
+
+  test("inside the sandbox, whose Keychain is closed to the gate, the seat start goes on and the new pane reads the item, as keychain_has rules", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ FAKE_NO_ITEM: "1", SANDBOX_RUNTIME: "1" }),
+      script,
+      undefined,
+      ownFiles({ seat: { week: 76 } }),
+    )
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(seatLine)
+    expect(launchOf(r)).toContain("-a own@example.com -w")
+  })
+
+  test("a stale stored reading under the gate cannot pass a start its seat's fresh reading refuses", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv(),
+      script,
+      undefined,
+      ownFiles({ seat: { week: 99 }, week: 20 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("the week is at 99% (login-flip.json seen seven_day.used_percentage)")
+  })
+
+  test("with no seat item, an ended Claude Code login refuses its --account start, naming the owner's /login and playground accounts add", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ FAKE_NO_ITEM: "1" }),
+      script,
+      undefined,
+      ownFiles({ ended: "time_limit", seat: { week: 20 } }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain(
+      "--account own@example.com, this machine's own login: its Claude Code login has ended (loginEnded: time_limit), and the Keychain holds no playground-claude-oauth item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it",
+    )
+  })
+
+  test.each<[string, Parameters<typeof ownFiles>[0]]>([
+    ["a live login's stale reading", {}],
+    ["an ended login whose status is over 15 minutes old", { ended: "time_limit", statusAge: 20 }],
+  ])("with no seat item, %s is refused as stale, as before", async (_, files) => {
+    const r = await spawn(
+      ownStart,
+      [],
+      ownEnv({ FAKE_NO_ITEM: "1" }),
+      script,
+      undefined,
+      ownFiles({ seat: { week: 20 }, ...files }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "ops/usage/stored-login.json was written 600 minutes ago (writtenAt), 15 is its limit",
+    )
+  })
+
+  test("a fresh stored reading over the gate stays the judge, with no seat start, though login-flip.json's seen reading shows room", async () => {
+    const r = await spawn(
+      ownStart,
+      [],
+      { CLAUDE_JSON: ownLogin, USAGE_JSON: factoryUsage(10) },
+      script,
+      undefined,
+      ownFiles({ seat: { week: 10 }, stored: 0, week: 40 }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "the week is at 40% (ops/usage/stored-login.json seven_day.used_percentage)",
+    )
+    expect(r.security).toBeUndefined()
+  })
+
   test("a usage.json without five_hour is an account with no 5-hour limit, read as none rather than 0%, and passes (#85)", async () => {
     const raw = JSON.stringify(usage({ rate_limits: { seven_day: usage().rate_limits.seven_day } }))
     const r = await spawn(["worker", "worker-brave-otter", "b.md"], [], { USAGE_JSON: raw })
