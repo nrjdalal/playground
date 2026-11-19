@@ -89,6 +89,8 @@ playground settings list | get <key> [--org <org>] | why <key> | set <key> <valu
                       read or change a setting in the extensions folder, each write one commit with its reason (an org's scope or your login's, your login's by default)
 playground settings set <key> <value> --from-owner-msg <id>
                       ask ops-wa to set a key, a guarded one included, at your login's scope from the owner's own WhatsApp message of that id, kept 24 hours, which must hold the value; a key a guard reads waits for the owner's yes on WhatsApp within 10 minutes, and each set prints its undo
+playground settings set <key> <value> --propose
+                      ask ops-wa to put a guarded key and its whole value to the owner on WhatsApp, "set <key> to <value>? Reply yes or no", and set it at your login's scope on his yes to that question within 10 minutes; a key no guard reads, a masked key, wa.owner, wa.device and an ask while another confirm waits are refused
 playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]
                       once, at the switch: each ops job jobs.json lists becomes its jobs.<name> setting (your login's scope by default), a launchd job's program read from its plist; a job the registry does not know stays in jobs.json
 playground ext which <skill> [--repo <dir>]

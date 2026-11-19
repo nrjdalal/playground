@@ -38,7 +38,7 @@ import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
 import { outboxDir } from "./outbound"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
-import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
+import { applyOwnerSetting, ownerSettings } from "./setting-set"
 import { votedOptions } from "./votes"
 
 // ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
@@ -249,20 +249,24 @@ const main = async () => {
     )
     return was
   }
-  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035)
+  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035); a session's proposal waits for it too, its question's id the reason (ADR 0041)
   const owned = {
-    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    apply: (key: string, value: string, id: string, proposed?: boolean) =>
+      applyOwnerSetting(data, key, value, id, proposed),
     dir,
     log: (line: string) => console.log(line),
     now: Date.now,
-    tell: (line: string) => send(line, "reply"),
+    question: (line: string) => send.card(line),
+    tell: (line: string) => send.out(line, "reply").then((out) => out.ids),
   }
+  const settings = ownerSettings(owned)
   serve(
     path,
     send.out,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
     send.react,
-    (id, key, value) => settingSet(owned, id, key, value),
+    settings.set,
+    settings.propose,
   )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
@@ -276,7 +280,7 @@ const main = async () => {
     card: send.card,
     catchUp: send.catchUp,
     check,
-    confirm: (text, reaction) => confirm(owned, text, reaction),
+    confirm: settings.confirm,
     dir,
     draft: send.draft,
     escalate: (body) => send(body, "escalate"),
