@@ -120,20 +120,25 @@ export const seatIo: SeatIo = {
   config: () => readText(claudeConfigFile()),
   now: Date.now,
   read: readText,
+  // Bun throws when no security is on PATH (a machine with no Keychain), which reads as no token
   seat: (service, email) => {
-    const run = Bun.spawnSync(
-      ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
-      {
-        // PATH as it reads now, which Bun would otherwise take from the start
-        env: process.env,
-        stderr: "ignore",
-        stdin: "ignore",
-        stdout: "pipe",
-        timeout: SEAT_READ_MS,
-      },
-    )
-    const token = run.exitCode === 0 ? run.stdout.toString().trim() : ""
-    return token || null
+    try {
+      const run = Bun.spawnSync(
+        ["security", "find-generic-password", "-s", service, "-a", email, "-w"],
+        {
+          // PATH as it reads now, which Bun would otherwise take from the start
+          env: process.env,
+          stderr: "ignore",
+          stdin: "ignore",
+          stdout: "pipe",
+          timeout: SEAT_READ_MS,
+        },
+      )
+      const token = run.exitCode === 0 ? run.stdout.toString().trim() : ""
+      return token || null
+    } catch {
+      return null
+    }
   },
   service: () => seatService(dataDir()),
 }

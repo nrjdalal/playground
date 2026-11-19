@@ -119,7 +119,7 @@ describe("hostedLogin", () => {
     })
   })
 
-  test("a stale or empty stored login that has not ended, with no seat token, keeps today's start with no cause, since the hosted session has no usage gate (the builder's ruling)", () => {
+  test("a stale or empty stored login that has not ended, with no seat token, keeps today's start with no cause, since the hosted session has no usage gate", () => {
     expect(
       hostedLogin(io({ [at("/data", "stored-login.json")]: stored(600) }, null), "/data"),
     ).toEqual({})
@@ -165,6 +165,16 @@ exit 44
   test("the seat token comes from security's own answer for the service and account, and none when it keeps no item", () => {
     expect(seatIo.seat("acme-claude", EMAIL)).toBe(TOKEN)
     expect(seatIo.seat("playground-claude-oauth", EMAIL)).toBeNull()
+  })
+
+  test("a machine with no security on PATH reads no seat token, rather than throw", () => {
+    const now = process.env.PATH
+    process.env.PATH = join(dir, "empty")
+    try {
+      expect(seatIo.seat("acme-claude", EMAIL)).toBeNull()
+    } finally {
+      process.env.PATH = now
+    }
   })
 
   test("the service is the login's usage.keychainService setting, and none before a login is named", () => {
