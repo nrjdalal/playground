@@ -70,8 +70,6 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     // whether the dispatcher's alerts-wait runs, and when it last handed over an alert, as its cursor's time
     waiter: true,
     printedAt: undefined as number | undefined,
-    // whether the bridge's own 👀 goes out, on in the reactions' tests alone, so every other test reads its texts as they were
-    react: false,
   }
   let now = START
   fake.setClock(() => now)
@@ -88,8 +86,6 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     },
   }
   const send = sender({ ...base, device: SPARE, sock: fake.sock })
-  // the bridge's own 👀, which it leaves running, so settle waits for each
-  const reacting: Promise<unknown>[] = []
   const watched = bridge({
     ...base,
     assistant: async () => mode.seat,
@@ -103,11 +99,6 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (to === "dispatcher") relayed.push(text)
     },
     poll: send.poll,
-    react: (emoji: string, on: Parameters<typeof send.react>[1]) => {
-      const run = mode.react ? send.react(emoji, on) : Promise.resolve("a test with no reactions")
-      reacting.push(run.catch(() => {}))
-      return run
-    },
     reply: send,
     stuck: async () => mode.stuck,
     votes: votedOptions,
@@ -141,11 +132,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     relayed,
     routed,
     send,
-    // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue and the 👀 it left running before it reads
-    settle: async () => {
-      await watched.idle()
-      await Promise.all(reacting)
-    },
+    // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue before it reads
+    settle: watched.idle,
     waits,
   }
 }
@@ -1446,9 +1434,8 @@ describe("every kind the owner sends (#2789)", () => {
     )
   })
 
-  test("an edit is relayed as such, naming the message, and gets no 👀", async () => {
+  test("an edit is relayed as such, naming the message, and ops-wa sends nothing", async () => {
     const h = harness()
-    h.mode.react = true
     const protocolMessage = {
       editedMessage: { conversation: "merge it after lunch" },
       key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
@@ -1494,7 +1481,6 @@ describe("every kind the owner sends (#2789)", () => {
 
   test("a delete is relayed as such, naming the message, asks no reply and is never handed on", async () => {
     const h = harness()
-    h.mode.react = true
     const protocolMessage = { key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) }, type: 0 }
     h.fake.upsert([of(h, { protocolMessage })])
     await h.settle()
@@ -1684,7 +1670,6 @@ describe("reactions (#2755)", () => {
 
   test("an owner message handed to the dispatcher gets no reaction from ops-wa", async () => {
     const h = harness()
-    h.mode.react = true
     said(h, jid(OWNER), "is the train moving?")
     await h.settle()
     expect(h.relayed).toHaveLength(1)
@@ -1703,7 +1688,6 @@ describe("reactions (#2755)", () => {
 
   test("wa react 👀 --id sets the dispatcher's 👀, a reply leaves it, and wa react ✅ on the latest message replaces it, one send with the gap alone", async () => {
     const h = harness()
-    h.mode.react = true
     said(h, jid(OWNER), "first")
     await h.settle()
     const id = said(h, jid(OWNER), "merge it")
@@ -1723,7 +1707,6 @@ describe("reactions (#2755)", () => {
 
   test("wa react names an older message by its id, and refuses one it never kept or one past 24 hours", async () => {
     const h = harness()
-    h.mode.react = true
     const first = said(h, jid(OWNER), "one")
     await h.settle()
     said(h, jid(OWNER), "two")
@@ -1740,7 +1723,6 @@ describe("reactions (#2755)", () => {
   test("no reaction on a card's answer, a stranger's message, or a message while WhatsApp mode is off", async () => {
     const ib = inboxOf([card(12)])
     const h = harness(ib.inbox)
-    h.mode.react = true
     said(h, jid(OWNER), "hello")
     await h.settle()
     await h.pass()
@@ -1754,9 +1736,8 @@ describe("reactions (#2755)", () => {
     expect(reactions(h)).toEqual([])
   })
 
-  test("the guest's message gets no 👀, and wa react --to alert ✅ answers the guest's latest", async () => {
+  test("the guest's message gets no reaction, and wa react --to alert ✅ answers the guest's latest", async () => {
     const h = harness(undefined, undefined, ALERT)
-    h.mode.react = true
     said(h, jid(OWNER), "hi")
     await h.settle()
     const id = said(h, jid(ALERT), "what is the factory on?")
@@ -1768,7 +1749,6 @@ describe("reactions (#2755)", () => {
 
   test("wa react ✅ on an owner message that came by LID is the dispatcher's answer, so the failover leaves it", async () => {
     const h = harness()
-    h.mode.react = true
     h.fake.upsert([h.fake.message("99887766554433@lid", "thanks", { remoteJidAlt: jid(OWNER) })])
     await h.settle()
     await h.send.react("✅", {})
@@ -1779,7 +1759,6 @@ describe("reactions (#2755)", () => {
 
   test("a message with no reply still goes on to the assistant seat, and the dispatcher's wa react 👀 is its answer", async () => {
     const h = harness()
-    h.mode.react = true
     said(h, jid(OWNER), "is it green?")
     await h.settle()
     h.advance(3 * 60_000)
@@ -1805,7 +1784,6 @@ describe("typing time (#2755)", () => {
 
   test("each text part waits its own typing time, a reaction the gap alone", async () => {
     const h = harness()
-    h.mode.react = true
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
     const body = `${"a".repeat(SEND.partChars)}\n\n${"b".repeat(30)}`

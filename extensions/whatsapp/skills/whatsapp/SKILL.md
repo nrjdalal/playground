@@ -15,7 +15,8 @@ The owner sets both numbers in Settings, Extensions, on the WhatsApp card (**Dev
 What goes over WhatsApp follows the policy line ops-wa adds to each message it hands you, from `wa.replyPolicy` (`wa.guestPolicy` for the guest), a setting the owner keeps on this machine ([ADR 0030](../../../../.agents/adr/0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md)); its default is factory status, and a secret, a token or customer personal data never goes, whatever the line says.
 
 1. Answer every owner message ops-wa hands you, even a one-word one: write the reply to a file and run `playground wa send <absolute path>`.
-   ops-wa has already reacted 👀 on it (seen, a reply is coming); a message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces the 👀 (got it); with no `--id` it lands on the owner's latest message, which may be a later one ([ADR 0031](../../../../.agents/adr/0031-ops-wa-reacts-and-types-at-a-human-pace.md)).
+   When the reply will take a while, some thinking or a look at the factory first, react `playground wa react 👀 --id <the id on ops-wa's line>` (seen, a reply is coming) before you start; a quick reply goes alone.
+   A message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces a 👀 (got it); with no `--id` a reaction lands on the owner's latest message, which may be a later one ([ADR 0038](../../../../.agents/adr/0038-the-dispatcher-sets-the-eyes-reaction.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
    When it prints anything but `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
    Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
