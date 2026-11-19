@@ -10,7 +10,8 @@ both pass. Signals nothing: it only reads pids and execs.
 Before the exec, the job's stderr goes to ops/<job>.stderr, a plain file, so a write never blocks the job or kills it with
 SIGPIPE, and a forked reader (its pid in ops/<job>.reader) copies that file to the pane and keeps the last non-empty line, cut
 to LAST_MAX characters, in ops/<job>.last (0600): herdr closes a job's pane the moment the job exits, so ops-up reads why a
-job died there. A start drops the last copy's line first, and the reader ends once the job has.
+job died there. A start drops the last copy's line first, and the reader ends once the job has; it ignores the pane's
+hangup, and writes the line only while ops/<job>.reader names it.
 """
 import fcntl, json, os, shlex, signal, subprocess, sys
 
