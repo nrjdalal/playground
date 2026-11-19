@@ -1,5 +1,5 @@
 import { appendFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { DEFAULT_POLICY, secretIn, shownValue } from "@packages/settings"
 
@@ -27,6 +27,7 @@ import {
 import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
+import { type Content, messagesOf, outboxDir, readOutbound } from "./outbound"
 import { alertSeedFile } from "./seed"
 import type { Vote, votedOptions } from "./votes"
 
@@ -48,11 +49,6 @@ export type Sock = {
   // the linked device's own chat ids, which a vote on its poll is encrypted with
   user?: { id?: string; lid?: string } | null
 }
-// What ops-wa sends: text, a poll of one choice, whose secret it makes itself so it can read the owner's vote, or a reaction on a kept message.
-export type Content =
-  | { linkPreview: null; text: string }
-  | { poll: { messageSecret: Uint8Array; name: string; selectableCount: 1; values: string[] } }
-  | { react: { key: { fromMe: false; id: string; remoteJid: string }; text: string } }
 export type Io = {
   // the second number in E.164, wa.alert, read afresh for each send and each message, empty for none: it gets alerts and chats as a guest, and its messages are data
   alert?: () => Promise<string>
@@ -811,7 +807,7 @@ export function sender(
 ) {
   let chain: Promise<unknown> = Promise.resolve()
   let last = 0
-  // one send, gapMs after the last and, for a text part, after its typing time, a poll and a reaction the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
+  // one send, gapMs after the last and, for a text part or a file's caption, after its typing time, a poll, a reaction and a file with no caption the gap alone; it returns the sent message's id, and is recorded in sends.json when its caller passes sends, which each does only for an answer to the owner, so neither the auto 👀 nor a send to the alert number reads as the dispatcher's answer
   const paced = async (
     sends: number[] | null,
     gapMs: number,
@@ -856,8 +852,16 @@ export function sender(
     if (!id) throw new Error("WhatsApp gave the poll no id, so its votes cannot be read")
     return { id, secret: Buffer.from(messageSecret).toString("base64") }
   }
-  const sendNow = async (body: string, kind: Kind, source?: string): Promise<string> => {
-    const refusal = refusalOf(body)
+  const sendNow = async (
+    body: string,
+    kind: Kind,
+    source?: string,
+    path?: string,
+  ): Promise<string> => {
+    // the outbox sits beside whatsapp/ in the data folder
+    const file = path ? await readOutbound(outboxDir(dirname(io.dir)), path) : undefined
+    const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
+    const refusal = refusalOf(words)
     if (refusal) throw new Error(refusal)
     const now = io.now()
     const alert = kind === "alert" || kind === "first"
@@ -868,7 +872,7 @@ export function sender(
       )
     if (kind === "guest") {
       if (!second) throw new Error("no alert number is set (wa.alert)")
-      const why = guestRefusal(body)
+      const why = guestRefusal(words)
       if (why) throw new Error(why)
     }
     if (kind === "escalate" && !second) throw new Error("no alert number is set (wa.alert)")
@@ -908,17 +912,19 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
-    const parts = split(toWhatsApp(body))
+    const messages = messagesOf(split(toWhatsApp(body)), file)
     const sends = await recent(now)
     const ids: string[] = []
     for (const t of going)
-      for (const [k, part] of parts.entries()) {
+      for (const [k, content] of messages.entries()) {
+        // a text or a caption waits its typing time; a file with none goes on the gap alone
+        const typed = "text" in content ? content.text : "caption" in content ? content.caption : ""
         const id = await paced(
           t.jid === jidOf(io.owner) ? sends : null,
           k === 0 ? SEND.gapMs : SEND.partGapMs,
           t.jid,
-          { linkPreview: null, text: part },
-          typingMs(part.length, io.random),
+          content,
+          typed ? typingMs(typed.length, io.random) : 0,
         )
         if (id) ids.push(id)
       }
@@ -970,9 +976,10 @@ export function sender(
     )
     return "sent"
   }
+  // source: what a checker reads for an alert to the owner first; path: a file from the outbox (outbound.ts), sent with the body as its caption
   return Object.assign(
-    (body: string, kind: Kind = "reply", source?: string): Promise<string> =>
-      queued(() => sendNow(body, kind, source)),
+    (body: string, kind: Kind = "reply", source?: string, path?: string): Promise<string> =>
+      queued(() => sendNow(body, kind, source, path)),
     {
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
       react: (emoji: string, on: { auto?: boolean; id?: string; who?: Who }) =>
