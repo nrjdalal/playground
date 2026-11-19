@@ -21,12 +21,14 @@ import {
 } from "../../../../../packages/scripts/src/ops-wa/alert-set"
 import { bridge, type Inbox } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { type Card, NO_ID } from "../../../../../packages/scripts/src/ops-wa/cards"
+import { serve, socketPath } from "../../../../../packages/scripts/src/ops-wa/server"
 import {
   applyOwnerSetting,
   CONFIRM_MS,
   confirm,
   guarded,
   holds,
+  settingPropose,
   settingSet,
 } from "../../../../../packages/scripts/src/ops-wa/setting-set"
 import { type Io, runStore } from "../../../../../packages/scripts/src/playground/store"
@@ -36,7 +38,11 @@ import { ALERT, fakeSocket, jid, OWNER, STRANGER } from "./fake-socket"
 process.env.PLAYGROUND_LOGIN = "made-up-me"
 
 const scratch = mkdtempSync(join(tmpdir(), "ops-wa-setting-"))
-afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+// a unix socket's path must stay short, so a test that serves ops-wa's socket takes its data folder under /tmp
+const short: string[] = []
+afterAll(() => {
+  for (const dir of [scratch, ...short]) rmSync(dir, { force: true, recursive: true })
+})
 let n = 0
 
 const HOUR = 3_600_000
@@ -58,17 +64,20 @@ const stored = (data: string): Record<string, unknown> => {
 }
 
 // A data folder and ops-wa's folder in it, the setting-set io over them, each line told to the owner, and a clock a test moves.
-const owned = () => {
-  const data = join(scratch, `data-${n++}`)
+const owned = (data = join(scratch, `data-${n++}`)) => {
   const dir = join(data, "whatsapp")
   const told: string[] = []
   const logged: string[] = []
   let now = START
+  let questions = 0
   const io = {
-    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    apply: (key: string, value: string, id: string, proposed?: boolean) =>
+      applyOwnerSetting(data, key, value, id, proposed),
     dir,
     log: (line: string) => void logged.push(line),
     now: () => now,
+    // a question to the owner, given the id WhatsApp gives the message it sent: q1, q2 and on
+    question: async (line: string) => (told.push(line), `q${++questions}`),
     tell: async (line: string) => void told.push(line),
   }
   return { advance: (ms: number) => (now += ms), data, dir, io, logged, run: cli(data), told }
@@ -272,6 +281,112 @@ describe("settings set from the owner's message", () => {
   })
 })
 
+describe("settings set --propose, a session's proposal", () => {
+  test("asks the owner the key and its whole value, sets nothing yet, and his yes sets exactly that value with the question's id as its reason", async () => {
+    const o = owned()
+    const said = await settingPropose(o.io, "wa.replyPolicy", "factory status only")
+    expect(said).toContain("asked the owner on WhatsApp to confirm wa.replyPolicy")
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? yes or no"])
+    expect(stored(o.data)["wa.replyPolicy"]).toBeUndefined()
+    expect(await confirm(o.io, "yes")).toBe(true)
+    expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
+    expect(o.logged).toEqual([
+      "ops-wa: wa.replyPolicy set on the owner's yes to the question q1; it was unset",
+    ])
+    expect(o.told[1]).toBe(
+      "set wa.replyPolicy on your yes. to undo: playground settings reset wa.replyPolicy --reason 'undo of the owner'\\''s WhatsApp yes to the question q1'",
+    )
+    expect((await o.run(["why", "wa.replyPolicy"])).out).toContain(
+      "the owner's WhatsApp yes to the question q1 confirmed it",
+    )
+  })
+
+  test("a masked key is refused, naming the Inbox secret ask, and the owner is asked nothing", async () => {
+    const o = owned()
+    await expect(settingPropose(o.io, "wa.alert", "+15550100123")).rejects.toThrow(
+      "ask for it with an Inbox secret ask",
+    )
+    expect(o.told).toEqual([])
+    expect(existsSync(join(o.dir, "confirm.json"))).toBe(false)
+  })
+
+  test.each(["wa.owner", "wa.device"])(
+    "%s is refused, and the owner is asked nothing",
+    async (key) => {
+      const o = owned()
+      await expect(settingPropose(o.io, key, "+15550100999")).rejects.toThrow(
+        `set ${key} on this Mac`,
+      )
+      expect(o.told).toEqual([])
+    },
+  )
+
+  test("a key no guard reads, or a value its schema refuses, is refused before the owner is asked", async () => {
+    const o = owned()
+    await expect(settingPropose(o.io, "factory.repo", "made-up-me/new")).rejects.toThrow(
+      "no key a guard reads",
+    )
+    await expect(settingPropose(o.io, "glm.readOnlyLoad5", "many")).rejects.toThrow(
+      "glm.readOnlyLoad5",
+    )
+    expect(o.told).toEqual([])
+  })
+
+  test("a second proposal is refused while one waits, naming the open one, and the yes applies the first alone", async () => {
+    const o = owned()
+    await settingPropose(o.io, "wa.replyPolicy", "factory status only")
+    await expect(settingPropose(o.io, "wa.guestPolicy", "status only")).rejects.toThrow(
+      "the question on wa.replyPolicy (a session's proposal) still waits",
+    )
+    expect(o.told).toEqual(["set wa.replyPolicy to factory status only? yes or no"])
+    expect(await confirm(o.io, "yes")).toBe(true)
+    expect(stored(o.data)["wa.replyPolicy"]).toBe("factory status only")
+    expect(stored(o.data)["wa.guestPolicy"]).toBeUndefined()
+  })
+
+  test("a no sets nothing and clears it, so a later yes sets nothing and a new proposal goes out", async () => {
+    const o = owned()
+    await settingPropose(o.io, "wa.replyPolicy", "factory status only")
+    expect(await confirm(o.io, "no")).toBe(true)
+    expect(o.told[1]).toBe("left wa.replyPolicy as it was.")
+    expect(await confirm(o.io, "yes")).toBe(false)
+    expect(stored(o.data)).toEqual({})
+    await settingPropose(o.io, "wa.guestPolicy", "status only")
+    expect(o.told[2]).toBe("set wa.guestPolicy to status only? yes or no")
+  })
+
+  test("a yes after 10 minutes sets nothing, and the proposal no longer blocks a new one", async () => {
+    const o = owned()
+    await settingPropose(o.io, "wa.replyPolicy", "factory status only")
+    o.advance(CONFIRM_MS)
+    expect(await confirm(o.io, "yes")).toBe(false)
+    expect(stored(o.data)).toEqual({})
+    await settingPropose(o.io, "wa.guestPolicy", "status only")
+    expect(o.told).toHaveLength(2)
+  })
+
+  test("while either kind of confirm waits the other is refused, naming the open one, and the yes applies only the one its question named", async () => {
+    const o = owned()
+    await keepMessage(o.dir, "own1", "guest policy: status only", START, OWNER)
+    await settingPropose(o.io, "wa.replyPolicy", "factory status only")
+    await expect(settingSet(o.io, "own1", "wa.guestPolicy", "status only")).rejects.toThrow(
+      "the question on wa.replyPolicy (a session's proposal) still waits",
+    )
+    expect(await confirm(o.io, "yes")).toBe(true)
+    expect(stored(o.data)).toEqual({ "wa.replyPolicy": "factory status only" })
+
+    const p = owned()
+    await keepMessage(p.dir, "own1", "guest policy: status only", START, OWNER)
+    await settingSet(p.io, "own1", "wa.guestPolicy", "status only")
+    await expect(settingPropose(p.io, "wa.replyPolicy", "factory status only")).rejects.toThrow(
+      "the question on wa.guestPolicy (the owner's own message) still waits",
+    )
+    expect(p.told).toEqual(["set wa.guestPolicy to status only? yes or no"])
+    expect(await confirm(p.io, "yes")).toBe(true)
+    expect(stored(p.data)).toEqual({ "wa.guestPolicy": "status only" })
+  })
+})
+
 describe("ops-wa's bridge keeps a message and takes a confirm from the owner alone", () => {
   const watched = (o: ReturnType<typeof owned>, inbox?: Inbox) => {
     const fake = fakeSocket()
@@ -463,6 +578,53 @@ describe("ops-wa's bridge keeps a message and takes a confirm from the owner alo
       "no message of the owner's",
     )
   })
+
+  describe("a session's proposal", () => {
+    test("the CLI proposes through ops-wa's socket, writing nothing, and the owner's yes from his number sets the key and sends the undo", async () => {
+      const data = mkdtempSync("/tmp/wa-propose-")
+      short.push(data)
+      const o = owned(data)
+      mkdirSync(o.dir, { recursive: true })
+      const server = serve(
+        socketPath(data),
+        async () => "sent",
+        undefined,
+        undefined,
+        undefined,
+        (key, value) => settingPropose(o.io, key, value),
+      )
+      try {
+        const r = await o.run(["set", "wa.guestPolicy", "status only", "--propose"])
+        expect(r.err).toBe("")
+        expect(r.out).toContain("asked the owner on WhatsApp to confirm wa.guestPolicy")
+      } finally {
+        server.stop(true)
+      }
+      expect(o.told).toEqual(["set wa.guestPolicy to status only? yes or no"])
+      expect(stored(data)).toEqual({})
+      const h = watched(o)
+      h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own1" })])
+      await h.settle()
+      expect(stored(data)["wa.guestPolicy"]).toBe("status only")
+      expect(o.told.at(-1)).toContain("to undo: playground settings reset wa.guestPolicy")
+      expect(h.relayed).toEqual([])
+    })
+
+    test("a yes from the second number or a stranger sets nothing, and the proposal still waits for the owner's", async () => {
+      const o = owned()
+      const h = watched(o)
+      await settingPropose(o.io, "wa.guestPolicy", "status only")
+      h.fake.upsert([
+        h.fake.message(jid(ALERT), "yes", { id: "guest1" }),
+        h.fake.message(jid(STRANGER), "yes", { id: "stranger1" }),
+      ])
+      await h.settle()
+      expect(stored(o.data)).toEqual({})
+      h.fake.upsert([h.fake.message(jid(OWNER), "yes", { id: "own1" })])
+      await h.settle()
+      expect(stored(o.data)["wa.guestPolicy"]).toBe("status only")
+    })
+  })
 })
 
 describe("playground settings set --from-owner-msg", () => {
@@ -487,5 +649,28 @@ describe("playground settings set --from-owner-msg", () => {
     ])
     expect(r.code).toBe(2)
     expect(r.err).toContain("--from-owner-msg takes no --scope")
+  })
+})
+
+describe("playground settings set --propose", () => {
+  test("only asks ops-wa, so with ops-wa down it refuses and writes nothing", async () => {
+    const o = owned()
+    const r = await o.run(["set", "wa.guestPolicy", "status only", "--propose"])
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("ops-wa is not running")
+    expect(stored(o.data)).toEqual({})
+  })
+
+  test.each([
+    ["--reason", "x"],
+    ["--scope", "x"],
+    ["--by", "x"],
+    ["--from-owner-msg", "own1"],
+  ])("takes no %s", async (flag, value) => {
+    const o = owned()
+    const r = await o.run(["set", "wa.guestPolicy", "status only", "--propose", flag, value])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("--propose takes no")
+    expect(stored(o.data)).toEqual({})
   })
 })
