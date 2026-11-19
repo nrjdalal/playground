@@ -895,8 +895,8 @@ try:
                 ended = status["loginEnded"] if (now - from_iso(status["writtenAt"])).total_seconds() < 15 * 60 and isinstance(status["loginEnded"], str) and status["loginEnded"] else None
             except (KeyError, TypeError, ValueError):
                 ended = None
-            service = os.environ.get("KEYCHAIN_SERVICE") or "playground-claude-oauth"
-            if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
+            service = os.environ.get("KEYCHAIN_SERVICE", "")
+            if not service or subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
                 if ended:
                     return "stored-login.json", {}, f"its Claude Code login has ended (loginEnded: {ended}), and the Keychain holds no {service} item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it", False
                 return "stored-login.json", {}, stale, False
