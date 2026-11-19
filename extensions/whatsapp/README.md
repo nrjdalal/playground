@@ -19,6 +19,12 @@ A saved number shows by its last 4 digits alone, and an empty field keeps it; th
 A message of yours the dispatcher needs a while to answer shows 👀, seen with a reply coming, and one that needs no reply shows ✅; a quick answer comes as the reply alone ([ADR 0038](../../.agents/adr/0038-the-dispatcher-sets-the-eyes-reaction.md)).
 A reply arrives after the time it takes to type it, 3 characters a second, so a long one takes up to a minute per part.
 
+## Quiet hours
+
+From `wa.quietStartHour` to `wa.quietEndHour` in your zone (`clock.ownerZone`), 12 am to 6 am unless you set them, a reply reaches you while you have read or written in the last hour.
+Once you have gone quiet for an hour, ops-wa holds each reply's text, mode 600 on this Mac, and sends them all as one catch-up, oldest first, when you read or write again or the window ends; an urgent alert reaches you at any hour ([ADR 0039](../../.agents/adr/0039-quiet-hours-hold-replies-for-one-catch-up.md)).
+Set both to the same hour for no quiet window.
+
 ## What you can send
 
 A photo, voice note, video or document you send is kept on this Mac in `<data>/wa/media/`, mode 600, and its path goes to the dispatcher with its caption, a document's name, or a voice note's or video's words; it stays out of the attachments folder.

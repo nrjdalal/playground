@@ -18,14 +18,16 @@ What goes over WhatsApp follows the policy line ops-wa adds to each message it h
    When the reply will take a while, some thinking or a look at the factory first, react `playground wa react 👀 --id <the id on ops-wa's line>` (seen, a reply is coming) before you start; a quick reply goes alone.
    A message that needs no reply, a yes or a thanks, gets `playground wa react ✅ --id <the id on ops-wa's line>` in place of one, which replaces a 👀 (got it); with no `--id` a reaction lands on the owner's latest message, which may be a later one ([ADR 0038](../../../../.agents/adr/0038-the-dispatcher-sets-the-eyes-reaction.md)).
    The Assistant answers only what ops-wa hands it, the same way, and routes nothing.
-   When its line does not start with `wa send: sent`, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
-   Done when the command prints `wa send: sent` or `wa react: sent`, or the Inbox update's id.
+   A line `wa send: held for quiet hours` means ops-wa keeps the reply for the owner's catch-up, and that reply is done.
+   When its line starts with neither, it has sent nothing: post the reply to the Inbox with `playground ask new`, as an update, and say why the send failed.
+   Done when the command prints `wa send: sent`, `wa send: held for quiet hours` or `wa react: sent`, or the Inbox update's id.
 2. At each 15-minute line from ops-wa, send the owner an update on the factory's work the same way, only when something changed since your last message to the owner; ops-wa sends the line only after a window with an owner message or a send to the owner.
    Done when the update is sent, or nothing has changed and nothing is sent.
 
 `wa send` refuses a body holding a token shape, sends to the owner's number (or the guest's, with `--to alert`), and only within 24 hours of that number's last message, since ops-wa never starts a chat, but for the alert number the owner approved, which takes a reply at any time; a refusal names its reason.
 `playground wa status` prints whether each number has written or been approved, whether a reply can go to it now, when the owner last read ops-wa's messages, and whether the last alert to the alert number was delivered and read.
 `playground wa react <emoji>` reacts on the owner's latest message, `--to alert` on the guest's, and `--id <id>` on an older one of the last 24 hours.
+In quiet hours, `wa.quietStartHour` to `wa.quietEndHour` in the owner's zone (12 am to 6 am by default), a reply goes out while the owner has read or written in the last hour; after that ops-wa holds its text and sends the held texts as one catch-up when the owner reads or writes, or the window ends, and refuses a poll, a file, a location or a quote until then, while an urgent `wa alert` goes at any hour ([ADR 0039](../../../../.agents/adr/0039-quiet-hours-hold-replies-for-one-catch-up.md)).
 ops-wa sends each text part, and a file's caption, after the time it takes to type it, 3 characters a second, so a long reply lands up to a minute per part later.
 It turns markdown into WhatsApp's marks (`*bold*`, a link as its text and URL, a table as a monospace block or `label: value` lines when a phone cannot fit it, a `> [!NOTE]` callout as one plain line) and splits a long body into parts, so write the reply as you would for the Inbox.
 
