@@ -1362,6 +1362,23 @@ test("10 touched-tests: the repo's own scanners read as scanners and its fixture
   )
 })
 
+// split the word so this file's own text is not a match; each written value is whole
+test("10 touched-tests: a test that walks imports with Bun's Transpiler is listed for a change it reaches through the graph (#2625)", () => {
+  const repo = scratch()
+  const walker =
+    'for (const { path } of new Bun.Transpiler({ loader: "ts" }).scan' +
+    "Imports(text)) log(path)\n"
+  scratchRepo(repo, {
+    "scripts/ops/optimizer/idle_sessions.ts": "x\n",
+    "tests/packages/scripts/src/ops-outbox/drain.test.ts": walker,
+  })
+  writeFiles(repo, { "scripts/ops/optimizer/idle_sessions.ts": "y\n" })
+  git(repo, "commit", "-qam", "change idle")
+  const { code, listed, stderr } = touched(repo)
+  expect(code, stderr).toBe(0)
+  expect(listed).toContain("tests/packages/scripts/src/ops-outbox/drain.test.ts")
+})
+
 test("10k a renamed file's old path still selects the test importing it", () => {
   const repo = scratch()
   scratchRepo(repo, {

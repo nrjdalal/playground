@@ -266,7 +266,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
     expect(rule).toContain("test:file < <scratch>/touched.txt")
     expect(rule).not.toContain("| xargs")
     expect(rule).toContain("the source's extension swapped for `.test.ts` or `.test.tsx`")
-    expect(rule).toContain("`readdirSync` or `readdir(`")
+    expect(rule).toContain("`readdirSync`, `readdir(` or `scanImports(`")
     expect(rule).toContain(
       "a `git grep` (in a shell line or as argv, wrapped across lines or after an option like `-C`: `GIT_GREP` in the script)",
     )
