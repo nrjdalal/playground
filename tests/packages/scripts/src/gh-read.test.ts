@@ -19,6 +19,7 @@ import {
   ghRead,
   ghTimedOut,
 } from "../../../../packages/scripts/src/gh-read"
+import { KEYRING_LOCKED } from "../../../../packages/scripts/src/ops-tick/tick"
 
 // A scratch folder holding a fake gh first on PATH, which records each call in called and answers as gh.sh says, and a data folder the beat's result is read from.
 const dir = mkdtempSync(join(tmpdir(), "gh-read-"))
@@ -83,6 +84,18 @@ test("a read past the cap keeps the keyring words while a fresh beat names a key
     unreachable: "gh hangs: keyring locked, try again",
   })
   expect(existsSync(called)).toBe(true)
+})
+
+// The beat's other keyring failure, a locked keyring with no desktop session, keeps its own words too.
+test("a read past the cap keeps the locked-keyring words while a fresh beat names them", () => {
+  rmSync(ghAuthPath(data), { force: true })
+  const at = new Date().toISOString()
+  fakeGh(
+    `mkdir -p "$PLAYGROUND_DATA_DIR/ops/tick"\n` +
+      `echo '{"at":"${at}","ok":false,"reason":"${KEYRING_LOCKED}"}' > "$PLAYGROUND_DATA_DIR/ops/tick/gh-auth.json"\n` +
+      `exec sleep 30`,
+  )
+  expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({ unreachable: KEYRING_LOCKED })
 })
 
 // Too old to trust a keyring failure, a past-cap read reports the timeout.
