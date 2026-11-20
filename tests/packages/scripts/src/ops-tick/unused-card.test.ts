@@ -488,7 +488,7 @@ test("a card holds CARD_MAX questions at most, the largest first", () => {
 test("a sharded set is one item, listed once at its total, its line naming the model stem and the shard count", () => {
   const stem = "models--nvidia--Qwen"
   const shards = ["00001", "00002", "00003", "00004"].map(
-    (n) => `${HOME}/models/hf/hub/${stem}-${n}-of-00004.gguf`,
+    (n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`,
   )
   const bytes = 13 * GB
   const item: CardItem = {
@@ -510,7 +510,7 @@ test("a sharded set is one item, listed once at its total, its line naming the m
 
 test("a sharded set missing a shard is still one item, its line naming the shards that are there and the set's total", () => {
   const stem = "models--nvidia--Qwen"
-  const shards = ["00002"].map((n) => `${HOME}/models/hf/hub/${stem}-${n}-of-00004.gguf`)
+  const shards = ["00002"].map((n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`)
   const bytes = 13 * GB
   const item: CardItem = {
     bytes,
