@@ -1,9 +1,6 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, systemd (systemctl, loginctl), Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one narrowed to the containers the box made (docker.ts), curl is real with each URL logged, and bunx is the real one. claude, launched with a session name, runs the scripted session in claude.ts.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, systemd (systemctl, loginctl), Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one narrowed to the containers the box made (docker.ts), curl is real with each URL logged, and bunx is real with each call logged. claude, launched with a session name, runs the scripted session in claude.ts.
 
 import { basename, join } from "node:path"
-
-// The label on every container the gate starts, which its clean-up removes by name.
-export const GATE_LABEL = "playground-gate=1"
 
 const logged = (box: string, name: string) =>
   `#!/bin/bash\necho "${name} $*" >> "${box}/calls.log"\n`

@@ -8,18 +8,13 @@ import { stubs, usageReading } from "../../../../../packages/scripts/src/new-use
 const box = realpathSync(mkdtempSync(join(tmpdir(), "gate-stubs-")))
 afterAll(() => rmSync(box, { force: true, recursive: true }))
 
-// The box's stand-ins, with a docker that logs its argv and answers port with a loopback address, and a real bunx that logs what it was handed
+// The box's stand-ins, with a real bunx that logs what it was handed
 const bin = join(box, "bin")
 for (const [name, text] of Object.entries(stubs(box, join(bin, "real-bunx")))) {
   await Bun.write(join(bin, name), text)
   chmodSync(join(bin, name), 0o755)
 }
-writeFileSync(
-  join(bin, "docker"),
-  `#!/bin/sh\necho "$*" >> ${box}/docker.log\n[ "$1" = inspect ] && exit 1\n[ "$1" = port ] && echo 127.0.0.1:54321\nexit 0\n`,
-)
 writeFileSync(join(bin, "real-bunx"), `#!/bin/sh\necho "real $*"\n`)
-chmodSync(join(bin, "docker"), 0o755)
 chmodSync(join(bin, "real-bunx"), 0o755)
 const call = (name: string, ...args: string[]) => {
   const out = Bun.spawnSync([join(bin, name), ...args], {
@@ -34,6 +29,10 @@ test("the box's systemctl and loginctl refuse every call and log it, so the box'
   const calls = readFileSync(join(box, "calls.log"), "utf8")
   expect(calls).toContain("systemctl --user stop com.playground.ops-tick.service\n")
   expect(calls).toContain("loginctl enable-linger 1000\n")
+})
+
+test("the box's bunx hands every call to the real one", () => {
+  expect(call("bunx", "portless", "get", "playground").out).toBe("real portless get playground\n")
 })
 
 describe("the gate's gh stand-in", () => {
