@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
 import { existsSync } from "node:fs"
-import { chmod, copyFile, open, rm, rename } from "node:fs/promises"
+import { chmod, copyFile, open, rm, rename, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -100,9 +100,25 @@ async function lockRoster(): Promise<() => Promise<void>> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
       const held = await readLock()
-      if (held && (!pidAlive(held.pid) || held.ageSeconds > 30)) {
-        await rm(lockPath, { force: true })
-        continue
+      if (held) {
+        // A gone pid, or one over the wait, is stale, so the write takes the lock and retries.
+        if (!pidAlive(held.pid) || held.ageSeconds > 30) {
+          await rm(lockPath, { force: true })
+          continue
+        }
+      } else {
+        // An empty lock from a write killed mid-write has no pid to read, so stat decides by its age.
+        let st: Awaited<ReturnType<typeof stat>>
+        try {
+          st = await stat(lockPath)
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") continue
+          throw err
+        }
+        if ((Date.now() - st.mtimeMs) / 1000 > 30) {
+          await rm(lockPath, { force: true })
+          continue
+        }
       }
       if (Date.now() - started >= 5000)
         throw new Refusal(
