@@ -102,6 +102,7 @@ A re-point that would drop an old head, one no ancestor of the new head, first k
 Last, it lists each machine's unused space with its size, and removes only what the owner picks Remove for on its Inbox card: model weights no model folder in `~/models` names, Docker images no container uses by any of their tags and unused for 7 days, model-test worktrees in `~/models/kit/runs/` a day after their row ended, and ship rehearsal folders in a scratchpad.
 It reads each other machine `PLAYGROUND_PEERS` names in the Dashboard's `.env` the same way, over one fixed ssh that only reads.
 An item under 100 MB joins one small leftovers total, and an item the machine record holds is marked recorded.
+A model stored as shards, the files in one folder that share a stem and end `-NNNNN-of-NNNNN.gguf` or `.safetensors`, is one item at its shards' total, and its Remove checks every shard before it deletes any.
 `bun packages/scripts/src/ops-tick/unused.ts` runs the same list by hand, a dry run that removes nothing.
 The card asks about the 20 largest items over 100 MB, each with Remove and Keep, and leaves out the model test's own runs and logs and a rehearsal whose version tag is not out yet; it is edited in place each night while it stands open.
 Once answered, each Remove still listed at the card's size goes the next night: an image through `docker image rm`, model weights deleted outright since they download again, and anything else to the 7-day trash, each through `playground rm --card`.
