@@ -387,7 +387,7 @@ test("a machine's lines: the log's totals by kind, the outbox's items with recor
 })
 
 test("shardSets: four shards of one model merge into one item, sized as the total, carrying every shard path", () => {
-  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const stem = "/me/models/loose/models--nvidia--Qwen"
   const shards = [
     {
       bytes: 10.4 * MB,
@@ -432,7 +432,7 @@ test("shardSets: four shards of one model merge into one item, sized as the tota
 })
 
 test("shardSets: a lone shard of a set is still one item, carrying that one shard", () => {
-  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const stem = "/me/models/loose/models--nvidia--Qwen"
   const merged = shardSets([
     {
       bytes: 4 * GB,
@@ -477,7 +477,7 @@ test("shardSets: sets in one folder stay apart by stem, total and extension", ()
 })
 
 test("shardSets: an unsharded gguf and an image pass through unchanged, largest first", () => {
-  const stem = "/me/models/hf/hub/models--nvidia--Qwen"
+  const stem = "/me/models/loose/models--nvidia--Qwen"
   const merged = shardSets([
     { bytes: 4 * GB, kind: "weights" as const, path: `${stem}/separate.gguf`, recorded: false },
     {
