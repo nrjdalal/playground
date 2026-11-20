@@ -61,15 +61,15 @@ playground ingest [--follow | status]
 playground queues     print the merge queue and the work queue (bun run queues)
 playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
-playground wa send [--to alert] [--file <path>] [<file>]
-                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; with --file, an image, a document, a video or a voice note from the data folder's wa/outbox/, the reply its caption and optional; it refuses a body holding a token shape (bun run wa)
+playground wa send [--to alert] [--file <path> | --location <lat>,<lon> | --quote <id> | --edit <id> | --delete <id> | --status] [<file>]
+                      send the reply in <file>, named by its absolute path, to the owner's WhatsApp through ops-wa, or with --to alert to the wa.alert number, a guest, the one way any session writes there; with --file, an image, a document, a video or a voice note from the data folder's wa/outbox/, the reply its caption and optional; --location a location, the reply its name; --quote a reply quoting a kept message; --edit or --delete one of its own messages by the id it printed; --status the 15-minute update as the owner's one live status message, edited in place while WhatsApp takes an edit; it refuses a body holding a token shape (bun run wa)
 playground wa alert [--now-both] [--source <kind>:<ref>] <file>
                       send an urgent alert, one the owner must act on now, in <file>, named by its absolute path, to the owner's WhatsApp at once and to the wa.alert number after wa.alertDelayMinutes unless the owner reacts or wa.alertCheck reads its source as handled, or to both at once with --now-both (bun run wa)
 playground wa react <emoji> [--to alert] [--id <id>]
                       react on the owner's latest WhatsApp message, the guest's with --to alert, or one by its id, as ✅ for got it, no reply needed (bun run wa)
 playground wa alert-set --from-owner-msg <id>
                       set the second number, wa.alert, to the one phone number in the owner's own WhatsApp message of that id, which ops-wa kept for 24 hours (bun run wa)
-playground wa status  print whether the owner and the alert number have written or been approved, each masked, whether a reply can go to each now, and each pending alert (bun run wa)
+playground wa status  print whether the owner and the alert number have written or been approved, each masked, whether a reply can go to each now, when the owner last read ops-wa's messages, whether the last alert to the alert number was delivered and read, each pending alert, and the last alert's outcome with its times (bun run wa)
 playground wa relink
                       after WhatsApp logged out the linked device, set the old link aside so ops-wa's next start posts a new pairing card (bun run wa)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
@@ -87,6 +87,10 @@ playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
                       read or change a setting in the extensions folder, each write one commit with its reason (an org's scope or your login's, your login's by default)
+playground settings set <key> <value> --from-owner-msg <id>
+                      ask ops-wa to set a key, a guarded one included, at your login's scope from the owner's own WhatsApp message of that id, kept 24 hours, which must hold the value; a key a guard reads waits for the owner's yes on WhatsApp within 10 minutes, and each set prints its undo
+playground settings set <key> <value> --propose
+                      ask ops-wa to put a guarded key and its whole value to the owner on WhatsApp, "set <key> to <value>? Reply yes or no", and set it at your login's scope on his yes to that question within 10 minutes; a key no guard reads, a masked key, wa.owner, wa.device and an ask while another confirm waits are refused
 playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]
                       once, at the switch: each ops job jobs.json lists becomes its jobs.<name> setting (your login's scope by default), a launchd job's program read from its plist; a job the registry does not know stays in jobs.json
 playground ext which <skill> [--repo <dir>]

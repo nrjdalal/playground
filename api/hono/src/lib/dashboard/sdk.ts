@@ -37,6 +37,7 @@ import {
   type FeedResult,
 } from "@/lib/dashboard/feed"
 import { keptLocalModel, startModel, type Started } from "@/lib/dashboard/local-load"
+import { type HostedLogin, machineHostedLogin } from "@/lib/dashboard/seat-login"
 import {
   settingSummary,
   type HostedSetting,
@@ -78,7 +79,7 @@ type Pending = {
   settle: (result: PermissionResult) => void
 }
 
-// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks, and PLAYGROUND_DATA_DIR naming the stack's own data folder, so a factory script the session runs on a fixture stack writes there, never this machine's. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or terminal it runs under; none of it reaches the session, and with no API key it runs on the login alone.
+// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks, and PLAYGROUND_DATA_DIR naming the stack's own data folder, so a factory script the session runs on a fixture stack writes there, never this machine's. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or terminal it runs under; none of it reaches the session. A cloud start runs on the stored login while ops-usage reads it live, else on the own account's seat token, CLAUDE_CODE_OAUTH_TOKEN added beside this list, by spawn.sh's rule (seat-login.ts).
 const HOSTED_ENV = [
   "CLAUDE_CONFIG_DIR",
   "HOME",
@@ -247,6 +248,8 @@ export function hostedSettings(path = FACTORY_SETTINGS): Record<string, unknown>
 
 export type HostDeps = {
   exists: (path: string) => boolean
+  // The login a cloud start runs on (seat-login.ts): the stored one, or the own account's seat token once the stored login reads stale, empty or ended; none reads as the stored one.
+  login?: () => HostedLogin
   // The local models the composer's menu offers and their server (org.ts).
   local: { models: LocalModel[]; url: string }
   now: () => Date
@@ -256,6 +259,7 @@ export type HostDeps = {
 
 const hostDeps: HostDeps = {
   exists: existsSync,
+  login: () => machineHostedLogin(),
   local: org.local,
   now: () => new Date(),
   query,
@@ -268,6 +272,8 @@ const CLOSE_MS = 10_000
 // One hosted session: its input stream, its prompts waiting on a card, and whether a turn is running.
 export class SdkHost {
   private inbox: SDKUserMessage[] = []
+  // Why its cloud start has no login, the ended stored login's words, shown as its row's expired login; null while it has one.
+  private loginCause: string | null = null
   private wake: (() => void) | null = null
   private pending = new Map<string, Pending>()
   private listeners = new Set<() => void>()
@@ -311,12 +317,22 @@ export class SdkHost {
     this.mode = mode
     this.model = model
     this.effort = null
+    const login = local ? {} : (this.deps.login?.() ?? {})
+    this.loginCause = login.token ? null : (login.cause ?? null)
+    if (login.token)
+      console.error(
+        `${SDK_PROBE} starts on ${login.email}'s seat token: the stored login has no live reading`,
+      )
+    if (this.loginCause) console.error(`${SDK_PROBE}: ${this.loginCause}`)
     const stream = this.deps.query({
       options: {
         allowDangerouslySkipPermissions: true,
         canUseTool: this.ask,
         cwd: dir,
-        env: hostedEnv(process.env, dataDir(), local),
+        env: {
+          ...hostedEnv(process.env, dataDir(), local),
+          ...(login.token && { CLAUDE_CODE_OAUTH_TOKEN: login.token }),
+        },
         extraArgs: { name: SDK_PROBE },
         includePartialMessages: true,
         ...(model && { model }),
@@ -574,6 +590,7 @@ export class SdkHost {
       lifecycle: this.working ? "running" : "idle",
       light: this.working ? "working" : "idle",
       ...(this.load && { localLoad: this.load }),
+      ...(this.loginCause && { loginExpired: true as const }),
       ...(this.deps.local.models.length > 0 && { localModels: this.deps.local.models }),
       model: this.model,
       name: SDK_PROBE,

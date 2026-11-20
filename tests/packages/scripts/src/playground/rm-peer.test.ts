@@ -204,9 +204,10 @@ test("runRmPeer deletes a .gguf a folder deeper under a recorded folder, logs it
   expect(paths).toContain(folder)
 })
 
-// A made-up peer whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out.
+// A made-up peer whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out, and `folders` one with an empty folder, which the set takes in at 0 bytes.
 const shardedFolder = (
   symlinks: number[] = [],
+  folders: number[] = [],
 ): {
   folder: string
   shard: (i: number) => string
@@ -230,7 +231,8 @@ const shardedFolder = (
     if (symlinks.includes(i)) {
       writeFileSync(join(folder, `target-${i}`), "real")
       symlinkSync(join(folder, `target-${i}`), here)
-    } else {
+    } else if (folders.includes(i)) mkdirSync(here)
+    else {
       writeFileSync(here, "")
       truncateSync(here, size)
     }
@@ -280,7 +282,7 @@ test("runRmPeer refuses a sharded set whose total no longer matches, deleting no
   for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
-test("runRmPeer refuses a sharded set whose one shard is a symlink, deleting none", async () => {
+test("runRmPeer leaves a symlinked shard out of the set, so its total no longer matches, deleting none", async () => {
   const m = machine()
   deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
   const { shard, total } = shardedFolder([4])
@@ -334,6 +336,19 @@ test("runRmPeer --bytes refuses a path not on the machine record", async () => {
   expect(out).toEqual([])
   expect(err.join("\n")).toContain("is not on the machine record, so it stays")
   expect(existsSync(path)).toBe(true)
+})
+
+test("runRmPeer refuses a sharded set whose one shard fails its own check, an empty folder, though the total matches, deleting none", async () => {
+  const m = machine()
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  const { shard, size } = shardedFolder([], [4])
+  const { code, err } = await rmpTold(shard(1), {
+    bytes: size * 3,
+    card: "11111111-2222-3333-4444-555555555555",
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(`${shard(4)} is not model weights the shard set holds`)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
 // One runRmPeer over its words, catching what it logs or errors, with the card's approved byte count.

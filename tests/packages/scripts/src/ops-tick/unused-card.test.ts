@@ -488,7 +488,7 @@ test("a card holds CARD_MAX questions at most, the largest first", () => {
 test("a sharded set is one item, listed once at its total, its line naming the model stem and the shard count", () => {
   const stem = "models--nvidia--Qwen"
   const shards = ["00001", "00002", "00003", "00004"].map(
-    (n) => `${HOME}/models/hf/hub/${stem}-${n}-of-00004.gguf`,
+    (n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`,
   )
   const bytes = 13 * GB
   const item: CardItem = {
@@ -505,12 +505,12 @@ test("a sharded set is one item, listed once at its total, its line naming the m
   )
   const line = (card.preview as { options: { description: string }[] }).options[0]!.description
   expect(line).toContain(stem)
-  expect(line).toContain("4 of 4 shards")
+  expect(line).toContain("all 4 of 4 shards.")
 })
 
 test("a sharded set missing a shard is still one item, its line naming the shards that are there and the set's total", () => {
   const stem = "models--nvidia--Qwen"
-  const shards = ["00002"].map((n) => `${HOME}/models/hf/hub/${stem}-${n}-of-00004.gguf`)
+  const shards = ["00002"].map((n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`)
   const bytes = 13 * GB
   const item: CardItem = {
     bytes,
@@ -522,5 +522,5 @@ test("a sharded set missing a shard is still one item, its line naming the shard
   const line = (cardOf([item]).preview as { options: { description: string }[] }).options[0]!
     .description
   expect(line).toContain(stem)
-  expect(line).toContain("shards 00002 of 00004")
+  expect(line).toContain("with only shards 2 of 4 here.")
 })

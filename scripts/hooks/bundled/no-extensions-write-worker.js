@@ -6143,6 +6143,11 @@ var JOBS = {
     description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 }
   }),
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description: "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true }
+  }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
     schedule: { every: 60 }
@@ -11482,7 +11487,7 @@ var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "s
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"]
+  settings: ["--dry-run", "--propose"]
 };
 function isCli(word, dirs) {
   tick();
@@ -12317,16 +12322,24 @@ function cliWrite(words, tuning) {
   const positional = [];
   let dry = false;
   let scoped = false;
+  const options = [];
+  let ownerId;
   for (let k = 0;k < rest.length; k++) {
     const word = rest[k];
-    if (word !== undefined && switches.includes(word))
+    if (word !== undefined && switches.includes(word)) {
       dry ||= word === "--dry-run";
-    else if (word?.startsWith("--")) {
+      options.push(word);
+    } else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope");
+      if (word === "--from-owner-msg")
+        ownerId = rest[k + 1];
+      options.push(word);
       k++;
     } else
       positional.push(word);
   }
+  const ownerMsg = options.length === 1 && options[0] === "--from-owner-msg" && !!ownerId && positional.length === 2;
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2;
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;
@@ -12335,6 +12348,10 @@ function cliWrite(words, tuning) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
+    if (verb === "set" && ownerMsg)
+      return;
+    if (verb === "set" && proposal)
+      return;
     const job = key.startsWith(JOB_PREFIX);
     if (!GUARD_KEYS.has(key) && !job)
       return;

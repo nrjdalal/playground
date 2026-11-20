@@ -1,5 +1,13 @@
 // The suite's runner: runs `bun test` in sandbox.ts's sandbox, so no test can start a real session or read the real config by accident (a self-removal test once started two). The env is set before bun starts, since os.homedir() and the spawn PATH lookup read the boot environment, not a later mutation. The folder goes when the run does.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { availableParallelism, constants } from "node:os"
 import { basename, isAbsolute, join, relative } from "node:path"
 
@@ -107,7 +115,31 @@ const readable = () => {
   }
 }
 const timings = update || readable() ? [`--timings=${TIMINGS}`] : []
-const args = process.argv.slice(2)
+// bun flags whose value may follow as its own word (`bun test --help`), A to Z; each is joined to its value here, as `bun test` reads `flag=value`, so no later step reads the value as a path or a name filter
+const takesValue = new Set([
+  "--coverage-dir",
+  "--coverage-reporter",
+  "--max-concurrency",
+  "--parallel-delay",
+  "--path-ignore-patterns",
+  "--reporter",
+  "--reporter-outfile",
+  "--rerun-each",
+  "--retry",
+  "--seed",
+  "--shard",
+  "--test-name-pattern",
+  "--timeout",
+  "--timings",
+  "-t",
+])
+const args: string[] = []
+for (const arg of process.argv.slice(2)) {
+  const flag = args.at(-1)
+  if (flag !== undefined && takesValue.has(flag) && !arg.startsWith("-"))
+    args[args.length - 1] = `${flag}=${arg}`
+  else args.push(arg)
+}
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
@@ -127,28 +159,28 @@ if (relativeHere.length > 0) {
 const isBunTest = (path: string) => /\.test\.tsx?$/.test(path)
 // a Python test is any test_*.py, matched by its stem so a nested one, tests/x/test_x.py, still names a test
 const isPyTest = (path: string) => /^test_[^/]+\.py$/.test(basename(path))
-// a folder scanned depth-first, skipping its build and VCS folders, holds a test when any entry under it is a bun test or a Python test
+// a folder scanned depth-first, skipping its build and VCS folders, returns its bun and Python test files, as full paths
 const IGNORED = new Set(["node_modules", ".git", "dist", ".next"])
-const holdsTest = (dir: string): boolean => {
-  let found = false
+const scanFolder = (dir: string): { bun: string[]; py: string[] } => {
+  const bun: string[] = []
+  const py: string[] = []
   const one = (folder: string) => {
-    if (found) return
     for (const entry of readdirSync(folder)) {
-      if (found) break
       if (IGNORED.has(entry)) continue
       try {
         const full = join(folder, entry)
         if (statSync(full).isDirectory()) one(full)
-        else if (isBunTest(entry) || isPyTest(entry)) found = true
+        else if (isBunTest(entry)) bun.push(full)
+        else if (isPyTest(entry)) py.push(full)
       } catch {
         continue
       }
     }
   }
   one(dir)
-  return found
+  return { bun, py }
 }
-// a bare name filter selects a test when any test file of the run's, found depth-first from here, carries it, so the run's set of test files decides, and bun still gets the filter to run it
+// a bare name filter selects a test when any test file of the run's, found depth-first from here, carries it in its whole path, so the run's set of test files decides, and bun still gets the filter to run it
 const filterMatches = (filter: string): boolean => {
   let found = false
   const one = (folder: string) => {
@@ -159,7 +191,7 @@ const filterMatches = (filter: string): boolean => {
       try {
         const full = join(folder, entry)
         if (statSync(full).isDirectory()) one(full)
-        else if ((isBunTest(entry) || isPyTest(entry)) && entry.includes(filter)) found = true
+        else if ((isBunTest(entry) || isPyTest(entry)) && full.includes(filter)) found = true
       } catch {
         continue
       }
@@ -172,6 +204,7 @@ const filterMatches = (filter: string): boolean => {
 const bunTargets: string[] = []
 const pyTargets: [label: string, file: string][] = []
 const unrunnable: [label: string, reason: string][] = []
+// each Python test keyed by its real path, so a linked folder and its real one, as macOS's /var and /private/var, name one file once (issue 2858)
 const seenPy = new Set<string>()
 for (const arg of paths) {
   if (arg.startsWith("-")) {
@@ -184,15 +217,23 @@ for (const arg of paths) {
     else bunTargets.push(arg)
   } else if (isPyTest(b)) {
     if (!existsSync(b)) unrunnable.push([arg, "no Python test at"])
-    else if (!seenPy.has(b)) {
-      seenPy.add(b)
+    else if (!seenPy.has(realpathSync(b))) {
+      seenPy.add(realpathSync(b))
       pyTargets.push([arg, relative("tests", b)])
     }
   } else if (existsSync(b)) {
     try {
       if (statSync(b).isDirectory()) {
-        if (holdsTest(b)) bunTargets.push(arg)
-        else unrunnable.push([arg, "no test in folder at"])
+        const { bun, py } = scanFolder(b)
+        if (py.length > 0 && bun.length === 0) {
+          for (const full of py)
+            if (!seenPy.has(realpathSync(full))) {
+              seenPy.add(realpathSync(full))
+              pyTargets.push([full, relative("tests", full)])
+            }
+        } else if (bun.length > 0) {
+          bunTargets.push(arg)
+        } else unrunnable.push([arg, "no test in folder at"])
       } else unrunnable.push([arg, "no test file at"])
     } catch {
       unrunnable.push([arg, "no test file at"])
@@ -284,8 +325,17 @@ if (pyRan) {
     }
   }
 }
+// a run with no Python path printed a Python line, so the summary only names the count when there is one
+const pyClause =
+  pyTargets.length > 0
+    ? `, ${pyTargets.length} ${pyTargets.length === 1 ? "Python test" : "Python tests"} ${
+        !pyRan ? "skipped" : pyFailed.length ? "failed" : "passed"
+      }`
+    : ""
 console.error(
-  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}, ${pyTargets.length} Python test${pyTargets.length === 1 ? "" : "s"} ${!pyRan ? "skipped" : pyFailed.length ? "failed" : "passed"}`,
+  `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${
+    alone === 0 ? "passed" : `failed (exit ${alone})`
+  }${pyClause}`,
 )
 dropScratch()
 process.exit(parallel || alone || pyFailed.length)

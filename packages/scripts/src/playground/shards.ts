@@ -11,8 +11,7 @@ import {
   type Roots,
 } from "@packages/safe-delete"
 
-// The sharded path pattern: one stem, one shard index, one total, one extension.
-export const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
+import { SHARD } from "../ops-tick/unused"
 
 // The shard set one sharded path names: every real file in the same folder with the same stem, total and extension, A to Z, a symlink left out, or null for any other path.
 export const shardSet = (path: string): string[] | null => {

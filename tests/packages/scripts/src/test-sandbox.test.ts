@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -223,29 +224,36 @@ test("an interrupt during the parallel pass ends the run with 128 plus its numbe
   expect(readdirSync(tmp).filter((name) => name.startsWith("test-sandbox-"))).toEqual([])
 }, 20_000)
 
-test("a serial file named with a flag runs alone: the parallel pass, left with the flag and no path, runs nothing", async () => {
-  const dir = mkdtempSync(join(DIR, "serial-flag-"))
-  const serialRan = join(dir, "serial-ran")
-  const otherRan = join(dir, "other-ran")
-  writeFileSync(
-    join(dir, "other.test.ts"),
-    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("other", () => writeFileSync(${JSON.stringify(otherRan)}, ""))\n`,
-  )
-  mkdirSync(join(dir, "tests/api/hono/src/bin"), { recursive: true })
-  writeFileSync(
-    join(dir, "tests/api/hono/src/bin/dev.test.ts"),
-    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("serial", () => writeFileSync(${JSON.stringify(serialRan)}, ""))\n`,
-  )
-  const run = Bun.spawn(["bun", SCRIPT, "tests/api/hono/src/bin/dev.test.ts", "--only-failures"], {
-    cwd: dir,
-    stderr: "ignore",
-    stdout: "ignore",
-    timeout: 15_000,
-  })
-  expect(await run.exited).toBe(0)
-  expect(existsSync(serialRan)).toBe(true)
-  expect(existsSync(otherRan)).toBe(false)
-}, 20_000)
+test.each([
+  ["--only-failures", ["--only-failures"]],
+  ["--timeout 5000", ["--timeout", "5000"]],
+])(
+  "a serial file named with a flag runs alone: the parallel pass, left with the flag and no path, runs nothing (%s)",
+  async (_, flags) => {
+    const dir = mkdtempSync(join(DIR, "serial-flag-"))
+    const serialRan = join(dir, "serial-ran")
+    const otherRan = join(dir, "other-ran")
+    writeFileSync(
+      join(dir, "other.test.ts"),
+      `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("other", () => writeFileSync(${JSON.stringify(otherRan)}, ""))\n`,
+    )
+    mkdirSync(join(dir, "tests/api/hono/src/bin"), { recursive: true })
+    writeFileSync(
+      join(dir, "tests/api/hono/src/bin/dev.test.ts"),
+      `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("serial", () => writeFileSync(${JSON.stringify(serialRan)}, ""))\n`,
+    )
+    const run = Bun.spawn(["bun", SCRIPT, "tests/api/hono/src/bin/dev.test.ts", ...flags], {
+      cwd: dir,
+      stderr: "ignore",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    expect(await run.exited).toBe(0)
+    expect(existsSync(serialRan)).toBe(true)
+    expect(existsSync(otherRan)).toBe(false)
+  },
+  20_000,
+)
 
 test("its sandbox is a marked scratch folder, gone once the run ends (#545)", async () => {
   const tmp = join(DIR, "tmp-scratch")
@@ -695,4 +703,149 @@ test("a Python test a red bun pass leaves unrun is reported as skipped, not pass
   expect(code).not.toBe(0)
   expect(stderr).toContain("1 Python test skipped")
   expect(stderr).not.toContain("Python test passed")
+}, 180_000)
+
+// 2770: a flag that takes a value, like `-t name` or `--timeout 5000`, was read as a name filter and stopped the run; the flag and its value now go to bun together
+test.each([
+  ["-t name", "-t", "select"],
+  ["--test-name-pattern name", "--test-name-pattern", "select"],
+  ["--timeout 5000", "--timeout", "5000"],
+])(
+  "passes a flag that takes a value through to bun: %s",
+  async (_, flag, value) => {
+    const dir = join(DIR, `flag-val-${flag.replace(/[^a-z0-9]/g, "-")}`)
+    mkdirSync(join(dir, "tests", "x"), { recursive: true })
+    writeFileSync(
+      join(dir, "tests", "x", "flag.test.ts"),
+      `import { test } from "bun:test"\ntest("keep", () => {})\ntest("select", () => {})\n`,
+    )
+    const run = Bun.spawn(["bun", SCRIPT, "tests/x/flag.test.ts", flag, value], {
+      cwd: dir,
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 120_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    expect(code).toBe(0)
+    expect(stderr).toContain("parallel pass passed")
+  },
+  180_000,
+)
+
+// 2770: a name filter matched a test file's base name, so a folder name matched nothing and stopped the run, though bun matches the whole path; the filter now matches the whole relative path
+test("a name filter matches on the whole path, so a folder name runs the test under it, like bun (#2770)", async () => {
+  const dir = join(DIR, "filter-path")
+  mkdirSync(join(dir, "tests", "hooks", "guards"), { recursive: true })
+  writeFileSync(
+    join(dir, "tests", "hooks", "guards", "guard.test.ts"),
+    'import { test } from "bun:test"\ntest("guard", () => {})\n',
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "hooks/guards"], {
+    cwd: dir,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 pass")
+}, 180_000)
+
+// 2770: a folder whose only tests are Python went to bun and failed; it now runs through the Python runner
+test("a folder holding only Python tests runs them as Python tests, not through bun (#2770)", async () => {
+  const dir = join(DIR, "py-only-folder")
+  mkdirSync(join(dir, "tests", "pyonly"), { recursive: true })
+  writeFileSync(join(dir, "tests", "pyonly", "test_x.py"), 'print("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT, "tests/pyonly"], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("running Python test tests/pyonly")
+  expect(stderr).toContain("1 Python test passed")
+}, 180_000)
+
+// 2770: seenPy was keyed by the path as given, so one Python file named by both its absolute and relative path ran twice; it is now deduped by its real path (#2858)
+test("one Python test named by both relative and absolute path runs once (#2770)", async () => {
+  const dir = join(DIR, "py-twice")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  const file = join(dir, "tests", "x", "test_ok.py")
+  writeFileSync(file, 'print("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x/test_ok.py", file], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 Python test passed")
+  expect(stderr).not.toContain("2 Python test")
+}, 180_000)
+
+// 2858: seenPy keyed a path by resolve(), so a file named through a linked folder and through its real one ran twice, as macOS's /var and /private/var name one file; it is now keyed by its real path
+test("one Python test named through a linked folder and its real folder runs once (#2858)", async () => {
+  const dir = join(DIR, "py-linked")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(join(dir, "tests", "x", "test_ok.py"), 'print("ok", flush=True)\n')
+  symlinkSync(join(dir, "tests", "x"), join(dir, "tests", "linked"))
+  const run = Bun.spawn(
+    [
+      "bun",
+      SCRIPT,
+      join(dir, "tests", "x", "test_ok.py"),
+      join(dir, "tests", "linked", "test_ok.py"),
+    ],
+    {
+      cwd: dir,
+      env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 120_000,
+    },
+  )
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 Python test passed")
+  expect(stderr).not.toContain("2 Python test")
+}, 180_000)
+
+// 2770: a run with no Python path printed `0 Python tests passed`; the summary now prints no Python line when there are none
+test("a run with no Python path prints no Python test line (#2770)", async () => {
+  const dir = join(DIR, "no-py-line")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(
+    join(dir, "tests", "x", "ok.test.ts"),
+    'import { test } from "bun:test"\ntest("ok", () => {})\n',
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "tests/x/ok.test.ts"], {
+    cwd: dir,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).not.toContain("Python test")
+}, 180_000)
+
+test("a flag whose value bun takes only after `=` leaves the next word a path: `--bail <Python test>` runs it as a Python test (#2770)", async () => {
+  const dir = join(DIR, "bail-py")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(join(dir, "tests", "x", "test_ok.py"), 'print("ok", flush=True)\n')
+  const run = Bun.spawn(["bun", SCRIPT, "--bail", "tests/x/test_ok.py"], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  expect(stderr).toContain("1 Python test passed")
 }, 180_000)
