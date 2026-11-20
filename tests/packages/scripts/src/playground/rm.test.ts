@@ -1,11 +1,13 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
+  closeSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -13,6 +15,7 @@ import {
   symlinkSync,
   truncateSync,
   writeFileSync,
+  writeSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -22,6 +25,7 @@ import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
 import { cardOf, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import {
   clonesOf,
+  type DeleteDecision,
   processesOf,
   RM_USAGE,
   type PrState,
@@ -30,9 +34,11 @@ import {
   type RmDeps,
   rmArgs,
   rmDeps,
+  rmPeerBytesCommand,
   rmPeerCommand,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
+import { RM_PEER_USAGE } from "../../../../../packages/scripts/src/playground/rm-peer"
 
 test("rm takes one path, or --worktree's with an optional --discard and --pr, with an optional reason", () => {
   expect(rmArgs(["old"])).toEqual({
@@ -2499,6 +2505,280 @@ test("runRm --peer relays a peer's silence with the did-not-answer fallback", as
     },
   ])
   expect(existsSync(repo)).toBe(true)
+})
+
+// A machine whose ~/models holds one hf repo a delete decision names, its one blob over the size cap as a sparse file (open, one byte at the far offset, no real data), and deps whose decision seam reads the card.
+const decisionMachine = (
+  base: ReturnType<typeof approvedMachine>,
+  decision: DeleteDecision | string,
+  approvals?: RmDeps["approvals"],
+  respond?: (
+    command: string,
+  ) => { code: number; out: string } | Promise<{ code: number; out: string }>,
+) => {
+  const { repo } = base
+  const blob = join(repo, "blobs", "b")
+  const fd = openSync(blob, "r+")
+  void writeSync(fd, Buffer.alloc(1), 0, 1, 3 * 1024 * 1024 * 1024)
+  closeSync(fd)
+  const spy = { card: null as string | null, seen: [] as { machine: string; command: string }[] }
+  const next: RmDeps = {
+    ...base.deps,
+    decision: (card) => {
+      spy.card = card
+      return Promise.resolve(decision)
+    },
+    ...(approvals ? { approvals } : {}),
+    peer: async (machine, command) => {
+      spy.seen.push({ machine, command })
+      return respond ? respond(command) : { code: 0, out: "Deleted the weights on the peer" }
+    },
+  }
+  return { deps: next, repo, spy }
+}
+
+// A delete decision as rm reads it: an approved answer to one what (null when it holds none).
+const withWhat = (what: string | null): DeleteDecision => ({
+  answer: "yes",
+  answeredAt: "2026-11-01T00:00:00Z",
+  editedAt: "2026-11-01T00:00:00Z",
+  kind: "delete",
+  what,
+})
+
+describe("runRm --card on an approved delete decision (#2895)", () => {
+  test("runRm --card removes a local path the delete decision approved over the size cap, as the card names it", async () => {
+    const base = approvedMachine(null)
+    const { deps, spy } = decisionMachine(base, withWhat(base.repo))
+    const { code, out } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(0)
+    expect(out.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(false)
+    expect(spy.card).toBe(CARD)
+  })
+
+  test("runRm --card --peer reads an approved path's size on the peer, then sends one rm-peer delete command", async () => {
+    const base = approvedMachine(null)
+    const BYTES = "packages/scripts/src/playground/rm-peer.ts --bytes "
+    const { deps, spy } = decisionMachine(
+      base,
+      withWhat(`spark-b:${base.repo}`),
+      undefined,
+      async (command: string) =>
+        command.startsWith(BYTES)
+          ? { code: 0, out: "7\n" }
+          : { code: 0, out: "Deleted the weights on the peer" },
+    )
+    const { code, out } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
+    expect(code).toBe(0)
+    expect(out.join("\n")).toContain("Deleted the weights on the peer")
+    expect(spy.seen).toEqual([
+      { machine: "spark-b", command: rmPeerBytesCommand(base.repo) },
+      { machine: "spark-b", command: rmPeerCommand(base.repo, 7, CARD) },
+    ])
+    expect(existsSync(base.repo)).toBe(true)
+    expect(spy.card).toBe(CARD)
+  })
+
+  test("runRm --card --peer refuses a path that is not model weights before any ssh", async () => {
+    const base = approvedMachine(null)
+    const off = join(base.home, "scratch", "not-weights.gguf")
+    const { deps, spy } = decisionMachine(base, withWhat(`spark-b:${off}`), undefined, async () => {
+      throw new Error("the peer responder must not run when the path is not model weights")
+    })
+    const { code, err } = await rmTold([off, "--card", CARD, "--peer", "spark-b"], deps)
+    expect(code).toBe(1)
+    expect(err.join("\n")).toContain("is not model weights")
+    expect(spy.seen).toEqual([])
+  })
+
+  test("runRm --card --peer relays a failed size read and sends no delete", async () => {
+    const base = approvedMachine(null)
+    const { deps, spy } = decisionMachine(
+      base,
+      withWhat(`spark-b:${base.repo}`),
+      undefined,
+      async (command: string) =>
+        command.startsWith("packages/scripts/src/playground/rm-peer.ts --bytes ")
+          ? {
+              code: 1,
+              out: `playground: ${base.repo} is not on the machine record, so it stays`,
+            }
+          : { code: 0, out: "Deleted the weights on the peer" },
+    )
+    const { code, err } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
+    expect(code).toBe(1)
+    expect(err.join("\n")).toContain(`spark-b: ${base.repo} is not on the machine record`)
+    expect(spy.seen).toHaveLength(1)
+    expect(spy.seen[0].command).toContain("--bytes")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card removes an approved shard set on this machine at the sum of its shards", async () => {
+    const m = machine()
+    const folder = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+    const shard = (i: number) => join(folder, `m-${String(i).padStart(5, "0")}-of-00002.gguf`)
+    file(shard(1), "01234")
+    file(shard(2), "012")
+    file(join(folder, "blobs", "b"), "weights")
+    writeFileSync(
+      join(m.deps.data, "machine-record.json"),
+      JSON.stringify({
+        baseline: [],
+        entries: [
+          {
+            added: "2026-11-17",
+            by: "ops",
+            kind: "folder",
+            path: shard(1),
+            undo: "rm",
+            why: "seed",
+          },
+          {
+            added: "2026-11-17",
+            by: "ops",
+            kind: "folder",
+            path: shard(2),
+            undo: "rm",
+            why: "seed",
+          },
+        ],
+      }),
+    )
+    const base = {
+      home: m.home,
+      deps: { ...m.deps, machine: "spark-a" },
+      main: m.main,
+      root: m.root,
+      told: m.told,
+      repo: folder,
+    }
+    const { deps } = decisionMachine(base, withWhat(shard(1)))
+    const { code, out } = await rmTold(
+      [shard(1), "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(0)
+    expect(out.join("\n")).not.toBe("")
+    expect(existsSync(shard(1))).toBe(false)
+    expect(existsSync(shard(2))).toBe(false)
+  })
+
+  test("runRm --card --peer against a peer without --bytes refuses closed and sends no delete", async () => {
+    const base = approvedMachine(null)
+    const { deps, spy } = decisionMachine(
+      base,
+      withWhat(`spark-b:${base.repo}`),
+      undefined,
+      async (command: string) =>
+        command.startsWith("packages/scripts/src/playground/rm-peer.ts --bytes ")
+          ? { code: 2, out: `playground: ${RM_PEER_USAGE}` }
+          : { code: 0, out: "Deleted the weights on the peer" },
+    )
+    const { code, err } = await rmTold([base.repo, "--card", CARD, "--peer", "spark-b"], deps)
+    expect(code).toBe(1)
+    expect(err.join("\n")).toContain("spark-b: usage:")
+    expect(spy.seen).toHaveLength(1)
+    expect(spy.seen[0].command).toContain("--bytes")
+  })
+
+  test("runRm refuses the same local path over the size cap with no card, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, withWhat(base.repo))
+    const { code, err } = await rmTold([base.repo, "--reason", "nightly-clean"], deps)
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card refuses a decision that denies, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, { ...withWhat(base.repo), answer: "no" })
+    const { code, err } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card refuses a path inside the folder a decision names, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, withWhat(base.repo))
+    const { code, err } = await rmTold(
+      [join(base.repo, "blobs", "extra"), "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card refuses an unlisted path a decision does not name, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, withWhat(base.repo))
+    const { code, err } = await rmTold(
+      [
+        join(base.repo, "upstream", "models--nvidia--Llama-3-8B"),
+        "--card",
+        CARD,
+        "--reason",
+        "nightly-clean",
+      ],
+      deps,
+    )
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card refuses a decision edited after it was answered, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, {
+      ...withWhat(base.repo),
+      editedAt: "2026-11-02T00:00:00Z",
+    })
+    const { code, err } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card refuses a decision with no what, and the path stays", async () => {
+    const base = approvedMachine(null)
+    const { deps } = decisionMachine(base, withWhat(null))
+    const { code, err } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(1)
+    expect(err.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(true)
+  })
+
+  test("runRm --card removes a path an approved delete decision names when nightly-clean's reader answers that the card is not its own", async () => {
+    const base = approvedMachine(null)
+    const { deps, spy } = decisionMachine(
+      base,
+      withWhat(base.repo),
+      async (card) => `card ${card} is not the card nightly-clean saved`,
+    )
+    const { code, out } = await rmTold(
+      [base.repo, "--card", CARD, "--reason", "nightly-clean"],
+      deps,
+    )
+    expect(code).toBe(0)
+    expect(out.join("\n")).not.toBe("")
+    expect(existsSync(base.repo)).toBe(false)
+    expect(spy.card).toBe(CARD)
+  })
 })
 
 // A main checkout pushed to origin/canary with one replay worktree in a row of ~/models/kit/runs holding an untracked answer.

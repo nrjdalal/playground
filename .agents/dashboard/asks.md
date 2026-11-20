@@ -90,6 +90,7 @@
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
   A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
+  A peer's target is written `<machine>:/full/path`, and `playground rm --card <id>` carries out each approved target, with `--peer <machine>` for a peer's.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then its options as shadcn's questionnaire choices, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row.
