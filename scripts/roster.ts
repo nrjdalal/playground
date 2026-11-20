@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
 import { existsSync } from "node:fs"
-import { chmod, copyFile, rename } from "node:fs/promises"
+import { chmod, copyFile, open, rm, rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -54,6 +54,74 @@ class Refusal extends Error {
 const path = join(dataDir(process.env), "roster.json")
 
 const now = (): string => new Date().toISOString().replace(/\.\d{3}Z$/, "Z")
+
+// A lock beside the roster, an exclusive create holding `<pid> <time>`, so the one writer's two calls wait on it.
+const lockPath = path + ".lock"
+
+// A lock holds `<pid> <ISO time>`; its pid and age let a call take over a stale one and wait on a live one.
+type Lock = { pid: number; ageSeconds: number; time: string }
+
+// Reads the pid and age in seconds a lock beside the roster names, and null when the lock is gone, so a live holder is waited on.
+async function readLock(): Promise<Lock | null> {
+  let text: string
+  try {
+    text = await Bun.file(lockPath).text()
+  } catch {
+    return null
+  }
+  const [pid, time] = text.split(" ")
+  if (!pid || !time) return null
+  const ageSeconds = (Date.now() - new Date(time).getTime()) / 1000
+  return { pid: Number(pid), ageSeconds, time }
+}
+
+// Asks whether a pid exists, `process.kill(pid, 0)` doing that without a signal, ESRCH meaning it is gone.
+const pidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The roster's one writer, held from before its load to after its write, so two overlapping writes never read the same version.
+async function lockRoster(): Promise<() => Promise<void>> {
+  const started = Date.now()
+  // The lock's body, so a call that is refused names the live pid that still holds it.
+  const body = `${process.pid} ${now()}`
+  for (;;) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600)
+      await handle.writeFile(body)
+      await handle.close()
+      // The lock is held, so remove it when this write is done, a stale holder's lock included.
+      return async () => {
+        try {
+          await rm(lockPath)
+        } catch {
+          // The lock may be gone, removed by a call that took it over.
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+      // A lock is stale, so the next call takes it over, only when its holder is gone or older than the 30 s wait.
+      const held = await readLock()
+      // A live holder setting up its lock leaves an empty file, so only a dead or stale lock clears; an unreadable one waits.
+      if (held && (!pidAlive(held.pid) || held.ageSeconds > 30)) {
+        await rm(lockPath)
+        continue
+      }
+      // The holder is live and its lock is fresh, or still being set up, so wait for it to clear, or give up after the 5 s wait.
+      if (Date.now() - started >= 5000)
+        throw new Refusal(
+          `roster.ts: ${lockPath} is held by pid ${held ? held.pid : process.pid} since ${held?.time ?? now()}, so this write waits; try again`,
+          1,
+        )
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  }
+}
 
 async function load(): Promise<Roster> {
   const file = Bun.file(path)
@@ -539,118 +607,125 @@ async function main(argv: string[]): Promise<void> {
     )
     return
   }
-  const roster = await load()
-  // The PRs a prs-= withdrew, read back after the write to confirm the clear persisted.
-  let withdrawn: string[] = []
-  // A bare PR number links into factory.repo, read only when one is given.
-  const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
-    ? await factoryRepoOf().catch((error: Error) => {
-        throw new Refusal(`roster.ts: ${error.message}`, 2)
-      })
-    : ""
-  if (cmd === "set") {
-    const pairs = pairsOf(rest)
-    checkPairs(cmd, name!, pairs)
-    const entry = agent(roster, name!, pairs)
-    checkRetask(roster, entry, pairs, factoryRepo)
-    // Captured before apply clears the row, so the read-back can confirm the clear persisted.
-    withdrawn = prsWithdrawn(entry, pairs, factoryRepo)
-    // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
-    if (entry.pr && pairs.some(([k]) => k === "task"))
-      throw new Refusal(
-        `roster.ts: ${name} holds a pr, so a new task goes through roster.ts assign ${name} <title> <task>, which clears pr, branch, repo and lastReport`,
-        1,
+  // The write takes the lock before its load, so two overlapping writes never read the same version.
+  const release = await lockRoster()
+  try {
+    const roster = await load()
+    // The PRs a prs-= withdrew, read back after the write to confirm the clear persisted.
+    let withdrawn: string[] = []
+    // A bare PR number links into factory.repo, read only when one is given.
+    const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
+      ? await factoryRepoOf().catch((error: Error) => {
+          throw new Refusal(`roster.ts: ${error.message}`, 2)
+        })
+      : ""
+    if (cmd === "set") {
+      const pairs = pairsOf(rest)
+      checkPairs(cmd, name!, pairs)
+      const entry = agent(roster, name!, pairs)
+      checkRetask(roster, entry, pairs, factoryRepo)
+      // Captured before apply clears the row, so the read-back can confirm the clear persisted.
+      withdrawn = prsWithdrawn(entry, pairs, factoryRepo)
+      // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
+      if (entry.pr && pairs.some(([k]) => k === "task"))
+        throw new Refusal(
+          `roster.ts: ${name} holds a pr, so a new task goes through roster.ts assign ${name} <title> <task>, which clears pr, branch, repo and lastReport`,
+          1,
+        )
+      apply(entry, pairs, factoryRepo)
+      // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
+      withdrawn = withdrawn.filter(
+        (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
       )
-    apply(entry, pairs, factoryRepo)
-    // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
-    withdrawn = withdrawn.filter(
-      (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
-    )
-    parkHold(entry, pairs, false)
-  } else if (cmd === "report") {
-    const [text, ...more] = rest
-    if (text === undefined) throw new Refusal(USAGE, 2)
-    const pairs = pairsOf(more)
-    checkPairs(cmd, name!, pairs)
-    const entry = agent(roster, name!, pairs)
-    checkRetask(roster, entry, pairs, factoryRepo)
-    entry.lastReport = text
-    entry.lastReportAt = now()
-    apply(entry, pairs, factoryRepo)
-    parkHold(entry, pairs, false)
-  } else if (cmd === "assign") {
-    const [title, task, ...more] = rest
-    if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
-    const pairs = pairsOf(more)
-    checkPairs(cmd, name!, pairs)
-    const entry = agent(roster, name!, pairs, task)
-    checkRetask(roster, entry, pairs, factoryRepo, true)
-    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
-    const checker = isChecker(entry)
-    const served =
-      checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
-    for (const k of [
-      "pr",
-      "endReason",
-      "item",
-      "branch",
-      "repo",
-      "lastReport",
-      "lastReportAt",
-      "eta",
-      "ticket",
-      "owner",
-    ])
-      delete entry[k]
-    Object.assign(entry, { status: "working", task })
-    apply(entry, [["title", title], ...pairs], factoryRepo)
-    parkHold(entry, pairs, true)
-    if (checker && (entry.pr || pairs.some(([k, v]) => (k === "pr" || k === "item") && v !== "")))
-      entry.prs = [
-        ...new Set([
-          ...served,
-          ...((entry.prs as string[] | undefined) ?? []),
-          ...(entry.pr ? [entry.pr as string] : []),
-        ]),
-      ]
-  } else if (cmd === "backlog") {
-    if (rest.length > 0) throw new Refusal('usage: roster.ts backlog "<text>"', 2)
-    roster.backlog = [...(roster.backlog ?? []), name!]
-  } else if (cmd === "backlog-done") {
-    const backlog = roster.backlog ?? []
-    const [issue, ...extra] = rest
-    const at = Number(name)
-    if (!issue || !/^[1-9]\d*$/.test(issue))
-      throw new Refusal(
-        `roster.ts: backlog-done takes a positive issue number${issue ? `, not ${issue}` : ""}`,
-        2,
-      )
-    if (extra.length > 0)
-      throw new Refusal(
-        `roster.ts: backlog-done takes one issue number, not also ${extra.join(" ")}`,
-        2,
-      )
-    if (backlog.length === 0)
-      throw new Refusal("roster.ts: backlog-done finds the backlog empty", 1)
-    if (!/^(0|[1-9]\d*)$/.test(name!) || at >= backlog.length)
-      throw new Refusal(
-        `roster.ts: backlog-done takes an index from 0 to ${backlog.length - 1}, not ${name}`,
-        2,
-      )
-    if (/^\[#[1-9]\d*\] /.test(backlog[at]!))
-      throw new Refusal(`roster.ts: backlog entry ${at} is already marked: ${backlog[at]}`, 1)
-    backlog[at] = `[#${issue}] ${backlog[at]}`
-  } else {
-    for (const entry of roster.agents) {
-      const kind = kindOfName(entry.name)
-      if (entry.kind === undefined && kind) entry.kind = kind
+      parkHold(entry, pairs, false)
+    } else if (cmd === "report") {
+      const [text, ...more] = rest
+      if (text === undefined) throw new Refusal(USAGE, 2)
+      const pairs = pairsOf(more)
+      checkPairs(cmd, name!, pairs)
+      const entry = agent(roster, name!, pairs)
+      checkRetask(roster, entry, pairs, factoryRepo)
+      entry.lastReport = text
+      entry.lastReportAt = now()
+      apply(entry, pairs, factoryRepo)
+      parkHold(entry, pairs, false)
+    } else if (cmd === "assign") {
+      const [title, task, ...more] = rest
+      if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
+      const pairs = pairsOf(more)
+      checkPairs(cmd, name!, pairs)
+      const entry = agent(roster, name!, pairs, task)
+      checkRetask(roster, entry, pairs, factoryRepo, true)
+      // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+      const checker = isChecker(entry)
+      const served =
+        checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
+      for (const k of [
+        "pr",
+        "endReason",
+        "item",
+        "branch",
+        "repo",
+        "lastReport",
+        "lastReportAt",
+        "eta",
+        "ticket",
+        "owner",
+      ])
+        delete entry[k]
+      Object.assign(entry, { status: "working", task })
+      apply(entry, [["title", title], ...pairs], factoryRepo)
+      parkHold(entry, pairs, true)
+      if (checker && (entry.pr || pairs.some(([k, v]) => (k === "pr" || k === "item") && v !== "")))
+        entry.prs = [
+          ...new Set([
+            ...served,
+            ...((entry.prs as string[] | undefined) ?? []),
+            ...(entry.pr ? [entry.pr as string] : []),
+          ]),
+        ]
+    } else if (cmd === "backlog") {
+      if (rest.length > 0) throw new Refusal('usage: roster.ts backlog "<text>"', 2)
+      roster.backlog = [...(roster.backlog ?? []), name!]
+    } else if (cmd === "backlog-done") {
+      const backlog = roster.backlog ?? []
+      const [issue, ...extra] = rest
+      const at = Number(name)
+      if (!issue || !/^[1-9]\d*$/.test(issue))
+        throw new Refusal(
+          `roster.ts: backlog-done takes a positive issue number${issue ? `, not ${issue}` : ""}`,
+          2,
+        )
+      if (extra.length > 0)
+        throw new Refusal(
+          `roster.ts: backlog-done takes one issue number, not also ${extra.join(" ")}`,
+          2,
+        )
+      if (backlog.length === 0)
+        throw new Refusal("roster.ts: backlog-done finds the backlog empty", 1)
+      if (!/^(0|[1-9]\d*)$/.test(name!) || at >= backlog.length)
+        throw new Refusal(
+          `roster.ts: backlog-done takes an index from 0 to ${backlog.length - 1}, not ${name}`,
+          2,
+        )
+      if (/^\[#[1-9]\d*\] /.test(backlog[at]!))
+        throw new Refusal(`roster.ts: backlog entry ${at} is already marked: ${backlog[at]}`, 1)
+      backlog[at] = `[#${issue}] ${backlog[at]}`
+    } else {
+      for (const entry of roster.agents) {
+        const kind = kindOfName(entry.name)
+        if (entry.kind === undefined && kind) entry.kind = kind
+      }
     }
+    roster.updatedAt = now()
+    await keepVersions(path)
+    await writeAtomic(path, JSON.stringify(roster, null, 2))
+    // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
+    await clearedOnRead(cmd, name, withdrawn)
+  } finally {
+    // The lock is always released, so a crashed or refused write never leaves a lock behind.
+    await release()
   }
-  roster.updatedAt = now()
-  await keepVersions(path)
-  await writeAtomic(path, JSON.stringify(roster, null, 2))
-  // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
-  await clearedOnRead(cmd, name, withdrawn)
 }
 
 if (import.meta.main) {
