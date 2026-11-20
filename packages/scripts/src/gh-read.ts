@@ -6,6 +6,7 @@ import { dataDir } from "@packages/env/data-dir"
 // gh's cap on one read: past it, gh counts as hanging, as every gh call did on a locked keyring until its caller's own timeout.
 export const GH_TIMEOUT_MS = 10_000
 export const GH_HANGS = "gh hangs: keyring locked"
+export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
 export const ghTimedOut = (ms: number): string => `gh timed out after ${ms / 1000} s`
 // The gh-auth beat probes each minute while gh fails, its result at most about 90 s old with a 10 s probe and a cycle's 20 s lag, so an older one means the beat has stopped, and reads go back to gh rather than freeze while gh may be fine.
 export const GH_STALE_MS = 2 * 60_000
@@ -57,7 +58,8 @@ export const ghRead = (
   })
   if (run.exitedDueToTimeout) {
     const down = ghDown()
-    if (down && down.includes(GH_HANGS)) return { unreachable: down }
+    if (down && [GH_HANGS, KEYRING_LOCKED].some((words) => down.includes(words)))
+      return { unreachable: down }
     return { unreachable: ghTimedOut(timeoutMs) }
   }
   return { code: run.exitCode ?? 1, out: run.stdout.toString() }

@@ -18,8 +18,8 @@ import {
   ghDown,
   ghRead,
   ghTimedOut,
+  KEYRING_LOCKED,
 } from "../../../../packages/scripts/src/gh-read"
-import { KEYRING_LOCKED } from "../../../../packages/scripts/src/ops-tick/tick"
 
 // A scratch folder holding a fake gh first on PATH, which records each call in called and answers as gh.sh says, and a data folder the beat's result is read from.
 const dir = mkdtempSync(join(tmpdir(), "gh-read-"))
