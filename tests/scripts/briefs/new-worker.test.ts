@@ -89,7 +89,7 @@ test("the worker template starts in the worktree and gives every file tool its a
   expect(fileLine).toContain("since a relative path lands in the main checkout")
 })
 
-// issue 2864: a fork started to send a report costs its own context and its send can arrive empty
+// issue 2854: a fork started to send a report costs its own context and its send can arrive empty
 test("the worker template has a worker send its own report, with no Agent or fork for it", async () => {
   const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
   const line =
@@ -98,7 +98,7 @@ test("the worker template has a worker send its own report, with no Agent or for
   expect(line).toContain("with no Agent or fork started for it")
 })
 
-// issue 2864: a scratch run carries its env on its own command, never an export
+// issue 2854: a scratch run carries its env on its own command, never an export
 test("the worker template has a scratch run carry its environment on its own command, never an export", async () => {
   const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
   const line = text.split("\n").find((l) => l.includes("Bun.spawnSync")) ?? ""

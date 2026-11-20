@@ -76,7 +76,7 @@ describe("brief-rush points to testing.md's Traps for a red-first stub (#2854)",
   test("a red-first commit that calls an export not built yet stubs it, typed and throwing, with any new field optional", async () => {
     const testing = await read(join(".agents", "testing.md"))
     expect(testing).toContain(
-      "red-first commit whose rows call an export not built yet also commits a stub of it, typed as the real one with a body that throws",
+      "red-first commit whose rows call a module or an export not built yet also commits a stub of it, typed as the real one with a body that throws",
     )
     const rush = await read(join("scripts/briefs", "brief-rush.md"))
     expect(rush).toContain("red-first commit that calls an export not built yet stubs it first, as")
@@ -97,8 +97,8 @@ describe("brief-rush.md's GLM rule pins the bundled-code check for a local or GL
   })
 })
 
-// issue 2864: a local session reads a file over 300 lines only by grep then sed of at most 80 lines around each hit, never whole, since one read filled its 120k window reading three such files whole and then hung in compaction
-describe("brief-rush.md's local-model rule reads a long file by grep then sed, never whole (#2864)", () => {
+// issue 2854: a local session reads a file over 300 lines only by grep then sed of at most 80 lines around each hit, never whole, since one read filled its 120k window reading three such files whole and then hung in compaction
+describe("brief-rush.md's local-model rule reads a long file by grep then sed, never whole (#2854)", () => {
   test("a local session reads over 300 lines only by grep -n, then sed -n of at most 80 lines around each hit, never whole", async () => {
     const rush = await read(join("scripts/briefs", "brief-rush.md"))
     const line = rush.split("\n").find((l) => l.startsWith("- Local model rule:")) ?? ""
@@ -109,8 +109,8 @@ describe("brief-rush.md's local-model rule reads a long file by grep then sed, n
   })
 })
 
-// issue 2864: the brief has no stacked-PR step yet, so a line beside its PR lines pins one, since the PR's CI workflows run only on a PR into canary or main and a retarget fires edited which starts neither
-describe("brief-rush.md's stacked-PR line pins the retarget-to-canary CI step (#2864)", () => {
+// issue 2854: the brief has no stacked-PR step yet, so a line beside its PR lines pins one, since the PR's CI workflows run only on a PR into canary or main and a retarget fires edited which starts neither
+describe("brief-rush.md's stacked-PR line pins the retarget-to-canary CI step (#2854)", () => {
   test("a stacked PR gets no CI until it targets canary, then retargets to canary, merges it in and pushes", async () => {
     const rush = await read(join("scripts/briefs", "brief-rush.md"))
     const line = rush.split("\n").find((l) => l.startsWith("- A stacked PR gets no CI")) ?? ""
@@ -123,8 +123,8 @@ describe("brief-rush.md's stacked-PR line pins the retarget-to-canary CI step (#
   })
 })
 
-// issue 2864: a local worker that compacts twice without a commit is respawned on one-step briefs, each a single step with its own completion criterion, with the next step sent only after the report
-describe("brief-rush.md's one-step line respawns a local worker that compacted twice on one-step briefs (#2864)", () => {
+// issue 2854: a local worker that compacts twice without a commit is respawned on one-step briefs, each a single step with its own completion criterion, with the next step sent only after the report
+describe("brief-rush.md's one-step line respawns a local worker that compacted twice on one-step briefs (#2854)", () => {
   test("a local worker that compacts twice without a commit is respawned on one-step briefs", async () => {
     const rush = await read(join("scripts/briefs", "brief-rush.md"))
     const line = rush.split("\n").find((l) => l.startsWith("- A local worker that compacts")) ?? ""
