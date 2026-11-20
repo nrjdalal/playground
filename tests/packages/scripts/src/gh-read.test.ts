@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  GH_HANGS,
   GH_STALE_MS,
   GH_TIMEOUT_MS,
   ghAuthPath,
@@ -77,11 +78,11 @@ test("a read past the cap keeps the keyring words while a fresh beat names a key
   const at = new Date().toISOString()
   fakeGh(
     `mkdir -p "$PLAYGROUND_DATA_DIR/ops/tick"\n` +
-      `echo '{"at":"${at}","ok":false,"reason":"gh hangs: keyring locked, try again"}' > "$PLAYGROUND_DATA_DIR/ops/tick/gh-auth.json"\n` +
+      `echo '{"at":"${at}","ok":false,"reason":"${GH_HANGS}"}' > "$PLAYGROUND_DATA_DIR/ops/tick/gh-auth.json"\n` +
       `exec sleep 30`,
   )
   expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({
-    unreachable: "gh hangs: keyring locked, try again",
+    unreachable: GH_HANGS,
   })
   expect(existsSync(called)).toBe(true)
 })
@@ -101,11 +102,7 @@ test("a read past the cap keeps the locked-keyring words while a fresh beat name
 // Too old to trust a keyring failure, a past-cap read reports the timeout.
 test("a stale keyring result on file reads the timeout", () => {
   fakeGh("exec sleep 30")
-  lastProbe(
-    false,
-    new Date(Date.now() - GH_STALE_MS - 60_000),
-    "gh hangs: keyring locked, try again",
-  )
+  lastProbe(false, new Date(Date.now() - GH_STALE_MS - 60_000), GH_HANGS)
   expect(ghRead(["api", "x"], { timeoutMs: 300 })).toEqual({
     unreachable: ghTimedOut(300),
   })

@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 
-// gh's cap on one read: past it, gh counts as hanging, as every gh call did on a locked keyring until its caller's own timeout.
+// gh's cap on one read, since every gh call on a locked keyring once hung until its caller's own timeout: past it, ghRead stops gh and answers as its comment says.
 export const GH_TIMEOUT_MS = 10_000
 export const GH_HANGS = "gh hangs: keyring locked"
 export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
@@ -57,9 +57,9 @@ export const ghRead = (
     timeout: timeoutMs,
   })
   if (run.exitedDueToTimeout) {
-    const down = ghDown()
-    if (down && [GH_HANGS, KEYRING_LOCKED].some((words) => down.includes(words)))
-      return { unreachable: down }
+    const beat = ghDown()
+    if (beat && [GH_HANGS, KEYRING_LOCKED].some((words) => beat.includes(words)))
+      return { unreachable: beat }
     return { unreachable: ghTimedOut(timeoutMs) }
   }
   return { code: run.exitCode ?? 1, out: run.stdout.toString() }
