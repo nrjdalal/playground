@@ -24,7 +24,7 @@ export const KEEP_IMAGES = ["redis:alpine"]
 export const UNUSED_CLI = "packages/scripts/src/ops-tick/unused.ts"
 const WEIGHTS = /\.(gguf|safetensors)$/
 // A sharded weights file: its stem, shard index and total (5-digit, so a lexicographic order is a numeric one) and extension.
-const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
+export const SHARD = /^(.+)-(\d{5})-of-(\d{5})\.(gguf|safetensors)$/
 const REHEARSAL = /^rehearse\d+$/
 
 export const KINDS = ["image", "rehearsal", "run", "weights"] as const
