@@ -34,7 +34,8 @@ import {
 import { SEND, typingMs } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { votedOptions } from "../../../../../packages/scripts/src/ops-wa/votes"
-import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { originCheckout } from "../../../../machine"
 import { ALERT, fakeSocket, groupJid, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
 const dirs: string[] = []
@@ -859,9 +860,14 @@ describe("toWhatsApp", () => {
 })
 
 // A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
+// A stub origin list, the same on every machine, so the terms row names a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 const TERMS = termsOf(
   { companies: ["Acmeworks"], handles: [], linearKeys: [], names: ["Quillon Barr"], slackIds: [] },
-  UNSET_REPOS,
+  REPOS,
 )
 const card = (
   ref: number,
@@ -2684,4 +2690,8 @@ describe("the reminder before the owner's 24 hours close (#2905)", () => {
     await h.pass()
     expect(h.fake.sent).toEqual([])
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

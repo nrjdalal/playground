@@ -1,12 +1,21 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { EMPTY_LIST, UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { EMPTY_LIST, reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
 import { indexHits, memoryHits } from "../../../../../packages/scripts/src/verify/memory"
+import { originCheckout } from "../../../../machine"
 
 // A made-up machine's memory notes, each name, company and key invented for the test.
+// A stub origin list, the same on every machine, so the memory rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 const LIST = { ...EMPTY_LIST, companies: ["Quillco"], names: ["Pat Example"] }
 const note = (text: string) => [{ path: "/m/.playground/memory/builder/note.md", text }]
-const kinds = (text: string) => memoryHits(note(text), LIST, UNSET_REPOS).map((hit) => hit.kind)
+const kinds = (text: string) => memoryHits(note(text), LIST, REPOS).map((hit) => hit.kind)
 
 describe("bun run verify memory names each private trace in a note (#1484)", () => {
   test.each([
@@ -50,7 +59,7 @@ describe("bun run verify memory names each private trace in a note (#1484)", () 
   })
 
   test("each hit names its file and line, never its text", () => {
-    const [hit] = memoryHits(note("fine\nPat Example said so"), LIST, UNSET_REPOS)
+    const [hit] = memoryHits(note("fine\nPat Example said so"), LIST, REPOS)
     expect(hit).toEqual({ kind: "names", line: 2, path: "/m/.playground/memory/builder/note.md" })
   })
 })
@@ -77,4 +86,8 @@ describe("bun run verify memory flags an index a start loads only in part (#1484
       indexHits([{ path: "/m/.playground/memory/ops/long.md", text: "x\n".repeat(500) }]),
     ).toEqual([])
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

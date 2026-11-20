@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   answerOf,
@@ -13,7 +16,8 @@ import {
   waitingLine,
   waits,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
-import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { originCheckout } from "../../../../machine"
 
 // A made-up list for no-public-leak: none of its words is a real person, handle, company, channel or ticket key.
 const LIST = {
@@ -23,7 +27,13 @@ const LIST = {
   names: ["Quillon Barr"],
   slackIds: ["C0FAKE0001"],
 }
-const TERMS = termsOf(LIST, UNSET_REPOS)
+// A stub origin list, the same on every machine, so the terms row names a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
+
+const TERMS = termsOf(LIST, REPOS)
 
 const ask = (over: Partial<Card> = {}, preview: Partial<Card["preview"]> = {}): Card => ({
   answer: null,
@@ -280,4 +290,8 @@ describe("reading a reply", () => {
     expect(answerOf(letters, 1)).toEqual({ action: "approve", option: 1 })
     expect(answerOf(letters, 2)).toEqual({ action: "deny" })
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })
