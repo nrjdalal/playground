@@ -1,5 +1,5 @@
-import { lstat, readdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { lstat, readdir, realpath } from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
 
 import {
   PEER_POLICY,
@@ -62,6 +62,9 @@ export const ROOT_FOLDERS: string[] = [
     ...Object.values(ROOT_STEPS).flatMap((step) => step.adds.map((path) => dirname(path))),
   ]),
 ].sort()
+
+// The OS folders a systemd .wants link may resolve into, so the OS-made links Ubuntu's snap presets leave under ~/.config/systemd add nothing.
+export const OS_ROOTS: string[] = ["/etc", "/usr"]
 
 // The watched folders root-only by design: polkit's rules folder is root:polkitd 0750, where the install leaves every other root-step folder 0755, so only these read as known when the user cannot list them.
 export const ROOT_ONLY: string[] = [dirname(PEER_RULE)]
@@ -213,7 +216,44 @@ const dockerItems = async (run: Run): Promise<string[] | null> => {
 
 export const DOCKER_UNREAD = "docker images and containers"
 
-// What the watched places hold now, each root-only place the user cannot read (known, with its reason), and each place the check should read but cannot.
+// True when a path is <home>/.config/systemd, that folder and below, so the OS-made systemd .wants links the daily check skips are the ones under it.
+const insideSystemd = (path: string, home: string): boolean =>
+  path === join(home, ".config", "systemd") || path.startsWith(`${home}/.config/systemd/`)
+
+// True when a path is one of the OS roots itself or descends under it, so a link resolving into it resolves into an OS folder.
+const insideRoots = (path: string, roots: string[]): boolean =>
+  roots.some((root) => path === root || path.startsWith(`${root}/`))
+
+// One listed path's contribution to seen, so an OS-made systemd .wants link that resolves into /etc or /usr adds nothing and each other path is seen as today.
+export async function osSeen(
+  path: string,
+  home: string,
+  roots: string[] = OS_ROOTS,
+): Promise<string[]> {
+  if (!insideSystemd(path, home)) return [path]
+  const stat = await lstat(path).catch(() => null)
+  if (stat === null) return [path]
+  if (stat.isSymbolicLink() && dirname(path).endsWith(".wants")) {
+    try {
+      if (insideRoots(await realpath(path), roots)) return []
+    } catch {
+      return [path]
+    }
+    return [path]
+  }
+  const entries = await listed(path)
+  if (entries === "unreadable" || !Array.isArray(entries)) return []
+  const added: string[] = []
+  for (const entry of entries) {
+    const seen = await osSeen(entry, home, roots)
+    if (seen.length) added.push(...seen)
+  }
+  if (stat.isDirectory() && basename(path).endsWith(".wants")) return added
+  if (stat.isDirectory() && added.length === 0 && entries.length > 0) return []
+  return [path]
+}
+
+// What the watched places hold now: each root-only place the user cannot read (known, with its reason), each place the check should read but cannot, and each path that is not the OS-made systemd .wants link the daily check skips.
 export async function snapshot(
   places: Places,
 ): Promise<{ seen: string[]; known: string[]; unreadable: string[] }> {
@@ -221,12 +261,13 @@ export async function snapshot(
   const known: string[] = []
   const unreadable: string[] = []
   const rootOnly = new Set(places.rootOnly ?? ROOT_ONLY)
+  const roots = places.osRoots ?? OS_ROOTS
   for (const folder of watchedFolders(places.home, places.system)) {
     const entries = await listed(folder)
     if (entries === "unreadable") {
       if (rootOnly.has(folder)) known.push(folder)
       else unreadable.push(folder)
-    } else seen.push(...entries)
+    } else for (const entry of entries) seen.push(...(await osSeen(entry, places.home, roots)))
   }
   const docker = await dockerItems(places.run)
   if (docker === null) unreadable.push(DOCKER_UNREAD)
