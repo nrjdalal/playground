@@ -88,34 +88,27 @@ const pidAlive = (pid: number): boolean => {
 // The roster's one writer, held from before its load to after its write, so two overlapping writes never read the same version.
 async function lockRoster(): Promise<() => Promise<void>> {
   const started = Date.now()
-  // The lock's body, so a call that is refused names the live pid that still holds it.
   const body = `${process.pid} ${now()}`
   for (;;) {
     try {
       const handle = await open(lockPath, "wx", 0o600)
       await handle.writeFile(body)
       await handle.close()
-      // The lock is held, so remove it when this write is done, a stale holder's lock included.
       return async () => {
-        try {
-          await rm(lockPath)
-        } catch {
-          // The lock may be gone, removed by a call that took it over.
-        }
+        await rm(lockPath, { force: true })
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
-      // A lock is stale, so the next call takes it over, only when its holder is gone or older than the 30 s wait.
       const held = await readLock()
-      // A live holder setting up its lock leaves an empty file, so only a dead or stale lock clears; an unreadable one waits.
       if (held && (!pidAlive(held.pid) || held.ageSeconds > 30)) {
-        await rm(lockPath)
+        await rm(lockPath, { force: true })
         continue
       }
-      // The holder is live and its lock is fresh, or still being set up, so wait for it to clear, or give up after the 5 s wait.
       if (Date.now() - started >= 5000)
         throw new Refusal(
-          `roster.ts: ${lockPath} is held by pid ${held ? held.pid : process.pid} since ${held?.time ?? now()}, so this write waits; try again`,
+          held
+            ? `roster.ts: ${lockPath} is held by pid ${held.pid} since ${held.time}, so this write waits; try again`
+            : `roster.ts: ${lockPath} is held and unreadable, so this write waits; try again`,
           1,
         )
       await new Promise((resolve) => setTimeout(resolve, 50))
