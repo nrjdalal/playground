@@ -21,7 +21,7 @@ import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
 import { BOX_LABEL } from "./docker"
-import { GATE_LABEL, stubs, usageReading } from "./stubs"
+import { stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -649,11 +649,17 @@ export const clean = (box: string, home: string, portless = PORTLESS, docker = "
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
-  const names = [GATE_LABEL, `${BOX_LABEL}=${basename(box)}`].flatMap((label) =>
-    run([docker, "ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
-      .out.split("\n")
-      .filter(Boolean),
-  )
+  const names = run([
+    docker,
+    "ps",
+    "-a",
+    "--filter",
+    `label=${BOX_LABEL}=${basename(box)}`,
+    "--format",
+    "{{.Names}}",
+  ])
+    .out.split("\n")
+    .filter(Boolean)
   const own = boxContainers(
     run([docker, "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
