@@ -224,7 +224,11 @@ const insideSystemd = (path: string, home: string): boolean =>
 const insideRoots = (path: string, roots: string[]): boolean =>
   roots.some((root) => path === root || path.startsWith(`${root}/`))
 
-// One listed path's contribution to seen, so an OS-made systemd .wants link that resolves into /etc or /usr adds nothing and each other path is seen as today.
+// True when a path is a file directly inside systemd/user, where the unit it points to is seen on its own, so the enable link adds nothing.
+const insideUser = (path: string, home: string): boolean =>
+  dirname(path) === join(home, ".config", "systemd", "user")
+
+// One listed path's contribution to seen, so a systemd .wants link resolving into an OS root or its own systemd/user adds nothing and each other path is seen as today.
 export async function osSeen(
   path: string,
   home: string,
@@ -235,14 +239,15 @@ export async function osSeen(
   if (stat === null) return [path]
   if (stat.isSymbolicLink() && dirname(path).endsWith(".wants")) {
     try {
-      if (insideRoots(await realpath(path), roots)) return []
+      const target = await realpath(path)
+      if (insideRoots(target, roots) || insideUser(target, home)) return []
     } catch {
       return [path]
     }
     return [path]
   }
   const entries = await listed(path)
-  if (entries === "unreadable" || !Array.isArray(entries)) return []
+  if (entries === "unreadable") return [path]
   const added: string[] = []
   for (const entry of entries) {
     const seen = await osSeen(entry, home, roots)
