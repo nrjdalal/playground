@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   chmodSync,
-  linkSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -279,8 +279,8 @@ describe("OS-made systemd links (#2963)", () => {
     mkdirSync(wants2, { recursive: true })
     writeFileSync(join(etcRoot, "a.service"), "")
     writeFileSync(join(usrRoot, "b.service"), "")
-    linkSync(join(etcRoot, "a.service"), join(wants1, "a.service"))
-    linkSync(join(usrRoot, "b.service"), join(wants2, "b.service"))
+    symlinkSync(join(etcRoot, "a.service"), join(wants1, "a.service"))
+    symlinkSync(join(usrRoot, "b.service"), join(wants2, "b.service"))
     expect(await systemd()).toEqual([])
   })
 
@@ -290,7 +290,7 @@ describe("OS-made systemd links (#2963)", () => {
     mkdirSync(wants, { recursive: true })
     mkdirSync(join(home, "models"), { recursive: true })
     writeFileSync(join(home, "models", "keep.service"), "")
-    linkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
+    symlinkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
     expect(await systemd()).toEqual([`misplaced: ${join(wants, "keep.service")}`])
   })
 
@@ -298,7 +298,7 @@ describe("OS-made systemd links (#2963)", () => {
     await seed(data, [], places({ osRoots }))
     const wants = join(user, "default.target.wants")
     mkdirSync(wants, { recursive: true })
-    linkSync(join(home, "does-not-exist.service"), join(wants, "gone.service"))
+    symlinkSync(join(home, "does-not-exist.service"), join(wants, "gone.service"))
     expect(await systemd()).toEqual([`misplaced: ${join(wants, "gone.service")}`])
   })
 
@@ -315,8 +315,8 @@ describe("OS-made systemd links (#2963)", () => {
     writeFileSync(join(etcRoot, "a.service"), "")
     mkdirSync(join(home, "models"), { recursive: true })
     writeFileSync(join(home, "models", "keep.service"), "")
-    linkSync(join(etcRoot, "a.service"), join(wants, "a.service"))
-    linkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
+    symlinkSync(join(etcRoot, "a.service"), join(wants, "a.service"))
+    symlinkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
     expect(await systemd()).toEqual([`misplaced: ${join(wants, "keep.service")}`])
   })
 })
