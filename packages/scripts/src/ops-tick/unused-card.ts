@@ -1,8 +1,8 @@
-import { sep } from "node:path"
+import { basename } from "node:path"
 
 import { picksOf } from "@packages/config/inbox"
 
-import { MIN_LIST_BYTES, type Machine, type Unused } from "./unused"
+import { MIN_LIST_BYTES, type Machine, SHARD, type Unused } from "./unused"
 
 // The owner's one Inbox card for each machine's unused space: nightly-clean posts it, edits it in place while it stands open, and once answered removes each Remove pick by its own handle; `playground rm --card` reads the same card to check its approval itself.
 
@@ -56,20 +56,14 @@ export const questionOf = (item: CardItem): string =>
 
 const QUESTION = /^Remove `(.+)` on ([A-Za-z0-9._-]+), (\d+) bytes \([\d.]+ GB\)\?$/
 
-// A sharded set's note. A whole set reads "N of N shards"; a set missing a shard names each shard number that is present.
-const shardedNote = (item: CardItem): string => {
-  const total = /-\d{5}-of-(\d{5})\.(gguf|safetensors)$/.exec(item.path)?.[1] ?? "0"
-  const stem =
-    item.path
-      .replace(/-\d{5}-of-\d{5}\.(gguf|safetensors)$/, "")
-      .split(sep)
-      .at(-1) ?? ""
-  // The shard numbers that are present, read from each shard path, smallest first.
-  const present = [...item.shards!].map((p) => /-(\d{5})-of-/.exec(p)?.[1] ?? "").sort()
-  const complete = present.length === Number(total) && present.every((n, i) => Number(n) === i + 1)
+// A sharded set's note, read through SHARD: a whole set reads "all N of N shards", and a set missing a shard names each shard that is present.
+const shardedNote = (shards: string[]): string => {
+  const [, stem, , total] = SHARD.exec(basename(shards[0]!))!
+  const present = shards.map((p) => Number(SHARD.exec(basename(p))![2]))
+  const complete = present.length === Number(total) && present.every((n, i) => n === i + 1)
   return complete
-    ? ` ${present.length} of ${Number(total)} shards, ${stem}`
-    : ` shards ${present.join(", ")} of ${total}, ${stem}`
+    ? ` It is ${stem}, all ${present.length} of ${Number(total)} shards.`
+    : ` It is ${stem}, with only shards ${present.join(", ")} of ${Number(total)} here.`
 }
 
 const removeRow = (item: CardItem) => ({
@@ -80,7 +74,7 @@ const removeRow = (item: CardItem) => ({
         ? "docker image rm removes it; a pull brings it back."
         : "Moved to the trash; playground rm --restore brings it back for 7 days."
   }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}${
-    item.shards ? shardedNote(item) : ""
+    item.shards ? shardedNote(item.shards) : ""
   }`,
   label: "Remove",
 })

@@ -452,6 +452,30 @@ test("shardSets: a lone shard of a set is still one item, carrying that one shar
   ])
 })
 
+test("shardSets: sets in one folder stay apart by stem, total and extension", () => {
+  const folder = "/me/models/loose"
+  const shard = (name: string, bytes: number) => ({
+    bytes,
+    kind: "weights" as const,
+    path: `${folder}/${name}`,
+    recorded: false,
+  })
+  const merged = shardSets([
+    shard("a-00001-of-00002.gguf", 1 * GB),
+    shard("a-00002-of-00002.gguf", 1 * GB),
+    shard("b-00001-of-00002.gguf", 2 * GB),
+    shard("b-00002-of-00002.gguf", 2 * GB),
+    shard("a-00001-of-00003.gguf", 5 * GB),
+    shard("a-00001-of-00002.safetensors", 3 * GB),
+  ])
+  expect(merged.map((i) => [i.bytes, i.shards])).toEqual([
+    [5 * GB, [`${folder}/a-00001-of-00003.gguf`]],
+    [4 * GB, [`${folder}/b-00001-of-00002.gguf`, `${folder}/b-00002-of-00002.gguf`]],
+    [3 * GB, [`${folder}/a-00001-of-00002.safetensors`]],
+    [2 * GB, [`${folder}/a-00001-of-00002.gguf`, `${folder}/a-00002-of-00002.gguf`]],
+  ])
+})
+
 test("shardSets: an unsharded gguf and an image pass through unchanged, largest first", () => {
   const stem = "/me/models/hf/hub/models--nvidia--Qwen"
   const merged = shardSets([

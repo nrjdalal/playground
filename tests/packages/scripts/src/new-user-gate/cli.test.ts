@@ -26,12 +26,15 @@ import {
   dockerRefusal,
   dropBox,
   gateDrift,
+  hostPorts,
   hostTools,
   installCheck,
   installEnv,
   leftForYou,
   makeBox,
+  ownDatabaseVerdict,
   plantLogin,
+  postgresUrl,
   readAfter,
   report,
   resultLine,
@@ -42,6 +45,7 @@ import {
   STEP_COUNT,
   type Step,
   strayStandIns,
+  urlPort,
   usageWords,
   verdictLine,
   verdictPost,
@@ -679,6 +683,123 @@ describe("the box's own database", () => {
       "the new-user gate's box keeps a database of its own",
     ])
   })
+
+  // OwnDatabaseVerdict: the box shares this Mac's Docker, so a step 2 verdict fails closed when the box has no database of its own.
+  test("a failed seed fails, so the box never reused the host's database", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "the settings set failed",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: false,
+      }),
+    ).toEqual({
+      detail: `the box could not set its own live.container ${own}: the settings set failed`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with no container of the box's own fails", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 0,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({
+      detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with a container of the box's own passes", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({ detail: "", ok: true })
+  })
+
+  test("a saved URL's port must be a host port of the box's own containers", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: 45313,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port 45313 is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
+
+  test("a saved URL that names no port fails, since no host port of the box's own containers matches it", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: NaN,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port NaN is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
+
+  test("a refused docker call fails even with a saved URL on a host port of the box's own container", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: 33210,
+        ports: [33210],
+        refused: `the box's docker refused inspect ${own}; a container or call the box did not make`,
+      }),
+    ).toEqual({
+      detail: `the box did not make its own database: the box's docker refused inspect ${own}; a container or call the box did not make`,
+      ok: false,
+    })
+  })
+})
+
+describe("from the host's own docker and the desk's .env", () => {
+  test("postgresUrl returns the value set, and '' when none is set", () => {
+    expect(postgresUrl("POSTGRES_URL=postgres://a:b@127.0.0.1:45313/db\nfoo=bar\n")).toBe(
+      "postgres://a:b@127.0.0.1:45313/db",
+    )
+    expect(postgresUrl("# nothing set\n")).toBe("")
+  })
+
+  test("urlPort takes the port a postgres:// URL names, and NaN when it names none or does not parse", () => {
+    expect(urlPort("postgres://gate:pw@127.0.0.1:45313/db")).toBe(45313)
+    expect(urlPort("postgres://gate:pw@127.0.0.1/db")).toBeNaN()
+    expect(urlPort("postgres://gate:p#w@127.0.0.1:45313/db")).toBeNaN()
+    expect(urlPort("")).toBeNaN()
+  })
+
+  test("hostPorts takes the host ports a docker port list binds, de-duped", () => {
+    expect(hostPorts("127.0.0.1:33210\n[::]:45313\n")).toEqual([33210, 45313])
+    expect(hostPorts("0.0.0.0:33210\n[::]:33210\n")).toEqual([33210])
+    expect(hostPorts("\n")).toEqual([])
+  })
 })
 
 // An older checkout's gate once ran a box with no live.container seed, which reused the live dashboard's database (#2826).
@@ -702,7 +823,7 @@ describe("the box's own docker, in the gate", () => {
     expect(said).toContain("bun run --cwd <dir> gate:new-user 647bbfe")
   })
 
-  test("clean removes every container carrying the box's label, beside the pglaunch stand-in's", () => {
+  test("clean removes every container carrying the box's label", () => {
     const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-clean-")))
     const box = makeBox("647bbfe931cab96aa71eca1bb15b01a26ae3cf69", parent)
     const bin = join(parent, "bin")

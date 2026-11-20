@@ -10158,6 +10158,11 @@ var JOBS = {
     description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 }
   }),
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description: "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true }
+  }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
     schedule: { every: 60 }
@@ -10632,6 +10637,7 @@ var slotSettings = defineSettings({
 // packages/settings/src/whatsapp.ts
 var DEFAULT_POLICY = "factory status; no secrets or customer personal data";
 var policy = string2().trim().min(1).max(400);
+var hour = number2().int().min(0).max(23);
 var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
 var whatsappSettings = defineSettings({
   "wa.alert": {
@@ -10666,6 +10672,16 @@ var whatsappSettings = defineSettings({
     description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e1642
+  },
+  "wa.quietEndHour": {
+    default: 6,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window ends at: ops-wa then sends the texts it held as one catch-up. Equal to wa.quietStartHour, there is no window.",
+    schema: hour
+  },
+  "wa.quietStartHour": {
+    default: 0,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window starts at: inside it, a reply to the owner goes out only within an hour of the owner's last read or message, and ops-wa holds it otherwise; an urgent alert goes at any hour.",
+    schema: hour
   },
   "wa.replyPolicy": {
     default: DEFAULT_POLICY,
