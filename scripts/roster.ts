@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
+import { existsSync } from "node:fs"
+import { chmod, copyFile, rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -491,6 +493,18 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
   console.log(names.join("\n"))
 }
 
+// The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it. A rotation that fails never blocks the write, so each step is caught and skipped.
+async function keepVersions(path: string): Promise<void> {
+  for (let n = 4; n >= 1; n--) {
+    const from = `${path}.${n}`
+    if (existsSync(from)) await rename(from, `${path}.${n + 1}`).catch(() => {})
+  }
+  if (existsSync(path)) {
+    await copyFile(path, `${path}.1`).catch(() => {})
+    await chmod(`${path}.1`, 0o600).catch(() => {})
+  }
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, name, ...rest] = argv
   // any other throw exits 1 under Bun, which reads as free, so holders turns it into 2
@@ -633,6 +647,7 @@ async function main(argv: string[]): Promise<void> {
     }
   }
   roster.updatedAt = now()
+  await keepVersions(path)
   await writeAtomic(path, JSON.stringify(roster, null, 2))
   // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
   await clearedOnRead(cmd, name, withdrawn)
