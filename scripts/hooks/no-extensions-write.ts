@@ -1878,10 +1878,10 @@ function rooted(commands: Command[], files?: Files): boolean {
   )
 }
 
-// The text an xargs reads: its own stdin (stdinOf), else the pipe into its brace group (braceFed), since every command of the group reads it, so a writing xargs anywhere in one gets its plain twin's verdict; a group's own input redirect stays unread, as stdinOf leaves it (PG-1175)
+// The text an xargs reads: its own stdin or pipe (stdinOf), else the pipe into its brace group (braceFed), since every command of the group reads it, so a writing xargs anywhere in one gets its plain twin's verdict; a group's own input redirect stays unread, as stdinOf leaves it (PG-1175)
 async function xargsStdin(cmd: Command, env: Env): Promise<Text> {
   const own = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"))
-  return stdinOf(cmd.braceFed && !own ? { ...cmd, stdin: cmd.braceFed } : cmd, env)
+  return stdinOf(cmd.braceFed && !own && !cmd.stdin ? { ...cmd, stdin: cmd.braceFed } : cmd, env)
 }
 
 // Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
@@ -3230,7 +3230,7 @@ async function inspect(
     plain(cmd) &&
     PIPE_READERS.has(program(parse(cmd).name)) &&
     cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""))
-  const alone =
+  const feedUnwritten =
     !!fed &&
     plain(fed) &&
     lexed.commands.every(
@@ -3242,7 +3242,9 @@ async function inspect(
     )
   rootLine = rooted(
     lexed.commands,
-    alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
+    feedUnwritten
+      ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory }
+      : undefined,
   )
   sshFed = new Set(
     [...codeFed(lexed.commands)]

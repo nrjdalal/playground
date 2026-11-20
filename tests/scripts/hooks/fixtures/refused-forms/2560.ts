@@ -4,7 +4,7 @@ import { type Group, type Paths, type Row } from "./_shared"
 // A cd ~ reads the process's own home, so its rows run in the process folders, as 356's do.
 
 // no-extensions-write: the same pipes fed a path outside the root
-const controls = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
+const controls = ({ HOME, WORDS }: Pick<Paths, "HOME" | "WORDS">): Row[] => [
   [
     "a path outside the root piped into a brace group's later xargs touch",
     "echo notes/x | { true; xargs touch; }",
@@ -20,6 +20,10 @@ const controls = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
   [
     "a path outside the root in a here-string ssh hands a remote line's later xargs touch",
     "ssh box 'true; xargs touch' <<< notes/x",
+  ],
+  [
+    "the root's path piped into a brace group whose xargs touch reads a pipe of its own naming an outside path",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { echo notes/x | xargs touch; }`,
   ],
 ]
 const cdControls = (): Row[] => [
@@ -115,6 +119,14 @@ const refused = ({ HOME, WORDS }: Pick<Paths, "HOME" | "WORDS">): Row[] => [
     "a pipe into a brace group whose exec behind command swaps stdin before its xargs touch",
     `echo notes/x | { command exec 0<&3; xargs touch; } 3<<< ${HOME}/.playground/extensions/.no-such-file`,
   ],
+  [
+    "an outside path piped into a brace group whose xargs touch reads a pipe of its own naming the root",
+    `echo notes/x | { echo ${HOME}/.playground/extensions/.no-such-file | xargs touch; }`,
+  ],
+  [
+    "an outside path piped into a brace group whose later xargs touch reads a pipe of its own naming the root",
+    `echo notes/x | { true; echo ${HOME}/.playground/extensions/.no-such-file | xargs touch; }`,
+  ],
 ]
 const cdRefused = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
   [
@@ -160,4 +172,6 @@ export const groups: Group[] = [
   },
 ]
 
-export const allowed: string[] = [...controls({ WORDS: "" }), ...cdControls()].map(([what]) => what)
+export const allowed: string[] = [...controls({ HOME: "", WORDS: "" }), ...cdControls()].map(
+  ([what]) => what,
+)

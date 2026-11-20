@@ -12204,7 +12204,7 @@ function rooted(commands, files) {
 }
 async function xargsStdin(cmd, env) {
   const own = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"));
-  return stdinOf(cmd.braceFed && !own ? { ...cmd, stdin: cmd.braceFed } : cmd, env);
+  return stdinOf(cmd.braceFed && !own && !cmd.stdin ? { ...cmd, stdin: cmd.braceFed } : cmd, env);
 }
 function sshSpared(cmd, files) {
   if (cmd.stdin || !sshCall(parse3(cmd)))
@@ -13106,8 +13106,8 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     return false;
   };
   const reader = (cmd) => plain(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""));
-  const alone = !!fed && plain(fed) && lexed.commands.every((cmd, k) => k === shellAt || (k < shellAt || fedBy(cmd) ? reader(cmd) : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"));
-  rootLine = rooted(lexed.commands, alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
+  const feedUnwritten = !!fed && plain(fed) && lexed.commands.every((cmd, k) => k === shellAt || (k < shellAt || fedBy(cmd) ? reader(cmd) : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"));
+  rootLine = rooted(lexed.commands, feedUnwritten ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
   sshFed = new Set([...codeFed(lexed.commands)].filter(([, { consumer }]) => !!sshCall(parse3(consumer))).map(([producer]) => producer));
   if (evaluatedParts(command).some((part) => touches(part, env)))
     return refuse(EVALUATES_ROOT);
