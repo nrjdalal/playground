@@ -63,6 +63,58 @@ const refused = ({ HOME, WORDS }: Pick<Paths, "HOME" | "WORDS">): Row[] => [
     "a file of words outside the root fed to a brace group's xargs touch, which the hook does not read",
     `{ true; xargs touch; } < ${WORDS}`,
   ],
+  [
+    "the root's path piped into a nested brace group's later xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { true; { true; xargs touch; }; }`,
+  ],
+  [
+    "the root's path piped into a brace group's if body's xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { if true; then xargs touch; fi; }`,
+  ],
+  [
+    "the root's path piped into a brace group's while body's xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { while true; do xargs touch; break; done; }`,
+  ],
+  [
+    "the root's path piped into a brace group's for body's xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { for i in 1; do xargs touch; done; }`,
+  ],
+  [
+    "the root's path piped into a brace group whose function runs an xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { f() { xargs touch; }; f; }`,
+  ],
+  [
+    "the root's path piped into a brace group's later xargs touch, the group piped on to cat",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { true; xargs touch; } | cat`,
+  ],
+  [
+    "the root's path piped into a brace group whose later command is exec xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { true; exec xargs touch; }`,
+  ],
+  [
+    "the root's path piped into a brace group whose bare exec comes before its xargs touch",
+    `echo ${HOME}/.playground/extensions/.no-such-file | { exec; xargs touch; }`,
+  ],
+  [
+    "a path outside the root piped into a brace group whose exec moves stderr before its xargs touch, which the hook then does not read",
+    "echo notes/x | { exec 2>/dev/null; xargs touch; }",
+  ],
+  [
+    "a path outside the root piped into a brace group whose exec moves stdout before its xargs touch, which the hook then does not read",
+    "echo notes/x | { exec >/dev/null; xargs touch; }",
+  ],
+  [
+    "a path outside the root piped into a brace group whose exec copies stdin before its xargs touch, which the hook then does not read",
+    "echo notes/x | { exec 3<&0; xargs touch; }",
+  ],
+  [
+    "a pipe into a brace group whose quoted exec swaps stdin before its xargs touch",
+    `echo notes/x | { "exec" 0<&3; xargs touch; } 3<<< ${HOME}/.playground/extensions/.no-such-file`,
+  ],
+  [
+    "a pipe into a brace group whose exec behind command swaps stdin before its xargs touch",
+    `echo notes/x | { command exec 0<&3; xargs touch; } 3<<< ${HOME}/.playground/extensions/.no-such-file`,
+  ],
 ]
 const cdRefused = ({ WORDS }: Pick<Paths, "WORDS">): Row[] => [
   [

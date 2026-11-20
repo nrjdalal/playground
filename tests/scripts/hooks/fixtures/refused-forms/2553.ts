@@ -33,6 +33,24 @@ const extensionsRefused = ({ WORK }: Pick<Paths, "WORK">): Row[] => [
     "the root's path piped to ssh, whose remote xargs reads a file of its own the hook cannot read",
     "echo .playground/extensions/.no-such-file | ssh box 'xargs touch < list'",
   ],
+  [
+    "output the hook cannot read piped to an xargs touch inside bash -c",
+    "bash -c 'mystery | xargs touch'",
+  ],
+  [
+    "output the hook cannot read piped to an xargs touch inside sh -c",
+    "sh -c 'mystery | xargs touch'",
+  ],
+  [
+    "output the hook cannot read piped to an xargs touch inside eval",
+    "eval 'mystery | xargs touch'",
+  ],
+  [
+    "a listing the hook cannot read piped to an xargs touch on a quoted remote line",
+    "ssh box 'ls | xargs touch'",
+  ],
+  ["output the hook cannot read piped to an xargs touch behind nice", "mystery | nice xargs touch"],
+  ["output the hook cannot read piped to an xargs -I{} cp", "mystery | xargs -I{} cp notes/x {}"],
 ]
 
 export const groups: Group[] = [
