@@ -1652,6 +1652,33 @@ describe("purgeTrash", () => {
     }
   })
 
+  // a file flagged immutable (macOS chflags uchg), or on Linux a folder with no write bit, which rmSync cannot clear
+  const lock = (item: string, on: boolean) =>
+    process.platform === "darwin"
+      ? Bun.spawnSync(["chflags", on ? "uchg" : "nouchg", item])
+      : chmodSync(dirname(item), on ? 0o555 : 0o755)
+
+  test("skips a batch it cannot remove, removes the rest, and names it once until it goes (#2918)", () => {
+    const { trash } = machine()
+    const stuck = batchAt(trash, new Date(NOW.getTime() - 9 * DAY), "x")
+    const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
+    const item = join(trash, stuck, "1", "item")
+    lock(item, true)
+    try {
+      const first = purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+      expect(first.removed).toEqual([old])
+      expect(first.stuck).toEqual([expect.stringMatching(new RegExp(`^${stuck} \\(E[A-Z]+\\)$`))])
+      const second = purgeTrash(trash, { free: () => 100 * GB, now: NOW })
+      expect(second).toEqual({ removed: [], skipped: [], stuck: [] })
+      expect(existsSync(item)).toBe(true)
+    } finally {
+      lock(item, false)
+    }
+    expect(purgeTrash(trash, { free: () => 100 * GB, now: NOW }).removed).toEqual([stuck])
+    expect(existsSync(join(trash, stuck))).toBe(false)
+    expect(existsSync(join(trash, ".purge-stuck", stuck))).toBe(false)
+  })
+
   test("removes the oldest batches early while free space is under 50 GB", () => {
     const { trash } = machine()
     const first = batchAt(trash, new Date(NOW.getTime() - 3 * DAY))
@@ -1685,7 +1712,7 @@ describe("purgeTrash", () => {
     const { trash } = machine()
     const old = batchAt(trash, new Date(NOW.getTime() - 8 * DAY))
     const done = purgeTrash(trash, { free: () => 20 * GB, now: NOW })
-    expect(done).toEqual({ removed: [old], skipped: [] })
+    expect(done).toEqual({ removed: [old], skipped: [], stuck: [] })
     expect(existsSync(join(trash, old))).toBe(false)
   })
 })

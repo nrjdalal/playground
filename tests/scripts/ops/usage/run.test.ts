@@ -242,10 +242,15 @@ const cycle = async (
   name: string,
   opts: {
     added: string[]
+    ended?: boolean
+    expired?: boolean
     factory?: string
     login: boolean
     loginExit?: number
+    noSeat?: boolean
     probeUrl?: string
+    seat?: { account?: string; age: number; via?: null }
+    storedAge?: number
   },
 ) => {
   const home = join(scratch, name)
@@ -262,14 +267,61 @@ const cycle = async (
     "usage.keychainService": "made-up-service",
   }
   writeFileSync(join(ops, "beat.py"), beatModule(settings))
-  if (opts.factory)
-    writeFileSync(join(ops, "usage", "login-flip.json"), JSON.stringify({ factory: opts.factory }))
+  // a stored-login.json from an earlier run, its writtenAt by the OS clock run.py reads, which the clock-ahead pass leaves alone: a file's mtime gives it
+  if (opts.storedAge !== undefined) {
+    const stored = join(ops, "usage", "stored-login.json")
+    writeFileSync(stored, "{}")
+    const at = new Date(statSync(stored).mtimeMs - opts.storedAge * 60_000)
+    writeFileSync(
+      stored,
+      JSON.stringify({
+        account: "stored@example.org",
+        rate_limits: { seven_day: { resets_at: 4_000_000_000, used_percentage: 20 } },
+        source: "oauth/usage",
+        writtenAt: `${at.toISOString().slice(0, 19)}Z`,
+      }),
+    )
+  }
+  // the stored login's seat probe in login-flip.json's seen, its `at` by the OS clock as above
+  const seatAt = () => {
+    const mark = join(ops, "usage", "seat-clock")
+    writeFileSync(mark, "")
+    return statSync(mark).mtimeMs / 1000 - opts.seat!.age * 60
+  }
+  if (opts.factory || opts.seat)
+    writeFileSync(
+      join(ops, "usage", "login-flip.json"),
+      JSON.stringify({
+        ...(opts.factory && { factory: opts.factory }),
+        ...(opts.seat && {
+          seen: {
+            [opts.seat.account ?? "stored@example.org"]: {
+              at: seatAt(),
+              ...(opts.seat.via !== null && { via: "token" }),
+              week: 30,
+              weekReset: 4_000_000_000,
+            },
+          },
+        }),
+      }),
+    )
   const login = JSON.stringify({
-    claudeAiOauth: { accessToken: "made-up", expiresAt: 4_000_000_000_000 },
+    claudeAiOauth: opts.ended
+      ? {
+          accessToken: "",
+          expiresAt: 0,
+          loginEnded: "time_limit",
+          refreshToken: "",
+          refreshTokenExpiresAt: 1_000_000_000_000,
+        }
+      : {
+          accessToken: "made-up",
+          expiresAt: opts.expired ? 1_000_000_000_000 : 4_000_000_000_000,
+        },
   })
   writeFileSync(
     join(stubs, "security"),
-    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
+    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n${opts.noSeat ? "  *made-up-service*stored@example.org*) exit 44 ;;\n" : ""}  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
     { mode: 0o755 },
   )
   const env = scratchEnv(home, {
@@ -289,6 +341,12 @@ const cycle = async (
   return {
     alerts: read("ops/alerts-usage.json"),
     beat: read("ops/beat.json"),
+    status: read("ops/usage/stored-login-status.json"),
+    // the file's mtime comes from the OS clock, which the clock-ahead pass leaves alone, as it leaves run.py's own
+    statusMtime: existsSync(join(home, ".playground", "ops/usage/stored-login-status.json"))
+      ? statSync(join(home, ".playground", "ops/usage/stored-login-status.json")).mtimeMs
+      : null,
+    stored: read("ops/usage/stored-login.json"),
     usage: read("usage.json"),
   }
 }
@@ -323,6 +381,181 @@ test("with Claude Code's own login alone, usage.json holds its reading, as befor
   const { beat, usage } = await cycle("login-only", { added: [], login: true })
   expect(beat.result).toBe("ok")
   expect(usage.account).toBe("stored@example.org")
+})
+
+// #2863: spawn.sh learns that the own login's Claude Code login has ended from this file alone, so it never reads Claude Code's credentials
+test("an expired stored token writes stored-login-status.json with no loginEnded, and no stored-login.json", async () => {
+  const { status, statusMtime, stored } = await cycle("expired", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: true })
+  expect(Math.abs(statusMtime! - Date.parse(status.writtenAt))).toBeLessThan(5_000)
+  expect(stored).toBeNull()
+})
+
+test("an ended stored login writes its reason to stored-login-status.json as loginEnded", async () => {
+  const { beat, status } = await cycle("ended", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+  })
+  expect(status).toMatchObject({ loginEnded: "time_limit", tokenExpired: false })
+  expect(beat.detail).toContain("stored login: LoginEnded: ")
+})
+
+test("a good stored read writes no loginEnded", async () => {
+  const { status, stored } = await cycle("unexpired", { added: [], login: true })
+  expect(status).toMatchObject({ loginEnded: null, tokenExpired: false })
+  expect(stored.account).toBe("stored@example.org")
+})
+
+// #2863: the heartbeat fails once the stored login has read nothing for 15 minutes, so the board shows it, while another account's reading keeps usage.json fresh
+test("an expired stored token beats error after 15 minutes with no stored-login reading, naming the cause and the fix in 120 characters", async () => {
+  const { beat } = await cycle("expired-stale", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 20,
+  })
+  expect(beat.result).toMatch(
+    /^error: stored login read nothing for 2[01] min \(access token expired\); the owner's \/login brings it back$/,
+  )
+  expect(beat.result.length).toBeLessThanOrEqual(120)
+})
+
+test("an ended stored login's error line keeps its fix whole within 120 characters, however long it has read nothing", async () => {
+  const { beat } = await cycle("ended-stale", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    storedAge: 100_000,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+  expect(beat.result).toContain("login ended")
+  expect(beat.result).toEndWith("); the owner's /login brings it back")
+  expect(beat.result.length).toBeLessThanOrEqual(120)
+})
+
+test("at exactly 15 minutes with no stored-login reading, the beat already fails", async () => {
+  const { beat } = await cycle("expired-15", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 15,
+  })
+  expect(beat.result).toStartWith(
+    "error: stored login read nothing for 15 min (access token expired)",
+  )
+})
+
+test("the stored login's error beat keeps the cycle's other problems in its detail, though no usage.json is written", async () => {
+  const { beat, usage } = await cycle("expired-refused", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    probeUrl: "http://127.0.0.1:8/v1/messages",
+    storedAge: 20,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+  expect(beat.detail).toContain("added account: RuntimeError: no reading of added@example.org")
+  expect(usage).toBeNull()
+})
+
+// a stored login that reads nothing while its seat token's probe is fresh runs every start on that token, so the beat stays ok, the literal health-beat and ops-sweep read, and its detail names the ended login
+test.each([
+  ["ended", { ended: true }, "login ended: time_limit"],
+  ["expired", { expired: true }, "access token expired"],
+])(
+  "an %s stored login whose seat token read fresh beats ok, its detail naming the login and its seat token",
+  async (name, cause, reason) => {
+    const { beat } = await cycle(`seat-${name}`, {
+      added: ["added@example.org"],
+      login: true,
+      seat: { age: 5 },
+      storedAge: 600,
+      ...cause,
+    })
+    expect(beat.result).toBe("ok")
+    expect(beat.detail).toContain(
+      `stored@example.org's stored login reads nothing (${reason}), so it runs on its seat token, read 5 min ago`,
+    )
+  },
+)
+
+test("a seat probe 59 minutes old still carries the ended login, so the beat stays ok", async () => {
+  const { beat } = await cycle("seat-59", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    seat: { age: 59 },
+    storedAge: 600,
+  })
+  expect(beat.result).toBe("ok")
+})
+
+test("with the seat token carrying the ended login and no other account to read, the beat is ok", async () => {
+  const { beat } = await cycle("seat-alone", {
+    added: [],
+    ended: true,
+    login: true,
+    seat: { age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toBe("ok")
+  expect(beat.detail).toContain("so it runs on its seat token")
+})
+
+test("a fresh seat probe of another account carries nothing, so the ended stored login beats its error", async () => {
+  const { beat } = await cycle("seat-other", {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    seat: { account: "added@example.org", age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+})
+
+test("with the seat token carrying the ended login, a refused factory read beats its own error, the stored login left to the detail", async () => {
+  const { beat } = await cycle("seat-factory-refused", {
+    added: ["added@example.org"],
+    ended: true,
+    factory: "added@example.org",
+    login: true,
+    probeUrl: "http://127.0.0.1:8/v1/messages",
+    seat: { age: 5 },
+    storedAge: 600,
+  })
+  expect(beat.result).toStartWith("error: factory account: ")
+  expect(beat.result).not.toContain("stored login")
+  expect(beat.detail).toContain("stored login: LoginEnded: ")
+})
+
+test.each([
+  ["its seat probe is over 60 minutes old", "seat-old", { seat: { age: 61 } }],
+  ["its seen entry is no seat probe", "seat-stamp", { seat: { age: 5, via: null } }],
+  ["it has no seat item", "seat-none", { noSeat: true, seat: { age: 5 } }],
+])("an ended stored login beats the stored-login error while %s", async (_, name, extra) => {
+  const { beat } = await cycle(name, {
+    added: ["added@example.org"],
+    ended: true,
+    login: true,
+    storedAge: 600,
+    ...extra,
+  })
+  expect(beat.result).toStartWith("error: stored login read nothing for ")
+})
+
+test("an expired stored token whose last reading is under 15 minutes old still beats ok", async () => {
+  const { beat } = await cycle("expired-fresh", {
+    added: ["added@example.org"],
+    expired: true,
+    login: true,
+    storedAge: 10,
+  })
+  expect(beat.result).toBe("ok")
 })
 
 test("with no account at all, the job beats waiting, not an error, and writes no usage.json", async () => {

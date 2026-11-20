@@ -1,10 +1,15 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { bridge, sender, statusOf } from "../../../../../packages/scripts/src/ops-wa/bridge"
-import { pendingDir, runCheck } from "../../../../../packages/scripts/src/ops-wa/escalate"
+import {
+  alertSentFile,
+  lastFile,
+  pendingDir,
+  runCheck,
+} from "../../../../../packages/scripts/src/ops-wa/escalate"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { ALERT, fakeSocket, jid, OWNER, SPARE } from "./fake-socket"
 
@@ -23,6 +28,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
   const dir = join(data, "whatsapp")
   const fake = fakeSocket()
   const logs: string[] = []
+  const relayed: string[] = []
   const mode = {
     alert: setup.alert ?? ALERT,
     checked: [] as [string, number][],
@@ -57,7 +63,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
     escalate: (body) => send(body, "escalate"),
     log: (line) => logs.push(line),
     on: async () => true,
-    relay: async () => {},
+    relay: async (_to: string, text: string) => void relayed.push(text),
     reply: send,
     stuck: async () => null,
   })
@@ -69,6 +75,7 @@ const harness = (setup: { alert?: string; data?: string } = {}) => {
     fake,
     logs,
     mode,
+    relayed,
     pass: async () => {
       watched.pass()
       await watched.idle()
@@ -142,6 +149,7 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     h.advance(5 * MINUTE)
     await h.pass()
     expect(h.toAlert()).toEqual([])
+    expect(h.relayed.filter((l) => l.includes("reacts"))).toEqual([])
   })
 
   test("an owner message on another topic handles nothing, so it still goes on", async () => {
@@ -151,6 +159,7 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     h.fake.upsert([h.fake.message(jid(OWNER), "what is for lunch?")])
     await h.settle()
     await h.react("some-other-message")
+    expect(h.relayed.at(-1)).toContain("reacts 👍 on the message some-other-message")
     h.advance(MINUTE)
     await h.pass()
     expect(h.toAlert()).toEqual(["ops-tick is down"])
@@ -242,6 +251,147 @@ describe("an urgent alert goes to the owner first (ADR 0034)", () => {
     expect(lines.at(-1)).toBe(
       "pending: the alert of 2026-11-11T03:00:00.000Z goes to the second number at 2026-11-11T03:03:00.000Z unless handled (source test:2026-11-11T03:00Z)",
     )
+  })
+})
+
+// PG-2851: wa status prints the last alert's outcome and its times, so a session can tell whether it reached the second number
+describe("wa status's last alert line", () => {
+  const last = async (h: Awaited<ReturnType<typeof ready>>) =>
+    (await statusOf(h.dir, { alert: ALERT, owner: OWNER }, START)).filter((line) =>
+      line.startsWith("last alert:"),
+    )
+
+  test("none before the first alert's outcome", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first", "test:2026-11-11T03:00Z")
+    expect(await last(h)).toEqual([])
+  })
+
+  test("handled by the owner's reaction, at the reaction's time", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    h.advance(2 * MINUTE)
+    await h.react("m1")
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:00\.000Z, at 2026-11-11T03:02:\d\d\.\d{3}Z: handled by the owner's reaction$/,
+      ),
+    ])
+  })
+
+  test("handled at its source, at the pass that read it", async () => {
+    const h = await ready()
+    h.mode.check = true
+    await h.send("a practice alert", "first", "chat:made-up-1")
+    h.advance(3 * MINUTE)
+    await h.pass()
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:00\.000Z, at 2026-11-11T03:03:\d\d\.\d{3}Z: handled at its source$/,
+      ),
+    ])
+  })
+
+  test("sent to the second number, in a 0600 file that holds no body", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first", "test:2026-11-11T03:00Z")
+    h.advance(3 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a practice alert"])
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:00\.000Z, at 2026-11-11T03:03:\d\d\.\d{3}Z: sent to the second number$/,
+      ),
+    ])
+    expect(statSync(lastFile(h.dir)).mode & 0o777).toBe(0o600)
+    expect(await Bun.file(lastFile(h.dir)).text()).not.toContain("practice")
+  })
+
+  test("a last-alert write that fails still sends to the second number once", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first", "test:2026-11-11T03:00Z")
+    mkdirSync(lastFile(h.dir), { recursive: true })
+    h.advance(3 * MINUTE)
+    await h.pass()
+    h.advance(MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a practice alert"])
+  })
+
+  test("a last-alert write that fails on a reaction is logged as such, and the alert stays with the owner", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    mkdirSync(lastFile(h.dir), { recursive: true })
+    h.advance(2 * MINUTE)
+    await h.react("m1")
+    expect(h.logs.some((line) => line.startsWith("ops-wa: the last alert's outcome:"))).toBe(true)
+    expect(h.logs.some((line) => line.includes("not handed on"))).toBe(false)
+    h.advance(5 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual([])
+  })
+
+  test("a failed send names its reason with the number masked", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    h.fake.sock.sendMessage = async (to: string) => {
+      throw new Error(`no route to ${to}`)
+    }
+    h.advance(3 * MINUTE)
+    await h.pass()
+    const lines = await last(h)
+    expect(lines).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:00\.000Z, at 2026-11-11T03:03:\d\d\.\d{3}Z: send to the second number failed: no route to <number>@s\.whatsapp\.net$/,
+      ),
+    ])
+    expect(lines.join("\n")).not.toContain(ALERT.slice(1))
+  })
+
+  test("a --now-both alert shows as the newest alert, over an older alert whose outcome came after it", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    h.advance(MINUTE)
+    expect(await h.send("a second practice alert", "alert")).toBe("sent")
+    h.advance(3 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a second practice alert", "a practice alert"])
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:01:\d\d\.\d{3}Z, at 2026-11-11T03:01:\d\d\.\d{3}Z: sent to both numbers at once$/,
+      ),
+    ])
+  })
+
+  test("an alert held back because the alert number has never written shows that it reached the owner alone", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    await h.send("a practice alert", "first")
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner alone: the alert number has never written to this number$/,
+      ),
+    ])
+    expect(statSync(alertSentFile(h.dir)).mode & 0o777).toBe(0o600)
+    expect(await Bun.file(alertSentFile(h.dir)).text()).not.toContain("a practice alert")
+  })
+
+  test("a --now-both alert that reaches the owner and fails on the alert number shows both, its number masked", async () => {
+    const h = await ready()
+    const sendMessage = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to: string, content: unknown) => {
+      if (to === jid(ALERT)) throw new Error(`no route to ${to}`)
+      return sendMessage(to, content as never)
+    }
+    await expect(h.send("a practice alert", "alert")).rejects.toThrow("no route")
+    const lines = await last(h)
+    expect(lines).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner, then the send to the alert number failed: no route to <number>@s\.whatsapp\.net$/,
+      ),
+    ])
+    expect(lines.join("\n")).not.toContain(ALERT.slice(1))
   })
 })
 
