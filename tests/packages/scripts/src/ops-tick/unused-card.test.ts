@@ -275,11 +275,12 @@ const inbox = (answer?: {
         return posted
           ? {
               code: 0,
-              out: JSON.stringify({
+              // ask get's picked line follows the card on stderr of the joined output, so the saved card is read from first brace to last (#2958).
+              out: `${JSON.stringify({
                 ...posted,
                 updatedAt: WROTE,
                 ...(answer ?? { status: "open" }),
-              }),
+              })}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${args[1]}"\nask: picked A: Remove\n`,
             }
           : { code: 1, out: `ask: no inbox item ${args[1]}` }
       return { code: 0, out: "" }
@@ -349,6 +350,19 @@ test("an answered card removes each Remove still listed at its size here, sends 
   expect(night.kept).toEqual({ "here docker image old:1": image.bytes })
   expect(calls.at(-1)!.args.slice(0, 3)).toEqual(["ack", ID, "--no-link"])
   expect(night.card).toBeUndefined()
+})
+
+test("an approved card whose picks are still pending reads through the joined output and removes them this night", async () => {
+  const items = offered([here(weights)], HOME, out, {})
+  const { deps, removed, setPosted } = inbox({
+    answer: { at: LATER, choice: "approve" },
+    status: "approved",
+  })
+  setPosted({ from: "ops", ...cardOf(items) })
+  const night = await cardNight([here(weights)], HOME, { card: { at: WROTE, id: ID, items } }, deps)
+  expect(removed).toEqual([weights.path])
+  expect(night.card).toBeUndefined()
+  expect(night.said).toContain(`removed ${weights.path}:`)
 })
 
 test("a kept item stays off the next card, and comes back on one once its size changes", async () => {
@@ -458,6 +472,21 @@ test("a card reads when ask's picked line on stderr follows its JSON in the join
     ).toEqual(card)
 })
 
+// A card read fails while the fix lands (PG-2958): bun's echo of the ask script's command line sits between the JSON and the picked line.
+test("a card reads when bun's echo of the ask script's command line sits between its JSON and the picked line", async () => {
+  const card = { status: "approved", updatedAt: WROTE }
+  for (const json of [JSON.stringify(card, null, 2), JSON.stringify(card)])
+    expect(
+      await readCard(
+        async () => ({
+          code: 0,
+          out: `${json}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${ID}"\nask: picked A: Remove\n`,
+        }),
+        ID,
+      ),
+    ).toEqual(card)
+})
+
 test("a card that does not read stays for the next night, and one the Inbox no longer holds is let go", async () => {
   const items = offered([here(image)], HOME, out, {})
   const unread = await cardNight(
@@ -469,9 +498,33 @@ test("a card that does not read stays for the next night, and one the Inbox no l
       ask: async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" }),
     },
   )
-  expect(unread.card).toEqual({ id: ID, items })
+  expect(unread.card).toEqual({ id: ID, items, unread: 1 })
   const gone = await cardNight([here()], HOME, { card: { id: ID, items } }, inbox().deps)
   expect(gone.card).toBeUndefined()
+})
+
+// A card that reads as unread holds another night, and a second night in a row it is sent to Ops (PG-2958).
+test("a card unread a second night in a row sends Ops one line naming it, and the first night sends none", async () => {
+  const items = offered([here(image)], HOME, out, {})
+  const ask = async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" })
+  const first = await cardNight(
+    [here(image)],
+    HOME,
+    { card: { id: ID, items } },
+    { ...inbox().deps, ask },
+  )
+  expect(first.ops).toEqual([])
+  expect(first.card?.unread).toBe(1)
+  const second = await cardNight(
+    [here(image)],
+    HOME,
+    { card: first.card! },
+    { ...inbox().deps, ask },
+  )
+  expect(second.card?.unread).toBe(2)
+  expect(second.ops).toEqual([
+    `card ${ID} unread two nights in a row: ERR_POSTGRES_CONNECTION_REFUSED`,
+  ])
 })
 
 test("a card holds CARD_MAX questions at most, the largest first", () => {
