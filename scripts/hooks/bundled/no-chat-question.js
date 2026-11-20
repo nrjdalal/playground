@@ -71,7 +71,7 @@ var applyEnvAliases = (env = process.env) => {
 applyEnvAliases();
 
 // scripts/hooks/no-chat-question.ts
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
@@ -5933,10 +5933,15 @@ var answerPayloadSchema = strictObject({
 var CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z";
 var ROOT_STEPS = {
   "bwrap-userns": {
+    adds: ["/etc/apparmor.d/bwrap"],
     undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
     what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace"
   },
   "chromium-ca": {
+    adds: [
+      "/etc/chromium/policies/managed/portless-ca.json",
+      "/etc/opt/chrome_for_testing/policies/managed/portless-ca.json"
+    ],
     undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
     what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart"
   }
@@ -5960,7 +5965,7 @@ var INSTALL_TEXT = [
   'for h in "$@"; do',
   "  n=$((n + 1))",
   `  [ $n -le ${ROOT_NAMES.length} ] || break`,
-  `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  case $h in *[!0123456789abcdef]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
   "done",
   'mkdir -p "$base/root" "$base/data"',
@@ -5976,7 +5981,7 @@ var INSTALL_TEXT = [
   "done",
   "if [ $# -eq 2 ]; then",
   `  case $1 in /*) ;; *) ${refuse("the CA's path is not absolute")} ;; esac`,
-  `  case $2 in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  case $2 in *[!0123456789abcdef]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#2} -eq 64 ] || { ${REFUSE_HASH}; }`,
   `  head -c ${CA_MAX_BYTES + 1} "$1" > "$stage/ca.pem"`,
   `  [ "$(wc -c < "$stage/ca.pem")" -le ${CA_MAX_BYTES} ] || ${refuse(`the CA file is over ${CA_MAX_BYTES / 1024} KB`)}`,
@@ -6020,7 +6025,7 @@ var PEER_IDS = ROOT_NAMES.map((name) => `"${PEER_ACTION}.${name}"`).join(", ");
 var PEER_INSTALL_TEXT = [
   "set -eu",
   "user=${SUDO_USER:-}",
-  `case $user in ""|root|*[!a-z0-9_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
+  `case $user in ""|root|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
   `[ -d ${PEER_POLICY.slice(0, PEER_POLICY.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit actions folder")}`,
   `[ -d ${PEER_RULE.slice(0, PEER_RULE.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit rules folder")}`,
   INSTALL_TEXT,
@@ -6094,6 +6099,7 @@ var namedKinds = () => {
   ]);
 };
 var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+var placedKindOf = (name, kind) => isRosterKind(kind) ? kind : placedKindOfName(name);
 var DISPATCHER_SLOT_LABELS = ["Alpha", "Bravo"];
 function roleOfName(name) {
   const kind = placedKindOfName(name);
@@ -6114,16 +6120,36 @@ var dataDirOf = (env, home = env.HOME || homedir()) => {
 };
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/scripts/src/stuck-alert.ts
+import { join as join2 } from "path";
+var HEAD_BYTES = 64 * 1024;
+var TAIL_BYTES = 256 * 1024;
+var META = new Set(["description", "run_in_background", "timeout"]);
+var waiterPidPath = (outbox, name) => join2(outbox, "alerts-wait", `${name}.pid`);
+var WAITER_GRACE_MS = 5 * 60000;
+async function waiterRunning(outbox, name) {
+  const pid = Number(await Bun.file(waiterPidPath(outbox, name)).text().catch(() => ""));
+  if (!Number.isInteger(pid) || pid <= 0)
+    return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+if (false) {}
+
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 import { fileURLToPath } from "url";
 var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
-var extensionsDir = (data) => join2(data, "extensions");
+var extensionsDir = (data) => join3(data, "extensions");
 var fixFor = (file) => {
   const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
-  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+  if (list && !existsSync(join3(coreDir(), "lists", `${list}.json`)))
     return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
   return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
 };
@@ -6134,7 +6160,7 @@ var readRenderedSync = (data, file) => {
   const parts = file.split("/");
   if (parts.some((part) => part === "" || part === "." || part === ".."))
     return { refusal: `${file} is not a path inside the extensions (${dir})` };
-  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  const path = parts[0] === CORE ? join3(coreDir(), ...parts.slice(1)) : join3(dir, file);
   return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
 };
 var readPolicy = async (data, org) => readPolicySync(data, org);
@@ -6224,13 +6250,13 @@ async function input(name, kind, deadline = DEADLINE) {
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
 var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -6245,17 +6271,17 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join3(dir, file)).json();
+      const entry = await Bun.file(join4(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
   }
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -6269,9 +6295,9 @@ async function rosterRole(name, environment = process.env) {
   return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
 }
 async function rosterNames(environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
-    const { live } = await Bun.file(join3(__CHECKOUT + "/scripts/hooks", "..", "roster-statuses.json")).json();
+    const { live } = await Bun.file(join4(__CHECKOUT + "/scripts/hooks", "..", "roster-statuses.json")).json();
     const roster = await Bun.file(path).json();
     return (roster.agents ?? []).flatMap((agent) => typeof agent?.name === "string" && live.includes(String(agent.status)) ? [agent.name] : []);
   } catch {
@@ -6386,7 +6412,7 @@ async function output(command, cwd, timeoutMs) {
 }
 var dashboard;
 function dashboardCheckout() {
-  const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+  const setting = join5(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
   dashboard ??= Promise.all([
     output(["bun", setting, "--text", "live.branch"], __CHECKOUT + "/scripts/hooks", READ_TIMEOUT_MS),
     output(["git", "worktree", "list", "--porcelain"], __CHECKOUT + "/scripts/hooks", GIT_TIMEOUT_MS)
@@ -6415,7 +6441,7 @@ function listedItem(item) {
   return needsYou || reopenable && !dismissedAt || item.kind === "update" && !dismissedAt && !(answer && ("choice" in answer)) && Date.parse(item.readAt ?? item.updatedAt ?? "") >= Date.parse(CLOCKS_STOPPED_AT);
 }
 async function readStatus(ref, checkout, timeoutMs = READ_TIMEOUT_MS) {
-  const item = JSON.parse(await output(["bun", join4(checkout, "api/hono/src/bin/dashboard-ask.ts"), "get", ref], checkout, timeoutMs));
+  const item = JSON.parse(await output(["bun", join5(checkout, "api/hono/src/bin/dashboard-ask.ts"), "get", ref], checkout, timeoutMs));
   const standing = standingOf(item);
   if (!standing)
     throw new Error(`bun run ask printed no status for ${ref}`);
@@ -6495,11 +6521,35 @@ async function gate(reply, deps, reason, counted) {
   const why = read.map((r) => ("status" in r) ? `${r.ref} is ${r.status}, not ${counted.join(" or ")}` : `${r.ref} could not be read with bun run ask (${r.error}), so it does not count`);
   return `${reason} (${why.join("; ")})`;
 }
+var WAITER_KINDS = new Set(["dispatcher", ...MANAGER_KINDS]);
+var waiterReason = (name) => `restart playground alerts-wait ${name} in the background`;
+async function waiterGate(env, sessionId, active, deps) {
+  if (active === true || typeof sessionId !== "string")
+    return;
+  const name = await deps.sessionName(sessionId);
+  if (!name)
+    return;
+  await loadNames(env);
+  const kind = placedKindOf(name, await rosterKind(name, env));
+  if (!kind || !WAITER_KINDS.has(kind))
+    return;
+  const outbox = join5(dataDirOf(env), "ops", "outbox");
+  return await waiterRunning(outbox, name) ? undefined : waiterReason(name);
+}
 async function inspect(raw, env, deps) {
   const input = JSON.parse(raw);
   if (input.hook_event_name === "PreToolUse")
     return picker(input, env, deps);
-  const { last_assistant_message: reply, session_id: sessionId } = input;
+  const [asked, waiter] = await Promise.all([
+    askGate(input.last_assistant_message, input.session_id, env, deps),
+    waiterGate(env, input.session_id, input.stop_hook_active, deps).catch(() => {
+      return;
+    })
+  ]);
+  return [asked, waiter].filter(Boolean).join(`
+`) || undefined;
+}
+async function askGate(reply, sessionId, env, deps) {
   if (typeof reply !== "string")
     return;
   const owner = await (deps.ownerNames ?? policyOwnerNames)(env);
@@ -6543,5 +6593,6 @@ export {
   check,
   keepsForOwner,
   listedItem,
-  readStatus
+  readStatus,
+  waiterReason
 };

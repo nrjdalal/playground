@@ -117,8 +117,14 @@ export const readSysctl = async (run: Run, name: SysctlName): Promise<string | n
   sysctlOf(name, await run(["sysctl", "-n", name]))
 
 // The machine's latest boot or wake from sleep, in ms since the epoch: the later of macOS's kern.boottime and kern.waketime (`{ sec = <s>, usec = <us> } <date>` lines), else /proc/stat's btime alone, since Linux keeps no wake time in /proc, else 0.
-export const readUpSince = async (run: Run): Promise<number> => {
-  const { out } = await run(["sysctl", "-n", "kern.boottime", "kern.waketime"])
+export const readUpSince = (run: Run): Promise<number> =>
+  latestOf(run, ["kern.boottime", "kern.waketime"])
+
+// The machine's latest boot alone, never a wake, since every process from before a sleep lives on: macOS's kern.boottime, else /proc/stat's btime, else 0.
+export const readBootTime = (run: Run): Promise<number> => latestOf(run, ["kern.boottime"])
+
+const latestOf = async (run: Run, names: string[]): Promise<number> => {
+  const { out } = await run(["sysctl", "-n", ...names])
   const times = [...out.matchAll(/\bsec = (\d+)/g)].map((m) => Number(m[1]) * 1000)
   if (times.length) return Math.max(...times)
   return (field(proc("stat") ?? "", /^btime (\d+)$/m) ?? 0) * 1000

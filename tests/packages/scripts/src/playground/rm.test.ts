@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -18,6 +19,7 @@ import { basename, dirname, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
+import { cardOf, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import {
   clonesOf,
   processesOf,
@@ -28,6 +30,7 @@ import {
   type RmDeps,
   rmArgs,
   rmDeps,
+  rmPeerCommand,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
@@ -59,6 +62,24 @@ test("rm takes one path, or --worktree's with an optional --discard and --pr, wi
   })
 })
 
+test("rm takes a path with --card <id>, the card that approved its removal, and an optional --peer <machine>", () => {
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--reason", "nightly-clean"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    reason: "nightly-clean",
+    worktree: false,
+  })
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    peer: "spark-b",
+    reason: "playground rm",
+    worktree: false,
+  })
+})
+
 test("rm takes --list or --restore <id> alone", () => {
   expect(rmArgs(["--list"])).toEqual({ list: true })
   expect(rmArgs(["--restore", "20261102T120000Z-s/1"])).toEqual({ restore: "20261102T120000Z-s/1" })
@@ -78,8 +99,21 @@ test.each([
   [["--worktree", "wt", "--discard", "--decision", "#i9"]],
   [["a", "--pr", "https://github.com/o/r/pull/1"]],
   [["--worktree", "wt", "--pr"]],
+  [["--worktree", "wt", "--card", "c1"]],
+  [["a", "--card"]],
+  [["a", "--peer", "spark-b"]],
+  [["--worktree", "wt", "--card", "c1", "--peer", "spark-b"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
+})
+
+test("rm refuses a --reason alongside a --peer, since a far-end removal is the peer's own card", () => {
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "nightly-clean"]),
+  ).toEqual({ error: RM_USAGE })
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "playground rm"]),
+  ).toEqual({ error: RM_USAGE })
 })
 
 const dirs: string[] = []
@@ -118,6 +152,7 @@ const machine = () => {
     liveBranch: () => "live/dashboard",
     main,
     merged: () => false,
+    mergedHead: () => null,
     notify: (text) => void told.push(text),
     places: () => [],
     prState: async () => null,
@@ -125,6 +160,76 @@ const machine = () => {
   }
   return { deps, home, main, root, told }
 }
+
+// A mkdtemp machine for a card: a main whose ask prints one approved card to stdout, a data folder with the ops manager's roster and the saved card, and the card id with its one pick.
+const cardMachine = () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-card-")))
+  dirs.push(root)
+  const home = join(root, "home")
+  const main = join(home, "playground")
+  const data = join(home, ".playground")
+  mkdirSync(join(data, "ops", "tick"), { recursive: true })
+  mkdirSync(main, { recursive: true })
+  const cardId = "11111111-2222-3333-4444-555555555555"
+  const item = {
+    bytes: 300 * 1024 * 1024,
+    id: "sha256:abc",
+    kind: "image",
+    machine: "here",
+    path: "docker image img:1",
+  } satisfies CardItem
+  const pick = { bytes: item.bytes, machine: item.machine, path: item.path }
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({ agents: [{ kind: "ops", name: "ops" }] }),
+  )
+  writeFileSync(
+    join(data, "ops", "tick", "nightly-clean.json"),
+    JSON.stringify({ card: { at: "2026-11-18T00:00:00.000Z", id: cardId, items: [item] } }),
+  )
+  const card = {
+    answer: { at: "2026-11-18T01:00:00.000Z", choice: "approve", options: [0] },
+    from: "ops",
+    kind: "decision",
+    preview: cardOf([item]).preview,
+    status: "approved",
+    updatedAt: "2026-11-18T00:00:00.000Z",
+  }
+  writeFileSync(join(main, "card.json"), `${JSON.stringify(card)}\n`)
+  writeFileSync(
+    join(main, "ask.sh"),
+    `#!/bin/sh\nif [ "$1" = "get" ] && [ "$#" -eq 2 ]; then cat card.json; printf '%s\\n' 'ask: picked A: Remove' >&2; exit 0; fi\nexit 1\n`,
+  )
+  writeFileSync(
+    join(main, "package.json"),
+    JSON.stringify({ name: "fake", private: true, scripts: { ask: "sh ask.sh" } }),
+  )
+  const repo0 = process.env.PLAYGROUND_REPO
+  const data0 = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_REPO = main
+  process.env.PLAYGROUND_DATA_DIR = data
+  return {
+    cardId,
+    deps: rmDeps(main),
+    pick,
+    restore: () => {
+      if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = repo0
+      if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = data0
+    },
+  }
+}
+
+test("rm --card reads ask's card from its stdout alone, so a picked line on stderr no longer breaks it", async () => {
+  const { cardId, deps, pick, restore } = cardMachine()
+  try {
+    const picks = await deps.approvals!(cardId)
+    expect(picks).toEqual([pick])
+  } finally {
+    restore()
+  }
+})
 
 test("runRm moves a path, lists it and restores it, telling no one", async () => {
   const { deps, home, told } = machine()
@@ -254,16 +359,16 @@ test("runRm clears the caller's own scratch folder", async () => {
   expect(existsSync(scratch)).toBe(false)
 })
 
-test("runRm refuses another session's scratch folder", async () => {
-  const { deps, home } = machine()
+test("runRm refuses another live session's scratch folder", async () => {
+  const { deps, home } = pads([{ name: "a4b5c6-worker", status: "working" }], "scratch")
   const other = join(home, ".playground", "scratch", "a4b5c6-worker")
   mkdirSync(other, { recursive: true })
   expect(await runRm([other], deps)).toBe(1)
   expect(existsSync(other)).toBe(true)
 })
 
-test("runRm refuses a .. escape out of the caller's own scratch folder", async () => {
-  const { deps, home } = machine()
+test("runRm refuses a .. escape out of the caller's own scratch folder into a live session's", async () => {
+  const { deps, home } = pads([{ name: "a4b5c6-worker", status: "working" }], "scratch")
   const scratch = join(home, ".playground", "scratch", "j6rjgy-worker")
   const other = join(home, ".playground", "scratch", "a4b5c6-worker")
   mkdirSync(other, { recursive: true })
@@ -281,11 +386,11 @@ test("runRm refuses a symlink inside the caller's own scratch folder that points
   expect(existsSync(join(scratch, "keys"))).toBe(true)
 })
 
-// The machine's scratchpad, with a roster of the given rows.
-const pads = (rows: { name: string; status: string }[]) => {
+// The machine's scratchpad, or its scratch folder, with a roster of the given rows.
+const pads = (rows: { name: string; status: string }[], dir = "scratchpad") => {
   const m = machine()
   writeFileSync(join(m.deps.data, "roster.json"), JSON.stringify({ agents: rows }))
-  return { ...m, pad: join(m.deps.data, "scratchpad") }
+  return { ...m, pad: join(m.deps.data, dir) }
 }
 
 test("runRm clears a path in the caller's own scratchpad folder", async () => {
@@ -297,50 +402,62 @@ test("runRm clears a path in the caller's own scratchpad folder", async () => {
   expect(existsSync(join(pad, "j6rjgy-worker"))).toBe(true)
 })
 
-test("runRm clears the whole scratchpad folder of a session the roster lists as finished, or lists not at all, and --restore brings it back", async () => {
-  const { deps, pad } = pads([
-    { name: "a4b5c6-reviewer", status: "ended" },
-    { name: "d7e8f9-runner", status: "parked" },
-  ])
-  for (const name of ["a4b5c6-reviewer", "d7e8f9-runner", "q1w2e3"]) {
-    mkdirSync(join(pad, name, "shots"), { recursive: true })
-    writeFileSync(join(pad, name, "shots", "a.png"), "x")
-    expect(await runRm([join(pad, name)], deps)).toBe(0)
-    expect(existsSync(join(pad, name))).toBe(false)
-  }
-  expect(existsSync(pad)).toBe(true)
-  const moved = listTrash(join(deps.data, "trash")).find(
-    (entry) => entry.path === join(pad, "q1w2e3"),
-  )!
-  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
-  expect(existsSync(join(pad, "q1w2e3", "shots", "a.png"))).toBe(true)
-})
+test.each(["scratchpad", "scratch"])(
+  "runRm clears the whole %s folder of a session the roster lists as finished, or lists not at all, and --restore brings it back",
+  async (dir) => {
+    const { deps, pad } = pads(
+      [
+        { name: "a4b5c6-reviewer", status: "ended" },
+        { name: "d7e8f9-runner", status: "parked" },
+      ],
+      dir,
+    )
+    for (const name of ["a4b5c6-reviewer", "d7e8f9-runner", "q1w2e3"]) {
+      mkdirSync(join(pad, name, "shots"), { recursive: true })
+      writeFileSync(join(pad, name, "shots", "a.png"), "x")
+      expect(await runRm([join(pad, name)], deps)).toBe(0)
+      expect(existsSync(join(pad, name))).toBe(false)
+    }
+    expect(existsSync(pad)).toBe(true)
+    const moved = listTrash(join(deps.data, "trash")).find(
+      (entry) => entry.path === join(pad, "q1w2e3"),
+    )!
+    expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+    expect(existsSync(join(pad, "q1w2e3", "shots", "a.png"))).toBe(true)
+  },
+)
 
-test("runRm refuses a live session's scratchpad folder, every path in it, and its bare id's folder while any of that id's rows is live, to any other session", async () => {
-  const { deps, pad, told } = pads([
-    { name: "j6rjgy-worker", status: "working" },
-    { name: "a4b5c6-reviewer", status: "waiting" },
-    { name: "h1j2k3-tester", status: "starting" },
-    { name: "p4q5r6-worker", status: "ended" },
-    { name: "p4q5r6-reviewer", status: "working" },
-  ])
-  for (const path of [
-    join(pad, "a4b5c6-reviewer"),
-    join(pad, "a4b5c6-reviewer", "r1.md"),
-    join(pad, "h1j2k3-tester"),
-    join(pad, "h1j2k3"),
-    join(pad, "p4q5r6"),
-  ]) {
-    mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
-    mkdirSync(join(pad, "h1j2k3-tester"), { recursive: true })
-    mkdirSync(join(pad, "h1j2k3"), { recursive: true })
-    mkdirSync(join(pad, "p4q5r6"), { recursive: true })
-    writeFileSync(join(pad, "a4b5c6-reviewer", "r1.md"), "x")
-    expect(await runRm([path], deps)).toBe(1)
-    expect(existsSync(path)).toBe(true)
-  }
-  expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
-})
+test.each(["scratchpad", "scratch"])(
+  "runRm refuses a live session's %s folder, every path in it, and its bare id's folder while any of that id's rows is live, to any other session",
+  async (dir) => {
+    const { deps, pad, told } = pads(
+      [
+        { name: "j6rjgy-worker", status: "working" },
+        { name: "a4b5c6-reviewer", status: "waiting" },
+        { name: "h1j2k3-tester", status: "starting" },
+        { name: "p4q5r6-worker", status: "ended" },
+        { name: "p4q5r6-reviewer", status: "working" },
+      ],
+      dir,
+    )
+    for (const path of [
+      join(pad, "a4b5c6-reviewer"),
+      join(pad, "a4b5c6-reviewer", "r1.md"),
+      join(pad, "h1j2k3-tester"),
+      join(pad, "h1j2k3"),
+      join(pad, "p4q5r6"),
+    ]) {
+      mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+      mkdirSync(join(pad, "h1j2k3-tester"), { recursive: true })
+      mkdirSync(join(pad, "h1j2k3"), { recursive: true })
+      mkdirSync(join(pad, "p4q5r6"), { recursive: true })
+      writeFileSync(join(pad, "a4b5c6-reviewer", "r1.md"), "x")
+      expect(await runRm([path], deps)).toBe(1)
+      expect(existsSync(path)).toBe(true)
+    }
+    expect(told.every((line) => line.includes("is inside the protected"))).toBe(true)
+  },
+)
 
 // A folder of one file more than the tripwire's count, spread over subfolders.
 const overCount = (dir: string) => {
@@ -351,37 +468,42 @@ const overCount = (dir: string) => {
   }
 }
 
-test("runRm clears an ended session's whole scratchpad folder over the tripwire's file count, and --restore brings back every file", async () => {
-  const { deps, pad } = pads([{ name: "a4b5c6-worker", status: "ended" }])
-  const folder = join(pad, "a4b5c6-worker")
-  overCount(folder)
-  expect(await runRm([folder], deps)).toBe(0)
-  expect(existsSync(folder)).toBe(false)
-  const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === folder)!
-  expect(moved.files).toBe(5001)
-  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
-  expect(
-    readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
-  ).toHaveLength(5001)
-})
+test.each(["scratchpad", "scratch"])(
+  "runRm clears an ended session's whole %s folder over the tripwire's file count, and --restore brings back every file",
+  async (dir) => {
+    const { deps, pad } = pads([{ name: "a4b5c6-worker", status: "ended" }], dir)
+    const folder = join(pad, "a4b5c6-worker")
+    overCount(folder)
+    expect(await runRm([folder], deps)).toBe(0)
+    expect(existsSync(folder)).toBe(false)
+    const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === folder)!
+    expect(moved.files).toBe(5001)
+    expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+    expect(
+      readdirSync(folder, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()),
+    ).toHaveLength(5001)
+  },
+)
 
 // the file count does not apply to an ended session's whole folder, so its refusal names the byte cap alone
-test("runRm refuses an ended session's whole scratchpad folder over 2 GB, naming the 2 GB cap alone", async () => {
-  const { deps, pad, told } = pads([{ name: "a4b5c6-worker", status: "ended" }])
-  const folder = join(pad, "a4b5c6-worker")
-  mkdirSync(folder, { recursive: true })
-  writeFileSync(join(folder, "big.bin"), "")
-  truncateSync(join(folder, "big.bin"), 2 * 1024 ** 3 + 1)
-  expect(await runRm([folder], deps)).toBe(1)
-  expect(existsSync(join(folder, "big.bin"))).toBe(true)
-  expect(told.filter((line) => line.includes("past the tripwire"))).toEqual([
-    expect.stringContaining(" holds over 2 GB, past the tripwire"),
-  ])
-})
+test.each(["scratchpad", "scratch"])(
+  "runRm refuses an ended session's whole %s folder over 2 GB, naming the 2 GB cap alone",
+  async (dir) => {
+    const { deps, pad, told } = pads([{ name: "a4b5c6-worker", status: "ended" }], dir)
+    const folder = join(pad, "a4b5c6-worker")
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, "big.bin"), "")
+    truncateSync(join(folder, "big.bin"), 2 * 1024 ** 3 + 1)
+    expect(await runRm([folder], deps)).toBe(1)
+    expect(existsSync(join(folder, "big.bin"))).toBe(true)
+    expect(told.filter((line) => line.includes("past the tripwire"))).toEqual([
+      expect.stringContaining(" holds over 2 GB, past the tripwire"),
+    ])
+  },
+)
 
-test("runRm keeps the tripwire's file count and its alert for a path inside the caller's own scratchpad folder, a path inside an ended folder and any other path", async () => {
+test("runRm keeps the tripwire's file count and its alert for a path inside an ended folder and any other path", async () => {
   for (const at of [
-    (pad: string) => join(pad, "j6rjgy-worker", "work"),
     (pad: string) => join(pad, "a4b5c6-worker", "1938"),
     (pad: string) => join(pad, "..", "..", "big"),
   ]) {
@@ -395,6 +517,32 @@ test("runRm keeps the tripwire's file count and its alert for a path inside the 
     expect(existsSync(join(path, "clone", "0", "0"))).toBe(true)
     expect(told.some((line) => line.includes("past the tripwire"))).toBe(true)
   }
+})
+
+// a ship rehearsal in the caller's own scratchpad folder holds two clones, past 5,000 files under 2 GB
+test("runRm clears a folder inside the caller's own scratchpad folder past the tripwire's file count, refuses it past 2 GB, and refuses one inside another session's", async () => {
+  const { deps, pad } = pads([
+    { name: "j6rjgy-worker", status: "working" },
+    { name: "a4b5c6-worker", status: "working" },
+  ])
+  const rehearsal = join(pad, "j6rjgy-worker", "ship-rehearsal")
+  overCount(rehearsal)
+  expect(await runRm([rehearsal], deps)).toBe(0)
+  expect(existsSync(rehearsal)).toBe(false)
+  expect(existsSync(join(pad, "j6rjgy-worker"))).toBe(true)
+  expect(listTrash(join(deps.data, "trash")).find((entry) => entry.path === rehearsal)?.files).toBe(
+    5001,
+  )
+  const huge = join(pad, "j6rjgy-worker", "huge")
+  mkdirSync(huge, { recursive: true })
+  writeFileSync(join(huge, "big.bin"), "")
+  truncateSync(join(huge, "big.bin"), 2 * 1024 ** 3 + 1)
+  expect(await runRm([huge], deps)).toBe(1)
+  expect(existsSync(join(huge, "big.bin"))).toBe(true)
+  const theirs = join(pad, "a4b5c6-worker", "ship-rehearsal")
+  overCount(theirs)
+  expect(await runRm([theirs], deps)).toBe(1)
+  expect(existsSync(join(theirs, "clone", "0", "0"))).toBe(true)
 })
 
 test("an end leaves its own scratch or scratchpad folder over the tripwire in place, with no move and no alert, its refusal naming who clears it", async () => {
@@ -468,44 +616,75 @@ test("a symlink inside the own scratch folder to a folder over the tripwire move
   expect(told).toEqual([])
 })
 
-test("--restore refuses a path inside an ended folder while a symlink stands at that folder or at a folder between", async () => {
-  const { deps, home, pad } = pads([])
-  mkdirSync(join(home, "kept"), { recursive: true })
-  for (const [moved, link] of [
-    [join(pad, "q1w2e3", "shots"), join(pad, "q1w2e3")],
-    [join(pad, "z9x8c7", "a", "shots"), join(pad, "z9x8c7", "a")],
-  ] as const) {
-    mkdirSync(moved, { recursive: true })
-    writeFileSync(join(moved, "a.png"), "x")
-    expect(await runRm([moved], deps)).toBe(0)
-    const entry = listTrash(join(deps.data, "trash")).find((e) => e.path === moved)!
-    rmSync(link, { recursive: true })
-    symlinkSync(join(home, "kept"), link)
-    expect(await runRm(["--restore", entry.id], deps)).toBe(1)
-    expect(existsSync(join(home, "kept", "shots"))).toBe(false)
-  }
-})
+test.each(["scratchpad", "scratch"])(
+  "--restore refuses a path inside an ended %s folder while a symlink stands at that folder or at a folder between",
+  async (dir) => {
+    const { deps, home, pad } = pads([], dir)
+    mkdirSync(join(home, "kept"), { recursive: true })
+    for (const [moved, link] of [
+      [join(pad, "q1w2e3", "shots"), join(pad, "q1w2e3")],
+      [join(pad, "z9x8c7", "a", "shots"), join(pad, "z9x8c7", "a")],
+    ] as const) {
+      mkdirSync(moved, { recursive: true })
+      writeFileSync(join(moved, "a.png"), "x")
+      expect(await runRm([moved], deps)).toBe(0)
+      const entry = listTrash(join(deps.data, "trash")).find((e) => e.path === moved)!
+      rmSync(link, { recursive: true })
+      symlinkSync(join(home, "kept"), link)
+      expect(await runRm(["--restore", entry.id], deps)).toBe(1)
+      expect(existsSync(join(home, "kept", "shots"))).toBe(false)
+    }
+  },
+)
 
-test("runRm refuses the scratchpad folder itself, every other path in the data folder, an ended session's folder that is a symlink, and any of them while the roster cannot be read", async () => {
-  const { deps, home, pad } = pads([{ name: "a4b5c6-reviewer", status: "ended" }])
-  mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
-  mkdirSync(join(deps.data, "briefs"), { recursive: true })
+test.each(["scratchpad", "scratch"])(
+  "runRm refuses the %s folder itself, every other path in the data folder, an ended session's folder that is a symlink, and any of them while the roster cannot be read",
+  async (dir) => {
+    const { deps, home, pad } = pads([{ name: "a4b5c6-reviewer", status: "ended" }], dir)
+    mkdirSync(join(pad, "a4b5c6-reviewer"), { recursive: true })
+    mkdirSync(join(deps.data, "briefs"), { recursive: true })
+    mkdirSync(join(home, "kept"), { recursive: true })
+    symlinkSync(join(deps.data, "briefs"), join(pad, "x9y8z7-worker"))
+    symlinkSync(join(home, "kept"), join(pad, "m5n6b7-worker"))
+    for (const path of [
+      pad,
+      join(deps.data, "roster.json"),
+      join(deps.data, "briefs"),
+      join(pad, "x9y8z7-worker"),
+      join(pad, "m5n6b7-worker"),
+    ]) {
+      expect(await runRm([path], deps)).toBe(1)
+      expect(existsSync(path)).toBe(true)
+    }
+    writeFileSync(join(deps.data, "roster.json"), "{")
+    expect(await runRm([join(pad, "a4b5c6-reviewer")], deps)).toBe(1)
+    expect(existsSync(join(pad, "a4b5c6-reviewer"))).toBe(true)
+  },
+)
+
+// a data folder a merged PR retired, such as the runner host's old run folder, goes whole to the trash on any machine
+test("runRm removes a retired data folder whole and --restore brings it back, and refuses an unlisted top-level folder and a retired name that is a symlink", async () => {
+  const { deps, home } = machine()
+  const ci = join(deps.data, "ci")
+  mkdirSync(join(ci, ".claude", "worktrees"), { recursive: true })
+  writeFileSync(join(ci, "suite.sh"), "x")
+  expect(await runRm([ci], deps)).toBe(0)
+  expect(existsSync(ci)).toBe(false)
+  const moved = listTrash(join(deps.data, "trash")).find((entry) => entry.path === ci)!
+  expect(await runRm(["--restore", moved.id], deps)).toBe(0)
+  expect(readFileSync(join(ci, "suite.sh"), "utf8")).toBe("x")
+  const ops = join(deps.data, "ops")
+  mkdirSync(ops, { recursive: true })
+  expect(await runRm([ops], deps)).toBe(1)
+  expect(existsSync(ops)).toBe(true)
+  expect(await runRm([join(ci, "suite.sh")], deps)).toBe(1)
+  expect(existsSync(join(ci, "suite.sh"))).toBe(true)
+  rmSync(ci, { recursive: true })
   mkdirSync(join(home, "kept"), { recursive: true })
-  symlinkSync(join(deps.data, "briefs"), join(pad, "x9y8z7-worker"))
-  symlinkSync(join(home, "kept"), join(pad, "m5n6b7-worker"))
-  for (const path of [
-    pad,
-    join(deps.data, "roster.json"),
-    join(deps.data, "briefs"),
-    join(pad, "x9y8z7-worker"),
-    join(pad, "m5n6b7-worker"),
-  ]) {
-    expect(await runRm([path], deps)).toBe(1)
-    expect(existsSync(path)).toBe(true)
-  }
-  writeFileSync(join(deps.data, "roster.json"), "{")
-  expect(await runRm([join(pad, "a4b5c6-reviewer")], deps)).toBe(1)
-  expect(existsSync(join(pad, "a4b5c6-reviewer"))).toBe(true)
+  symlinkSync(join(home, "kept"), ci)
+  expect(await runRm([ci], deps)).toBe(1)
+  expect(lstatSync(ci).isSymbolicLink()).toBe(true)
+  expect(existsSync(join(home, "kept"))).toBe(true)
 })
 
 test("runRm tells the dispatcher of a protected path, and not of a missing one", async () => {
@@ -774,6 +953,22 @@ test("a worktree whose PR merged or closed passes a working roster row naming it
     })
     expect(existsSync(wt)).toBe(false)
   }
+})
+
+// PG-2498: a row holding the worktree by its own merged PR's number alone is the freed check's, which names the PR that freed it, so the merged-head read asks gh nothing for it
+test("a worktree freed by its own merged PR, held by a row naming that PR alone, says which PR freed it and asks gh for no merged head", async () => {
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const asked: string[] = []
+  const head = git(wt, "rev-parse", "HEAD")
+  const merged: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), head) }
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  const { code, out } = await heldRun(merged, ["--worktree", wt, "--discard"], "MERGED", row, 7)
+  expect({ asked, code, said: out[0] }).toEqual({
+    asked: [],
+    code: 0,
+    said: `playground: ${wt} is freed by #7, which reads MERGED, past abc123-worker's roster row (working)`,
+  })
 })
 
 // PG-1419: the freed removal goes through the 7-day trash like any other, and --restore brings the worktree back, the work --discard let go with it
@@ -1317,6 +1512,78 @@ const ownPushed = () => {
   const discard = `playground rm --worktree ${own} --discard removes it anyway, its commits no remote holds kept first in a git bundle beside it in the trash`
   return { ...m, discard, own }
 }
+
+// #2498: #2484's review clone stayed "held by gkbbch-worker" after #2484 merged, since the worker's row still named it as its pr; a row's hold by a PR that reads merged no longer counts, as SESSIONS.md's End says, while one on an open PR still keeps the clone
+test("--worktree takes a review clone a live row holds only by a PR that has merged, and keeps it while that PR is open", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-2484")
+  git(main, "worktree", "add", "-q", "--detach", clone, git(own, "rev-parse", "HEAD"))
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({
+      agents: [
+        {
+          branch: "PG-2475-other",
+          name: "gkbbch-worker",
+          pr: "https://github.com/o/r/pull/2484",
+          status: "working",
+        },
+      ],
+    }),
+  )
+  const held = {
+    code: 1,
+    err: [`playground: ${clone} is held by gkbbch-worker, which the roster lists as working`],
+    out: [],
+  }
+  const asked: string[] = []
+  const open: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), null) }
+  expect(await rmTold(["--worktree", clone], open)).toEqual(held)
+  expect(asked).toEqual(["https://github.com/o/r/pull/2484"])
+  const absent: RmDeps = { ...deps, mergedHead: () => "0".repeat(40) }
+  expect(await rmTold(["--worktree", clone], absent)).toEqual(held)
+  const head = git(clone, "rev-parse", "HEAD")
+  const merged: RmDeps = {
+    ...deps,
+    mergedHead: (_, u) => (u === "https://github.com/o/r/pull/2484" ? head : null),
+  }
+  const told = await rmTold(["--worktree", clone], merged)
+  expect(told.err).toEqual([])
+  expect(told.code).toBe(0)
+  expect(existsSync(clone)).toBe(false)
+})
+
+// PG-2498: a merged PR's number still holds while HEAD has a commit past that PR's head, so --discard cannot take it, and a row naming the PR alongside its branch never asks gh
+test("--worktree --discard keeps a clone with a commit past a merged PR's head, which the row holds by that PR alone", async () => {
+  const { deps, main, own } = ownPushed()
+  const clone = join(main, ".claude", "worktrees", "review-7")
+  const merged = git(own, "rev-parse", "HEAD")
+  git(main, "worktree", "add", "-q", "-b", "PG-7-review", clone, merged)
+  writeFileSync(join(clone, "past.txt"), "past\n")
+  git(clone, "add", "past.txt")
+  git(clone, "commit", "-qm", "past the merged head")
+  const row = { name: "abc123-worker", pr: "https://github.com/o/r/pull/7", status: "working" }
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-9-other" }] }),
+  )
+  const asked: string[] = []
+  const past: RmDeps = { ...deps, mergedHead: (_, u) => (asked.push(u), merged) }
+  expect(await rmTold(["--worktree", clone, "--discard"], past)).toEqual({
+    code: 1,
+    err: [`playground: ${clone} is held by abc123-worker, which the roster lists as working`],
+    out: [],
+  })
+  expect(asked).toEqual(["https://github.com/o/r/pull/7"])
+  expect(existsSync(join(clone, "past.txt"))).toBe(true)
+  writeFileSync(
+    join(deps.data, "roster.json"),
+    JSON.stringify({ agents: [{ ...row, branch: "PG-7-review" }] }),
+  )
+  asked.length = 0
+  expect((await rmTold(["--worktree", clone, "--discard"], past)).code).toBe(1)
+  expect(asked).toEqual([])
+})
 
 test.each([
   ["an open PR", openPr],
@@ -1895,10 +2162,221 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     expect(await deps.prState(wt)).toEqual({ unreachable: "gh token invalid" })
     expect(deps.merged("HEAD", wt)).toBeNull()
     expect(deps.defaultBranch(wt)).toBeNull()
+    expect(deps.mergedHead(wt, "https://github.com/o/r/pull/2484")).toBeNull()
     expect(existsSync(called)).toBe(false)
   } finally {
     process.env.PATH = saved.path
     if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
     else process.env.PLAYGROUND_DATA_DIR = saved.data
   }
+})
+
+const CARD = "11111111-2222-3333-4444-555555555555"
+
+test("runRm --card takes only an Inbox card id, so no flag reaches ask get", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", "--ack"], deps)
+  expect(code).toBe(2)
+  expect(err.join("\n")).toContain("--ack is not an Inbox card id")
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A machine whose ~/models holds one dropped hf repo the record names, and whose card approves it on spark-a at its size.
+type Picks = (repo: string) => { bytes: number; machine: string; path: string }[] | string
+const approvedMachine = (picks: Picks | null) => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  file(join(repo, "blobs", "b"), "weights")
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  const deps: RmDeps = {
+    ...m.deps,
+    ...(picks === null ? {} : { approvals: async () => picks(repo) }),
+    machine: "spark-a",
+  }
+  return { ...m, deps, repo }
+}
+
+test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card ${CARD} approved`)
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test.each<[string, Picks | null, string]>([
+  ["no Remove answer on the card", () => [], "holds no Remove answer from the owner"],
+  [
+    "a Remove for another machine",
+    (path) => [{ bytes: 7, machine: "spark-b", path }],
+    "holds no Remove answer",
+  ],
+  [
+    "a size other than the card's",
+    (path) => [{ bytes: 6, machine: "spark-a", path }],
+    "its size changed",
+  ],
+  ["a card that does not read", () => "ERR_POSTGRES_CONNECTION_REFUSED", "did not read"],
+  ["no Inbox here", null, "no Inbox is read here"],
+])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
+  const { deps, repo } = approvedMachine(picks)
+  const { code, err } = await rmTold([repo, "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(said)
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A peer's far end: run-slot's ssh, a closure a test injects so the stub records the command.
+type PeerRun = { machine: string; command: string }
+const peerRun = (out: { code: number; out: string }) => {
+  const seen: PeerRun[] = []
+  const peer: RmDeps["peer"] = async (machine, command) => {
+    seen.push({ machine, command })
+    return out
+  }
+  return { seen, peer }
+}
+
+test("runRm --peer sends one rm-peer command to the named peer and relays its line, leaving this machine's own copy at that path and its record entry", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const record = readFileSync(join(deps.data, "machine-record.json"), "utf8")
+  const { code, out } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(0)
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(out.join("\n")).toContain("Deleted the weights on the peer")
+  expect(existsSync(repo)).toBe(true)
+  expect(readFileSync(join(deps.data, "machine-record.json"), "utf8")).toBe(record)
+})
+
+test("runRm --peer passes a path with a space or a quote to the peer as one word", () => {
+  expect(rmPeerCommand("/h/models/a b's.gguf", 7, "c1")).toBe(
+    `packages/scripts/src/playground/rm-peer.ts '/h/models/a b'\\''s.gguf' '7' 'c1'`,
+  )
+})
+
+test("runRm --peer refuses a pick the card does not name on that peer, and sends no ssh", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "ignored" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("holds no Remove answer")
+  expect(seen).toEqual([])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's plain refusal once and tells the dispatcher nothing, as a local one does", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "playground: no such path" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual([])
+  expect(err).toEqual(["playground: spark-b: no such path"])
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer tells the dispatcher of a peer's protected refusal (exit 3), as a local one does", async () => {
+  const { peer } = peerRun({ code: 3, out: "playground: /m/x.gguf is protected" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], { ...deps, peer })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: /m/x.gguf is protected"])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's silence with the did-not-answer fallback", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: the peer did not answer"])
+  expect(err.join("\n")).toContain("the peer did not answer")
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A main checkout pushed to origin/canary with one replay worktree in a row of ~/models/kit/runs holding an untracked answer.
+const replayMachine = () => {
+  const m = machine()
+  git(m.root, "init", "--bare", "-q", join(m.root, "remote.git"))
+  git(m.main, "init", "-q", "-b", "canary")
+  file(join(m.main, "README.md"))
+  git(m.main, "add", "README.md")
+  git(m.main, "commit", "-qm", "init")
+  git(m.main, "remote", "add", "origin", join(m.root, "remote.git"))
+  git(m.main, "push", "-q", "origin", "canary")
+  const wt = join(m.home, "models", "kit", "runs", "MB-1", "pr0001")
+  mkdirSync(dirname(wt), { recursive: true })
+  git(m.main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+  file(join(wt, "answer.ts"), "export const a = 1\n")
+  return { ...m, wt }
+}
+
+test("runRm --worktree keeps a replay worktree a model test is running in, and refuses --discard and --pr on one", async () => {
+  const { deps, wt } = replayMachine()
+  const running = {
+    ...deps,
+    procs: () => [{ command: "bun run kit replay", cwd: wt, pid: 4242, sockets: [] }],
+  }
+  const held = await rmTold(["--worktree", wt], running)
+  expect(held.code).toBe(1)
+  expect(held.err.join("\n")).toContain(
+    `${wt} is held by pid 4242 (bun run kit replay) working in ${wt}`,
+  )
+  for (const words of [["--discard"], ["--pr", "https://github.com/o/r/pull/1"]]) {
+    const flagged = await rmTold(["--worktree", wt, ...words], deps)
+    expect(flagged.code).toBe(2)
+    expect(flagged.err.join("\n")).toContain("takes neither --discard nor --pr")
+  }
+  expect(existsSync(wt)).toBe(true)
+  expect(existsSync(`${wt}.diff`)).toBe(false)
+})
+
+test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
+  const { deps, wt } = replayMachine()
+  const { code, out } = await rmTold(["--worktree", wt], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`its work is kept in ${wt}.diff`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readFileSync(`${wt}.diff`, "utf8")).toContain("+export const a = 1")
 })

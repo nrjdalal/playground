@@ -29,7 +29,18 @@ CANARY=$(gh api repos/{owner}/{repo}/branches/canary --jq .commit.sha)
 A ship still short of step 4 as the freeze nears its lapse ([pr-merge's Holds and rulings](../../../packages/scripts/src/pr-merge/README.md#holds-and-rulings)) runs `bun run ship:freeze vX.Y.Z` again, which restarts it.
 A ship that stops before its tag ends the freeze with `bun run ship:freeze --end`, so the held PRs merge again, and clears its rehearsal's scratch folder (the rehearsal's **Clear**).
 
-Run the new-user gate on it through run-slot as `ops-ship`, `~/.playground/ops/run-slot.sh ops-ship -- bun run gate:new-user "$CANARY"` (`.agents/testing.md`, End-to-end tests), so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus. Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
+Run the new-user gate on it from a detached worktree at `$CANARY`, through run-slot as `ops-ship`, so it runs at class 0, beside the runs that gate a merge, and a ship needs no focus (`.agents/testing.md`, End-to-end tests).
+The box is the calling checkout's gate code, so the gate runs from the pin's own: the gate stops with exit 2 in a checkout whose gate code differs from the sha's, since a main checkout's older gate once let its box reach the live dashboard's database.
+
+```bash
+GATE="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/ship-gate-${CANARY:0:7}"
+git worktree add --detach "$GATE" "$CANARY"
+~/.playground/ops/run-slot.sh ops-ship -- bun install --cwd "$GATE"
+~/.playground/ops/run-slot.sh ops-ship -- bun run --cwd "$GATE" gate:new-user "$CANARY"
+playground rm --worktree "$GATE" --reason "ship gate at ${CANARY:0:7}"
+```
+
+Its last line, `New-user gate at <sha>: PASS` or `New-user gate at <sha>: FAIL`, goes into the ship PR's body on a line of its own, for step 3's `ship:merge` to read, with each FAIL and INCONCLUSIVE line it printed named below it.
 A ship the owner approves past a FAIL takes the dispatcher's Inbox decision whose title or text names `vX.Y.Z` and whose approved row reads `Ship everything now, skip the new-user check this once` verbatim (`WAIVER_LABEL`), the label the dispatcher offers for it: write `New-user gate at <sha>: waived by Inbox <id>` in place of the FAIL line, the failing lines still named below it, since `ship:merge` refuses a FAIL line beside a waiver too and reads the decision through `playground ask get` ([pr-merge's README, ship:merge](../../../packages/scripts/src/pr-merge/README.md#shipmerge)).
 
 Done when `bun run ship:freeze status` prints the `"*"` line naming `vX.Y.Z` (step 3's `ship:merge` refuses a line Ops wrote by hand, so ask Ops to lift one), `CANARY` holds the SHA you mean to ship and the gate's last line for it, or its waiver line, is in hand. When `canary` moves before step 3, read it again.
@@ -129,7 +140,7 @@ Fix each reason it names, then run it again, at most every 5 minutes while a che
 
 - A refusal naming a head other than `$CANARY` means `canary` moved: go back to step 1.
 - No `Audit, Lint, and Build` or `test` check at the head, with the pin's `auto-check-build` and `auto-test` runs reading `action_required` (`gh run list --commit "$CANARY" --event pull_request`), means the bot opened the draft there, so its runs are held runs ([GITHUB-BULK-READS.md, Reading canary's own checks](../../../extensions/core/skills/playbook/GITHUB-BULK-READS.md#reading-canarys-own-checks)). Run `bun run ship:approve-held <n>`, which approves the ship PR's held runs at its head alone and prints each run it approved, or `none held`.
-- A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`, its id from `gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,conclusion`.
+- A red check: rerun its run once, `gh run rerun <run id> --failed`, or a cancelled run whole with `gh run rerun <run id>`, its id from `gh run list --commit "$CANARY" --event pull_request --json databaseId,workflowName,conclusion`. A check whose failing test turns green on that rerun still gets one issue to root-cause its red, or to delete the test with the reason, as a `BATCH-RED` does in [code-review-loop's step 2](../../../extensions/core/skills/code-review-loop/SKILL.md).
 - A second red, or a FAIL gate line, holds the ship: name the failing test (`gh run view <run id> --log-failed`; `gh api --allow-escape-sequences repos/<owner>/<repo>/actions/jobs/<job id>/logs` reads a job's whole log, where `--log-failed` cuts it) or step in the ship PR and up the chain, and end the freeze by step 1's line for a ship that stops.
 
 Then clear the rehearsal's scratch folder (the rehearsal's **Clear**).
@@ -188,6 +199,7 @@ A reset or merge of the main checkout made outside `playground update`, with no 
 6. Move each peer's Playground clone to the commit `HEAD` reached (`peer-sync.ts`), for each machine the Dashboard's `.env` names in `PLAYGROUND_PEERS`, so a job run from a peer's clone (the relay) runs the same code: over ssh, as the System panel reads a peer, it reads the status of the peer's clone at the same place under its home as the main checkout (`cloneOf`), then fetches, checks out that sha detached and runs a frozen `bun install` under `nice`.
    A clone with changes of its own, committed or not, on a branch other than `main`, or with another worktree cut from it (a replay run, whose hooks read through the clone's git dir) is left as it is, and each peer prints one `peer <name>:` line, `at <sha7>` or why not, never failing the update.
 7. Roll the Dashboard, which answers `Already up to date` when the branch it follows has not moved.
+   The update gives its run slot back first (`gave its run slot back`), since the roll's own steps queue in run-slot; a roll queued there reads `Waiting for load: load5 is <n>…` or another `Waiting for …` line naming its queue, never `Failed`, and one still waiting at 30 minutes exits 0 and finishes by itself, so this item is done once `ops/dashboard/results.log` holds that roll's `ROLL … PASS` line.
 
 A build that fails part way can leave another package's `dist` cleaned and empty (`packages/redis`, which pr:merge's lock imports, on v0.0.107): after a failed build, fix its cause and run `playground update` again, which builds again, since a run that stopped short records nothing.
 A job that a `left alone` or an `on, but not running` line names and that is not running three of its cycles after the update (its heartbeat's `cycleSeconds`, the staleness `up.py` reads a job down by) is a failed step, whatever the line's `up.py exited 0` says, since `up.py` exits 0 on every pass: send its `up.log` lines (`ops/` in the data folder) up the chain.

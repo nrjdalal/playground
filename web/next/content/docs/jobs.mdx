@@ -10,6 +10,7 @@ Playground's background work runs as ops jobs: the Dashboard's supervisor, the s
 Each job is a setting, `jobs.<name>` (`ops-merge-train` is `jobs.opsMergeTrain`), whose value is the job: whether it is on, its schedule, its command or launchd program, and why it is paused.
 A stored value holds only the fields it changes, and reads over the job's entry in Playground's registry, so a job turned on still runs the command and schedule Playground ships, including after an update changes them.
 A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's own, which serves first run's checks and every settings write, and `jobs.opsUsage`, which reads your Claude login's 5-hour and week usage every 5 minutes, so the Dashboard shows them with no setting.
+On a Mac a third is on too, `jobs.opsKeepAwake`, which keeps an idle Mac awake ([below](#keep-an-idle-mac-awake)).
 
 ## Turn a job on
 
@@ -56,6 +57,19 @@ The `ops-peer-relay` job carries those lines across: it runs on one machine, hol
 On the other machine it runs a small script from that machine's own Playground checkout, at the same path, so nothing is installed there, and that checkout must be at a release that has the script, or the job says so; it also says when the other machine stays silent or ends before the script answers.
 Lines carry from the job's first connection on, so a line written before it stays where it was written.
 After a drop it starts ssh again within 2 seconds, waiting up to a minute between tries, tells Ops once, and a line written meanwhile still arrives once, keeping the time it was sent.
+
+## Reach the model servers on another machine
+
+The `ops-model-tunnel` job brings the peer's local model servers, which [`playground model use`](/docs/cli#start-a-local-model-playground-model-use) starts on its loopback, to this machine's loopback: one ssh connection forwards `127.0.0.1:18000` here to the peer's `127.0.0.1:8000`, and `18001` to `8001`, with nothing listening off loopback at either end.
+The peer is the one `localModels.machine` names in `PLAYGROUND_PEERS`, or the only one it names, reached with the key `PLAYGROUND_PEER_KEY` names (`~/.ssh/playground_spark` by default).
+After a drop it starts ssh again within 2 seconds, waiting up to a minute between tries while it keeps failing.
+
+## Keep an idle Mac awake
+
+The `ops-keep-awake` job keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on while you are away and the display is off.
+It holds `caffeinate -i -s` as its one child: the display still sleeps and the screen still locks, it needs no `sudo`, and it sets no `pmset` value.
+It runs on macOS alone: on any other platform the runner leaves it out of `jobs.json`, so there it is no job.
+It is on by default on a Mac, and `pmset -g assertions` lists its hold; turn it off as any job, with `jobs.opsKeepAwake` set to `{"enabled": false}` ([above](#turn-a-job-on)).
 
 ## Restore now
 

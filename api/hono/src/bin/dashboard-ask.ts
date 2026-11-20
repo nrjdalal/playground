@@ -10,7 +10,13 @@ import { env } from "@packages/env/db"
 import { factorySettings, readPolicyOrDefaults, ruleSettings } from "@packages/settings"
 
 import { fillNow, futureNowTimes, NOW, ownerTime } from "@/lib/dashboard/ask-clock"
-import { ASK_EXAMPLES, isAskExampleKind, shapeHints } from "@/lib/dashboard/ask-shape"
+import {
+  ASK_EXAMPLES,
+  isAskExampleKind,
+  progressCardRefusal,
+  progressRefusal,
+  shapeHints,
+} from "@/lib/dashboard/ask-shape"
 import { deleteRefusal } from "@/lib/dashboard/delete-targets"
 import { branchOf, checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import {
@@ -18,6 +24,7 @@ import {
   editItem,
   getItem,
   getPickLine,
+  inflightCard,
   itemTag,
   openItems,
   postOrEdit,
@@ -31,10 +38,11 @@ import { publicDraftRefusal } from "@/lib/dashboard/public-draft"
 import { linkShipPrs, repoOfRemote } from "@/lib/dashboard/ship-links"
 import { whatsappAnswer } from "@/lib/dashboard/whatsapp-answer"
 import { livePair, mainCheckoutOf, othersLiveDashboard } from "@/lib/dev/launch"
+import { org } from "@/lib/org"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr), an update titled as one of its poster's an edit still takes editing that card in place (postOrEdit); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]` lists the open items, oldest first, those posted in that window alone when given, each whole as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr), an update titled as one of its poster's an edit still takes editing that card in place (postOrEdit); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock, and a draft with no link, a public post's, whose text holds a work figure or an internal name (the public rule); `open [--from <session>] [--since <iso time>] [--until <iso time>] [--json]` lists the open items, oldest first, those posted in that window alone when given, each whole as one JSON line with --json, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `whatsapp <file>` records the owner's answer from WhatsApp, a file ops-wa wrote in its own folder (whatsapp-answer.ts); `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card, and both refuse a progress block whose line does not read (progressRefusal). See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (the plain-words skill)
@@ -70,6 +78,17 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 they post at; a "measured" or "now" time ahead of the clock is refused
                                                 a draft with no link is a public post's: one whose text holds a work
                                                 figure or an internal name is refused (playground rules public)
+                                                a \`\`\`progress block draws bars at the card's width, one
+                                                name | percent | what's going on | ETA | state a line, the state
+                                                optional: active, done, held or waiting (active draws in colour,
+                                                the rest muted, a row at 100 with none done); a line with other
+                                                than 4 or 5 fields, a percent outside 0 to 100 or another state
+                                                is refused; a progress block is the dispatcher's one in-flight
+                                                card, so new refuses it as a second card, a different title,
+                                                or a card another poster may start: the dispatcher edits it
+                                                in place (edit), any other poster sends it up the chain, not
+                                                its own card, so every job stays one row
+
        bun run ask edit <id|#iN> < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a
@@ -250,6 +269,15 @@ if (command === "new" || command === "edit") {
     worktrees: main === null ? null : join(main, ".claude", "worktrees"),
   })
   if (shortDelete) fail(shortDelete)
+  // a progress block draws as bars only when every line reads, so one that does not is refused before it posts
+  const badProgress = progressRefusal(input)
+  if (badProgress) fail(badProgress)
+  // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720); the daily ledger card posts beside it
+  if (command === "new") {
+    const ledger = org.ledger.title
+    const refusal = progressCardRefusal(input, await inflightCard(db, ledger), ledger)
+    if (refusal) fail(refusal)
+  }
   // a draft with no link is a public post's, which goes out in the owner's own words alone (the public rule): scripts/hooks/public-draft.ts reads it with the leak guards' own finders, as a child
   const publicLeak = await publicDraftRefusal(input)
   if (publicLeak) fail(publicLeak)

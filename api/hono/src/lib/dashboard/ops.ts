@@ -23,8 +23,10 @@ export const OPS_DOES: Record<string, string> = {
   "ops-ext-sync": "Syncs each extension with its private repo each night",
   "ops-flow": "Tells the leads when a run slot is held too long",
   "ops-herdr": "Keeps the herdr terminal servers up",
+  "ops-keep-awake": "Keeps an idle Mac awake, so the jobs run on",
   "ops-machine": "Saves this Mac's load and memory",
   "ops-merge-train": "Merges ready pull requests together",
+  "ops-model-tunnel": "Keeps the link to the model servers on the other machine open",
   "ops-peer-relay": "Carries messages between sessions on this machine and the other one",
   "ops-restore": "Puts a lost main checkout back once its guards are gone",
   "ops-session-resume": "Tells each session to carry on once its usage limit resets",
@@ -45,8 +47,10 @@ export const RUNNER_NAMES: Record<string, string> = {
   "ops-ext-sync": "Extensions sync",
   "ops-flow": "Run slot alarm",
   "ops-herdr": "Herdr servers",
+  "ops-keep-awake": "Keep awake",
   "ops-machine": "Machine readings",
   "ops-merge-train": "Merge train",
+  "ops-model-tunnel": "Model tunnel",
   "ops-peer-relay": "Peer messages",
   "ops-restore": "Checkout restore",
   "ops-session-resume": "Usage-limit resumes",
@@ -109,10 +113,22 @@ export const STALE_CYCLES = 3
 
 const EXITED = /^(supervisor exited|loop exited)/
 
+// A job's steady healthy beat that is not `ok` but is not a failure, up: for the tunnels and idle: for the relay: a copy of HEALTHY_PREFIXES in packages/scripts/src/ops-sweep/sweep.ts, kept in step with it by a test (tests/api/hono/src/lib/dashboard/ops.test.ts).
+export const HEALTHY_PREFIXES: Record<string, string[]> = {
+  "ops-model-tunnel": ["up: "],
+  "ops-peer-relay": ["idle: "],
+  "ops-tunnel": ["up: "],
+}
+
+// A job's beat steady and healthy, so it reads Running like ops-sweep does and not Failing: it is not `ok`, but it starts one of its job's healthy prefixes.
+function healthyBeat(job: string, result: string): boolean {
+  return (HEALTHY_PREFIXES[job] ?? []).some((prefix) => result.startsWith(prefix))
+}
+
 // What jobs.json says a job calls, beside its pause mark.
 export type JobCalls = { callsModel: boolean; model: string | null }
 
-// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Waiting when the last result starts `waiting: ` (a job with nothing to read yet, the reason after it); Failing when it is anything else but ok; else Running.
+// Pure: a job's row from its heartbeat file's text (null when the file is missing) and whether its pid is still running (null when that could not be read). Down when the file is missing, does not read or names another job, the loop has exited, the pid is gone or the last beat is older than STALE_CYCLES cycles; Waiting when the last result starts `waiting: ` (a job with nothing to read yet, the reason after it); Failing when it is not `ok` and not one of its job's steady healthy beats; a healthy steady beat, and `ok`, reads Running.
 export function opsRowOf(
   job: string,
   text: string | null,
@@ -173,7 +189,7 @@ export function opsRowOf(
   }
   const waiting = /^waiting: (.+)/.exec(beat.lastResult)?.[1]
   if (waiting) return { ...withRefused, lastBeatAt, problem, reason: waiting, status: "waiting" }
-  if (beat.lastResult !== "ok") {
+  if (beat.lastResult !== "ok" && !healthyBeat(job, beat.lastResult)) {
     return {
       ...withRefused,
       lastBeatAt,

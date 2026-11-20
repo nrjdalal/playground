@@ -3,6 +3,58 @@ import { z } from "zod"
 // The widest line, in characters, a drawing in an Inbox ask runs before bun run ask warns its author: the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
 export const ASK_CODE_COLUMNS = 72
 
+// The fenced block's language an Inbox card draws as progress bars at its own width, one item a line, so no width limit binds it.
+export const PROGRESS_LANGUAGE = "progress"
+
+// A progress row's state: active rows draw in the palette's blue and the rest muted.
+export const PROGRESS_STATES = ["active", "done", "held", "waiting"] as const
+export type ProgressState = (typeof PROGRESS_STATES)[number]
+
+export type ProgressItem = {
+  eta: string
+  name: string
+  percent: number
+  state?: ProgressState
+  text: string
+}
+
+// Why a progress block's line does not read: no line at all, too few or too many fields (`count` of them), a percent outside 0 to 100, or a state none of PROGRESS_STATES; `line` counts from 1 inside the block.
+export type ProgressFault =
+  | { kind: "empty"; line: 0; text: "" }
+  | { count: number; kind: "fields"; line: number; text: string }
+  | { kind: "percent"; line: number; text: string }
+  | { kind: "state"; line: number; state: string; text: string }
+
+const PERCENT = /^(\d{1,3}(?:\.\d+)?)%?$/
+
+const isProgressState = (state: string): state is ProgressState =>
+  PROGRESS_STATES.some((known) => known === state)
+
+// Pure: a progress block's items, one a non-blank line of `name | percent | what's going on | ETA | state`, the percent 0 to 100 with an optional %, the state optional (an empty or missing one is none, and a row at 100 with none reads as done), or the first line that does not read.
+export function progressItems(
+  block: string,
+): { items: ProgressItem[]; ok: true } | { fault: ProgressFault; ok: false } {
+  const items: ProgressItem[] = []
+  const lines = block.split("\n")
+  for (const [index, text] of lines.entries()) {
+    if (text.trim() === "") continue
+    const fields = text.split("|").map((field) => field.trim())
+    const line = index + 1
+    if (fields.length !== 4 && fields.length !== 5)
+      return { fault: { count: fields.length, kind: "fields", line, text }, ok: false }
+    const [name, percent, said, eta, state = ""] = fields as [string, string, string, string]
+    const value = Number(PERCENT.exec(percent)?.[1] ?? Number.NaN)
+    if (!(value >= 0 && value <= 100)) return { fault: { kind: "percent", line, text }, ok: false }
+    if (state !== "" && !isProgressState(state))
+      return { fault: { kind: "state", line, state, text }, ok: false }
+    const shown = state || (value === 100 ? "done" : null)
+    items.push({ eta, name, percent: value, ...(shown && { state: shown }), text: said })
+  }
+  return items.length > 0
+    ? { items, ok: true }
+    : { fault: { kind: "empty", line: 0, text: "" }, ok: false }
+}
+
 // What an Inbox answer tells its poster: one JSON line after this lead, typed through deliver(), so the poster parses it rather than reading prose.
 export const ANSWER_LEAD = "[inbox-answer]"
 
@@ -269,16 +321,56 @@ export function picksOf(
   return picks
 }
 
+// The two fields a card's place reads: pinned when pinnedAt is set, placed by hand when rank is.
+export type InboxPlace = {
+  pinnedAt: string | null
+  rank: string | null
+}
+
+// Pure: the cards, pinned first, each group's unranked first in the order given (today's order, since the sort is stable), then its ranked by rank; a rank compares by code point here, never in ORDER BY, whose collation can read the same keys differently.
+export function orderInboxItems<T extends InboxPlace>(items: T[]): T[] {
+  const byRank = (a: T, b: T): number =>
+    a.rank === b.rank ? 0 : a.rank === null ? -1 : b.rank === null ? 1 : a.rank < b.rank ? -1 : 1
+  return [...items].sort(
+    (a, b) => Number(a.pinnedAt === null) - Number(b.pinnedAt === null) || byRank(a, b),
+  )
+}
+
+const RANK_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// Pure: a key strictly between two neighbour ranks, null at a tab's end, from base-62 digits alone, so Postgres text stores it and no key ends in "0", which keeps room below every key (fractional-indexing's midpoint).
+export function rankBetween(prev: string | null, next: string | null): string {
+  return rankMidpoint(prev ?? "", next)
+}
+
+function rankMidpoint(low: string, high: string | null): string {
+  if (high !== null) {
+    let n = 0
+    while ((low[n] ?? "0") === high[n]) n++
+    if (n > 0) return high.slice(0, n) + rankMidpoint(low.slice(n), high.slice(n))
+  }
+  const a = low === "" ? 0 : RANK_DIGITS.indexOf(low[0]!)
+  const b = high === null ? RANK_DIGITS.length : RANK_DIGITS.indexOf(high[0]!)
+  if (b - a > 1) return RANK_DIGITS[Math.round((a + b) / 2)]!
+  if (high !== null && high.length > 1) return high.slice(0, 1)
+  return RANK_DIGITS[a]! + rankMidpoint(low.slice(1), null)
+}
+
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
 
-// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with what it does and how to undo it in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
+// The root steps an Inbox card can run, each a fixed script in api/hono/src/lib/system/root that the install card puts under ROOT_DIR, owned by root: one per kind, by its name, with the paths it writes (which the machine record takes once it runs), what it does and how to undo it in plain words. Nothing a card holds reaches its argv, as probe.ts's COMMANDS holds the System panel's reads.
 export const ROOT_STEPS = {
   "bwrap-userns": {
+    adds: ["/etc/apparmor.d/bwrap"],
     undo: "remove /etc/apparmor.d/bwrap and unload its AppArmor profile",
     what: "Lets Claude Code's sandbox start: an AppArmor profile that lets bwrap make a user namespace",
   },
   "chromium-ca": {
+    adds: [
+      "/etc/chromium/policies/managed/portless-ca.json",
+      "/etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
+    ],
     undo: "remove /etc/chromium/policies/managed/portless-ca.json and /etc/opt/chrome_for_testing/policies/managed/portless-ca.json",
     what: "Lets Helium and Chrome for Testing trust the Dashboard's certificate for .localhost addresses alone, through a browser policy; Helium may then show Managed by your organization in its menu, and needs one restart",
   },
@@ -316,7 +408,7 @@ export const INSTALL_TEXT = [
   'for h in "$@"; do',
   "  n=$((n + 1))",
   `  [ $n -le ${ROOT_NAMES.length} ] || break`,
-  `  case $h in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  case $h in *[!0123456789abcdef]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#h} -eq 64 ] || { ${REFUSE_HASH}; }`,
   "done",
   'mkdir -p "$base/root" "$base/data"',
@@ -332,7 +424,7 @@ export const INSTALL_TEXT = [
   "done",
   "if [ $# -eq 2 ]; then",
   `  case $1 in /*) ;; *) ${refuse("the CA's path is not absolute")} ;; esac`,
-  `  case $2 in *[!0-9a-f]*) ${REFUSE_HASH} ;; esac`,
+  `  case $2 in *[!0123456789abcdef]*) ${REFUSE_HASH} ;; esac`,
   `  [ \${#2} -eq 64 ] || { ${REFUSE_HASH}; }`,
   `  head -c ${CA_MAX_BYTES + 1} "$1" > "$stage/ca.pem"`,
   `  [ "$(wc -c < "$stage/ca.pem")" -le ${CA_MAX_BYTES} ] || ${refuse(`the CA file is over ${CA_MAX_BYTES / 1024} KB`)}`,
@@ -381,7 +473,7 @@ const PEER_IDS = ROOT_NAMES.map((name) => `"${PEER_ACTION}.${name}"`).join(", ")
 export const PEER_INSTALL_TEXT = [
   "set -eu",
   "user=${SUDO_USER:-}",
-  `case $user in ""|root|*[!a-z0-9_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
+  `case $user in ""|root|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*) ${refuse("sudo named no user other than root, so the rule names no one")} ;; esac`,
   `[ -d ${PEER_POLICY.slice(0, PEER_POLICY.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit actions folder")}`,
   `[ -d ${PEER_RULE.slice(0, PEER_RULE.lastIndexOf("/"))} ] || ${refuse("this machine has no polkit rules folder")}`,
   INSTALL_TEXT,

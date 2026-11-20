@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
-import { extname, join } from "node:path"
+import { homedir } from "node:os"
+import { dirname, extname, join } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
 import { withOwn } from "@packages/config/accounts"
@@ -15,10 +16,12 @@ import {
   ROOT_NAMES,
   rowOfAnswer,
 } from "@packages/config/inbox"
-import { type Peer, peerSchema } from "@packages/config/org"
+import { cloneOf, type Peer, peerSchema } from "@packages/config/org"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
+import { addEntries, peerRecordArgv, rootEntries } from "@packages/scripts/machine-record/record"
+import { seedAlert } from "@packages/scripts/ops-wa/seed"
 import {
   checkSetting,
   extensionsDir,
@@ -66,6 +69,7 @@ import {
   ROOT_TIMEOUT_MS,
   stepArgv,
 } from "../system/root"
+import { holdsProgressBlock, type InflightCard, isDispatcher, isLedgerTitle } from "./ask-shape"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
@@ -1746,6 +1750,9 @@ const ownerDone = (item: InboxItem): boolean => {
   return !("choice" in answer)
 }
 
+// Pure: an update a poster may still edit, its twin postOrEdit takes, a closed one except the owner's Done (PG-2720).
+const stillEditable = (item: InboxItem): boolean => !closed(item) || ownerDone(item)
+
 // Pure: what a card says, its files by name alone, since bun run ask copies a file under a new id on every edit.
 const wordsOf = ({ preview, title }: { preview: unknown; title: string }): unknown =>
   JSON.parse(
@@ -1845,6 +1852,23 @@ export async function postOrEdit(
     return { item: twin, ok: true, unchanged: true }
   const edited = await editItem(db, twin.id, input, now, settingsData)
   return edited.ok ? { ...edited, edited: true } : edited
+}
+
+// Pure: the dispatcher's one open in-flight card among items newest first: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720); nor is the daily ledger card, which posts beside it.
+export function inflightOf(items: InboxItem[], ledger: string): InflightCard {
+  const card = items.find(
+    (item) =>
+      isDispatcher(item.from) &&
+      stillEditable(item) &&
+      holdsProgressBlock(item.preview) &&
+      !isLedgerTitle(item.title, ledger),
+  )
+  return card ? { ref: card.ref, title: card.title } : null
+}
+
+export async function inflightCard(db: Database, ledger: string): Promise<InflightCard> {
+  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
+  return inflightOf(rows.map(toItem), ledger)
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
@@ -2315,8 +2339,10 @@ const PEER_EXITS: Record<number, string> = {
   255: "ssh could not reach that machine, so nothing ran as root",
 }
 
-// A peer's seams: the machines org.cluster names with their ssh key, and the secret store item an install reads its password from; a test passes its own.
+// A root card's seams: the machines org.cluster names with their ssh key, the secret store item an install reads its password from, the data folder this machine's record sits in (dataDir() when unset), and the peers' clone path (cloneOf, read from git when unset), whose record CLI a peer's add runs; a test passes its own.
 export type PeerSeams = {
+  clone?: string | null
+  data?: string
   key?: string
   peers: readonly Peer[]
   secret: (service: string) => { read: () => Promise<string | null>; remove: () => Promise<void> }
@@ -2326,6 +2352,49 @@ const PEER_SEAMS: PeerSeams = {
   key: org.cluster.key,
   peers: org.cluster.peers,
   secret: (service) => keychainItem(service),
+}
+
+// The peers' clone: this checkout's main checkout as a ~/ path (cloneOf), the place peer-sync keeps each peer's clone, or null when git cannot say or the path is not plain under home.
+const peerClone = async (run: ArgvRun): Promise<string | null> => {
+  const root = checkoutRoot()
+  const git =
+    root &&
+    (await run(["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"]))
+  return git && git.code === 0
+    ? cloneOf(dirname(git.out.trim()), process.env.HOME || homedir())
+    : null
+}
+
+// What a root card that ran put on its machine goes into that machine's record, here or on the peer through its one ssh; a record that fails is logged and never fails the card, since the next daily check names the path.
+async function recordRoot(
+  run: ArgvRun,
+  preview: InboxRoot,
+  seams: PeerSeams,
+  peer?: Peer,
+): Promise<void> {
+  const entries = rootEntries(preview.step, {
+    ca: !peer && !!preview.ca,
+    now: new Date(),
+    peer: !!peer,
+  })
+  try {
+    if (!peer) {
+      await addEntries(seams.data ?? dataDir(), entries)
+      return
+    }
+    // read here, not at import, since it asks git where the main checkout is
+    const clone = seams.clone === undefined ? await peerClone(run) : seams.clone
+    if (!clone) throw new Error("this checkout is not a plain path under home, so no peer clone")
+    const ran = await run(
+      peerRecordArgv(seams.key, peer.target, clone, "add"),
+      JSON.stringify(entries),
+    )
+    if (ran.code !== 0) throw new Error((ran.err || ran.out).trim() || `exit ${ran.code}`)
+  } catch (error) {
+    console.error(
+      `inbox: ${peer ? `${peer.name}'s` : "this machine's"} record of its root ${preview.step} failed, so its next check names those paths: ${(error as Error).message}`,
+    )
+  }
 }
 
 // Deletes a peer's password item, then reads it again, so the line says only what is true.
@@ -2401,7 +2470,15 @@ export async function endLostRoots(
     )
     .returning()
   const ended: InboxItem[] = []
-  for (const item of rows.map(toItem)) ended.push(await forgetLostPassword(db, item, secret, now))
+  // each card on its own, so a delete whose write throws leaves the later cut-off installs' passwords deleted
+  for (const item of rows.map(toItem)) {
+    try {
+      ended.push(await forgetLostPassword(db, item, secret, now))
+    } catch (error) {
+      console.error(`inbox: deleting #i${item.ref}'s cut-off install password failed:`, error)
+      ended.push(item)
+    }
+  }
   if (!telling) return ended
   const told: InboxItem[] = []
   // each card on its own, so a send that throws (a database write) leaves the other posters told
@@ -2446,6 +2523,7 @@ export async function rootRun(
     return { exitCode: 1, line: error instanceof Error ? error.message : String(error) }
   }
   const ran = await run(argv)
+  if (ran.code === 0) await recordRoot(run, preview, seams)
   const exit = ROOT_EXITS[ran.code]
   return exit ? { exitCode: ran.code, line: exit } : runResult(ran)
 }
@@ -2455,8 +2533,9 @@ async function peerRootRun(
   run: ArgvRun,
   preview: InboxRoot,
   machine: string,
-  { key, peers, secret }: PeerSeams,
+  seams: PeerSeams,
 ): Promise<RunResult> {
+  const { key, peers, secret } = seams
   const fail = (error: unknown): RunResult => ({
     exitCode: 1,
     line: error instanceof Error ? error.message : String(error),
@@ -2478,7 +2557,9 @@ async function peerRootRun(
       const mine = (await repoScripts()).find((script) => script.name === preview.step)
       const refused = peerInstalledRefusal(read.out, preview.step, mine?.sha256 ?? "")
       if (refused) return { exitCode: 1, line: refused }
-      return result(await run(peerStepArgv(peer, key, preview.step)))
+      const stepped = await run(peerStepArgv(peer, key, preview.step))
+      if (stepped.code === 0) await recordRoot(run, preview, seams, peer)
+      return result(stepped)
     } catch (error) {
       return fail(error)
     }
@@ -2520,6 +2601,7 @@ async function peerRootRun(
   console.log(
     `inbox: ${machine}'s install ${ran.exitCode === 0 ? "ran" : "failed"}; ${forgot.line}`,
   )
+  if (ran.exitCode === 0) await recordRoot(run, preview, seams, peer)
   return {
     exitCode: forgot.gone ? ran.exitCode : ran.exitCode || 1,
     line: [ran.line, forgot.line].filter(Boolean).join("; "),
@@ -2580,15 +2662,22 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
   if (part && orgJobKey(key) && held === undefined)
     return { exitCode: 1, line: `${key} has no row at ${scope} to change` }
   const next = part ? { ...(held as object | undefined), ...(value as object) } : value
-  if (held !== undefined && isDeepStrictEqual(held, next))
+  // the owner's Approve of wa.alert stands in for that number's first message, so an alert may reach it, a value already held included (ADR 0028)
+  const seed = (approved: unknown) => {
+    if (key === "wa.alert" && typeof approved === "string" && approved)
+      seedAlert(data, approved, Date.now())
+  }
+  if (held !== undefined && isDeepStrictEqual(held, next)) {
+    seed(held)
     return {
       exitCode: 0,
       line: `${key} at ${scope} is already ${JSON.stringify(held)}, so nothing changed`,
     }
+  }
   const set = setSetting(data, { key, scope, value: next }, who)
-  return set.ok
-    ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
-    : { exitCode: 1, line: set.message }
+  if (!set.ok) return { exitCode: 1, line: set.message }
+  seed(set.value)
+  return { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
 }
 
 // Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.

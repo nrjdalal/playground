@@ -25,18 +25,22 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
+import STATUSES from "../../../../scripts/roster-statuses.json"
 import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
-import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
+import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { lockRootOf } from "../pr-merge/merge"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
+import { bootCheckPass } from "./boot-check"
 import { dashboardWatch } from "./dashboard-watch"
 import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
+import { machineRecord } from "./machine-record"
 import { nightlyClean } from "./nightly-clean"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
@@ -564,8 +568,8 @@ const resumeRelay = async (ctx: Context, line: string): Promise<boolean> => {
   return false
 }
 
-// A session the roster holds on purpose, or a probe, is never named as felled.
-const HELD = new Set(["done", "ended", "parked", "paused", "starting"])
+// A session the roster holds finished (roster-statuses.json) or starting is never named as felled, so a status added to that file is held without a second edit.
+const HELD = new Set<string>([...(STATUSES.finished as string[]), "starting"])
 
 type Agent = { kind?: unknown; name?: string; status?: string; worker?: unknown }
 
@@ -764,7 +768,7 @@ const freeBytes = (dir: string): number => {
   return fs.bavail * fs.bsize
 }
 
-// The trash playground rm fills, beside ops in the data folder, emptied hourly: purgeTrash (@packages/safe-delete) takes each batch over 7 days old, then the oldest while its disk has under 50 GB free, deleting being cheap whatever the load, and stripTrash beside it removes each batch's node_modules folders and web/next/.next, oldest first and paced, which an install or a build rebuilds; one line in ops/log/trash-purge.log.
+// The trash playground rm fills, beside ops in the data folder, emptied hourly: purgeTrash (@packages/safe-delete) takes each batch over 7 days old, then the oldest while its disk has under 50 GB free, deleting being cheap whatever the load, and stripTrash beside it removes each batch's node_modules folders and web/next/.next, oldest first and paced, which an install or a build rebuilds; one line in ops/log/trash-purge.log, naming once each batch it cannot remove.
 export const trashPurge =
   (
     trash?: string,
@@ -773,9 +777,12 @@ export const trashPurge =
   ) =>
   async (ctx: Context) => {
     const root = trash ?? join(dirname(ctx.ops), "trash")
-    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
+    const { removed, skipped, stuck } = purgeTrash(root, {
+      free: () => free(root),
+      now: ctx.now,
+    })
     const strip = await stripTrash(root, { sleep })
-    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}${strip.failed.length ? `, not finished (${strip.failed.join(", ")})` : ""}`
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${stuck.length ? `, cannot remove ${stuck.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}${strip.failed.length ? `, not finished (${strip.failed.join(", ")})` : ""}`
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
@@ -808,6 +815,12 @@ export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx
 }
 
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
+
+// The local models' keep beat (playground model use): each machine whose localModels.hereModel or localModels.peerModel is set gets that model back once another sits idle, or once it is down; loaded only here, since it reads the settings package.
+const modelKeep = async (ctx: Context) => {
+  const { keepBeat } = await import("../local-model/live")
+  for (const line of await keepBeat(dirname(ctx.ops))) await ctx.send("ops", line)
+}
 
 // Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
 const canaryPull = async (ctx: Context) => {
@@ -1126,6 +1139,22 @@ export const ghAuth =
     await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
   }
 
+// boot-check: once per boot, never a wake, inside BOOT_MS (bootCheckPass in boot-check.ts): a merge lock taken before the boot let go, git fsck on the shared store, a gate-owned worktree's torn object repaired, and every other break one line to Ops' waiter queue and one Inbox alert; a check that never finished inside BOOT_MS is one line to Ops after it.
+export const bootCheck = (lockRoot?: string) => async (ctx: Context) => {
+  const boot = await readBootTime(ctx.run)
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  const ops = managerOf(roster?.agents, "ops")
+  await bootCheckPass(ctx, boot, ctx.now.getTime() - boot < BOOT_MS, {
+    alert: async (title, text) => {
+      await postAlert(ctx, title, text)
+    },
+    lockRoot: lockRoot ?? lockRootOf(),
+    tell: (text) => queueWaiterLine(ctx, ops, text),
+  })
+}
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -1149,9 +1178,11 @@ export const BEATS: Beat[] = [
     run: nightlyClean(),
     to: "ops/log/nightly-clean.log and the outbox line to ops",
   },
+  { cron: "45 3 * * *", name: "machine-record", run: machineRecord(), to: "ops, a line a finding" },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
+  { cron: "*/5 * * * *", name: "model-keep", run: modelKeep, to: "ops" },
   {
     cron: "*/5 * * * *",
     name: "relay-watch",
@@ -1164,6 +1195,12 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
   { cron: "* * * * *", name: "gh-auth", run: ghAuth(), to: "ops and the Inbox, once a failure" },
+  {
+    cron: "* * * * *",
+    name: "boot-check",
+    run: bootCheck(),
+    to: "ops, and the Inbox for a break it leaves",
+  },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

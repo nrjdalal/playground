@@ -2085,3 +2085,132 @@ ${body}`,
     }
   })
 })
+
+// An install made before the loopback rule: the roll moves its database onto loopback before the API starts, and the follower's guard refusal of a database's publish is the machine's, never a bad build.
+describe("the supervisor's database move", () => {
+  test("moves the database before the API starts, and only once first run's setup has written it", () => {
+    expect(script).toContain("\n  setup_pending || move_database\n  start_dev; dev=$(check_dev)")
+  })
+
+  test("leaves a database on loopback alone: nothing printed, logged or written", async () => {
+    const { log, out, ran } = await inDashboard(
+      published,
+      `${fn("move_database")}\nmoved_note=; move_failure=; move_database; echo "note=$moved_note failure=$move_failure"`,
+    )
+    expect(out).toBe("note= failure=")
+    expect(log).toBe("")
+    expect(ran).toBe("")
+  }, 15_000)
+
+  test("reports a move that cannot run with its reason and no password", async () => {
+    const exposed = join(scratch, "exposed-bin")
+    await Bun.write(
+      join(exposed, "docker"),
+      `#!/bin/sh\ncase "$1" in\n  ps) echo c0ffee ;;\n  inspect) echo '[{"Id":"c0ffee","Name":"/playground-db-Ab12","Config":{"Image":"postgres:alpine"},"NetworkSettings":{"Ports":{"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"55432"}]}}}]' ;;\n  *) echo "$*" >> "${execs}"; exit 9 ;;\nesac\n`,
+    )
+    chmodSync(join(exposed, "docker"), 0o755)
+    const { log, out, ran } = await inDashboard(
+      published,
+      `PATH=${exposed}:$PATH\n${fn("move_database")}\nmove_failure=; move_database; echo "failure=$move_failure"`,
+    )
+    expect(out).toBe(
+      "failure=dashboard-db: playground-db-Ab12-old already exists, so playground-db-Ab12 cannot move aside; playground-db-Ab12 is untouched",
+    )
+    expect(log).toContain("database: dashboard-db: playground-db-Ab12-old already exists")
+    expect(`${out}${log}`).not.toContain(":pw@")
+    expect(ran).toBe("")
+  }, 15_000)
+
+  const inglog = join(state, "ingest.log")
+  const reason = async (lines: string) => {
+    await Bun.write(inglog, lines)
+    const proc = Bun.spawn(
+      ["bash", "-c", `INGLOG=${inglog}\n${fn("guard_reason")}\nguard_reason`],
+      {
+        stdout: "pipe",
+      },
+    )
+    return (await new Response(proc.stdout).text()).trim()
+  }
+
+  test("reads the follower's guard refusal of the database's publish, and nothing else", async () => {
+    expect(
+      await reason(
+        "x\nrefusing to write: playground-db publishes port 55432 beyond loopback (0.0.0.0); keep its data\n",
+      ),
+    ).toBe("refusing to write: playground-db publishes port 55432 beyond loopback")
+    expect(
+      await reason("refusing to write: no single running Docker container publishes port 55432\n"),
+    ).toBe("refusing to write: no single running Docker container publishes port 55432")
+    expect(await reason("TypeError: undefined is not a function\n")).toBe("")
+    expect(await reason("refusing to write: the server at 127.0.0.1:1 is not x's Postgres\n")).toBe(
+      "",
+    )
+  })
+
+  const failing = (refusal: string) =>
+    `roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = FALLBACK ] && return 0; guard_refusal="${refusal}"; return 1; }\nfinish_roll "ROLL canary" ${c2} ${c1} ""`
+
+  test("keeps a head whose follower the guard refused out of bad-builds, naming the refusal", async () => {
+    clean()
+    for (const path of [calls, join(state, "bad-builds"), join(state, "dev.log")]) {
+      rmSync(path, { force: true })
+    }
+    const refusal = "refusing to write: playground-db publishes port 55432 beyond loopback"
+    await sup(failing(refusal), c2)
+    expect(await Bun.file(join(state, "bad-builds")).exists()).toBe(false)
+    expect(await Bun.file(calls).text()).toContain(
+      `result ROLL canary ${c2.slice(0, 7)} FAIL dev refusing: ${refusal} (not the head's, no bad build)\n`,
+    )
+  })
+
+  test("puts a failed move's reason first in the line playground update prints, and keeps the head out of bad-builds", async () => {
+    clean()
+    for (const path of [calls, join(state, "bad-builds"), join(state, "dev.log")]) {
+      rmSync(path, { force: true })
+    }
+    const why =
+      "dashboard-db: the move failed (docker run failed: no); playground-db is started again as it was"
+    const refusal = "refusing to write: playground-db publishes port 55432 beyond loopback"
+    await sup(
+      `roll_up() { echo "roll_up $1" >> ${calls}; [ "$1" = FALLBACK ] && return 0; move_failure="${why}"; guard_refusal="${refusal}"; return 1; }\nfinish_roll "ROLL canary" ${c2} ${c1} ""`,
+      c2,
+    )
+    expect(await Bun.file(join(state, "bad-builds")).exists()).toBe(false)
+    expect(await Bun.file(calls).text()).toContain(
+      `FAIL dev refusing: database move: ${why}; ${refusal} (not the head's, no bad build)\n`,
+    )
+  })
+
+  test("names a move on the roll's PASS or FAIL line, which playground update prints", () => {
+    expect(script).toContain('result "$tag $sha PASS $dev $fol${moved_note:+ $moved_note}"')
+    expect(script).toContain(
+      'result "$tag $sha FAIL $dev $fol${move_failure:+ database move: $move_failure}${moved_note:+ $moved_note}"',
+    )
+  })
+
+  test("joins a move's lines with a semicolon, so the two read apart", async () => {
+    const moving = join(scratch, "moving-bin")
+    await Bun.write(
+      join(moving, "bun"),
+      `#!/bin/sh\nprintf 'Moved the database x onto 127.0.0.1:1 alone, keeping its data\\nx-old is stopped and kept; remove it with: docker rm -v x-old\\n'\n`,
+    )
+    chmodSync(join(moving, "bun"), 0o755)
+    const proc = Bun.spawn(
+      ["bash", "-c", `say() { :; }\n${fn("move_database")}\nmove_database; echo "$moved_note"`],
+      { env: { ...process.env, PATH: `${moving}:${process.env.PATH}`, WT: root }, stdout: "pipe" },
+    )
+    expect((await new Response(proc.stdout).text()).trim()).toBe(
+      "database: Moved the database x onto 127.0.0.1:1 alone, keeping its data; x-old is stopped and kept; remove it with: docker rm -v x-old",
+    )
+  })
+
+  test("still lists a head in bad-builds when its follower failed for any other reason", async () => {
+    clean()
+    for (const path of [calls, join(state, "bad-builds"), join(state, "dev.log")]) {
+      rmSync(path, { force: true })
+    }
+    await sup(failing(""), c2)
+    expect(await Bun.file(join(state, "bad-builds")).text()).toBe(`${c2}\n`)
+  })
+})

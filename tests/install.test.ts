@@ -48,6 +48,7 @@ const SOURCE_FILES = withImports(
     ".gitignore",
     "install.sh",
     "package.json",
+    "packages/scripts/src/machine-record/cli.ts",
     "packages/scripts/src/ops-herdr/pin.json",
     "packages/scripts/src/playground/claude-trust.ts",
     "packages/scripts/src/playground/doctor.ts",
@@ -493,7 +494,9 @@ describe("install.sh", () => {
     for (const place of places)
       expect(out.indexOf(join(home, place))).toBeLessThan(out.indexOf("linked "))
     expect(out.indexOf("Claude Code's user settings")).toBeLessThan(out.indexOf("linked "))
-    expect(out).toContain("Every ops job starts off but the Dashboard's own and the usage read")
+    expect(out).toContain(
+      "Every ops job starts off but the Dashboard's own, the usage read and, on a Mac, keep-awake, so nothing goes into",
+    )
     expect(out).toContain(`${plist}  portless's proxy service`)
     expect(out.indexOf(plist)).toBeLessThan(out.indexOf("linked "))
     const outside = Object.keys(snapshot(home)).filter(

@@ -25,6 +25,8 @@ A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM,
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead, unless every row or step names an issue or PR (`scripts/hooks/README.md`).
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve your own update once it has settled: an alert that has fixed itself, a progress card whose last step is done.
+A job in flight is a row on the dispatcher's one in-flight card, which the dispatcher posts and edits in place with `playground ask edit`; every other session sends its progress and ETA moves up the chain and posts no progress card, so a new card is posted only for a decision or a finished result; the daily ledger card, the dispatcher's card titled with the ledger prefix (`PLAYGROUND_LEDGER_TITLE`), posts beside it ([PROGRESS.md](references/PROGRESS.md)).
+A card that offers a new Claude start, or a resume, first runs that start with `spawn.sh --check`, states the measured result on the card, a pass or the gate's refusal line, and keeps `--priority`'s order: open the priority window (`playground priority on <session> --reason "<why>"`, on the owner's or the dispatcher's word) before a `--check --priority`, or check without `--priority`.
 Until you resolve it or the owner presses Dismiss, an update stays editable (below, Done), as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `playground ask edit` before that.
 
 Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
@@ -33,17 +35,17 @@ On an update, Done types you `done`: edit the same card for more, which brings i
 ## Steps
 
 1. **Already open?** Run `playground ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the drawing width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's block is its picture, and the block's first line, the job and its done/total, is its note ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
+2. **Picture and note.** Load [plain-words](../plain-words/SKILL.md) with the Skill tool, then pick the one picture asks.md's shape leads with, by its owner style, each line within the drawing width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it, and a `progress` block, which the card draws at its own width. Under it, write the picture's note: one sentence on the point. Attachments always show under the text, so an item whose picture is an attachment opens its text on the note, then the bullets. A work status card's `progress` block is its picture, and its note names the steps done of the total ([PROGRESS.md](references/PROGRESS.md)). Done when the text opens on that picture with its note under it, or, when the picture is an attachment, on the note.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
-   | The item is about                                    | Its picture                                                                               |
-   | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-   | A number or a short comparison                       | a markdown table of three columns or fewer                                                |
-   | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
-   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)    |
-   | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
-   | A job of several steps (a plan, a lane, a PR series) | the **work status** block, built by [PROGRESS.md](references/PROGRESS.md)                 |
+   | The item is about                                    | Its picture                                                                                                            |
+   | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+   | A number or a short comparison                       | a markdown table of three columns or fewer                                                                             |
+   | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md)                              |
+   | A PDF                                                | the PDF itself as one `pdf` attachment, by [HTML.md's A PDF](references/HTML.md#a-pdf)                                 |
+   | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view                                       |
+   | A job of several steps (a plan, a lane, a PR series) | the **work status** `progress` block, on the dispatcher's one in-flight card, by [PROGRESS.md](references/PROGRESS.md) |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
@@ -100,6 +102,7 @@ Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbo
 The card shows a drawing at its 12px code size, and on a card narrower than its widest line shrinks the font to fit, down to 10px, before it scrolls sideways.
 Keep a drawing compact: several items or events go in a table, one row per item, over a tall chain of one event per line.
 A picture that still runs past the width becomes a table of three columns or fewer, or bullets.
+A `progress` block's lines are free of the width, since the card draws its bars at the card's own width ([PROGRESS.md](references/PROGRESS.md)).
 
 ## Example
 

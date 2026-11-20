@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -69,8 +70,14 @@ import {
   CLOCKS_STOPPED_AT,
   INSTALL_TEXT,
   payloadOf,
+  ROOT_STEPS,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import {
+  peerRecordArgv,
+  readRecord,
+  rootEntries,
+} from "../../../../../../packages/scripts/src/machine-record/record"
 import type { Run } from "../../../../../../packages/scripts/src/ops-tick/tick"
 import { extInitCheck, extVerb } from "../../../../../../packages/scripts/src/playground/ext-init"
 import type { Io } from "../../../../../../packages/scripts/src/playground/store"
@@ -1559,15 +1566,60 @@ describe("a root step decision (PG-2433)", () => {
       calls.push(argv)
       return { code: 0, err: "", out: "bwrap may now make a user namespace" }
     }
+    const data = mkdtempSync(join(tmpdir(), "root-record-"))
+    const seams = {
+      data,
+      peers: [],
+      secret: () => ({ read: async () => null, remove: async () => {} }),
+    }
     const preview = inboxInputSchema.parse(decision(ROOT_STEP)).preview as InboxRoot
     const refused = "/usr/local/lib/playground is not owned by root: approve a new install card"
-    expect(await rootRun(run, preview, async () => refused)).toEqual({ exitCode: 1, line: refused })
+    expect(await rootRun(run, preview, async () => refused, seams)).toEqual({
+      exitCode: 1,
+      line: refused,
+    })
     expect(calls).toHaveLength(0)
-    expect(await rootRun(run, preview, async () => undefined)).toEqual({
+    expect((await readRecord(data)).entries).toEqual([])
+    expect(await rootRun(run, preview, async () => undefined, seams)).toEqual({
       exitCode: 0,
       line: "bwrap may now make a user namespace",
     })
     expect(calls).toEqual([stepArgv("bwrap-userns")])
+    // PG-2538: what the step wrote goes into this machine's record, with its undo
+    expect((await readRecord(data)).entries).toMatchObject([
+      { by: "the Inbox", path: "/etc/apparmor.d/bwrap", undo: ROOT_STEPS["bwrap-userns"].undo },
+    ])
+  })
+
+  test("a record that cannot be written leaves a step's run as it was, and says why in the log (PG-2538)", async () => {
+    const data = mkdtempSync(join(tmpdir(), "root-record-"))
+    writeFileSync(join(data, "machine-record.json"), "{ not json")
+    const seams = {
+      data,
+      peers: [],
+      secret: () => ({ read: async () => null, remove: async () => {} }),
+    }
+    const preview = inboxInputSchema.parse(decision(ROOT_STEP)).preview as InboxRoot
+    const held = console.error
+    const lines: string[] = []
+    console.error = (...args: unknown[]) => lines.push(args.map(String).join(" "))
+    try {
+      expect(
+        await rootRun(
+          async () => ({ code: 0, err: "", out: "ok" }),
+          preview,
+          async () => undefined,
+          seams,
+        ),
+      ).toEqual({ exitCode: 0, line: "ok" })
+    } finally {
+      console.error = held
+    }
+    expect(lines).toEqual([
+      expect.stringContaining(
+        "this machine's record of its root bwrap-userns failed, so its next check names those paths",
+      ),
+    ])
   })
 
   test("a run stopped at ROOT_TIMEOUT_MS reads in plain words, not an empty line", async () => {
@@ -1583,6 +1635,11 @@ describe("a root step decision (PG-2433)", () => {
 describe("a root step on another machine (PG-2434)", () => {
   const PEER = { name: "spark-test", target: "me@spark-test" }
   const SERVICE = "playground-spark-test-sudo"
+  const CLONE = "~/code/playground"
+  // PG-2538: the peer's own record add, its entries on stdin, which ends every run that put a path there
+  const RECORD = peerRecordArgv(undefined, PEER.target, CLONE, "add")
+  const recorded = (input: string | undefined) =>
+    (JSON.parse(input ?? "[]") as { path: string }[]).map((entry) => entry.path)
   // a password holding what a shell or a log would bend, so a leak shows whole
   const MARKER = "pw-MARKER-7f3a'$(id)"
   const ok = { code: 0, err: "", out: "" }
@@ -1591,6 +1648,7 @@ describe("a root step on another machine (PG-2434)", () => {
     let value = held
     const removed: string[] = []
     const peerSeams: PeerSeams = {
+      clone: CLONE,
       peers: [PEER],
       secret: (service) => ({
         read: async () => value,
@@ -1652,8 +1710,16 @@ describe("a root step on another machine (PG-2434)", () => {
     expect(calls.map((call) => call.argv)).toEqual([
       ...peerCopyArgv(PEER, undefined),
       peerInstallArgv(PEER, undefined, preview.scripts ?? []),
+      RECORD,
     ])
-    expect(calls.map((call) => call.input)).toEqual([undefined, undefined, `${MARKER}\n`])
+    expect(calls.slice(0, 3).map((call) => call.input)).toEqual([
+      undefined,
+      undefined,
+      `${MARKER}\n`,
+    ])
+    expect(recorded(calls[3]?.input)).toEqual(
+      rootEntries("install", { now: new Date(), peer: true }).map((entry) => entry.path),
+    )
     expect(removed).toEqual([SERVICE])
     expect(lines).toEqual([`inbox: spark-test's install ran; deleted ${SERVICE}`])
   })
@@ -1741,8 +1807,10 @@ describe("a root step on another machine (PG-2434)", () => {
     expect(current.calls.map((call) => call.argv)).toEqual([
       peerReadArgv(PEER, undefined, "bwrap-userns"),
       peerStepArgv(PEER, undefined, "bwrap-userns"),
+      RECORD,
     ])
-    expect(current.calls.every((call) => call.input === undefined)).toBe(true)
+    expect(current.calls.slice(0, 2).every((call) => call.input === undefined)).toBe(true)
+    expect(recorded(current.calls[2]?.input)).toEqual(["/etc/apparmor.d/bwrap"])
     const stale = recorder(async () => ({ ...ok, out: read("b".repeat(64)) }))
     expect(await rootRun(stale.run, preview, undefined, peerSeams)).toEqual({
       exitCode: 1,
@@ -3528,7 +3596,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const posted = await post(decision(PREVIEWS.ship))
       const writer = new SQL(url, { max: 1 })
       try {
-        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::text::jsonb where id = ${posted.id}`
       } finally {
         await writer.close()
       }
@@ -3545,7 +3613,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       await store.answerItem(db, posted.id, { action: "deny" }, { actor })
       const writer = new SQL(url, { max: 1 })
       try {
-        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::jsonb where id = ${posted.id}`
+        await writer`update inbox_item set delivery = ${JSON.stringify({ code: "LOST", reason: "lost", status: "failed" })}::text::jsonb where id = ${posted.id}`
       } finally {
         await writer.close()
       }
@@ -6356,6 +6424,59 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }
     })
 
+    test("a cut-off peer install whose card write throws leaves the next one's password deleted (#2535)", async () => {
+      const at = new Date("2026-11-07T20:00:00.000Z")
+      const services = ["playground-spark-one-sudo", "playground-spark-two-sudo"]
+      const ids: string[] = []
+      for (const machine of ["spark-one", "spark-two"]) {
+        const posted = await post(decision(ROOT_INSTALL))
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", seen: posted.updatedAt },
+          { actor, now: at, root: () => new Promise(() => {}) },
+        )
+        const writer = new SQL(url, { max: 1 })
+        await writer`update inbox_item set preview = jsonb_set(preview, '{machine}', to_jsonb(${machine}::text)) where id = ${posted.id}`
+        await writer.close()
+        ids.push(posted.id)
+      }
+      const kept = new Map(services.map((service) => [service, "pw-left-behind"]))
+      // the first of these cards to reach its own write throws there, as a database write that fails
+      let armed = false
+      const order: string[] = []
+      const secret = (name: string) => {
+        if (services.includes(name)) {
+          order.push(name)
+          armed = order.length === 1
+        }
+        return {
+          read: async () => kept.get(name) ?? null,
+          remove: async () => {
+            kept.delete(name)
+          },
+        }
+      }
+      const failing = new Proxy(db, {
+        get: (target, key, receiver) =>
+          key === "update" && armed
+            ? () => {
+                armed = false
+                throw new Error("write failed")
+              }
+            : Reflect.get(target, key, receiver),
+      })
+      const ended = await store.endLostRoots(failing, new Date(at.getTime() + 1), undefined, secret)
+      expect(order).toHaveLength(2)
+      const second = order[1]!
+      const card = ids[services.indexOf(second)]!
+      const rooted = { exitCode: 1, line: `${store.ROOT_LOST_LINE}; deleted ${second}` }
+      expect(ended.find((item) => item.id === card)?.answer).toMatchObject({ rooted })
+      expect((await store.getItem(db, card))?.answer).toMatchObject({ rooted })
+      expect(kept.has(second)).toBe(false)
+      expect(ended.map((item) => item.id)).toEqual(expect.arrayContaining(ids))
+    })
+
     test("the API ends lost root runs once at its start on a stack that reads this machine, and the Inbox's read writes nothing", async () => {
       const read = (path: string) =>
         Bun.file(join(import.meta.dir, "../../../../../../api/hono/src", path)).text()
@@ -6559,6 +6680,50 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         `the owner approved it in the Inbox (#i${posted.ref})`,
       )
     })
+
+    test("a wa.alert card's Approve stands in for that number's first message, and a set any other way seeds nothing (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+      expect(statSync(seed).mode & 0o777).toBe(0o600)
+      expect(statSync(join(data, "whatsapp")).mode & 0o777).toBe(0o700)
+      const other = folder()
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(other, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      expect(existsSync(join(other, "whatsapp", "alert-seed.json"))).toBe(false)
+    })
+
+    test("a wa.alert card's Approve seeds the number when it was already set by hand, as the README says (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(data, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(existsSync(seed)).toBe(false)
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+    })
+
+    test.each(["wa.device", "wa.owner"])(
+      "a %s card's Approve sets the number, so first run's WhatsApp setup works through the Inbox (PG-2821)",
+      async (key) => {
+        const data = folder()
+        const number = "+15550100004"
+        const posted = await post(decision({ ...GUARD, key, scope: "made-up-me", value: number }))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        expect(readSetting(data, key)?.rows).toEqual([{ key, scope: "made-up-me", value: number }])
+      },
+    )
 
     test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {
       const data = folder()
@@ -7261,7 +7426,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ] as const) {
         // written past postItem's checks, as a row changed after it was posted
         const writer = new SQL(url, { max: 1 })
-        await writer`update inbox_item set preview = ${JSON.stringify(preview)}::jsonb where id = ${item.id}`
+        await writer`update inbox_item set preview = ${JSON.stringify(preview)}::text::jsonb where id = ${item.id}`
         await writer.close()
         expect(await approveWith(item.id, clone, data), item.id).toMatchObject({
           code: "VALIDATION_ERROR",

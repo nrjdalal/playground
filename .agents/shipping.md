@@ -5,6 +5,7 @@ AGENTS.md's Shipping a Playground PR, step 1, points here: read this before you 
 The body is written with the [pr](../extensions/core/skills/pr/SKILL.md) skill, called through the Skill tool: a `## TL;DR` of two sentences or more on top, then its Summary, Evidence and Merge Danger, then `## Links` last.
 Its TL;DR is in plain words: what the owner sees or can do now, in words a person uses, with no factory or code jargon such as pane, slot or jsonb.
 The body gate (`packages/scripts/src/pr-merge/body.ts`, read by Checks, `pr:merge`, merge-on-ready and the train) takes the template, a TL;DR with no `Outcome:` label, and Evidence with an `A/B:` line, no `TBD`.
+That line opens with `A/B:` exactly, colon included (`abLine()` in `body.ts`), so `- A/B, red at canary` fails the gate; `bun run pr:merge <n> --explain` before round 1 prints the body gate's verdict.
 The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
 Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read,
 and fill the template above; the reviewer still judges everything.

@@ -82,6 +82,11 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
+  A `progress` block draws as bars at the card's own width, on a phone and a wide screen alike (`ProgressBlock` in `web/next/src/components/progress-block.tsx`, `progressItems` in `@packages/config/inbox`).
+  It holds one item a line, `name | percent | what's going on | ETA | state`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
+  The state is optional, one of `active`, `done`, `held` or `waiting` (`PROGRESS_STATES`), and a row at 100 that names none reads as done: an `active` row's bar, and a row under 100 with no state, fill in the palette's blue (`ACTIVE_BAR`, `bg-chart-2`), and every other row's fill draws muted (`MUTED_BAR`), its state also in the bar's accessible name.
+  The names share one column of at most 6rem, so every bar starts at one x and a long name never narrows them: a name past it is cut short, its whole name on hover.
+  A block with a line that does not read stays the plain code block, and `bun run ask` refuses it before it posts (below).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
   A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
@@ -238,7 +243,7 @@
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
   bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster closes its own update once it has settled (a cleared alert, a finished progress card); until then it stays editable by its poster, unless the owner presses its Dismiss; an edit after his Done brings it back unread
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
-  bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024)
+  bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024), or a draft's send from WhatsApp, as written or in the owner's words, through the Inbox's own Send (ADR 0039)
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
@@ -503,8 +508,10 @@
   The password window waits on the owner longer than a request stays open, so Approve records the claim and returns at once, the card reading In progress, and the step runs in the background for up to 5 minutes (`ROOT_TIMEOUT_MS`), then the answer keeps `rooted: {exitCode, line}`, `126` reading that the owner closed the window,
   `127` that no window could ask and `143` that the window got no answer in 5 minutes,
   and its poster is told.
+  A root card that ran adds what it put on its machine to that machine's record (`machine-record.json`, GLOSSARY's Machine record), through `recordRoot` in `inbox.ts` and `rootEntries` in `packages/scripts/src/machine-record/record.ts`:
+  an install its folders, scripts and CA, on a peer its polkit files and staging folder too, and a step the paths its `ROOT_STEPS` entry `adds`; a record write that fails is logged and the card's answer stands, so the next daily check names those paths unrecorded.
   The run lives in the API process that claimed the card, so a restart cuts it off: at its start the API records each approved root card with no `rooted` answered before then as failed, saying the Dashboard restarted while it ran and to check before approving again, and tells its poster (`endLostRoots`, called from `api/hono/src/local.ts` on a stack that reads this machine).
-  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
+  A peer install cut off that way never reached its own delete, so the start deletes its password's item too, each card's delete on its own so one that throws leaves the rest deleted, and the line ends `deleted <item>` or `could not delete <item>: remove it by hand`.
   The card reads `Ran as root: <line>` green or `Root step failed (exit N): <line>` red; the poster closes it with `playground ask ack #iN --no-link "<why>"`.
   `chromium-ca` reads only that kept DER and writes it as a managed browser policy, `CACertificatesWithConstraints` with `permitted_dns_names: ["localhost"]`, to `/etc/chromium/policies/managed/portless-ca.json` (Helium reads that folder) and `/etc/opt/chrome_for_testing/policies/managed/portless-ca.json` (Playwright's and agent-browser's), root's, 0644.
   The constraint means even a swapped CA vouches for `*.localhost` alone.
@@ -559,7 +566,7 @@
 
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
-     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them.
+     Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names; a `diff` block's lines may run longer, since the card wraps them, and a `progress` block's, which the card draws at its own width.
      Draw several items or events as a compact table, one row per item, over a tall chain of one event per line.
      A wider drawing still posts: the card shrinks its font until the widest line fits, down to 10px, and scrolls sideways only when that line is still wider at 10px, so the limit is a writing guide.
      A note of one sentence on the point follows the picture, by the `plain-words` skill's owner style (`extensions/core/skills/plain-words/SKILL.md`).
@@ -569,12 +576,15 @@
      For several calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 `options` and an optional `recommended` index, which the card asks one at a time and sends together.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
-  A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
+  A job of several steps leads with to-inbox's work status block, on the dispatcher's one in-flight card, a read-only update the dispatcher edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`); every other session sends its progress up the chain.
 
   `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
   a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`, never a version such as `GLM-4.7`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
-  or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  or a code block other than a `diff` or `progress` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` and `ask edit` refuse an ask's or a read-only update's `progress` block whose line holds other than 4 or 5 fields, a percent outside 0 to 100 or a state none of the four, naming the block, the line and its words, and post nothing (`progressRefusal` in `api/hono/src/lib/dashboard/ask-shape.ts`).
+  a `progress` block is the dispatcher's one in-flight card, so `ask new` refuses a second of it: a non-dispatcher's card, or the dispatcher's own card a second time, a different title, naming the open one, while `ask edit` carries the dispatcher's card to its end, so a job keeps one card (`progressCardRefusal`, PG-2720).
+  the daily ledger card posts beside it: a dispatcher card whose title is the ledger prefix (`PLAYGROUND_LEDGER_TITLE`, Firefighting, stack.md's org rule) alone or followed by `: ` and a day passes, and is never the in-flight card (`isLedgerTitle`, `inflightOf` in `api/hono/src/lib/dashboard/inbox.ts`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

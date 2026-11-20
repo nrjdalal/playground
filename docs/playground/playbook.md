@@ -99,9 +99,19 @@ A branch whose issue is open and that is no copy stays.
 Any other unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
 A branch never pushed stays too, with a local `archive/<branch>` tag alone, since a push would publish commits no one has reviewed, and is named once, the night that tag is made or re-pointed to the branch's head.
 A re-point that would drop an old head, one no ancestor of the new head, first keeps it at a tag of its own, `archive/<branch>-<old7>` (its first 7 characters), so `git branch <name> archive/<branch>-<old7>` brings it back; when that tag cannot be made, the old tag stays as it is and the log names why.
-Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
-The log line also holds the free disk before and after, which the System page shows too.
-It asks no decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
+Last, it lists each machine's unused space with its size, and removes only what the owner picks Remove for on its Inbox card: model weights no model folder in `~/models` names, Docker images no container uses by any of their tags and unused for 7 days, model-test worktrees in `~/models/kit/runs/` a day after their row ended, and ship rehearsal folders in a scratchpad.
+It reads each other machine `PLAYGROUND_PEERS` names in the Dashboard's `.env` the same way, over one fixed ssh that only reads.
+An item under 100 MB joins one small leftovers total, and an item the machine record holds is marked recorded.
+`bun packages/scripts/src/ops-tick/unused.ts` runs the same list by hand, a dry run that removes nothing.
+The card asks about the 20 largest items over 100 MB, each with Remove and Keep, and leaves out the model test's own runs and logs and a rehearsal whose version tag is not out yet; it is edited in place each night while it stands open.
+Once answered, each Remove still listed at the card's size goes the next night: an image through `docker image rm`, model weights deleted outright since they download again, and anything else to the 7-day trash, each through `playground rm --card`.
+A Remove on another machine reaches Ops as the command `playground rm --card <id> --peer <machine> <path>`, which re-checks the path on that peer before it deletes, and a Keep holds until the item's size changes.
+Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch, with each machine's unused items.
+The log line also holds the free disk before and after, which the System page shows too, and each machine's unused total.
+The card is its one decision: a container or unused volume over 1 GB that no rule takes, the one leftover it cannot judge, is kept, and named as kept in the same log and outbox line, as is a container whose removal failed.
+Each machine keeps a record of every path the factory put on it, `machine-record.json` in the data folder, written by `playground record add` and the steps that make such a path: an Inbox root card that ran, `link-skills.sh`'s links outside the data folder, and the run folder and Postgres image the runner box's heavy runs use (`ci.sh`).
+Every night at 3:45 a check compares it with the watched places here and on each peer: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root-step folders.
+It sends ops one line a finding: a new path the record lacks (misplaced outside `paths.factoryHomes`, unrecorded inside), a recorded path that is gone, a root-only place the user cannot list and the record holds a path in (known with its reason, never unreadable, and left out where the record holds none), or one it cannot read.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
@@ -220,7 +230,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
   A lead picks any other session's model and effort by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
-- Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
+- Every session runs on `models.default` (Opus) unless it was started on GLM, on the local model, or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
   The owner picks another model for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer.
 - A suggestion, from anyone, is tested before a session acts on it or repeats it, and a decision that claims no change for this machine or the owner's setup cites the command and output that measured it.
@@ -244,7 +254,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - An ask leads with a picture of the point (a diff or an ASCII flow; before and after pictures once the Inbox takes them) and a one-sentence note ([plain-words](./plain-words.md)), then short bullets, then what Approve does.
   `playground ask example` prints a template for each, and `playground ask new` posts a wall of prose, an unlinked PR, ticket or commit, or a too-wide code line with a hint on how to shape it.
 - Each decision is one Inbox item, with its sub-choices inside it, and a changed plan closes its old item before the new one goes up.
-- Every session compacts itself in one 400k window, GLM's included, which spawn.sh sets on every start and resume (Inbox #i706), with a summary shaped by AGENTS.md's Compact Instructions.
+- Every session compacts itself in one 400k window, GLM's included (a local session in a 120k one, inside its model's context), which spawn.sh sets on every start and resume (Inbox #i706), with a summary shaped by AGENTS.md's Compact Instructions.
   It keeps its surface and name; after a compaction it gets the glance lines from a hook, loads the factory skill again, and rereads its roster entry, its open Inbox items, its PRs and the register of settled decisions before it acts.
   A session spawn.sh did not start, the owner's own in a Playground checkout included, compacts at the settings files' 400k.
 - Each PR has one reviewer session across all its rounds, and from round 2 it reads only what changed since its last score, plus the findings still open.
@@ -261,8 +271,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - No guarded org's ticket, PR, commit, branch, comment or Slack message names Playground, a lead, a factory session or the live dashboard.
 - Every Playground PR merges through `bun run pr:merge <n>` or merge-on-ready (`bun run pr:train ready`), so none lands unless the repo's owner opened it (an outside author's only on the Builder's word, with `--outside-author <login>`), nor while Ops' held list names it,
   nor while a merge of `canary` inside it dropped lines `canary` added (the `keeps canary` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md); a factory hook also refuses `-s ours` and `-X ours`),
-  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` checks green at its head, with GitGuardian's among the checks, nor, for a `web/next/` diff, without its tester's PASS there.
-  A merge of `canary` makes a new head, which needs its own checks and 5/5, and on a `web/next/` diff its own tester's PASS.
+  nor without a 5/5 and GitHub's `Audit, Lint, and Build` and `test` and every other check green at its head, and, on `factory.repo`, a `GitGuardian` check among them, nor, for a `web/next/` diff, without its tester's PASS there, nor, for an installer or first-run diff, without the new-user gate's PASS there (`**ci**`).
+  A merge of `canary` makes a new head, which needs its own checks and 5/5, and its own tester's or new-user gate's PASS where its diff calls for one.
   Merges go one at a time, under the factory's merge lock, which pr:merge takes itself.
   A wrong refusal goes to the Builder, the only one who merges by hand, on an override.
 - Every extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n>`, so none lands on its default branch unless the account every session pushes as opened it, a reviewer session other than its author scored it 5/5 at its head, and its checks passed.

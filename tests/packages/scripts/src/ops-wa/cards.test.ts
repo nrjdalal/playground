@@ -6,6 +6,7 @@ import {
   cardOf,
   goesOut,
   HIDDEN,
+  pollOf,
   redact,
   replyOf,
   termsOf,
@@ -177,6 +178,7 @@ describe("a card as WhatsApp shows it", () => {
       TERMS,
     )
     expect(card).toEqual({
+      poll: undefined,
       rows: [],
       text: "*#1828 merged*\nCI is green\n#i12 is an update: it asks nothing.",
     })
@@ -188,9 +190,62 @@ describe("a card as WhatsApp shows it", () => {
     expect(text).not.toContain("Quillon")
   })
 
-  test("the waiting line names a count alone", () => {
-    expect(waitingLine(1)).toBe("1 card waits in the Inbox.")
-    expect(waitingLine(3)).toBe("3 cards wait in the Inbox.")
+  test("its poll names the card's id and redacted title, one numbered option per row, and fits WhatsApp's 2 to 12 options (#2752)", () => {
+    const { poll } = cardOf(
+      ask({ title: "Tell Quillon Barr?" }, { approve: "Merge it", deny: "Hold it" }),
+      TERMS,
+    )
+    expect(poll).toEqual({
+      name: `#i12 Tell ${HIDDEN}?`,
+      values: ["1. Merge it", "2. Hold it"],
+    })
+    const row = (label: string) => ({ go: true, label })
+    expect(pollOf(3, "x", [row("only")])).toBeUndefined()
+    expect(
+      pollOf(
+        3,
+        "x",
+        Array.from({ length: 13 }, (_, i) => row(`r${i}`)),
+      ),
+    ).toBeUndefined()
+    expect(pollOf(3, "x", [row("same"), row("same")])!.values).toEqual(["1. same", "2. same"])
+  })
+
+  test("the waiting message names each kept card by its title alone, one 📥 line each", () => {
+    const titled = (...titles: string[]) => titles.map((title) => ({ title }))
+    expect(waitingLine(titled("Add the second number", "Merge #12?"), TERMS)).toBe(
+      "📥 Add the second number\n📥 Merge #12?",
+    )
+  })
+
+  test("past 5 cards it shows 5, then one line counting the rest", () => {
+    const seven = Array.from({ length: 7 }, (_, i) => ({ title: `Card ${i + 1}` }))
+    expect(waitingLine(seven, TERMS).split("\n")).toEqual([
+      "📥 Card 1",
+      "📥 Card 2",
+      "📥 Card 3",
+      "📥 Card 4",
+      "📥 Card 5",
+      "📥 +2 more in the Inbox",
+    ])
+  })
+
+  test("a title's token or hide term reads [hidden], and a title holding a kept-back term shows only in the count", () => {
+    const lines = waitingLine(
+      [
+        { title: `Rotate ghp_${"a".repeat(36)}` },
+        { title: "Ask Quillon Barr" },
+        { title: "Acmeworks renewal" },
+      ],
+      TERMS,
+    )
+    expect(lines).toBe("📥 Rotate [hidden]\n📥 Ask [hidden]\n📥 +1 more in the Inbox")
+    expect(lines).not.toContain("Acmeworks")
+    expect(waitingLine([{ title: "Acmeworks renewal" }], TERMS)).toBe("📥 1 card in the Inbox")
+  })
+
+  test("while the terms cannot be read, the count alone goes", () => {
+    expect(waitingLine([{ title: "a" }, { title: "b" }], undefined)).toBe("📥 2 cards in the Inbox")
   })
 })
 

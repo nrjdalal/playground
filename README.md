@@ -34,7 +34,7 @@ You need a Mac, a Claude account and a GitHub account.
 1. Install starts Playground and opens the Dashboard; the first start takes a few minutes. After that, `playground` in a new terminal starts whatever is down and opens it.
 2. On a first run, the Dashboard's chat checks this Mac: each missing thing the app can set up has a button that does it, the database's **Start a local container** among them. Once nothing is missing, click **Continue**. You are now this Mac's owner, signed in with no password, and later starts skip the checks.
 
-   > **Warning**: the local database listens on every interface with the user, password and database `postgres`. Anyone who can reach this Mac on its port can sign in to it.
+   > **Warning**: the local database listens on loopback alone (127.0.0.1), with the user and database `postgres` and a random password, so only this Mac can reach it.
 
 3. The same chat then lists the steps left, each ticked once done: GitHub, **Set up settings** (your settings in a private repo under your GitHub login), **Harness** (Claude Code or Codex for Alpha), a Claude account when the pick is Claude Code, and **Start Alpha**.
 
@@ -73,6 +73,7 @@ Core's own skills; the rest are in [Skills and orgs](web/next/content/docs/skill
 Model- or user-reachable.
 
 - **[agent-desktop](./extensions/core/skills/agent-desktop/SKILL.md)**: Operate a desktop app through the agent-desktop CLI (computer use through the macOS accessibility tree): check its install and grants, load the binary's own docs, and keep to Playground's guardrails: headless, the owner's apps untouched, desktop content private.
+- **[app-install](./extensions/core/skills/app-install/SKILL.md)**: Install, move or update an app on a factory machine so it starts the way the owner starts it, and call it ready only with proof. Use before you install, move or update an app, a browser or any build the owner opens, and before you report one ready, installed or live.
 - **[code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md)**: Review one PR as its reviewer session, round by round until it scores 5/5: the two axes of core's code-review (the right thing, built well), a score out of 5 checked against the ticket, inline comments, a re-review on every push, its own threads resolved, and a fresh full read before the last 5/5. Its recovery scan lists the open PRs whose head nobody has scored.
 - **[plain-words](./extensions/core/skills/plain-words/SKILL.md)**: Write every text a person reads by two rules, ASD-STE100's sentence checks and an ELI5 read for a newcomer, and a message to the owner in its owner style, picture first. Every factory session loads it before it writes for a person (the **talk** rule).
 - **[playbook](./extensions/core/skills/playbook/SKILL.md)**: Run Playground's factory of herdr sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, the Assistant, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.

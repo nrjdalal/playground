@@ -1,7 +1,7 @@
 import { appendFile, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 
-import { kindOf, placedKindOf } from "@packages/config/kinds"
+import { kindOf, placedKindOf, SDK_PROBE } from "@packages/config/kinds"
 import { type SshLaunch, sshLaunchOf, sshProcessOf } from "@packages/config/ssh-probe"
 import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
@@ -295,6 +295,13 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
+// A steady beat that is not `ok` but is not a failure: up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job. The Dashboard reads this same list, its copy kept in step by a test.
+export const HEALTHY_PREFIXES: Record<string, string[]> = {
+  "ops-model-tunnel": ["up: "],
+  "ops-peer-relay": ["idle: "],
+  "ops-tunnel": ["up: "],
+}
+
 // The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's; a RETIRED job's heartbeat file, which outlives it, goes unread.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
@@ -315,8 +322,12 @@ export async function opsDown(ctx: Context): Promise<string[]> {
       if (disabled.has(String(b.job))) continue
       const at = Date.parse(String(b.lastBeatAt))
       if (Number.isNaN(at)) throw new Error("lastBeatAt")
-      // a waiting: beat has nothing to read yet, as opsRowOf reads it, so it is no failure
-      if (b.lastResult !== "ok" && !String(b.lastResult).startsWith("waiting: "))
+      if (
+        b.lastResult !== "ok" &&
+        !["waiting: ", ...(HEALTHY_PREFIXES[String(b.job)] ?? [])].some((p) =>
+          String(b.lastResult).startsWith(p),
+        )
+      )
         out.push(`ops-failing:${b.job}`)
       if (ctx.now() - at > 3 * Number(b.cycleSeconds ?? 60) * 1000) out.push(`ops-stale:${b.job}`)
     } catch {
@@ -715,7 +726,7 @@ export const runsForDelete = (pid: number): boolean => {
   }
 }
 
-// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, pglaunch's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
+// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, first run's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
 export async function leakedTests(
   ctx: Context,
   runs: (pid: number) => boolean = runsForDelete,
@@ -788,7 +799,7 @@ export async function check(ctx: Context): Promise<string[]> {
   }
   for (const name of Object.keys(seen)) if (!live.has(name)) delete seen[name]
   for (const name of live.keys()) {
-    if (kindOf(name, kinds.get(name)) !== "probe") continue
+    if (name === SDK_PROBE || kindOf(name, kinds.get(name)) !== "probe") continue
     seen[name] ??= now
     const age = Math.floor((now - seen[name]!) / 60)
     if (age >= 15) found.push(`probe-over-15m:${name}`)

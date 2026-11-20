@@ -154,12 +154,18 @@ import {
 } from "@/lib/dashboard"
 import { useDrafted } from "@/lib/drafts"
 import { inboxWaitOf, inboxWaiting, useInbox } from "@/lib/inbox"
+import { useMakerIcon } from "@/lib/model-icons"
 import {
   dispatcherLabel,
+  initialsOf,
   isGlmModel,
+  levelName,
   modelName,
-  providerOf,
   type Provider,
+  rowEffort,
+  rowModelName,
+  rowProvider,
+  showsEffort,
 } from "@/lib/model-label"
 import { needsYouAnchor, sessionWaiting, targetNeedsYou } from "@/lib/needs-you"
 import {
@@ -182,7 +188,7 @@ import {
   useGroupOpen,
   useGroupOrder,
 } from "@/lib/sidebar-groups"
-import { effortIcon, PR_TONES, PROVIDER_ICONS, prTone } from "@/lib/status-icons"
+import { effortIcon, LOCAL_EFFORT_ICON, PR_TONES, prTone } from "@/lib/status-icons"
 import {
   glanceReadings,
   isStale,
@@ -487,6 +493,7 @@ export function DispatcherUsage({
   read: SystemRead
 }) {
   const glm = provider === "zai"
+  const ZaiIcon = useMakerIcon("zai")
   const stale = report ? isStale(report.sampledAt, now) : false
   const readings =
     report && !stale ? (glm ? zaiReadings(report.zai, now) : systemReadings(report, now)) : []
@@ -507,7 +514,7 @@ export function DispatcherUsage({
       data-usage
       className="text-2xs flex shrink-0 items-center gap-1.5 font-mono tabular-nums group-data-[collapsible=icon]:hidden [&_svg]:size-3!"
     >
-      {logo && <PROVIDER_ICONS.zai aria-hidden className="size-3 shrink-0" />}
+      {logo && ZaiIcon && <ZaiIcon aria-hidden className="text-muted-foreground size-3 shrink-0" />}
       {known.map((reading, i) => {
         if (reading) return <ReadingItem key={reading.key} reading={reading} />
         const Icon = READING_ICONS[USAGE_READINGS[i]!].line
@@ -805,7 +812,12 @@ function MemberRow({
         <Hint content={info.join("\n")} description={null} side="right">
           <span className="min-w-0 flex-1 truncate">{rowLabel(lines) ?? first}</span>
         </Hint>
-        <ModelIcons effort={worker.effort} model={worker.model} />
+        <ModelIcons
+          effort={worker.effort}
+          localModel={worker.localModel}
+          localModels={worker.localModels}
+          model={worker.model}
+        />
       </SidebarMenuSubButton>
     </SidebarMenuSubItem>
   )
@@ -824,32 +836,39 @@ const PLUS_EFFORT_HIDDEN =
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
-// A row's right end, ZeroSDK's: its provider's logo, naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
+// A row's right end, ZeroSDK's: its provider's logo (its model's initials in a chip for a maker with none, nothing with no model), naming its model on hover (a local model with its level, levelName), then its effort's level, naming itself, which a local model's row with no effort set draws as a plain circle (rowEffort, LOCAL_EFFORT_ICON); with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays on every row, so the logos line up.
 function ModelIcons({
   effort,
   effortHidden = EFFORT_HIDDEN,
+  localModel,
+  localModels,
   model,
   toggles = false,
 }: {
   effort: string | null
   effortHidden?: string
+  localModel?: string
+  localModels?: { id: string }[]
   model: string | null
   toggles?: boolean
 }) {
-  const provider = providerOf(model)
-  const Logo = provider ? PROVIDER_ICONS[provider] : null
-  const Effort = effortIcon(effort)
+  const name = rowModelName({ localModel, model })
+  const Logo = useMakerIcon(rowProvider({ localModel, model }), initialsOf(name))
+  const known = effortIcon(rowEffort({ effort, localModels, model }))
+  const Effort =
+    known ?? (model !== null && !showsEffort({ localModels, model }) ? LOCAL_EFFORT_ICON : null)
   return (
     <>
-      {Logo && (
-        <Hint content={modelName(model)}>
+      {model && !Logo && <span className="size-4 shrink-0 group-data-[collapsible=icon]:hidden" />}
+      {model && Logo && (
+        <Hint content={levelName({ effort, localModel, model })}>
           <span className={MODEL_ICON}>
             <Logo aria-hidden className="size-4" />
           </span>
         </Hint>
       )}
       {Effort ? (
-        <Hint content={effort}>
+        <Hint content={known ? effort : "No effort set"}>
           <span className={cn(MODEL_ICON, toggles && effortHidden)}>
             <Effort aria-hidden className="size-4" />
           </span>
@@ -1062,6 +1081,8 @@ function SessionRowView({
       <ModelIcons
         effort={worker.effort}
         effortHidden={action ? PLUS_EFFORT_HIDDEN : undefined}
+        localModel={worker.localModel}
+        localModels={worker.localModels}
         model={worker.model}
         toggles={expandable || Boolean(action)}
       />

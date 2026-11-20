@@ -27,6 +27,8 @@ export type LinkSock = {
 }
 export type LifeIo<S extends LinkSock> = {
   alert: (text: string) => Promise<unknown>
+  // wa.alert, the second number in E.164, a guest, if set
+  alertNumber?: string
   // posts the pairing card with its code, answering the card's id
   card: (code: string) => Promise<string | undefined>
   connect: () => Promise<S>
@@ -72,6 +74,8 @@ export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
   const digits = (n: string) => n.replace(/\D/g, "")
   if (digits(io.device) === digits(io.owner))
     return "wa.device is the owner's own number, and a self-chat number is banned fast: set wa.device to the spare number"
+  if (io.alertNumber && digits(io.alertNumber) === digits(io.device))
+    return "wa.alert is the spare number, and an alert to it is a self-chat, which is banned fast: set wa.alert to another number or leave it empty"
   await ownFolder(io.dir)
   const marker = join(io.dir, "logged-out")
   if (await Bun.file(marker).exists())

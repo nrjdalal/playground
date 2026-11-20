@@ -3,6 +3,7 @@ import { appendFile, lstat, mkdir, readdir, realpath, unlink } from "node:fs/pro
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
+import { managerOf } from "@packages/config/kinds"
 import { configDirOf } from "@packages/env/data-dir"
 import {
   archiveUnlanded,
@@ -25,8 +26,10 @@ import { machineRoots } from "../trash"
 import { writeAtomic } from "../write-atomic"
 import { CWDS, cwdsOf, endOrphans, orphansOf, procsOf, PS } from "./orphans"
 import type { Context } from "./tick"
+import { aged, linesOf, livePlaces, type Machine, unusedEverywhere } from "./unused"
+import { cardNight, type CardState, type Kept } from "./unused-card"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear); then one log line with the free disk before and after, which the System page also shows, and one outbox line to ops naming each removal. It asks no decision: each container or volume no rule removes is kept and named as kept.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), the orphans of factory scripts whose worktree is gone and of test runs whose sandbox is gone (ended by their own pid, orphans.ts), every other repo's stale worktrees (git worktree remove, its branch kept, a tree with no PR once its commits no remote holds are archived), the scratch folders and loose scratch files of sessions that are gone (trashed, each restorable), branches (each not useful kept in a git bundle in the trash first, each other unmerged head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old, each invitee rehearsal's marked folder over a day old (ship:rehearsal's backstop for a rehearsal that died before its clear), then each machine's unused space, listed (unused.ts) and removed only as the owner's Remove on its one Inbox card names it (unused-card.ts); then one log line with the free disk before and after and each machine's unused total, which the System page also shows, and one outbox line to ops naming each removal and each machine's unused items. The card is its one decision: each container or volume no rule removes is kept and named as kept.
 
 const GB = 1024 ** 3
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
@@ -44,7 +47,7 @@ export type Prs = {
 export type Ref = { name: string; sha: string; subject?: string }
 export type Worktree = { branch: string | null; path: string }
 
-// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the temp folders a rehearsal is made in, the clock the cap's pacing reads, and the sleep it waits on.
+// What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers and the states of issues in the repo a folder's origin names (the checkout's when none is given; null when GitHub cannot be read), the folders other repos are read in, the names of the live sessions, the roots safe-delete's quarantine reads, the turbo cache's folder, the temp folders a rehearsal is made in, the clock the cap's pacing reads, the sleep it waits on, and each machine's unused space.
 export type NightDeps = {
   cleanup: () => Promise<CleanupDeps | null>
   free: (dir: string) => number
@@ -62,10 +65,11 @@ export type NightDeps = {
   temps: () => string[]
   trashRoots: () => Roots
   turbo: string
+  unused: (ctx: Context) => Promise<Machine[]>
 }
 
-// The beat's own record: the last run's time alone; a decision or denied key an older run wrote is read past and dropped on the next write.
-type State = { at?: string }
+// The beat's own record: the last run's time, the night each image with no age docker knows was first read unused, by `<machine> <path>` (unused.ts's aged), the unused card while it stands and each item the owner kept (unused-card.ts); a decision or denied key an older run wrote is read past and dropped on the next write.
+type State = { at?: string; card?: CardState; imagesSeen?: Record<string, string>; kept?: Kept }
 
 const lines = (out: string): string[] => out.split("\n").filter((l) => l.trim())
 const gbOf = (bytes: number): string => (bytes / GB).toFixed(1)
@@ -223,7 +227,7 @@ export const staleBranches = (input: {
   return out
 }
 
-// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and pglaunch's beside it), a Vibeground copy, a running container and any other name stay, and one over 1 GB is named as kept, but the live dashboard's, pglaunch's and a Vibeground copy, which stay unnamed.
+// Pure: what the docker step removes and names as kept. An exited playground-<worktree>-db or -redis container whose worktree folder is gone is removed; the live dashboard's database (and first run's beside it), a Vibeground copy, a running container and any other name stay, and one over 1 GB is named as kept, but the live dashboard's, first run's and a Vibeground copy, which stay unnamed.
 export const staleContainers = (
   listed: { name: string; size: number; state: string }[],
   folders: string[],
@@ -808,6 +812,61 @@ export const nightlyClean =
       removed.push(...pruned.gone.map((path) => `rehearsal ${path}`))
       return pruned.line
     })
+    const unused: string[] = []
+    let imagesSeen = state.imagesSeen ?? {}
+    let card = state.card
+    let keptItems = state.kept ?? {}
+    await step("unused", async () => {
+      const judged = aged(await deps.unused(ctx), imagesSeen, ctx.now.getTime())
+      imagesSeen = judged.seen
+      const found = judged.found.map((m) => linesOf(m, homedir()))
+      unused.push(...found.flatMap((m) => m.item ?? []))
+      const totals = found.map((m) => m.total).join("; ") || "none read"
+      if (!judged.found.length) return totals
+      const roster = (await Bun.file(join(data, "roster.json"))
+        .json()
+        .catch(() => null)) as { agents?: unknown } | null
+      const tags = new Set(lines((await git(["tag", "-l", "v0.0.*"])).out).map((t) => t.trim()))
+      const rmCard = (path: string, id: string) =>
+        ctx.run([
+          "bun",
+          "--no-env-file",
+          cliOf(ctx),
+          "rm",
+          path,
+          "--card",
+          id,
+          "--reason",
+          "nightly-clean",
+        ])
+      const night = await cardNight(
+        judged.found,
+        homedir(),
+        { card, kept: keptItems },
+        {
+          ask: (args, stdin) =>
+            ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin),
+          from: managerOf(roster?.agents, "ops"),
+          // unusedEverywhere lists this machine first
+          here: judged.found[0]!.machine,
+          out: (path) => tags.has(`v0.0.${/rehearse(\d+)$/.exec(path)?.[1]}`),
+          remove: async (item, id) => {
+            if (item.kind === "image") return ctx.run(["docker", "image", "rm", item.id ?? ""])
+            let done = await rmCard(item.path, id)
+            // one wait out rm's per-minute cap, which the worktree step may have spent
+            if (done.code !== 0 && RM_CAP.test(done.out)) {
+              await deps.sleep(CAP_WAIT_MS)
+              done = await rmCard(item.path, id)
+            }
+            return done
+          },
+        },
+      )
+      card = night.card
+      keptItems = night.kept
+      for (const line of night.ops) await ctx.send("ops", line)
+      return night.said ? `${totals}; ${night.said}` : totals
+    })
     const purged = trashSince(
       await Bun.file(join(ctx.ops, "log", "trash-purge.log"))
         .text()
@@ -816,14 +875,22 @@ export const nightlyClean =
     )
     said.push(`trash: ${purged} batches purged since the last run`)
     const named = [...removed, ...kept]
-    if (named.length)
+    if (named.length || unused.length)
       await ctx.send(
         "ops",
-        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${named.join("; ")}`,
+        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${[...named, ...unused].join("; ")}`,
       )
     const after = deps.free(data)
     await mkdir(join(ctx.ops, "tick"), { recursive: true })
-    await writeAtomic(statePath, JSON.stringify({ at: ctx.now.toISOString() } satisfies State))
+    await writeAtomic(
+      statePath,
+      JSON.stringify({
+        at: ctx.now.toISOString(),
+        ...(card ? { card } : {}),
+        ...(Object.keys(imagesSeen).length ? { imagesSeen } : {}),
+        ...(Object.keys(keptItems).length ? { kept: keptItems } : {}),
+      } satisfies State),
+    )
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(
       join(ctx.ops, "log", "nightly-clean.log"),
@@ -910,4 +977,6 @@ const liveNight: NightDeps = {
   temps: tempFolders,
   trashRoots: machineRoots,
   turbo: TURBO_CACHE,
+  unused: (ctx) =>
+    unusedEverywhere({ ...livePlaces(), now: ctx.now.getTime(), run: ctx.run }, ctx.repo, ctx.run),
 }

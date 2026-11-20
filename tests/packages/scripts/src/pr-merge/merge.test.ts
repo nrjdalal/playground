@@ -135,7 +135,7 @@ function stub({
   draft = false,
   ready = ok(""),
   comments = PASSING,
-  files = ["AGENTS.md", "packages/scripts/src/pr-merge/cli.ts"],
+  files = ["AGENTS.md", "packages/scripts/src/ship/cli.ts"],
   labels = [] as string[],
   merges = [ok("")],
   parents = {},
@@ -396,6 +396,47 @@ describe("prMerge", () => {
       name: "code",
       ok: true,
     })
+  })
+
+  // a PR could change a check that judges it, and the same review passed it like any other diff (PG-2576).
+  test("a PR deleting a refused-forms row, read from the files call's deletion count, refuses on the checks gate until its 5/5 names the file", async () => {
+    const row = "tests/scripts/hooks/fixtures/refused-forms/2522.ts"
+    const { calls, run } = stub({ files: ["AGENTS.md", `${row}\t\t2`] })
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.filter((gate) => !gate.ok)).toEqual([
+      {
+        detail: `the PR changes a check that judges it (${row}): its 5/5 at 69a6a4c does not name ${row} in a \`Reviewed check change: <path>\` line`,
+        name: "checks",
+        ok: false,
+      },
+    ])
+    expect(merges(calls)).toEqual([])
+    const explained = await prMerge(112, { explain: true, repo: REPO }, run, local())
+    expect(explained.gates.find((gate) => gate.name === "checks")?.ok).toBe(false)
+    const named = comment(
+      `## ReviewBot · round 1: 5/5 at 69a6a4c · 0 blocking\n\nReviewed check change: \`${row}\``,
+      "2026-10-06T19:00:00Z",
+    )
+    const passed = stub({ comments: named, files: ["AGENTS.md", `${row}\t\t2`] })
+    expect((await prMerge(112, { repo: REPO }, passed.run, local())).kind).toBe("merged")
+  })
+
+  test("a refused-forms file the PR only adds to, and a renamed file's old path, read as the files call gives them", async () => {
+    const added = stub({ files: ["tests/scripts/hooks/fixtures/refused-forms/2522.ts\t\t0"] })
+    const outcome = await prMerge(112, { explain: true, repo: REPO }, added.run, local())
+    expect(outcome.gates.find((gate) => gate.name === "checks")).toEqual({
+      detail: "the PR changes no check that judges it",
+      name: "checks",
+      ok: true,
+    })
+    const moved = stub({
+      files: ["tests/scripts/hooks/rows.ts\ttests/scripts/hooks/fixtures/refused-forms/2522.ts\t0"],
+    })
+    const read = await prMerge(112, { explain: true, repo: REPO }, moved.run, local())
+    expect(read.gates.find((gate) => gate.name === "checks")?.detail).toContain(
+      "(tests/scripts/hooks/fixtures/refused-forms/2522.ts)",
+    )
   })
 
   test("refuses a PR the held list names, saying why, and never calls gh pr merge", async () => {
@@ -874,7 +915,7 @@ describe("the merge lock in Redis", () => {
   }
   const root = () => mkdtempSync(join(scratch, "redis-lock-"))
   const held = (lock: Awaited<ReturnType<typeof takeLock>>) => "release" in lock
-  const deadPid = () => Bun.spawnSync(["true"]).pid
+  const deadPid = () => 4_194_305
 
   test("a holder that crashed lets its key lapse, and the next taker gets the lock", async () => {
     const at = root()
@@ -1145,7 +1186,9 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     writeFileSync(join(repo, path), text)
   }
   const GATES = "packages/scripts/src/pr-merge/gates.ts"
+  const PATHS = "packages/scripts/src/new-user-gate/paths.ts"
   write(GATES, "export const gates = ['review']\n")
+  write(PATHS, "export const NEW_USER_PATHS = ['install.sh']\n")
   write("README.md", "a\n")
   at("init", "-q", "-b", "canary")
   at("add", ".")
@@ -1166,6 +1209,12 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     write("README.md", "b\n")
     expect(await gateCodeOf(git, canary)).toEqual([])
     at("checkout", "-q", "--", "README.md")
+  })
+
+  test("an edit to the new-user gate's path list counts, since the gate reads which diffs it holds from it (PG-2496)", async () => {
+    write(PATHS, "export const NEW_USER_PATHS = []\n")
+    expect(await gateCodeOf(git, canary)).toEqual([PATHS])
+    at("checkout", "-q", "--", PATHS)
   })
 
   test("an uncommitted edit to the gate code counts, as a commit does", async () => {

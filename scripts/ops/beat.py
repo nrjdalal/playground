@@ -2,7 +2,7 @@
 """beat.py <job> <pid> <startedAt> <cycleSeconds> <lastResult> [extra JSON]: write the job's heartbeat, ops/<job>.json, atomically.
 Imported, it also holds checkout(), the one place the ops scripts name the main checkout, gh_down(), the gh sign-in probe's failed result, and the factory login's one rule (factory_login, with has_token beside it), which login-flip.py and run.py read the flip state's `factory` through.
 
-The dashboard reads it: Running while lastResult is "ok" and lastBeatAt is fresh, Waiting while it starts "waiting: " (the reason after it), Failing when lastResult is anything else,
+The dashboard reads it: Running while lastResult is "ok" or a steady healthy beat and lastBeatAt is fresh, Waiting while it starts "waiting: " (the reason after it), Failing when lastResult is not "ok" and not a steady healthy beat,
 Down when lastBeatAt is older than 3 x cycleSeconds, the pid is gone or the file is missing.
 """
 import calendar, json, os, shutil, subprocess, sys, time

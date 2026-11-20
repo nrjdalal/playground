@@ -41,10 +41,12 @@ import {
   examine,
   filled,
   GIT_TAKES,
+  globSwitch,
   isFolder,
   knownVariables,
   lex,
   marked,
+  NO_GLOB,
   onlyReserved,
   outputOf,
   ownFirst,
@@ -131,6 +133,9 @@ const refuseNearEval = (program: string) => (what: string) =>
 // text the shell runs as code where the lexer reads a plain word (evaluatedParts), read past by the reader, so code naming the root's folders may write there
 const EVALUATES_ROOT =
   "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(…) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates"
+// a shell feature that changes what a glob matches, on a line a remote shell runs, which the hook refuses in any spelling rather than reads (globSwitch in shell.ts)
+const GLOB_SWITCH = (found: string) =>
+  `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally; a shell's options run there only as a cluster with no O or 4, and a -o or a long option (--login) naming ${[...NO_GLOB].join(", ")}, as in set -euo pipefail`
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
 
@@ -409,7 +414,7 @@ function alternatives(word: string): string[] {
   const [before, after] = [word.slice(0, group.index), word.slice(group.index + group[0].length)]
   return group[1].split("|").flatMap((alt) => alternatives(before + alt + after))
 }
-// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with no dotglob or GLOB_DOTS (`dots`), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group or a zsh qualifier follows
+// Whether a glob's path segment may match a name as bash and zsh read it: each word its brace lists expand to (braceWords), a brace with no list in it kept as text, read by mayMatch past the dot rule: with `dots` off (a fully static remote line, which holds no glob-option switch once visit has refused one), a name led by a dot matches only a segment led by one, so a `*`, `?` or `[…]` first reaches no `.playground`, unless a group holding `|` follows, since visit refused any other group or zsh qualifier as a switch
 function globMatches(segment: string, name: string, dots: boolean): boolean {
   const words = braceWords(segment)?.flatMap(alternatives)
   if (!words || words.length > 64) return true
@@ -894,7 +899,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-outside-pr-code, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and yard.logReaders, the bots this Mac answers a read of the dispatcher's log for; every jobs.<name> is refused beside them (JOB_PREFIX).
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-outside-pr-code, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, yard.logReaders, the bots this Mac answers a read of the dispatcher's log for, wa.alert, whose Approve stands in for that number's first WhatsApp message (ADR 0028), and wa.device and wa.owner, which choose the number ops-wa links as and the one it takes orders from; every jobs.<name> is refused beside them (JOB_PREFIX).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
@@ -910,6 +915,12 @@ export const GUARD_KEYS = new Set([
   "sessions.names",
   "slack.gatedSends",
   "usage.keychainService",
+  "wa.alert",
+  "wa.alertCheck",
+  "wa.device",
+  "wa.guestPolicy",
+  "wa.owner",
+  "wa.replyPolicy",
   "yard.logReaders",
 ])
 // An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included, but the Ops lead's change of its interval alone (tunes()): only the owner's Approve of a guard decision, or Settings > Jobs, sets any other.
@@ -1022,7 +1033,7 @@ const EXT_DRY = new Set(["add", "import", "init"])
 // Each command's bare switches, as its parseWords call names them; every other -- word takes the next word as its value.
 const SWITCHES: Record<string, string[]> = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"],
+  settings: ["--dry-run", "--propose"],
 }
 
 // Whether a word is the playground CLI in any one of the folders it may be read from: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed; in a folder the hook cannot read, a relative word is the CLI by its last part alone (playground, cli or cli.ts).
@@ -2067,14 +2078,28 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
   const positional: (string | undefined)[] = []
   let dry = false
   let scoped = false
+  const options: string[] = []
+  let ownerId: string | undefined
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
-    if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
-    else if (word?.startsWith("--")) {
+    if (word !== undefined && switches.includes(word)) {
+      dry ||= word === "--dry-run"
+      options.push(word)
+    } else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope")
+      if (word === "--from-owner-msg") ownerId = rest[k + 1]
+      options.push(word)
       k++
     } else positional.push(word)
   }
+  // --from-owner-msg <id> as the call's one option, beside the key and value alone, so a CLI from before the flag stops at its missing --reason before it writes
+  const ownerMsg =
+    options.length === 1 &&
+    options[0] === "--from-owner-msg" &&
+    !!ownerId &&
+    positional.length === 2
+  // --propose as the call's one option, beside the key and value alone: ops-wa asks the owner and writes on his yes, and a CLI from before the flag stops at it needing a value (ADR 0041)
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry
@@ -2083,6 +2108,9 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
+    // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
+    if (verb === "set" && ownerMsg) return
+    if (verb === "set" && proposal) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]
@@ -2161,14 +2189,6 @@ async function inspect(
     reachSeen.set(at, names)
     return names
   }
-  // bash's dotglob or GLOBIGNORE, or zsh's GLOB_DOTS (any case, underscores, quotes, backslashes or a backslash-newline inside, or zsh's -4) spelled on the line lets a glob match a name led by a dot; a remote line not fully static counts as one too (`remoteDots`, set by remoteEnv)
-  const bare =
-    typeof input.command === "string"
-      ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "")
-      : ""
-  const dotsOn =
-    /dotglob|globdots|globignore/i.test(bare) ||
-    /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare)
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join(home, file.slice(1)) : file
@@ -2246,7 +2266,7 @@ async function inspect(
         const folder = dir && dirname(dir)
         // a glob in the filesystem's own root, where no session adds a name without root, reaches the root only through a name it may match there (mayMatch), so regex or comment text read as a path (`/__[A-Z]+__/`) names none; any other folder above the root fails closed on a glob, since code text (`node -e '…'`, an awk program) reads as one there
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0]
-        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in a folder above the root reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it
+        // on ssh's remote line (`env.remote`), which canary read from the local folder, a glob in a folder above the root reaches the root only through the next folder down to it or a link there (globMatches), so `{{.Names}}` or `[c]laude` names none, while a remover's glob and one a `..` after it climbs back from still reach it; a dot-led name matches only on a line not fully static (`remoteDots`), since visit refuses one holding a glob-option switch first (`remoteSwitch`)
         const climbs = text.value.slice(glob.index).split("/").includes("..")
         const reaches = (folder: string) =>
           inRoot(folder) ||
@@ -2255,9 +2275,7 @@ async function inspect(
             : !env.remote ||
               remover ||
               climbs ||
-              reachNames(folder).some((name) =>
-                globMatches(segment, name, dotsOn || !!env.remoteDots),
-              ))
+              reachNames(folder).some((name) => globMatches(segment, name, !!env.remoteDots)))
         if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`
       }
@@ -2416,10 +2434,13 @@ async function inspect(
   const visit: Visit = async (cmd: Command, parsed, env) => {
     // a case pattern is matched, never run, so its words are no path and no program; a substitution in it is its own command
     if (patterns.has(cmd)) return
+    // a glob-option switch on a remote line or in the script a remote shell reads is refused, never read, so a spelling no list names is refused too
+    if (env.remote && env.remoteSwitch) return GLOB_SWITCH(env.remoteSwitch)
     // ssh runs each ProxyCommand, LocalCommand and KnownHostsCommand value here, judged as a line typed here, and the words after its host as one command line, on this machine when the host is this machine, so that line is judged as one typed in the login's home, where a remote shell starts, and ssh itself by its own words up to the host, a local redirect included
     // a command ssh's stdin reads as code was typed here, so its text is judged from the remote home too, as its local twin there would be
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true))
+      const fed = cmd.words.map((word) => word.value).join(" ")
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true, fed))
       if (verdict) return verdict
     }
     const ssh = sshOwn.has(cmd) ? undefined : sshCall(parsed)
@@ -2428,6 +2449,15 @@ async function inspect(
     if (fedText && (fedText.unknown || marked(fedText.value)))
       return refuse(
         "an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally",
+      )
+    // a SetEnv or SendEnv value starts the remote shell with its variable, whatever its line says
+    const envSwitch = globSwitch((ssh?.env ?? []).map((w) => w.value).join(" "))
+    if (envSwitch) return GLOB_SWITCH(`ssh -o ${envSwitch}`)
+    // a SendEnv pattern (`SendEnv=BASH*`) sends whichever of this shell's variables it matches, so it is a name the hook cannot read
+    const envUnread = ssh?.env.find((w) => marked(w.value) || /[*?]/.test(w.value))
+    if (envUnread)
+      return refuse(
+        `an ssh -o SetEnv or SendEnv of ${shown(envUnread)}, a value or pattern the hook cannot read, which may start the remote shell with a glob-option switch; name each variable literally`,
       )
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))

@@ -133,16 +133,19 @@ const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
 
-// Whether the session runs on GLM: spawn.sh's GLM launch points ANTHROPIC_BASE_URL at api.z.ai, else the backend pin spawn.sh keeps under the session's registry name names glm (readPin, either shape).
+// Whether the session runs on GLM or the local model, which the glm rule fences alike: spawn.sh's GLM launch points ANTHROPIC_BASE_URL at api.z.ai and its local launch at this machine's model server on 127.0.0.1:8000, else the backend pin spawn.sh keeps under the session's registry name names glm or local (readPin, either shape).
 export async function onGlm(raw: string, environment: Environment = process.env): Promise<boolean> {
-  if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? "")) return true
+  const base = environment.ANTHROPIC_BASE_URL ?? ""
+  if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(base)) return true
+  if (/^https?:\/\/(?:127\.0\.0\.1|localhost):8000(?:\/|$)/.test(base)) return true
   const id = sessionOf(raw)
   if (typeof id !== "string") return false
   try {
     const name = await registryName(id, environment)
     if (!name || name.includes("/")) return false
     const pin = join(dataDir(environment), "backends", name)
-    return readPin(await Bun.file(pin).text())?.backend === "glm"
+    const backend = readPin(await Bun.file(pin).text())?.backend
+    return backend === "glm" || backend === "local"
   } catch {
     return false
   }

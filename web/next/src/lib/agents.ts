@@ -19,7 +19,7 @@ import {
   type EntriesListener,
   type SessionTask,
 } from "@/lib/dashboard"
-import { modelName } from "@/lib/model-label"
+import { levelName, showsEffort } from "@/lib/model-label"
 import { whenWords } from "@/lib/ops"
 import {
   checkedOf,
@@ -336,13 +336,13 @@ export function useAgents(
 export type RowLines = {
   // what the row's tooltip adds to the state (lightOf's detail)
   detail: string | null
-  // the effort the newest reply ran with, between the model and the state in the tooltip
+  // the effort the newest reply ran with, between the model and the state in the tooltip; none on a local model's row (showsEffort)
   effort: string | null
   // the time left, the tooltip's alone (timeLeft)
   eta: string | null
   // its kind (labelParts), which closes its label: its role word after the ticket and the pull request, else after the title
   kind: RosterKind | null
-  // the model's name, without the effort
+  // the model's name (levelName): any other model's without its effort, a local session's with its level in words, as high: Ornith 122B, thinking
   model: string | null
   pr: number | null
   // the row's one icon
@@ -381,13 +381,13 @@ export function rowLines(
     light,
     worker,
   })
-  const model = label ? null : modelName(worker.model)
+  const model = label ? null : levelName(worker)
   // a dispatcher named by its label keeps no session name (#i520), else its state keeps its name (Inbox #i493: "dispatcher keeps Playground; only managers drop names"), and an AI runner's ends with when it runs
   const name = dispatcher && !label ? sinName(worker) : null
   const when = worker.role === "runner" ? rosterWhen(agent?.schedule ?? null) : null
   return {
     detail: status.detail,
-    effort: model ? (worker.effort ?? null) : null,
+    effort: model && showsEffort(worker) ? (worker.effort ?? null) : null,
     eta: timeLeft(agentView, now, { checkers, light, worker }),
     ...(label
       ? {
@@ -556,6 +556,7 @@ export const SHOWN_RANK: Record<ShownState, number> = {
   approval: 7,
   approvals: 7,
   ready: 8,
+  gated: 8,
   parked: 9,
   "usage-limit": 10,
   unknown: 10,
