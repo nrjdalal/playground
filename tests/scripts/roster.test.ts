@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs"
+import { utimes } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1743,5 +1744,17 @@ describe("the write lock (#2966)", () => {
     expect(elapsedMs).toBeLessThan(8000)
     expect(existsSync(lockPathFor(config))).toBe(true)
     expect(readFileSync(join(config, "playground", "roster.json"), "utf8")).toBe(before)
+  })
+
+  // An empty lock from a write killed between open and writeFile, its mtime older than the wait, is still taken over, so the next write lands.
+  test("an empty lock older than the wait is taken over, so the next write lands", async () => {
+    const config = configWith([WITH_PR])
+    writeFileSync(lockPathFor(config), "")
+    await utimes(lockPathFor(config), new Date(Date.now()), new Date(Date.now() - 60_000))
+    const eta = inMinutes(60)
+    const r = await run(config, ["set", "worker-greed", `eta=${eta}`])
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-greed")?.eta).toBe(eta)
+    expect(existsSync(lockPathFor(config))).toBe(false)
   })
 })
