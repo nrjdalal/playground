@@ -319,6 +319,27 @@ describe("OS-made systemd links (#2963)", () => {
     symlinkSync(join(home, "models", "keep.service"), join(wants, "keep.service"))
     expect(await systemd()).toEqual([`misplaced: ${join(wants, "keep.service")}`])
   })
+
+  test("a unit file plus a default.target.wants link to it adds only the unit file", async () => {
+    await seed(data, [], places({ osRoots }))
+    const wants = join(user, "default.target.wants")
+    writeFileSync(join(user, "x.service"), "")
+    mkdirSync(wants, { recursive: true })
+    symlinkSync(join(user, "x.service"), join(wants, "x.service"))
+    expect(await systemd()).toEqual([`misplaced: ${join(user, "x.service")}`])
+  })
+
+  test("an unreadable folder under systemd/user names itself", async () => {
+    await seed(data, [], places({ osRoots }))
+    const locked = join(user, "locked")
+    mkdirSync(locked)
+    chmodSync(locked, 0o000)
+    try {
+      expect(await systemd()).toEqual([`misplaced: ${locked}`])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
 })
 
 describe("the record's writes (PG-2538)", () => {
