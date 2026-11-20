@@ -347,6 +347,54 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     await dismiss(id)
   })
 
+  test("new and edit refuse a bad ```ui block, naming it, and post a progress card unchanged (PG-2722)", async () => {
+    const ui = (text: string) => ({
+      from: "worker-envy",
+      kind: "update",
+      preview: { outcome: "merged", text },
+      title: "Yard control ui",
+    })
+    const block = (...json: string[]) => ["```ui", ...json, "```", "", "- One line."].join("\n")
+
+    // a good ```ui card posts, and its edit takes the same shape, so it is the card to edit
+    const good = ui(
+      block(JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "done" }] })),
+    )
+    const first = await post(good)
+
+    // a bad ```ui block is refused on new and on an edit, naming the reason, before it posts
+    const bad = ui(
+      block(JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "nope" }] })),
+    )
+    const newRefused = await cli(["new"], JSON.stringify(bad))
+    expect(newRefused.code).toBe(1)
+    expect(newRefused.stderr).toContain('step 1 has an unknown status "nope"')
+    expect(newRefused.stdout).toBe("")
+    const editRefused = await cli(["edit", first.tag], JSON.stringify(bad))
+    expect(editRefused.code).toBe(1)
+    expect(editRefused.stderr).toContain('step 1 has an unknown status "nope"')
+
+    // an old ```progress card with no ui block posts unchanged, so the check leaves progress cards alone
+    const progress = await cli(
+      ["new"],
+      JSON.stringify({
+        from: "dispatcher",
+        kind: "update",
+        preview: {
+          outcome: "merged",
+          text: "```progress\nMac reads | 100 | Reads every Mac | 9:10 pm\n```",
+        },
+        title: "Yard control progress",
+      }),
+    )
+    expect(progress.code).toBe(0)
+    expect(progress.stdout).toMatch(/^\S+\n$/)
+
+    // clear both cards so a later test sees none as its in-flight card
+    await dismiss(first.id)
+    await dismiss(progress.stdout.trim())
+  })
+
   test("refuses an invalid item with the reason, and posts nothing", async () => {
     const result = await cli(["new"], JSON.stringify({ ...DECISION, preview: undefined }))
     expect(result.code).toBe(1)
