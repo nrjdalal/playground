@@ -2238,7 +2238,7 @@ test.each<[string, Picks | null, string]>([
   expect(existsSync(repo)).toBe(true)
 })
 
-// A mkdtemp machine whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out.
+// A mkdtemp machine whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out, and `folders` one with an empty folder, which the set takes in at 0 bytes.
 type ShardState = {
   deps: RmDeps
   repo: string
@@ -2246,7 +2246,7 @@ type ShardState = {
   size: number
   total: number
 }
-const shardedMachine = (symlinks: number[] = []): ShardState => {
+const shardedMachine = (symlinks: number[] = [], folders: number[] = []): ShardState => {
   const m = machine()
   const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
   const shard = (i: number) => join(repo, `model-${String(i).padStart(5, "0")}-of-00004.gguf`)
@@ -2265,7 +2265,8 @@ const shardedMachine = (symlinks: number[] = []): ShardState => {
     if (symlinks.includes(i)) {
       writeFileSync(join(repo, `target-${i}`), "real")
       symlinkSync(join(repo, `target-${i}`), here)
-    } else {
+    } else if (folders.includes(i)) mkdirSync(here)
+    else {
       writeFileSync(here, "")
       truncateSync(here, size)
     }
@@ -2319,12 +2320,23 @@ test("runRm --card refuses a sharded set whose total no longer matches the pick,
   for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
-test("runRm --card refuses a sharded set whose one shard is a symlink, deleting none", async () => {
+test("runRm --card leaves a symlinked shard out of the set, so its total no longer matches the pick, deleting none", async () => {
   const { deps, shard } = shardedMachine([4])
   const { code, err } = await rmTold([shard(1), "--card", CARD], deps)
   expect(code).toBe(1)
   expect(err.join("\n")).toContain("shard set holds 3 shards at 150 bytes")
   expect(err.join("\n")).toContain("approved it at 200")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+test("runRm --card refuses a sharded set whose one shard fails its own check, an empty folder, though the total matches the pick, deleting none", async () => {
+  const { deps, shard, size } = shardedMachine([], [4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: size * 3, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(`${shard(4)} is not model weights the shard set holds`)
   for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
