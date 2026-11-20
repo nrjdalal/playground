@@ -3215,15 +3215,15 @@ async function inspect(
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
   // a file fed to ssh is read only when every command before the ssh, and every one its pipe feeds (`| head -80`), is a reader with no redirect but a descriptor's copy, and every other runs after it and feeds no shell (`; ssh box grep …`), since any other could write the file before ssh reads it
-  const at = lexed.commands.findIndex((cmd) => !!stdinShell(cmd))
-  const only = lexed.commands[at]
+  const shellAt = lexed.commands.findIndex((cmd) => !!stdinShell(cmd))
+  const fed = lexed.commands[shellAt]
   const plain = (cmd: Command) =>
     !cmd.inner &&
     ![...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
       (word) => word.procs,
     )
   const fedBy = (cmd: Command) => {
-    for (let from = cmd.stdin; from; from = from.stdin) if (from === only) return true
+    for (let from = cmd.stdin; from; from = from.stdin) if (from === fed) return true
     return false
   }
   const reader = (cmd: Command) =>
@@ -3231,12 +3231,12 @@ async function inspect(
     PIPE_READERS.has(program(parse(cmd).name)) &&
     cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""))
   const alone =
-    !!only &&
-    plain(only) &&
+    !!fed &&
+    plain(fed) &&
     lexed.commands.every(
       (cmd, k) =>
-        k === at ||
-        (k < at || fedBy(cmd)
+        k === shellAt ||
+        (k < shellAt || fedBy(cmd)
           ? reader(cmd)
           : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"),
     )

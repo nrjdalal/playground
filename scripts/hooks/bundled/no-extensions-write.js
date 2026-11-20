@@ -13096,17 +13096,17 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     vars: new Map,
     visitShells: true
   };
-  const at = lexed.commands.findIndex((cmd) => !!stdinShell(cmd));
-  const only = lexed.commands[at];
+  const shellAt = lexed.commands.findIndex((cmd) => !!stdinShell(cmd));
+  const fed = lexed.commands[shellAt];
   const plain = (cmd) => !cmd.inner && ![...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => word.procs);
   const fedBy = (cmd) => {
     for (let from = cmd.stdin;from; from = from.stdin)
-      if (from === only)
+      if (from === fed)
         return true;
     return false;
   };
   const reader = (cmd) => plain(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""));
-  const alone = !!only && plain(only) && lexed.commands.every((cmd, k) => k === at || (k < at || fedBy(cmd) ? reader(cmd) : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"));
+  const alone = !!fed && plain(fed) && lexed.commands.every((cmd, k) => k === shellAt || (k < shellAt || fedBy(cmd) ? reader(cmd) : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"));
   rootLine = rooted(lexed.commands, alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
   sshFed = new Set([...codeFed(lexed.commands)].filter(([, { consumer }]) => !!sshCall(parse3(consumer))).map(([producer]) => producer));
   if (evaluatedParts(command).some((part) => touches(part, env)))

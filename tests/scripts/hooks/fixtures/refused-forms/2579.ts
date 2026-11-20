@@ -44,6 +44,22 @@ const extensionsRefused = ({ HOME }: Pick<Paths, "HOME">): Row[] => [
     `ssh box bash -s < ${HOME}/stats.sh & echo x > ${HOME}/stats.sh`,
   ],
   ["a fed script that runs a script it writes with sed", `ssh box bash -s < ${HOME}/serve.sh`],
+  [
+    "a fed script naming the root, readers before it",
+    `head -5 ${HOME}/peer-write.sh; ssh box bash -s < ${HOME}/peer-write.sh`,
+  ],
+  [
+    "a fed script naming the root, readers before it and a filter after",
+    `head -5 ${HOME}/peer-write.sh; tail -3 ${HOME}/peer-write.sh; ssh box bash -s < ${HOME}/peer-write.sh 2>&1 | grep -v '^l'`,
+  ],
+  [
+    "a fed script naming the root, another ssh after it",
+    `ssh box bash -s < ${HOME}/peer-write.sh; ssh box grep -c x /var/log/serve.log`,
+  ],
+  [
+    "a fed script naming the root, its pipe feeding a reader",
+    `ssh box bash -s < ${HOME}/peer-write.sh | head -80`,
+  ],
 ]
 
 export const groups: Group[] = [
