@@ -676,7 +676,9 @@ test("a seat probe that answers nothing past FRESH_FOR puts the seat and its las
   expect(probe).toHaveLength(1)
   expect(probe[0].name).toBe("spare@example.org")
   expect(probe[0].line).toMatch(
-    new RegExp(`^seat 2's probe has failed for 30 minutes or more, last reading ${READ_AT}$`),
+    new RegExp(
+      `^seat 2 has read nothing for 30 minutes or more, its probe failing, last reading ${READ_AT}$`,
+    ),
   )
   expect(probe[0].since).toBe(probe[0].line.split(" ").at(-1))
 })
