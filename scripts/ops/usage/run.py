@@ -195,7 +195,7 @@ def accounts_reading():
 
 
 def failing_seats(flip, now):
-    """Each seat with no fresh reading, as (its 1-based position in seats(), its account, its last reading's time or None): seen() probes a seat again each cycle once its reading is PROBE_EVERY old and past its limitedUntil, so a stale one is a probe that has failed for FRESH_FOR or more."""
+    """Each seat with no fresh reading, as (its 1-based position in seats(), its account, its last reading's time or None): seen() probes a seat again each cycle once its reading is PROBE_EVERY old and past its limitedUntil, so a stale one is a seat whose probe has failed on every cycle since its reading went PROBE_EVERY old or its limitedUntil passed."""
     entries = flip.get("seen") or {}
     return [(n, email, (entries.get(email) or {}).get("at")) for n, email in enumerate(seats(flip), 1) if not fresh(entries.get(email) or {}, now)]
 
@@ -337,7 +337,7 @@ while True:
         # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
         out = week_alerts(data, FACTORY or [])
         # a seat whose probe keeps failing reads no week, so no mark can fire for it until it reads again
-        out += [{"at": data["writtenAt"], "kind": "usage-probe", "line": f"seat {n}'s probe has failed for {FRESH_FOR // 60} minutes or more, last reading {last_read(at)}", "name": email, "since": iso(at) if at else data["writtenAt"]} for n, email, at in failing]
+        out += [{"at": data["writtenAt"], "kind": "usage-probe", "line": f"seat {n} has read nothing for {FRESH_FOR // 60} minutes or more, its probe failing, last reading {last_read(at)}", "name": email, "since": iso(at) if at else data["writtenAt"]} for n, email, at in failing]
         if account in (FACTORY or []):
             # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
             five = limits.get("five_hour") or {}
