@@ -139,7 +139,7 @@ export async function life<S extends LinkSock>(io: LifeIo<S>): Promise<string> {
     failed = opened ? 0 : failed + 1
     if (failed >= BACKOFF.tries) {
       await io.alert(
-        `ops-wa could not connect to WhatsApp in ${BACKOFF.tries} tries in a row, so it has stopped, and ops-up starts it again once WhatsApp answers`,
+        `ops-wa could not connect to WhatsApp in ${BACKOFF.tries} tries in a row, so it has stopped; ops-up starts it again once, when WhatsApp answers after a network outage`,
       )
       return `no connect in ${BACKOFF.tries} tries`
     }
