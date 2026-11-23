@@ -7,6 +7,7 @@ import {
   MUTED_BAR,
   ProgressBlock,
 } from "../../../../../web/next/src/components/progress-block"
+import { config } from "../../../../../web/next/src/lib/config"
 
 // React resolves from the web app's own packages, which this directory cannot see; the two calls the test makes are typed here rather than through a path into node_modules.
 type Node = unknown
@@ -94,5 +95,20 @@ describe("ProgressBlock's names (PG-2982)", () => {
     const script = html("[ABC-12](javascript:alert(1)) | 40 | x | y")
     expect(script).not.toContain("<a ")
     expect(script).not.toContain("href=")
+  })
+
+  test("a link with credentials draws as plain text, since transcriptLink refuses it", () => {
+    const out = html("[ABC-12](https://user:pw@example.com/issue/ABC-12) | 40 | x | y")
+    expect(out).not.toContain("<a ")
+    expect(out).not.toContain("user:pw")
+    expect(out).toMatch(/<span [^>]*truncate[^>]*>ABC-12<\/span>/)
+  })
+
+  test("a link to the app's own pages opens in this tab", () => {
+    const own = new URL("/dashboard", config.app.url).href
+    const link = /<a [^>]*>Own<\/a>/.exec(html(`[Own](${own}) | 40 | x | y`))?.[0] ?? ""
+    expect(link).toContain(`href="${own}"`)
+    expect(link).not.toContain("target=")
+    expect(link).not.toContain("rel=")
   })
 })

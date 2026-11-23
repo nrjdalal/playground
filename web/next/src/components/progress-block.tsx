@@ -5,12 +5,14 @@ import { Fragment } from "react"
 
 import { Hint } from "@/components/hint"
 import { Progress } from "@/components/ui/progress"
+import { config } from "@/lib/config"
+import { transcriptLink } from "@/lib/markdown"
 
 // An active row's bar, and a row with no state under 100, fills in the palette's blue, since the primary colour has no hue; every other row's fill is muted.
 export const ACTIVE_BAR = "**:data-[slot=progress-indicator]:bg-chart-2"
 export const MUTED_BAR = "**:data-[slot=progress-indicator]:bg-muted-foreground/40"
 
-// A row's name written as a markdown link to an http or https page, `[ABC-12](https://...)`, draws as that link; any other name draws as plain text.
+// A row's name written as a markdown link to an http or https page, `[ABC-12](https://...)`, draws as that link once transcriptLink passes it, another site's in a new tab; any other name draws as plain text.
 const LINK = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/
 
 // A progress fenced block, drawn at the width of whatever holds it, so its bars fill an Inbox card on a phone and a wide screen alike: each item is its name, a bar and its percent on one line, the names in one column of at most 6rem so the bars start at one x and a long name never narrows them, a name past it cut short with its whole name on hover, then what is going on with its ETA at the right; each bar takes ACTIVE_BAR or MUTED_BAR by its row's state.
@@ -22,14 +24,14 @@ export function ProgressBlock({ items }: { items: ProgressItem[] }) {
     >
       {items.map((item, index) => {
         const [, label = item.name, href] = LINK.exec(item.name) ?? []
+        const link = href ? transcriptLink(href, config.app.url) : null
         return (
           <Fragment key={index}>
             <Hint content={label} description={null}>
-              {href ? (
+              {link ? (
                 <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  href={link.href}
+                  {...(link.external ? { rel: "noopener noreferrer", target: "_blank" } : {})}
                   className="min-w-0 truncate font-medium hover:underline"
                 >
                   {label}
