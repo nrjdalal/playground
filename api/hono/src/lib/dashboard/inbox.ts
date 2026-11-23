@@ -76,7 +76,7 @@ import { OWNER_APPS } from "./owner-apps"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
-const LIMITS = { line: 200, link: 4000, name: 120, prs: 50 }
+const LIMITS = { changed: 4000, line: 200, link: 4000, name: 120, note: 3000, prs: 50 }
 
 const oneLine = (max: number) =>
   z
@@ -1003,10 +1003,20 @@ export type InboxList = {
   snoozed: InboxItem[]
 }
 
+// An answer's note and changed words ride the one line deliver() types, which holds at most 8000 characters, so each is capped as JSON writes it there, a line break or a quote counting twice.
+const sent = (max: number) =>
+  z
+    .string()
+    .trim()
+    .refine(
+      (value) => JSON.stringify(value).length - 2 <= max,
+      `Must be at most ${max} characters as sent, a line break or a quote counting twice`,
+    )
+
 // What the dashboard posts for an item: the action, the words that go with Edit or with a draft changed before Send or Draft, and seen, the updatedAt of the card he answered, so an answer never lands on words its poster edited after he read them.
 export const answerInputSchema = z.strictObject({
   action: z.enum(ACTIONS),
-  note: z.string().trim().optional(),
+  note: sent(LIMITS.note).optional(),
   option: z
     .number()
     .int()
@@ -1025,7 +1035,7 @@ export const answerInputSchema = z.strictObject({
     .max(MAX_QUESTIONS)
     .optional(),
   seen: z.iso.datetime().optional(),
-  text: z.string().trim().optional(),
+  text: sent(LIMITS.changed).optional(),
 })
 
 export type AnswerInput = z.input<typeof answerInputSchema>

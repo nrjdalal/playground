@@ -82,7 +82,8 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
-  A card's text takes any length, as an answer's note and a changed draft's words do (`words` in `api/hono/src/lib/dashboard/inbox.ts`): the card draws it whole, and the Inbox scrolls past a long one.
+  A card's text takes any length (`words` in `api/hono/src/lib/dashboard/inbox.ts`): the card draws it whole, and the Inbox scrolls past a long one.
+  An answer's note holds at most 3000 characters and a changed draft's words 4000, each counted as JSON writes it, a line break or a quote counting twice (`sent`), so the answer's one line fits `deliver()`'s 8000.
   A `progress` block draws as bars at the card's own width, on a phone and a wide screen alike (`ProgressBlock` in `web/next/src/components/progress-block.tsx`, `progressItems` in `@packages/config/inbox`).
   It holds one item a line, `name | percent | what's going on | ETA | state`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
   The state is optional, one of `active`, `done`, `held` or `waiting` (`PROGRESS_STATES`), and a row at 100 that names none reads as done: an `active` row's bar, and a row under 100 with no state, fill in the palette's blue (`ACTIVE_BAR`, `bg-chart-2`), and every other row's fill draws muted (`MUTED_BAR`), its state also in the bar's accessible name.

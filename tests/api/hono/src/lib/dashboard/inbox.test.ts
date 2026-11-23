@@ -19,7 +19,7 @@ import {
   readAttachment,
   storeAttachment,
 } from "../../../../../../api/hono/src/lib/dashboard/attachments"
-import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
+import { MAX_CHARS, QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import { standingFocus } from "../../../../../../api/hono/src/lib/dashboard/focus"
 import {
   acceptArgs,
@@ -887,14 +887,27 @@ describe("an answer", () => {
     expect(checkAnswer(item({ kind: "update" }), { action: "approve", note: "x" })).toEqual({
       message: "An update is read, not answered",
     })
-    // a note and a changed draft take any length, as the card's own text does (#2970)
-    expect(
-      answerInputSchema.safeParse({
-        action: "edit",
-        note: "x".repeat(8000),
-        text: "y".repeat(8000),
-      }).success,
-    ).toBe(true)
+  })
+
+  // the card's text takes any length (#2970), but an answer's note and changed words ride deliver()'s one line, so they keep a cap sized to fit it
+  test("the longest note and changed draft an answer takes make a line deliver() takes", () => {
+    const longest = { note: '"'.repeat(1500), text: "y".repeat(4000) }
+    const parsed = answerInputSchema.safeParse({ action: "send", ...longest })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    const draft = item({ kind: "draft", title: '"'.repeat(200) })
+    const checked = checkAnswer(draft, parsed.data)
+    if (!("answer" in checked)) throw new Error(checked.message)
+    const line = answerLine(answerPayload(draft, { ...checked.answer, at: AT }))
+    expect(payloadOf(line)).toMatchObject({ comment: longest.note, text: longest.text })
+    expect(line.length).toBeLessThanOrEqual(MAX_CHARS)
+    // one character more, or a line break that JSON writes as two, is refused at the box
+    for (const over of [
+      { note: "x".repeat(3001) },
+      { note: `x\n${"x".repeat(2998)}` },
+      { text: "y".repeat(4001) },
+    ])
+      expect(answerInputSchema.safeParse({ action: "send", ...over }).success).toBe(false)
   })
 
   test("leaves an update and an answered item alone", () => {
