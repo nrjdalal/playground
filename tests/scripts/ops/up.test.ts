@@ -211,8 +211,9 @@ const pyNow = () =>
     Bun.spawnSync(["python3", "-I", "-c", "import time; print(time.time())"]).stdout.toString(),
   )
 
-// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
+// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made, and the machine booted long ago: a CI runner boots seconds before the suite, which would end the grace of a start a minute old.
 const RESTARTED = `${LOAD}started = []
+up.boot_time = lambda: 0
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None

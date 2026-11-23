@@ -16,7 +16,11 @@ import { tmpdir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
 import { setSessionNames } from "../../../../../packages/config/src/kinds"
-import { GH_HANGS, KEYRING_LOCKED } from "../../../../../packages/scripts/src/gh-read"
+import {
+  GH_HANGS,
+  GH_TIMEOUT_MS,
+  KEYRING_LOCKED,
+} from "../../../../../packages/scripts/src/gh-read"
 import {
   autoEnd,
   BEATS,
@@ -2452,7 +2456,8 @@ describe("gh-auth", () => {
       ])
       return { code: await proc.exited, out: out + err }
     }
-    await ghAuth(300)(made.ctx)
+    // the hang alone is stopped at 300ms; any other gh keeps the real limit, since a loaded machine can take 300ms to start one and the probe would read it as a hang
+    await ghAuth(body === HANGING ? 300 : GH_TIMEOUT_MS)(made.ctx)
     return { ...made, calls }
   }
 
