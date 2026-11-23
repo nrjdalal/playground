@@ -41,7 +41,7 @@ import { socketPath, serve } from "./server"
 import { applyOwnerSetting, ownerSettings } from "./setting-set"
 import { votedOptions } from "./votes"
 
-// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
+// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so its row reads the reason and up.py starts it again only after a no-connect stop, once WhatsApp answers.
 process.umask(0o077)
 const data = engineData("ops-wa")
 const dir = join(data, "whatsapp")
