@@ -172,14 +172,19 @@ def seen(flip, email, now):
     return s
 
 
-def accounts_reading():
-    """Each account in login-flip.json's `accounts` (every account the factory's sessions spend into), or `rotation.pool`'s when that list is missing, each with a fresh week reading."""
-    flip, now, out = flip_file() or {}, time.time(), {}
+def seats(flip):
+    """login-flip.json's `accounts` (every account the factory's sessions spend into), or `rotation.pool`'s when that list is missing."""
     accounts = flip.get("accounts")
     if not accounts:
         rot = rotation(flip)
         accounts = [e["account"] for e in rot["pool"]] if rot else []
-    for email in accounts:
+    return accounts
+
+
+def accounts_reading():
+    """Each account seats() names, each with a fresh week reading."""
+    flip, now, out = flip_file() or {}, time.time(), {}
+    for email in seats(flip):
         s = seen(flip, email, now)
         if fresh(s, now) and s.get("weekReset"):
             row = {"readAt": iso(s["at"]), "week": s["week"], "weekReset": int(s["weekReset"])}
@@ -187,6 +192,12 @@ def accounts_reading():
                 row = {"limitedUntil": int(s["limitedUntil"]), **row}
             out[email] = row
     return out
+
+
+def failing_seats(flip, now):
+    """Each seat with no fresh reading, as (its 1-based position in seats(), its account, its last reading's time or None): seen() probes a seat again each cycle once its reading is PROBE_EVERY old and past its limitedUntil, so a stale one is a probe that has failed for FRESH_FOR or more."""
+    entries = flip.get("seen") or {}
+    return [(n, email, (entries.get(email) or {}).get("at")) for n, email in enumerate(seats(flip), 1) if not fresh(entries.get(email) or {}, now)]
 
 
 def week_alerts(data, factory):
@@ -308,12 +319,16 @@ while True:
             problems.append(f"added account: {type(e).__name__}: {e}")
     data = data or stored
     if data:
+        failing = []
         try:
             accounts = accounts_reading()
             if accounts:
                 data["accounts"] = accounts
+            failing = failing_seats(flip_file() or {}, time.time())
         except Exception as e:
             problems.append(f"accounts: {type(e).__name__}: {e}")
+        last_read = lambda at: iso(at) if at else "none"
+        problems += [f"seat {n}: probe failing, last reading {last_read(at)}" for n, _, at in failing]
         pool = rotation(flip)
         if pool:
             data["rotation"] = pool
@@ -321,6 +336,8 @@ while True:
         account, limits = data["account"], data["rate_limits"]
         # the outbox needs a session to relay it; the marks also go to ops/alerts-usage.json, which ops-unstick folds into alerts-pending.json
         out = week_alerts(data, FACTORY or [])
+        # a seat whose probe keeps failing reads no week, so no mark can fire for it until it reads again
+        out += [{"at": data["writtenAt"], "kind": "usage-probe", "line": f"seat {n}'s probe has failed for {FRESH_FOR // 60} minutes or more, last reading {last_read(at)}", "name": email, "since": iso(at) if at else data["writtenAt"]} for n, email, at in failing]
         if account in (FACTORY or []):
             # dispatcher, 8 Oct: the 5-hour window at 90% or more, while it lasts, so the Builder slows spawns before the cap
             five = limits.get("five_hour") or {}
