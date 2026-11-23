@@ -69,11 +69,11 @@ export const zaiProblem = (zai: ZaiUsage | null): string | null =>
 
 const failureSchema = z.object({ error: z.string(), errorAt: z.string() })
 
-// Pure: the report's problem line for a read the job wrote as failed (its error and errorAt), or null; zaiUsageOf reads that file as no usage, so this line is the one trace of it.
+// Pure: the report's problem line for a read the job wrote as failed (its error and errorAt), or null; zaiUsageOf reads that file as no usage, so this line is the one trace of it. A `waiting: ` error (no GLM row to read) is no failure.
 export function zaiFailureOf(text: string): string | null {
   try {
     const parsed = failureSchema.safeParse(JSON.parse(text))
-    return parsed.success
+    return parsed.success && !parsed.data.error.startsWith("waiting: ")
       ? `The GLM usage read failed at ${parsed.data.errorAt}: ${parsed.data.error}`
       : null
   } catch {
