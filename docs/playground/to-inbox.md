@@ -75,5 +75,6 @@ a `progress` block is the dispatcher's one in-flight card, so a second of it is 
 The daily ledger card posts beside it: a dispatcher card titled with the ledger prefix (`PLAYGROUND_LEDGER_TITLE`, default `Firefighting`), alone or followed by `: ` and a day, passes and never counts as the in-flight card.
 An `active` step's bar, and one under 100 with no state, draw in the palette's blue, so you see at a glance which steps are in progress now; a step at 100 that names no state reads as done, and every other step's bar is muted.
 A step's name past about 14 characters is cut to the card's 6rem name column, so a session keeps each name short.
+A step's name may be a markdown link, `[ABC-12](https://...)`, which the card draws as a link you can click, its label alone shown.
 It and `edit` refuse a public post's draft, one with no link, whose words hold a work figure or an internal name, naming the kind and never the words, so what reaches your card is in your own words alone ([playbook](./playbook.md)'s **public** rule).
 Once you answer, the session that posted gets your answer as one `[inbox-answer]` line: it does what the line's `next` says, the way its `verb` names, then runs its `close` ([asks.md](../../.agents/dashboard/asks.md)).

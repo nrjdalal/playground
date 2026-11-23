@@ -86,6 +86,7 @@
   It holds one item a line, `name | percent | what's going on | ETA | state`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
   The state is optional, one of `active`, `done`, `held` or `waiting` (`PROGRESS_STATES`), and a row at 100 that names none reads as done: an `active` row's bar, and a row under 100 with no state, fill in the palette's blue (`ACTIVE_BAR`, `bg-chart-2`), and every other row's fill draws muted (`MUTED_BAR`), its state also in the bar's accessible name.
   The names share one column of at most 6rem, so every bar starts at one x and a long name never narrows them: a name past it is cut short, its whole name on hover.
+  A name written as a markdown link to an http or https page, `[ABC-12](https://...)`, draws as that link, opening in a new tab, its label alone shown, cut short and on hover, and named in the bar's accessible name; any other name draws as plain text (`LINK` in `progress-block.tsx`).
   A block with a line that does not read stays the plain code block, and `bun run ask` refuses it before it posts (below).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
