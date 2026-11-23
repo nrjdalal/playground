@@ -306,7 +306,7 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     for (const line of lost) io.out(line)
     io.out(
       lost.length
-        ? "put each again from a copy that has its executable bit: playground ext put <scope> <kind> <key> <path> --reason <why>"
+        ? "put each again, which stores it executable: playground ext put <scope> <kind> <key> <path> --reason <why>"
         : "every stored file that starts with #! keeps its executable bit",
     )
   } else if (verb === "import-scripts") {
