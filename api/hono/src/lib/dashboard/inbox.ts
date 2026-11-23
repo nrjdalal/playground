@@ -1056,11 +1056,15 @@ export type Deliver = (delivery: Delivery) => Promise<DeliveryResult>
 export type InboxFailure = { code: "CONFLICT" | "NOT_FOUND" | "VALIDATION_ERROR"; message: string }
 type Refused = { ok: false } & InboxFailure
 
-export const zodMessage = (error: z.ZodError): string =>
+// A zod error's issues, or a route validator's standard-schema ones, as one line naming each field.
+export const zodMessage = (error: {
+  issues: readonly { message: string; path?: ReadonlyArray<PropertyKey | { key: PropertyKey }> }[]
+}): string =>
   error.issues
-    .map((issue) =>
-      issue.path.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message,
-    )
+    .map((issue) => {
+      const path = (issue.path ?? []).map((p) => String(typeof p === "object" ? p.key : p))
+      return path.length ? `${path.join(".")}: ${issue.message}` : issue.message
+    })
     .join("; ")
 
 // The short id an item goes by, in the list, in a reply and in bun run ask get.
