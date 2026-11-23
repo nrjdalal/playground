@@ -16,7 +16,7 @@ import { tmpdir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
 
 import { setSessionNames } from "../../../../../packages/config/src/kinds"
-import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
+import { GH_HANGS, KEYRING_LOCKED } from "../../../../../packages/scripts/src/gh-read"
 import {
   autoEnd,
   BEATS,
@@ -25,7 +25,6 @@ import {
   cycle,
   ghAuth,
   idleCompact,
-  KEYRING_LOCKED,
   leadOf,
   nextDue,
   resultOf,

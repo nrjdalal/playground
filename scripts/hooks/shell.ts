@@ -34,6 +34,8 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
+  // Set on every command of a brace group a pipe feeds (`echo x | { true; xargs touch; }`), past its first, which stdin holds: the command whose output the group reads, which a later command reads too once the ones before it leave it
+  braceFed?: Command
   // Set on a case statement's pattern (casePatterns), which the shell matches and never runs, so its words name no program
   casePattern?: boolean
   // Set on every command of a line that defines a function named cd or chpwd, or holds a word that, its quotes and backslashes removed, starts with chpwd (`chpwd_functions=(f)`, `chp""wd_functions`, `add-zsh-hook chpwd f`), so each cd there is unread
@@ -1332,7 +1334,12 @@ function list(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
 function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): void {
   const { src } = lx
   const pending: Pending[] = []
-  const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
+  // the pipe into each brace group the walk is inside, beside opens, so every command of the body reads it (braceFed)
+  const fedOpens: (Command | undefined)[] = []
+  const fresh = (): Command => {
+    const braceFed = fedOpens.at(-1)
+    return { ...(braceFed && { braceFed }), redirects: [], scope, stdin: inherit, words: [] }
+  }
   let cmd = fresh()
   // each group command whose paren globOpens also reads as zsh's glob word, with that reading's command
   const twins = new Map<Command, Twin>()
@@ -1360,6 +1367,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
     if (brace(done, "}")) {
       const open = opens.pop()
+      fedOpens.pop()
       if (open !== undefined) {
         const { commands } = lx
         const close = commands.length
@@ -1426,11 +1434,24 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         lx.orRun = op === "||"
       }
       after = op
-      if (counting) opens.push(lx.commands.length)
+      if (counting) {
+        opens.push(lx.commands.length)
+        fedOpens.push(fedOpens.at(-1))
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted) break
         opens.push(lx.commands.length)
+        fedOpens.push(done.stdin ?? done.braceFed)
       }
+      // an exec with a redirect swaps the group's descriptors (`{ exec 0<&3; xargs …; }`), so the commands after it read the pipe no more
+      const called = done.words.find((w) => w.value !== "{" || w.quoted)
+      if (
+        fedOpens.length > 0 &&
+        called?.value === "exec" &&
+        !called.quoted &&
+        done.redirects.length > 0
+      )
+        fedOpens[fedOpens.length - 1] = undefined
       lx.commands.push(done)
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin
