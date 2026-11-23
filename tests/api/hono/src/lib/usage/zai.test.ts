@@ -134,4 +134,18 @@ describe("zaiFailureOf", () => {
     expect(zaiFailureOf(SAMPLE)).toBeNull()
     expect(zaiFailureOf("not json")).toBeNull()
   })
+
+  test("lists no failure while the job waits for a GLM row, and still lists a GLM row with no key", () => {
+    const at = "2026-10-16T15:05:00.000Z"
+    const waiting = JSON.stringify({
+      error: "waiting: no GLM account in usage.accounts",
+      errorAt: at,
+    })
+    expect(zaiFailureOf(waiting)).toBeNull()
+    const keyless =
+      "the Keychain holds no key for the first GLM row of usage.accounts under models.glmKeychainService"
+    expect(zaiFailureOf(JSON.stringify({ error: keyless, errorAt: at }))).toBe(
+      `The GLM usage read failed at ${at}: ${keyless}`,
+    )
+  })
 })

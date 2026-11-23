@@ -196,6 +196,7 @@ Sessions that work together share a workspace as full-height columns ([SPAWN.md]
   An ops job that runs a skill or script an accept changed restarts by itself at its next idle tick, never mid-pass, and logs the revision it picked up ([scripts/ops/README.md](../../../../scripts/ops/README.md#when-a-job-restarts-onto-new-code)), so Ops restarts none by hand.
   ops-zai-usage is `bun run ops:zai-usage`: every 5 minutes it reads Z.ai's quota endpoint, retrying for about 2 minutes a fetch that never reached Z.ai (DNS or the network just after boot),
   writes `zai-usage.json`, the readings the GLM spawn gate reads, with `balance` marked empty for an hour after a session-state record's `balance` failure (the quota endpoint never reports the balance) and `error` over the last windows on a failed read, and beats its own heartbeat;
+  with no GLM row in `usage.accounts` it beats `waiting: no GLM account in usage.accounts`, Waiting on the Scripts group, while a GLM row whose key the Keychain lacks beats the Keychain error, Failing;
   `--once` runs one read and writes only `zai-usage.json`, no beat.
   These jobs took over what runners held as background tasks, each `bun <checkout>/packages/scripts/src/<job>/cli.ts` with its script named by absolute path, so `up.py` keys it by its folder:
   ops-machine writes only under the data folder its `--data` names, which the jobs render passes; run with no `--data` from any checkout but the live dashboard's, it exits 2 before it writes.
