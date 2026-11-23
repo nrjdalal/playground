@@ -103,7 +103,8 @@ describe("ops-wa's ban-safety habits", () => {
 
   test("stops after 12 failed tries in a row, with one alert", async () => {
     const h = harness([])
-    expect(await h.run()).toContain("12 tries")
+    // the whole reason, since scripts/ops/up.py's NO_CONNECT retries a stop on this text alone
+    expect(await h.run()).toBe(`no connect in ${BACKOFF.tries} tries`)
     expect(h.sockets).toHaveLength(BACKOFF.tries)
     expect(h.waits).toHaveLength(BACKOFF.tries - 1)
     expect(h.alerts).toHaveLength(1)
