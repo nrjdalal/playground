@@ -82,6 +82,7 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
+  A card's text takes any length, as an answer's note and a changed draft's words do (`words` in `api/hono/src/lib/dashboard/inbox.ts`): the card draws it whole, and the Inbox scrolls past a long one.
   A `progress` block draws as bars at the card's own width, on a phone and a wide screen alike (`ProgressBlock` in `web/next/src/components/progress-block.tsx`, `progressItems` in `@packages/config/inbox`).
   It holds one item a line, `name | percent | what's going on | ETA | state`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
   The state is optional, one of `active`, `done`, `held` or `waiting` (`PROGRESS_STATES`), and a row at 100 that names none reads as done: an `active` row's bar, and a row under 100 with no state, fill in the palette's blue (`ACTIVE_BAR`, `bg-chart-2`), and every other row's fill draws muted (`MUTED_BAR`), its state also in the bar's accessible name.
@@ -122,7 +123,7 @@
   The unread dot stands in for an update's light alone; an ask keeps its light ("what is this dot before the icon?").
   Each verb is an icon button too, named in its `aria-label`, its `Hint` saying what it does ("should be just icon in this case also").
   Every open card ends in a comment box above its buttons, named Comment, the same gap above it as between the card's other parts, at least as tall as its first choice (`NoteBox`):
-  on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`, the answered card reading `You: ...` under its result and the box emptying;
+  on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note`, its poster reading it as the answer line's `comment`, the answered card reading `You: ...` under its result and the box emptying;
   on a secret ask or a reveal card it reads Type a note to Playground, then press Reply (the hosted build's reveal card keeps Add an optional comment, since it draws no Reply);
   on any other card (an update, an answered card) it reads Add a comment, and Reply alone sends it.
   Reply (the reply icon, named `Reply to #iN`) with the box empty hands the card's ref to Playground's composer (`outbox.reply` in `web/next/src/lib/chat.ts`, `replyRoute` and `withRef` in `web/next/src/lib/reply.ts`),

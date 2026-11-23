@@ -76,7 +76,7 @@ import { OWNER_APPS } from "./owner-apps"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
-const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
+const LIMITS = { line: 200, link: 4000, name: 120, prs: 50 }
 
 const oneLine = (max: number) =>
   z
@@ -86,7 +86,7 @@ const oneLine = (max: number) =>
     .max(max)
     .refine((value) => !/[\r\n]/.test(value), "Must be one line")
 
-const words = z.string().trim().min(1).max(LIMITS.text)
+const words = z.string().trim().min(1)
 
 // A Slack link reaches the owner in the app form they open, never the archives form; slack.linkConverter names the command that rewrites one, and slack.sendServer the MCP server a send goes through, each read from the extensions' policy when a message is made, "" when unset or unreadable.
 const ARCHIVES = /\b(?:[a-z0-9-]+\.)?slack\.com\/archives\//i
@@ -1006,7 +1006,7 @@ export type InboxList = {
 // What the dashboard posts for an item: the action, the words that go with Edit or with a draft changed before Send or Draft, and seen, the updatedAt of the card he answered, so an answer never lands on words its poster edited after he read them.
 export const answerInputSchema = z.strictObject({
   action: z.enum(ACTIONS),
-  note: z.string().trim().max(LIMITS.text).optional(),
+  note: z.string().trim().optional(),
   option: z
     .number()
     .int()
@@ -1025,7 +1025,7 @@ export const answerInputSchema = z.strictObject({
     .max(MAX_QUESTIONS)
     .optional(),
   seen: z.iso.datetime().optional(),
-  text: z.string().trim().max(LIMITS.text).optional(),
+  text: z.string().trim().optional(),
 })
 
 export type AnswerInput = z.input<typeof answerInputSchema>
@@ -3414,7 +3414,7 @@ export async function dismissItems(
 const settleNoteSchema = oneLine(LIMITS.line)
 
 // Where the poster carried the answer out (a Slack message's permalink, a ticket, a pull request), which the card links to; https alone, since the dashboard opens it.
-const linkSchema = z.url({ protocol: /^https$/ }).max(LIMITS.text)
+const linkSchema = z.url({ protocol: /^https$/ }).max(LIMITS.link)
 
 // What the link is, as the card names it ("Filed ABC-123"); one line.
 const linkLabelSchema = oneLine(LIMITS.line)
