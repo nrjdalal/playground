@@ -887,12 +887,14 @@ describe("an answer", () => {
     expect(checkAnswer(item({ kind: "update" }), { action: "approve", note: "x" })).toEqual({
       message: "An update is read, not answered",
     })
-    expect(answerInputSchema.safeParse({ action: "approve", note: "x".repeat(4000) }).success).toBe(
-      true,
-    )
-    expect(answerInputSchema.safeParse({ action: "approve", note: "x".repeat(4001) }).success).toBe(
-      false,
-    )
+    // a note and a changed draft take any length, as the card's own text does (#2970)
+    expect(
+      answerInputSchema.safeParse({
+        action: "edit",
+        note: "x".repeat(8000),
+        text: "y".repeat(8000),
+      }).success,
+    ).toBe(true)
   })
 
   test("leaves an update and an answered item alone", () => {
@@ -2334,6 +2336,22 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       title: "Weekly plan, final",
     })
     expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan, final.html")
+  })
+
+  test("a card's text past 4000 characters posts, edits and reads back whole (#2970)", async () => {
+    const long = "The ledger lists every open ticket with its owner and its age. ".repeat(80).trim()
+    expect(long.length).toBeGreaterThan(4000)
+    const card = (text: string) => ({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title: "Firefighting ledger",
+    })
+    const posted = await post(card(long))
+    expect((await store.getItem(db, posted.id))?.preview).toMatchObject({ text: long })
+    const longer = `${long}\n\n${long}`
+    expect((await store.editItem(db, posted.id, card(longer)))?.ok).toBe(true)
+    expect((await store.getItem(db, posted.id))?.preview).toMatchObject({ text: longer })
   })
 
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {
