@@ -3561,6 +3561,20 @@ var READERS = new Set([
   "wc"
 ]);
 var COPIERS = new Set(["cp", "rsync"]);
+var CODE_RUNNERS = new Set([
+  "awk",
+  "bun",
+  "deno",
+  "gawk",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby"
+]);
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);
   let real = data;
@@ -3654,6 +3668,8 @@ async function judgeBash(command, cwd, environment) {
     const tool = program(name);
     if (!tool)
       return;
+    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
+      return refuse(`${tool} code that names the roster and holds a write word`);
     if (COPIERS.has(tool)) {
       const dest = destinationOf(args);
       if (!dest)

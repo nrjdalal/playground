@@ -51,6 +51,13 @@ describe("a write to the live roster is refused, naming roster.ts", () => {
     "echo x > ~/.playground/r?ster.json",
     "bash -c 'echo x > ~/.playground/roster.json'",
     "F=$(echo ~/.playground/roster.json); echo x > $F",
+    // inline code that names the roster and holds a write word, failing closed when the write goes elsewhere
+    `python3 -c "open('${ROSTER}', 'w').write('{}')"`,
+    "bun -e \"await Bun.write(process.env.HOME + '/.playground/roster.json', '{}')\"",
+    "node -e \"require('fs').writeFileSync(process.env.HOME + '/.playground/roster.json', '{}')\"",
+    `perl -e 'unlink "${ROSTER}"'`,
+    `python3 -I -c "import json,os; a=json.load(open(os.path.expanduser('~/.playground/roster.json'))); open(os.path.expanduser('~/.playground/ops/x.priority'), 'w').write(str(len(a)))"`,
+    `bun /tmp/probe.ts 'echo x > "$(echo ~/.playground/roster.json)"'`,
     'echo x > "$D"/roster.json # ~/.playground/roster.json',
     'echo x > "$(echo ~/.playground/roster.json)"',
   ])("%s", async (command) => {
@@ -98,10 +105,9 @@ describe("roster.ts and every read run", () => {
     "printf '%s\\n' ~/.playground/roster.json",
     "bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + \"/.playground/roster.json\").text()); console.log(r)'",
     `python3 -I -c "import json; r = json.load(open('${ROSTER}')); print(json.dumps(r)[:80])"`,
-    `bun /tmp/probe.ts 'echo x > "$(echo ~/.playground/roster.json)"'`,
-    // real calls the replay found, each a read of the roster beside a write elsewhere
+    "bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + \"/.playground/roster.json\").text()); for (const s of r.agents.filter((a) => a.n >= 1)) console.log(s.name)'",
+    // real calls the replay found, each a read of the roster
     'n="$(head -c 6 /dev/urandom | xxd -p)-worker"; grep -c "$n" ~/.playground/roster.json; sed "s/x/y/" /tmp/t.md > ~/.playground/brief-$n.md',
-    `python3 -I -c "import json,os; a=json.load(open(os.path.expanduser('~/.playground/roster.json'))); open(os.path.expanduser('~/.playground/ops/x.priority'), 'w').write(str(len(a)))"`,
     `bun scripts/roster.ts assign x-reviewer "Review: $(jq -r '.title' ~/.playground/roster.json)" "score PR 1" worker=x-worker`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()

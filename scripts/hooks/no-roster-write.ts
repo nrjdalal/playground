@@ -58,6 +58,25 @@ const READERS = new Set([
 // Programs that copy their operands to the last one, which alone they write.
 const COPIERS = new Set(["cp", "rsync"])
 
+// Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
+const CODE_RUNNERS = new Set([
+  "awk",
+  "bun",
+  "deno",
+  "gawk",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby",
+])
+
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
+const WRITE_WORDS =
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i
+
 // The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
 const targetsOf = (environment: Environment): string[] => {
   const data = dataDirOf(environment)
@@ -166,6 +185,11 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         return refuse(`a redirect onto ${shown(r.target)}`)
     const tool = program(name)
     if (!tool) return
+    if (
+      CODE_RUNNERS.has(tool) &&
+      args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
+    )
+      return refuse(`${tool} code that names the roster and holds a write word`)
     if (COPIERS.has(tool)) {
       const dest = destinationOf(args)
       if (!dest) return

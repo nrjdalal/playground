@@ -1512,9 +1512,11 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   - `cp` or `rsync` with the file as its destination (its last operand, or `-t`), or a `roster.json` copied into the data folder;
   - `sed` or `gsed` with `-i` or `--in-place`;
   - any other program given the file as a word (`tee`, `mv`, `ln`, `rm`, `truncate`, an editor), since only a reader leaves it as it is;
+  - inline code (`bun -e`, `python3 -c`, `node`, `perl` and the rest of `CODE_RUNNERS`) that names the file and holds a write word (`WRITE_WORDS`: `write`, an `open(` to write or append, `rename`, `unlink`, `rm`, `truncate`, a `>` but `=>` and `>=`), since it does not parse that code;
+    so a write to another file beside a read of the roster is refused too, and a read alone runs.
 - It fails closed: a write position it cannot read (a redirect target or a copy's destination built from a substitution or an unknown variable) is refused when the call names the file anywhere and the text after the word's last expansion may end its path (`$F` and `"$(…)"` may, `brief-$n.md` may not), and so is a call it cannot parse whose text names the file.
   An unread operand of any other program runs, since a real `roster.ts` call carries one (`"Review: $(jq … roster.json)"`).
-  Inline code (`bun -e`, `python3 -c`) is not parsed, so a write there passes: real reads of the roster there sit beside writes to other files in the same code, which no text test tells apart (measured over a day's calls).
+  A `bash -c` or `sh -c` script is read as shell, so its forms are judged as the line's own.
 - Every other call runs: `bun scripts/roster.ts …`, a reader of the file (`cat`, `jq`, `grep`, `head`, `ls`, `stat`, `diff`, `sed` without `-i`, the rest of `READERS`), a copy from it, the versions and temp file beside it (`roster.json.1`, `roster.json.tmp`), and text that only names it on its way elsewhere (a commit message, a `--body`, a heredoc or an `echo` into another file).
   `merge-queue.json` stays out of it, since the Builder writes that file by hand (playbook's SWEEP.md).
 - It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-raw-wa](#no-raw-wa)'s process runs it first on the file tools, since that hook's registration already takes them, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
