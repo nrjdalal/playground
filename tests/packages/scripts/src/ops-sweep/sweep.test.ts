@@ -1489,6 +1489,36 @@ describe("forecast", () => {
     ])
     expect(await forecast(ctx)).toEqual({ main: { week: 48 }, backup: "no forecast yet" })
   })
+
+  // usage.json's 5-hour window, 10% an hour ago and 50% now, projects to 130 at its reset 2 hours on.
+  const highFiveHour = (ctx: Context) => {
+    prior(ctx, A, 10, -3600)
+    usage(ctx, A, {
+      five_hour: { resets_at: T + 7200, used_percentage: 50 },
+      seven_day: { resets_at: T + 86400, used_percentage: 40 },
+    })
+  }
+
+  test("with no usage.accounts, usage.json's account still reads its 5-hour window, and it counts for headroom", async () => {
+    const { ctx } = setup()
+    roster(ctx, [])
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    highFiveHour(ctx)
+    expect(await forecast(ctx)).toEqual({
+      "unlisted 1": { week: "no forecast yet", fiveHour: 130 },
+    })
+    expect(await check(ctx)).toContain("no-headroom")
+  })
+
+  test("a listed account with too few week readings keeps its 5-hour window, and it counts for headroom", async () => {
+    const { ctx } = setup()
+    roster(ctx, [])
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [{ email: A, label: "main" }])
+    highFiveHour(ctx)
+    expect(await forecast(ctx)).toEqual({ main: { week: "no forecast yet", fiveHour: 130 } })
+    expect(await check(ctx)).toContain("no-headroom")
+  })
 })
 
 describe("pace off", () => {

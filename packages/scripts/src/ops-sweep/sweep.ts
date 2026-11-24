@@ -162,8 +162,8 @@ export async function sshLive(ctx: Context, names: string[]): Promise<string[]> 
   return out
 }
 
-// A forecast entry, by its label: one account's projected week, and, when usage.json logs it, the 5-hour window projected to its reset, or a state string ("no forecast yet", "parked until ...").
-type ForecastEntry = { week: number; fiveHour?: number } | string
+// A forecast entry, by its label: one account's projected week, or "no forecast yet" beside a 5-hour figure, and, when usage.json logs it, the 5-hour window projected to its reset; else a state string ("no forecast yet", "parked until ...").
+type ForecastEntry = { week: number | "no forecast yet"; fiveHour?: number } | string
 
 // usage.accounts' Claude rows, each by its account key and the label pickable() names it, with the time it is parked until, when set.
 const usageAccounts = async (
@@ -181,7 +181,7 @@ const usageAccounts = async (
   }))
 }
 
-// The 5-hour window the account usage.json logs, projected to its reset from the first sample within the last hour sharing its reset, else undefined when the account has no 5-hour window or its readings do not yet span 20 minutes, so it projects its week alone.
+// The 5-hour window the account usage.json logs, projected to its reset from the first sample within the last hour sharing its reset, else undefined when the account has no 5-hour window, its readings do not yet span 20 minutes or its reset is under 10 minutes away, so it projects its week alone.
 const fiveHourOf = (account: string | undefined, s: Json, samples: Json[]): number | undefined => {
   const used = s.f5 as number | undefined
   const reset = s.r5 as number | undefined
@@ -199,7 +199,7 @@ const fiveHourOf = (account: string | undefined, s: Json, samples: Json[]): numb
   return Math.round((used + rate * (reset - t)) * 10) / 10
 }
 
-// One entry per usage.accounts Claude row, by the label pickable() names it: the account's projected week at its reset from weekOf, plus, for the account usage.json logs, its 5-hour window from the recent rate, or a state string for an account with too few readings, or parked in the future.
+// One entry per usage.accounts Claude row, and for usage.json's account when no row lists it, by the label pickable() names it: the account's projected week at its reset from weekOf, plus, for the account usage.json logs, its 5-hour window from the recent rate, or a state string for an account with no figure, or parked in the future.
 export async function forecast(ctx: Context): Promise<Record<string, ForecastEntry>> {
   const samples = join(here(ctx), "usage-samples.jsonl")
   const t = Math.floor(seconds(ctx))
@@ -213,8 +213,6 @@ export async function forecast(ctx: Context): Promise<Record<string, ForecastEnt
       account: login,
       f5: rl.five_hour?.used_percentage,
       r5: rl.five_hour?.resets_at,
-      r7: rl.seven_day?.resets_at,
-      s7: rl.seven_day?.used_percentage,
       t,
     }
     await appendFile(samples, `${JSON.stringify(s)}\n`)
@@ -230,19 +228,19 @@ export async function forecast(ctx: Context): Promise<Record<string, ForecastEnt
     await samplesOf(ctx, "week-samples.jsonl"),
     await samplesOf(ctx, "account-samples.jsonl"),
   ]
+  const accounts = await usageAccounts(ctx)
+  if (login && !accounts.some((row) => row.account === login))
+    accounts.push({ account: login, label: (await pickable(ctx)).get(login) ?? "unlisted" })
   const out: Record<string, ForecastEntry> = {}
-  for (const { account: key, label, parkedUntil } of await usageAccounts(ctx)) {
+  for (const { account: key, label, parkedUntil } of accounts) {
     if (parkedUntil && Date.parse(parkedUntil) > ctx.now()) {
       out[label] = `parked until ${parkedUntil}`
       continue
     }
-    const week = weekOf(factory, others, key, t)
-    if (!week) {
-      out[label] = "no forecast yet"
-      continue
-    }
-    out[label] =
-      key === login && fiveHour !== undefined ? { week: week.week, fiveHour } : { week: week.week }
+    const week = weekOf(factory, others, key, t)?.week ?? "no forecast yet"
+    const five = key === login ? fiveHour : undefined
+    if (five === undefined) out[label] = typeof week === "number" ? { week } : week
+    else out[label] = { week, fiveHour: five }
   }
   return out
 }
@@ -868,9 +866,9 @@ export async function check(ctx: Context): Promise<string[]> {
   const picked = new Set((await pickable(ctx)).values())
   const figures: number[] = []
   for (const [label, entry] of Object.entries(await forecast(ctx))) {
-    // only the accounts the split can pick, never a parked one or one with too few readings
+    // only the accounts the split can pick, each by the figures it has, never a parked one
     if (!picked.has(label) || typeof entry === "string") continue
-    figures.push(entry.week)
+    if (typeof entry.week === "number") figures.push(entry.week)
     if (typeof entry.fiveHour === "number") figures.push(entry.fiveHour)
   }
   if (figures.length) found.push(figures.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
