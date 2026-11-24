@@ -846,7 +846,7 @@ describe.skipIf(!dockerUp())("ingest", () => {
     expect(before).toBeGreaterThan(0)
     appendFileSync(path, human(`${id}-u2`, "two", "2026-10-06T15:00:01.000Z"))
     await ingestFile(db, projects, path)
-    // The append folds from the stored offset, reading no entries; the one new read is the reboot fix's head check, which reads the first stored line to confirm the head is unchanged, so it is not a re-scan of the session's entries.
+    // The append folds from the stored offset, reading no entries; the one new read is the head check's lookup of this file's first entry by its uuid, since the file grew, so it is not a re-scan of the session's entries.
     expect(Number((await entryQueries()) - before)).toBe(1)
     expect((await calls(SWEEP)) - sweepsBefore).toBe(1)
     expect(await entryCount(id)).toBe(2)
