@@ -1640,16 +1640,15 @@ describe("restore points", () => {
     const data = dataOf(config)
     await run(config, ["set", "worker-restore", "task=Keep versions", `eta=${inMinutes(30)}`])
     await run(config, ["set", "worker-restore", `eta=${inMinutes(20)}`])
-    const before = versionList(data)
-    const before1 = existsSync(versionPath(data, 1))
-      ? readFileSync(versionPath(data, 1), "utf8")
-      : null
+    // The second set kept the first set's roster as .1, the one version so far.
+    expect(versionList(data)).toEqual([1])
+    const before1 = readFileSync(versionPath(data, 1), "utf8")
     // A key the roster does not know is refused before the write, so nothing is written and no version is added.
     const refused = await run(config, ["set", "worker-restore", "nosuchkey=1"])
     expect(refused.code).not.toBe(0)
-    // The versions are unchanged: none added, and .1 still the same text when one existed.
-    expect(versionList(data)).toEqual(before)
-    if (before1 !== null) expect(readFileSync(versionPath(data, 1), "utf8")).toBe(before1)
+    // The versions are unchanged: none added, and .1 still the same text.
+    expect(versionList(data)).toEqual([1])
+    expect(readFileSync(versionPath(data, 1), "utf8")).toBe(before1)
   })
 
   test("a version that cannot be rotated still lets the roster write land", async () => {
