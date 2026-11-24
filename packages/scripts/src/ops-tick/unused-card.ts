@@ -1,6 +1,9 @@
+import { basename } from "node:path"
+
 import { picksOf } from "@packages/config/inbox"
 
-import { MIN_LIST_BYTES, type Machine, type Unused } from "./unused"
+import { askItemText } from "../ops-job/ask-item"
+import { MIN_LIST_BYTES, type Machine, SHARD, type Unused } from "./unused"
 
 // The owner's one Inbox card for each machine's unused space: nightly-clean posts it, edits it in place while it stands open, and once answered removes each Remove pick by its own handle; `playground rm --card` reads the same card to check its approval itself.
 
@@ -16,11 +19,12 @@ export type CardItem = {
   machine: string
   path: string
   recorded?: true
+  shards?: string[]
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }
-// The open card nightly-clean keeps in its state file: its Inbox id, the items it asks about, and at, the card's updatedAt read back right after nightly-clean's own last post or edit.
-export type CardState = { at?: string; id: string; items: CardItem[] }
+// The open card nightly-clean keeps in its state file: its Inbox id, the items it asks about, at, the card's updatedAt read back right after nightly-clean's own last post or edit, and unread, the nights in a row its card has read as unread, the second of which sends Ops one line.
+export type CardState = { at?: string; id: string; items: CardItem[]; unread?: number }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
 export type Kept = Record<string, number>
 
@@ -53,6 +57,16 @@ export const questionOf = (item: CardItem): string =>
 
 const QUESTION = /^Remove `(.+)` on ([A-Za-z0-9._-]+), (\d+) bytes \([\d.]+ GB\)\?$/
 
+// A sharded set's note, read through SHARD: a whole set reads "all N of N shards", and a set missing a shard names each shard that is present.
+const shardedNote = (shards: string[]): string => {
+  const [, stem, , total] = SHARD.exec(basename(shards[0]!))!
+  const present = shards.map((p) => Number(SHARD.exec(basename(p))![2]))
+  const complete = present.length === Number(total) && present.every((n, i) => n === i + 1)
+  return complete
+    ? ` It is ${stem}, all ${present.length} of ${Number(total)} shards.`
+    : ` It is ${stem}, with only shards ${present.join(", ")} of ${Number(total)} here.`
+}
+
 const removeRow = (item: CardItem) => ({
   description: `${
     item.kind === "weights"
@@ -60,7 +74,9 @@ const removeRow = (item: CardItem) => ({
       : item.kind === "image"
         ? "docker image rm removes it; a pull brings it back."
         : "Moved to the trash; playground rm --restore brings it back for 7 days."
-  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}`,
+  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}${
+    item.shards ? shardedNote(item.shards) : ""
+  }`,
   label: "Remove",
 })
 
@@ -82,13 +98,14 @@ export const offered = (
             .filter((i) => !KIT_RECORD.some((rel) => inside(i.path, `${home}/${rel}`)))
             .filter((i) => i.kind !== "rehearsal" || out(i.path))
             .filter((i) => kept[keyOf({ machine: m.machine, path: i.path })] !== i.bytes)
-            .map(({ bytes, id, kind, path, recorded }) => ({
+            .map(({ bytes, id, kind, path, recorded, shards }) => ({
               bytes,
               ...(id ? { id } : {}),
               kind,
               machine: m.machine,
               path,
               ...(recorded ? { recorded: true as const } : {}),
+              ...(shards ? { shards } : {}),
             })),
     )
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
@@ -180,14 +197,11 @@ const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 // An Inbox id as ask new prints it, the one form a card id takes.
 export const CARD_ID = /^[0-9a-f-]{36}$/
 
-// The card's JSON alone: ask get puts its `ask: picked` line on stderr, which a run joining both streams (ops-job's) leaves after it.
-const cardJson = (out: string) => out.slice(out.indexOf("{")).replace(/(?:\n+ask: [^\n]*)+\s*$/, "")
-
 // One card read by `bun run ask get <id>`, or ask's last line when it did not read.
 export const readCard = async (ask: CardDeps["ask"], id: string): Promise<CardAnswer | string> => {
   const read = await ask(["get", id])
   try {
-    if (read.code === 0) return JSON.parse(cardJson(read.out)) as CardAnswer
+    if (read.code === 0) return JSON.parse(askItemText(read.out)) as CardAnswer
   } catch {}
   return lastLine(read.out) || `exit ${read.code}`
 }
@@ -226,7 +240,7 @@ export const peerCommand = (item: CardItem, card: string): string =>
       ? `playground rm --card ${card} --peer ${item.machine} '${item.path.replaceAll("'", `'\\''`)}'`
       : `playground rm ${item.path} --reason "nightly-clean card ${card}"`
 
-// One night of the card: an answered card's Remove picks still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, every other item kept at its size, and the card closed; an open card is edited in place to tonight's items, or settled with none; then a new card is posted for what is left, from the ops manager's name. Returns the card and kept to save, the log's words (none on a night with no card), and each line for Ops.
+// One night of the card: an answered card's Remove picks still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, every other item kept at its size, and the card closed; an open card is edited in place to tonight's items, or settled with none; a card that reads as unread is held another night, and a second night in a row it is sent to Ops; then a new card is posted for what is left, from the ops manager's name. Returns the card and kept to save, the log's words (none on a night with no card), and each line for Ops.
 export async function cardNight(
   found: Machine[],
   home: string,
@@ -240,14 +254,19 @@ export async function cardNight(
   if (card) {
     const item = await readCard(deps.ask, card.id)
     if (typeof item === "string") {
-      if (/no inbox item/.test(item)) card = undefined
+      // A saved card the Inbox no longer holds reads "no inbox item"; it is let go, while a read that fails holds the card another night, and a second night in a row it is sent to Ops.
+      if (/no inbox item/.test(item)) return { kept, ops, said: "card gone" }
+      const nights = (card.unread ?? 0) + 1
+      if (nights === 2) ops.push(`card ${card.id} unread two nights in a row: ${item}`)
       return {
-        ...(card ? { card } : {}),
+        card: { ...card, unread: nights },
         kept,
         ops,
-        said: card ? `card ${card.id} unread: ${item}` : "card gone",
+        said: `card ${card.id} unread: ${item}`,
       }
     }
+    const { unread: _unread, ...read } = card
+    card = read
     if (item.status === "open") {
       const tonight = offered(found, home, deps.out, kept).slice(0, CARD_MAX)
       if (!tonight.length) {
