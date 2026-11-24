@@ -1738,7 +1738,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*|\d+)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -1759,7 +1759,7 @@ function dollar(lx, plain = false) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return unknown("a shell variable");
+    return /\d/.test(next) ? variable(next) : unknown("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -14941,6 +14941,8 @@ var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", 
 var LEADS2 = new Set(["!", "(", "do", "elif", "else", "then", "{"]);
 var OPENERS = new Set(["case", "for", "if", "select", "until", "while"]);
 var CLOSERS = new Set(["done", "esac", "fi"]);
+var RUNS_TEXT2 = new Set([".", "eval", "source"]);
+var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
