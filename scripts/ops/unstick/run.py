@@ -428,11 +428,11 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
-# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
 # the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper, `zsh -c ... eval '<command>'`) is never a job (builder, 8 Oct)
 HEAVY_PROGRAM = re.compile(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)")
 # run-slot.sh as ps shows it, run by a shell or by its own shebang
 RUN_SLOT = re.compile(r"^((\S*/)?(ba|z)?sh\s+)?(\S*/)?run-slot\.sh(\s|$)")
+# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
 PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
@@ -478,15 +478,8 @@ def heavy_jobs(rows=None):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
         except (OSError, IndexError):
             pass
-    # owners is the holder and every pid up it, so `pid in owners` counts a run that is itself the holder or started it, never one that merely shares an ancestor with a holder
-    owners = set(holders)
-    for hpid in holders:
-        pp = parent.get(hpid)
-        while pp and pp not in ("0", "1") and pp not in owners:
-            owners.add(pp)
-            pp = parent.get(pp)
-    # a run-slot.sh still waiting for its slot writes no holder (the commit lane leaves no ticket either), so the run that started it counts as in line for one
-    owners |= {parent[p] for p, c in cmds.items() if RUN_SLOT.match(c) and p in parent}
+    # owners is the parent of every run-slot.sh, holding (the holder is run-slot.sh's own pid) or still waiting (it writes no holder, and the commit lane leaves no ticket either), so `pid in owners` counts a run that started run-slot.sh, never one that merely shares an ancestor with it
+    owners = {parent[p] for p, c in cmds.items() if RUN_SLOT.match(c) and p in parent}
     # bare is every pid above a heavy process with no run-slot.sh between them, so a run that also runs a suite itself beside its run-slot.sh child never reads as inside
     bare = set()
     for p, c in cmds.items():
