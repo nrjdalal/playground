@@ -10,6 +10,7 @@ import {
   cutDashboardCheckout,
   dashboardCheckout,
   dashboardUrls,
+  followerRunning,
   graceEnded,
   homeDataDir,
   liveBranch,
@@ -412,7 +413,7 @@ describe("upHolds", () => {
   })
 })
 
-describe("prebuildQueued when the pid file is gone", () => {
+describe("a pid reader whose pid file is gone", () => {
   const withData = (data: string, read: () => boolean): boolean => {
     const saved = process.env.PLAYGROUND_DATA_DIR
     try {
@@ -429,5 +430,11 @@ describe("prebuildQueued when the pid file is gone", () => {
     const data = join(dir, "prebuild-gone")
     mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
     expect(withData(data, () => prebuildQueued())).toBe(false)
+  })
+
+  test("a follower with no dashboard-ingest.pid reads not running, not a throw", () => {
+    const data = join(dir, "follower-gone")
+    mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
+    expect(withData(data, () => followerRunning())).toBe(false)
   })
 })
