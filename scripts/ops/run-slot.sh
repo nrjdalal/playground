@@ -44,6 +44,8 @@ if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n') SF=(-c '%i %Y'); els
 mtime() { local o; o=$(stat "${ST[@]}" "$1" 2>/dev/null) || return 1; printf '%s\n' "${o%% *}"; }
 # the call's clock, moved by SECONDS with no process, so a long wait reads the time as it is now
 clock() { NOW=$((T0 + SECONDS)); }
+# NOW_ISO as of the clock's NOW, one date only once NOW has moved since the last read, so an expiry read in a subshell, whose refresh the parent never sees, still reads the time now
+iso_clock() { [ "$ISO_AT" = "$NOW" ] || { NOW_ISO=$(date -u +%FT%TZ); ISO_AT=$NOW; }; }
 stamp() { stat -L "${SF[@]}" "$1" 2>/dev/null; }
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
@@ -51,23 +53,23 @@ STAMP=$(stamp "$SELF")
 SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
-  local f="$OPS/$1" line ends now m
+  local f="$OPS/$1" line ends m
   [ -e "$f" ] || return 1
   clock
   line=$(head -n 1 "$f" 2>/dev/null)
   switch_ends "$1"
   ends=$ENDS
-  now=$NOW_ISO
   if [ -n "$ends" ]; then
-    [ "$ISO_AT" = "$NOW" ] || { NOW_ISO=$(date -u +%FT%TZ); ISO_AT=$NOW; }
-    [[ "$now" < "$ends" ]] && return 0
+    iso_clock
+    [[ "$NOW_ISO" < "$ends" ]] && return 0
   else
     m=$(mtime "$f" || printf '%s' "$NOW")
     # an mtime that reads back empty counts as the file gone, rather than as a shell error (4 Nov: the same read in stale printed "syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
     [ $(( NOW - m )) -lt 14400 ] && return 0
+    iso_clock
   fi
-  mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
+  mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$NOW_ISO expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
 }
 # the expiry a switch line carries, read with builtins into ENDS, so switch_on and due_at parse one line with no process (issue 1378's fork bound)
@@ -1957,7 +1959,8 @@ reclaim() {
   line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
   dir=$(stamp "$1")
-  [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
+  # the stale holder line goes before the rmdir, as in free, so a reclaimer that read it before this one freed the slot finds it gone once the next taker holds the slot
+  [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rm -f "$1.holder" && rmdir "$1" 2>/dev/null
 }
 
 # the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
