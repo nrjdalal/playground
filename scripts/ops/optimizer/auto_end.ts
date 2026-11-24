@@ -345,7 +345,7 @@ export async function unsavedLive(
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
+// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR, by their pr and, while prsToo, their prs (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
 export type CleanupDeps = {
   carry?: (item: Carried) => Promise<void>
   checkers?: (pr: string, prsToo: boolean) => Promise<string[] | null>
@@ -654,7 +654,7 @@ export async function drainCarried(
   return lines
 }
 
-// After a session closes, each worktree it used, one at a time; then, for a checker, each other checker kind's clone of its PR an earlier end kept, while no other reviewer or tester row on that PR is live; then its leftovers (its scratch and scratchpad folders, its memory settings file and its temp folders). Every move is charged to the session itself, so an end never spends its worker's cap or any other session's, and one past the cap is carried to the next beat.
+// After a session closes, each worktree it used, one at a time; then, for a checker, each other checker kind's clone of its PR an earlier end kept, while no other live reviewer or tester row names that PR as its pr, or, until that PR reads merged or closed, in its prs; then its leftovers (its scratch and scratchpad folders, its memory settings file and its temp folders). Every move is charged to the session itself, so an end never spends its worker's cap or any other session's, and one past the cap is carried to the next beat.
 export const cleanupLive =
   (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
