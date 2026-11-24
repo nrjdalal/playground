@@ -34,7 +34,8 @@ import {
 import { SEND, typingMs } from "../../../../../packages/scripts/src/ops-wa/habits"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { votedOptions } from "../../../../../packages/scripts/src/ops-wa/votes"
-import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { originCheckout } from "../../../../machine"
 import { ALERT, fakeSocket, groupJid, jid, OWNER, SPARE, STRANGER } from "./fake-socket"
 
 const dirs: string[] = []
@@ -97,6 +98,7 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     assistant: async () => mode.seat,
     busy: async () => mode.busy,
     catchUp: send.catchUp,
+    remind: send.remind,
     log: (line) => logs.push(line),
     on: async () => mode.on,
     relay: async (to: string, text: string, isData?: boolean) => {
@@ -857,10 +859,15 @@ describe("toWhatsApp", () => {
   })
 })
 
+// A stub origin list, the same on every machine, so the terms row names a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 // A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
 const TERMS = termsOf(
   { companies: ["Acmeworks"], handles: [], linearKeys: [], names: ["Quillon Barr"], slackIds: [] },
-  UNSET_REPOS,
+  REPOS,
 )
 const card = (
   ref: number,
@@ -1118,6 +1125,29 @@ describe("Inbox cards on WhatsApp", () => {
     await h.pass()
     expect(h.texts().at(-1)).toBe("📥 Card 40\n📥 Card 41\n📥 Card 42")
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
+  })
+
+  test("a three-part card whose second part fails sends its first part once, then the other two on the next pass (#2899)", async () => {
+    const long = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([card(12, { kind: "update" }, { text: long })])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts).toHaveLength(3)
+    expect(texts[0]).toStartWith(`*Card 12*\n${"a".repeat(3_000)}`)
+    expect(texts[1]).toBe("b".repeat(3_000))
+    expect(texts[2]).toStartWith("c".repeat(3_000))
   })
 
   test("a card that goes is redacted first", async () => {
@@ -2139,6 +2169,29 @@ describe("Inbox drafts on WhatsApp (#2873)", () => {
     expect(h.logs.filter((line) => line.includes("#i21"))).toHaveLength(1)
   })
 
+  test("a three-part draft whose second part fails sends its first part once, then the other two, and a reply to any part answers it (#2899)", async () => {
+    const long = draftCard(20)
+    long.preview.text = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([long])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts.map((t) => t.replace("*Card 20*\n", "")[0])).toEqual(["a", "b", "c"])
+    const answer = await replyTo({ ...h, ...ib } as never, "send", OWNER, "m1")
+    expect(answer).toEqual(["Sent #i20 as written."])
+  })
+
   test("a draft with files posts nothing from WhatsApp", async () => {
     const draft = draftCard(20)
     draft.preview.attachments = [{ name: "made-up.png" }]
@@ -2571,4 +2624,74 @@ describe("quiet hours (#2887)", () => {
     expect(fake.sent).toEqual([])
     expect((await held(h.dir)).map((m) => m.body)).toEqual(["kept through the wait"])
   })
+})
+
+describe("the reminder before the owner's 24 hours close (#2905)", () => {
+  // the owner writes at 03:00 UTC, so 22 hours on is 01:00 UTC the next day and the window closes at 03:00
+  const opened = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "away for a while")])
+    await h.settle()
+    return h
+  }
+  const reminders = (h: Awaited<ReturnType<typeof opened>>) =>
+    h.fake.sent.flatMap((s) => s.content.text ?? []).filter((t) => t.includes("24 hours"))
+
+  test("at 22 hours one line asks for any reply, and none goes at 21 hours", async () => {
+    const h = await opened()
+    h.advance(21 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    expect(reminders(h)[0]).toContain("reply")
+  })
+
+  test("past 24 hours the window has closed, and no line goes", async () => {
+    const h = await opened()
+    h.advance(24 * HOUR + 60_000)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("a window gets one line alone, and the owner's next message opens a new window with its own", async () => {
+    const h = await opened()
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(30 * 60_000)
+    await h.pass()
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    h.fake.upsert([h.fake.message(jid(OWNER), "still here")])
+    await h.settle()
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(2)
+  })
+
+  test("at 22 hours inside quiet hours the line waits for their end while the window is open", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 2, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+  })
+
+  test("quiet hours that end after the window closes leave no line", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 6, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(3 * HOUR)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
+  })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

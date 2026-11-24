@@ -250,8 +250,9 @@ const pyNow = () =>
     Bun.spawnSync(["python3", "-I", "-c", "import time; print(time.time())"]).stdout.toString(),
   )
 
-// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
+// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made, and the machine booted long ago: a CI runner boots seconds before the suite, which would end the grace of a start a minute old.
 const RESTARTED = `${LOAD}started = []
+up.boot_time = lambda: 0
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None
@@ -450,6 +451,80 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-y")
   // ops-w has no holder to stop, so a start would run a second copy beside its heartbeat pid
   expect(log).not.toContain("ops-w")
+})
+
+// Loads up.py and runs one pass per [lastResult, host answers] given, the job's holder and heartbeat pid 4800 plus the pass's number, every TERM and start recorded rather than made.
+const NO_CONNECT = `${LOAD}import datetime, os
+passes = json.loads(sys.argv[2])
+hosts, kills, started = [], [], []
+up.ptable.table = lambda: {4800 + i: None for i in range(1, len(passes) + 1)}
+up.run = lambda argv, timeout=60: (0, "")
+up.os.kill = lambda pid, sig: kills.append([pid, sig])
+up.alive = lambda pid: [pid, 15] not in kills
+up.start = lambda job: started.append(job["name"]) or True
+up.herdr = lambda: ("/x/herdr", "")
+up.in_grid = lambda job, binary: True
+up.grace_ended = lambda job, start_at: True
+for i, (result, answers) in enumerate(passes, 1):
+    up.once.running = lambda name, marker, pid=4800 + i: pid
+    up.answers = lambda host, answers=answers: hosts.append(host) or answers
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(os.path.join(up.OPS, "ops-wa.json"), "w") as f:
+        json.dump({"pid": 4800 + i, "lastBeatAt": now, "startedAt": now, "lastResult": result, "cycleSeconds": 60}, f)
+    up.up(True)
+print(json.dumps({"hosts": hosts, "kills": kills, "started": started}))
+`
+
+// #2980: ops-wa beat a no-connect stop through a network outage and stayed stopped after the network came back, so ops-up starts it again once WhatsApp's host answers, once per recovery, and leaves a logout alone.
+test("a no-connect stop starts again once its host answers, once per recovery, and a logout stop stays", () => {
+  const config = mkdtempSync(join(scratch, "no-connect-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = {
+    command: "bun /x/ops-wa/cli.ts",
+    heartbeat: "ops-wa",
+    name: "ops-wa",
+    runtime: "herdr",
+  }
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
+  const stopped = "stopped: no connect in 12 tries"
+  const passes = [
+    [stopped, false],
+    [stopped, true],
+    [stopped, true],
+    [stopped, false],
+    [stopped, true],
+    ["ok", true],
+    [stopped, true],
+    ["stopped: WhatsApp logged out the device", true],
+  ]
+  const child = Bun.spawnSync(["python3", "-I", "-c", NO_CONNECT, upPy, JSON.stringify(passes)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const { hosts, kills, started } = JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!)
+  // only each retried pass's own recorded holder is signalled: pass 2 after the host answers again, pass 5 after an outage pass 4 saw, pass 7 after pass 6's ok beat
+  expect(kills).toEqual([
+    [4802, 15],
+    [4805, 15],
+    [4807, 15],
+  ])
+  expect(started).toEqual(["ops-wa", "ops-wa", "ops-wa"])
+  // the host is asked only on a no-connect beat, never on an ok or a logout beat
+  expect(hosts).toEqual(Array(6).fill("web.whatsapp.com"))
+  const log = readFileSync(join(ops, "up.log"), "utf8")
+  expect(log).toContain(
+    `ops-wa pid 4802 ${stopped}, and web.whatsapp.com answers again; stopped it`,
+  )
+  expect(log).not.toContain("logged out")
 })
 
 // a start recorded within GRACE, its heartbeat pid dead and no heartbeat.startedAt, but the machine booted after the recorded start, so ops-up ends the grace and starts the job in that pass.

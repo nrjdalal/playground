@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
+import { readFile, rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -491,6 +492,13 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
   console.log(names.join("\n"))
 }
 
+// The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it. A rotation that fails never blocks the write, so each step is caught and skipped.
+async function keepVersions(path: string): Promise<void> {
+  for (let n = 4; n >= 1; n--) await rename(`${path}.${n}`, `${path}.${n + 1}`).catch(() => {})
+  const text = await readFile(path, "utf8").catch(() => null)
+  if (text !== null) await writeAtomic(`${path}.1`, text).catch(() => {})
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, name, ...rest] = argv
   // any other throw exits 1 under Bun, which reads as free, so holders turns it into 2
@@ -571,7 +579,7 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(roster, entry, pairs, factoryRepo, true)
-    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end keeps the checker while any is open.
     const checker = isChecker(entry)
     const served =
       checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
@@ -633,6 +641,7 @@ async function main(argv: string[]): Promise<void> {
     }
   }
   roster.updatedAt = now()
+  await keepVersions(path)
   await writeAtomic(path, JSON.stringify(roster, null, 2))
   // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
   await clearedOnRead(cmd, name, withdrawn)

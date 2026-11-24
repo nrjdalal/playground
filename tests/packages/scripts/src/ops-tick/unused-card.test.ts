@@ -275,11 +275,12 @@ const inbox = (answer?: {
         return posted
           ? {
               code: 0,
-              out: JSON.stringify({
+              // ask get's picked line follows the card on stderr of the joined output, so the saved card is read from first brace to last (#2958).
+              out: `${JSON.stringify({
                 ...posted,
                 updatedAt: WROTE,
                 ...(answer ?? { status: "open" }),
-              }),
+              })}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${args[1]}"\nask: picked A: Remove\n`,
             }
           : { code: 1, out: `ask: no inbox item ${args[1]}` }
       return { code: 0, out: "" }
@@ -349,6 +350,19 @@ test("an answered card removes each Remove still listed at its size here, sends 
   expect(night.kept).toEqual({ "here docker image old:1": image.bytes })
   expect(calls.at(-1)!.args.slice(0, 3)).toEqual(["ack", ID, "--no-link"])
   expect(night.card).toBeUndefined()
+})
+
+test("an approved card whose picks are still pending reads through the joined output and removes them this night", async () => {
+  const items = offered([here(weights)], HOME, out, {})
+  const { deps, removed, setPosted } = inbox({
+    answer: { at: LATER, choice: "approve" },
+    status: "approved",
+  })
+  setPosted({ from: "ops", ...cardOf(items) })
+  const night = await cardNight([here(weights)], HOME, { card: { at: WROTE, id: ID, items } }, deps)
+  expect(removed).toEqual([weights.path])
+  expect(night.card).toBeUndefined()
+  expect(night.said).toContain(`removed ${weights.path}:`)
 })
 
 test("a kept item stays off the next card, and comes back on one once its size changes", async () => {
@@ -458,6 +472,21 @@ test("a card reads when ask's picked line on stderr follows its JSON in the join
     ).toEqual(card)
 })
 
+// A card read fails while the fix lands (PG-2958): bun's echo of the ask script's command line sits between the JSON and the picked line.
+test("a card reads when bun's echo of the ask script's command line sits between its JSON and the picked line", async () => {
+  const card = { status: "approved", updatedAt: WROTE }
+  for (const json of [JSON.stringify(card, null, 2), JSON.stringify(card)])
+    expect(
+      await readCard(
+        async () => ({
+          code: 0,
+          out: `${json}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "${ID}"\nask: picked A: Remove\n`,
+        }),
+        ID,
+      ),
+    ).toEqual(card)
+})
+
 test("a card that does not read stays for the next night, and one the Inbox no longer holds is let go", async () => {
   const items = offered([here(image)], HOME, out, {})
   const unread = await cardNight(
@@ -469,9 +498,69 @@ test("a card that does not read stays for the next night, and one the Inbox no l
       ask: async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" }),
     },
   )
-  expect(unread.card).toEqual({ id: ID, items })
+  expect(unread.card).toEqual({ id: ID, items, unread: 1 })
   const gone = await cardNight([here()], HOME, { card: { id: ID, items } }, inbox().deps)
   expect(gone.card).toBeUndefined()
+})
+
+// A card that reads as unread holds another night, and a second night in a row it is sent to Ops (PG-2958).
+test("a card unread a second night in a row sends Ops one line naming it, and the first night sends none", async () => {
+  const items = offered([here(image)], HOME, out, {})
+  const ask = async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" })
+  const first = await cardNight(
+    [here(image)],
+    HOME,
+    { card: { id: ID, items } },
+    { ...inbox().deps, ask },
+  )
+  expect(first.ops).toEqual([])
+  expect(first.card?.unread).toBe(1)
+  const second = await cardNight(
+    [here(image)],
+    HOME,
+    { card: first.card! },
+    { ...inbox().deps, ask },
+  )
+  expect(second.card?.unread).toBe(2)
+  expect(second.ops).toEqual([
+    `card ${ID} unread two nights in a row: ERR_POSTGRES_CONNECTION_REFUSED`,
+  ])
+})
+
+// A night whose card reads ends the unread run, its failed edit included, so Ops hears only of two unread nights in a row (PG-2958).
+test("an unread night, then a read with a failed edit, then an unread night sends Ops no line", async () => {
+  const items = offered([here(image)], HOME, out, {})
+  const unread = async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" })
+  const first = await cardNight(
+    [here(image)],
+    HOME,
+    { card: { id: ID, items } },
+    { ...inbox().deps, ask: unread },
+  )
+  const read = inbox()
+  read.setPosted(cardOf(items))
+  const second = await cardNight(
+    [here(image)],
+    HOME,
+    { card: first.card! },
+    {
+      ...read.deps,
+      ask: async (args, stdin) =>
+        args[0] === "edit"
+          ? { code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" }
+          : read.deps.ask(args, stdin),
+    },
+  )
+  expect(second.said).toBe(`card ${ID} not edited: ERR_POSTGRES_CONNECTION_REFUSED`)
+  expect(second.card?.unread).toBeUndefined()
+  const third = await cardNight(
+    [here(image)],
+    HOME,
+    { card: second.card! },
+    { ...inbox().deps, ask: unread },
+  )
+  expect(third.ops).toEqual([])
+  expect(third.card?.unread).toBe(1)
 })
 
 test("a card holds CARD_MAX questions at most, the largest first", () => {
@@ -483,4 +572,44 @@ test("a card holds CARD_MAX questions at most, the largest first", () => {
   const items = offered([here(...many)], HOME, out, {}).slice(0, CARD_MAX)
   expect((cardOf(items).preview as { questions: unknown[] }).questions).toHaveLength(CARD_MAX)
   expect(items[0]!.bytes).toBe((200 + CARD_MAX + 2) * MB)
+})
+
+test("a sharded set is one item, listed once at its total, its line naming the model stem and the shard count", () => {
+  const stem = "models--nvidia--Qwen"
+  const shards = ["00001", "00002", "00003", "00004"].map(
+    (n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`,
+  )
+  const bytes = 13 * GB
+  const item: CardItem = {
+    bytes,
+    kind: "weights",
+    machine: "here",
+    path: shards[0]!,
+    shards,
+  }
+  const card = cardOf([item])
+  expect(card.title).toBe("Remove 1 unused item?")
+  expect((card.preview as { text: string }).text.split("\n")[0]).toBe(
+    `Remove \`${shards[0]!}\` on here, ${bytes} bytes (${(bytes / GB).toFixed(1)} GB)?`,
+  )
+  const line = (card.preview as { options: { description: string }[] }).options[0]!.description
+  expect(line).toContain(stem)
+  expect(line).toContain("all 4 of 4 shards.")
+})
+
+test("a sharded set missing a shard is still one item, its line naming the shards that are there and the set's total", () => {
+  const stem = "models--nvidia--Qwen"
+  const shards = ["00002"].map((n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`)
+  const bytes = 13 * GB
+  const item: CardItem = {
+    bytes,
+    kind: "weights",
+    machine: "here",
+    path: shards[0]!,
+    shards,
+  }
+  const line = (cardOf([item]).preview as { options: { description: string }[] }).options[0]!
+    .description
+  expect(line).toContain(stem)
+  expect(line).toContain("with only shards 2 of 4 here.")
 })

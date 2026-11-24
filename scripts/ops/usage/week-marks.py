@@ -59,10 +59,17 @@ def pace(rows):
 
 
 def sample(path, t, account, used, reset):
-    """Append this reading, and return the account's samples in this week with its pace()."""
-    with open(path, "a") as f:
-        f.write(json.dumps({"t": t, "week": used, "reset": reset, "account": account}) + "\n")
-    rows = [r for r in (json.loads(l) for l in open(path) if l.strip()) if r.get("account", account) == account and abs(r["reset"] - reset) < 300]
+    """Append this reading, unless it is the account's newest row already (a stale reading usage.json still holds), and return the account's samples in this week with its pace()."""
+    try:
+        mine = [r for r in (json.loads(l) for l in open(path) if l.strip()) if r.get("account", account) == account]
+    except FileNotFoundError:
+        mine = []
+    if not mine or mine[-1]["t"] != t:
+        row = {"t": t, "week": used, "reset": reset, "account": account}
+        with open(path, "a") as f:
+            f.write(json.dumps(row) + "\n")
+        mine.append(row)
+    rows = [r for r in mine if abs(r["reset"] - reset) < 300]
     return rows, pace(rows)
 
 

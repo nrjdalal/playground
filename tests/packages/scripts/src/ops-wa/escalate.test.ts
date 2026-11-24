@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { bridge, sender, statusOf } from "../../../../../packages/scripts/src/ops-wa/bridge"
-import { lastFile, pendingDir, runCheck } from "../../../../../packages/scripts/src/ops-wa/escalate"
+import {
+  alertSentFile,
+  lastFile,
+  pendingDir,
+  runCheck,
+} from "../../../../../packages/scripts/src/ops-wa/escalate"
 import { seedAlert } from "../../../../../packages/scripts/src/ops-wa/seed"
 import { ALERT, fakeSocket, jid, OWNER, SPARE } from "./fake-socket"
 
@@ -338,6 +343,52 @@ describe("wa status's last alert line", () => {
     expect(lines).toEqual([
       expect.stringMatching(
         /^last alert: the alert of 2026-11-11T03:00:00\.000Z, at 2026-11-11T03:03:\d\d\.\d{3}Z: send to the second number failed: no route to <number>@s\.whatsapp\.net$/,
+      ),
+    ])
+    expect(lines.join("\n")).not.toContain(ALERT.slice(1))
+  })
+
+  test("a --now-both alert shows as the newest alert, over an older alert whose outcome came after it", async () => {
+    const h = await ready()
+    await h.send("a practice alert", "first")
+    h.advance(MINUTE)
+    expect(await h.send("a second practice alert", "alert")).toBe("sent")
+    h.advance(3 * MINUTE)
+    await h.pass()
+    expect(h.toAlert()).toEqual(["a second practice alert", "a practice alert"])
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:01:\d\d\.\d{3}Z, at 2026-11-11T03:01:\d\d\.\d{3}Z: sent to both numbers at once$/,
+      ),
+    ])
+  })
+
+  test("an alert held back because the alert number has never written shows that it reached the owner alone", async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    await h.send("a practice alert", "first")
+    expect(await last(h)).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner alone: the alert number has never written to this number$/,
+      ),
+    ])
+    expect(statSync(alertSentFile(h.dir)).mode & 0o777).toBe(0o600)
+    expect(await Bun.file(alertSentFile(h.dir)).text()).not.toContain("a practice alert")
+  })
+
+  test("a --now-both alert that reaches the owner and fails on the alert number shows both, its number masked", async () => {
+    const h = await ready()
+    const sendMessage = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async (to: string, content: unknown) => {
+      if (to === jid(ALERT)) throw new Error(`no route to ${to}`)
+      return sendMessage(to, content as never)
+    }
+    await expect(h.send("a practice alert", "alert")).rejects.toThrow("no route")
+    const lines = await last(h)
+    expect(lines).toEqual([
+      expect.stringMatching(
+        /^last alert: the alert of 2026-11-11T03:00:\d\d\.\d{3}Z, at 2026-11-11T03:00:\d\d\.\d{3}Z: sent to the owner, then the send to the alert number failed: no route to <number>@s\.whatsapp\.net$/,
       ),
     ])
     expect(lines.join("\n")).not.toContain(ALERT.slice(1))

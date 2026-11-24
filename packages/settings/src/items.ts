@@ -67,7 +67,19 @@ const candidates = (kind: Kind, key: string): string[] => {
 const safe = (path: string): boolean =>
   path.split("/").every((part) => part !== "" && part !== "." && part !== "..")
 
-// The item's content as the folder at dir holds it, or null when it holds none.
+const runs = (file: string) => (statSync(file).mode & 0o100) !== 0
+
+// The files that run in an item's copy at at, as Content's executable names: each such file of a folder, or . for a file.
+const runsAt = (at: string): string[] =>
+  !existsSync(at)
+    ? []
+    : statSync(at).isDirectory()
+      ? filesIn(at).filter((file) => runs(join(at, file)))
+      : runs(at)
+        ? ["."]
+        : []
+
+// The item's content as the folder at dir holds it, with the files that run named, or null when it holds none.
 const readIn = (dir: string, ref: Ref): Content | null => {
   const [path] = candidates(ref.kind, ref.key)
   const at = join(dir, path!)
@@ -79,7 +91,8 @@ const readIn = (dir: string, ref: Ref): Content | null => {
     )
   else if (ref.kind === "list") content.value = JSON.parse(readFileSync(at, "utf8"))
   else content.body = readFileSync(at, "utf8")
-  return content
+  const executable = runsAt(at)
+  return executable.length ? { ...content, executable } : content
 }
 
 const place = (dir: string, ref: Ref, content: Content) => {
@@ -154,6 +167,13 @@ export const putItem = (
   const large = files.find((file) => file.bytes.length > ATTACHMENT_LIMIT)
   if (large)
     return { message: `${large.name} is over 50 MB, which GitHub refuses`, ok: false, status: 400 }
+  // a script's or a skill's file that starts with #! runs directly, so it is stored 755 even from a copy written without modes, as check-modes holds
+  const shebang = folder
+    ? Object.keys(content.files ?? {}).filter((name) => content.files![name]!.startsWith("#!"))
+    : ref.kind === "script" && content.body?.startsWith("#!")
+      ? ["."]
+      : []
+  const executable = [...new Set([...(content.executable ?? []), ...shebang])]
   const state = acceptNow || !REVIEWED_KINDS.includes(ref.kind) ? "accepted" : "proposed"
   let sha: string | undefined
   try {
@@ -162,7 +182,10 @@ export const putItem = (
       ref.scope,
       { author: who.author, reason: who.reason, trailers: trailers(ref, who, [["State", state]]) },
       (dir, root) => {
-        place(state === "accepted" ? dir : join(dir, PROPOSED), ref, content)
+        place(state === "accepted" ? dir : join(dir, PROPOSED), ref, {
+          ...content,
+          executable,
+        })
         for (const file of files) {
           const hash = new Bun.CryptoHasher("sha256").update(file.bytes).digest("hex")
           writeAtomically(join(dir, "attachments", `${hash}${extname(file.name)}`), file.bytes)
@@ -349,9 +372,13 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
           ?.trim()
       : undefined
   for (const [state, at, tree] of reads) {
-    const listed = extGit(dir, ["ls-tree", "-r", "--name-only", tree, "--", at])
+    const listed = extGit(dir, ["ls-tree", "-r", tree, "--", at])
     if (listed.code !== 0) return null
-    const names = listed.out.split("\n").filter(Boolean)
+    const entries = listed.out
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => [line.slice(line.indexOf("\t") + 1), line.startsWith("100755 ")] as const)
+    const names = entries.map(([name]) => name)
     if (!names.length) continue
     const show = (name: string) => mustGitRaw(dir, ["show", `${tree}:${name}`])
     const content: Content = { attachments: [], body: null, files: null, value: null }
@@ -359,9 +386,12 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
       content.files = Object.fromEntries(names.map((name) => [relative(at, name), show(name)]))
     else if (ref.kind === "list") content.value = JSON.parse(show(at))
     else content.body = show(at)
+    const executable = entries.flatMap(([name, runs]) =>
+      runs ? [name === at ? "." : relative(at, name)] : [],
+    )
     return {
       ...ref,
-      content,
+      content: executable.length ? { ...content, executable } : content,
       rev,
       state: next === "accepted" ? "accepted" : state,
     }

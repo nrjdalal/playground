@@ -1425,6 +1425,154 @@ describe("ops-unstick's slot alerts", () => {
     "  999443 999442 bun run test:file tests/AGENTS.test.ts /x/.claude/worktrees/pg-334-x",
   ]
 
+  // pre-push's tree as ps shows it: commit-slot.ts holds the commit slot by spawning run-slot.sh, which then runs bun run test:skills
+  const committingHook = () => [
+    `  999471      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check`,
+    "  999472 999471 bash /x/.playground/ops/run-slot.sh commit-PG-2831-commit-slot-check -- bun run test:skills",
+    "  999473 999472 bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check",
+  ]
+  // the same tree while run-slot.sh still waits: it starts the step only once it holds the slot
+  const waitingHook = () => committingHook().slice(0, 2)
+  // the commit slot's holder as run-slot.sh writes it, its own pid the child that holds the slot, under the slot name commit-slot.ts acquires
+  const committingHookSlot = () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot-commit"), { recursive: true })
+    writeFileSync(
+      join(ops, "run-slot-commit.holder"),
+      "commit-PG-2831-commit-slot-check 999472 2026-11-01T13:00:00Z 1 small\n",
+    )
+    return config
+  }
+
+  // commit-slot.ts runs the step bare outside a worktree, with no run-slot.sh under it
+  const bareHook = () => [
+    `  999471      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check`,
+    "  999473 999471 bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check",
+  ]
+
+  // a pre-push run that started no run-slot.sh is still outside-slot, its own pid never counts it as inside a slot
+  test("a pre-push run with no run-slot under it is outside-slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", bareHook())
+    expect(jobs).toEqual([
+      { inside: false, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+      {
+        at,
+        kind: "outside-slot",
+        line: `a suite runs outside the run slots (pid 999471); use run-slot.sh`,
+        name: "PG-2831-commit-slot-check",
+        since: at,
+      },
+    ])
+  })
+
+  // a heavy run that commit-slot.ts started, under the commit slot's holder, reads inside a slot, not outside
+  test("a pre-push run under the commit slot's holder reads inside a slot", async () => {
+    expect(await call(committingHookSlot(), "heavy_jobs", committingHook())).toEqual([
+      { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+  })
+
+  // the commit lane writes no holder or ticket while its run-slot.sh waits, so the run-slot.sh child alone shows the run is in line for a slot
+  test("a pre-push run whose run-slot child still waits for the commit slot reads inside a slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", waitingHook())
+    expect(jobs).toEqual([
+      { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
+  })
+
+  // a run that started run-slot.sh but also runs a suite itself beside it, as its own child outside run-slot.sh
+  const besideHook = [
+    `  999491      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/pg-3-beside`,
+    "  999492 999491 bash /x/.playground/ops/run-slot.sh commit-pg-3-beside -- bun run test:skills",
+    "  999493 999491 bun run test:file tests/c.test.ts /x/.claude/worktrees/pg-3-beside",
+  ]
+  const besideHeld = () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot-commit"), { recursive: true })
+    writeFileSync(
+      join(ops, "run-slot-commit.holder"),
+      "commit-pg-3-beside 999492 2026-11-01T13:00:00Z 1 small\n",
+    )
+    return config
+  }
+  for (const [state, config] of [
+    ["waits", scratch],
+    ["holds the slot", besideHeld],
+  ] as const)
+    test(`a run with a suite beside its run-slot child stays outside-slot while that child ${state}`, async () => {
+      expect(await call(config(), "heavy_jobs", besideHook)).toEqual([
+        { inside: false, kind: "suite", pid: "999491", where: "pg-3-beside" },
+      ])
+    })
+
+  // a run inside a slot, listed first, never hides a bare suite in the same worktree: the bare suite's own pid raises the alert
+  const besideBare = (where: string, pid: string) =>
+    `  ${pid}      1 bun run test:file tests/d.test.ts /x/.claude/worktrees/${where}`
+  for (const [name, config, rows, where] of [
+    [
+      "a waiting pre-push",
+      scratch,
+      [...waitingHook(), besideBare("PG-2831-commit-slot-check", "999474")],
+      "PG-2831-commit-slot-check",
+    ],
+    [
+      "a run-slot chain",
+      () => held("run-slot"),
+      [...committing("999441"), besideBare("pg-334-x", "999474")],
+      "pg-334-x",
+    ],
+  ] as const)
+    test(`${name} beside a bare suite in the same worktree alerts for the bare suite's pid`, async () => {
+      const jobs = await call(config(), "heavy_jobs", rows)
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+        {
+          at,
+          kind: "outside-slot",
+          line: "a suite runs outside the run slots (pid 999474); use run-slot.sh",
+          name: where,
+          since: at,
+        },
+      ])
+    })
+
+  // a bare suite in the same session as a held run both climb to the session's own claude, but the bare run holds no slot and stays outside
+  const siblingHeld = () => {
+    const rows = [
+      "  999481      1 claude",
+      "  999482 999481 /bin/zsh -c run-slot",
+      "  999483 999482 bash /x/.playground/ops/run-slot.sh worker-x -- bun run test:file a",
+      "  999484 999483 bun run test:file tests/a.test.ts /x/.claude/worktrees/pg-1-held",
+      "  999485 999481 /bin/zsh -c bare",
+      "  999486 999485 bun run test:file tests/b.test.ts /x/.claude/worktrees/pg-2-bare",
+    ]
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot"), { recursive: true })
+    writeFileSync(join(ops, "run-slot.holder"), "worker-x 999483 2026-11-01T13:00:00Z 1 small\n")
+    return { config, rows }
+  }
+
+  // a bare suite beside a held run in the same session climbs to the same claude but holds no slot, so it stays outside-slot
+  test("a bare suite beside a held run in the same session stays outside-slot", async () => {
+    const { config, rows } = siblingHeld()
+    const jobs = await call(config, "heavy_jobs", rows)
+    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999486", where: "pg-2-bare" }])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+      {
+        at,
+        kind: "outside-slot",
+        line: "a suite runs outside the run slots (pid 999486); use run-slot.sh",
+        name: "pg-2-bare",
+        since: at,
+      },
+    ])
+  })
+
   for (const slot of ["run-slot-commit", "run-slot-model-2"])
     test(`a suite under ${slot}'s holder reads as inside a slot`, async () => {
       expect(await call(held(slot), "heavy_jobs", committing("999441"))).toEqual([
