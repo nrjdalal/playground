@@ -2968,6 +2968,69 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
   })
 
+  // PG-2736 half 1: a card may carry planned, held for the Planned shelf; it lives in the stored preview, no schema change. ask new/edit set or clear it, ask start clears it.
+  test("an ask may carry planned, held for the Planned shelf; a card posted without the field reads as before", async () => {
+    const planned = await post({
+      from: "ops",
+      preview: { planned: true, text: "Port the fix to staging.", type: "ask" },
+      title: "Plan the port",
+    })
+    expect((planned.preview as { planned?: boolean }).planned).toBe(true)
+    const plain = await post(decision(PREVIEWS.ask))
+    expect((plain.preview as { planned?: boolean }).planned).toBeUndefined()
+  })
+
+  test("edit sets planned, then clears it", async () => {
+    const posted = await post(decision(PREVIEWS.ask))
+    const at = new Date(Date.parse(posted.updatedAt) + 60_000)
+    const set = await store.editItem(
+      db,
+      `#i${posted.ref}`,
+      {
+        from: "ops",
+        preview: { planned: true, text: "Port the fix to staging.", type: "ask" },
+        title: "Plan the port",
+      },
+      at,
+    )
+    expect(set.ok).toBe(true)
+    if (!set.ok) return
+    expect((set.item.preview as { planned?: boolean }).planned).toBe(true)
+    const clear = await store.editItem(
+      db,
+      `#i${posted.ref}`,
+      {
+        from: "ops",
+        preview: { planned: false, text: "Port the fix to staging.", type: "ask" },
+        title: "Plan the port",
+      },
+      at,
+    )
+    expect(clear.ok).toBe(true)
+    if (!clear.ok) return
+    expect((clear.item.preview as { planned?: boolean }).planned).toBe(false)
+  })
+
+  test("start clears planned, leaves the card open and answerable, and moves its version (PG-2736 half 1)", async () => {
+    const posted = await post({
+      from: "ops",
+      preview: { planned: true, text: "Port the fix to staging.", type: "ask" },
+      title: "Plan the port",
+    })
+    const started = await store.startItem(db, `#i${posted.ref}`)
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+    // start deletes the flag, so the card leaves the Planned shelf: planned is gone, not set
+    expect((started.item.preview as { planned?: boolean }).planned).toBeUndefined()
+    expect(started.item.status).toBe("open")
+    expect(started.item.answer).toBeNull()
+    expect(started.item.version).toBe(posted.version + 1)
+    expect(await store.startItem(db, `#i999999`)).toMatchObject({
+      code: "NOT_FOUND",
+      ok: false,
+    })
+  })
+
   test("the poster edits its own item in place, bumping updatedAt and version; another session's, a closed item and a bad shape are refused (PG-2547)", async () => {
     const posted = await post(decision(SLACK))
     const at = new Date(Date.parse(posted.updatedAt) + 60_000)

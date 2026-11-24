@@ -39,6 +39,7 @@ An edit that changes an update you marked Done brings it back to your list unrea
 A card that offers to start a new Claude session, or to resume one, first checks that start with `spawn.sh --check` and states the result, a pass or the gate's refusal line, so the card shows whether that start would pass when the card was written.
 
 An ask or an update about the factory's own work carries `scope: "factory"`, so it can reach you on WhatsApp too; any other card stays in the Inbox.
+A card held for a later start carries `planned: true`, so it waits on the Planned shelf; its poster clears it with `playground ask start <id|#iN>` when it is due, leaving the shelf and staying open (the field is in asks.md's ask shape).
 
 ## The card it writes for
 

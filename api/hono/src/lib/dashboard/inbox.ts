@@ -88,6 +88,9 @@ const oneLine = (max: number) =>
 
 const words = z.string().trim().min(1)
 
+// A card can be marked planned, held for the Planned shelf, kept in the preview (no schema change, PG-2736 half 1): ask new/edit set it or clear it, ask start clears it. A card's preview, over the kind, one strict object per shape; this carries across every branch, so an ask's, an accept, a grant, a root, a guard, an apps or own step, a clone, a Slack send, a ship, a ticket, a delete, a schema, a budget, a secret or a reveal each take it.
+const planned = { planned: z.boolean().optional() }
+
 // A Slack link reaches the owner in the app form they open, never the archives form; slack.linkConverter names the command that rewrites one, and slack.sendServer the MCP server a send goes through, each read from the extensions' policy when a message is made, "" when unset or unreadable.
 const ARCHIVES = /\b(?:[a-z0-9-]+\.)?slack\.com\/archives\//i
 const slack = (key: "slack.linkConverter" | "slack.sendServer"): string => {
@@ -255,6 +258,7 @@ const acceptSchema = z.strictObject({
   key: proposalSchema.shape.key,
   kind: proposalSchema.shape.kind,
   more: z.array(proposalSchema).min(1).max(20).optional(),
+  ...planned,
   rev: proposalSchema.shape.rev,
   scope: proposalSchema.shape.scope,
   type: z.literal("accept"),
@@ -325,6 +329,7 @@ export const GRANT_PANES = {
 // A macOS permission agent-desktop needs, which the owner grants in System Settings: Approve opens its pane on this Mac, and the poster rechecks the grant itself, since macOS grants the app that launches agent-desktop, which only the poster's own run reads.
 const grantSchema = z.strictObject({
   permission: z.enum(Object.keys(GRANT_PANES) as [keyof typeof GRANT_PANES]),
+  ...planned,
   type: z.literal("grant"),
   why: words,
 })
@@ -344,6 +349,7 @@ const rootSchema = z.strictObject({
     .optional(),
   // a machine org.cluster names, whose steps run over ssh (system/peer-root.ts); none for this one
   machine: peerSchema.shape.name.optional(),
+  ...planned,
   scripts: z
     .array(
       z.strictObject({
@@ -373,6 +379,7 @@ const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._&'()+-]*$/u
 const appsSchema = z.strictObject({
   app: z.string().trim().min(1).max(LIMITS.name).regex(APP_NAME, "Must be an app's name"),
   change: z.enum(["add", "remove"]),
+  ...planned,
   type: z.literal("apps"),
   why: words,
 })
@@ -436,6 +443,7 @@ const orgJobKeySchema = z
 const guardSchema = z
   .strictObject({
     key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS), orgJobKeySchema]),
+    ...planned,
     scope: extScopeSchema,
     type: z.literal("guard"),
     value: z.unknown().optional(),
@@ -469,6 +477,7 @@ export type InboxGuard = z.infer<typeof guardSchema>
 const ownSchema = z.strictObject({
   key: z.email().max(LIMITS.name),
   own: z.boolean(),
+  ...planned,
   scope: extScopeSchema,
   type: z.literal("own"),
   why: words,
@@ -488,6 +497,7 @@ const cloneRepoSchema = z.strictObject({
 
 // The extensions' first clone on a new machine, which only the owner may write: the login's repo first, through ext init, then each further one through ext add, in order. Each scope once.
 const cloneSchema = z.strictObject({
+  ...planned,
   repos: z
     .array(cloneRepoSchema)
     .min(1)
@@ -648,6 +658,7 @@ export const previewSchema = z.discriminatedUnion("type", [
       .min(1, OPTIONS_MESSAGE)
       .max(MAX_OPTIONS, OPTIONS_MESSAGE)
       .optional(),
+    ...planned,
     questions: z
       .array(askQuestion)
       .min(MIN_QUESTIONS, QUESTIONS_MESSAGE)
@@ -660,6 +671,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     attachments,
     ...place,
+    ...planned,
     text: words,
     thread: soFar,
     to: oneLine(LIMITS.name),
@@ -667,6 +679,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   }),
   z.strictObject({
     ...place,
+    ...planned,
     prs: z
       .array(
         z.strictObject({
@@ -686,23 +699,30 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     body: words,
     ...place,
+    ...planned,
     team: oneLine(LIMITS.name),
     title: oneLine(LIMITS.line),
     type: z.literal("ticket"),
   }),
-  z.strictObject({ type: z.literal("delete"), what: words, why: words }),
-  z.strictObject({ shape: words, type: z.literal("schema") }),
-  z.strictObject({ amount: oneLine(LIMITS.name), type: z.literal("budget"), why: words }),
+  z.strictObject({ ...planned, type: z.literal("delete"), what: words, why: words }),
+  z.strictObject({ ...planned, shape: words, type: z.literal("schema") }),
+  z.strictObject({
+    amount: oneLine(LIMITS.name),
+    ...planned,
+    type: z.literal("budget"),
+    why: words,
+  }),
   z.strictObject({
     key: z
       .string()
       .max(LIMITS.name)
       .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Must be an environment variable's name"),
+    ...planned,
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
   // shows a Keychain item's value on the owner's click, in that one response alone (revealSecret); it names the item by its full service, so the card shows which one
-  z.strictObject({ service: playgroundService, type: z.literal("reveal"), why: words }),
+  z.strictObject({ ...planned, service: playgroundService, type: z.literal("reveal"), why: words }),
   acceptSchema,
   appsSchema,
   cloneSchema,
@@ -721,6 +741,7 @@ const link = z
 export const draftSchema = z.strictObject({
   attachments,
   ...place,
+  ...planned,
   text: words,
   thread: soFar,
   to: oneLine(LIMITS.name),
@@ -734,6 +755,7 @@ export const updateSchema = z.strictObject({
   approve: link,
   attachments,
   link,
+  ...planned,
   outcome: z.enum(OUTCOMES),
   scope,
   text: words.optional(),
@@ -3481,6 +3503,36 @@ async function recordLink(
     .where(and(eq(inboxItem.id, id), isNotNull(inboxItem.answer)))
     .returning()
   return row ? toItem(row) : null
+}
+
+// The poster begins a card it marked planned (`bun run ask start <id>`), PG-2736 half 1: it clears planned from the card's preview, so the card leaves the Planned shelf and stays open and answerable, and its version moves. A decision, a draft or an update each take it; an unknown id is refused.
+export async function startItem(
+  db: Database,
+  key: string,
+  now = new Date(),
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  const item = await getItem(db, key)
+  if (!item) return NOT_FOUND
+  // clear planned from the preview so the card leaves the Planned shelf, open and answerable
+  const preview = { ...(item.preview as unknown as Record<string, unknown>) }
+  delete (preview as { planned?: boolean }).planned
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      preview,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(and(eq(inboxItem.id, item.id), eq(inboxItem.version, item.version)))
+    .returning()
+  if (!row) {
+    return {
+      code: "CONFLICT",
+      message: "This card changed while starting it; try again",
+      ok: false,
+    }
+  }
+  return { item: toItem(row), ok: true }
 }
 
 // The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Decided by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.

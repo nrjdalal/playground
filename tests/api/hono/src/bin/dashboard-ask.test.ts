@@ -347,6 +347,54 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     await dismiss(id)
   })
 
+  test("new and edit refuse a bad ```ui block, naming it, and post a progress card unchanged (PG-2722)", async () => {
+    const ui = (text: string) => ({
+      from: "worker-envy",
+      kind: "update",
+      preview: { outcome: "merged", text },
+      title: "Yard control ui",
+    })
+    const block = (...json: string[]) => ["```ui", ...json, "```", "", "- One line."].join("\n")
+
+    // a good ```ui card posts, and its edit takes the same shape, so it is the card to edit
+    const good = ui(
+      block(JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "done" }] })),
+    )
+    const first = await post(good)
+
+    // a bad ```ui block is refused on new and on an edit, naming the reason, before it posts
+    const bad = ui(
+      block(JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "nope" }] })),
+    )
+    const newRefused = await cli(["new"], JSON.stringify(bad))
+    expect(newRefused.code).toBe(1)
+    expect(newRefused.stderr).toContain('step 1 has an unknown status "nope"')
+    expect(newRefused.stdout).toBe("")
+    const editRefused = await cli(["edit", first.tag], JSON.stringify(bad))
+    expect(editRefused.code).toBe(1)
+    expect(editRefused.stderr).toContain('step 1 has an unknown status "nope"')
+
+    // an old ```progress card with no ui block posts unchanged, so the check leaves progress cards alone
+    const progress = await cli(
+      ["new"],
+      JSON.stringify({
+        from: "dispatcher",
+        kind: "update",
+        preview: {
+          outcome: "merged",
+          text: "```progress\nMac reads | 100 | Reads every Mac | 9:10 pm\n```",
+        },
+        title: "Yard control progress",
+      }),
+    )
+    expect(progress.code).toBe(0)
+    expect(progress.stdout).toMatch(/^\S+\n$/)
+
+    // clear both cards so a later test sees none as its in-flight card
+    await dismiss(first.id)
+    await dismiss(progress.stdout.trim())
+  })
+
   test("refuses an invalid item with the reason, and posts nothing", async () => {
     const result = await cli(["new"], JSON.stringify({ ...DECISION, preview: undefined }))
     expect(result.code).toBe(1)
@@ -1051,6 +1099,78 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       expect(edited.stderr).toContain(`edited ${card.tag}`)
       expect(edited.stderr).not.toContain("not one to start twice")
       await dismiss(card.id)
+    })
+  })
+
+  // PG-2736 half 1: a card may carry planned, held for the Planned shelf, ask new/edit set or clear it, ask start clears it; the flag lives in the stored preview, no schema change.
+  describe("PG-2736: a card may be planned, and `start` clears it", () => {
+    beforeEach(async () => {
+      let dbg: SQL | null = null
+      for (let i = 0; i < 30; i++) {
+        try {
+          dbg = new SQL(url, { max: 1 })
+          await dbg`select 1`
+          break
+        } catch {
+          await Bun.sleep(200)
+        }
+      }
+      await dbg!.unsafe("delete from inbox_item")
+      await dbg!.close()
+    })
+
+    const ask = (text: string, planned = true) => ({
+      from: "worker-envy",
+      preview: { planned, text, type: "ask" },
+      title: `Plan: ${text}`,
+    })
+
+    test("ask new stores planned, and a card posted without the field reads as before", async () => {
+      const card = await post(ask("the draft", true))
+      expect(JSON.parse((await cli(["get", card.id])).stdout).preview.planned).toBe(true)
+      const plain = await post({
+        from: "worker-envy",
+        preview: { text: "the note", type: "ask" },
+        title: "No planned flag",
+      })
+      // a card posted without the field reads as before: planned is absent, not set
+      expect(JSON.parse((await cli(["get", plain.id])).stdout).preview.planned).toBeUndefined()
+    })
+
+    test("ask edit sets planned, then clears it", async () => {
+      const card = await post(ask("the draft", false))
+      const set = await cli(["edit", card.tag], JSON.stringify(ask("the draft", true)))
+      expect(set.code).toBe(0)
+      expect(JSON.parse((await cli(["get", card.id])).stdout).preview.planned).toBe(true)
+      const clear = await cli(["edit", card.tag], JSON.stringify(ask("the draft", false)))
+      expect(clear.code).toBe(0)
+      expect(JSON.parse((await cli(["get", card.id])).stdout).preview.planned).toBe(false)
+    })
+
+    test("start clears planned, keeps the card open and answerable, and moves its version", async () => {
+      const card = await post(ask("the draft", true))
+      const before = JSON.parse((await cli(["get", card.id])).stdout)
+      const started = await cli(["start", card.id])
+      expect(started.code).toBe(0)
+      // start deletes the flag, so the card leaves the Planned shelf and planned is gone
+      const after = JSON.parse((await cli(["get", card.id])).stdout)
+      expect(after.preview.planned).toBeUndefined()
+      expect(after.status).toBe("open")
+      expect(after.answer).toBe(null)
+      expect(after.version).toBe(before.version + 1)
+    })
+
+    test("start by its tag clears planned", async () => {
+      const card = await post(ask("the draft", true))
+      const started = await cli(["start", card.tag])
+      expect(started.code).toBe(0)
+      expect(JSON.parse((await cli(["get", card.id])).stdout).preview.planned).toBeUndefined()
+    })
+
+    test("start on an unknown id fails, naming it", async () => {
+      const failed = await cli(["start", "#i999999"])
+      expect(failed.code).toBe(1)
+      expect(failed.stderr).toContain("no inbox item")
     })
   })
 })
