@@ -38,6 +38,8 @@ Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
 type Roster = { agents: Agent[]; backlog?: string[]; updatedAt?: string }
+type QueueEntry = { pr?: unknown; item?: string; etaMerge?: string }
+type QueueFile = { queue?: QueueEntry[]; parked?: QueueEntry[]; updatedAt?: string }
 
 class Refusal extends Error {
   constructor(
@@ -236,6 +238,38 @@ function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): vo
   if (status && !pairs.some(([k]) => k === "endReason")) {
     if (STATUSES.live.includes(status)) delete entry.endReason
     else if (status === "done") entry.endReason = "done"
+  }
+}
+
+// A worker's eta write moves its PR's etaMerge too, so the roster row and the queue entry never drift (PG-2955).
+async function moveQueueEta(entry: Agent, eta: string): Promise<void> {
+  // A checker times a PR it serves, never its own, so only a live worker on a queued PR moves one.
+  if (isChecker(entry) || typeof entry.pr !== "string") return
+  const n = Number.parseInt(/pull\/(\d+)$/.exec(entry.pr)?.[1] ?? "", 10)
+  if (!Number.isInteger(n)) return
+  const { queuePath } = await import("../packages/scripts/src/pr-merge/merge")
+  const qpath = queuePath()
+  let data: QueueFile
+  try {
+    data = (await Bun.file(qpath).json()) as QueueFile
+  } catch (error) {
+    // The roster write still lands, so the lead sets etaMerge by hand.
+    console.error(
+      `roster.ts: ${qpath}: ${error instanceof Error ? error.message : String(error)}; set its etaMerge by hand`,
+    )
+    return
+  }
+  const queue = Array.isArray(data.queue) ? data.queue : null
+  const target = queue?.find((entry) => Number(entry.pr) === n)
+  if (!target) return
+  target.etaMerge = eta
+  try {
+    await writeAtomic(qpath, JSON.stringify(data, null, 2))
+  } catch (error) {
+    // The roster write still lands, so the lead sets etaMerge by hand.
+    console.error(
+      `roster.ts: ${qpath}: ${error instanceof Error ? error.message : String(error)}; set its etaMerge by hand`,
+    )
   }
 }
 
@@ -548,6 +582,8 @@ async function main(argv: string[]): Promise<void> {
         1,
       )
     apply(entry, pairs, factoryRepo)
+    const eta = pairs.find(([k]) => k === "eta")?.[1]
+    if (eta) await moveQueueEta(entry, eta)
     // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
     withdrawn = withdrawn.filter(
       (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
@@ -563,6 +599,8 @@ async function main(argv: string[]): Promise<void> {
     entry.lastReport = text
     entry.lastReportAt = now()
     apply(entry, pairs, factoryRepo)
+    const eta = pairs.find(([k]) => k === "eta")?.[1]
+    if (eta) await moveQueueEta(entry, eta)
     parkHold(entry, pairs, false)
   } else if (cmd === "assign") {
     const [title, task, ...more] = rest

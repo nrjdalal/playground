@@ -81,6 +81,7 @@ For a repeated score, the Builder picks one of three with the PR's worker, since
 - park it with the workaround written down, in its body's line opening with `Parked:`.
 
 The Builder keeps `merge-queue.json` in the data folder, which every worker's merge-tree check before a review round and `pr:train` read: it writes the file on every PR open, merge and reorder, in merge order, the owner's items first, each open PR in `queue` (`pr`, its `item` and an `etaMerge` when known) or in `parked`, and a closed one taken out.
+A worker's `set eta=` moves that entry's `etaMerge` too, in the same write, so the roster row and the queue entry never drift, and the Builder writes `etaMerge` by hand only for a PR whose worker has moved on.
 Done when a sweep after the write prints neither `merge queue missing` nor `merge queue stale`.
 
 Every clean-or-conflict call (a head that conflicts with canary, or one behind it) comes from a tool that reads git's exit code, never a tree line read by eye: `bun run pr:train forecast` for the queue, `bun run pr:merge <n> --explain` for one PR, whose first line says whether its head merges clean with canary now and as which tree,
