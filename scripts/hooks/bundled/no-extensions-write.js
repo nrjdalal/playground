@@ -12268,6 +12268,7 @@ function quietRun(cmd, parsed, env) {
 }
 var edits = (cmd, parsed, env) => quietRun(cmd, parsed, env) || inPlaceScripts(cmd, parsed, env) !== undefined;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
+var EXEC_FRONT = new Set(["builtin", "command"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
 var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
 function namesShell(text) {
@@ -12758,7 +12759,8 @@ async function inspect(raw, environment, rootNames, unknown = false) {
           return named;
       }
     };
-    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+    const execWords = cmd.words.map((w) => w.value);
+    if (execWords.at(-1) === "exec" && execWords.slice(0, -1).every((v) => EXEC_FRONT.has(v)))
       execFds = fdFiles(cmd.redirects, execFds);
     const teeTool = program(name);
     const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined);
