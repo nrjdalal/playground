@@ -40,7 +40,7 @@ const held = (): Row[] => [
     "an echo of the data folder through a variable set under an or",
     `P=x || P=${HOOK}; ${ECHO} > "$P"`,
   ],
-  ["an echo of the data folder through a variable read sets", `read P; ${ECHO} > "$P"`],
+  ["an echo of the data folder through a variable a read sets", `read P; ${ECHO} > "$P"`],
   ["an echo of the data folder through a variable the line never sets", `${ECHO} > "$UNSET_X"`],
   [
     "an echo of the data folder through a variable set after an and",
