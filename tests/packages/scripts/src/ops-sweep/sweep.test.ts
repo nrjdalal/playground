@@ -729,6 +729,8 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
       if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
       if (argv[0] === "gh") return { code: 0, err: "", out: reply }
       if (argv[0] === "git") {
+        if (argv.join(" ") !== "git -C /repo ls-remote origin refs/heads/pr-145")
+          return { code: 0, err: "", out: "" }
         if (tip === null) return { code: 1, err: "unknown reference", out: "" }
         const sha = tip ?? JSON.parse(reply).data.repository.p145.headRefOid
         return { code: 0, err: "", out: `${sha}\trefs/heads/pr-145` }
@@ -857,8 +859,10 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
   })
 
   test("an unreadable tip sends nothing and is named in the pass's findings", async () => {
-    const { found } = await sweeps([answer(), answer()], [null, null])
+    const { found, state, told } = await sweeps([answer(), answer()], [null, null])
     expect(found).toEqual(["conflict-tip-unreadable #145"])
+    expect(told).toEqual([])
+    expect(state["145"]).toMatchObject({ told: false })
   })
 })
 
