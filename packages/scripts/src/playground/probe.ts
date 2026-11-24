@@ -222,13 +222,13 @@ export const linesSince = async (file: string, offset: number): Promise<string[]
 // The dashboard's supervisor state folder (scripts/ops/dashboard/supervisor.sh), which records each child's pid and logs each roll.
 export const opsDashboard = (): string => join(dataDir(), "ops", "dashboard")
 
-// A pid still runs here, since the only signal-free liveness probe (kill with signal 0) raises an error when the pid is gone: the dashboard folder, a prebuild.pid and a heartbeat all read alive this way.
+// Whether a pid still runs, by kill with signal 0, which the kernel refuses (EPERM) for another user's process or one outside Claude Code's sandbox: the follower's and the prebuild's pid files and the heartbeat's pid all read alive this way.
 export const alive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
 
