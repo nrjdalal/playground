@@ -2,8 +2,11 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
+import { sender } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import { serve, socketPath } from "../../../../../packages/scripts/src/ops-wa/server"
+import { fakeSocket, OWNER, SPARE } from "../ops-wa/fake-socket"
 
+const HOUR = 3_600_000
 const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/wa/cli.ts")
 const dirs: string[] = []
 afterAll(() => {
@@ -465,6 +468,46 @@ describe("playground wa send's structure (#2799)", () => {
       expect((await wa(data, ["send", "--quote"])).code).toBe(2)
       expect((await wa(data, ["alert", "--quote", "own1", body])).code).toBe(2)
       expect(got).toEqual([])
+    } finally {
+      server.stop(true)
+    }
+  })
+})
+
+describe("quiet hours (#2887)", () => {
+  test("a held reply prints that it is held, and a refused poll's kin, a location or a quote, prints one refusal line, which the whatsapp skill reads as nothing sent", async () => {
+    const { body, data } = machine("the train is green\n")
+    const dir = join(data, "whatsapp")
+    const now = Date.parse("2026-11-11T03:00:00Z")
+    writeFileSync(
+      join(dir, "owner.json"),
+      JSON.stringify({ firstAt: now - 2 * HOUR, ownerAt: now - 2 * HOUR }),
+    )
+    const fake = fakeSocket()
+    const send = sender({
+      device: SPARE,
+      dir,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => ({ end: 6, start: 0, zone: "UTC" }),
+      sleep: async () => {},
+      sock: fake.sock,
+    })
+    const server = serve(socketPath(data), send.out)
+    try {
+      const held = await wa(data, ["send", body])
+      expect(held.code).toBe(0)
+      expect(held.out).toStartWith("wa send: held for quiet hours")
+      for (const extra of [
+        ["--location", "12.5,-45.25"],
+        ["--quote", "in1"],
+      ]) {
+        const refused = await wa(data, ["send", ...extra, body])
+        expect(refused.code).toBe(1)
+        expect(refused.out).toStartWith("wa send: quiet hours: ")
+        expect(refused.out.split("\n")).toHaveLength(1)
+      }
+      expect(fake.sent).toEqual([])
     } finally {
       server.stop(true)
     }

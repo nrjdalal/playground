@@ -116,6 +116,19 @@ writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
 // a script ssh feeds a remote shell: a listing of the data folder, and its twin writing under the root
 writeFileSync(join(HOME, "peer-check.sh"), `ls ${DATA}\n`)
 writeFileSync(join(HOME, "peer-write.sh"), `touch ${ROOT}/x\n`)
+// a runner's scripts ssh feeds a remote shell, for #2579's rows: an awk program whose * multiplies, a loop whose variable names a folder outside the root, and one that writes a script with sed and runs it
+writeFileSync(
+  join(HOME, "stats.sh"),
+  `awk '\n/accept/ { acc[++n] = $2 }\n/draft/ { dr[++m] = $2 }\nEND { if (dr[2] - dr[1] > 0) printf " mtp_accept=%.1f%%", 100 * (acc[2] - acc[1]) / (dr[2] - dr[1]) }\n' /var/log/serve.log\n`,
+)
+writeFileSync(
+  join(HOME, "dl.sh"),
+  "for r in a b; do\n  d=/srv/models/hf/hub/models--$r\n  find $d/blobs -name '*.incomplete'\ndone\n",
+)
+writeFileSync(
+  join(HOME, "serve.sh"),
+  "sed 's/PORT/8080/' serve.tmpl > serve-mb.sh\nbash serve-mb.sh\n",
+)
 symlinkSync(ROOT, PATHS.LINK)
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")

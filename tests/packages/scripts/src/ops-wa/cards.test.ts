@@ -19,7 +19,7 @@ import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kin
 const LIST = {
   companies: ["Acmeworks"],
   handles: ["zed-handle"],
-  linearKeys: ["ZZQ"],
+  linearKeys: ["ABC"],
   names: ["Quillon Barr"],
   slackIds: ["C0FAKE0001"],
 }
@@ -117,7 +117,6 @@ describe("the redactor", () => {
     ["a handle", "ping zed-handle"],
     ["a company term", "the Acmeworks build"],
     ["a Slack id", "see C0FAKE0001"],
-    ["a Linear key", "filed ZZQ-42"],
     ["an email", "mail made.up@example.com"],
     ["a GitHub token", `token ghp_${"a".repeat(36)}`],
     ["a Slack token", "token xoxb-1234567890-fake"],
@@ -141,6 +140,16 @@ describe("the redactor", () => {
     expect(redact("#1828 merged; the suite is green", TERMS)).toBe(
       "#1828 merged; the suite is green",
     )
+  })
+
+  test("keeps a tracker id and hides an email in the same card", () => {
+    const { text } = cardOf(
+      ask({ title: "Claim ABC-123" }, { text: "Mail made.up@example.com about ABC-123?" }),
+      TERMS,
+    )
+    expect(text).toContain("*Claim ABC-123*")
+    expect(text).toContain(`Mail ${HIDDEN} about ABC-123?`)
+    expect(text).not.toContain("made.up@example.com")
   })
 })
 
