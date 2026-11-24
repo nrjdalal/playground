@@ -1443,9 +1443,15 @@ describe("ops-unstick's slot alerts", () => {
     return config
   }
 
-  // a pre-push run with no commit slot above it is still outside-slot, its own pid never counts it as inside a slot
-  test("a pre-push run with no commit slot above it is outside-slot", async () => {
-    const jobs = await call(scratch(), "heavy_jobs", committingHook())
+  // commit-slot.ts runs the step bare outside a worktree, with no run-slot.sh under it
+  const bareHook = () => [
+    `  999471      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check`,
+    "  999473 999471 bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check",
+  ]
+
+  // a pre-push run that started no run-slot.sh is still outside-slot, its own pid never counts it as inside a slot
+  test("a pre-push run with no run-slot under it is outside-slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", bareHook())
     expect(jobs).toEqual([
       { inside: false, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
     ])
@@ -1465,6 +1471,15 @@ describe("ops-unstick's slot alerts", () => {
     expect(await call(committingHookSlot(), "heavy_jobs", committingHook())).toEqual([
       { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
     ])
+  })
+
+  // the commit lane writes no holder or ticket while its run-slot.sh waits, so the run-slot.sh child alone shows the run is in line for a slot
+  test("a pre-push run whose run-slot child still waits for the commit slot reads inside a slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", committingHook())
+    expect(jobs).toEqual([
+      { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
+    ])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
   })
 
   // a bare suite in the same session as a held run both climb to the session's own claude, but the bare run holds no slot and stays outside
