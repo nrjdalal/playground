@@ -2597,6 +2597,12 @@ async function inspect(
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, piped or fed a heredoc or here-string, is refused when it holds a remover or text the hook cannot read (hookRemover), else judged as an in-place edit's script is (scriptNames)
     const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), and one whose value the hook cannot read counts unless the check must be sure, so it fails closed as a folder git cannot answer for does
+    const hookWord = (word: Word, here: Env, sure = false): boolean => {
+      if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
+      const held = heldReadings(word, here, steadyAt(cmd))
+      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+    }
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
       for (const text of await printed(source, env, kids))
@@ -2605,12 +2611,12 @@ async function inspect(
           let into: Word | undefined
           const removes = hookRemover(
             text,
-            (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))),
+            (sure) => !!(into = targets.find((word) => hookWord(word, here, sure))),
           )
           if (removes && into) return hookRemoval(shown(into), removes)
           if (text === undefined) continue
           const named = scriptNames(text, here)
-          const hook = named && targets.find((word) => hookFile(pathOf(word, here)))
+          const hook = named && targets.find((word) => hookWord(word, here))
           if (hook) return `${shown(hook)}, a hook file, written with a script that names ${named}`
         }
     }
@@ -2685,7 +2691,7 @@ async function inspect(
       const hookAt = () =>
         hookTargets.find((word) => {
           const path = pathOf(word, here)
-          return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
+          return hookWord(word, here, true) || (copies && !!path && hookFile(join(path, "x"), true))
         })
       // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
       const linkFolder = () => {

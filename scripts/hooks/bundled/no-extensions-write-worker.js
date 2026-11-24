@@ -12707,19 +12707,25 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
     const kids = (c) => c.inner?.() ?? bodies.get(c);
+    const hookWord = (word, here, sure = false) => {
+      if (word.procs || !marked(word.value))
+        return hookFile(pathOf(word, here), sure);
+      const held = heldReadings(word, here, steadyAt(cmd));
+      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure;
+    };
     const intoHook = async (targets, source) => {
       if (targets.length === 0)
         return;
       for (const text of await printed(source, env, kids))
         for (const here of places(env)) {
           let into;
-          const removes = hookRemover(text, (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))));
+          const removes = hookRemover(text, (sure) => !!(into = targets.find((word) => hookWord(word, here, sure))));
           if (removes && into)
             return hookRemoval(shown(into), removes);
           if (text === undefined)
             continue;
           const named = scriptNames(text, here);
-          const hook = named && targets.find((word) => hookFile(pathOf(word, here)));
+          const hook = named && targets.find((word) => hookWord(word, here));
           if (hook)
             return `${shown(hook)}, a hook file, written with a script that names ${named}`;
         }
@@ -12764,7 +12770,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
       const hookAt = () => hookTargets.find((word) => {
         const path = pathOf(word, here);
-        return hookFile(path, true) || copies && !!path && hookFile(join7(path, "x"), true);
+        return hookWord(word, here, true) || copies && !!path && hookFile(join7(path, "x"), true);
       });
       const linkFolder = () => {
         const target = into.length === 1 ? pathOf(into[0], here) : undefined;
