@@ -429,6 +429,10 @@ def stall(live, state):
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
 # precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
+# the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper, `zsh -c ... eval '<command>'`) is never a job (builder, 8 Oct)
+HEAVY_PROGRAM = re.compile(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)")
+# run-slot.sh as ps shows it, run by a shell or by its own shebang
+RUN_SLOT = re.compile(r"^((\S*/)?(ba|z)?sh\s+)?(\S*/)?run-slot\.sh(\s|$)")
 PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
@@ -481,11 +485,19 @@ def heavy_jobs(rows=None):
         while pp and pp not in ("0", "1") and pp not in owners:
             owners.add(pp)
             pp = parent.get(pp)
+    # a run-slot.sh still waiting for its slot writes no holder (the commit lane leaves no ticket either), so the run that started it counts as in line for one
+    owners |= {parent[p] for p, c in cmds.items() if RUN_SLOT.match(c) and p in parent}
+    # bare is every pid above a heavy process with no run-slot.sh between them, so a run that also runs a suite itself beside its run-slot.sh child never reads as inside
+    bare = set()
+    for p, c in cmds.items():
+        if HEAVY.search(c) and HEAVY_PROGRAM.match(c):
+            pp = parent.get(p)
+            while pp and pp not in ("0", "1") and pp not in bare and not RUN_SLOT.match(cmds.get(pp, "")):
+                bare.add(pp)
+                pp = parent.get(pp)
     jobs, seen = [], set()
     for pid, cmd in cmds.items():
-        # the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper,
-        # `zsh -c ... eval '<command>'`) is never a job (builder, 8 Oct)
-        if not HEAVY.search(cmd) or not re.match(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)", cmd):
+        if not HEAVY.search(cmd) or not HEAVY_PROGRAM.match(cmd):
             continue
         chain, p = [], parent.get(pid)
         while p and p not in ("0", "1") and len(chain) < 40:
@@ -510,8 +522,8 @@ def heavy_jobs(rows=None):
         if (where, "dev" if "dev.ts" in cmd else "suite") in seen:
             continue
         seen.add((where, "dev" if "dev.ts" in cmd else "suite"))
-        # inside a slot when the slot's holder is one of its ancestors, or the run itself is the holder or started it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
-        jobs.append({"inside": bool(holders & set(chain)) or pid in owners, "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
+        # inside a slot when the slot's holder is one of its ancestors, or the run itself started run-slot.sh (holding or waiting) and runs no heavy step outside it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
+        jobs.append({"inside": bool(holders & set(chain)) or (pid in owners and pid not in bare), "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
     return jobs
 
 
@@ -528,8 +540,8 @@ def heavy_cap():
 
 
 def slot_alerts(jobs, cap, at):
-    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors, or the run itself is the holder or started the holder, as commit-slot.ts's pre-commit and pre-push
-    hold run-slot as a child; a dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
+    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors, or the run itself started run-slot.sh, holding or still waiting, and runs no
+    heavy step outside it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child; a dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
     alerts = []
     for j in jobs:
         if not j["inside"] and j["kind"] not in ("ci job", "dev stack"):
