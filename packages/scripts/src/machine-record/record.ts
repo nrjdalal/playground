@@ -31,12 +31,14 @@ export type Entry = {
   why: string
 }
 
+// A path the OS made, recorded with its reason by record known so the daily check skips it; apart from snapshot's root-only known folders.
+export type KnownPath = { path: string; why: string }
+
 // baseline: what the watched places held at the seed, so the first check names only what came after.
-// known: a path the OS made, recorded with its reason so the daily check skips it, added by record known.
 export type MachineRecord = {
   baseline: string[]
   entries: Entry[]
-  known: { path: string; why: string }[]
+  known: KnownPath[]
 }
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
@@ -100,8 +102,8 @@ const isEntry = (value: unknown): value is Entry => {
 }
 
 // A known path with its reason, so the daily check skips it, recorded by record known.
-const isKnown = (value: unknown): value is { path: string; why: string } => {
-  const known = value as { path: string; why: string }
+const isKnown = (value: unknown): value is KnownPath => {
+  const known = value as KnownPath
   return (
     typeof known === "object" &&
     known !== null &&

@@ -238,6 +238,15 @@ describe("the daily check (PG-2538)", () => {
     expect(await check(data, places())).toEqual([])
   })
 
+  test("a re-seed keeps the known paths while it rewrites the baseline", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    await addKnown(data, made, "the OS snapd made it")
+    await seed(data, [], places())
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+  })
+
   test("recording one known path does not suppress a sibling the factory adds later", async () => {
     await seed(data, [], places())
     const known = join(home, ".config", "snapd")
