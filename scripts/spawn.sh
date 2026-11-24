@@ -285,7 +285,7 @@ gate_capacity() {
   target=
   [ -z "$SSH_HOST" ] || target=$("$BUN" --no-env-file "$REPO/packages/scripts/src/spawn/peer-gate.ts" "$SSH_HOST" "$SSH_KEY") || target="{\"problem\": \"peer-gate.ts failed\"}"
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" "$SSH_HOST" "$target" "${LOCAL_CAP:-}" <<'PY'
+    KEYCHAIN_SERVICE="$KEYCHAIN" python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" "$NAME" "$OWN_LOGIN" "${READS_ONLY:+reads-only}" "$ROSTER_JSON" "$MODE" "$SSH_HOST" "$target" "${LOCAL_CAP:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -301,6 +301,7 @@ units = int(units)
 gates = json.loads(gates)
 now = dt.datetime.now(dt.timezone.utc)
 readings = {}
+on_seat = False  # an --account start on the own login that seat_start moves onto its seat token
 if host:
     readings["host"] = host
     try:
@@ -887,29 +888,77 @@ try:
             readings["pace"] = pace_skip
         # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
         # which ops-usage writes for the stored login and the ops tick's other-logins beat (account-watch.py <email>) every 30 minutes for another; another login's week moves slowly, so its reading holds for an hour.
+        # why the own login's stored reading reads nothing, from run.py's stored-login-status.json while it is under 15 minutes old: its Claude Code login ended (loginEnded), or its access token expired (tokenExpired), which Claude Code refreshes only while it runs
+        login_status, _ = load("ops/usage/stored-login-status.json")
+        try:
+            status_fresh = (now - from_iso(login_status["writtenAt"])).total_seconds() < 15 * 60
+        except (KeyError, TypeError, ValueError):
+            status_fresh = False
+        login_ended = login_status["loginEnded"] if status_fresh and isinstance(login_status.get("loginEnded"), str) and login_status["loginEnded"] else None
+        expired_cause = "its Claude Code access token has expired (stored-login-status.json tokenExpired), and Claude Code refreshes it only while it runs: opening Claude Code refreshes it, the owner's /login brings it back, and `playground accounts add` keeps a seat token for it" if status_fresh and not login_ended and login_status.get("tokenExpired") is True else None
+        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended) starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
+        def seat_start(email, stale):
+            service = os.environ.get("KEYCHAIN_SERVICE", "")
+            if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
+                if os.environ.get("SANDBOX_RUNTIME") == "1":
+                    print(f"spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the {service} item for {email}", file=sys.stderr)
+                elif login_ended:
+                    return "stored-login.json", {}, f"its Claude Code login has ended (loginEnded: {login_ended}), and the Keychain holds no {service} item for it to start on. The owner's /login in Claude Code brings the login back, and `playground accounts add` keeps a seat token for it", False
+                else:
+                    return "stored-login.json", {}, stale, False
+            flip, _ = load("ops/usage/login-flip.json")
+            # run.py probes each account login-flip.json's accounts lists, else its rotation pool's, so a seat on neither list is never read
+            listed = flip.get("accounts") if isinstance(flip, dict) else None
+            if not listed and isinstance(flip, dict) and isinstance(flip.get("rotation"), dict) and isinstance(flip["rotation"].get("pool"), list):
+                listed = [e.get("account") for e in flip["rotation"]["pool"] if isinstance(e, dict)]
+            probed = isinstance(listed, list) and any(isinstance(a, str) and a.lower() == email.lower() for a in listed)
+            name = "login-flip.json seen"
+            later = "ops-usage probes it every 14 minutes; wait for its next run and try again" if probed else f"ops-usage probes only the accounts login-flip.json lists, and it does not list {email}: add it to usage.accounts, or to login-flip.json's accounts while that list is set"
+            entries = flip.get("seen") if isinstance(flip, dict) else None
+            s = next((r for a, r in entries.items() if isinstance(a, str) and a.lower() == email.lower() and isinstance(r, dict)), None) if isinstance(entries, dict) else None
+            if s is None:
+                return name, {}, f"{'its Claude Code login has ended (loginEnded: ' + login_ended + ')' if login_ended else stale.rstrip('.')}, and login-flip.json holds no seen reading of {email} to judge its seat token by. {later}", False
+            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+            if isinstance(s.get("five"), (int, float)):
+                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+            seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, later + ".")
+            limited = s.get("limitedUntil")
+            if detail is None and isinstance(limited, (int, float)) and not isinstance(limited, bool) and limited > now.timestamp():
+                detail = f"its account is limited until {from_iso(limited):%Y-%m-%d %H:%M} UTC (login-flip.json seen limitedUntil)"
+            return name, seen, detail, True
+
         usage, detail = load("usage.json")
         own = usage.get("account") if isinstance(usage, dict) else None
         writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
-        # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
-        if not os.path.exists(os.path.join(data_dir, "usage.json")):
-            seen, detail = {"usage": "unread (usage.json not yet written)"}, None
-        else:
-            seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
-        logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
-        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
         try:
             with open(own_config) as f:
                 runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
         except Exception:
             runs_on = None
+        # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
+        if not os.path.exists(os.path.join(data_dir, "usage.json")):
+            seen, detail = {"usage": "unread (usage.json not yet written)"}, None
+        else:
+            # usage.json naming the config's own login, as on a machine with that one login, is the stored login's reading, so an expired access token is its stale reading's cause too
+            own_reading = not isinstance(runs_on, str) or not runs_on or not isinstance(own, str) or runs_on.lower() == own.lower()
+            seen, detail = judge("usage.json", usage, 15, f"It reads nothing because {expired_cause}." if expired_cause and own_reading else writer) if not detail else ({}, detail)
+        logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
+        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account (but for seat_start below), and the factory becomes a login --account reaches.
         if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
             name = "ops/usage/stored-login.json"
             stored, stored_detail = load(name)
             named = stored.get("account") if isinstance(stored, dict) else None
             if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
                 stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
-            stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
-            logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+            # an expired access token is the stale reading's cause, named in place of a run to wait for
+            stored_writer = f"It reads nothing because {expired_cause}." if expired_cause else writer
+            if stored_detail and stored is None and expired_cause:
+                stored_detail = f"{stored_detail}. {stored_writer}"
+            stored_seen, stored_detail = judge(name, stored, 15, stored_writer) if not stored_detail else ({}, stored_detail)
+            stored_name = "stored-login.json"
+            if own_pick and stored_detail and not stored_seen:
+                stored_name, stored_seen, stored_detail, on_seat = seat_start(runs_on, stored_detail)
+            logins = [(runs_on, stored_name, None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
         known = {login[0].lower() for login in logins}
         for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
             name = os.path.basename(path)
@@ -950,6 +999,8 @@ try:
             if logins[0][4]:
                 readings.update(logins[0][3])
                 refuse("usage", f"--account {own_pick}, this machine's own login: {logins[0][4]}")
+            if on_seat:
+                readings["account"] = own_pick
         passing = [login for login in logins if login[4] is None]
         if not passing:
             readings.update(logins[0][3])
@@ -1015,6 +1066,8 @@ for gate, detail in skips:
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
+elif own_pick and on_seat:
+    print(f"ok {own_pick} --account {own_pick} is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
@@ -1037,7 +1090,8 @@ PY
     "ok "*)
       pick=${verdict#ok }
       pick=${pick%% *}
-      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; check_account; }
+      # the own login on its seat token: seat_start checked its item, and check_account refuses the own login by name
+      [ "$pick" = - ] || { ACCOUNT=$pick; PICKED=1; if [ "$pick" = "$OWN_LOGIN" ]; then plain_account; else check_account; fi; }
       echo "spawn.sh: ${verdict#ok "$pick" }"
       ;;
     *) refuse "$verdict" ;;
@@ -1798,10 +1852,13 @@ keychain_has() {
   [ "${SANDBOX_RUNTIME:-}" = 1 ] || return 1
   echo "spawn.sh: the sandbox closes the Keychain to this shell, so the new pane checks the $1 item for $2" >&2
 }
+# The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
+plain_account() {
+  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+}
 # An --account, or the login the usage gate picks for a bare spawn, is a second login whose Keychain item exists.
 check_account() {
-  # The email goes into the pane's command, so it is a plain local@domain: no quote, space or $.
-  [[ $ACCOUNT =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || refuse "--account takes a plain email, not $ACCOUNT"
+  plain_account
   ! own_login || refuse "--account $ACCOUNT is this machine's own Claude login, whose usage the session would share unchecked: name a second account"
   keychain_has "$KEYCHAIN" "$ACCOUNT" || refuse "the Keychain holds no $KEYCHAIN item for $ACCOUNT"
 }

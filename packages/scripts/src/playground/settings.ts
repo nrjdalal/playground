@@ -15,7 +15,7 @@ import { type Io, need, one, type Out, parseWords, print, Usage, valueOf } from 
 // playground settings: reads and writes the settings files in the extensions folder itself, with no dashboard needed; a write is one commit in its scope's clone, under the lock every writer takes.
 
 export const SETTINGS_USAGE =
-  "usage: playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason <why> [--scope <scope>] | set <key> <value> --from-owner-msg <id> | reset <key> --reason <why> [--scope <scope>] | import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]"
+  "usage: playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason <why> [--scope <scope>] | set <key> <value> --from-owner-msg <id> | set <key> <value> --propose | reset <key> --reason <why> [--scope <scope>] | import-jobs <jobs.json> [--launch-agents <dir>] [--scope <scope>] [--dry-run]"
 
 const done = <T>(result: Result<T>): T => {
   if (!result.ok) throw new Error(`${result.status} ${result.message}`)
@@ -25,7 +25,7 @@ const done = <T>(result: Result<T>): T => {
 
 export async function settingsCommand(words: string[], io: Io, err: Out): Promise<number> {
   const [verb, ...rest] = words
-  const { options, positional } = parseWords(rest, ["--dry-run"])
+  const { options, positional } = parseWords(rest, ["--dry-run", "--propose"])
   const who = () => ({
     actor: "cli",
     author: one(options, "--by") ?? "owner",
@@ -45,7 +45,21 @@ export async function settingsCommand(words: string[], io: Io, err: Out): Promis
   if (verb === "list") print(io.out, listSettings(io.data))
   else if (verb === "get") print(io.out, known(readSetting(io.data, key(), one(options, "--org"))))
   else if (verb === "why") print(io.out, known(settingHistory(io.data, key())))
-  else if (verb === "set" && options["--from-owner-msg"]) {
+  else if (verb === "set" && options["--propose"]) {
+    // ops-wa asks the owner on WhatsApp, "set <key> to <value>? yes or no", and sets it on his yes alone; this shell writes nothing (ADR 0041)
+    if (options["--scope"] || options["--by"] || options["--reason"] || options["--from-owner-msg"])
+      throw new Usage(
+        "--propose takes no --scope, --by, --reason or --from-owner-msg: ops-wa sets it at your login's scope, as the owner's act, on his yes to its question",
+      )
+    const { requestSettingPropose, socketPath } = await import("../ops-wa/server")
+    const reply = await requestSettingPropose(
+      socketPath(io.data),
+      key(),
+      need(positional[1], "a value"),
+    )
+    if (reply.refusal) throw new Error(reply.refusal)
+    io.out(`playground settings: ${reply.note}`)
+  } else if (verb === "set" && options["--from-owner-msg"]) {
     // ops-wa writes it, not this shell: it proves the id is the owner's own WhatsApp message holding the value, and asks the owner to confirm a key a guard reads (ADR 0035)
     if (options["--scope"] || options["--by"] || options["--reason"])
       throw new Usage(

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   truncateSync,
   utimesSync,
   writeFileSync,
@@ -17,6 +18,7 @@ import {
   measured,
   measureUnused,
   peerUnusedArgv,
+  shardSets,
   type Unused,
   unusedEverywhere,
   unusedImages,
@@ -26,6 +28,7 @@ const HERE = hostname().split(".")[0]!
 const NOW = Date.parse("2026-11-18T03:00:00Z")
 const DAY = 86_400_000
 const MB = 1024 ** 2
+const GB = 1024 ** 3
 const homes: string[] = []
 afterAll(() => {
   for (const home of homes) rmSync(home, { force: true, recursive: true })
@@ -380,5 +383,131 @@ test("a machine's lines: the log's totals by kind, the outbox's items with recor
   expect(linesOf({ items: [], machine: "spark-a566" }, home)).toEqual({
     item: null,
     total: "spark-a566 unused 0.0 GB",
+  })
+})
+
+test("shardSets: four shards of one model merge into one item, sized as the total, carrying every shard path", () => {
+  const stem = "/me/models/loose/models--nvidia--Qwen"
+  const shards = [
+    {
+      bytes: 10.4 * MB,
+      kind: "weights" as const,
+      path: `${stem}-00001-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00003-of-00004.gguf`,
+      recorded: false,
+    },
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00004-of-00004.gguf`,
+      recorded: false,
+    },
+  ]
+  const merged = shardSets(shards)
+  expect(merged).toEqual([
+    {
+      bytes: 10.4 * MB + 4 * GB + 4 * GB + 4 * GB,
+      kind: "weights",
+      path: `${stem}-00001-of-00004.gguf`,
+      recorded: false,
+      shards: [
+        `${stem}-00001-of-00004.gguf`,
+        `${stem}-00002-of-00004.gguf`,
+        `${stem}-00003-of-00004.gguf`,
+        `${stem}-00004-of-00004.gguf`,
+      ],
+    },
+  ])
+})
+
+test("shardSets: a lone shard of a set is still one item, carrying that one shard", () => {
+  const stem = "/me/models/loose/models--nvidia--Qwen"
+  const merged = shardSets([
+    {
+      bytes: 4 * GB,
+      kind: "weights" as const,
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+    },
+  ])
+  expect(merged).toEqual([
+    {
+      bytes: 4 * GB,
+      kind: "weights",
+      path: `${stem}-00002-of-00004.gguf`,
+      recorded: false,
+      shards: [`${stem}-00002-of-00004.gguf`],
+    },
+  ])
+})
+
+test("shardSets: sets in one folder stay apart by stem, total and extension", () => {
+  const folder = "/me/models/loose"
+  const shard = (name: string, bytes: number) => ({
+    bytes,
+    kind: "weights" as const,
+    path: `${folder}/${name}`,
+    recorded: false,
+  })
+  const merged = shardSets([
+    shard("a-00001-of-00002.gguf", 1 * GB),
+    shard("a-00002-of-00002.gguf", 1 * GB),
+    shard("b-00001-of-00002.gguf", 2 * GB),
+    shard("b-00002-of-00002.gguf", 2 * GB),
+    shard("a-00001-of-00003.gguf", 5 * GB),
+    shard("a-00001-of-00002.safetensors", 3 * GB),
+  ])
+  expect(merged.map((i) => [i.bytes, i.shards])).toEqual([
+    [5 * GB, [`${folder}/a-00001-of-00003.gguf`]],
+    [4 * GB, [`${folder}/b-00001-of-00002.gguf`, `${folder}/b-00002-of-00002.gguf`]],
+    [3 * GB, [`${folder}/a-00001-of-00002.safetensors`]],
+    [2 * GB, [`${folder}/a-00001-of-00002.gguf`, `${folder}/a-00002-of-00002.gguf`]],
+  ])
+})
+
+test("shardSets: an unsharded gguf and an image pass through unchanged, largest first", () => {
+  const stem = "/me/models/loose/models--nvidia--Qwen"
+  const merged = shardSets([
+    { bytes: 4 * GB, kind: "weights" as const, path: `${stem}/separate.gguf`, recorded: false },
+    {
+      bytes: 5 * GB,
+      id: "sha256:aaa",
+      kind: "image" as const,
+      path: "docker image x:1",
+      recorded: false,
+    },
+  ])
+  expect(merged).toEqual([
+    { bytes: 5 * GB, id: "sha256:aaa", kind: "image", path: "docker image x:1", recorded: false },
+    { bytes: 4 * GB, kind: "weights", path: `${stem}/separate.gguf`, recorded: false },
+  ])
+})
+
+test("a sharded model's four loose shards under models/ are one item end to end: measureUnused reads the whole set at its total, each shard path carried", async () => {
+  const { models, places } = setUp()
+  const stem = join(models, "models--nvidia--Qwen-27B-shards")
+  const shards = ["00001", "00002", "00003", "00004"].map((n) => `${stem}-${n}-of-00004.gguf`)
+  // One shard under 100 MiB by its stated size, the rest 200 MiB, so the set reads at its whole total.
+  sized(shards[0]!, 10 * MB)
+  shards.slice(1).forEach((p) => sized(p, 200 * MB))
+  const { items } = await measureUnused(places)
+  const sharded = items.find((i) => i.kind === "weights" && Array.isArray(i.shards))
+  expect(sharded).toEqual({
+    bytes: shards.reduce((sum, p) => sum + statSync(p).size, 0),
+    kind: "weights",
+    path: shards[0]!,
+    recorded: false,
+    shards,
   })
 })

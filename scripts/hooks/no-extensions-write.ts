@@ -1033,7 +1033,7 @@ const EXT_DRY = new Set(["add", "import", "init"])
 // Each command's bare switches, as its parseWords call names them; every other -- word takes the next word as its value.
 const SWITCHES: Record<string, string[]> = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"],
+  settings: ["--dry-run", "--propose"],
 }
 
 // Whether a word is the playground CLI in any one of the folders it may be read from: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed; in a folder the hook cannot read, a relative word is the CLI by its last part alone (playground, cli or cli.ts).
@@ -1740,6 +1740,108 @@ function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Comma
   })
   return bodies
 }
+// the programs that run a text which may call a function, and those that move its positional parameters from inside its body
+const RUNS_TEXT = new Set([".", "eval", "source"])
+const MOVES_ARGS = new Set(["getopts", "set", "shift"])
+// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+function functionArgs(commands: Command[], line: string) {
+  const seen = new Set<Command>()
+  const walk = (list: Command[]) => {
+    for (const c of list) {
+      seen.add(c)
+      if (c.inner) walk(c.inner())
+    }
+  }
+  walk(commands)
+  const all = [...seen]
+  const out = new WeakMap<Command, Record<string, string>>()
+  const names = new Map(all.map((c) => [c, parse(c).name]))
+  const name = (c: Command) => names.get(c) ?? parse(c).name
+  if (all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))) return out
+  const plain = (w: Word | undefined) => !!w && !w.quoted && /^[A-Za-z_]\w*$/.test(w.value)
+  const unquoted = (w: Word | undefined, value: string) => !!w && !w.quoted && w.value === value
+  const below = (list: Command[]): Command[] =>
+    list.flatMap((c) => [c, ...below(c.inner?.() ?? [])])
+  const definitions: { at: Command; body: Command[]; fn: string; group?: Command }[] = []
+  const find = (list: Command[]) =>
+    list.forEach((c, k) => {
+      if (c.inner) find(c.inner())
+      // a definition's name follows the reserved words that open the body around it (`{ g() …`, `then g() …`)
+      const lead = c.words.findIndex((w) => w.quoted || !LEADS.has(w.value))
+      const own = lead === -1 ? [] : c.words.slice(lead)
+      const [first, second, third] = own
+      // `function f { … }`: the body runs from this command, which holds its first words, to the brace that closes it
+      if (unquoted(first, "function") && plain(second) && unquoted(third, "{")) {
+        let depth = 0
+        for (let j = k; j < list.length; j++) {
+          const words = j === k ? own.slice(2) : list[j].words
+          const opens = words.findIndex((w) => !unquoted(w, "{"))
+          depth += opens === -1 ? words.length : opens
+          if (unquoted(list[j].words[0], "}")) depth--
+          if (depth === 0)
+            return definitions.push({ at: c, body: below(list.slice(k, j + 1)), fn: second.value })
+        }
+        return
+      }
+      // `f() …` and `function f() …`: the name, then the empty group the `()` makes, which holds the body's first words
+      const fn =
+        own.length === 1 && plain(first)
+          ? first.value
+          : own.length === 2 && unquoted(first, "function") && plain(second)
+            ? second.value
+            : undefined
+      if (!fn) return
+      // a substitution in the body's first command lexes its own commands ahead of it, with no operator before them
+      let at = k + 1
+      while (list[at] && !list[at].group && list[at].follows === undefined) at++
+      const group = list[at]
+      if (!group?.group || group.inner?.().length !== 0) return
+      const opener = group.words.length === 0 ? list[at + 1] : group
+      const closer =
+        group.words.length === 0 || unquoted(group.words[0], "{")
+          ? list.slice(at + 1).find((x) => x !== opener && x.inner?.().includes(opener))
+          : group
+      if (closer)
+        definitions.push({
+          at: c,
+          body: below([...(closer.inner?.() ?? []), closer]),
+          fn,
+          group,
+        })
+    })
+  find(commands)
+  for (const { at, body, fn, group } of definitions) {
+    const calls = all.filter((c) => c !== at && name(c) === fn)
+    const [call] = calls
+    const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length
+    // a definition inside the body, another `()` group or a `function` word, whose own parameters are not the body's
+    const nests = body.some(
+      (c) =>
+        (c !== group && !!c.group && c.inner?.().length === 0) ||
+        c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")),
+    )
+    const moves = body.some(
+      (c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)),
+    )
+    const bound: Record<string, string> = {}
+    if (
+      calls.length === 1 &&
+      named === 2 &&
+      !moves &&
+      !nests &&
+      !body.includes(call) &&
+      all.indexOf(call) > all.indexOf(at)
+    )
+      for (const [k, w] of parse(call).args.entries()) {
+        if (marked(w.value) || w.glob) break
+        bound[String(k + 1)] = w.value
+      }
+    for (const c of body)
+      if (Object.keys(bound).length > 0) out.set(c, bound)
+      else out.delete(c)
+  }
+  return out
+}
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
 // the commands a group, a subshell or a compound's closer holds, none for any other command
@@ -1878,6 +1980,12 @@ function rooted(commands: Command[], files?: Files): boolean {
   )
 }
 
+// The text an xargs reads: its own stdin or pipe (stdinOf), else the pipe into its brace group (braceFed), since every command of the group reads it, so a writing xargs anywhere in one gets its plain twin's verdict; a group's own input redirect stays unread, as stdinOf leaves it (PG-1175)
+async function xargsStdin(cmd: Command, env: Env): Promise<Text> {
+  const own = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"))
+  return stdinOf(cmd.braceFed && !own && !cmd.stdin ? { ...cmd, stdin: cmd.braceFed } : cmd, env)
+}
+
 // Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
 function sshSpared(cmd: Command, files: Files | undefined): boolean {
   if (cmd.stdin || !sshCall(parse(cmd))) return false
@@ -1888,7 +1996,7 @@ function sshSpared(cmd: Command, files: Files | undefined): boolean {
 // The last redirect onto an ssh's stdin, whose text the remote side reads
 const sshInput = (cmd: Command) =>
   cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
-// Whether sshText may read a fed file: only on a line of one command, from `from` (the tool's folder on a line that moves no folder) for a relative path
+// Whether sshText may read a fed file: only on a line whose other commands cannot write it first (rootLine's alone), from `from` (the tool's folder on a line that moves no folder) for a relative path
 type Files = { from?: string }
 // The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or, when `files` allows, a file named by a literal path, absolute or from its `from`, read when it is a regular file within 1 MiB; undefined for any other
 function sshText(cmd: Command, files: Files | undefined): string | undefined {
@@ -2092,6 +2200,8 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     options[0] === "--from-owner-msg" &&
     !!ownerId &&
     positional.length === 2
+  // --propose as the call's one option, beside the key and value alone: ops-wa asks the owner and writes on his yes, and a CLI from before the flag stops at it needing a value (ADR 0041)
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry
@@ -2102,6 +2212,7 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
     // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
     if (verb === "set" && ownerMsg) return
+    if (verb === "set" && proposal) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]
@@ -2394,6 +2505,8 @@ async function inspect(
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
   let bodies = new WeakMap<Command, Command[]>()
+  // each function body command's positional parameters, bound from the line's one call (functionArgs)
+  let fnArgs = new WeakMap<Command, Record<string, string>>()
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
   let lineTexts: string[] = []
@@ -2469,16 +2582,18 @@ async function inspect(
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) }
       sshOwn.add(own)
       const remote = lex(line, at.known)
-      // the remote line's first command reads ssh's stdin, so a remote xargs takes the words piped into ssh, ssh's own here-string or heredoc, or a file ssh reads, its path taken from this folder, as its local twin does, the words read from the login's home; a file the hook cannot read passes, as its local twin's does (PG-2553)
-      const head = remote.commands[0]
-      const input = sshInput(cmd)
-      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse(head).xargs) {
-        const target = input?.op === "<" ? input.target : undefined
-        const path = target && pathOf(target, env)
-        if (input?.body) head.redirects = [input, ...head.redirects]
+      // the remote line reads ssh's stdin, so each remote xargs with no pipe, input or brace group's pipe of its own takes the words piped into ssh, ssh's own here-string or heredoc, or a file ssh reads, its path taken from this folder, as its local twin does, the words read from the login's home; under ssh -n it reads /dev/null's empty text, and a stdin the hook cannot read is refused as its local twin's is (PG-2553)
+      const input: Command["redirects"][number] | undefined = ssh.noStdin
+        ? { body: { value: "" }, fd: "", op: "<<<" }
+        : sshInput(cmd)
+      const target = input?.op === "<" ? input.target : undefined
+      const path = target && pathOf(target, env)
+      for (const each of remote.commands) {
+        if (each.stdin || each.braceFed || sshInput(each) || !parse(each).xargs) continue
+        if (input?.body) each.redirects = [input, ...each.redirects]
         else if (input && target && path)
-          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects]
-        else if (!input && cmd.stdin) head.stdin = cmd.stdin
+          each.redirects = [{ ...input, target: { ...target, value: path } }, ...each.redirects]
+        else if (!input && cmd.stdin) each.stdin = cmd.stdin
       }
       return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
@@ -2585,7 +2700,19 @@ async function inspect(
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, piped or fed a heredoc or here-string, is refused when it holds a remover or text the hook cannot read (hookRemover), else judged as an in-place edit's script is (scriptNames)
-    const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
+    // a function name's empty `()` leaves the lexer's empty group on the body's first command (`f() { echo x > "$U"; }`), which holds that command's own words and so is no group
+    const kids: Kids = (c) => {
+      const inner = c.inner?.()
+      return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
+    }
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's word (functionArgs), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    const hookWord = (word: Word, here: Env, sure = false): boolean => {
+      if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
+      const args = fnArgs.get(slotOf.get(cmd) ?? cmd)
+      const known = args ? { ...here, known: { ...here.known, ...args } } : here
+      const held = heldReadings(word, known, steadyAt(cmd))
+      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+    }
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
       for (const text of await printed(source, env, kids))
@@ -2594,12 +2721,12 @@ async function inspect(
           let into: Word | undefined
           const removes = hookRemover(
             text,
-            (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))),
+            (sure) => !!(into = targets.find((word) => hookWord(word, here, sure))),
           )
           if (removes && into) return hookRemoval(shown(into), removes)
           if (text === undefined) continue
           const named = scriptNames(text, here)
-          const hook = named && targets.find((word) => hookFile(pathOf(word, here)))
+          const hook = named && targets.find((word) => hookWord(word, here))
           if (hook) return `${shown(hook)}, a hook file, written with a script that names ${named}`
         }
     }
@@ -2616,7 +2743,8 @@ async function inspect(
         if (named) return named
       }
     }
-    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+    // an exec that runs no program in a reading parse gives (past reserved words, assignments, its own options and the wrappers before it, an option it cannot place read every way) opens its descriptors for the rest of the line
+    if (name === "" && cmd.words.some((w) => w.value === "exec"))
       execFds = fdFiles(cmd.redirects, execFds)
     const teeTool = program(name)
     const hookWrite =
@@ -2669,11 +2797,11 @@ async function inspect(
       ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
     ]
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
-      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run
-      const hookAt = () =>
+      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run; for the command's own text that names the root, a target the hook cannot read counts, as it does for a printer's (`git log --format=… > "$X"`)
+      const hookAt = (sure = true) =>
         hookTargets.find((word) => {
           const path = pathOf(word, here)
-          return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
+          return hookWord(word, here, sure) || (copies && !!path && hookFile(join(path, "x"), true))
         })
       // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
       const linkFolder = () => {
@@ -2743,7 +2871,7 @@ async function inspect(
         [copied, "copied from a file whose text"],
       ] as const)
         for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
-          const hook = hookAt()
+          const hook = hookAt(texts !== ownTexts || !!removes)
           if (hook && removes) return refuse(hookRemoval(shown(hook), removes))
           if (hook) return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`)
         }
@@ -2782,7 +2910,7 @@ async function inspect(
     // GNU xargs' -a reads its words from a file in place of stdin; a word read as -a may be another option's value, so stdin is still judged as xargs' words, and the file adds a word the hook cannot read (argWord)
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word))
     const argWord: Word | undefined = argFile ? { quoted: false, value: UNKNOWN } : undefined
-    const fed = xargs ? await stdinOf(cmd, env) : undefined
+    const fed = xargs ? await xargsStdin(cmd, env) : undefined
     // xargs' own words: under -0 or -d its quotes and backslashes stay, else xargsWords reads them
     const fedSplit =
       !fed || fed.unknown
@@ -3026,8 +3154,9 @@ async function inspect(
         cmd.redirects.some((r) => r.body && holds(r.body.value, here))
       )
         return refuse(`${verb} with a script that names ${root}`)
+      // a remover, or a writer the line typed that reads stdin (no -a), fed stdin the hook cannot read may write under the root; a writer read out of a quoted text (a sed script's replacement, textDepth) is judged by the words it can read, since that text is most often data (PG-2553)
       const unreadFeed =
-        fed && remover
+        fed && (remover || (WRITERS.has(tool) && textDepth === 0 && !argFile))
           ? argFile
             ? "the file its -a names"
             : fed.unknown || marked(fed.value) || !fedSplit
@@ -3202,30 +3331,37 @@ async function inspect(
     visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
-  // a file fed to ssh is read only when the line's first command is the ssh and every other is a reader its pipe feeds with no redirect but a descriptor's copy (`| head -80`), since any other could write the file before ssh reads it
-  const [only, ...rest] = lexed.commands
+  // a file fed to ssh is read only when every command before the ssh, and every one its pipe feeds (`| head -80`), is a reader with no redirect but a descriptor's copy, and every other runs after it and feeds no shell (`; ssh box grep …`), since any other could write the file before ssh reads it
+  const shellAt = lexed.commands.findIndex((cmd) => !!stdinShell(cmd))
+  const fed = lexed.commands[shellAt]
   const plain = (cmd: Command) =>
     !cmd.inner &&
     ![...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
       (word) => word.procs,
     )
   const fedBy = (cmd: Command) => {
-    for (let at = cmd.stdin; at; at = at.stdin) if (at === only) return true
+    for (let from = cmd.stdin; from; from = from.stdin) if (from === fed) return true
     return false
   }
-  const alone =
-    !!only &&
-    plain(only) &&
-    rest.every(
-      (cmd) =>
-        plain(cmd) &&
-        fedBy(cmd) &&
-        PIPE_READERS.has(program(parse(cmd).name)) &&
-        cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")),
+  const reader = (cmd: Command) =>
+    plain(cmd) &&
+    PIPE_READERS.has(program(parse(cmd).name)) &&
+    cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""))
+  const feedUnwritten =
+    !!fed &&
+    plain(fed) &&
+    lexed.commands.every(
+      (cmd, k) =>
+        k === shellAt ||
+        (k < shellAt || fedBy(cmd)
+          ? reader(cmd)
+          : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"),
     )
   rootLine = rooted(
     lexed.commands,
-    alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
+    feedUnwritten
+      ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory }
+      : undefined,
   )
   sshFed = new Set(
     [...codeFed(lexed.commands)]
@@ -3236,6 +3372,7 @@ async function inspect(
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
   bodies = compoundBodies(lexed.commands)
+  fnArgs = functionArgs(lexed.commands, command)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
   lineTexts = lineTextsOf(lexed.commands)

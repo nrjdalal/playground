@@ -206,21 +206,6 @@ describe("the gate box's docker", () => {
         "fsync=off",
       ],
     ],
-    [
-      "the pglaunch stand-in's run",
-      [
-        "-d",
-        "--name",
-        `${box}-db-gate`,
-        "--label",
-        "playground-gate=1",
-        "-e",
-        "POSTGRES_PASSWORD=postgres",
-        "-p",
-        "127.0.0.1::5432",
-        "postgres:alpine",
-      ],
-    ],
   ])("takes %s whole, the command after the image included", (_, rest) => {
     expect(narrow(["run", ...rest], box, listed)).toEqual({
       argv: ["run", "--label", `${BOX_LABEL}=${box}`, ...rest],

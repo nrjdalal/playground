@@ -24,7 +24,26 @@ import {
   waitingLine,
   waits,
 } from "./cards"
-import { DEFAULT_DELAY_MINUTES, escalations, keepPending, pendingLines, reacted } from "./escalate"
+import {
+  DRAFT_FILES,
+  draftAlready,
+  draftAnswerOf,
+  draftChanged,
+  draftNotSent,
+  draftOf,
+  type DraftSent,
+  draftSent,
+} from "./drafts"
+import {
+  DEFAULT_DELAY_MINUTES,
+  escalations,
+  keepPending,
+  keepSent,
+  lastLines,
+  masked,
+  pendingLines,
+  reacted,
+} from "./escalate"
 import { HOUR, OWNER_WINDOW_MS, ownFolder, readOwn, SEND, typingMs, writeOwn } from "./habits"
 import { keep } from "./media"
 import {
@@ -39,6 +58,7 @@ import {
   readOutbound,
 } from "./outbound"
 import { alertSeedFile } from "./seed"
+import { type Answered, type NewMessage, sentFile } from "./setting-set"
 import type { Vote, votedOptions } from "./votes"
 
 type Key = {
@@ -51,7 +71,12 @@ type Key = {
 export type Incoming = { key: Key; message?: Record<string, unknown> | null }
 export type Upsert = { messages: Incoming[]; type: string }
 export type Call = { from: string; status: string }
-type Events = { call: Call[]; "messages.upsert": Upsert }
+// a 1:1 chat's receipt, as Baileys gives it: the message's key and its status, with the receipt's time in seconds
+export type Update = {
+  key: Key
+  update: { messageTimestamp?: number | null; status?: number | null }
+}
+type Events = { call: Call[]; "messages.update": Update[]; "messages.upsert": Upsert }
 // The calls ops-wa makes on a Baileys socket, so a test hands it a fake one.
 export type Sock = {
   ev: { on<K extends keyof Events>(name: K, fn: (arg: Events[K]) => void): void }
@@ -84,10 +109,14 @@ export type Mode = {
   stuck: () => Promise<Stuck>
   // sends a card's text to the owner and gives its first message's id, which a decision's pin names; a bridge with none sends it through reply and pins only a poll
   card?: (body: string) => Promise<string | undefined>
+  // sends the texts held in quiet hours as one catch-up, once the owner may be written to again; a bridge with none holds nothing
+  catchUp?: () => Promise<void>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
-  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
-  confirm?: (text: string, reaction?: string) => Promise<boolean>
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm); answered names the message it quotes and the time of his message before it
+  confirm?: (text: string, reaction?: string, answered?: Answered) => Promise<boolean>
+  // sends a draft's text to the owner and gives the ids of its messages, which a reply to it names; a bridge with none sends no draft
+  draft?: (body: string) => Promise<string[]>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
   escalate?: (body: string) => Promise<string>
   // the Inbox, for its cards on WhatsApp; a bridge with none sends none
@@ -100,6 +129,8 @@ export type Mode = {
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
+  // sends the owner one line at 22 hours of the owner's 24 asking for any reply, once a window; a bridge with none sends none
+  remind?: () => Promise<void>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
   // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
@@ -116,7 +147,9 @@ export type Inbox = {
   // the answer recorded through the Inbox's own route, or why not
   answer: (
     id: string,
-    answer: { action: "approve" | "deny"; option?: number },
+    answer:
+      | { action: "approve" | "deny"; option?: number }
+      | { action: "send"; seen?: string; text?: string },
   ) => Promise<string | undefined>
   open: () => Promise<Card[]>
   // undefined while no-public-leak's list cannot be read, so no card goes out
@@ -135,11 +168,11 @@ export const jidOf = (e164: string) => `${e164.replace(/^\+/, "")}@s.whatsapp.ne
 export const OFF =
   "WhatsApp mode is off, so this message goes no further. Turn it on in Playground's Settings, under Extensions."
 export const updateLine = (policy: string) =>
-  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. ${replyLine(policy)}`
+  `WhatsApp mode: send the owner an update on the factory's work only if something changed since your last message to the owner; otherwise send nothing. Send it with playground wa send --status, which edits the one live status message. ${replyLine(policy)}`
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json and messages.json the bridge's queue, sends.json and eyes.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, last-alert.json, messages.json and receipts.json the bridge's queue, alert-sent.json, sends.json, sent.json, eyes.json, partial.json, quiet.json, remind.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -147,12 +180,18 @@ const eyesFile = (dir: string) => join(dir, "eyes.json")
 // ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
 const oursFile = (dir: string) => join(dir, "ours.json")
 type Ours = { id: string; text: string }
+// partial.json: a send that failed after some of its parts, by its chat, kind, words and extra, the last 24 hours', so the same send again sends only the parts still unsent
+const partialFile = (dir: string) => join(dir, "partial.json")
+type Partial = { at: number; ids: string[]; parts: number }
 const handedFile = (dir: string) => join(dir, "handed.json")
 // alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
 const alertFile = (dir: string) => join(dir, "alert.json")
 // cards.json, the bridge's queue's too: each card sent by its ref, and the ids the last waiting line counted
 const cardsFile = (dir: string) => join(dir, "cards.json")
 type Cards = { held?: string; sent?: Record<string, Sent> }
+// drafts.json: each draft sent to the owner's chat, by the id of each of its messages, so a reply to any of them answers that draft
+const draftsFile = (dir: string) => join(dir, "drafts.json")
+type Drafts = { sent?: Record<string, DraftSent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
 // Each open decision's pin in the owner's chat: its message id, its card and when it was pinned, so it comes off once the card settles.
 const pinsFile = (dir: string) => join(dir, "pins.json")
@@ -317,7 +356,11 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const reaction = message.reactionMessage as
     | { key?: { id?: string | null }; text?: string }
     | undefined
-  if (reaction?.key?.id && reaction.text && (await reacted(io.dir, reaction.key.id))) {
+  if (
+    reaction?.key?.id &&
+    reaction.text &&
+    (await reacted(io.dir, reaction.key.id, io.now(), io.log))
+  ) {
     io.log("ops-wa: the owner's reaction handled a pending alert, so it stays with the owner")
     return
   }
@@ -327,7 +370,10 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
-  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
+  // his typed message before this one, which a plain answer to a proposal counts from (ADR 0041); a reaction, an edit or a delete moves ownerAt alone
+  const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+  const before = owner.typedAt ?? owner.ownerAt
+  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner), !said?.about)
   const id = m.key.id
   const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
@@ -338,11 +384,25 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
     await io.reply(OFF).catch((error: Error) => io.log(`ops-wa: the off reply: ${error.message}`))
     return
   }
+  // a reply to a draft's message answers that draft, as the Inbox's Send does, and goes no further
+  const quoted = (
+    (message.extendedTextMessage as Part)?.contextInfo as { stanzaId?: string | null } | undefined
+  )?.stanzaId
+  const draft =
+    quoted && text && io.inbox
+      ? (await readOwn<Drafts>(draftsFile(io.dir), {})).sent?.[quoted]
+      : undefined
+  if (draft) return answerDraft(io, io.inbox!, draft, text!)
   const reply = io.inbox && text ? replyOf(text) : null
   const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
   // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
   const asked = reaction ? (reaction.text ?? "") : undefined
-  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? "", asked))) return
+  if (
+    !(toCard && bare(reply!)) &&
+    io.confirm &&
+    (await io.confirm(text ?? "", asked, { quoted: quoted ?? undefined, since: before ?? 0 }))
+  )
+    return
   if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   if (toCard) return answerCard(io, io.inbox!, reply!)
   // a line about another message names only that one's id, the one wa react --id takes
@@ -390,12 +450,31 @@ export const keptLine = (id: string) =>
   `ops-wa kept the one phone number in it: when the owner asks for it to be the second number, run playground wa alert-set --from-owner-msg ${id}.`
 
 // What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
-type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }
-async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?: string) {
+type Wrote = {
+  alertAt?: number
+  firstAt?: number
+  jid?: string
+  ownerAt?: number
+  typedAt?: number
+}
+// typed: a message he wrote, not a reaction, an edit or a delete, which moves typedAt too
+async function wrote(
+  path: string,
+  key: "alertAt" | "ownerAt",
+  at: number,
+  jid?: string,
+  typed = false,
+) {
   const before = await readOwn<Wrote>(path, {})
   const same = before.jid === jid
   const firstAt = same ? (before.firstAt ?? before[key] ?? at) : at
-  await writeOwn(path, { firstAt, [key]: at, ...(jid && { jid }) })
+  const typedAt = typed ? at : same ? before.typedAt : undefined
+  await writeOwn(path, {
+    firstAt,
+    [key]: at,
+    ...(jid && { jid }),
+    ...(typedAt !== undefined && { typedAt }),
+  })
 }
 // a file from before chats were named, the owner's alone, counts as the current number's
 const firstOf = (w: Wrote, jid?: string) =>
@@ -547,6 +626,60 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   )
 }
 
+// The owner's reply to a draft's message: "send" posts it as written and other words post in its place, through the Inbox's own Send, whose checks run as they do there; one line back says what happened. A draft no longer open, or one with files, posts nothing from here.
+async function answerDraft(io: Io & Mode, inbox: Inbox, draft: DraftSent, text: string) {
+  const say = (line: string) =>
+    io.reply(line).catch((error: Error) => io.log(`ops-wa: a draft reply's line: ${error.message}`))
+  const card = (await inbox.open().catch(() => [] as Card[])).find((c) => c.id === draft.id)
+  if (!card || card.status !== "open") return say(draftAlready(draft.ref))
+  if (card.preview.attachments?.length) return say(draftNotSent(draft.ref, DRAFT_FILES))
+  // a draft its poster changed after it came here posts nothing, and the next pass sends its new words
+  if (card.updatedAt !== draft.seen) return say(draftChanged(draft.ref))
+  const answer = draftAnswerOf(text)
+  const why = await inbox
+    .answer(draft.id, { action: "send", seen: draft.seen, ...answer })
+    .catch((error: Error) => error.message)
+  return say(
+    why === undefined
+      ? draftSent(draft.ref, answer.text !== undefined)
+      : draftNotSent(draft.ref, why),
+  )
+}
+
+// The drafts step of a pass: each open draft that still waits on the owner goes to the owner's own chat once, and again each time its poster changes it, with the line that says how a reply answers it.
+async function drafts(io: Io & Mode, open: Card[], send: NonNullable<Mode["draft"]>) {
+  const now = io.now()
+  const sent = Object.fromEntries(
+    Object.entries((await readOwn<Drafts>(draftsFile(io.dir), {})).sent ?? {}).filter(
+      ([, d]) => now - d.at < CARD_KEEP_MS,
+    ),
+  )
+  const went = new Set(Object.values(sent).map((d) => `${d.id} ${d.seen}`))
+  try {
+    for (const card of open) {
+      const version = `${card.id} ${card.updatedAt}`
+      if (card.kind !== "draft" || !waits(card, now) || went.has(version)) continue
+      const body = draftOf(card)
+      // a draft the sender refuses, a token shape in it, is kept as gone, so it is logged once and stays in the Inbox; any other failed send is tried again next pass, and one in quiet hours waits unlogged
+      const refusal = refusalOf(body)
+      const ids = refusal
+        ? [`none-${card.id}`]
+        : await send(body).catch((error: Error) => {
+            if (error.message === QUIET_WAITS) return null
+            io.log(`ops-wa: #i${card.ref}'s draft waits for the next pass: ${error.message}`)
+            return null
+          })
+      if (refusal) io.log(`ops-wa: #i${card.ref}'s draft stays in the Inbox: ${refusal}`)
+      if (!ids) continue
+      for (const id of ids)
+        sent[id] = { at: io.now(), id: card.id, ref: card.ref, seen: card.updatedAt }
+      went.add(version)
+    }
+  } finally {
+    await writeOwn(draftsFile(io.dir), { sent })
+  }
+}
+
 // The cards step of a pass: each open card on the allowlist goes out once, and the rest stand as one waiting message, a 📥 line per card by its title, sent when the cards it names change.
 async function cards(io: Io & Mode, inbox: Inbox) {
   const now = io.now()
@@ -560,13 +693,26 @@ async function cards(io: Io & Mode, inbox: Inbox) {
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
     if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
+    if (io.draft)
+      await drafts(io, open, io.draft).catch((error: Error) =>
+        io.log(`ops-wa: the Inbox's drafts: ${error.message}`),
+      )
     const kept: Card[] = []
     for (const card of open) {
+      // a draft that went to the owner's chat stands there, not in the waiting line
+      if (card.kind === "draft" && io.draft) continue
       if (!terms || !goesOut(card, terms)) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
         const { poll, rows, text } = cardOf(card, terms)
-        const textId = io.card ? await io.card(text) : void (await io.reply(text))
+        let textId: string | undefined
+        try {
+          textId = io.card ? await io.card(text) : void (await io.reply(text))
+        } catch (error) {
+          // a card in quiet hours stays unsent, so it goes out whole, poll and pin, at a later pass
+          if ((error as Error).message === QUIET_WAITS) continue
+          throw error
+        }
         sent[card.ref] = { at: io.now(), id: card.id, rows }
         // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
         if (poll && io.poll)
@@ -655,6 +801,10 @@ async function pass(io: Io & Mode) {
     await escalations({ ...io, escalate: io.escalate }).catch((error: Error) =>
       io.log(`ops-wa: the pending alerts: ${error.message}`),
     )
+  if (io.catchUp)
+    await io
+      .catchUp()
+      .catch((error: Error) => io.log(`ops-wa: the quiet hours' catch-up: ${error.message}`))
   const now = io.now()
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
   const handed = (watch.handed ?? []).filter((h) => now - h.at < HOUR)
@@ -663,6 +813,12 @@ async function pass(io: Io & Mode) {
   // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
   try {
     if (await io.on()) {
+      if (io.remind)
+        await io
+          .remind()
+          .catch((error: Error) =>
+            io.log(`ops-wa: the reminder before the 24 hours end: ${error.message}`),
+          )
       const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
       const eyes = (await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})).eyes ?? []
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
@@ -728,6 +884,10 @@ export function bridge(io: Io & Mode) {
       sock.ev.on("messages.upsert", ({ messages, type }) => {
         if (type !== "notify") return
         for (const m of messages) queue(() => inbound(io, m, sock.user))
+      })
+      sock.ev.on("messages.update", (updates) => {
+        const seen = updates.flatMap(receiptsOf(io.now()))
+        if (seen.length > 0) queue(() => keepReceipts(io.dir, seen))
       })
       sock.ev.on("call", (calls) => {
         for (const c of calls) if (c.status === "offer") queue(() => drop(io, "call", c.from))
@@ -843,7 +1003,7 @@ const phoneIn = (body: string): boolean =>
 export const windowLeft = (at: number | undefined, now: number): number =>
   at === undefined ? 0 : Math.max(0, at + OWNER_WINDOW_MS - now)
 
-// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, and whether a reply can go to it now, as the sender decides.
+// wa status's lines, each number masked to its last 4 digits: whether it has written or been approved, so an alert reaches it, whether a reply can go to it now, as the sender decides, the receipts' lines, each pending alert and the last alert's outcome.
 export async function statusOf(
   dir: string,
   numbers: { alert: string; owner: string },
@@ -880,7 +1040,9 @@ export async function statusOf(
       ? `${line("owner", "wa.owner", numbers.owner, firstOf(owner, jidOf(numbers.owner)))}; ${replies(windowLeft(owner.ownerAt, now), "its 24 hours for replies are over until it writes")}`
       : line("owner", "wa.owner", "", undefined),
     numbers.alert ? await alertLine(numbers.alert) : line("alert", "wa.alert", "", undefined),
+    ...(await receiptLines(dir, numbers)),
     ...(await pendingLines(dir)),
+    ...(await lastLines(dir)),
   ]
 }
 
@@ -888,27 +1050,147 @@ export async function statusOf(
 export type PollSent = { id: string; secret: string }
 // What a send answers: who it reached, and the ids of the messages it sent.
 export type Out = { ids: string[]; said: string }
-// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat and time, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one.
-type Own = { at: number; id: string; jid: string }
+// own.json, the sender's chain's: each message wa send sent, the last 50, by its id, chat, time and kind, so an edit or a delete names one of ours alone, a reaction, an edit and a delete never one, and a receipt is kept for ours alone.
+type Own = { at: number; id: string; jid: string; kind?: Kind }
 const ownFile = (dir: string) => join(dir, "own.json")
+
+// receipts.json, the bridge's queue's: the delivered and read times WhatsApp sends for each message in own.json, kept only while own.json keeps that message; ops-wa only reads them, and marks nothing read and sends no receipt or presence of its own
+type Receipt = { delivered?: number; id: string; read?: number }
+const receiptsFile = (dir: string) => join(dir, "receipts.json")
+// proto.WebMessageInfo.Status's DELIVERY_ACK and READ; PLAYED, a voice note's, is past READ
+const DELIVERED = 3
+const READ = 4
+// Pure: the receipts in a messages.update for messages from this number, at the receipt's own time or now; a read is a delivery too. Baileys sends a group's receipts on message-receipt.update, and ops-wa sends to no group.
+const receiptsOf =
+  (now: number) =>
+  ({ key, update }: Update): Receipt[] => {
+    const status = update.status ?? 0
+    if (!key.fromMe || !key.id || status < DELIVERED) return []
+    const at = update.messageTimestamp ? update.messageTimestamp * 1000 : now
+    return [{ delivered: at, id: key.id, ...(status >= READ && { read: at }) }]
+  }
+// each receipt for a message ops-wa sent, matched by its id alone, since a chat's id can come as its LID; the first delivered and the first read time stay
+async function keepReceipts(dir: string, seen: Receipt[]) {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const ours = seen.filter((s) => own.some((o) => o.id === s.id))
+  if (ours.length === 0) return
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  for (const s of ours) {
+    const had = receipts.find((r) => r.id === s.id)
+    if (!had) receipts.push(s)
+    else {
+      had.delivered ??= s.delivered
+      if (s.read !== undefined) had.read ??= s.read
+    }
+  }
+  await writeOwn(receiptsFile(dir), {
+    receipts: receipts.filter((r) => own.some((o) => o.id === r.id)),
+  })
+}
+// each message ops-wa sent to a number, with its receipts, oldest first
+const sentTo = async (dir: string, number: string) => {
+  const own = (await readOwn<{ messages?: Own[] }>(ownFile(dir), {})).messages ?? []
+  const { receipts = [] } = await readOwn<{ receipts?: Receipt[] }>(receiptsFile(dir), {})
+  return own
+    .filter((o) => o.jid === jidOf(number))
+    .map((o) => ({ ...o, ...receipts.find((r) => r.id === o.id) }))
+}
+// The owner's last read: the latest read time WhatsApp sent for a message ops-wa sent the owner, or undefined before any; quiet hours reads it.
+export async function ownerReadAt(dir: string, owner: string): Promise<number | undefined> {
+  const reads = (await sentTo(dir, owner)).flatMap((o) => (o.read === undefined ? [] : [o.read]))
+  return reads.length === 0 ? undefined : Math.max(...reads)
+}
+// wa status's receipt lines, each only once there is something to say: the owner's last read, and the last alert to the alert number with its delivered and read times
+async function receiptLines(dir: string, numbers: { alert: string; owner: string }) {
+  const iso = (at: number) => new Date(at).toISOString()
+  const read = numbers.owner ? await ownerReadAt(dir, numbers.owner) : undefined
+  const alert = numbers.alert
+    ? (await sentTo(dir, numbers.alert)).filter((o) => o.kind && o.kind !== "guest").at(-1)
+    : undefined
+  return [
+    ...(read === undefined
+      ? []
+      : [
+          `owner ${String(shownValue("wa.owner", numbers.owner))}: read ops-wa's messages last at ${iso(read)}`,
+        ]),
+    ...(alert === undefined
+      ? []
+      : [
+          `alert ${String(shownValue("wa.alert", numbers.alert))}: the last alert went at ${iso(alert.at)}; ${
+            alert.delivered === undefined
+              ? "not delivered yet"
+              : `delivered at ${iso(alert.delivered)}, ${alert.read === undefined ? "not read yet" : `read at ${iso(alert.read)}`}`
+          }`,
+        ]),
+  ]
+}
 // WhatsApp takes an edit in a message's first 15 minutes.
 const EDIT_MS = 15 * 60_000
+// status.json, the sender's chain's: the live status in the owner's chat, by its id, its words and its first send's time, which WhatsApp's edit window counts from.
+type Live = { at?: number; id?: string; text?: string }
+const statusFile = (dir: string) => join(dir, "status.json")
+// The owner's chat messages after the live status, the owner's and ours, at which it has scrolled away.
+const STATUS_SCROLL = 5
 
 const NO_CHAT = "the owner has not written in the last 24 hours, and ops-wa never starts a chat"
 
 // What a send is: a reply to the owner, an urgent alert to both numbers at once, an urgent alert to the owner first that goes on to the alert number unless handled, that later send itself, or a reply to the alert number as a guest.
 export type Kind = "alert" | "escalate" | "first" | "guest" | "reply"
 
-// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
+// Quiet hours: the window's start and end hours in the owner's zone, wa.quietStartHour, wa.quietEndHour and clock.ownerZone.
+export type Quiet = { end: number; start: number; zone: string }
+// quiet.json, the sender's chain's: each text held in quiet hours, oldest first, until the catch-up sends them
+type Held = { at: number; body: string; status?: true }
+const quietFile = (dir: string) => join(dir, "quiet.json")
+// inside the window, a reply goes out only within this long of the owner's last read or message
+export const QUIET_IDLE_MS = HOUR
+// remind.json, the sender's chain's: the owner's message whose window the last reminder was for, so each window gets one
+const remindFile = (dir: string) => join(dir, "remind.json")
+// the reminder goes this long after the owner's last message, 2 hours before ops-wa can no longer reply
+export const REMIND_MS = 22 * HOUR
+const REMIND =
+  "This chat can reply only within 24 hours of your last message, and those 24 hours end soon. Send any reply to keep updates coming."
+const HELD =
+  "held for quiet hours: the owner has read or written nothing in the last hour, so it goes out in one catch-up once the owner reads or writes, or when the quiet hours end"
+const QUIET_WAITS =
+  "quiet hours: the owner has read or written nothing in the last hour, and only a text waits for the catch-up; send this once the owner reads or writes, or after the quiet hours"
+// Pure: whether a time falls in the quiet window by its hour in the zone; a window whose start and end are the same hour is none, and one past midnight wraps.
+export const inQuiet = (at: number, q: Quiet): boolean => {
+  if (q.start === q.end) return false
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      hourCycle: "h23",
+      timeZone: q.zone,
+    }).format(at),
+  )
+  return q.start < q.end ? hour >= q.start && hour < q.end : hour >= q.start || hour < q.end
+}
+// Pure: the one catch-up message, each held text under the time it was held, in the owner's zone.
+export const catchUpOf = (held: Held[], zone: string): string => {
+  const time = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: zone,
+  })
+  return [
+    "Held in quiet hours, oldest first:",
+    ...held.map((h) => `${time.format(h.at)}\n${h.body}`),
+  ].join("\n\n")
+}
+
 // the words a send carries, a text or a file's caption, which its typing time and ours.json read
 const wordsOf = (content: Content) =>
   "text" in content ? content.text : "caption" in content ? content.caption : undefined
 
+// The one send path, paced by habits.ts's SEND with no hourly cap (ADR 0033), and never a chat's first message: a reply or a card's poll to the owner's number alone within 24 hours of its last message, a guest's reply to the alert number alone within 24 hours of its last, or at any time once the owner approved it (ADR 0034), and an alert once to the owner and once to the alert number, each once that number has written (ADR 0028), the owner first and the alert number after wa.alertDelayMinutes unless it is handled (ADR 0034).
 export function sender(
   io: Omit<Io, "relay"> & {
     // wa.alertDelayMinutes, read afresh for each alert
     delay?: () => Promise<number>
     device: string
+    // the quiet window, read afresh for each send; a sender with none, or one that reads none, has no quiet hours
+    quiet?: () => Promise<Quiet | undefined>
     sock: Sock
   },
 ) {
@@ -931,6 +1213,15 @@ export function sender(
     } | null
     last = io.now()
     const id = sent?.key?.id
+    // a new message in the owner's chat, which a plain answer to a proposal counts (ADR 0041); an edit, a delete, a reaction and a pin add none
+    if (
+      id &&
+      jid === jidOf(io.owner) &&
+      !["delete", "edit", "pin", "react"].some((k) => k in content)
+    ) {
+      const { messages = [] } = await readOwn<{ messages?: NewMessage[] }>(sentFile(io.dir), {})
+      await writeOwn(sentFile(io.dir), { messages: [...messages, { at: last, id }].slice(-50) })
+    }
     const words = wordsOf(content)
     if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
@@ -953,12 +1244,42 @@ export function sender(
     ((await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []).filter(
       (at) => now - at < HOUR,
     )
+  // whether a message to the owner waits now: inside the quiet window, with no read or message from the owner in the last hour (ADR 0040)
+  const quietNow = async (now: number) => {
+    const q = await io.quiet?.()
+    if (!q || !inQuiet(now, q)) return false
+    const { ownerAt = 0 } = await readOwn<Wrote>(ownerFile(io.dir), {})
+    const read = (await ownerReadAt(io.dir, io.owner)) ?? 0
+    return now - Math.max(ownerAt, read) >= QUIET_IDLE_MS
+  }
+  // the held texts as one catch-up, once the owner may be written to again and inside the owner's 24 hours, since ops-wa never starts a chat; it answers nothing, as each held text counted when it was held, so the owner's message that set it off still waits for its answer; the texts are cleared once it has gone, so a catch-up that fails or a restart in its typing wait keeps them
+  const catchUpNow = async () => {
+    const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
+    const now = io.now()
+    if (held.length === 0 || (await quietNow(now))) return
+    if (windowLeft((await readOwn<Wrote>(ownerFile(io.dir), {})).ownerAt, now) === 0) return
+    const zone = (await io.quiet?.())?.zone ?? "UTC"
+    await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
+    await writeOwn(quietFile(io.dir), { held: [] })
+  }
+  // one line a window at 22 hours, while the window is open and outside quiet hours, so the owner can keep it open with any reply; in quiet hours it waits for their end
+  const remindNow = async () => {
+    const now = io.now()
+    const { ownerAt } = await readOwn<Wrote>(ownerFile(io.dir), {})
+    if (ownerAt === undefined || now - ownerAt < REMIND_MS || windowLeft(ownerAt, now) === 0) return
+    const q = await io.quiet?.()
+    if (q && inQuiet(now, q)) return
+    if ((await readOwn<{ for?: number }>(remindFile(io.dir), {})).for === ownerAt) return
+    await sendNow(REMIND, "reply", undefined, {})
+    await writeOwn(remindFile(io.dir), { for: ownerAt })
+  }
   const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
     if (refusal) throw new Error(refusal)
     const now = io.now()
     const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
     if (windowLeft(owner.ownerAt, now) === 0) throw new Error(NO_CHAT)
+    if (await quietNow(now)) throw new Error(QUIET_WAITS)
     const sends = await recent(now)
     const messageSecret = crypto.getRandomValues(new Uint8Array(32))
     const poll = { messageSecret, name, selectableCount: 1 as const, values }
@@ -971,11 +1292,12 @@ export function sender(
     kind: Kind,
     source: string | undefined,
     extra: Extra,
+    answers = true,
   ): Promise<Out> => {
-    const shape = extraRefusal(extra, body)
-    if (shape) throw new Error(shape)
     if (kind !== "reply" && kind !== "guest" && Object.keys(extra).length > 0)
       throw new Error("wa alert sends text alone")
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
     // the outbox sits beside whatsapp/ in the data folder
     const file = extra.file ? await readOutbound(outboxDir(dirname(io.dir)), extra.file) : undefined
     const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
@@ -1030,6 +1352,24 @@ export function sender(
             ? "the alert number has never written to this number, and ops-wa never starts a chat"
             : `${to[0]!.who} has not written in the last 24 hours, and ops-wa never starts a chat`,
       )
+    // in quiet hours a new message to the owner waits: a text is held for the catch-up and counts as the dispatcher's answer, a status replaces the one held before it and answers nothing, anything else is refused; an edit, a delete and an urgent alert go as before
+    if (kind === "reply" && !extra.edit && !extra.delete) {
+      if (await quietNow(now)) {
+        if (extra.file || extra.location || extra.quote) throw new Error(QUIET_WAITS)
+        const { held = [] } = await readOwn<{ held?: Held[] }>(quietFile(io.dir), {})
+        await writeOwn(quietFile(io.dir), {
+          held: extra.status
+            ? [...held.filter((h) => !h.status), { at: now, body, status: true }]
+            : [...held, { at: now, body }],
+        })
+        if (!extra.status)
+          await writeOwn(sendsFile(io.dir), { sends: [...(await recent(now)), now] })
+        lastIds = []
+        return { ids: [], said: HELD }
+      }
+      // the held texts go first, so the owner reads them in the order they were written
+      if (answers) await catchUpNow()
+    }
     const jid = going[0]!.jid
     const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
     const who: Who = kind === "guest" ? "alert" : "owner"
@@ -1059,33 +1399,93 @@ export function sender(
       ...(quoted && { quote: { id: quoted.id, jid: quoted.jid, text: quoted.text! } }),
     })
     const sends = await recent(now)
+    const partials = Object.fromEntries(
+      Object.entries(
+        (await readOwn<{ partials?: Record<string, Partial> }>(partialFile(io.dir), {})).partials ??
+          {},
+      ).filter(([, p]) => now - p.at < OWNER_WINDOW_MS),
+    )
     const ids: string[] = []
-    for (const t of going)
-      for (const [k, content] of messages.entries()) {
-        // a text or a caption waits its typing time; a file with none goes on the gap alone
-        const typed = wordsOf(content)
-        const id = await paced(
-          t.jid === jidOf(io.owner) ? sends : null,
-          k === 0 ? SEND.gapMs : SEND.partGapMs,
-          t.jid,
-          content,
-          typed ? typingMs(typed.length, io.random) : 0,
-        )
-        // kept as each part goes, so a part already sent can be taken back when a later one fails
-        if (id && !target) {
-          ids.push(id)
-          own.push({ at: io.now(), id, jid: t.jid })
-          await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
+    const reached: string[] = []
+    for (const t of going) {
+      const key = target
+        ? undefined
+        : Bun.hash(`${t.jid}\n${kind}\n${body}\n${JSON.stringify(extra)}`).toString(36)
+      const done = key ? partials[key] : undefined
+      const sent = [...(done?.ids ?? [])]
+      let parts = done?.parts ?? 0
+      const from = parts
+      try {
+        for (const [k, content] of messages.entries()) {
+          // a part an earlier try of this same send already sent stays as it went
+          if (k < from) continue
+          // a text or a caption waits its typing time; a file with none goes on the gap alone
+          const typed = wordsOf(content)
+          const id = await paced(
+            t.jid === jidOf(io.owner) && answers ? sends : null,
+            k === from ? SEND.gapMs : SEND.partGapMs,
+            t.jid,
+            content,
+            typed ? typingMs(typed.length, io.random) : 0,
+          )
+          parts = k + 1
+          // kept as each part goes, so a part already sent can be taken back when a later one fails
+          if (id && !target) {
+            sent.push(id)
+            own.push({ at: io.now(), id, jid: t.jid, kind })
+            await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
+          }
         }
+      } catch (error) {
+        if (key && parts > 0) {
+          partials[key] = { at: done?.at ?? now, ids: sent, parts }
+          await writeOwn(partialFile(io.dir), { partials })
+        }
+        // an alert that fails keeps its outcome too, with each number it reached first
+        if (alert)
+          await keepSent(io.dir, {
+            at: now,
+            outcome: `${reached.length > 0 ? `sent to ${reached.join(" and ")}, then the send` : "the send"} to ${t.who} failed: ${masked((error as Error).message)}`,
+            when: io.now(),
+          }).catch(() => {})
+        throw error
       }
+      reached.push(t.who)
+      ids.push(...sent)
+      if (key && done) {
+        delete partials[key]
+        await writeOwn(partialFile(io.dir), { partials })
+      }
+    }
+    // a deleted message leaves own.json, ours.json and any partial send naming it, so a second delete or an edit of it is refused and that send goes again whole
+    if (extra.delete) {
+      const gone = extra.delete
+      await writeOwn(ownFile(io.dir), { messages: own.filter((o) => o.id !== gone) })
+      const { messages: words = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      await writeOwn(oursFile(io.dir), { messages: words.filter((m) => m.id !== gone) })
+      for (const [k, p] of Object.entries(partials)) if (p.ids.includes(gone)) delete partials[k]
+      await writeOwn(partialFile(io.dir), { partials })
+    }
     lastIds = ids
+    // an alert that never goes pending keeps its outcome as it goes, so wa status shows the newest alert's; a failed write leaves the send as it went
+    const settled = async (said: string): Promise<Out> => {
+      if (alert)
+        await keepSent(io.dir, {
+          at: now,
+          outcome:
+            said !== "sent"
+              ? said
+              : going.length > 1
+                ? "sent to both numbers at once"
+                : `sent to ${going[0]!.who} alone`,
+          when: io.now(),
+        }).catch(() => {})
+      return { ids, said }
+    }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return {
-          ids,
-          said: "sent to the owner alone: the alert number has never written to this number",
-        }
+        return settled("sent to the owner alone: the alert number has never written to this number")
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
@@ -1095,13 +1495,62 @@ export function sender(
       }
     }
     const left = to.find((t) => !t.open)
-    return {
-      ids,
-      said: left
+    return settled(
+      left
         ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
         : "sent",
-    }
+    )
   }
+  // the live status: one message in the owner's chat, edited in place while WhatsApp takes an edit and it has not scrolled away, else sent anew as the live one; an unchanged status sends nothing
+  const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
+    if (kind !== "reply")
+      throw new Error(
+        kind === "guest" ? "a status goes to the owner's chat alone" : "wa alert sends text alone",
+      )
+    const text = body.trim()
+    if (split(toWhatsApp(text)).length > 1)
+      throw new Error(`a status fits one message, ${SEND.partChars} characters`)
+    const { at, id, text: was } = await readOwn<Live>(statusFile(io.dir), {})
+    if (id && was === text)
+      return { ids: [], said: "unchanged: the live status already reads this" }
+    const now = io.now()
+    let failed: string | undefined
+    if (id && at !== undefined && now - at < EDIT_MS) {
+      const owner = jidOf(io.owner)
+      const { messages: kept = [] } = await readOwn<{ messages?: Kept[] }>(messagesFile(io.dir), {})
+      const own = (await readOwn<{ messages?: Own[] }>(ownFile(io.dir), {})).messages ?? []
+      const after =
+        kept.filter((k) => k.who === "owner" && k.at > at).length +
+        own.filter((o) => o.jid === owner && o.id !== id && o.at > at).length
+      // only the edit's own failure falls back to a new message; the state's write after a good edit throws as it is
+      const edited =
+        after < STATUS_SCROLL &&
+        (await sendNow(text, "reply", undefined, { edit: id }).then(
+          () => true,
+          (error: Error) => {
+            failed = error.message
+            return false
+          },
+        ))
+      if (edited) {
+        await writeOwn(statusFile(io.dir), { at, id, text })
+        return { ids: [id], said: "edited the live status" }
+      }
+    }
+    const out = await sendNow(text, "reply", undefined, { status: true })
+    if (out.ids[0]) await writeOwn(statusFile(io.dir), { at: io.now(), id: out.ids[0], text })
+    return failed !== undefined
+      ? {
+          ...out,
+          said: `${out.said}: the live status's edit failed (${failed}), so this one is live now`,
+        }
+      : out
+  }
+  // a send, or the live status when its extra marks it
+  const anySend = (body: string, kind: Kind, source: string | undefined, extra: Extra) =>
+    extra.status ? statusNow(body, kind, extra) : sendNow(body, kind, source, extra)
   const queued = <T>(job: () => Promise<T>): Promise<T> => {
     const run = chain.then(job)
     chain = run.catch(() => {})
@@ -1127,16 +1576,16 @@ export function sender(
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
     // on the owner's message a ✅ or any other reaction is the dispatcher's answer, and a 👀 says a reply is coming, so it holds the 3-minute timer alone
-    const eyes = target.who === "owner" && emoji === "👀"
+    const isEyes = target.who === "owner" && emoji === "👀"
     await paced(
-      target.who === "owner" && !eyes ? await recent(now) : null,
+      target.who === "owner" && !isEyes ? await recent(now) : null,
       SEND.gapMs,
       target.jid,
       {
         react: { key, text: emoji },
       },
     )
-    if (eyes) {
+    if (isEyes) {
       const at = io.now()
       const { eyes: list = [] } = await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})
       await writeOwn(eyesFile(io.dir), { eyes: [...list.filter((e) => at - e < HOUR), at] })
@@ -1153,19 +1602,28 @@ export function sender(
   return Object.assign(
     // source: what a checker reads for an alert to the owner first; extra: a file, a location, a quote, an edit or a delete beside the body (outbound.ts)
     (body: string, kind: Kind = "reply", source?: string, extra: Extra = {}): Promise<string> =>
-      queued(() => sendNow(body, kind, source, extra)).then((out) => out.said),
+      queued(() => anySend(body, kind, source, extra)).then((out) => out.said),
     {
-      // a card's text to the owner, giving its first message's id, which a decision's pin names
+      // a card's text to the owner, giving its first message's id, which a decision's pin names; in quiet hours the card waits whole, its poll and pin with it
       card: (body: string) =>
         queued(async () => {
+          if (await quietNow(io.now())) throw new Error(QUIET_WAITS)
           await sendNow(body, "reply", undefined, {})
           return lastIds[0]
         }),
+      catchUp: () => queued(catchUpNow),
+      // a draft's text to the owner, giving the ids a reply to it names; in quiet hours it waits whole, as a card does
+      draft: (body: string) =>
+        queued(async () => {
+          if (await quietNow(io.now())) throw new Error(QUIET_WAITS)
+          return (await sendNow(body, "reply", undefined, {})).ids
+        }),
       // the same send, with the ids of the messages it sent, which an edit or a delete names
       out: (body: string, kind: Kind, source?: string, extra: Extra = {}) =>
-        queued(() => sendNow(body, kind, source, extra)),
+        queued(() => anySend(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
+      remind: () => queued(remindNow),
       react: (emoji: string, on: { id?: string; who?: Who }) => queued(() => reactNow(emoji, on)),
     },
   )

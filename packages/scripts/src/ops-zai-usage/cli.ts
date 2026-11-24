@@ -4,7 +4,7 @@ import { sessionStateDir } from "@packages/config/session-state"
 import { dataDir } from "@packages/env/data-dir"
 import { accountSettings, accountsOf, modelSettings, readPolicy } from "@packages/settings"
 
-import { beat, cycle, CYCLE_SECONDS, emptyBalanceAt, zaiQuota } from "./sync"
+import { beat, cycle, CYCLE_SECONDS, emptyBalanceAt, glmKey, zaiQuota } from "./sync"
 
 // The Z.ai key, the first GLM row of usage.accounts by its label, is read from the Keychain inside this process and goes only into the request header: it never reaches a log, a file or an argument list.
 const data = dataDir()
@@ -15,10 +15,21 @@ const key = async (): Promise<string> => {
   const policy = await readPolicy(data)
   if (policy.refusal !== undefined) return ""
   const service = modelSettings.get(policy.settings, "models.glmKeychainService")
-  const label = accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "glm")[0]?.label
-  if (!label) return ""
-  const out = Bun.spawnSync(["security", "find-generic-password", "-s", service, "-a", label, "-w"])
-  return out.exitCode === 0 ? out.stdout.toString().trim() : ""
+  return glmKey(
+    accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "glm"),
+    (label) => {
+      const out = Bun.spawnSync([
+        "security",
+        "find-generic-password",
+        "-s",
+        service,
+        "-a",
+        label,
+        "-w",
+      ])
+      return out.exitCode === 0 ? out.stdout.toString().trim() : ""
+    },
+  )
 }
 const read = async (): Promise<unknown> => zaiQuota(await key())
 const balance = () => emptyBalanceAt(sessionStateDir(data))

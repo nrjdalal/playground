@@ -54,6 +54,25 @@ describe("the inbox routes", () => {
     expect((await answer({ origin: trusted() }, peer("::ffff:127.0.0.1"))).status).toBe(401)
     expect((await answer({ origin: trusted() }, peer("::1"))).status).toBe(401)
   })
+
+  test("an answer past its cap is refused with a message naming the field and its bound, which the card shows (#2970)", async () => {
+    const { invalidAnswer } = await import("../../../../../api/hono/src/routers/inbox")
+    const { answerInputSchema } = await import("../../../../../api/hono/src/lib/dashboard/inbox")
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
+    ).text()
+    expect(source).toContain('sValidator("json", answerInputSchema, invalidAnswer)')
+    // the route's validator hands its hook the schema's standard issues, as here
+    const check = async (body: object) => {
+      const result = await answerInputSchema["~standard"].validate(body)
+      return () =>
+        invalidAnswer(result.issues ? { error: result.issues, success: false } : { success: true })
+    }
+    expect(await check({ action: "approve", note: "x".repeat(3001) })).toThrow(
+      "note: Must be at most 3000 characters as sent, a line break or a quote counting twice",
+    )
+    expect(await check({ action: "approve", note: "x".repeat(3000) })).not.toThrow()
+  })
 })
 
 describe("scheduling an item", () => {
