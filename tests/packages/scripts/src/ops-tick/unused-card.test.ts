@@ -527,6 +527,42 @@ test("a card unread a second night in a row sends Ops one line naming it, and th
   ])
 })
 
+// A night whose card reads ends the unread run, its failed edit included, so Ops hears only of two unread nights in a row (PG-2958).
+test("an unread night, then a read with a failed edit, then an unread night sends Ops no line", async () => {
+  const items = offered([here(image)], HOME, out, {})
+  const unread = async () => ({ code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" })
+  const first = await cardNight(
+    [here(image)],
+    HOME,
+    { card: { id: ID, items } },
+    { ...inbox().deps, ask: unread },
+  )
+  const read = inbox()
+  read.setPosted(cardOf(items))
+  const second = await cardNight(
+    [here(image)],
+    HOME,
+    { card: first.card! },
+    {
+      ...read.deps,
+      ask: async (args, stdin) =>
+        args[0] === "edit"
+          ? { code: 1, out: "ERR_POSTGRES_CONNECTION_REFUSED" }
+          : read.deps.ask(args, stdin),
+    },
+  )
+  expect(second.said).toBe(`card ${ID} not edited: ERR_POSTGRES_CONNECTION_REFUSED`)
+  expect(second.card?.unread).toBeUndefined()
+  const third = await cardNight(
+    [here(image)],
+    HOME,
+    { card: second.card! },
+    { ...inbox().deps, ask: unread },
+  )
+  expect(third.ops).toEqual([])
+  expect(third.card?.unread).toBe(1)
+})
+
 test("a card holds CARD_MAX questions at most, the largest first", () => {
   const many = Array.from({ length: CARD_MAX + 3 }, (_, i) => ({
     ...image,

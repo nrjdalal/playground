@@ -23,7 +23,7 @@ export type CardItem = {
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }
-// The open card nightly-clean keeps in its state file: its Inbox id, the items it asks about, at, the card's updatedAt read back right after nightly-clean's own last post or edit, and unread, the nights in a row its card has read as unread, one past two of which send Ops a line.
+// The open card nightly-clean keeps in its state file: its Inbox id, the items it asks about, at, the card's updatedAt read back right after nightly-clean's own last post or edit, and unread, the nights in a row its card has read as unread, the second of which sends Ops one line.
 export type CardState = { at?: string; id: string; items: CardItem[]; unread?: number }
 // Each item the owner kept, by `<machine> <path>`, at the bytes it was kept at: it stays off later cards until its size changes.
 export type Kept = Record<string, number>
@@ -265,6 +265,8 @@ export async function cardNight(
         said: `card ${card.id} unread: ${item}`,
       }
     }
+    const { unread: _unread, ...read } = card
+    card = read
     if (item.status === "open") {
       const tonight = offered(found, home, deps.out, kept).slice(0, CARD_MAX)
       if (!tonight.length) {
