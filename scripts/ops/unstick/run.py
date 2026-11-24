@@ -13,7 +13,7 @@ block goes to the session's manager (alert_to), each through the outbox at first
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
 A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
-screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or an invalid_request), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock, since those counts move while the pane works; the local model's count does not advance while compaction runs, so for it the 10-minute line reads the frozen count unchanged for those 10 minutes.
+screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or an invalid_request), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock; a healthy local compaction can run past it (48m on 2026-11-19), so for the local model the 10-minute line reads the spinner's ↓ count unchanged for those 10 minutes, and a count that moves raises nothing. Each re-alerts every REALERT; nothing is pressed in the pane.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
@@ -1118,22 +1118,19 @@ def cycle(state):
                 "surface": s["surface_id"],
                 "workspace": s["workspace_id"],
             }
-            # a hang is alerted on first sight, since wall-clock alone cannot tell it apart from a healthy compaction
-            if comp[2] and not prev.get("alerted"):
-                block["alerted"] = now_t
-                notify(f"{name} is compacting, but a stop sits above the line: {comp[0]}", to=alert_to(name, s.get("transcript_path")))
-                log(f"{name}: compaction a hang sits above the line: {comp[0]}")
-            # stuck past 10 minutes: a local session's ↓ count has not moved, a non-local one has held the pane since it started; re-alerted every REALERT
+            # a stop above the line alerts at first sight; else a local session's ↓ count unmoved for 10 minutes, or a non-local one compacting 10 minutes; each re-alerted every REALERT
             frozen = is_loc and comp[1] is not None and comp[1] == prev.get("count")
             hold = (now_t - block["countSince"] >= 600) if frozen else (not is_loc and now_t - block["since"] >= 600)
-            if hold and now_t - prev.get("alerted", 0) >= REALERT:
+            if (comp[2] or hold) and now_t - prev.get("alerted", 0) >= REALERT and not hook_owned(s["session_id"]):
                 block["alerted"] = now_t
-                if frozen:
-                    detail = f"{comp[0]} (the spinner's ↓ count is frozen at {comp[1]} for {ago(block['countSince'])})"
+                if comp[2]:
+                    detail = f"a stop sits above the line, compacting for {ago(block['since'])}: {comp[0]}"
+                elif frozen:
+                    detail = f"stuck past 10 minutes: {comp[0]} (the spinner's ↓ count is frozen at {comp[1]} for {ago(block['countSince'])})"
                 else:
-                    detail = f"{comp[0]} (compacting for {ago(block['since'])})"
-                notify(f"{name} is compacting, stuck past 10 minutes: {detail}", to=alert_to(name, s.get("transcript_path")))
-                log(f"{name}: compaction stuck past 10 minutes: {detail}")
+                    detail = f"stuck past 10 minutes: {comp[0]} (compacting for {ago(block['since'])})"
+                notify(f"{name} is compacting, {detail}", to=alert_to(name, s.get("transcript_path")))
+                log(f"{name} is compacting, {detail}")
             blocks[key] = block
             continue
         if not kind:

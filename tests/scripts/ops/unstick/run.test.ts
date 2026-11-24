@@ -2331,6 +2331,7 @@ run.alert_to = lambda name, transcript: "lead"
 run.session_account = lambda name: "acct"
 run.moving = lambda now_t=None: None
 run.api_error_stop = lambda s, now_t: None
+run.hook_owned = lambda sid: os.environ.get("HOOK_OWNED") == "true"
 sent = []
 run.notify = lambda text, to="dispatcher": sent.append([to, text])
 run.log = lambda line: None
@@ -2353,9 +2354,11 @@ print(json.dumps(sent))
     passes = 1,
     step = 1200,
     isLocal = false,
+    hookOwned = false,
   ): Promise<[string, string][]> => {
     const config = scratch()
     const env = {
+      HOOK_OWNED: hookOwned ? "true" : "false",
       IS_LOCAL: isLocal ? "true" : "false",
       PASSES: String(passes),
       SCREEN: JSON.stringify(screens),
@@ -2396,6 +2399,33 @@ print(json.dumps(sent))
     expect(sent[0][0]).toBe("lead")
     expect(sent[0][1]).toContain("Compacting conversation")
     expect(sent[0][1]).toContain("above the line")
+  })
+
+  test("a stop above the line re-alerts every REALERT while it holds, its count still moving", async () => {
+    const stopped = (tick: string) => ["  ? Prompt is too long", ...compaction(tick)]
+    const sent = await compact([stopped("1.8k"), stopped("2.0k")], 2, 1200, true)
+    expect(sent, "two alerts").toHaveLength(2)
+  })
+
+  test("a stop that shows past 10 minutes sends one alert on that pass, not two", async () => {
+    const sent = await compact(
+      [compaction("1.8k"), ["  ? Prompt is too long", ...compaction("2.0k")]],
+      2,
+      1200,
+    )
+    expect(sent, "one alert").toHaveLength(1)
+    expect(sent[0][1]).toContain("above the line")
+  })
+
+  test("a compaction the session-state hook recorded as stuck or failed raises nothing", async () => {
+    const sent = await compact(
+      [["  ? Prompt is too long", ...compaction("1.8k")]],
+      1,
+      1200,
+      false,
+      true,
+    )
+    expect(sent, "nothing").toEqual([])
   })
 
   test("a local compaction whose ↓ count is unchanged past 10 minutes alerts, with the frozen count", async () => {
