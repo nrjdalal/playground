@@ -114,7 +114,7 @@ export const claudeEntry = pgTable(
   ],
 )
 
-// How far the importer has read each transcript file. A changed inode or a head rewritten in place, or a file shorter than byte_offset, is read again from 0; the device id is not read, so a reboot's new device id is not a trigger.
+// How far the importer has read each transcript file. A changed inode, a file that grew with its head rewritten in place, or a file shorter than byte_offset, is read again from 0; the device id is not read, so a reboot's new device id is not a trigger.
 export const claudeTranscript = pgTable(
   "claude_transcript",
   {

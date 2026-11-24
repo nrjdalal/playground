@@ -652,7 +652,7 @@ describe.skipIf(!dockerUp())("ingest", () => {
     expect(result?.duplicate).toBeUndefined()
   })
 
-  test("a device id that changes on reboot, the inode and head unchanged, reads from the stored offset and wipes nothing", async () => {
+  test("a device id that changes on reboot, then an append, the inode and head unchanged, reads from the stored offset and wipes nothing", async () => {
     const at = "2026-10-06T11:00:00.000Z"
     // A session made at run time, so this row writes and reads only its own rows, never the rows the other rows read.
     const id = crypto.randomUUID()
@@ -660,11 +660,11 @@ describe.skipIf(!dockerUp())("ingest", () => {
     const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
     writeFileSync(here(), [h(`${id}-u1`, "first"), h(`${id}-u2`, "second")].join(""))
     expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
-    const before = await entryCount(id)
-    // A Mac reboot numbers the volume anew: the stored dev differs, but the inode and the head are unchanged, so the read resumes from its offset and deletes no row.
+    // A Mac reboot numbers the volume anew: the stored dev differs, but the inode and the head are unchanged, so the grown file's read resumes from its offset and deletes no row.
     await admin`update claude_transcript set dev = dev + 1 where path = ${here()}`
-    expect(await ingestFile(db, projects, here())).toEqual({ entries: 0, id })
-    expect(await entryCount(id)).toBe(before)
+    appendFileSync(here(), h(`${id}-u3`, "third"))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 1, id })
+    expect(await entryCount(id)).toBe(3)
   })
 
   test("a head rewritten in place, the inode the same and the file larger, reads from 0 and replaces", async () => {
@@ -682,6 +682,79 @@ describe.skipIf(!dockerUp())("ingest", () => {
     const result = await ingestFile(db, projects, here())
     expect(result?.entries).toBe(3)
     expect(await entryCount(id)).toBe(3)
+  })
+
+  test("a head rewritten in place to a line with no uuid, the file larger, reads from 0 and replaces", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(here(), [h(`${id}-u1`, "first"), h(`${id}-u2`, "second")].join(""))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "s", leafUuid: "x" }),
+        h(`${id}-v2`, "new two"),
+        h(`${id}-v3`, "new three"),
+        h(`${id}-v4`, "new four"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, here())
+    const rows = await admin`select uuid from claude_entry where session_id = ${id} order by seq`
+    expect(rows.map((r: { uuid: string }) => r.uuid)).toEqual([`${id}-v2`, `${id}-v3`, `${id}-v4`])
+  })
+
+  test("a head rewritten in place so the stored first offset lands mid-line, the file larger, reads from 0 and replaces", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "s" }),
+        h(`${id}-u1`, "first"),
+        h(`${id}-u2`, "second"),
+      ].join(""),
+    )
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "a much longer summary line than before" }),
+        h(`${id}-v1`, "new one"),
+        h(`${id}-v2`, "new two"),
+        h(`${id}-v3`, "new three"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, here())
+    const rows = await admin`select uuid from claude_entry where session_id = ${id} order by seq`
+    expect(rows.map((r: { uuid: string }) => r.uuid)).toEqual([`${id}-v1`, `${id}-v2`, `${id}-v3`])
+  })
+
+  test("a longer transcript sharing its session with a shorter copy whose head differs, then appended, wipes nothing", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const olderDir = join(projects, `${PROJECT}-head-dup`)
+    mkdirSync(olderDir, { recursive: true })
+    const long = join(olderDir, `${id}.jsonl`)
+    const short = join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(
+      long,
+      [
+        line({ type: "agent-name", agentName: "n", sessionId: id }),
+        h(`${id}-a1`, "a one"),
+        h(`${id}-a2`, "a two"),
+        h(`${id}-a3`, "a three"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, long)
+    writeFileSync(short, [h(`${id}-b1`, "b"), h(`${id}-a2`, "a two")].join(""))
+    await ingestFile(db, projects, short)
+    appendFileSync(long, h(`${id}-a4`, "a four"))
+    expect((await ingestFile(db, projects, long))?.entries).toBe(1)
   })
 
   test("a pass reports each duplicate transcript it folded without wiping", async () => {
