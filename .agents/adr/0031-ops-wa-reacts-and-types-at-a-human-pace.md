@@ -1,5 +1,7 @@
 # ops-wa reacts on a handed-on message, and paces a text by its typing time
 
+> Superseded in part by [ADR 0038](./0038-the-dispatcher-sets-the-eyes-reaction.md): ops-wa sets no 👀 of its own, and the dispatcher sets 👀 with `wa react` when a reply will take a while.
+
 [ADR 0023](0023-the-owners-whatsapp-chat-is-the-owners-words.md) set ops-wa's habits: a send a second apart, no presence and no read marks, and [ADR 0033](0033-whatsapp-sends-have-no-hourly-cap.md) left the gap as the one pace.
 The owner asked for two things a person's own phone does: a reaction that says a message was seen or settled, and a long message that arrives after the time it takes to type.
 Both change how ops-wa sends, so by [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md) this ADR stands beside 0023, [ADR 0028](0028-a-second-whatsapp-number-gets-alerts-and-is-data.md), [ADR 0030](0030-the-second-whatsapp-number-is-a-guest-and-the-policy-lines-are-settings.md) and 0033, and every other line of theirs still holds.

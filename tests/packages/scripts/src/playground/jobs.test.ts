@@ -87,15 +87,19 @@ test("a machine with no store keeps its jobs.json untouched and exits 3", async 
   expect(readFileSync(jobs, "utf8")).toBe('{"jobs":[{"name":"ops-company"}]}\n')
 })
 
-test("a fresh machine, with no store and no jobs.json, gets the registry's defaults: the Dashboard's job and the usage read on", async () => {
+// The jobs on with no setting, on the platform this render runs on: the Dashboard's and the usage read, and keep-awake on a Mac alone.
+const ON = [
+  "ops-dashboard",
+  ...(process.platform === "darwin" ? ["ops-keep-awake"] : []),
+  "ops-usage",
+]
+
+test("a fresh machine, with no store and no jobs.json, gets the registry's defaults: the Dashboard's job and the usage read on, and keep-awake on a Mac", async () => {
   const jobs = join(scratch, "fresh", "ops", "jobs.json")
   const fresh = await run(join(scratch, "fresh"), jobs)
   expect(fresh).toEqual({ code: 0, err: "", out: "jobs: rendered jobs.json" })
   const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
-  expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
-    "ops-dashboard",
-    "ops-usage",
-  ])
+  expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual(ON)
   expect((await run(join(scratch, "fresh"), jobs)).code).toBe(3)
 })
 
@@ -432,10 +436,7 @@ test("an extensions root that lacks policy.json gets the registry's defaults, as
   const jobs = join(scratch, "no-policy", "ops", "jobs.json")
   expect(await run(data, jobs)).toEqual({ code: 0, err: "", out: "jobs: rendered jobs.json" })
   const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
-  expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual([
-    "ops-dashboard",
-    "ops-usage",
-  ])
+  expect(rendered.filter((job) => job.disabled !== true).map((job) => job.name)).toEqual(ON)
 })
 
 test("a policy.json that does not parse is refused, exit 2, and jobs.json is kept", async () => {

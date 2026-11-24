@@ -1,17 +1,11 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, systemd (systemctl, loginctl), Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one narrowed to the containers the box made (docker.ts), curl is real with each URL logged, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, systemd (systemctl, loginctl), Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one narrowed to the containers the box made (docker.ts), curl is real with each URL logged, and bunx is real with each call logged. claude, launched with a session name, runs the scripted session in claude.ts.
 
 import { basename, join } from "node:path"
-
-// The suffix the pglaunch stand-in gives its container, 4 letters as pglaunch's own, so the live dashboard's name rule reads it as first run's.
-export const GATE_SUFFIX = "gate"
-
-// The label on every container the gate starts, which its clean-up removes by name.
-export const GATE_LABEL = "playground-gate=1"
 
 const logged = (box: string, name: string) =>
   `#!/bin/bash\necho "${name} $*" >> "${box}/calls.log"\n`
 
-// Pure: each stand-in's file name and script for a box at box, with bunx execing realBunx for anything but pglaunch, and docker the real one narrowed to the box's own containers (docker.ts).
+// Pure: each stand-in's file name and script for a box at box, with bunx execing the real one for everything, and docker the real one narrowed to the box's own containers (docker.ts).
 export const stubs = (
   box: string,
   realBunx: string,
@@ -19,16 +13,7 @@ export const stubs = (
   realDocker = "",
 ): Record<string, string> => ({
   brew: `${logged(box, "brew")}exit 1\n`,
-  bunx: `${logged(box, "bunx")}pg=; name=; prev=
-for a in "$@"; do case "$a" in pglaunch@*) pg=1 ;; esac; [ "$prev" = -n ] && name=$a; prev=$a; done
-[ -n "$pg" ] || exec "${realBunx}" "$@"
-c="$name-${GATE_SUFFIX}"
-docker inspect "$c" >/dev/null 2>&1 || docker run -d --name "$c" --label ${GATE_LABEL} -e POSTGRES_PASSWORD=postgres -p 127.0.0.1::5432 postgres:alpine >/dev/null || exit 1
-docker start "$c" >/dev/null 2>&1
-port=$(docker port "$c" 5432 | head -1 | sed 's/.*://')
-echo "name \\"$c :$port\\" started"
-echo "postgres://postgres:postgres@localhost:$port/postgres"
-`,
+  bunx: `${logged(box, "bunx")}exec "${realBunx}" "$@"\n`,
   // a launch that names its session runs the scripted one (claude.ts), any other call answers at once; HERDR_AGENT is herdr's wrapper hint, so it reads the bun process as claude's foreground process
   claude: `${logged(box, "claude")}[ "$1" = setup-token ] && exec bun "${box}/h/playground/api/hono/src/fixtures/setup-token.ts" setup-token
 [ "$1 $2" = "auth status" ] && { echo '{"loggedIn": true}'; exit 0; }
