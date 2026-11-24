@@ -12758,7 +12758,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
           return named;
       }
     };
-    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+    if (name === "" && cmd.words.some((w) => w.value === "exec"))
       execFds = fdFiles(cmd.redirects, execFds);
     const teeTool = program(name);
     const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined);

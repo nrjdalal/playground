@@ -2627,7 +2627,8 @@ async function inspect(
         if (named) return named
       }
     }
-    if (cmd.words.length === 1 && cmd.words[0].value === "exec" && !cmd.words[0].quoted)
+    // an exec that runs no program in a reading parse gives (past reserved words, assignments, its own options and the wrappers before it, an option it cannot place read every way) opens its descriptors for the rest of the line
+    if (name === "" && cmd.words.some((w) => w.value === "exec"))
       execFds = fdFiles(cmd.redirects, execFds)
     const teeTool = program(name)
     const hookWrite =

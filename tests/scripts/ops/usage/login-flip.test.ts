@@ -24,7 +24,7 @@ const beat = join(import.meta.dir, "..", "..", "..", "..", "scripts", "ops", "be
 const scratch = mkdtempSync(join(tmpdir(), "ops-usage-login-flip-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
-// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts, the rule's factory_login and has_token the real ones beat.py carries. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the account it said the factory is now on, the accounts it kept in `accounts`, and the pool and split it wrote. spec.tokens names the short accounts whose Keychain read succeeds, every one of them unless it says otherwise, and urlopen refuses, so a probe that passes the Keychain gate still leaves the Mac unread
+// login-flip.py run whole under a scratch HOME at the clock given, with subprocess stubbed so no Keychain read or bun run ask runs, and beat's setting() answering ACCOUNTS as usage.accounts, the rule's factory_login and has_token the real ones beat.py carries. Accounts go by short names (ND, LW, ...) over made-up addresses: the harness writes the stored login and every reading into the state it finds, runs it, and names the switch's target (none when no account has room), the account it said the factory is now on, the accounts it kept in `accounts`, and the pool and split it wrote. spec.tokens names the short accounts whose Keychain read succeeds, every one of them unless it says otherwise, and urlopen refuses, so a probe that passes the Keychain gate still leaves the Mac unread, its error carrying spec.probeHeaders as the made-up answer when a test gives them
 const harness = `
 import contextlib, io, json, os, re, sys, time, types, urllib.request
 spec = json.loads(sys.argv[2])
@@ -41,7 +41,7 @@ sys.modules["subprocess"] = types.SimpleNamespace(run=keychain)
 beat["subprocess"] = sys.modules["subprocess"]
 sys.modules["beat"] = types.SimpleNamespace(OPS=os.path.expanduser("~/.playground/ops"), checkout=lambda: "/checkout", setting=lambda key: values[key], factory_login=beat["factory_login"], has_token=beat["has_token"])
 class Refused(Exception):
-    headers = None
+    headers = spec.get("probeHeaders")
 def refused(*a, **k):
     raise Refused()
 urllib.request.urlopen = refused
@@ -134,6 +134,7 @@ const flip = (
     due?: string
     noFive?: boolean
     prior?: Record<string, Reading>
+    probeHeaders?: Record<string, string>
     split?: Record<string, number>
     storedAt?: number | null
     tokens?: string[]
@@ -547,6 +548,7 @@ print(json.dumps(ns["probe"]("spare@example.test")))
 `
 
 const FAR = 4102444800
+const PROBE_EVERY = 840
 
 test.each([
   { name: "no status header", status: undefined, week: "1.0", limited: true },
@@ -637,4 +639,24 @@ test("a stored reading with no writtenAt is no fresh reading either, and leaves 
   )
   expect(out.seenAt.OWN).toBe(TONIGHT - 300)
   expect(out.seenWeek.OWN).toBe(76)
+})
+
+// #2997: a rejected reading with the week and 5-hour shares both under 100 has another cause than a full window, so it parks the account for one probe interval, never until the week resets
+test("a rejected probe with both shares under 100 parks the account for one probe interval, then probes it again", () => {
+  const home = mkdtempSync(join(scratch, "home-"))
+  const probeHeaders = {
+    "anthropic-ratelimit-unified-5h-reset": String(FAR),
+    "anthropic-ratelimit-unified-5h-utilization": "0.5",
+    "anthropic-ratelimit-unified-7d-reset": String(FAR),
+    "anthropic-ratelimit-unified-7d-utilization": "0.3",
+    "anthropic-ratelimit-unified-status": "rejected",
+  }
+  const run = (now: number) =>
+    flip("OWN", { OWN: { week: 50, weekReset: MON_1500 } }, now, home, undefined, false, false, {
+      probeHeaders,
+      tokens: ["ND"],
+    }).seenAt.ND
+  expect(run(TONIGHT)).toBe(TONIGHT)
+  expect(run(TONIGHT + PROBE_EVERY - 1)).toBe(TONIGHT)
+  expect(run(TONIGHT + PROBE_EVERY)).toBe(TONIGHT + PROBE_EVERY)
 })
