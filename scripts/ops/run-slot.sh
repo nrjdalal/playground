@@ -1959,6 +1959,8 @@ reclaim() {
   line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
   dir=$(stamp "$1")
+  # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
+  stale "$1" "$line" || return 0
   # the stale holder line goes before the rmdir, as in free, so a reclaimer that read it before this one freed the slot finds it gone once the next taker holds the slot
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rm -f "$1.holder" && rmdir "$1" 2>/dev/null
 }
