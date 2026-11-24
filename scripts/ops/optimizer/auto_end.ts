@@ -1,7 +1,7 @@
 // auto_end.ts: ends a worker, reviewer or tester once its work is done, by SESSIONS.md#end (spawn.sh close, then its roster report), so no finished session sits idle.
 // Two callers: ops-tick's auto-end beat every 5 minutes (sweep, over idle_sessions.ts's flags), and pr:merge and the train's land right after a merge (endMerged, over the PR's roster rows).
 // Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes, and a worker not in `shell`, since its background task is a step of its chore; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
-// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason; a checker's end cleans the other kind's clones of its PR an earlier end kept the same way, once no other checker of that PR is live.
+// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason; a checker's end cleans the other kind's clones of its PR an earlier end kept the same way, once no other live checker row names that PR as its pr, or, until that PR reads merged or closed, in its prs.
 // Then its leftovers go to the trash too: its scratch and scratchpad folders, its memory settings file and its temp folders. Every move is charged to the ended session under safe-delete's cap of 3 a minute, and a move past the cap is carried to the next auto-end beat.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
@@ -230,7 +230,7 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
 // The managers' shared worktree under a main checkout, where spawn.sh's manager mode starts every manager, so what sits there is no single session's work (a test pins it to spawn.sh's line).
 export const LEADS_WORKTREE = ".claude/worktrees/leads"
 
-// The worktrees a session used: each linked worktree its transcript ran in, but the managers' leads worktree, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's, once no other checker of it is live); null when its transcript cannot be read.
+// The worktrees a session used: each linked worktree its transcript ran in, but the managers' leads worktree, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's); null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
