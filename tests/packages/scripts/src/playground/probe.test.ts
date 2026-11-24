@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  alive,
   apiRead,
   apiUp,
   bootTime,
@@ -410,6 +411,13 @@ describe("upHolds", () => {
     const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
     writeOps(data, { "ops-dashboard": start }, beat)
     expect(withData(data, () => upHolds(start * 1000 + 700_000))).toBe(false)
+  })
+})
+
+describe("alive", () => {
+  // #2658 item 3: the kernel refuses signal 0 to another user's process or one outside Claude Code's sandbox (EPERM), and that process still runs
+  test("a pid the kernel refuses a signal to reads alive", () => {
+    expect(alive(1)).toBe(true)
   })
 })
 
