@@ -42,6 +42,43 @@ const held = (): Row[] => [
   ],
   ["an echo of the data folder through a variable read sets", `read P; ${ECHO} > "$P"`],
   ["an echo of the data folder through a variable the line never sets", `${ECHO} > "$UNSET_X"`],
+  [
+    "an echo of the data folder through a variable set after an and",
+    `true && P=${HOOK}; ${ECHO} > "$P"`,
+  ],
+  [
+    "an echo of the data folder through a variable set in a loop",
+    `while true; do P=${HOOK}; break; done; ${ECHO} > "$P"`,
+  ],
+  ["an echo piped into tee writing a git hook through a variable", `P=${HOOK}; ${ECHO} | tee "$P"`],
+  [
+    "a git log's output redirected into a git hook through a variable",
+    `P=${HOOK}; git log -1 --format='touch ~/.playground/extensions/x' > "$P"`,
+  ],
+  [
+    "an echo piped into dd writing a git hook through a variable",
+    `P=${HOOK}; ${ECHO} | dd of="$P"`,
+  ],
+  [
+    "an echo piped into a copy of stdin onto a git hook through a variable",
+    `P=${HOOK}; ${ECHO} | cp /dev/stdin "$P"`,
+  ],
+  [
+    "a subshell's echo redirected into a git hook through a variable",
+    `P=${HOOK}; ( ${ECHO} ) > "$P"`,
+  ],
+  [
+    "a remover word echoed into a git hook through a variable",
+    `P=${HOOK}; echo 'rm -rf dist' > "$P"`,
+  ],
+  [
+    "text the hook cannot read echoed into a git hook through a variable",
+    `P=${HOOK}; echo "$(cat payload)" > "$P"`,
+  ],
+  [
+    "a remover word echoed through a variable the line never sets",
+    `echo 'rm -rf dist' > "$UNSET_X"`,
+  ],
 ]
 
 // Pass controls: a variable naming an ordinary file, a plain text into a hook through a variable, and a plain write through a variable the hook cannot read.
@@ -65,6 +102,7 @@ const controls = (): Row[] => [
   ],
   ["a plain echo through a variable the line never sets", `echo hi > "$UNSET_X"`],
   ["a plain echo through a variable set under an or", `P=x || P=${HOOK}; echo hi > "$P"`],
+  ["a plain echo through a variable set after an and", `true && P=${HOOK}; echo hi > "$P"`],
 ]
 
 const rows = () => [...held(), ...controls()]
