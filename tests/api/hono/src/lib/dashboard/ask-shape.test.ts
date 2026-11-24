@@ -10,6 +10,7 @@ import {
   progressRefusal,
   PROSE_LIMIT,
   shapeHints,
+  uiRefusal,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
 import {
   deleteRefusal,
@@ -337,6 +338,90 @@ describe("progressRefusal", () => {
         preview: { text: block("B | 140 | x | y"), type: "draft" },
       }),
     ).toBeNull()
+  })
+})
+
+describe("uiRefusal", () => {
+  const update = (text: string) => ({ kind: "update", preview: { outcome: "merged", text } })
+  const block = (...json: string[]) => ["```ui", ...json, "```", "", "- One line."].join("\n")
+
+  test("passes a good steps and progress spec, and a plain prose or progress card, on an ask and an update", () => {
+    const steps = block(
+      JSON.stringify({ type: "steps", steps: [{ label: "Write it", status: "done" }] }),
+    )
+    expect(uiRefusal(ask(steps))).toBeNull()
+    expect(uiRefusal(update(steps))).toBeNull()
+
+    const progress = block(
+      JSON.stringify({
+        type: "progress",
+        items: [{ name: "Sign-in", on: "Login", percent: 40, state: "active" }],
+      }),
+    )
+    expect(uiRefusal(ask(progress))).toBeNull()
+    expect(uiRefusal(update(progress))).toBeNull()
+
+    // a ```progress block is not a ui block, so it passes, and a block that does not parse is refused
+    expect(uiRefusal(ask("```progress\nA | 100 | done\n```"))).toBeNull()
+    expect(uiRefusal(ask("```ui\n{ not json\n```"))).toContain("no JSON")
+  })
+
+  test("names the first bad block's type, prop, percent, or status, on an ask and an edit's update", () => {
+    expect(uiRefusal(ask(block(JSON.stringify({ type: "bogus" }))))).toContain(
+      'the ui block holds an unknown type "bogus"',
+    )
+
+    expect(
+      uiRefusal(
+        update(
+          block(
+            JSON.stringify({
+              type: "steps",
+              steps: [{ label: "Write it", status: "done", bogus: true }],
+            }),
+          ),
+        ),
+      ),
+    ).toContain('step 1 has an unknown prop "bogus"')
+
+    expect(
+      uiRefusal(
+        ask(
+          block(
+            JSON.stringify({
+              type: "progress",
+              items: [{ name: "Sign-in", on: "Login", percent: 40, bogus: true }],
+            }),
+          ),
+        ),
+      ),
+    ).toContain('line 1 has an unknown prop "bogus"')
+
+    expect(
+      uiRefusal(
+        update(
+          block(
+            JSON.stringify({
+              type: "progress",
+              items: [{ name: "Sign-in", on: "Login", percent: 140 }],
+            }),
+          ),
+        ),
+      ),
+    ).toContain("line 1 has a percent outside 0 to 100")
+
+    expect(
+      uiRefusal(
+        ask(
+          block(
+            JSON.stringify({
+              type: "steps",
+              steps: [{ label: "Write it", status: "nope" }],
+            }),
+          ),
+        ),
+      ),
+    ).toContain('step 1 has an unknown status "nope"')
   })
 })
 

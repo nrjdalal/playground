@@ -16,6 +16,7 @@ import {
   progressCardRefusal,
   progressRefusal,
   shapeHints,
+  uiRefusal,
 } from "@/lib/dashboard/ask-shape"
 import { deleteRefusal } from "@/lib/dashboard/delete-targets"
 import { branchOf, checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
@@ -272,6 +273,9 @@ if (command === "new" || command === "edit") {
   // a progress block draws as bars only when every line reads, so one that does not is refused before it posts
   const badProgress = progressRefusal(input)
   if (badProgress) fail(badProgress)
+  // a ui block draws as a card only when it parses into a progress or a steps object, so one that does not is refused before it posts
+  const badUi = uiRefusal(input)
+  if (badUi) fail(badUi)
   // the progress block is the dispatcher's one card, and a second, a different title, or another poster's is refused before it posts (PG-2720); the daily ledger card posts beside it
   if (command === "new") {
     const ledger = org.ledger.title
