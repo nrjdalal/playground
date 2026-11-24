@@ -1743,7 +1743,7 @@ function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Comma
 // the programs that run a text which may call a function, and those that move its positional parameters from inside its body
 const RUNS_TEXT = new Set([".", "eval", "source"])
 const MOVES_ARGS = new Set(["getopts", "set", "shift"])
-// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its body a brace group, a subshell or one command; none is bound when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
 function functionArgs(commands: Command[], line: string) {
   const seen = new Set<Command>()
   const walk = (list: Command[]) => {
@@ -1762,16 +1762,19 @@ function functionArgs(commands: Command[], line: string) {
   const unquoted = (w: Word | undefined, value: string) => !!w && !w.quoted && w.value === value
   const below = (list: Command[]): Command[] =>
     list.flatMap((c) => [c, ...below(c.inner?.() ?? [])])
-  const definitions: { at: Command; body: Command[]; fn: string }[] = []
+  const definitions: { at: Command; body: Command[]; fn: string; group?: Command }[] = []
   const find = (list: Command[]) =>
     list.forEach((c, k) => {
       if (c.inner) find(c.inner())
-      const [first, second, third] = c.words
+      // a definition's name follows the reserved words that open the body around it (`{ g() …`, `then g() …`)
+      const lead = c.words.findIndex((w) => w.quoted || !LEADS.has(w.value))
+      const own = lead === -1 ? [] : c.words.slice(lead)
+      const [first, second, third] = own
       // `function f { … }`: the body runs from this command, which holds its first words, to the brace that closes it
       if (unquoted(first, "function") && plain(second) && unquoted(third, "{")) {
         let depth = 0
         for (let j = k; j < list.length; j++) {
-          const words = list[j].words.slice(j === k ? 2 : 0)
+          const words = j === k ? own.slice(2) : list[j].words
           const opens = words.findIndex((w) => !unquoted(w, "{"))
           depth += opens === -1 ? words.length : opens
           if (unquoted(list[j].words[0], "}")) depth--
@@ -1782,9 +1785,9 @@ function functionArgs(commands: Command[], line: string) {
       }
       // `f() …` and `function f() …`: the name, then the empty group the `()` makes, which holds the body's first words
       const fn =
-        c.words.length === 1 && plain(first)
+        own.length === 1 && plain(first)
           ? first.value
-          : c.words.length === 2 && unquoted(first, "function") && plain(second)
+          : own.length === 2 && unquoted(first, "function") && plain(second)
             ? second.value
             : undefined
       if (!fn) return
@@ -1799,13 +1802,24 @@ function functionArgs(commands: Command[], line: string) {
           ? list.slice(at + 1).find((x) => x !== opener && x.inner?.().includes(opener))
           : group
       if (closer)
-        definitions.push({ at: c, body: below([...(closer.inner?.() ?? []), closer]), fn })
+        definitions.push({
+          at: c,
+          body: below([...(closer.inner?.() ?? []), closer]),
+          fn,
+          group,
+        })
     })
   find(commands)
-  for (const { at, body, fn } of definitions) {
+  for (const { at, body, fn, group } of definitions) {
     const calls = all.filter((c) => c !== at && name(c) === fn)
     const [call] = calls
     const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length
+    // a definition inside the body, another `()` group or a `function` word, whose own parameters are not the body's
+    const nests = body.some(
+      (c) =>
+        (c !== group && !!c.group && c.inner?.().length === 0) ||
+        c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")),
+    )
     const moves = body.some(
       (c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)),
     )
@@ -1814,6 +1828,7 @@ function functionArgs(commands: Command[], line: string) {
       calls.length === 1 &&
       named === 2 &&
       !moves &&
+      !nests &&
       !body.includes(call) &&
       all.indexOf(call) > all.indexOf(at)
     )

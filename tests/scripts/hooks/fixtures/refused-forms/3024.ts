@@ -33,6 +33,33 @@ const held = (): Row[] => [
     "an echo of the data folder by a function called with an ordinary file and a git hook",
     `f() { ${ECHO} > "$1"; }; f out.log; f ${HOOK}`,
   ],
+  ...(
+    [
+      ["an echo of the data folder", `${ECHO} > "$1"`],
+      ["a line led by a question", `echo "Done? yes" > "$1"`],
+      ["a remover word", `echo 'rm -rf dist' > "$1"`],
+      ["a cat's output", `cat payload > "$1"`],
+    ] as const
+  ).map(([what, write]): Row => [
+    `${what} by a function defined first in another's body and called there with a git hook`,
+    `f() { g() { ${write}; }; g ${HOOK}; }; f out.log`,
+  ]),
+  [
+    "an echo of the data folder by a function defined first in another's brace body and called there with a git hook",
+    `function f { g() { ${ECHO} > "$1"; }; g ${HOOK}; }; f out.log`,
+  ],
+  [
+    "an echo of the data folder by a subshell function defined first in another's body and called there with a git hook",
+    `f() { g() ( ${ECHO} > "$1" ); g ${HOOK}; }; f out.log`,
+  ],
+  [
+    "an echo of the data folder by a function defined first in another's body and called after it with a git hook",
+    `f() { g() { ${ECHO} > "$1"; }; }; f out.log; g ${HOOK}`,
+  ],
+  [
+    "a cat's output by a function defined after a then in another's body and called there with a git hook",
+    `f() { if :; then g() { cat payload > "$1"; }; g ${HOOK}; fi; }; f out.log`,
+  ],
 ]
 
 // Pass controls: plain text through a function's first parameter into a git hook, as at top level, a cat's output through it into an ordinary file, and an echo of the data folder through it into an ordinary file, which top level runs too.

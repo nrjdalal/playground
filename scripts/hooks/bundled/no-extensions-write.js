@@ -12119,11 +12119,13 @@ function functionArgs(commands, line) {
   const find = (list) => list.forEach((c, k) => {
     if (c.inner)
       find(c.inner());
-    const [first, second, third] = c.words;
+    const lead = c.words.findIndex((w) => w.quoted || !LEADS2.has(w.value));
+    const own = lead === -1 ? [] : c.words.slice(lead);
+    const [first, second, third] = own;
     if (unquoted(first, "function") && plain(second) && unquoted(third, "{")) {
       let depth = 0;
       for (let j = k;j < list.length; j++) {
-        const words = list[j].words.slice(j === k ? 2 : 0);
+        const words = j === k ? own.slice(2) : list[j].words;
         const opens = words.findIndex((w) => !unquoted(w, "{"));
         depth += opens === -1 ? words.length : opens;
         if (unquoted(list[j].words[0], "}"))
@@ -12133,7 +12135,7 @@ function functionArgs(commands, line) {
       }
       return;
     }
-    const fn = c.words.length === 1 && plain(first) ? first.value : c.words.length === 2 && unquoted(first, "function") && plain(second) ? second.value : undefined;
+    const fn = own.length === 1 && plain(first) ? first.value : own.length === 2 && unquoted(first, "function") && plain(second) ? second.value : undefined;
     if (!fn)
       return;
     let at = k + 1;
@@ -12145,16 +12147,22 @@ function functionArgs(commands, line) {
     const opener = group.words.length === 0 ? list[at + 1] : group;
     const closer = group.words.length === 0 || unquoted(group.words[0], "{") ? list.slice(at + 1).find((x) => x !== opener && x.inner?.().includes(opener)) : group;
     if (closer)
-      definitions.push({ at: c, body: below([...closer.inner?.() ?? [], closer]), fn });
+      definitions.push({
+        at: c,
+        body: below([...closer.inner?.() ?? [], closer]),
+        fn,
+        group
+      });
   });
   find(commands);
-  for (const { at, body, fn } of definitions) {
+  for (const { at, body, fn, group } of definitions) {
     const calls = all.filter((c) => c !== at && name(c) === fn);
     const [call] = calls;
     const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length;
+    const nests = body.some((c) => c !== group && !!c.group && c.inner?.().length === 0 || c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")));
     const moves = body.some((c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)));
     const bound = {};
-    if (calls.length === 1 && named === 2 && !moves && !body.includes(call) && all.indexOf(call) > all.indexOf(at))
+    if (calls.length === 1 && named === 2 && !moves && !nests && !body.includes(call) && all.indexOf(call) > all.indexOf(at))
       for (const [k, w] of parse3(call).args.entries()) {
         if (marked(w.value) || w.glob)
           break;
