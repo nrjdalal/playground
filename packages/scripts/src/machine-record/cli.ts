@@ -91,10 +91,14 @@ const usage = (io: RecordIo, why: string): number => {
   return 2
 }
 
+// A ~/ path read under this home.
+const homed = (path: string, io: RecordIo): string =>
+  path.startsWith("~/") ? `${io.home}/${path.slice(2)}` : path
+
 const entryOf = (value: unknown, io: RecordIo): Entry | string => {
   const v = value as Partial<Record<keyof Entry, unknown>>
   if (typeof v?.path !== "string") return "an entry needs a path"
-  const path = v.path.startsWith("~/") ? `${io.home}/${v.path.slice(2)}` : v.path
+  const path = homed(v.path, io)
   if (!/^(?:\/|docker (?:container|image) \S)/.test(path))
     return `${path}: a path is absolute, ~/ or a docker image or container`
   if (!KINDS.includes(v.kind as Kind)) return `${path}: kind is one of ${KINDS.join(", ")}`
@@ -110,7 +114,7 @@ const entryOf = (value: unknown, io: RecordIo): Entry | string => {
   }
 }
 
-// add, drop, seed or check: 0 done, 1 a finding or a failure, 2 a usage error.
+// add, known, drop, seed or check: 0 done, 1 a finding or a failure, 2 a usage error.
 export async function runRecord(words: string[], io: RecordIo): Promise<number> {
   const [verb, ...rest] = words
   if (verb === "--help" || verb === "-h" || verb === "help") {
@@ -155,7 +159,9 @@ export async function runRecord(words: string[], io: RecordIo): Promise<number> 
     if (bare.length !== 1) return usage(io, "known takes one path")
     const why = named.get("why")
     if (!why) return usage(io, "known needs its --why")
-    const recorded = await addKnown(io.data, bare[0], why)
+    const path = homed(bare[0]!, io)
+    if (!path.startsWith("/")) return usage(io, `${path}: a known path is absolute or ~/`)
+    const recorded = await addKnown(io.data, path, why)
     io.out(`known ${recorded}`)
     return 0
   }

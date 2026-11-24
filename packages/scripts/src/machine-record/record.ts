@@ -144,7 +144,7 @@ const write = async (data: string, record: MachineRecord) =>
 // A path as the record keeps it: no trailing slash, so a folder named with one matches its listing.
 export const plain = (path: string): string => (path.length > 1 ? path.replace(/\/+$/, "") : path)
 
-// A path the OS made (for example a systemd unit snapd put under ~/.config): record it with its reason so the daily check skips it, and add it to the baseline. A path already known, or none new, leaves the record untouched.
+// A path the OS made (for example a systemd unit snapd put under ~/.config): record it with its reason beside the baseline, so the daily check skips it and a re-seed keeps it. A path already known leaves the record untouched.
 export async function addKnown(data: string, path: string, why: string): Promise<string> {
   const record = await readRecord(data)
   const knownPaths = new Set(record.known.map((known) => known.path))

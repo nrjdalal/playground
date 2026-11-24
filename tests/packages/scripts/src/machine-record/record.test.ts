@@ -336,6 +336,21 @@ describe("playground record (PG-2538)", () => {
     )
   })
 
+  test("known reads a ~/ path under this home, a path under it still gives a finding, and a relative path exits 2", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "systemd")
+    mkdirSync(join(made, "user"), { recursive: true })
+    const lines: string[] = []
+    expect(await runRecord(["known", "~/.config/systemd", "--why", "snapd"], io(lines))).toBe(0)
+    expect(lines).toContain(`known ${made}`)
+    expect(await check(data, places())).toEqual([])
+    const later = join(made, "user", "x.service")
+    writeFileSync(later, "")
+    expect(await check(data, places())).toEqual([`misplaced: ${later}`])
+    expect(await runRecord(["known", ".config/apt", "--why", "apt"], io(lines))).toBe(2)
+    expect(lines.some((l) => l.includes(".config/apt: a known path is absolute or ~/"))).toBe(true)
+  })
+
   test("add --stdin takes a peer's JSON list, its ~/ paths read under this home", async () => {
     const lines: string[] = []
     const sent = JSON.stringify(rootEntries("install", { now: NOW, peer: true }))
