@@ -1,5 +1,6 @@
 import fc from "fast-check"
 
+// The rewrites reach a call's program word alone, so two open bypasses stay outside the property until a rewrite lands with each one's fix: #3028, another program's output in a group whose redirect the hook cannot read, and #3030, a function's call word a brace list or a word split spells
 // Words the shell reads as syntax only when written plainly, so a variable or an empty word in front turns them into a program name and the call means something else; programWord's pattern already leaves out those of other characters (`!`, `[[`, an assignment)
 const SYNTAX = new Set([
   "case",
