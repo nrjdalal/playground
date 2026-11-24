@@ -437,7 +437,7 @@ const sliceOf =
   async (start, end) =>
     new Uint8Array(await Bun.file(path).slice(start, end).arrayBuffer())
 
-// Reads one transcript from its stored offset to its end in chunks, a line longer than a chunk widening it. Each chunk stores how far into the file it looked (size), so a read cut short after any chunk resumes from its offset on the next pass. A file replaced under the same path (a new inode) or cut shorter than its offset is read again from 0, its old entries and the session's facts from them replaced, and one emptied clears them. A transcript that is not Playground's own (own.ts), a subagent's judged by its parent's, is skipped unread, so another's never reaches the database.
+// Reads one transcript from its stored offset to its end in chunks, a line longer than a chunk widening it. Each chunk stores how far into the file it looked (size), so a read cut short after any chunk resumes from its offset on the next pass. A file whose inode changed, one that grew with its head rewritten (headUnchanged), or one cut shorter than its offset, is read again from 0, its old entries and the session's facts from them replaced, and one emptied clears them; a stored device id that no longer matches is not a trigger, so a Mac reboot's new device id does not make the file look new. A transcript that is not Playground's own (own.ts), a subagent's judged by its parent's, is skipped unread, so another's never reaches the database.
 export async function ingestFile(
   db: Database,
   projects: string,
@@ -465,6 +465,28 @@ async function firstLine(bytes: Bytes, size: number): Promise<Record<string, unk
   }
 }
 
+// A transcript's head is unchanged while its own first line with a uuid is stored at that line's offset, whatever device id was stored, so a reboot does not look like a new file. It reads this file's first entry, not the session's lowest row, since a duplicate transcript can share the session.
+async function headUnchanged(
+  db: Database,
+  file: TranscriptFile,
+  stat: Stat,
+  bytes: Bytes,
+): Promise<boolean> {
+  for (let end = Math.min(stat.size, 64 * 1024); ; end = Math.min(stat.size, end * 2)) {
+    for (const line of splitLines(await bytes(0, end), 0).lines) {
+      const json = parseJson(line.text)
+      const entry = json && toEntry(json, line.seq)
+      if (!entry) continue
+      const [row] = await db
+        .select({ seq: claudeEntry.seq })
+        .from(claudeEntry)
+        .where(and(eq(claudeEntry.sessionId, file.id), eq(claudeEntry.uuid, entry.uuid)))
+      return row?.seq === line.seq
+    }
+    if (end === stat.size) return true
+  }
+}
+
 // Reads one Codex rollout as ingestFile reads a transcript, into the session its session_meta line names (threadOf), so a rollout and its compressed copy are one session and a second read adds nothing. A compressed rollout is written once, so it is read whole once per inode, in one chunk: its read row then lands only with all its lines, and a stop or a crash part way leaves none, so the next pass reads it again. A rollout that is not Playground's own is skipped as a transcript is.
 export async function ingestRollout(
   db: Database,
@@ -480,7 +502,7 @@ export async function ingestRollout(
     return null
   }
   const [known] = await db.select().from(claudeTranscript).where(eq(claudeTranscript.path, path))
-  const sameInode = known && known.dev === stat.dev && known.ino === stat.ino
+  const sameInode = known && known.ino === stat.ino
   if (sameInode && isCompressed(path)) return { entries: 0, id: known.sessionId }
   let bytes = sliceOf(path)
   let read = options
@@ -506,9 +528,10 @@ async function readInto(
   { chunkBytes = CHUNK_BYTES, signal }: ReadOptions,
 ): Promise<FileResult> {
   const [known] = await db.select().from(claudeTranscript).where(eq(claudeTranscript.path, path))
-  const same =
-    known && known.dev === stat.dev && known.ino === stat.ino && stat.size >= known.byteOffset
+  let same = Boolean(known) && known.ino === stat.ino && stat.size >= known.byteOffset
   if (same && stat.size === known.size) return { entries: 0, id: file.id }
+  // Only a file that grew pays for the head check; a rollout's uuid is its offset, so its check could never fail.
+  if (same && format === TRANSCRIPT) same = await headUnchanged(db, file, stat, bytes)
   let offset = same ? known.byteOffset : 0
   let reset = Boolean(known) && !same
   let chunk = chunkBytes

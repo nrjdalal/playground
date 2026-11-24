@@ -26,7 +26,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import STATUSES from "../../../../scripts/roster-statuses.json"
-import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, KEYRING_LOCKED } from "../gh-read"
 import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
@@ -1066,7 +1066,6 @@ const relayWatch = async (ctx: Context) => {
   }
 }
 
-export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
 export const TOKEN_INVALID = "gh token invalid"
 const BOOT_MS = 10 * 60_000
 const HOUR_MS = 60 * 60_000
