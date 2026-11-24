@@ -2596,8 +2596,12 @@ async function inspect(
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, piped or fed a heredoc or here-string, is refused when it holds a remover or text the hook cannot read (hookRemover), else judged as an in-place edit's script is (scriptNames)
-    const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
-    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), and one whose value the hook cannot read counts unless the check must be sure, so it fails closed as a folder git cannot answer for does
+    // a function name's empty `()` leaves the lexer's empty group on the body's first command (`f() { echo x > "$U"; }`), which holds that command's own words and so is no group
+    const kids: Kids = (c) => {
+      const inner = c.inner?.()
+      return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
+    }
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
       if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
       const held = heldReadings(word, here, steadyAt(cmd))
@@ -2687,11 +2691,11 @@ async function inspect(
       ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
     ]
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
-      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run
-      const hookAt = () =>
+      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run; for the command's own text that names the root, a target the hook cannot read counts, as it does for a printer's (`git log --format=… > "$X"`)
+      const hookAt = (sure = true) =>
         hookTargets.find((word) => {
           const path = pathOf(word, here)
-          return hookWord(word, here, true) || (copies && !!path && hookFile(join(path, "x"), true))
+          return hookWord(word, here, sure) || (copies && !!path && hookFile(join(path, "x"), true))
         })
       // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
       const linkFolder = () => {
@@ -2761,7 +2765,7 @@ async function inspect(
         [copied, "copied from a file whose text"],
       ] as const)
         for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
-          const hook = hookAt()
+          const hook = hookAt(texts !== ownTexts || !!removes)
           if (hook && removes) return refuse(hookRemoval(shown(hook), removes))
           if (hook) return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`)
         }
