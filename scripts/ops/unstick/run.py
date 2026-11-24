@@ -477,7 +477,7 @@ def heavy_jobs(rows=None):
     # owners is the holder and every pid up it, so `pid in owners` counts a run that is itself the holder or started it, never one that merely shares an ancestor with a holder
     owners = set(holders)
     for hpid in holders:
-        p, pp = hpid, parent.get(hpid)
+        pp = parent.get(hpid)
         while pp and pp not in ("0", "1") and pp not in owners:
             owners.add(pp)
             pp = parent.get(pp)
