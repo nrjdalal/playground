@@ -512,11 +512,14 @@ def heavy_jobs(rows=None):
         where = m.group(1) if m else "?"
         if where in ("canary", "desk") and "dev.ts" in cmd:
             continue  # the live dashboard's own stack (its worktree read canary before the dashboard one)
-        if (where, "dev" if "dev.ts" in cmd else "suite") in seen:
-            continue
-        seen.add((where, "dev" if "dev.ts" in cmd else "suite"))
+        kind = "dev stack" if "dev.ts" in cmd else "suite"
         # inside a slot when the slot's holder is one of its ancestors, or the run itself started run-slot.sh (holding or waiting) and runs no heavy step outside it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
-        jobs.append({"inside": bool(holders & set(chain)) or (pid in owners and pid not in bare), "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
+        inside = bool(holders & set(chain)) or (pid in owners and pid not in bare)
+        # one job per worktree, kind and slot state, so a run inside a slot never hides a bare one in the same worktree
+        if (where, kind, inside) in seen:
+            continue
+        seen.add((where, kind, inside))
+        jobs.append({"inside": inside, "kind": kind, "pid": pid, "where": where})
     return jobs
 
 
