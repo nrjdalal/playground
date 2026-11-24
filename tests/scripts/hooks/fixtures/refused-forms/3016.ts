@@ -45,7 +45,7 @@ const OPENERS = [
 
 const WRITE = "echo 'touch ~/.playground/extensions/x' >&3"
 
-// Whole lines whose write does not follow the opener: an if's condition, and a second descriptor duplicated from the first by a wrapped exec.
+// Whole lines that are no opener then one echo: the write inside an if whose condition opens the descriptor, and a second descriptor duplicated from the first by a wrapped exec.
 const LINES = [
   ["an if's condition", `if exec 3> .git/hooks/pre-commit; then ${WRITE}; fi`],
   [
@@ -56,7 +56,7 @@ const LINES = [
 
 const held = (): Row[] => [
   ...OPENERS.map(([how, opener]): Row => [
-    `an echo whose stdout is duplicated to a descriptor an exec behind ${how} opened on a git hook`,
+    `an echo whose stdout is duplicated to a descriptor an exec opened on a git hook, with ${how}`,
     `${opener}; ${WRITE}`,
   ]),
   ...LINES.map(([how, line]): Row => [
@@ -68,7 +68,7 @@ const held = (): Row[] => [
 // Pass controls: each opener's and line's descriptor on a log, an exec or an assignment before a program, an exec word that is an argument, and the common forms the wider reading may catch.
 const controls = (): Row[] => [
   ...OPENERS.map(([how, opener]): Row => [
-    `an echo of the data folder through a descriptor an exec behind ${how} opened on a log`,
+    `an echo of the data folder through a descriptor an exec opened on a log, with ${how}`,
     `${opener.replace(".git/hooks/pre-commit", "out.log")}; ${WRITE}`,
   ]),
   ...LINES.map(([how, line]): Row => [
