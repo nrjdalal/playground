@@ -194,6 +194,7 @@ describe("moveIfExposed", () => {
     expect(lines.at(-1)).toBe(
       `${NAME}-old is stopped and kept; once the Dashboard reads its data, remove it with: docker rm -v ${NAME}-old`,
     )
+    expect(lines.join("\n")).not.toContain(SECRET)
   })
 
   test("the follower's guard passes after the move, naming the moved container on loopback alone", async () => {
@@ -345,10 +346,28 @@ describe("moveToLoopback", () => {
       (error) => error,
     )
     expect(failure).toBeInstanceOf(MoveError)
+    expect(failure.message).toBe(
+      `the dump of ${NAME} failed: pg_dump broke, so ${NAME} is left running, untouched`,
+    )
     // the dump runs before the stop, so a failed dump leaves the container untouched
     expect(docker.calls.some(([verb]) => verb === "stop")).toBe(false)
     expect(docker.boxes.get(NAME)).toMatchObject({ running: true })
     expect(docker.boxes.has(`${NAME}-old`)).toBe(false)
+  })
+
+  test("a failed copy of the dump refuses the move and leaves the old container running", async () => {
+    const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+    const docker = fakeDocker("0.0.0.0", { cp: 1 })
+    const failure = await moveToLoopback(NAME, PORT, docker.run, noWait, dumpDir).catch(
+      (error) => error,
+    )
+    expect(failure).toBeInstanceOf(MoveError)
+    expect(failure.message).toBe(
+      `copying the dump of ${NAME} failed: cp broke, so ${NAME} is left running, untouched`,
+    )
+    expect(docker.calls.some(([verb]) => verb === "stop")).toBe(false)
+    expect(docker.boxes.get(NAME)).toMatchObject({ running: true })
+    expect(dumpIn(dumpDir)).toBe("")
   })
 
   test("names the dump's path in its note", async () => {
