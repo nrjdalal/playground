@@ -4,7 +4,7 @@ import { join } from "node:path"
 import type { Kind, Out, Who } from "./bridge"
 import type { Extra } from "./outbound"
 
-// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, delete?, edit?, file?, location?, quote?, source?, status?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, the rest a send's Extra (outbound.ts), `location` as [latitude, longitude], with a file, a location or a delete the body may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, {sent, ids?, note?} or {refusal} out, `ids` the sent messages' ids, the note saying who an alert missed); it listens on no port.
+// The one way into ops-wa: a unix socket in its own folder, mode 600, one JSON line each way ({body, alert?, delete?, edit?, file?, location?, quote?, source?, status?, to?} in, `alert: true` an urgent alert to both numbers at once, `alert: "first"` one to the owner first with its source, `to: "alert"` a guest's reply, the rest a send's Extra (outbound.ts), `location` as [latitude, longitude], with a file, a location or a delete the body may be empty, or {alertSet} in, an owner's message id, or {react, id?, to?} in, a reaction, or {settingSet: {id, key, value}} in, or {settingPropose: {key, value}} in, a session's proposal, {sent, ids?, note?} or {refusal} out, `ids` the sent messages' ids, the note saying who an alert missed); it listens on no port.
 export const socketPath = (data: string) => join(data, "whatsapp", "wa.sock")
 
 type Reply = { ids?: string[]; note?: string; refusal?: string; sent?: true }
@@ -22,6 +22,7 @@ export function serve(
   alertSet?: (id: string) => Promise<string>,
   react?: React,
   settingSet?: (id: string, key: string, value: string) => Promise<string>,
+  settingPropose?: (key: string, value: string) => Promise<string>,
 ) {
   const server = Bun.listen<{ done: boolean; text: string }>({
     socket: {
@@ -46,6 +47,7 @@ export function serve(
           location?: unknown
           quote?: unknown
           react?: unknown
+          settingPropose?: { key?: unknown; value?: unknown }
           settingSet?: { id?: unknown; key?: unknown; value?: unknown }
           source?: unknown
           status?: unknown
@@ -69,6 +71,17 @@ export function serve(
           typeof set.value === "string"
         )
           return void settingSet(set.id, set.key, set.value).then(
+            (said) => answer({ note: said }),
+            (error: Error) => answer({ refusal: error.message }),
+          )
+        const proposed = asked.settingPropose
+        if (
+          settingPropose &&
+          typeof proposed?.key === "string" &&
+          proposed.key &&
+          typeof proposed.value === "string"
+        )
+          return void settingPropose(proposed.key, proposed.value).then(
             (said) => answer({ note: said }),
             (error: Error) => answer({ refusal: error.message }),
           )
@@ -168,6 +181,10 @@ export const requestAlertSet = (path: string, id: string) => ask(path, { alertSe
 // settings set --from-owner-msg's side: the owner's message id, the key and the value as typed, to ops-wa, and its answer.
 export const requestSettingSet = (path: string, id: string, key: string, value: string) =>
   ask(path, { settingSet: { id, key, value } }, 60_000)
+
+// settings set --propose's side: a session's key and value, to ops-wa, which asks the owner, and its answer.
+export const requestSettingPropose = (path: string, key: string, value: string) =>
+  ask(path, { settingPropose: { key, value } }, 60_000)
 
 async function ask(path: string, line: object, timeoutMs: number): Promise<Reply> {
   if (!existsSync(path)) return { refusal: "ops-wa is not running: its job is off or stopped" }

@@ -38,7 +38,9 @@ import {
   DEFAULT_DELAY_MINUTES,
   escalations,
   keepPending,
+  keepSent,
   lastLines,
+  masked,
   pendingLines,
   reacted,
 } from "./escalate"
@@ -56,6 +58,7 @@ import {
   readOutbound,
 } from "./outbound"
 import { alertSeedFile } from "./seed"
+import { type Answered, type NewMessage, sentFile } from "./setting-set"
 import type { Vote, votedOptions } from "./votes"
 
 type Key = {
@@ -110,8 +113,8 @@ export type Mode = {
   catchUp?: () => Promise<void>
   // whether a pending alert's source was handled elsewhere, by the checker wa.alertCheck names
   check?: (source: string, at: number) => Promise<boolean>
-  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm)
-  confirm?: (text: string, reaction?: string) => Promise<boolean>
+  // the owner's yes or no to a setting waiting on it: true when the text was that answer, which goes no further (setting-set.ts's confirm); answered names the message it quotes and the time of his message before it
+  confirm?: (text: string, reaction?: string, answered?: Answered) => Promise<boolean>
   // sends a draft's text to the owner and gives the ids of its messages, which a reply to it names; a bridge with none sends no draft
   draft?: (body: string) => Promise<string[]>
   // the send of a pending alert on to the alert number; a bridge with none leaves pending alerts as they are
@@ -126,6 +129,8 @@ export type Mode = {
   policy?: () => Promise<Policy | undefined>
   // sends a card's choices as a poll to the owner; a bridge with none sends text alone
   poll?: (name: string, values: string[]) => Promise<PollSent>
+  // sends the owner one line at 22 hours of the owner's 24 asking for any reply, once a window; a bridge with none sends none
+  remind?: () => Promise<void>
   // reads a vote on a card's poll (votes.ts), so a bridge with none answers no vote
   votes?: typeof votedOptions
   // whether a manager's playground alerts-wait runs now or handed it an alert at or after since; a bridge with none sends nothing on through Ops
@@ -167,7 +172,7 @@ export const updateLine = (policy: string) =>
 export const UPDATE = updateLine(DEFAULT_POLICY)
 export const UPDATE_MS = 15 * 60_000
 
-// Each state file has one writer: owner.json, handed.json, messages.json and receipts.json the bridge's queue, sends.json, eyes.json, quiet.json and status.json the sender's chain, so no write drops another's.
+// Each state file has one writer: owner.json, handed.json, last-alert.json, messages.json and receipts.json the bridge's queue, alert-sent.json, sends.json, sent.json, eyes.json, partial.json, quiet.json, remind.json and status.json the sender's chain, so no write drops another's.
 const ownerFile = (dir: string) => join(dir, "owner.json")
 const sendsFile = (dir: string) => join(dir, "sends.json")
 // the times of the dispatcher's 👀 on the owner's messages, the last hour's, which hold the 3-minute hand-on and nothing else (ADR 0038)
@@ -175,6 +180,9 @@ const eyesFile = (dir: string) => join(dir, "eyes.json")
 // ours.json, the sender's chain's too: the id and words of each text part ops-wa sent, the last 50, so the owner's reaction names the message it is on
 const oursFile = (dir: string) => join(dir, "ours.json")
 type Ours = { id: string; text: string }
+// partial.json: a send that failed after some of its parts, by its chat, kind, words and extra, the last 24 hours', so the same send again sends only the parts still unsent
+const partialFile = (dir: string) => join(dir, "partial.json")
+type Partial = { at: number; ids: string[]; parts: number }
 const handedFile = (dir: string) => join(dir, "handed.json")
 // alert.json, the bridge's queue's too: when the alert number first and last wrote, and its chat, so an alert reaches it once it has written
 const alertFile = (dir: string) => join(dir, "alert.json")
@@ -362,7 +370,10 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const text = said?.text
   const at = io.now()
   await ownFolder(io.dir)
-  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner))
+  // his typed message before this one, which a plain answer to a proposal counts from (ADR 0041); a reaction, an edit or a delete moves ownerAt alone
+  const owner = await readOwn<Wrote>(ownerFile(io.dir), {})
+  const before = owner.typedAt ?? owner.ownerAt
+  await wrote(ownerFile(io.dir), "ownerAt", at, jidOf(io.owner), !said?.about)
   const id = m.key.id
   const kept = !!text && !!id && (await keepMessage(io.dir, id, text, at, io.owner))
   const watch = await readOwn<Watch>(handedFile(io.dir), {})
@@ -386,7 +397,12 @@ async function inbound(io: Io & Mode, m: Incoming, me?: Sock["user"]) {
   const toCard = !!reply && (bare(reply) ? await rowsWait(io, io.inbox!) : true)
   // a bare number goes to a card waiting on its rows first and a reaction leaves it waiting too; any other owner message, a vote, photo, voice note or delete included, settles it
   const asked = reaction ? (reaction.text ?? "") : undefined
-  if (!(toCard && bare(reply!)) && io.confirm && (await io.confirm(text ?? "", asked))) return
+  if (
+    !(toCard && bare(reply!)) &&
+    io.confirm &&
+    (await io.confirm(text ?? "", asked, { quoted: quoted ?? undefined, since: before ?? 0 }))
+  )
+    return
   if (message.pollUpdateMessage) return io.inbox && vote(io, io.inbox, m, me)
   if (toCard) return answerCard(io, io.inbox!, reply!)
   // a line about another message names only that one's id, the one wa react --id takes
@@ -434,12 +450,31 @@ export const keptLine = (id: string) =>
   `ops-wa kept the one phone number in it: when the owner asks for it to be the second number, run playground wa alert-set --from-owner-msg ${id}.`
 
 // What ops-wa keeps of a number's messages: the last one's time, which for the owner opens its 24 hours for replies, and the first one's, after which an alert may reach it, since the chat is then its own; each file names its chat, so a new wa.owner or wa.alert starts with none.
-type Wrote = { alertAt?: number; firstAt?: number; jid?: string; ownerAt?: number }
-async function wrote(path: string, key: "alertAt" | "ownerAt", at: number, jid?: string) {
+type Wrote = {
+  alertAt?: number
+  firstAt?: number
+  jid?: string
+  ownerAt?: number
+  typedAt?: number
+}
+// typed: a message he wrote, not a reaction, an edit or a delete, which moves typedAt too
+async function wrote(
+  path: string,
+  key: "alertAt" | "ownerAt",
+  at: number,
+  jid?: string,
+  typed = false,
+) {
   const before = await readOwn<Wrote>(path, {})
   const same = before.jid === jid
   const firstAt = same ? (before.firstAt ?? before[key] ?? at) : at
-  await writeOwn(path, { firstAt, [key]: at, ...(jid && { jid }) })
+  const typedAt = typed ? at : same ? before.typedAt : undefined
+  await writeOwn(path, {
+    firstAt,
+    [key]: at,
+    ...(jid && { jid }),
+    ...(typedAt !== undefined && { typedAt }),
+  })
 }
 // a file from before chats were named, the owner's alone, counts as the current number's
 const firstOf = (w: Wrote, jid?: string) =>
@@ -778,6 +813,12 @@ async function pass(io: Io & Mode) {
   // the file is written however the pass ends, so a relay that throws keeps the marks of those sent before it
   try {
     if (await io.on()) {
+      if (io.remind)
+        await io
+          .remind()
+          .catch((error: Error) =>
+            io.log(`ops-wa: the reminder before the 24 hours end: ${error.message}`),
+          )
       const sends = (await readOwn<{ sends?: number[] }>(sendsFile(io.dir), {})).sends ?? []
       const eyes = (await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})).eyes ?? []
       const waiting = handed.filter((h) => !h.bravo && !sends.some((at) => at >= h.at))
@@ -1103,6 +1144,12 @@ type Held = { at: number; body: string; status?: true }
 const quietFile = (dir: string) => join(dir, "quiet.json")
 // inside the window, a reply goes out only within this long of the owner's last read or message
 export const QUIET_IDLE_MS = HOUR
+// remind.json, the sender's chain's: the owner's message whose window the last reminder was for, so each window gets one
+const remindFile = (dir: string) => join(dir, "remind.json")
+// the reminder goes this long after the owner's last message, 2 hours before ops-wa can no longer reply
+export const REMIND_MS = 22 * HOUR
+const REMIND =
+  "This chat can reply only within 24 hours of your last message, and those 24 hours end soon. Send any reply to keep updates coming."
 const HELD =
   "held for quiet hours: the owner has read or written nothing in the last hour, so it goes out in one catch-up once the owner reads or writes, or when the quiet hours end"
 const QUIET_WAITS =
@@ -1166,6 +1213,15 @@ export function sender(
     } | null
     last = io.now()
     const id = sent?.key?.id
+    // a new message in the owner's chat, which a plain answer to a proposal counts (ADR 0041); an edit, a delete, a reaction and a pin add none
+    if (
+      id &&
+      jid === jidOf(io.owner) &&
+      !["delete", "edit", "pin", "react"].some((k) => k in content)
+    ) {
+      const { messages = [] } = await readOwn<{ messages?: NewMessage[] }>(sentFile(io.dir), {})
+      await writeOwn(sentFile(io.dir), { messages: [...messages, { at: last, id }].slice(-50) })
+    }
     const words = wordsOf(content)
     if (id && words) {
       const { messages = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
@@ -1206,6 +1262,17 @@ export function sender(
     await sendNow(catchUpOf(held, zone), "reply", undefined, {}, false)
     await writeOwn(quietFile(io.dir), { held: [] })
   }
+  // one line a window at 22 hours, while the window is open and outside quiet hours, so the owner can keep it open with any reply; in quiet hours it waits for their end
+  const remindNow = async () => {
+    const now = io.now()
+    const { ownerAt } = await readOwn<Wrote>(ownerFile(io.dir), {})
+    if (ownerAt === undefined || now - ownerAt < REMIND_MS || windowLeft(ownerAt, now) === 0) return
+    const q = await io.quiet?.()
+    if (q && inQuiet(now, q)) return
+    if ((await readOwn<{ for?: number }>(remindFile(io.dir), {})).for === ownerAt) return
+    await sendNow(REMIND, "reply", undefined, {})
+    await writeOwn(remindFile(io.dir), { for: ownerAt })
+  }
   const pollNow = async (name: string, values: string[]): Promise<PollSent> => {
     const refusal = refusalOf([name, ...values].join("\n"))
     if (refusal) throw new Error(refusal)
@@ -1227,10 +1294,10 @@ export function sender(
     extra: Extra,
     answers = true,
   ): Promise<Out> => {
-    const shape = extraRefusal(extra, body)
-    if (shape) throw new Error(shape)
     if (kind !== "reply" && kind !== "guest" && Object.keys(extra).length > 0)
       throw new Error("wa alert sends text alone")
+    const shape = extraRefusal(extra, body)
+    if (shape) throw new Error(shape)
     // the outbox sits beside whatsapp/ in the data folder
     const file = extra.file ? await readOutbound(outboxDir(dirname(io.dir)), extra.file) : undefined
     const words = [body, file?.name, file?.text].filter(Boolean).join("\n")
@@ -1332,33 +1399,93 @@ export function sender(
       ...(quoted && { quote: { id: quoted.id, jid: quoted.jid, text: quoted.text! } }),
     })
     const sends = await recent(now)
+    const partials = Object.fromEntries(
+      Object.entries(
+        (await readOwn<{ partials?: Record<string, Partial> }>(partialFile(io.dir), {})).partials ??
+          {},
+      ).filter(([, p]) => now - p.at < OWNER_WINDOW_MS),
+    )
     const ids: string[] = []
-    for (const t of going)
-      for (const [k, content] of messages.entries()) {
-        // a text or a caption waits its typing time; a file with none goes on the gap alone
-        const typed = wordsOf(content)
-        const id = await paced(
-          t.jid === jidOf(io.owner) && answers ? sends : null,
-          k === 0 ? SEND.gapMs : SEND.partGapMs,
-          t.jid,
-          content,
-          typed ? typingMs(typed.length, io.random) : 0,
-        )
-        // kept as each part goes, so a part already sent can be taken back when a later one fails
-        if (id && !target) {
-          ids.push(id)
-          own.push({ at: io.now(), id, jid: t.jid, kind })
-          await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
+    const reached: string[] = []
+    for (const t of going) {
+      const key = target
+        ? undefined
+        : Bun.hash(`${t.jid}\n${kind}\n${body}\n${JSON.stringify(extra)}`).toString(36)
+      const done = key ? partials[key] : undefined
+      const sent = [...(done?.ids ?? [])]
+      let parts = done?.parts ?? 0
+      const from = parts
+      try {
+        for (const [k, content] of messages.entries()) {
+          // a part an earlier try of this same send already sent stays as it went
+          if (k < from) continue
+          // a text or a caption waits its typing time; a file with none goes on the gap alone
+          const typed = wordsOf(content)
+          const id = await paced(
+            t.jid === jidOf(io.owner) && answers ? sends : null,
+            k === from ? SEND.gapMs : SEND.partGapMs,
+            t.jid,
+            content,
+            typed ? typingMs(typed.length, io.random) : 0,
+          )
+          parts = k + 1
+          // kept as each part goes, so a part already sent can be taken back when a later one fails
+          if (id && !target) {
+            sent.push(id)
+            own.push({ at: io.now(), id, jid: t.jid, kind })
+            await writeOwn(ownFile(io.dir), { messages: own.slice(-50) })
+          }
         }
+      } catch (error) {
+        if (key && parts > 0) {
+          partials[key] = { at: done?.at ?? now, ids: sent, parts }
+          await writeOwn(partialFile(io.dir), { partials })
+        }
+        // an alert that fails keeps its outcome too, with each number it reached first
+        if (alert)
+          await keepSent(io.dir, {
+            at: now,
+            outcome: `${reached.length > 0 ? `sent to ${reached.join(" and ")}, then the send` : "the send"} to ${t.who} failed: ${masked((error as Error).message)}`,
+            when: io.now(),
+          }).catch(() => {})
+        throw error
       }
+      reached.push(t.who)
+      ids.push(...sent)
+      if (key && done) {
+        delete partials[key]
+        await writeOwn(partialFile(io.dir), { partials })
+      }
+    }
+    // a deleted message leaves own.json, ours.json and any partial send naming it, so a second delete or an edit of it is refused and that send goes again whole
+    if (extra.delete) {
+      const gone = extra.delete
+      await writeOwn(ownFile(io.dir), { messages: own.filter((o) => o.id !== gone) })
+      const { messages: words = [] } = await readOwn<{ messages?: Ours[] }>(oursFile(io.dir), {})
+      await writeOwn(oursFile(io.dir), { messages: words.filter((m) => m.id !== gone) })
+      for (const [k, p] of Object.entries(partials)) if (p.ids.includes(gone)) delete partials[k]
+      await writeOwn(partialFile(io.dir), { partials })
+    }
     lastIds = ids
+    // an alert that never goes pending keeps its outcome as it goes, so wa status shows the newest alert's; a failed write leaves the send as it went
+    const settled = async (said: string): Promise<Out> => {
+      if (alert)
+        await keepSent(io.dir, {
+          at: now,
+          outcome:
+            said !== "sent"
+              ? said
+              : going.length > 1
+                ? "sent to both numbers at once"
+                : `sent to ${going[0]!.who} alone`,
+          when: io.now(),
+        }).catch(() => {})
+      return { ids, said }
+    }
     // the owner has it; the alert number gets it at due unless the owner's reaction or its source's checker says it was handled
     if (kind === "first" && open && second && jidOf(second) !== jidOf(io.owner)) {
       if ((await alertFirst(io.dir, second)) === undefined)
-        return {
-          ids,
-          said: "sent to the owner alone: the alert number has never written to this number",
-        }
+        return settled("sent to the owner alone: the alert number has never written to this number")
       const minutes = (await io.delay?.()) ?? DEFAULT_DELAY_MINUTES
       const due = now + minutes * 60_000
       await keepPending(io.dir, { at: now, body, due, ids, ...(source && { source }) })
@@ -1368,12 +1495,11 @@ export function sender(
       }
     }
     const left = to.find((t) => !t.open)
-    return {
-      ids,
-      said: left
+    return settled(
+      left
         ? `sent to ${going[0]!.who} alone: ${left.who} has never written to this number`
         : "sent",
-    }
+    )
   }
   // the live status: one message in the owner's chat, edited in place while WhatsApp takes an edit and it has not scrolled away, else sent anew as the live one; an unchanged status sends nothing
   const statusNow = async (body: string, kind: Kind, extra: Extra): Promise<Out> => {
@@ -1450,16 +1576,16 @@ export function sender(
       )
     const key = { fromMe: false as const, id: target.id, remoteJid: target.jid }
     // on the owner's message a ✅ or any other reaction is the dispatcher's answer, and a 👀 says a reply is coming, so it holds the 3-minute timer alone
-    const eyes = target.who === "owner" && emoji === "👀"
+    const isEyes = target.who === "owner" && emoji === "👀"
     await paced(
-      target.who === "owner" && !eyes ? await recent(now) : null,
+      target.who === "owner" && !isEyes ? await recent(now) : null,
       SEND.gapMs,
       target.jid,
       {
         react: { key, text: emoji },
       },
     )
-    if (eyes) {
+    if (isEyes) {
       const at = io.now()
       const { eyes: list = [] } = await readOwn<{ eyes?: number[] }>(eyesFile(io.dir), {})
       await writeOwn(eyesFile(io.dir), { eyes: [...list.filter((e) => at - e < HOUR), at] })
@@ -1497,6 +1623,7 @@ export function sender(
         queued(() => anySend(body, kind, source, extra)),
       pin: (id: string, off = false) => queued(() => pinNow(id, off)),
       poll: (name: string, values: string[]) => queued(() => pollNow(name, values)),
+      remind: () => queued(remindNow),
       react: (emoji: string, on: { id?: string; who?: Who }) => queued(() => reactNow(emoji, on)),
     },
   )

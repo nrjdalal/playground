@@ -52,6 +52,13 @@ export function windowsOf(limits: unknown): ZaiWindows | null {
 // The waits before each retry of a fetch that never reached Z.ai (DNS or the network just after boot): with each try's timeout, under 4 minutes in all, so a read and its retries end inside one cycle and the beat turns ok once the network is back.
 const RETRY_MS = [5_000, 15_000, 30_000, 60_000]
 
+// The first GLM row's key from the Keychain by its label; no GLM row is nothing to read, so the beat waits, and a row whose key is missing hands back "", which zaiQuota refuses.
+export function glmKey(rows: { label?: string }[], keychain: (label: string) => string): string {
+  const [row] = rows
+  if (!row) throw new Error("waiting: no GLM account in usage.accounts")
+  return row.label ? keychain(row.label) : ""
+}
+
 // The key goes only into the Authorization header; a failure names Z.ai's status and body code, and masks the key, should Z.ai or the fetch echo it.
 export async function zaiQuota(
   key: string,

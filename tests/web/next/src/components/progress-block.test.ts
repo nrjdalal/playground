@@ -7,6 +7,7 @@ import {
   MUTED_BAR,
   ProgressBlock,
 } from "../../../../../web/next/src/components/progress-block"
+import { config } from "../../../../../web/next/src/lib/config"
 
 // React resolves from the web app's own packages, which this directory cannot see; the two calls the test makes are typed here rather than through a path into node_modules.
 type Node = unknown
@@ -68,5 +69,46 @@ describe("ProgressBlock's bars (PG-2730)", () => {
     expect(bar).toContain(MUTED_BAR)
     expect(bar).not.toContain(ACTIVE_BAR)
     expect(bar).toContain('aria-label="Mac reads, done"')
+  })
+})
+
+describe("ProgressBlock's names (PG-2982)", () => {
+  const html = (block: string) =>
+    renderToStaticMarkup(createElement(ProgressBlock, { items: items(block) }))
+
+  test("a markdown link name draws as a link to a new tab, cut short, its label alone in the bar's name and on hover", () => {
+    const out = html("[ABC-12](https://example.com/issue/ABC-12) | 40 | x | y | active")
+    const link = /<a [^>]*>ABC-12<\/a>/.exec(out)?.[0] ?? ""
+    expect(link).toContain('href="https://example.com/issue/ABC-12"')
+    expect(link).toContain('target="_blank"')
+    expect(link).toContain('rel="noopener noreferrer"')
+    expect(link).toContain("truncate")
+    expect(link).toContain(`data-slot="tooltip-trigger"`)
+    expect(out).toContain('aria-label="ABC-12, active"')
+    expect(out).not.toContain("](")
+  })
+
+  test("a plain name, and a link to other than http or https, draw as plain text", () => {
+    const plain = html("Build | 60 | x | y | active")
+    expect(plain).not.toContain("<a ")
+    expect(plain).toMatch(/<span [^>]*truncate[^>]*>Build<\/span>/)
+    const script = html("[ABC-12](javascript:alert(1)) | 40 | x | y")
+    expect(script).not.toContain("<a ")
+    expect(script).not.toContain("href=")
+  })
+
+  test("a link with credentials draws as plain text, since transcriptLink refuses it", () => {
+    const out = html("[ABC-12](https://user:pw@example.com/issue/ABC-12) | 40 | x | y")
+    expect(out).not.toContain("<a ")
+    expect(out).not.toContain("user:pw")
+    expect(out).toMatch(/<span [^>]*truncate[^>]*>ABC-12<\/span>/)
+  })
+
+  test("a link to the app's own pages opens in this tab", () => {
+    const own = new URL("/dashboard", config.app.url).href
+    const link = /<a [^>]*>Own<\/a>/.exec(html(`[Own](${own}) | 40 | x | y`))?.[0] ?? ""
+    expect(link).toContain(`href="${own}"`)
+    expect(link).not.toContain("target=")
+    expect(link).not.toContain("rel=")
   })
 })
