@@ -76,7 +76,7 @@ describe("brief-rush points to testing.md's Traps for a red-first stub (#2854)",
   test("a red-first commit that calls an export not built yet stubs it, typed and throwing, with any new field optional", async () => {
     const testing = await read(join(".agents", "testing.md"))
     expect(testing).toContain(
-      "red-first commit whose rows call a module or an export not built yet also commits a stub of it, typed as the real one with a body that throws",
+      "red-first commit whose rows call an export not built yet also commits a stub of it, typed as the real one with a body that throws",
     )
     const rush = await read(join("scripts/briefs", "brief-rush.md"))
     expect(rush).toContain("red-first commit that calls an export not built yet stubs it first, as")
