@@ -1273,7 +1273,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -1294,6 +1298,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -1361,13 +1366,19 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
         opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
       }
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
@@ -1727,7 +1738,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*|\d+)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -1748,7 +1759,7 @@ function dollar(lx, plain = false) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return unknown("a shell variable");
+    return /\d/.test(next) ? variable(next) : unknown("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -10808,6 +10819,11 @@ var JOBS = {
     description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 }
   }),
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description: "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true }
+  }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
     schedule: { every: 60 }
@@ -11291,6 +11307,7 @@ var slotSettings = defineSettings({
 // packages/settings/src/whatsapp.ts
 var DEFAULT_POLICY = "factory status; no secrets or customer personal data";
 var policy = string2().trim().min(1).max(400);
+var hour = number2().int().min(0).max(23);
 var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
 var whatsappSettings = defineSettings({
   "wa.alert": {
@@ -11325,6 +11342,16 @@ var whatsappSettings = defineSettings({
     description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e1642
+  },
+  "wa.quietEndHour": {
+    default: 6,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window ends at: ops-wa then sends the texts it held as one catch-up. Equal to wa.quietStartHour, there is no window.",
+    schema: hour
+  },
+  "wa.quietStartHour": {
+    default: 0,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window starts at: inside it, a reply to the owner goes out only within an hour of the owner's last read or message, and ops-wa holds it otherwise; an urgent alert goes at any hour.",
+    schema: hour
   },
   "wa.replyPolicy": {
     default: DEFAULT_POLICY,
@@ -14914,6 +14941,8 @@ var CODE_QUALIFIER = new RegExp(QUALIFIER.source.replace("([^\\s[{<])[^]*?\\1", 
 var LEADS2 = new Set(["!", "(", "do", "elif", "else", "then", "{"]);
 var OPENERS = new Set(["case", "for", "if", "select", "until", "while"]);
 var CLOSERS = new Set(["done", "esac", "fi"]);
+var RUNS_TEXT2 = new Set([".", "eval", "source"]);
+var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);

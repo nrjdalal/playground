@@ -24,7 +24,7 @@ export const listedOf = (out: string): Listed[] =>
       return { id: id.trim(), label: label.trim(), names: names.trim().split(",") }
     })
 
-// The flags a box's docker run takes, each with whether it takes a value: those first run (startArgv), its move (loopbackArgv) and the pglaunch stand-in use, so a run mounts no volume or host path and joins no host network.
+// The flags a box's docker run takes, each with whether it takes a value: those first run (startArgv) and its move (loopbackArgv) use, so a run mounts no volume or host path and joins no host network.
 const RUN_FLAGS = new Map([
   ["--detach", false],
   ["--env", true],
