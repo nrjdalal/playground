@@ -55,8 +55,28 @@ const READERS = new Set([
   "wc",
 ])
 
-// Programs that copy their operands to the last one, which alone they write.
-const COPIERS = new Set(["cp", "rsync"])
+// Programs that place their operands at the last one, or into its folder: a copier only reads its sources, the rest move or link them too.
+const PLACERS = new Set(["cp", "ditto", "install", "ln", "mv", "rsync"])
+const COPIERS = new Set(["cp", "ditto", "rsync"])
+// The placers whose -t or --target-directory names the folder they place into; rsync's -t keeps times.
+const TARGET_FLAG = new Set(["cp", "install", "ln", "mv"])
+
+// Programs that write every file operand they name, so an operand the hook cannot read is a write position.
+const WRITERS = new Set([
+  "dd",
+  "install",
+  "ln",
+  "mv",
+  "rm",
+  "shred",
+  "tee",
+  "touch",
+  "truncate",
+  "unlink",
+])
+
+// A sed script's own write, its w command or an s command's w flag, which writes a file with no -i.
+const SED_WRITE = /(?:^|[;{}\n]|\/[gpiImMe0-9]*)\s*w\s+\S/
 
 // Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
@@ -138,9 +158,11 @@ const shown = (word: Word) => word.source ?? visible(word.value)
 // sed writes the files it names in place given -i or --in-place, and only reads them otherwise.
 const inPlace = (args: Word[]) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value))
 
-// A copy's destination: its -t folder, else its last operand.
-const destinationOf = (args: Word[]): Word | undefined => {
-  const t = args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory"))
+// A placer's destination: its -t folder where it takes one, else its last operand.
+const destinationOf = (tool: string, args: Word[]): Word | undefined => {
+  const t = TARGET_FLAG.has(tool)
+    ? args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory"))
+    : -1
   if (t >= 0) return args[t]!.value.includes("=") ? args[t] : args[t + 1]
   return args.filter((a) => !a.value.startsWith("-")).at(-1)
 }
@@ -170,7 +192,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // A word unread in a write position (a redirect's target, a copy's destination) may write the roster when the call names it and the text after its last expansion may end its path; an unread operand of any other program runs.
+  // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand) may write the roster when the call names it and the text after its last expansion may end its path; an unread operand of any other program runs.
   const writes = (typed: Word, at: Env, position = false) => {
     const paths = pathsOf(typed, at)
     if (!paths) {
@@ -190,22 +212,28 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
     )
       return refuse(`${tool} code that names the roster and holds a write word`)
-    if (COPIERS.has(tool)) {
-      const dest = destinationOf(args)
-      if (!dest) return
-      if (writes(dest, at, true)) return refuse(`${tool} onto ${shown(dest)}`)
-      // a copy into the data folder of a file named roster.json lands on it
-      const into = pathsOf(dest, at) ?? []
+    if (PLACERS.has(tool)) {
+      const dest = destinationOf(tool, args)
+      if (dest && writes(dest, at, true)) return refuse(`${tool} onto ${shown(dest)}`)
+      // a file named roster.json placed into the data folder lands on it
+      const into = dest ? (pathsOf(dest, at) ?? []) : []
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"))
       if (
         sources.some((s) => basename(s.value).toLowerCase() === "roster.json") &&
         into.some(({ path }) => isRoster(resolve(path, "roster.json"), targets))
       )
-        return refuse(`${tool} of a roster.json into ${shown(dest)}`)
-      return
+        return refuse(`${tool} of a roster.json into ${dest && shown(dest)}`)
+      if (COPIERS.has(tool)) return
     }
-    if (READERS.has(tool) || (SEDS.has(tool) && !inPlace(args))) return
-    for (const word of args) if (writes(word, at)) return refuse(`${tool} on ${shown(word)}`)
+    if (SEDS.has(tool)) {
+      if (args.some((a) => SED_WRITE.test(a.value) && namesRoster(a.source ?? a.value, targets)))
+        return refuse(`${tool} whose script writes the roster`)
+      if (!inPlace(args)) return
+    }
+    if (READERS.has(tool)) return
+    const writer = WRITERS.has(tool) || SEDS.has(tool)
+    for (const word of args)
+      if (writes(word, at, writer)) return refuse(`${tool} on ${shown(word)}`)
   }
   return run(lex(command, env.known), env, visit, true)
 }

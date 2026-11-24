@@ -106,6 +106,17 @@ describe("roster.ts and every read run", () => {
     "bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + \"/.playground/roster.json\").text()); console.log(r)'",
     `python3 -I -c "import json; r = json.load(open('${ROSTER}')); print(json.dumps(r)[:80])"`,
     "bun -e 'const r = JSON.parse(await Bun.file(process.env.HOME + \"/.playground/roster.json\").text()); for (const s of r.agents.filter((a) => a.n >= 1)) console.log(s.name)'",
+    // pass controls for the placers, the writers and sed the review's bypass forms reach
+    "mv /tmp/a.json /tmp/b.json && cat ~/.playground/roster.json",
+    "rsync -a src/ dst/",
+    "rsync -t /tmp/x /tmp/y",
+    "cp /tmp/notes.json ~/.playground/",
+    "ln -s ~/.playground/handoffs /tmp/handoffs",
+    "install -m 600 /tmp/x ~/.playground/scratch/x",
+    "sed -E 's/a/b/' ~/.playground/roster.json > /tmp/out.json",
+    "sed -n 'w /tmp/out.json' ~/.playground/roster.json",
+    "rm /tmp/x.json; tee /tmp/y < ~/.playground/roster.json",
+    'F=$(mktemp); touch "$F"',
     // real calls the replay found, each a read of the roster
     'n="$(head -c 6 /dev/urandom | xxd -p)-worker"; grep -c "$n" ~/.playground/roster.json; sed "s/x/y/" /tmp/t.md > ~/.playground/brief-$n.md',
     `bun scripts/roster.ts assign x-reviewer "Review: $(jq -r '.title' ~/.playground/roster.json)" "score PR 1" worker=x-worker`,

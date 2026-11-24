@@ -19736,7 +19736,22 @@ var READERS4 = new Set([
   "test",
   "wc"
 ]);
-var COPIERS2 = new Set(["cp", "rsync"]);
+var PLACERS = new Set(["cp", "ditto", "install", "ln", "mv", "rsync"]);
+var COPIERS2 = new Set(["cp", "ditto", "rsync"]);
+var TARGET_FLAG = new Set(["cp", "install", "ln", "mv"]);
+var WRITERS2 = new Set([
+  "dd",
+  "install",
+  "ln",
+  "mv",
+  "rm",
+  "shred",
+  "tee",
+  "touch",
+  "truncate",
+  "unlink"
+]);
+var SED_WRITE = /(?:^|[;{}\n]|\/[gpiImMe0-9]*)\s*w\s+\S/;
 var CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -19799,8 +19814,8 @@ var tailOf = (source) => {
 var SEDS3 = new Set(["gsed", "sed"]);
 var shown3 = (word) => word.source ?? visible(word.value);
 var inPlace2 = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
-var destinationOf = (args) => {
-  const t = args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory"));
+var destinationOf = (tool, args) => {
+  const t = TARGET_FLAG.has(tool) ? args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory")) : -1;
   if (t >= 0)
     return args[t].value.includes("=") ? args[t] : args[t + 1];
   return args.filter((a) => !a.value.startsWith("-")).at(-1);
@@ -19846,22 +19861,28 @@ async function judgeBash(command, cwd, environment) {
       return;
     if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
       return refuse15(`${tool} code that names the roster and holds a write word`);
-    if (COPIERS2.has(tool)) {
-      const dest = destinationOf(args);
-      if (!dest)
-        return;
-      if (writes(dest, at, true))
+    if (PLACERS.has(tool)) {
+      const dest = destinationOf(tool, args);
+      if (dest && writes(dest, at, true))
         return refuse15(`${tool} onto ${shown3(dest)}`);
-      const into = pathsOf(dest, at) ?? [];
+      const into = dest ? pathsOf(dest, at) ?? [] : [];
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"));
       if (sources.some((s) => basename11(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve14(path, "roster.json"), targets)))
-        return refuse15(`${tool} of a roster.json into ${shown3(dest)}`);
-      return;
+        return refuse15(`${tool} of a roster.json into ${dest && shown3(dest)}`);
+      if (COPIERS2.has(tool))
+        return;
     }
-    if (READERS4.has(tool) || SEDS3.has(tool) && !inPlace2(args))
+    if (SEDS3.has(tool)) {
+      if (args.some((a) => SED_WRITE.test(a.value) && namesRoster(a.source ?? a.value, targets)))
+        return refuse15(`${tool} whose script writes the roster`);
+      if (!inPlace2(args))
+        return;
+    }
+    if (READERS4.has(tool))
       return;
+    const writer = WRITERS2.has(tool) || SEDS3.has(tool);
     for (const word of args)
-      if (writes(word, at))
+      if (writes(word, at, writer))
         return refuse15(`${tool} on ${shown3(word)}`);
   };
   return run2(lex(command, env.known), env, visit, true);
