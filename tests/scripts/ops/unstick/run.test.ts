@@ -1482,6 +1482,32 @@ describe("ops-unstick's slot alerts", () => {
     expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
   })
 
+  // a run that started run-slot.sh but also runs a suite itself beside it, as its own child outside run-slot.sh
+  const besideHook = [
+    `  999491      1 bun packages/scripts/src/commit-slot.ts bun run test:skills /x/.claude/worktrees/pg-3-beside`,
+    "  999492 999491 bash /x/.playground/ops/run-slot.sh commit-pg-3-beside -- bun run test:skills",
+    "  999493 999491 bun run test:file tests/c.test.ts /x/.claude/worktrees/pg-3-beside",
+  ]
+  const besideHeld = () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    mkdirSync(join(ops, "run-slot-commit"), { recursive: true })
+    writeFileSync(
+      join(ops, "run-slot-commit.holder"),
+      "commit-pg-3-beside 999492 2026-11-01T13:00:00Z 1 small\n",
+    )
+    return config
+  }
+  for (const [state, config] of [
+    ["waits", scratch],
+    ["holds the slot", besideHeld],
+  ] as const)
+    test(`a run with a suite beside its run-slot child stays outside-slot while that child ${state}`, async () => {
+      expect(await call(config(), "heavy_jobs", besideHook)).toEqual([
+        { inside: false, kind: "suite", pid: "999491", where: "pg-3-beside" },
+      ])
+    })
+
   // a bare suite in the same session as a held run both climb to the session's own claude, but the bare run holds no slot and stays outside
   const siblingHeld = () => {
     const rows = [
