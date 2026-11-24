@@ -2347,7 +2347,8 @@ state = {"blocks": {}}
 for _ in range(int(os.environ.get("PASSES", "1"))):
     run.cycle(state)
     clock[0] += float(os.environ.get("STEP", "1200"))
-print(json.dumps(sent))
+blocked = [b["kind"] for b in json.load(open(os.path.join(run.HERE, "state.json")))["blocked"]]
+print(json.dumps({"blocked": blocked, "sent": sent}))
 `
   const compact = async (
     screens: string[][],
@@ -2355,7 +2356,7 @@ print(json.dumps(sent))
     step = 1200,
     isLocal = false,
     hookOwned = false,
-  ): Promise<[string, string][]> => {
+  ): Promise<{ blocked: string[]; sent: [string, string][] }> => {
     const config = scratch()
     const env = {
       HOOK_OWNED: hookOwned ? "true" : "false",
@@ -2384,7 +2385,7 @@ print(json.dumps(sent))
       proc.exited,
     ])
     if (code !== 0) throw new Error(`unstick exited ${code}: ${err}`)
-    return JSON.parse(out) as [string, string][]
+    return JSON.parse(out) as { blocked: string[]; sent: [string, string][] }
   }
   // A real compacting pane, the "Compacting conversation…" line, its spinner, and the esc footer the kind matcher bails on.
   const compaction = (tick: string) => [
@@ -2394,7 +2395,7 @@ print(json.dumps(sent))
     "  ? esc to interrupt",
   ]
   test("a Prompt is too long stop above the line alerts the manager at first sight", async () => {
-    const sent = await compact([["  ? Prompt is too long", ...compaction("1.8k")]], 1)
+    const { sent } = await compact([["  ⎿  Prompt is too long", ...compaction("1.8k")]], 1)
     expect(sent, "one alert").toHaveLength(1)
     expect(sent[0][0]).toBe("lead")
     expect(sent[0][1]).toContain("Compacting conversation")
@@ -2402,14 +2403,14 @@ print(json.dumps(sent))
   })
 
   test("a stop above the line re-alerts every REALERT while it holds, its count still moving", async () => {
-    const stopped = (tick: string) => ["  ? Prompt is too long", ...compaction(tick)]
-    const sent = await compact([stopped("1.8k"), stopped("2.0k")], 2, 1200, true)
+    const stopped = (tick: string) => ["  ⎿  Prompt is too long", ...compaction(tick)]
+    const { sent } = await compact([stopped("1.8k"), stopped("2.0k")], 2, 1200, true)
     expect(sent, "two alerts").toHaveLength(2)
   })
 
   test("a stop that shows past 10 minutes sends one alert on that pass, not two", async () => {
-    const sent = await compact(
-      [compaction("1.8k"), ["  ? Prompt is too long", ...compaction("2.0k")]],
+    const { sent } = await compact(
+      [compaction("1.8k"), ["  ⎿  Prompt is too long", ...compaction("2.0k")]],
       2,
       1200,
     )
@@ -2417,9 +2418,33 @@ print(json.dumps(sent))
     expect(sent[0][1]).toContain("above the line")
   })
 
+  // state.json's blocked list is what the Dashboard shows as Stuck and the leads' sweep reads, and most compactions are healthy.
+  test("a healthy compaction is not listed as blocked in state.json", async () => {
+    const { blocked, sent } = await compact([compaction("300")], 1)
+    expect(sent, "nothing").toEqual([])
+    expect(blocked, "no blocked entry").toEqual([])
+  })
+
+  test("a compaction past the 10-minute line is listed as blocked in state.json", async () => {
+    const { blocked, sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200)
+    expect(sent, "one alert").toHaveLength(1)
+    expect(blocked, "one compacting entry").toEqual(["compacting"])
+  })
+
+  test("a line that only quotes the stop's words above a healthy compaction raises nothing", async () => {
+    const quoted = [
+      '+STOP = re.compile(r"Prompt is too long|invalid_request", re.I)',
+      "  ⎿  run.py:55: Prompt is too long",
+      ...compaction("300"),
+    ]
+    const { blocked, sent } = await compact([quoted], 1)
+    expect(sent, "nothing").toEqual([])
+    expect(blocked, "no blocked entry").toEqual([])
+  })
+
   test("a compaction the session-state hook recorded as stuck or failed raises nothing", async () => {
-    const sent = await compact(
-      [["  ? Prompt is too long", ...compaction("1.8k")]],
+    const { sent } = await compact(
+      [["  ⎿  Prompt is too long", ...compaction("1.8k")]],
       1,
       1200,
       false,
@@ -2429,7 +2454,7 @@ print(json.dumps(sent))
   })
 
   test("a local compaction whose ↓ count is unchanged past 10 minutes alerts, with the frozen count", async () => {
-    const sent = await compact([compaction("1.8k"), compaction("1.8k")], 2, 1200, true)
+    const { sent } = await compact([compaction("1.8k"), compaction("1.8k")], 2, 1200, true)
     expect(sent, "one alert").toHaveLength(1)
     expect(sent[0][0]).toBe("lead")
     expect(sent[0][1]).toContain("Compacting conversation")
@@ -2437,12 +2462,12 @@ print(json.dumps(sent))
   })
 
   test("a slow local compaction whose ↓ count moves raises nothing", async () => {
-    const sent = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, true)
+    const { sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, true)
     expect(sent, "nothing").toEqual([])
   })
 
   test("a Claude-served session still compacting 10 minutes on alerts", async () => {
-    const sent = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, false)
+    const { sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, false)
     expect(sent, "one alert").toHaveLength(1)
     expect(sent[0][0]).toBe("lead")
     expect(sent[0][1]).toContain("Compacting conversation")
@@ -2450,7 +2475,7 @@ print(json.dumps(sent))
   })
 
   test("a session that moved on between passes raises nothing", async () => {
-    const sent = await compact([compaction("1.8k"), ["⏺ Working on the fix."]], 2, 1200, false)
+    const { sent } = await compact([compaction("1.8k"), ["⏺ Working on the fix."]], 2, 1200, false)
     expect(sent, "nothing").toEqual([])
   })
 
@@ -2463,7 +2488,7 @@ print(json.dumps(sent))
       "   the log names the phrase again below the tool output as plain prose",
       "  ? esc to interrupt",
     ]
-    const sent = await compact([quoted, quoted], 2, 1200, false)
+    const { sent } = await compact([quoted, quoted], 2, 1200, false)
     expect(sent, "nothing").toEqual([])
   })
 })

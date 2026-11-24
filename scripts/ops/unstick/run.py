@@ -13,7 +13,7 @@ block goes to the session's manager (alert_to), each through the outbox at first
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
 A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
-screen past 10 minutes, or at first sight when the stop already sits above the line (a "Prompt is too long" or an invalid_request), naming the session and how long it has compacted. For a session the local model does not serve the 10-minute line is wall-clock; a healthy local compaction can run past it (48m on 2026-11-19), so for the local model the 10-minute line reads the spinner's ↓ count unchanged for those 10 minutes, and a count that moves raises nothing. Each re-alerts every REALERT; nothing is pressed in the pane.
+screen past 10 minutes, or at first sight when the stop already sits above the line (a ⎿ notice line reading "Prompt is too long" or an invalid_request API error), naming the session and how long it has compacted; only then is it listed in state.json as a block. For a session the local model does not serve the 10-minute line is wall-clock; a healthy local compaction can run past it (48m on 2026-11-19), so for the local model the 10-minute line reads the spinner's ↓ count unchanged for those 10 minutes, and a count that moves raises nothing. Each re-alerts every REALERT; nothing is pressed in the pane.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
@@ -50,10 +50,9 @@ KINDS = [
     ("mcp", re.compile(r"new MCP servers? found|MCP servers? found in", re.I)),
     ("picker", re.compile(r"Enter to select|Would you like to proceed\?|↑/↓ to navigate|Esc to cancel · Tab", re.I)),
 ]
-# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on the compaction spinner line, the lowest such line taken. A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
+# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on the compaction spinner line, the lowest such line taken. A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); STOP takes it only as the ⎿ notice line a turn ends on, as the limit line is, so a line quoting the words is none. TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
 COMPACT = re.compile(r"^\s*.\s*Compacting conversation…\s*\(\s*\d")
-PROMPT_TOO_LONG = re.compile(r"Prompt is too long", re.I)
-INVALID_STOP = re.compile(r"invalid_request", re.I)
+STOP = re.compile(r"^\s*⎿\s+(?:Prompt is too long|API Error: 4\d\d\b.*invalid_request)", re.I)
 TOKEN_RE = re.compile(r"↓\s*([0-9]+(?:\.[0-9]+)?[kmb]?)", re.I)
 # The limit dialog proper (a menu under its question), as against the one-line notice a turn prints when it stops on the limit.
 # A factory session by its name: an old name's prefix (worker-greed), or an <id>-<kind> name's last word (k3m9px-worker), as kindOfName in packages/config/src/kinds.ts reads it.
@@ -633,21 +632,14 @@ def compaction(lines):
     if idx is None:
         return None
     tick = next((TOKEN_RE.search(l) for l in lines[idx:] if TOKEN_RE.search(l)), None)
-    firstsight = any(
-        PROMPT_TOO_LONG.search(l) or INVALID_STOP.search(l) for l in lines[:idx]
-    )
-    return [lines[idx].strip()[:100], tick_count(tick.group(1)) if tick else None, firstsight]
+    stopped = any(STOP.search(l) for l in lines[:idx])
+    return lines[idx].strip()[:100], tick_count(tick.group(1)) if tick else None, stopped
 
 
 def tick_count(raw):
-    """The spinner's ↓ N as one number, so a frozen count is a like-for-like compare (1.8k and 1800 are the same) or None when the tick is gone.
-    A token count is whole, so a 1.8k spinner and a 1800 one compare equal, and 1.8 * 1000's float round-off lands on 1800."""
-    if not raw:
-        return None
-    n = raw
-    val = float(n[:-1]) if n[-1].lower() in "kmb" else float(n)
-    val *= {"k": 1e3, "m": 1e6, "b": 1e9}.get(n[-1].lower(), 1)
-    return int(round(val))
+    """The spinner's ↓ N as one whole number, so a frozen count compares like for like: 1.8k and 1800 are the same."""
+    val = float(raw[:-1]) if raw[-1].lower() in "kmb" else float(raw)
+    return int(round(val * {"k": 1e3, "m": 1e6, "b": 1e9}.get(raw[-1].lower(), 1)))
 
 
 def dialog_room(name, lines):
@@ -1076,7 +1068,7 @@ def ending_alert():
 
 def cycle(state):
     live = herdr_sessions()
-    blocks, now_t, cleared = {}, time.time(), []
+    blocks, compacting, now_t, cleared = {}, {}, time.time(), []
     mover = moving(now_t)
     kinds = roster_kinds()
     skipped, api_found = 0, {}
@@ -1103,35 +1095,34 @@ def cycle(state):
         state.setdefault("unreadable", {}).pop(s["surface_id"], None)
         kind, line, stuck, comp = read_block(lines, s)
         if comp is not None:
-            key = f"{s['surface_id']}:compacting"
-            prev = state["blocks"].get(key, {})
+            # tracked apart from blocks, since state.json lists every block as Stuck and most compactions are healthy; it joins blocks only once alertable
+            comp_line, count, stopped = comp
+            prev = state.get("compacting", {}).get(s["surface_id"], {})
             is_loc = is_local(name)
-            block = {
-                "account": session_account(name),
+            track = {
                 "alerted": prev.get("alerted", 0),
-                "count": comp[1],
-                "countSince": prev.get("countSince", now_t) if comp[1] == prev.get("count") else now_t,
-                "kind": "compacting",
-                "line": comp[0],
-                "name": name,
+                "count": count,
+                "countSince": prev.get("countSince", now_t) if count == prev.get("count") else now_t,
                 "since": prev.get("since", now_t),
-                "surface": s["surface_id"],
-                "workspace": s["workspace_id"],
             }
+            compacting[s["surface_id"]] = track
             # a stop above the line alerts at first sight; else a local session's ↓ count unmoved for 10 minutes, or a non-local one compacting 10 minutes; each re-alerted every REALERT
-            frozen = is_loc and comp[1] is not None and comp[1] == prev.get("count")
-            hold = (now_t - block["countSince"] >= 600) if frozen else (not is_loc and now_t - block["since"] >= 600)
-            if (comp[2] or hold) and now_t - prev.get("alerted", 0) >= REALERT and not hook_owned(s["session_id"]):
-                block["alerted"] = now_t
-                if comp[2]:
-                    detail = f"a stop sits above the line, compacting for {ago(block['since'])}: {comp[0]}"
-                elif frozen:
-                    detail = f"stuck past 10 minutes: {comp[0]} (the spinner's ↓ count is frozen at {comp[1]} for {ago(block['countSince'])})"
-                else:
-                    detail = f"stuck past 10 minutes: {comp[0]} (compacting for {ago(block['since'])})"
+            frozen = is_loc and count is not None and count == prev.get("count")
+            hold = (now_t - track["countSince"] >= 600) if frozen else (not is_loc and now_t - track["since"] >= 600)
+            if not (stopped or hold):
+                continue
+            if stopped:
+                detail = f"a stop sits above the line, compacting for {ago(track['since'])}: {comp_line}"
+            elif frozen:
+                detail = f"stuck past 10 minutes: {comp_line} (the spinner's ↓ count is frozen at {count} for {ago(track['countSince'])})"
+            else:
+                detail = f"stuck past 10 minutes: {comp_line} (compacting for {ago(track['since'])})"
+            blocks[f"{s['surface_id']}:compacting"] = {"kind": "compacting", "line": detail, "name": name, "since": track["since"], "alerted": track["alerted"],
+                                                       "surface": s["surface_id"], "workspace": s["workspace_id"]}
+            if now_t - track["alerted"] >= REALERT and not hook_owned(s["session_id"]):
+                track["alerted"] = now_t
                 notify(f"{name} is compacting, {detail}", to=alert_to(name, s.get("transcript_path")))
                 log(f"{name} is compacting, {detail}")
-            blocks[key] = block
             continue
         if not kind:
             if stuck:
@@ -1182,6 +1173,7 @@ def cycle(state):
                 notify(msg, to=alert_to(name, s.get("transcript_path")))
             log(msg)
     state["blocks"] = blocks
+    state["compacting"] = compacting
     # a limit block's own alert went once; while any alerted one holds, the builder and dispatcher get one summary an hour (a move's dispatcher gets its own, below)
     if mover or not any(b["kind"] in LIMIT_KINDS and b["alerted"] for b in blocks.values()):
         state.pop("limitSummaryAt", None)
