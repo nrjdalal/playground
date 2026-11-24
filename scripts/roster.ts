@@ -585,7 +585,7 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(roster, entry, pairs, factoryRepo, true)
-    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end keeps the checker while any is open.
     const checker = isChecker(entry)
     const served =
       checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
