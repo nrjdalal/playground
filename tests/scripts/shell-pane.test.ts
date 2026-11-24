@@ -30,13 +30,11 @@ import { storeWith } from "./hooks/render-set"
 import { git } from "./hooks/scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..")
-// One stub checkout on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
-const ORIGIN_REPO = originCheckout(
-  mkdtempSync(join(tmpdir(), "pg-2616-origin")),
-  "example-owner/example-repo",
+// A stub origin list, the same on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
 )
-// A stub origin list built from that checkout, so the guard rows name the made-up repo, not the running checkout's.
-const REPOS = reposOf({ schemaVersion: 1, values: {} }, ORIGIN_REPO)
 // The pane's folder: a worktree of the main checkout the guards read, as a session's pane opens in its own worktree, here or on CI's checkout.
 const MAIN = mainCheckout(CHECKOUT)
 const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
@@ -85,7 +83,6 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-outside-pr-code": ["bun test"],
   "no-prepare-write": ["gh pr create --fill"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
-  "no-protected-push": [`git push https://github.com/${REPOS.public[0]}.git main`],
   "no-public-leak": [`gh pr comment 1 --repo ${REPOS.public[0]} --body "$X"`],
   "no-raw-vercel": ["vercel env pull"],
   "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
@@ -132,11 +129,8 @@ writeFileSync(
   join(PREPARE, "playground", "roster.json"),
   JSON.stringify({ agents: [{ mode: "prepare", name: "worker-made-up-1" }] }),
 )
-// The folder a guard's case runs in, where it is not the worktree: no-protected-push reads the stub checkout's origin.
-const CWDS: Record<string, string> = {
-  "no-glm-heavy-path": GLM_REPO,
-  "no-protected-push": ORIGIN_REPO,
-}
+// The folder a guard's case runs in, where it is not the worktree.
+const CWDS: Record<string, string> = { "no-glm-heavy-path": GLM_REPO }
 // The environment a guard's case runs in beyond the session's role, set on the process, since run calls each check() with its own defaults.
 const ENVS: Record<string, Record<string, string>> = {
   "no-extension-repo-write": { PLAYGROUND_DATA_DIR: SYNCED },

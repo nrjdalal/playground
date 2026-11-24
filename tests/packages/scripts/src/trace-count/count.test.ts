@@ -166,14 +166,22 @@ describe("the trace count", () => {
   })
 
   test("reads past a live name the migration moves, the public repositories' names and the seed's left-out paths", () => {
-    const counts = count([
-      {
-        path: "a.ts",
-        text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${REPOS.public.join(" and ")}`,
-      },
-      { path: "packages/scripts/src/trace-count/counts.json", text: `#123 ${OLD_NAME.dispatcher}` },
-      { path: "packages/scripts/src/trace-count/kept.json", text: "#456" },
-    ])
+    const counts = count(
+      [
+        {
+          path: "a.ts",
+          text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${REPOS.public.join(" and ")}`,
+        },
+        {
+          path: "packages/scripts/src/trace-count/counts.json",
+          text: `#123 ${OLD_NAME.dispatcher}`,
+        },
+        { path: "packages/scripts/src/trace-count/kept.json", text: "#456" },
+      ],
+      { ...EMPTY_LIST, handles: ["example-owner"] },
+      REPOS,
+    )
+    expect(counts.handles).toBe(0)
     expect(counts.oldNames).toBe(0)
     expect(counts.issueRefs).toBe(0)
   })

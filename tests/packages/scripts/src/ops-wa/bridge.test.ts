@@ -859,12 +859,12 @@ describe("toWhatsApp", () => {
   })
 })
 
-// A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
 // A stub origin list, the same on every machine, so the terms row names a made-up repo, not the running checkout's, which a clone with none lacks.
 const REPOS = reposOf(
   { schemaVersion: 1, values: {} },
   originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
 )
+// A made-up list for no-public-leak and an Inbox held in memory: its open cards, and each answer the bridge records through it.
 const TERMS = termsOf(
   { companies: ["Acmeworks"], handles: [], linearKeys: [], names: ["Quillon Barr"], slackIds: [] },
   REPOS,

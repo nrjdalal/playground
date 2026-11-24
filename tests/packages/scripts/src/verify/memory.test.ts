@@ -7,12 +7,12 @@ import { EMPTY_LIST, reposOf } from "../../../../../packages/scripts/src/trace-c
 import { indexHits, memoryHits } from "../../../../../packages/scripts/src/verify/memory"
 import { originCheckout } from "../../../../machine"
 
-// A made-up machine's memory notes, each name, company and key invented for the test.
 // A stub origin list, the same on every machine, so the memory rows name a made-up repo, not the running checkout's, which a clone with none lacks.
 const REPOS = reposOf(
   { schemaVersion: 1, values: {} },
   originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
 )
+// A made-up machine's memory notes, each name, company and key invented for the test.
 const LIST = { ...EMPTY_LIST, companies: ["Quillco"], names: ["Pat Example"] }
 const note = (text: string) => [{ path: "/m/.playground/memory/builder/note.md", text }]
 const kinds = (text: string) => memoryHits(note(text), LIST, REPOS).map((hit) => hit.kind)
