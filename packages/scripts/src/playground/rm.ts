@@ -18,6 +18,7 @@ import {
   replayPlace,
   restore,
   type Roots,
+  type Refusal,
   type WorktreeGit,
   worktreeRepo,
 } from "@packages/safe-delete"
@@ -36,6 +37,7 @@ import {
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
+import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -512,6 +514,32 @@ export const rmPeerCommand = (path: string, bytes: number, card: string): string
     ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
   ].join(" ")
 
+// The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
+const approvedWeights = (
+  path: string,
+  opts: {
+    approved: { bytes: number; card: string }
+    folders: string[]
+    reason: string
+    session: string
+  },
+  roots: Roots,
+): { paths: string[]; size: number; shards?: number } | Refusal => {
+  const set = shardSet(path)
+  if (!set) {
+    const done = deleteWeights(path, opts, roots)
+    return "refused" in done ? done : { paths: [path], size: done.size }
+  }
+  const done = removeSet(
+    set,
+    { bytes: opts.approved.bytes, card: opts.approved.card },
+    { folders: opts.folders, reason: opts.reason, session: opts.session },
+    roots,
+  )
+  if ("refused" in done) return done
+  return { paths: done.paths, size: done.size, shards: set.length }
+}
+
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
@@ -554,8 +582,9 @@ async function removeApproved(
   }
   const approved = { bytes: pick.bytes, card }
   let line: string
+  let drop: string[]
   if (isWeights(args.path, deps.home, folders)) {
-    const done = deleteWeights(
+    const done = approvedWeights(
       args.path,
       { approved, folders, reason: args.reason, session },
       roots,
@@ -565,7 +594,10 @@ async function removeApproved(
       console.error(`playground: ${done.refused}`)
       return 1
     }
-    line = `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+    line = done.shards
+      ? `Deleted the ${done.shards} shards outright (${done.size} bytes), as card ${card} approved on this machine; ${join(roots.trash, "deleted.jsonl")} logs it`
+      : `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+    drop = done.paths
   } else {
     const done = quarantine(args.path, { approved, reason: args.reason, session }, roots)
     if ("refused" in done) {
@@ -574,9 +606,13 @@ async function removeApproved(
       return 1
     }
     line = `Moved to the trash as ${done.id} (${done.files} files), as card ${card} approved; playground rm --restore ${done.id} brings it back`
+    drop = [args.path]
   }
-  const dropped = await dropPaths(deps.data, [args.path]).catch(() => [])
-  console.log(dropped.length ? `${line}; its machine record entry is dropped` : line)
+  const dropped = await dropPaths(deps.data, drop).catch(() => [])
+  const suffix = dropped.length
+    ? `its machine record ${drop.length > 1 ? "entries are" : "entry is"} dropped`
+    : ""
+  console.log(suffix ? `${line}; ${suffix}` : line)
   return 0
 }
 

@@ -61,17 +61,22 @@ export const pollOf = (
         values: rows.map((row, i) => `${i + 1}. ${row.label}`.slice(0, 90)),
       }
 
-// The patterns a card is read with: org, the terms that keep a whole card in the Inbox, and hide, every kind no-public-leak refuses, each written as [hidden] in a card that goes.
+// The patterns a card is read with: org, the terms that keep a whole card in the Inbox, and hide, the kinds written as [hidden] in a card that goes, tracker ids kept since the owner reads them in the Inbox too.
 export type Terms = { hide: RegExp[]; org: RegExp[] }
 
 const ORG: Kind[] = ["companies", "companyName"]
 const HIDE: Kind[] = [
+  // an archive link opens a private thread or file outside the factory
   "archiveLinks",
+  // a company term names an org whose work stays out of the factory's posts
   "companies",
+  // an email is a person's own contact
   "emails",
+  // a handle names a person
   "handles",
-  "linearKeys",
+  // a name names a person
   "names",
+  // a Slack id points at a private channel, DM or person
   "slackIds",
 ]
 
@@ -112,7 +117,7 @@ export const waits = (card: Card, now: number): boolean =>
   !(card.answer?.snoozedUntil !== undefined && Date.parse(card.answer.snoozedUntil) > now) &&
   !(card.answer?.archivedAt !== undefined && card.answer.dismissedAt === undefined)
 
-// Pure: the text with every term no-public-leak refuses and every token shape written as [hidden].
+// Pure: the text with every HIDE term and every secret or token shape written as [hidden].
 export const redact = (text: string, terms: Terms): string =>
   terms.hide.reduce((said, re) => said.replace(re, HIDDEN), hideSecrets(text, HIDDEN))
 

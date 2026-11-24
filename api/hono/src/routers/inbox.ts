@@ -23,6 +23,7 @@ import {
   revealSecret,
   scheduleItem,
   secretInputSchema,
+  zodMessage,
 } from "@/lib/dashboard/inbox"
 import { runArgv } from "@/lib/dashboard/run-argv"
 import { readFromKeychain, runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
@@ -56,6 +57,18 @@ const STATUS = { CONFLICT: 409, NOT_FOUND: 404, VALIDATION_ERROR: 400 } as const
 const invalid = (result: { success: boolean; error?: unknown }) => {
   if (!result.success) {
     throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
+  }
+}
+
+// An answer's refusal names each field and its bound (a note past its cap), so the card says why.
+export const invalidAnswer = (result: {
+  success: boolean
+  error?: Parameters<typeof zodMessage>[0]["issues"]
+}) => {
+  if (!result.success) {
+    throw new ApiError(400, "VALIDATION_ERROR", zodMessage({ issues: result.error ?? [] }), {
+      issues: result.error,
+    })
   }
 }
 
@@ -170,7 +183,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
       },
     }),
     refuseAgentOffFixture,
-    sValidator("json", answerInputSchema, invalid),
+    sValidator("json", answerInputSchema, invalidAnswer),
     async (c) => {
       const user = c.get("user")
       const result = await answerItem(db, c.req.param("id"), c.req.valid("json"), {
