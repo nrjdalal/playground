@@ -843,7 +843,7 @@ describe("the box's own docker, in the gate", () => {
     expect(said).toContain("bun run --cwd <dir> gate:new-user 647bbfe")
   })
 
-  test("clean removes every container carrying the box's label, beside the pglaunch stand-in's", () => {
+  test("clean removes every container carrying the box's label", () => {
     const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-clean-")))
     const box = makeBox("647bbfe931cab96aa71eca1bb15b01a26ae3cf69", parent)
     const bin = join(parent, "bin")

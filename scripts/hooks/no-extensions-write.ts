@@ -1033,7 +1033,7 @@ const EXT_DRY = new Set(["add", "import", "init"])
 // Each command's bare switches, as its parseWords call names them; every other -- word takes the next word as its value.
 const SWITCHES: Record<string, string[]> = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"],
+  settings: ["--dry-run", "--propose"],
 }
 
 // Whether a word is the playground CLI in any one of the folders it may be read from: the command by name in any case, as macOS's filesystem reads it, or by a path that is no folder, or the checkout's cli.ts, with or without its extension, links followed; in a folder the hook cannot read, a relative word is the CLI by its last part alone (playground, cli or cli.ts).
@@ -1878,6 +1878,12 @@ function rooted(commands: Command[], files?: Files): boolean {
   )
 }
 
+// The text an xargs reads: its own stdin or pipe (stdinOf), else the pipe into its brace group (braceFed), since every command of the group reads it, so a writing xargs anywhere in one gets its plain twin's verdict; a group's own input redirect stays unread, as stdinOf leaves it (PG-1175)
+async function xargsStdin(cmd: Command, env: Env): Promise<Text> {
+  const own = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"))
+  return stdinOf(cmd.braceFed && !own && !cmd.stdin ? { ...cmd, stdin: cmd.braceFed } : cmd, env)
+}
+
 // Whether an ssh a redirect feeds leaves the line's readers spared: the remote side runs the redirect's text, whose readers print back to ssh rather than into a shell, so only a text the hook cannot read (`sshText`), or one rooted itself, roots the line
 function sshSpared(cmd: Command, files: Files | undefined): boolean {
   if (cmd.stdin || !sshCall(parse(cmd))) return false
@@ -1888,7 +1894,7 @@ function sshSpared(cmd: Command, files: Files | undefined): boolean {
 // The last redirect onto an ssh's stdin, whose text the remote side reads
 const sshInput = (cmd: Command) =>
   cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
-// Whether sshText may read a fed file: only on a line of one command, from `from` (the tool's folder on a line that moves no folder) for a relative path
+// Whether sshText may read a fed file: only on a line whose other commands cannot write it first (rootLine's alone), from `from` (the tool's folder on a line that moves no folder) for a relative path
 type Files = { from?: string }
 // The text a redirect hands an ssh on stdin: its last here-string's or heredoc's body, or, when `files` allows, a file named by a literal path, absolute or from its `from`, read when it is a regular file within 1 MiB; undefined for any other
 function sshText(cmd: Command, files: Files | undefined): string | undefined {
@@ -2092,6 +2098,8 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     options[0] === "--from-owner-msg" &&
     !!ownerId &&
     positional.length === 2
+  // --propose as the call's one option, beside the key and value alone: ops-wa asks the owner and writes on his yes, and a CLI from before the flag stops at it needing a value (ADR 0041)
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry
@@ -2102,6 +2110,7 @@ function cliWrite(words: Word[], tuning: Tuning): string | undefined {
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
     // the CLI only asks ops-wa, which proves the owner's own WhatsApp message and writes it itself (ADR 0035)
     if (verb === "set" && ownerMsg) return
+    if (verb === "set" && proposal) return
     const job = key.startsWith(JOB_PREFIX)
     if (!GUARD_KEYS.has(key) && !job) return
     const value = positional[1]
@@ -2469,16 +2478,18 @@ async function inspect(
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) }
       sshOwn.add(own)
       const remote = lex(line, at.known)
-      // the remote line's first command reads ssh's stdin, so a remote xargs takes the words piped into ssh, ssh's own here-string or heredoc, or a file ssh reads, its path taken from this folder, as its local twin does, the words read from the login's home; a file the hook cannot read passes, as its local twin's does (PG-2553)
-      const head = remote.commands[0]
-      const input = sshInput(cmd)
-      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse(head).xargs) {
-        const target = input?.op === "<" ? input.target : undefined
-        const path = target && pathOf(target, env)
-        if (input?.body) head.redirects = [input, ...head.redirects]
+      // the remote line reads ssh's stdin, so each remote xargs with no pipe, input or brace group's pipe of its own takes the words piped into ssh, ssh's own here-string or heredoc, or a file ssh reads, its path taken from this folder, as its local twin does, the words read from the login's home; under ssh -n it reads /dev/null's empty text, and a stdin the hook cannot read is refused as its local twin's is (PG-2553)
+      const input: Command["redirects"][number] | undefined = ssh.noStdin
+        ? { body: { value: "" }, fd: "", op: "<<<" }
+        : sshInput(cmd)
+      const target = input?.op === "<" ? input.target : undefined
+      const path = target && pathOf(target, env)
+      for (const each of remote.commands) {
+        if (each.stdin || each.braceFed || sshInput(each) || !parse(each).xargs) continue
+        if (input?.body) each.redirects = [input, ...each.redirects]
         else if (input && target && path)
-          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects]
-        else if (!input && cmd.stdin) head.stdin = cmd.stdin
+          each.redirects = [{ ...input, target: { ...target, value: path } }, ...each.redirects]
+        else if (!input && cmd.stdin) each.stdin = cmd.stdin
       }
       return (await visit(own, parse(own), env)) ?? run(remote, at, visit, true)
     }
@@ -2782,7 +2793,7 @@ async function inspect(
     // GNU xargs' -a reads its words from a file in place of stdin; a word read as -a may be another option's value, so stdin is still judged as xargs' words, and the file adds a word the hook cannot read (argWord)
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word))
     const argWord: Word | undefined = argFile ? { quoted: false, value: UNKNOWN } : undefined
-    const fed = xargs ? await stdinOf(cmd, env) : undefined
+    const fed = xargs ? await xargsStdin(cmd, env) : undefined
     // xargs' own words: under -0 or -d its quotes and backslashes stay, else xargsWords reads them
     const fedSplit =
       !fed || fed.unknown
@@ -3026,8 +3037,9 @@ async function inspect(
         cmd.redirects.some((r) => r.body && holds(r.body.value, here))
       )
         return refuse(`${verb} with a script that names ${root}`)
+      // a remover, or a writer the line typed that reads stdin (no -a), fed stdin the hook cannot read may write under the root; a writer read out of a quoted text (a sed script's replacement, textDepth) is judged by the words it can read, since that text is most often data (PG-2553)
       const unreadFeed =
-        fed && remover
+        fed && (remover || (WRITERS.has(tool) && textDepth === 0 && !argFile))
           ? argFile
             ? "the file its -a names"
             : fed.unknown || marked(fed.value) || !fedSplit
@@ -3202,30 +3214,37 @@ async function inspect(
     visitShells: true,
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
-  // a file fed to ssh is read only when the line's first command is the ssh and every other is a reader its pipe feeds with no redirect but a descriptor's copy (`| head -80`), since any other could write the file before ssh reads it
-  const [only, ...rest] = lexed.commands
+  // a file fed to ssh is read only when every command before the ssh, and every one its pipe feeds (`| head -80`), is a reader with no redirect but a descriptor's copy, and every other runs after it and feeds no shell (`; ssh box grep …`), since any other could write the file before ssh reads it
+  const shellAt = lexed.commands.findIndex((cmd) => !!stdinShell(cmd))
+  const fed = lexed.commands[shellAt]
   const plain = (cmd: Command) =>
     !cmd.inner &&
     ![...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].some(
       (word) => word.procs,
     )
   const fedBy = (cmd: Command) => {
-    for (let at = cmd.stdin; at; at = at.stdin) if (at === only) return true
+    for (let from = cmd.stdin; from; from = from.stdin) if (from === fed) return true
     return false
   }
-  const alone =
-    !!only &&
-    plain(only) &&
-    rest.every(
-      (cmd) =>
-        plain(cmd) &&
-        fedBy(cmd) &&
-        PIPE_READERS.has(program(parse(cmd).name)) &&
-        cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")),
+  const reader = (cmd: Command) =>
+    plain(cmd) &&
+    PIPE_READERS.has(program(parse(cmd).name)) &&
+    cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""))
+  const feedUnwritten =
+    !!fed &&
+    plain(fed) &&
+    lexed.commands.every(
+      (cmd, k) =>
+        k === shellAt ||
+        (k < shellAt || fedBy(cmd)
+          ? reader(cmd)
+          : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"),
     )
   rootLine = rooted(
     lexed.commands,
-    alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined,
+    feedUnwritten
+      ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory }
+      : undefined,
   )
   sshFed = new Set(
     [...codeFed(lexed.commands)]

@@ -113,6 +113,8 @@ describe("defineSettings", () => {
       "wa.device",
       "wa.guestPolicy",
       "wa.owner",
+      "wa.quietEndHour",
+      "wa.quietStartHour",
       "wa.replyPolicy",
       "yard.logReaders",
     ])

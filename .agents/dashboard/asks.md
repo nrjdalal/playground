@@ -82,10 +82,14 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
+  A card's text takes any length (`words` in `api/hono/src/lib/dashboard/inbox.ts`): the card draws it whole, and the Inbox scrolls past a long one.
+  An answer's note holds at most 3000 characters and a changed draft's words 4000, each counted as JSON writes it, a line break or a quote counting twice (`sent`), so the answer's one line fits `deliver()`'s 8000, and the answer route refuses one past either with a message naming the field and its bound (`invalidAnswer`).
   A `progress` block draws as bars at the card's own width, on a phone and a wide screen alike (`ProgressBlock` in `web/next/src/components/progress-block.tsx`, `progressItems` in `@packages/config/inbox`).
   It holds one item a line, `name | percent | what's going on | ETA | state`, drawn as two lines: the name, a stock `Progress` bar filling the rest of the line and the percent, then the words with the ETA at the right.
   The state is optional, one of `active`, `done`, `held` or `waiting` (`PROGRESS_STATES`), and a row at 100 that names none reads as done: an `active` row's bar, and a row under 100 with no state, fill in the palette's blue (`ACTIVE_BAR`, `bg-chart-2`), and every other row's fill draws muted (`MUTED_BAR`), its state also in the bar's accessible name.
   The names share one column of at most 6rem, so every bar starts at one x and a long name never narrows them: a name past it is cut short, its whole name on hover.
+  A name written as a markdown link to an http or https page, `[ABC-12](https://...)`, draws as that link once `transcriptLink` passes it (`web/next/src/lib/markdown.ts`, messages.md's transcript rule), another site's in a new tab and the app's own in this one,
+  its label alone shown, cut short and on hover, and named in the bar's accessible name; any other name, a refused link's included, draws as plain text (`LINK` in `progress-block.tsx`).
   A block with a line that does not read stays the plain code block, and `bun run ask` refuses it before it posts (below).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`), 72 columns, is the owner's chosen drawing width, wider than the narrowest card, which shrinks, then scrolls, any line wider than itself.
@@ -120,7 +124,7 @@
   The unread dot stands in for an update's light alone; an ask keeps its light ("what is this dot before the icon?").
   Each verb is an icon button too, named in its `aria-label`, its `Hint` saying what it does ("should be just icon in this case also").
   Every open card ends in a comment box above its buttons, named Comment, the same gap above it as between the card's other parts, at least as tall as its first choice (`NoteBox`):
-  on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`, the answered card reading `You: ...` under its result and the box emptying;
+  on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note`, its poster reading it as the answer line's `comment`, the answered card reading `You: ...` under its result and the box emptying;
   on a secret ask or a reveal card it reads Type a note to Playground, then press Reply (the hosted build's reveal card keeps Add an optional comment, since it draws no Reply);
   on any other card (an update, an answered card) it reads Add a comment, and Reply alone sends it.
   Reply (the reply icon, named `Reply to #iN`) with the box empty hands the card's ref to Playground's composer (`outbox.reply` in `web/next/src/lib/chat.ts`, `replyRoute` and `withRef` in `web/next/src/lib/reply.ts`),
@@ -243,7 +247,7 @@
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
   bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster closes its own update once it has settled (a cleared alert, a finished progress card); until then it stays editable by its poster, unless the owner presses its Dismiss; an edit after his Done brings it back unread
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
-  bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024)
+  bun run ask whatsapp <file>   # ops-wa's alone: the owner's answer to a card from WhatsApp, read from a file in <data>/whatsapp/answers/ and typed into its poster as the card's own answer is (ADR 0024), or a draft's send from WhatsApp, as written or in the owner's words, through the Inbox's own Send (ADR 0039)
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
@@ -584,6 +588,7 @@
   or a code block other than a `diff` or `progress` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   `bun run ask new` and `ask edit` refuse an ask's or a read-only update's `progress` block whose line holds other than 4 or 5 fields, a percent outside 0 to 100 or a state none of the four, naming the block, the line and its words, and post nothing (`progressRefusal` in `api/hono/src/lib/dashboard/ask-shape.ts`).
   a `progress` block is the dispatcher's one in-flight card, so `ask new` refuses a second of it: a non-dispatcher's card, or the dispatcher's own card a second time, a different title, naming the open one, while `ask edit` carries the dispatcher's card to its end, so a job keeps one card (`progressCardRefusal`, PG-2720).
+  the daily ledger card posts beside it: a dispatcher card whose title is the ledger prefix (`PLAYGROUND_LEDGER_TITLE`, Firefighting, stack.md's org rule) alone or followed by `: ` and a day passes, and is never the in-flight card (`isLedgerTitle`, `inflightOf` in `api/hono/src/lib/dashboard/inbox.ts`).
   The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
