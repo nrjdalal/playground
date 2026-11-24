@@ -202,6 +202,17 @@ test("the factory's accounts at 1%/h each read 2%/h combined", () => {
   expect(new Set(accounts("account-samples.jsonl"))).toEqual(new Set(["spare@example.test"]))
 })
 
+test("two passes on one stale readAt leave a single row for that account (#2981)", () => {
+  const now = Date.now() / 1000
+  const home = setup("stale-read-at", 50, 20, {
+    "spare@example.test": { readAt: iso(now - 3600), week: 92, weekReset: now + 172800 },
+  })
+  run(home)
+  run(home)
+  const rows = readFileSync(samples(home, "account-samples.jsonl"), "utf8").trim().split("\n")
+  expect(rows).toHaveLength(1)
+})
+
 // #2735: a whole-point step in the 1-hour window inflated the combined line; reading the 6-hour rate keeps it 1.0 plus 0.7, not 1.0 plus 2.0
 test("a whole-point step in the 1-hour window reads the 6-hour rate, so the combined line does not inflate (#2735)", () => {
   const now = Date.now() / 1000

@@ -8,6 +8,7 @@ import {
   beat,
   cycle,
   emptyBalanceAt,
+  glmKey,
   windowsOf,
   zaiQuota,
   BALANCE_HOLD_MS,
@@ -209,6 +210,40 @@ describe("cycle", () => {
     expect(failed.error).toBe("Z.ai 401: code 1001")
     expect(failed.writtenAt).toBe("2026-10-16T15:10:00.000Z")
     expect(failed.windows).toBeDefined()
+  })
+})
+
+describe("glmKey", () => {
+  const read = (rows: { label?: string }[], keychain: (label: string) => string) => async () =>
+    zaiQuota(glmKey(rows, keychain), unreached)
+  const unreached = (async () => {
+    throw new Error("no call expected")
+  }) as unknown as typeof fetch
+
+  test("waits, with no Keychain read, while usage.accounts holds no GLM row", async () => {
+    const asked: string[] = []
+    const result = await cycle(
+      read([], (label) => (asked.push(label), "zai_key")),
+      join(scratch(), "zai-usage.json"),
+    )
+    expect(result).toBe("waiting: no GLM account in usage.accounts")
+    expect(asked).toEqual([])
+  })
+
+  test("keeps the Keychain error for a GLM row whose key is missing", async () => {
+    const asked: string[] = []
+    const result = await cycle(
+      read([{ label: "zai-main" }], (label) => (asked.push(label), "")),
+      join(scratch(), "zai-usage.json"),
+    )
+    expect(result).toBe(
+      "the Keychain holds no key for the first GLM row of usage.accounts under models.glmKeychainService",
+    )
+    expect(asked).toEqual(["zai-main"])
+  })
+
+  test("hands back the first GLM row's key", () => {
+    expect(glmKey([{ label: "a" }, { label: "b" }], (label) => `key-${label}`)).toBe("key-a")
   })
 })
 

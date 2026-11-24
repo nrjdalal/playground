@@ -51,7 +51,7 @@ Every other card stays in the Inbox, named by its title alone as `📥 <title>`,
 Each open draft comes to you too, once, as written, with where it goes and a line on how to reply; the sender refuses token shapes ([ADR 0039](../../.agents/adr/0039-an-inbox-draft-reaches-the-owners-whatsapp.md)).
 Reply `send` to that message to post it as written, or reply to it with your own words to post those instead; a Send in the Inbox and a reply on WhatsApp settle each other, and a draft with files goes from the Inbox alone.
 A draft changed after it came to you comes again with its new words, and a reply to the old message posts nothing.
-A card that goes reads `[hidden]` for every name, handle, company term, Slack id, Linear key, email and token, and its files stay in the Inbox.
+A card that goes reads `[hidden]` for every name, handle, company term, Slack id, archive link, email and token, keeps a tracker id such as `ABC-123` as written ([ADR 0042](../../.agents/adr/0042-a-whatsapp-card-keeps-tracker-ids.md)), and its files stay in the Inbox.
 
 ## Alerts to a second number
 
