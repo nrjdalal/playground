@@ -228,7 +228,24 @@ const whyHolds = (path: string, roots: Roots): string | null => {
 const SCRATCH_DIRS = ["scratch", "scratchpad"] as const
 type ScratchDir = (typeof SCRATCH_DIRS)[number]
 
-// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, path when it is the memory trial's settings file spawn.sh wrote for the session, and path, its parent resolved, when it is a loose file directly in scratch/ named <session>- or <session>. and a regular file or nothing (a restore checks a gone path), while scratch/ is a real folder reached through no symlink from the real HOME; none for a name no session may hold.
+// The memory folder a session's own settings file names as its autoMemoryDirectory, the one spawn.sh picked by its role (ADR 0022), its parent resolved: when the file is a regular file and the folder an absolute path to a real folder (not a symlink) directly in the data folder's memory/, itself a real folder; else undefined.
+const memoryFolderOf = (home: string, settings: string): string | undefined => {
+  if (!lstat(settings)?.isFile()) return undefined
+  let folder: unknown
+  try {
+    folder = JSON.parse(readFileSync(settings, "utf8"))?.autoMemoryDirectory
+  } catch {
+    return undefined
+  }
+  if (typeof folder !== "string" || !isAbsolute(folder)) return undefined
+  const own = join(real(dirname(folder)), basename(folder))
+  return dirname(own) === join(real(join(home, ".playground")), "memory") &&
+    lstat(own)?.isDirectory()
+    ? own
+    : undefined
+}
+
+// The caller's own scratch in the data folder: scratch/<session> and scratchpad/<session>, symlinks resolved, path when it is the memory trial's settings file spawn.sh wrote for the session, and path, its parent resolved, when it is a regular file or nothing (a restore checks a gone path) and either a loose file directly in scratch/ named <session>- or <session>., while scratch/ is a real folder reached through no symlink from the real HOME, or a note other than MEMORY.md, in any case, directly in the session's own memory folder (memoryFolderOf); none for a name no session may hold.
 const ownScratchOf = (home: string, session: string, path: string): string[] => {
   if (!SESSION.test(session)) return []
   const name = basename(path)
@@ -243,9 +260,13 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
     real(join(home, ".playground")),
     `factory-settings-400k-memory-${session}.json`,
   )
+  const note =
+    dirname(path) === memoryFolderOf(home, settings) &&
+    name.toLowerCase() !== "memory.md" &&
+    (!stat || stat.isFile())
   return [
     ...SCRATCH_DIRS.map((dir) => real(join(home, ".playground", dir, session))),
-    ...(loose ? [path] : []),
+    ...(loose || note ? [path] : []),
     ...(path === settings && (!stat || stat.isFile()) ? [path] : []),
   ]
 }
@@ -363,7 +384,7 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file and its own memory settings file (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file, its own memory settings file and a note directly in its own memory folder, MEMORY.md aside (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else.
 export function isProtected(
   path: string,
   roots: Roots,

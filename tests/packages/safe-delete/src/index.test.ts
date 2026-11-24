@@ -232,6 +232,72 @@ describe("isProtected", () => {
     ])
       expect(isProtected(path, roots, opts.session)).toBeString()
   })
+
+  // #3031: the auto-memory trial has a role delete its own memory note, in the folder spawn.sh's settings file names for the session.
+  test("lets a file directly in the caller's own memory folder go, and refuses the rest of memory/", () => {
+    const roots = machine()
+    const data = join(roots.home, ".playground")
+    const memory = join(data, "memory", "worker-b")
+    file(
+      join(data, `factory-settings-400k-memory-${opts.session}.json`),
+      JSON.stringify({ autoMemoryDirectory: memory, autoMemoryEnabled: true }),
+    )
+    const note = file(join(memory, "a-note.md"), "note")
+    expect(isProtected(note, roots, opts.session)).toBeNull()
+    expect(isProtected(note, roots, "a4b5c6-worker")).toBeString()
+    expect(quarantine(note, opts, roots, { now: NOW })).toMatchObject({ files: 1 })
+    expect(existsSync(note)).toBe(false)
+    const [entry] = listTrash(roots.trash)
+    expect(restore(entry!.id, roots)).toEqual({ path: note })
+    symlinkSync(file(join(roots.root, "elsewhere.md")), join(memory, "linked.md"))
+    for (const path of [
+      memory,
+      file(join(memory, "MEMORY.md")),
+      join(memory, "memory.md"),
+      join(memory, "linked.md"),
+      file(join(memory, "sub", "deep.md")),
+      file(join(data, "memory", "builder", "b-note.md")),
+      file(join(data, "memory", "worker-arm")),
+    ])
+      expect(isProtected(path, roots, opts.session)).toBeString()
+  })
+
+  test("lets a lead's own memory note go, by its own settings file", () => {
+    const roots = machine()
+    const data = join(roots.home, ".playground")
+    const memory = join(data, "memory", "ops")
+    file(
+      join(data, "factory-settings-400k-memory-ops.json"),
+      JSON.stringify({ autoMemoryDirectory: memory, autoMemoryEnabled: true }),
+    )
+    const note = file(join(memory, "a-note.md"))
+    expect(isProtected(note, roots, "ops")).toBeNull()
+    expect(isProtected(note, roots, "builder")).toBeString()
+    expect(isProtected(note, roots, opts.session)).toBeString()
+  })
+
+  test("takes no memory folder from a settings file that names one outside memory/ or none", () => {
+    const roots = machine()
+    const data = join(roots.home, ".playground")
+    const settings = join(data, `factory-settings-400k-memory-${opts.session}.json`)
+    const outside = file(join(data, "notes", "a-note.md"))
+    const nested = file(join(data, "memory", "worker-b", "sub", "a-note.md"))
+    for (const [dir, path] of [
+      [join(data, "notes"), outside],
+      [join(data, "memory", "worker-b", "sub"), nested],
+      [join(data, "memory"), file(join(data, "memory", "loose.md"))],
+    ] as const) {
+      file(settings, JSON.stringify({ autoMemoryDirectory: dir }))
+      expect(isProtected(path, roots, opts.session)).toBeString()
+    }
+    file(settings, "not json")
+    expect(isProtected(nested, roots, opts.session)).toBeString()
+    file(join(data, "away", "memory", "worker-b", "a-note.md"))
+    symlinkSync(join(data, "away", "memory"), join(data, "memory-link"))
+    file(settings, JSON.stringify({ autoMemoryDirectory: join(data, "memory-link", "worker-b") }))
+    const linked = join(data, "memory-link", "worker-b", "a-note.md")
+    expect(isProtected(linked, roots, opts.session)).toBeString()
+  })
 })
 
 describe("quarantine, listTrash and restore", () => {
