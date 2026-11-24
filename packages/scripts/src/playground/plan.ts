@@ -424,15 +424,11 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
-// A pid's elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), in seconds, so its own start is now minus this.
+// A pid's elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), in seconds, so its own start is now minus this; NaN for anything else, as when a sandbox refuses ps, so stepQueued skips its reuse guard.
 export const parseEtime = (elapsed: string): number => {
-  const parts = elapsed.split("-")
-  const days = parts.length > 1 ? Number(parts[0]) : 0
-  const hms = parts[parts.length - 1].split(":")
-  let secs = 0
-  if (hms.length === 3) secs = Number(hms[0]) * 3600 + Number(hms[1]) * 60 + Number(hms[2])
-  else if (hms.length === 2) secs = Number(hms[0]) * 60 + Number(hms[1])
-  return days * 86400 + secs
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(elapsed.trim())
+  if (!m) return Number.NaN
+  return Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3]) * 60 + Number(m[4])
 }
 
 // Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line back 5 s past the file's mtime, and the pid is not another that reused it, read as reused only once it clears the mtime by more than 2 s.

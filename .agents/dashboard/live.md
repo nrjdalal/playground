@@ -34,6 +34,7 @@
   At 30 minutes with no result, a prebuild step whose run-slot (`prebuild.pid`) still lives with no `start` line for its pid in `run-slot.runs.log` since that file was written reads as waiting (`prebuildQueued`), so a build queued under `PREBUILD_SLOW` ends the update as waiting.
   The supervisor's `prebuild <step> still queued after <n>s` line reads as waiting only while `prebuildQueued` agrees, else the update ends Failed, since a step that started and then hung is no longer queued.
   A pid whose own start, read from `ps`'s elapsed time, comes after `prebuild.pid`'s mtime is another process that reused the pid, and reads not queued.
+  When `ps` prints no elapsed time, as under Claude Code's sandbox, which refuses it, the start lines alone decide.
   A roll queued for load reads `Waiting for load: load5 is <n>…`, and one still queued at 30 minutes ends the update with exit 0 rather than `Failed`.
   The update gives its own run slot back before it asks for the roll (`giveBackSlot`, `packages/scripts/src/playground/give-back.ts`), since the roll's steps take run-slot lanes of their own.
   Its verify runs health and map, plus signin, ws and system where the checkout's `.env` turns `AGENT_SIGNIN_ENABLED` on, since those three sign in as the agent and a person's checkout keeps that off.
