@@ -739,6 +739,16 @@ describe("rollOutcome", () => {
       expect(parseEtime("2-01:05:07")).toBe(176707)
     })
 
+    // #2658 item 2: a sandbox that refuses ps prints no elapsed, so its start is unknown and only the start lines decide
+    test("an elapsed that does not parse skips the reuse guard, so a queued pid still reads queued", () => {
+      expect(parseEtime("")).toBeNaN()
+      expect(parseEtime("ps: refused")).toBeNaN()
+      const fileMtime = Date.parse("2026-11-17T12:15:30Z")
+      const live = (pid: number) => pid === 4242
+      const pidStart = Date.now() - parseEtime("") * 1000
+      expect(stepQueued("4242", live, [], fileMtime, pidStart)).toBe(true)
+    })
+
     // #2658 item 2: the pid's elapsed reads up to a second late, so a live pid whose start clears the file by under 2 s still reads queued
     test("a pid whose computed start clears the file by under 2 s still reads queued", () => {
       const fileMtime = Date.parse("2026-11-17T12:15:30Z")
