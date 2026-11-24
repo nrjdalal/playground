@@ -61,7 +61,7 @@ const controls = (): Row[] => [
     `env X=1 exec 3> out.log; ${WRITE}`,
   ],
   ["a lookup of exec through command -v", "command -v exec"],
-  ["noglob before a program", "noglob ls *.ts"],
+  ["noglob before a program", "noglob git status"],
   ["command's -p before a program", "command -p ls"],
 ]
 
