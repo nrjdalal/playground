@@ -12706,7 +12706,10 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const unplaced = env.cwdUnread ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd))) : undefined;
     if (unplaced?.target)
       return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`));
-    const kids = (c) => c.inner?.() ?? bodies.get(c);
+    const kids = (c) => {
+      const inner = c.inner?.();
+      return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c);
+    };
     const hookWord = (word, here, sure = false) => {
       if (word.procs || !marked(word.value))
         return hookFile(pathOf(word, here), sure);
@@ -12768,9 +12771,9 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       ...cmd.redirects.flatMap((r) => r.body ? [r.body.value] : [])
     ];
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
-      const hookAt = () => hookTargets.find((word) => {
+      const hookAt = (sure = true) => hookTargets.find((word) => {
         const path = pathOf(word, here);
-        return hookWord(word, here, true) || copies && !!path && hookFile(join7(path, "x"), true);
+        return hookWord(word, here, sure) || copies && !!path && hookFile(join7(path, "x"), true);
       });
       const linkFolder = () => {
         const target = into.length === 1 ? pathOf(into[0], here) : undefined;
@@ -12836,7 +12839,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
         [copied, "copied from a file whose text"]
       ])
         for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
-          const hook = hookAt();
+          const hook = hookAt(texts !== ownTexts || !!removes);
           if (hook && removes)
             return refuse(hookRemoval(shown(hook), removes));
           if (hook)
