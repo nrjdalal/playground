@@ -24,21 +24,56 @@ const OPENERS = [
     "an if's body, an assignment, command's -p and exec's --",
     "if true; then x=1 command -p exec -- 3> .git/hooks/pre-commit; fi",
   ],
+  ["an option exec does not take", "exec -z 3> .git/hooks/pre-commit"],
+  ["exec's -a and its name before --", "exec -a x -- 3> .git/hooks/pre-commit"],
+  ["exec's -l and -a joined before its name", "exec -la x 3> .git/hooks/pre-commit"],
+  ["command's -p and --", "command -p -- exec 3> .git/hooks/pre-commit"],
+  ["builtin's --", "builtin -- exec 3> .git/hooks/pre-commit"],
+  ["time", "time exec 3> .git/hooks/pre-commit"],
+  ["zsh's repeat", "repeat 1 exec 3> .git/hooks/pre-commit"],
+  ["an assignment and a redirect before exec", "x=1 3> .git/hooks/pre-commit exec"],
+  ["an elif's body", "if false; then :; elif true; then exec 3> .git/hooks/pre-commit; fi"],
+  ["an else body", "if false; then :; else exec 3> .git/hooks/pre-commit; fi"],
+  ["an until loop's body", "until false; do exec 3> .git/hooks/pre-commit; break; done"],
+  ["a for loop's body", "for i in 1; do exec 3> .git/hooks/pre-commit; done"],
+  ["a select loop's body", "select i in 1; do exec 3> .git/hooks/pre-commit; break; done"],
+  ["a brace group with a redirect of its own", "{ exec 3> .git/hooks/pre-commit; } 2>/dev/null"],
+  ["a negated brace group", "! { exec 3> .git/hooks/pre-commit; }"],
+  ["a function body, then its call", "f() { exec 3> .git/hooks/pre-commit; }; f"],
+  ["a function keyword's body, then its call", "function f { exec 3> .git/hooks/pre-commit; }; f"],
 ] as const
 
 const WRITE = "echo 'touch ~/.playground/extensions/x' >&3"
 
-const held = (): Row[] =>
-  OPENERS.map(([how, opener]): Row => [
+// Whole lines whose write does not follow the opener: an if's condition, and a second descriptor duplicated from the first by a wrapped exec.
+const LINES = [
+  ["an if's condition", `if exec 3> .git/hooks/pre-commit; then ${WRITE}; fi`],
+  [
+    "a descriptor duplicated by command -p exec from one a plain exec opened",
+    "exec 3> .git/hooks/pre-commit; command -p exec 4>&3; echo 'touch ~/.playground/extensions/x' >&4",
+  ],
+] as const
+
+const held = (): Row[] => [
+  ...OPENERS.map(([how, opener]): Row => [
     `an echo whose stdout is duplicated to a descriptor an exec behind ${how} opened on a git hook`,
     `${opener}; ${WRITE}`,
-  ])
+  ]),
+  ...LINES.map(([how, line]): Row => [
+    `an echo of the data folder into a git hook through ${how}`,
+    line,
+  ]),
+]
 
-// Pass controls: each opener's descriptor on a log, an exec or an assignment before a program, an exec word that is an argument, and the common forms the wider reading may catch.
+// Pass controls: each opener's and line's descriptor on a log, an exec or an assignment before a program, an exec word that is an argument, and the common forms the wider reading may catch.
 const controls = (): Row[] => [
   ...OPENERS.map(([how, opener]): Row => [
     `an echo of the data folder through a descriptor an exec behind ${how} opened on a log`,
     `${opener.replace(".git/hooks/pre-commit", "out.log")}; ${WRITE}`,
+  ]),
+  ...LINES.map(([how, line]): Row => [
+    `an echo of the data folder into a log through ${how}`,
+    line.replace(".git/hooks/pre-commit", "out.log"),
   ]),
   [
     "an exec of a program with -a and a descriptor on a git hook, then an echo to that descriptor",
