@@ -4,6 +4,7 @@ export default defineConfig({
   entry: [
     "src/accounts.ts",
     "src/console.ts",
+    "src/delete-targets.ts",
     "src/inbox.ts",
     "src/kinds.ts",
     "src/org.ts",

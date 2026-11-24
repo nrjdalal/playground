@@ -19,6 +19,11 @@
       "bun": "./src/console.ts",
       "default": "./dist/console.mjs"
     },
+    "./delete-targets": {
+      "types": "./dist/delete-targets.d.mts",
+      "bun": "./src/delete-targets.ts",
+      "default": "./dist/delete-targets.mjs"
+    },
     "./inbox": {
       "types": "./dist/inbox.d.mts",
       "bun": "./src/inbox.ts",

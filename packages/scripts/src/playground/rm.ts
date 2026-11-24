@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
+import { targetWords } from "@packages/config/delete-targets"
 import { managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
@@ -37,7 +38,7 @@ import {
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
-import { removeSet, shardSet } from "./shards"
+import { removeSet, setBytes, shardSet } from "./shards"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -116,11 +117,22 @@ export const freedOf = (
     : undefined
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
+// An Inbox delete decision as rm reads it: its answer, when it was answered and last edited, and its what (null when it holds none)
+export type DeleteDecision = {
+  answer: string
+  answeredAt: string
+  editedAt: string
+  kind: string
+  what: string | null
+}
+
 export type RmDeps = {
   // Each Remove the owner picked on a nightly-clean card, read from the Inbox by its id, or why it did not read; absent where no Inbox is read, which refuses every --card.
   approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
+  // The Inbox delete decision the nightly-clean's delete path reads by its card id, or why the Inbox did not read; a string means the Inbox did not read.
+  decision?: (card: string) => Promise<DeleteDecision | string>
   defaultBranch: (at: string) => string | null
   home: string
   // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
@@ -514,6 +526,14 @@ export const rmPeerCommand = (path: string, bytes: number, card: string): string
     ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
   ].join(" ")
 
+// The peer's read-only byte-count command, same quoting as the delete, the near end sends it before the delete so the far end returns the path's size on that machine.
+export const rmPeerBytesCommand = (path: string): string =>
+  [
+    "packages/scripts/src/playground/rm-peer.ts",
+    "--bytes",
+    `'${path.replaceAll("'", `'\\''`)}'`,
+  ].join(" ")
+
 // The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
 const approvedWeights = (
   path: string,
@@ -540,7 +560,42 @@ const approvedWeights = (
   return { paths: done.paths, size: done.size, shards: set.length }
 }
 
-// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
+// The pick an approved delete decision gives for a path, or why it gives none: the card must be a delete the owner approved after its last edit, whose what names the path whole, as <machine>:/path for a peer.
+async function deletePick(
+  args: { path: string; peer?: string },
+  card: string,
+  folders: string[],
+  deps: RmDeps,
+): Promise<{ bytes: number } | string> {
+  const d = deps.decision ? await deps.decision(card) : "no Inbox is read here"
+  if (typeof d === "string") return `card ${card} did not read: ${d}`
+  if (d.kind !== "delete") return `card ${card} is not a delete decision, so ${args.path} stays`
+  if (d.answer !== "yes") return `card ${card} is not approved, so ${args.path} stays`
+  if (d.what === null) return `card ${card} names no path in its what, so ${args.path} stays`
+  if (d.answeredAt < d.editedAt)
+    return `card ${card} was edited after its answer, so ${args.path} stays until the owner answers it again`
+  const word = args.peer === undefined ? args.path : `${args.peer}:${args.path}`
+  if (!targetWords(d.what).includes(word))
+    return `card ${card} does not name ${word} as one whole path, so it stays`
+  if (args.peer !== undefined) {
+    if (!isWeights(args.path, deps.home, folders))
+      return `card ${card}: ${word} is not model weights, so a peer delete stays`
+    if (!deps.peer) return `${args.path} is on ${args.peer}, not this machine, so it stays`
+    const ran = await deps.peer(args.peer, rmPeerBytesCommand(args.path))
+    if (ran.code !== 0) {
+      const said = ran.out.trim().replace(/^playground: /, "") || "the peer did not answer"
+      return `${args.peer}: ${said}`
+    }
+    const text = ran.out.trim()
+    const n = Number(text)
+    if (!/^\d+$/.test(text) || n <= 0)
+      return `${args.peer} printed no byte count for ${args.path}, so it stays`
+    return { bytes: n }
+  }
+  return { bytes: setBytes(args.path) }
+}
+
+// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card, or an approved delete decision, names it, on this machine or a peer, at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
   card: string,
@@ -548,17 +603,22 @@ async function removeApproved(
   roots: Roots,
   deps: RmDeps,
 ): Promise<number> {
-  const picks = deps.approvals ? await deps.approvals(card) : "no Inbox is read here"
-  if (typeof picks === "string") {
-    console.error(`playground: card ${card} did not read: ${picks}`)
-    return 1
+  // The nightly-clean's Remove on this card, read first; an array is its picks, a string or a missing reader routes to the decision next.
+  const picks = deps.approvals ? await deps.approvals(card) : null
+  // The pick the path is approved at, or why it stays: the nightly-clean's own card, or the delete decision's when the card is not one it saved.
+  let chosen: { bytes: number } | string
+  if (Array.isArray(picks)) {
+    const machine = args.peer ?? deps.machine
+    const pick = picks.find((p) => p.path === args.path && p.machine === machine)
+    chosen = pick
+      ? { bytes: pick.bytes }
+      : `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`
+  } else {
+    const said = await deletePick(args, card, folders, deps)
+    chosen = typeof said === "string" ? `playground: ${said}` : said
   }
-  const machine = args.peer ?? deps.machine
-  const pick = picks.find((p) => p.path === args.path && p.machine === machine)
-  if (!pick) {
-    console.error(
-      `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`,
-    )
+  if (typeof chosen === "string") {
+    console.error(chosen)
     return 1
   }
   // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
@@ -568,7 +628,7 @@ async function removeApproved(
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
       return 1
     }
-    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
+    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, chosen.bytes, card))
     if (ran.code !== 0) {
       const said = ran.out.trim().replace(/^playground: /, "")
       const refused = said || "the peer did not answer"
@@ -580,7 +640,7 @@ async function removeApproved(
     console.log(ran.out.trim())
     return 0
   }
-  const approved = { bytes: pick.bytes, card }
+  const approved = { bytes: chosen.bytes, card }
   let line: string
   let drop: string[]
   if (isWeights(args.path, deps.home, folders)) {

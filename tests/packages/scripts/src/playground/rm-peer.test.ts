@@ -296,6 +296,48 @@ test("runRmPeer leaves a symlinked shard out of the set, so its total no longer 
   for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
 })
 
+test("runRmPeer --bytes prints a weights path's size and deletes nothing", async () => {
+  const m = machine()
+  const path = file(
+    join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B", "gguf"),
+    "0123456",
+  )
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B"))
+  const { code, out } = await rmpBytesTold(path)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toBe("7")
+  expect(out).toHaveLength(1)
+  expect(existsSync(path)).toBe(true)
+})
+
+test("runRmPeer --bytes prints a shard set's summed size", async () => {
+  const m = machine()
+  const folder = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) => join(folder, `m-${String(i).padStart(5, "0")}-of-00002.gguf`)
+  file(shard(1), "01234")
+  file(shard(2), "012")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  RECORD(folder)
+  const { code, out } = await rmpBytesTold(shard(1))
+  expect(code).toBe(0)
+  expect(out.join("\n")).toBe("8")
+  expect(out).toHaveLength(1)
+  expect(existsSync(shard(1))).toBe(true)
+  expect(existsSync(shard(2))).toBe(true)
+})
+
+test("runRmPeer --bytes refuses a path not on the machine record", async () => {
+  const m = machine()
+  const path = file(join(m.home, "scratch", "off-record.gguf"), "0123456")
+  deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
+  const { code, out, err } = await rmpBytesTold(path)
+  expect(code).toBe(1)
+  expect(out).toEqual([])
+  expect(err.join("\n")).toContain("is not on the machine record, so it stays")
+  expect(existsSync(path)).toBe(true)
+})
+
 test("runRmPeer refuses a sharded set whose one shard fails its own check, an empty folder, though the total matches, deleting none", async () => {
   const m = machine()
   deps = { ...m.deps, data: m.data, home: m.home, main: m.main }
@@ -322,6 +364,25 @@ const rmpTold = async (
   console.log = (line: string) => void out.push(line)
   try {
     const code = await runRmPeer([path, String(approved.bytes), approved.card], deps)
+    return { code, err, out }
+  } finally {
+    console.error = oldErr
+    console.log = oldLog
+  }
+}
+
+// One runRmPeer --bytes over a path, catching what it logs or errors, so the far end reads a size and deletes nothing.
+const rmpBytesTold = async (
+  path: string,
+): Promise<{ code: number; err: string[]; out: string[] }> => {
+  const err: string[] = []
+  const out: string[] = []
+  const oldErr = console.error
+  const oldLog = console.log
+  console.error = (line: string) => void err.push(line)
+  console.log = (line: string) => void out.push(line)
+  try {
+    const code = await runRmPeer(["--bytes", path], deps)
     return { code, err, out }
   } finally {
     console.error = oldErr
