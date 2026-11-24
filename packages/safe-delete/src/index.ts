@@ -1336,20 +1336,34 @@ export function removeStale(
 }
 
 // The one recursive delete of the trash: each batch over 7 days old, then the oldest while free space is under 50 GB; deleting the trash is cheap, so no load holds either, and a batch whose real path is not a folder directly in the trash root is skipped.
+// A batch the delete cannot finish, a file in it flagged immutable, stays for the next pass, and stuck names it with its error code on the first pass that meets it alone, by a mark in .purge-stuck that goes with the batch.
 export function purgeTrash(
   trash: string,
   io: { free: () => number; now: Date },
-): { removed: string[]; skipped: string[] } {
+): { removed: string[]; skipped: string[]; stuck: string[] } {
   const root = real(trash)
   const removed: string[] = []
   const skipped: string[] = []
+  const stuck: string[] = []
+  const marks = join(root, ".purge-stuck")
   const remove = (batch: string) => {
     const at = join(root, batch)
     if (!lstat(at)?.isDirectory() || dirname(real(at)) !== root) {
       skipped.push(batch)
       return
     }
-    rmSync(at, { force: true, recursive: true })
+    try {
+      rmSync(at, { force: true, recursive: true })
+    } catch (error) {
+      const mark = join(marks, batch)
+      if (lstat(mark)) return
+      try {
+        mkdirSync(marks, { recursive: true })
+        writeFileSync(mark, "")
+      } catch {}
+      stuck.push(`${batch} (${(error as NodeJS.ErrnoException).code ?? "unknown"})`)
+      return
+    }
     removed.push(batch)
   }
   const cutoff = io.now.getTime() - PURGE.days * 86_400_000
@@ -1358,6 +1372,11 @@ export function purgeTrash(
     if (stampMs(BATCH.exec(batch)![1]!) < cutoff) remove(batch)
     else young.push(batch)
   while (young.length && io.free() < PURGE.minFree) remove(young.shift()!)
+  for (const mark of entriesOf(marks))
+    if (!lstat(join(root, mark.name)))
+      try {
+        rmSync(join(marks, mark.name), { force: true })
+      } catch {}
   // A told mark no try can meet again: a burst's key is a stamp that never recurs, so a mark older than the cap's window is swept, and the session's folder stays, since a concurrent try may be about to fill it.
   const toldCutoff = io.now.getTime() - CAP_WINDOW_MS
   const stale = (at: string) => (lstat(at)?.mtimeMs ?? Infinity) < toldCutoff
@@ -1380,7 +1399,7 @@ export function purgeTrash(
       }
     }
   }
-  return { removed, skipped }
+  return { removed, skipped, stuck }
 }
 
 // The wait between two item strips, so the strip's deletions never run back to back.

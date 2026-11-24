@@ -63,3 +63,28 @@ test("a probe answered with a full week and no status header marks the account l
   })
   expect(seen["watched@example.org"]).toMatchObject({ week: 100, limitedUntil: 4000000000 })
 })
+
+// #2997: near-limit.py writes the same login-flip.json seen entry login-flip.py does, so a rejected reading with both shares under 100 parks it for one probe interval, and one with a full 5-hour window until that window resets
+test("a rejected probe with both shares under 100 parks the account for one probe interval, not until its week resets (#2997)", async () => {
+  const seen = await runWhole({
+    "anthropic-ratelimit-unified-5h-reset": "3900000000",
+    "anthropic-ratelimit-unified-5h-utilization": "0.5",
+    "anthropic-ratelimit-unified-7d-reset": "4000000000",
+    "anthropic-ratelimit-unified-7d-utilization": "0.3",
+    "anthropic-ratelimit-unified-status": "rejected",
+  })
+  const { at, limitedUntil } = seen["watched@example.org"]
+  expect(limitedUntil - at).toBeGreaterThanOrEqual(840)
+  expect(limitedUntil - at).toBeLessThan(900)
+})
+
+test("a rejected probe with a full 5-hour window parks the account until that window resets", async () => {
+  const seen = await runWhole({
+    "anthropic-ratelimit-unified-5h-reset": "3900000000",
+    "anthropic-ratelimit-unified-5h-utilization": "1.0",
+    "anthropic-ratelimit-unified-7d-reset": "4000000000",
+    "anthropic-ratelimit-unified-7d-utilization": "0.3",
+    "anthropic-ratelimit-unified-status": "rejected",
+  })
+  expect(seen["watched@example.org"]).toMatchObject({ five: 100, limitedUntil: 3900000000 })
+})
