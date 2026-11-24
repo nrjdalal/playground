@@ -718,6 +718,7 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
                 },
               ],
             },
+            headRefName: "pr-145",
             headRefOid: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             isDraft: false,
             mergeStateStatus: "DIRTY",
@@ -728,16 +729,26 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
         },
       },
     })
-  // one sweep's read at each of the given seconds after NOW, each answered by its own reply, with every queued line it told
-  const sweeps = async (replies: string[], step = 300) => {
+  // one sweep's read at each of the given seconds after NOW, each answered by its own reply, with the branch tip `git ls-remote` returns on each pass given per reply (null = unreadable), with every queued line it told
+  const sweeps = async (replies: string[], tips: (string | null)[] = [], step = 300) => {
     const { ctx, sweep } = setup()
     const told: Call[] = []
     let at = 0
+    let found: string[] = []
     ctx.now = () => NOW + at * 1000
     let reply = ""
+    let tip: string | null | undefined = undefined
     ctx.run = async (argv, options = {}) => {
       if (argv[1] === "/repo/scripts/ops/notify.sh") told.push({ argv, env: options.env })
-      return { code: 0, err: "", out: argv[0] === "gh" ? reply : "" }
+      if (argv[0] === "gh") return { code: 0, err: "", out: reply }
+      if (argv[0] === "git") {
+        if (argv.join(" ") !== "git -C /repo ls-remote origin refs/heads/pr-145")
+          return { code: 0, err: "", out: "" }
+        if (tip === null) return { code: 1, err: "unknown reference", out: "" }
+        const sha = tip ?? JSON.parse(reply).data.repository.p145.headRefOid
+        return { code: 0, err: "", out: `${sha}\trefs/heads/pr-145` }
+      }
+      return { code: 0, err: "", out: "" }
     }
     const agents = [
       { kind: "builder", name: "builder" },
@@ -753,10 +764,11 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
     for (const [i, out] of replies.entries()) {
       at = i * step
       reply = out
-      await lateReviewers(ctx, agents, new Map())
+      tip = tips[i]
+      found = await lateReviewers(ctx, agents, new Map())
       counts.push(told.length)
     }
-    return { counts, state: read(join(sweep, "conflict-told.json")), told }
+    return { counts, state: read(join(sweep, "conflict-told.json")), told, found }
   }
 
   test("a conflict with no run at the head tells the worker and its lead one sweep after it is first seen, once per head", async () => {
@@ -813,7 +825,7 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
     const quiet = await sweeps([unknown, unknown])
     expect(quiet.told).toEqual([])
     expect(quiet.state).toEqual({})
-    expect((await sweeps([answer(), answer()], CONFLICT_AFTER - 1)).told).toEqual([])
+    expect((await sweeps([answer(), answer()], [], CONFLICT_AFTER - 1)).told).toEqual([])
   })
 
   test("an UNKNOWN read at the same head, as GitHub works it out again after the base moves, keeps the told mark and tells nothing", async () => {
@@ -835,6 +847,35 @@ describe("conflicting PRs, in lateReviewers' read (#2457)", () => {
     expect(Object.keys(state)).toEqual(["145"])
     const closed = await sweeps([answer(), answer({ state: "MERGED" })])
     expect(closed.state).toEqual({})
+  })
+
+  test("a conflict read at a head the remote moved past sends nothing, leaving the PR untold for the next pass", async () => {
+    const { counts, told, state } = await sweeps(
+      [answer(), answer()],
+      ["deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"],
+    )
+    expect(counts).toEqual([0, 0])
+    expect(told).toEqual([])
+    expect(state["145"]).toMatchObject({
+      sha: "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      told: false,
+    })
+  })
+
+  test("a conflict whose head matches the remote's tip sends its line once", async () => {
+    const { counts, told } = await sweeps(
+      [answer(), answer()],
+      ["c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "c0ff1c7aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    )
+    expect(counts).toEqual([0, 2])
+    expect(told[0]!.argv[3]).toContain("it conflicts with its base at head c0ff1c7")
+  })
+
+  test("an unreadable tip sends nothing and is named in the pass's findings", async () => {
+    const { found, state, told } = await sweeps([answer(), answer()], [null, null])
+    expect(found).toEqual(["conflict-tip-unreadable #145"])
+    expect(told).toEqual([])
+    expect(state["145"]).toMatchObject({ told: false })
   })
 })
 
