@@ -424,6 +424,19 @@ describe("check", () => {
     expect(calls.some((c) => c.argv.at(-1) === "x9")).toBe(true)
   })
 
+  // A read must parse past the `$ ` echo line too (PG-2958): the same parser that fixes the card read also fixes an ask sweep read.
+  test("an answered ask whose joined output has bun's echo and the picked line after its JSON reads as answered", async () => {
+    const { ctx } = setup({
+      "bun run --silent --cwd /dashboard ask get #i7": {
+        code: 0,
+        out: `${JSON.stringify({ status: "answered" })}\n$ bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts get "#i7"\nask: picked A: Remove\n`,
+      },
+      [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" },
+    })
+    roster(ctx, [{ asks: "7", name: "ops", status: "working" }])
+    expect(await check(ctx)).toEqual(["ask-answered:7"])
+  })
+
   test("an answered ask on an <id>-ops entry, which holds ops' seat by its name (PG-1644)", async () => {
     const { ctx } = setup({
       "bun run --silent --cwd /dashboard ask get #i7": { out: '{"status":"answered"}' },

@@ -7,6 +7,7 @@ import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
+import { askItemText } from "../ops-job/ask-item"
 import { leadName } from "../ops-session-resume/resume"
 import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
@@ -805,10 +806,9 @@ export async function check(ctx: Context): Promise<string[]> {
       const r = await ctx.run(dashboardAsk(ctx, "get", /^\d+$/.test(ask) ? `#i${ask}` : ask), {
         timeoutMs: 60_000,
       })
-      const brace = r.out.indexOf("{")
       let d: Json | null = null
       try {
-        if (r.code === 0 && brace !== -1) d = JSON.parse(r.out.slice(brace)) as Json
+        if (r.code === 0) d = JSON.parse(askItemText(r.out)) as Json
       } catch {}
       if (!d || typeof d !== "object") found.push(`ask-unreadable:${ask}`)
       else if (d.status !== "open") found.push(`ask-answered:${ask}`)
