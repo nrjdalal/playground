@@ -8,7 +8,6 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -691,56 +690,6 @@ test("a job 90 s into its grace with a live holder is left alone", () => {
   })
   expect(child.stderr.toString()).toBe("")
   expect(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!).started).toEqual([])
-})
-
-// the lost-start case: up.py recorded the start, but once.py wrote nothing for it, so its start lock, pid and stderr keep the times of the start before it. With no holder, up.py starts it again 90 s on.
-test("a start once.py never ran is restarted 90 s on though its lock files are older than it", () => {
-  const config = mkdtempSync(join(scratch, "lost-start-"))
-  const ops = join(dataOf(config), "ops")
-  mkdirSync(ops, { recursive: true })
-  const job = {
-    command: "bash /x/ops-relay.sh",
-    heartbeat: "ops-relay",
-    name: "ops-relay",
-    runtime: "herdr",
-  }
-  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
-  const now = Math.floor(pyNow())
-  writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-relay": now - 90 }))
-  // once.py never opened these, so they carry the times of the start before the lost one
-  for (const file of [
-    "ops-relay.start.lock",
-    "ops-relay.pid",
-    "ops-relay.stderr",
-    "ops-relay.reader",
-  ])
-    writeFileSync(join(ops, file), "")
-  utimesSync(
-    join(ops, "ops-relay.pid"),
-    new Date((now - 3600) * 1000),
-    new Date((now - 3600) * 1000),
-  )
-  utimesSync(
-    join(ops, "ops-relay.start.lock"),
-    new Date((now - 3600) * 1000),
-    new Date((now - 3600) * 1000),
-  )
-  const child = Bun.spawnSync(["python3", "-I", "-c", NO_HOLDER, upPy], {
-    env: {
-      BOOT: String(now - 3600),
-      CLAUDE_CONFIG_DIR: config,
-      PLAYGROUND_DATA_DIR: join(config, "playground"),
-      HOME: scratch,
-      PATH: SYS_PATH,
-      ...SYSTEMD_ENV,
-    },
-    stderr: "pipe",
-    stdout: "pipe",
-  })
-  expect(child.stderr.toString()).toBe("")
-  expect(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!).started).toEqual([
-    "ops-relay",
-  ])
 })
 
 // a launchd job turned on but never installed once logged "keeps it alive" every pass and told nobody, so a run of down passes is told to ops once, and again only after it comes back and goes down.

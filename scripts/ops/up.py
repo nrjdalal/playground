@@ -47,7 +47,7 @@ REGISTRY = (
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
-NO_HOLDER_GRACE = 60  # a start that left no holder never ran once.py, so it only waits to fall
+NO_HOLDER_GRACE = 60  # a herdr start whose holder is gone (once.py never ran, or its loop already exited) is dead, so it waits only this long
 START_WINDOW = 10  # a start this close before a --restarted call, or after it, came from another pass after the job stopped, so that call keeps it
 NO_CONNECT = re.compile(r"stopped: no connect in \d+ tries$")  # ops-wa's beat once its connects ran out (packages/scripts/src/ops-wa/life.ts)
 REACH = {"ops-wa": "web.whatsapp.com"}  # the host each job's no-connect stop waits on
@@ -441,7 +441,7 @@ def up(quiet):
                 log(f"{job['name']} is paused; stopped its loop, pid {holder}")
             continue
         start_at = starts.get(job["name"]) or 0
-        # a job started this recently is left alone, but its grace ends when it recorded a later start or the machine booted after it, so a dead job restarts on the first pass after a reboot. A herdr start that left no holder never ran once.py, so it gets 60 s, not the 600 s grace, and with GRACE 0 it is left to itself.
+        # a job started this recently is left alone, but its grace ends when it recorded a later start or the machine booted after it, so a dead job restarts on the first pass after a reboot. A herdr start whose holder is gone is dead, so it gets NO_HOLDER_GRACE, not GRACE; GRACE 0, the tests' switch, turns both off.
         grace = 0 if not GRACE else (NO_HOLDER_GRACE if is_herdr(job) and not holder else GRACE)
         if job["name"] == skip or (time.time() - start_at < grace and not grace_ended(job, start_at)):
             continue
