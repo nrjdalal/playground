@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test"
 import {
   appendFileSync,
   mkdirSync,
@@ -47,6 +47,21 @@ const human = (uuid: string, text: string, at: string) =>
     uuid,
     timestamp: at,
     sessionId: SESSION,
+    cwd: "/Users/me/repo",
+    entrypoint: "cli",
+    gitBranch: "main",
+    version: "2.1.289",
+    origin: { kind: "human" },
+    message: { role: "user", content: text },
+  })
+
+// A user line for a session id made at run time, so a row writes only its own rows.
+const userLine = (id: string, uuid: string, text: string, at: string) =>
+  line({
+    type: "user",
+    uuid,
+    timestamp: at,
+    sessionId: id,
     cwd: "/Users/me/repo",
     entrypoint: "cli",
     gitBranch: "main",
@@ -637,6 +652,111 @@ describe.skipIf(!dockerUp())("ingest", () => {
     expect(result?.duplicate).toBeUndefined()
   })
 
+  test("a device id that changes on reboot, then an append, the inode and head unchanged, reads from the stored offset and wipes nothing", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    // A session made at run time, so this row writes and reads only its own rows, never the rows the other rows read.
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(here(), [h(`${id}-u1`, "first"), h(`${id}-u2`, "second")].join(""))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    // A Mac reboot numbers the volume anew: the stored dev differs, but the inode and the head are unchanged, so the grown file's read resumes from its offset and deletes no row.
+    await admin`update claude_transcript set dev = dev + 1 where path = ${here()}`
+    appendFileSync(here(), h(`${id}-u3`, "third"))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 1, id })
+    expect(await entryCount(id)).toBe(3)
+  })
+
+  test("a head rewritten in place, the inode the same and the file larger, reads from 0 and replaces", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(here(), [h(`${id}-u1`, "first old"), h(`${id}-u2`, "second")].join(""))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    // Rewrite the head line in place, the same inode, a larger file, a different first line's uuid, so the stored head no longer matches and the read starts from 0.
+    writeFileSync(
+      here(),
+      [h(`${id}-x`, "first rewritten"), h(`${id}-u2`, "second"), h(`${id}-u3`, "third")].join(""),
+    )
+    const result = await ingestFile(db, projects, here())
+    expect(result?.entries).toBe(3)
+    expect(await entryCount(id)).toBe(3)
+  })
+
+  test("a head rewritten in place to a line with no uuid, the file larger, reads from 0 and replaces", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(here(), [h(`${id}-u1`, "first"), h(`${id}-u2`, "second")].join(""))
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "s", leafUuid: "x" }),
+        h(`${id}-v2`, "new two"),
+        h(`${id}-v3`, "new three"),
+        h(`${id}-v4`, "new four"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, here())
+    const rows = await admin`select uuid from claude_entry where session_id = ${id} order by seq`
+    expect(rows.map((r: { uuid: string }) => r.uuid)).toEqual([`${id}-v2`, `${id}-v3`, `${id}-v4`])
+  })
+
+  test("a head rewritten in place so the stored first offset lands mid-line, the file larger, reads from 0 and replaces", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const here = () => join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "s" }),
+        h(`${id}-u1`, "first"),
+        h(`${id}-u2`, "second"),
+      ].join(""),
+    )
+    expect(await ingestFile(db, projects, here())).toEqual({ entries: 2, id })
+    writeFileSync(
+      here(),
+      [
+        line({ type: "summary", summary: "a much longer summary line than before" }),
+        h(`${id}-v1`, "new one"),
+        h(`${id}-v2`, "new two"),
+        h(`${id}-v3`, "new three"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, here())
+    const rows = await admin`select uuid from claude_entry where session_id = ${id} order by seq`
+    expect(rows.map((r: { uuid: string }) => r.uuid)).toEqual([`${id}-v1`, `${id}-v2`, `${id}-v3`])
+  })
+
+  test("a longer transcript sharing its session with a shorter copy whose head differs, then appended, wipes nothing", async () => {
+    const at = "2026-10-06T11:00:00.000Z"
+    const id = crypto.randomUUID()
+    const olderDir = join(projects, `${PROJECT}-head-dup`)
+    mkdirSync(olderDir, { recursive: true })
+    const long = join(olderDir, `${id}.jsonl`)
+    const short = join(projects, PROJECT, `${id}.jsonl`)
+    const h = (uuid: string, text: string) => userLine(id, uuid, text, at)
+    writeFileSync(
+      long,
+      [
+        line({ type: "agent-name", agentName: "n", sessionId: id }),
+        h(`${id}-a1`, "a one"),
+        h(`${id}-a2`, "a two"),
+        h(`${id}-a3`, "a three"),
+      ].join(""),
+    )
+    await ingestFile(db, projects, long)
+    writeFileSync(short, [h(`${id}-b1`, "b"), h(`${id}-a2`, "a two")].join(""))
+    await ingestFile(db, projects, short)
+    appendFileSync(long, h(`${id}-a4`, "a four"))
+    expect((await ingestFile(db, projects, long))?.entries).toBe(1)
+  })
+
   test("a pass reports each duplicate transcript it folded without wiping", async () => {
     const id = "77777777-8888-4888-9999-000000000005"
     const olderDir = join(projects, `${PROJECT}-old`)
@@ -726,7 +846,8 @@ describe.skipIf(!dockerUp())("ingest", () => {
     expect(before).toBeGreaterThan(0)
     appendFileSync(path, human(`${id}-u2`, "two", "2026-10-06T15:00:01.000Z"))
     await ingestFile(db, projects, path)
-    expect(Number((await entryQueries()) - before)).toBe(0)
+    // The append folds from the stored offset, reading no entries; the one new read is the head check's lookup of this file's first entry by its uuid, since the file grew, so it is not a re-scan of the session's entries.
+    expect(Number((await entryQueries()) - before)).toBe(1)
     expect((await calls(SWEEP)) - sweepsBefore).toBe(1)
     expect(await entryCount(id)).toBe(2)
     await flushTokens()
@@ -821,8 +942,6 @@ describe.skipIf(!dockerUp())("ingest", () => {
           await admin`select coalesce(sum(calls), 0) as calls from pg_stat_statements where dbid = (select oid from pg_database where datname = current_database()) and query ilike '%from %claude_entry%' and query not ilike 'delete from %claude_entry%"seq" < %'`
         )[0].calls,
       )
-    const before = await entryQueries()
-    expect(before).toBeGreaterThan(0)
     for (let i = 2; i <= 5; i++) {
       appendFileSync(
         path,
@@ -835,6 +954,9 @@ describe.skipIf(!dockerUp())("ingest", () => {
       )
       await ingestFile(db, projects, path)
     }
+    // Each append read the head (one entry) to confirm it unchanged; capture the count after them, so this measures the window's recount alone, not those checks.
+    const before = await entryQueries()
+    expect(before).toBeGreaterThan(0)
     await Bun.sleep(TOKEN_WINDOW_MS + 1500)
     expect(Number((await entryQueries()) - before)).toBe(1)
     const [row] = await admin`select output_tokens from claude_session where id = ${id}`
@@ -1325,6 +1447,31 @@ describe.skipIf(!dockerUp())("ingest", () => {
       id: ZST_THREAD,
     })
     expect((await sessionRow(ZST_THREAD)).harness).toBe("codex")
+  })
+
+  test("a compressed rollout whose device id changes on reboot reads nothing more, its decode skipped", async () => {
+    const thread = crypto.randomUUID()
+    const original = Bun.zstdDecompressSync
+    const spy = spyOn(Bun, "zstdDecompressSync").mockImplementation((...args: unknown[]) =>
+      (original as (...a: unknown[]) => Buffer)(...args),
+    )
+    try {
+      writeFileSync(rolloutPath(thread, ".zst"), Bun.zstdCompressSync(rollout(thread)))
+      expect(await ingestRollout(rolloutPath(thread, ".zst"))).toEqual({
+        entries: 9,
+        id: thread,
+      })
+      // A Mac reboot numbers the volume anew, so the stored dev differs, but the inode and path are unchanged, so the read stops before it decodes.
+      await admin`update claude_transcript set dev = dev + 1 where path = ${rolloutPath(thread, ".zst")}`
+      expect(await ingestRollout(rolloutPath(thread, ".zst"))).toEqual({
+        entries: 0,
+        id: thread,
+      })
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(await entryCount(thread)).toBe(9)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   test("a Claude Code transcript still ingests as a claude-code session", async () => {
