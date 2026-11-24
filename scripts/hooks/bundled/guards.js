@@ -1273,7 +1273,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -1294,6 +1298,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -1361,13 +1366,19 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
         opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
       }
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
@@ -14933,6 +14944,7 @@ var CLOSERS = new Set(["done", "esac", "fi"]);
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
+var EXEC_FRONT = new Set(["builtin", "command"]);
 async function guarded(raw, environment = process.env, wait = 12000, url = new URL(`./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`, import.meta.url).href) {
   const worker = new Worker(url);
   let timer;

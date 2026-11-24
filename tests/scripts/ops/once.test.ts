@@ -195,3 +195,33 @@ describe("once.py's last stderr line", () => {
     expect(existsSync(join(opsDir, "ops-t4.last"))).toBe(false)
   })
 })
+
+// two writers to one path share the fixed name path+".tmp", so one replaces the other's half-written text; each caller needs a temp of its own (PG-2938)
+describe("once.py's private() write", () => {
+  const path = join(scratch, "shared.txt")
+  const code = [
+    "import sys",
+    "sys.path.insert(0, sys.argv[1])",
+    "import once",
+    "p = sys.argv[2]",
+    "text = open(sys.argv[3]).read()",
+    "for _ in range(200):",
+    "    once.private(p, text)",
+  ].join("\n")
+  test("two concurrent private() writes to one path leave one whole text", async () => {
+    const content = { A: join(scratch, "a.bin"), B: join(scratch, "b.bin") }
+    await Bun.write(content.A, "A".repeat(1_000_000))
+    await Bun.write(content.B, "B".repeat(1_000_000))
+    const a = Bun.spawn(["python3", "-I", "-c", code, ops, path, content.A], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: scratch },
+    })
+    const b = Bun.spawn(["python3", "-I", "-c", code, ops, path, content.B], {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: scratch },
+    })
+    const [ra, rb] = await Promise.all([a.exited, b.exited])
+    expect(ra).toBe(0)
+    expect(rb).toBe(0)
+    const out = readFileSync(path, "utf8")
+    expect(out === "A".repeat(1_000_000) || out === "B".repeat(1_000_000)).toBe(true)
+  })
+})

@@ -669,6 +669,47 @@ describe("playground ext", () => {
     }
   })
 
+  // PG-2996: a skill put from a copy written without modes, as one rebuilt from ext show's files, stored its #! script 644, at its first put or over a stored 755
+  test("put stores a script's or a skill's file that starts with #! as 755 from a copy at 644, and show names the files that run", async () => {
+    const at = folder("shebang-modes")
+    const skill = join(scratch, "shebang-greeter")
+    mkdirSync(join(skill, "scripts"), { recursive: true })
+    writeFileSync(join(skill, "SKILL.md"), "---\nname: greeter\ndescription: d\n---\nRun it.\n")
+    const greet = join(skill, "scripts", "greet.sh")
+    const modes = () =>
+      git(at, "tester", ["ls-files", "-s"])
+        .replace(/ [0-9a-f]{40} 0\t/g, " ")
+        .split("\n")
+    const put = async () =>
+      JSON.parse((await ext(at, ["put", "tester", "skill", "greeter", skill, "--reason", "r"])).out)
+        .rev as string
+    writeFileSync(greet, "#!/bin/sh\necho made-up greet\n")
+    chmodSync(greet, 0o644)
+    const first = await put()
+    await ext(
+      at,
+      ["put", "tester", "script", "hello", "-", "--reason", "r"],
+      "#!/bin/sh\necho hi\n",
+    )
+    expect(modes()).toEqual([
+      "100755 proposed/scripts/hello",
+      "100644 proposed/skills/greeter/SKILL.md",
+      "100755 proposed/skills/greeter/scripts/greet.sh",
+    ])
+    expect(
+      (await ext(at, ["accept", "tester", "skill", "greeter", first, "--reason", "r"])).code,
+    ).toBe(0)
+    writeFileSync(greet, "#!/bin/sh\necho made-up greet again\n")
+    const second = await put()
+    expect(modes()).toContain("100755 proposed/skills/greeter/scripts/greet.sh")
+    for (const words of [[], ["--rev", first], ["--rev", second]]) {
+      const shown = JSON.parse(
+        (await ext(at, ["show", "tester", "skill", "greeter", ...words])).out,
+      )
+      expect(shown.content.executable).toEqual(["scripts/greet.sh"])
+    }
+  })
+
   test("check-modes lists each stored file that starts with #! but lost its executable bit, and changes nothing (PG-1377)", async () => {
     const at = folder("check-modes")
     writeFiles(
@@ -692,7 +733,7 @@ describe("playground ext", () => {
     expect(r.code).toBe(0)
     expect(r.out.split("\n")).toEqual([
       "tester scripts/old",
-      "put each again from a copy that has its executable bit: playground ext put <scope> <kind> <key> <path> --reason <why>",
+      "put each again, which stores it executable: playground ext put <scope> <kind> <key> <path> --reason <why>",
     ])
     expect(git(at, "tester", ["rev-parse", "HEAD"])).toBe(head)
     const none = await ext(folder("check-modes-none"), ["check-modes"])

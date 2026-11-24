@@ -262,7 +262,7 @@ Each machine keeps a record of every path the factory put on it: `machine-record
 An Inbox root step that ran, `link-skills.sh`'s links, and the run folder and Postgres image the runner box's heavy runs use add their own paths, so you add by hand only what you made by hand.
 `playground record seed` fills the record once on a machine from your data folder's `bundles/footprint.md` and that machine's undo note, `bundles/<machine>-undo.md`, and keeps what the watched places hold then as its baseline, so the first check names only what came after.
 `playground record check` compares the record with the watched places: the home folder's top level, `~/.bun/bin`, `~/.cache`, `~/.config`, systemd user units, `~/.local/bin`, Docker's images and containers, and the root steps' folders.
-It prints one line a finding: `misplaced` for a new path outside the folders `paths.factoryHomes` names, `unrecorded` for one inside them, `gone` for a recorded path that is not there, and `unreadable` for a place or path it cannot read.
+It prints one line a finding: `misplaced` for a new path outside the folders `paths.factoryHomes` names, `unrecorded` for one inside them (Finder's `.DS_Store` aside), `gone` for a recorded path that is not there, and `unreadable` for a place or path it cannot read.
 Ops runs it every night at 3:45 on this machine and on each machine `PLAYGROUND_PEERS` names, and sends each finding to Ops.
 
 ## Read the rules: `playground rules`

@@ -290,6 +290,14 @@ describe("progressRefusal", () => {
     expect(progressRefusal(ask("```\nA | 500 | not a progress block\n```"))).toBeNull()
   })
 
+  test("passes a line whose name is a markdown link, on an ask and a read-only update (PG-2982)", () => {
+    const linked = block(
+      "[ABC-12](https://example.com/issue/ABC-12) | 40 | Fixing the export | 2:00 pm | active",
+    )
+    expect(progressRefusal(ask(linked))).toBeNull()
+    expect(progressRefusal(update(linked))).toBeNull()
+  })
+
   test("names the block and line with other than 4 or 5 fields, and the line itself", () => {
     const refusal = progressRefusal(update(block("A | 10 | x | y", "B | 20 | no eta")))
     expect(refusal).toContain(

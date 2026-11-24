@@ -1,5 +1,5 @@
 import { lstat, readdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
   PEER_POLICY,
@@ -222,6 +222,8 @@ export function findings(
   const lines: string[] = []
   for (const path of now.seen) {
     if (held.has(path) || before.has(path)) continue
+    // Finder writes .DS_Store in any folder it opens, so it is never the factory's
+    if (basename(path) === ".DS_Store") continue
     const placed = path.startsWith("/") && !homes.some((home) => inside(path, home))
     lines.push(`${placed ? "misplaced" : "unrecorded"}: ${path}`)
   }
