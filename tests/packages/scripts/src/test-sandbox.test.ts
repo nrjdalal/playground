@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const SCRIPT = join(import.meta.dir, "../../../../packages/scripts/src/test-sandbox.ts")
 const DIR = mkdtempSync(join(tmpdir(), "test-sandbox-test-"))
@@ -837,9 +837,43 @@ test("a bare run runs bun's tests alone and names the Python tests it leaves out
   const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
   expect(code).not.toBe(0)
   expect(stderr).toContain("parallel pass failed")
-  expect(stderr).toContain("2 Python tests are left out")
-  expect(stderr).toContain("bun run test:file tests")
+  expect(stderr).toContain(
+    "test-sandbox: 2 Python tests left out, bun run test:file tests runs them",
+  )
   expect(stderr).not.toContain("running Python test")
+}, 180_000)
+
+// 2848: suite.sh's sandbox_ok needs a green run's last parallel pass line to read exactly this, so a bare mixed run names its left-out Python test on a line of its own
+test("a green bare run keeps the exact parallel pass line suite.sh reads, and names its left-out Python test on its own line (#2848)", async () => {
+  const dir = join(DIR, "no-args-py-green")
+  mkdirSync(join(dir, "tests", "x"), { recursive: true })
+  writeFileSync(
+    join(dir, "tests", "x", "a.test.ts"),
+    'import { test } from "bun:test"\ntest("a", () => {})\n',
+  )
+  writeFileSync(join(dir, "tests", "x", "test_a.py"), 'print("ok", flush=True)\n')
+  // a bare run's serial pass names each SERIAL file, so a green stub stands at each, read from the script's own list
+  const serial = readFileSync(SCRIPT, "utf8").match(/const SERIAL = \[([^\]]*)\]/)?.[1] ?? ""
+  const serialFiles = [...serial.matchAll(/"([^"]+)"/g)].map(([, file]) => file!)
+  expect(serialFiles.length).toBeGreaterThan(0)
+  for (const file of serialFiles) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true })
+    writeFileSync(join(dir, file), 'import { test } from "bun:test"\ntest("s", () => {})\n')
+  }
+  const run = Bun.spawn(["bun", SCRIPT], {
+    cwd: dir,
+    env: { ...process.env, PATH: `${uvBin}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 120_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).toBe(0)
+  const lines = stderr.split("\n")
+  expect(lines.filter((line) => line.startsWith("test-sandbox: parallel pass")).at(-1)).toBe(
+    "test-sandbox: parallel pass passed, serial pass passed",
+  )
+  expect(lines).toContain("test-sandbox: 1 Python test left out, bun run test:file tests runs it")
 }, 180_000)
 
 // 2770: seenPy was keyed by the path as given, so one Python file named by both its absolute and relative path ran twice; it is now deduped by its real path (#2858)

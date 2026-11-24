@@ -344,15 +344,15 @@ const pyClause =
         !pyRan ? "skipped" : pyFailed.length ? "failed" : "passed"
       }`
     : ""
-// a bare run leaves a mixed folder's Python tests to bun alone, so the summary names how many were left out, and the command that runs them when the folder is named explicitly
-const leftOutClause =
-  leftOutPy.length > 0
-    ? `, ${leftOutPy.length} ${leftOutPy.length === 1 ? "Python test is" : "Python tests are"} left out, run bun run test:file tests to run them`
-    : ""
 console.error(
   `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${
     alone === 0 ? "passed" : `failed (exit ${alone})`
-  }${pyClause}${leftOutClause}`,
+  }${pyClause}`,
 )
+// a line of its own, since suite.sh's sandbox_ok reads the parallel pass line by its exact text
+if (leftOutPy.length > 0)
+  console.error(
+    `test-sandbox: ${leftOutPy.length} Python ${leftOutPy.length === 1 ? "test" : "tests"} left out, bun run test:file tests runs ${leftOutPy.length === 1 ? "it" : "them"}`,
+  )
 dropScratch()
 process.exit(parallel || alone || pyFailed.length)
