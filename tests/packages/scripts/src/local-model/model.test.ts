@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { readModelMetrics } from "../../../../../packages/scripts/src/local-model/live"
 import {
   busyOf,
   commandArgv,
@@ -10,6 +11,7 @@ import {
   keepUp,
   type Machine,
   memOf,
+  metricsBusy,
   type ModelConfig,
   type ModelDeps,
   sizeOf,
@@ -35,6 +37,9 @@ const meminfo = (availableGiB: number, totalGiB = 121) =>
   `MemTotal:       ${Math.round(totalGiB * KiB)} kB\nMemFree:        1000 kB\nMemAvailable:   ${Math.round(availableGiB * KiB)} kB\n`
 const metrics = (running: number, waiting = 0) =>
   `# HELP vllm:num_requests_running Number of requests running.\nvllm:num_requests_running{engine="0",model_name="local"} ${running}.0\nvllm:num_requests_waiting{engine="0",model_name="local"} ${waiting}.0\n`
+// a full page, as the speed reading needs: the counters and histograms beside the request gauges
+const page = (tokens: number, itl: number, ttftSum: number, ttftCount: number, waiting = 0) =>
+  `${metrics(1, waiting)}vllm:generation_tokens_total{engine="0",model_name="local"} ${tokens}\nvllm:inter_token_latency_seconds_sum{engine="0",model_name="local"} ${itl}\nvllm:time_to_first_token_seconds_sum{engine="0",model_name="local"} ${ttftSum}\nvllm:time_to_first_token_seconds_count{engine="0",model_name="local"} ${ttftCount}\n`
 const SIZED = "${CONTAINER:-\n${PORT:-\n${GPU_MEMORY_UTILIZATION:-\n${MAX_NUM_SEQS:-\n"
 
 type Box = {
@@ -43,6 +48,8 @@ type Box = {
   containers: Set<string>
   health: string[]
   memory: number[]
+  // a port's whole /metrics pages, read before busy when set
+  pages?: Record<number, string[]>
   serves: Record<string, string>
 }
 
@@ -117,6 +124,8 @@ const stub = (box: Box, data: string, overrides: Partial<ModelDeps> = {}) => {
       }
       if ((found = /^curl -sf --max-time 5 http:\/\/127\.0\.0\.1:(\d+)\/metrics$/.exec(command))) {
         steps.push(`metrics ${found[1]}`)
+        const pages = box.pages?.[Number(found[1])]
+        if (pages?.length) return { code: 0, out: next(pages, "") }
         const readings = box.busy[Number(found[1])] ?? [0]
         const busy = (readings.length > 1 ? readings.shift() : readings[0]) as number | null
         return busy === null ? { code: 28, out: "" } : { code: 0, out: metrics(busy) }
@@ -251,10 +260,10 @@ describe("playground model use (PG-2543)", () => {
       "health 8000",
     ])
     expect(Object.keys(await modelServers(data, PEER.name))).toEqual(["k-model"])
-    // with the kept model serving, the beat only checks it
+    // with the kept model serving, the beat reads its /metrics for the local gate and checks it
     steps.length = 0
     expect(await keepUp(deps)).toBeNull()
-    expect(steps).toEqual(["serves k-model", "inspect local-vllm-k-model"])
+    expect(steps).toEqual(["metrics 8000", "serves k-model", "inspect local-vllm-k-model"])
   })
 
   test("starts beside the running model when the reading holds a session of both, with no hold and nothing stopped", async () => {
@@ -623,6 +632,83 @@ describe("playground model use (PG-2543)", () => {
   })
 })
 
+describe("the keep beat reads each server's /metrics (PG-2559, PG-2604)", () => {
+  // M loaded on request an hour ago, past the 30 idle minutes, with K kept
+  const mServer = { ...kServer, container: "local-vllm-m-model", maxSessions: 13, share: 0.75 }
+
+  test("PG-2604 a silent /metrics on a running container past idleMinutes is no idle time, so the server is not stopped", async () => {
+    const data = scratch()
+    await writeMachineState(data, PEER.name, { servers: { "m-model": mServer } })
+    const peer = box({ busy: { 8000: [null] }, containers: new Set(["local-vllm-m-model"]) })
+    const { deps, steps } = stub(peer, data)
+    expect(await keepUp(deps)).toBeNull()
+    expect(steps).toEqual(["metrics 8000", "inspect local-vllm-m-model"])
+    expect(peer.containers.has("local-vllm-m-model")).toBe(true)
+    expect((await modelServers(data, PEER.name))["m-model"]?.busyAt).toBe(
+      "2026-11-17T06:00:00.000Z",
+    )
+  })
+
+  test("PG-2604 a /metrics reading zero requests past idleMinutes still stops it", async () => {
+    const data = scratch()
+    await writeMachineState(data, PEER.name, { servers: { "m-model": mServer } })
+    const peer = box({ busy: { 8000: [0] }, containers: new Set(["local-vllm-m-model"]) })
+    const { deps, steps } = stub(peer, data)
+    expect(await keepUp(deps)).toStartWith(
+      "m-model sat idle 30 minutes on spark-test, so playground model use stopped it",
+    )
+    expect(steps.slice(0, 2)).toEqual(["metrics 8000", "stop local-vllm-m-model"])
+  })
+
+  test("PG-2559 the kept server's snapshot and its speed since the last are kept for the local gate", async () => {
+    const data = scratch()
+    const prev = {
+      at: "2026-11-17T05:55:00.000Z",
+      firstTokenCount: 6,
+      firstTokenSeconds: 12,
+      generationTokens: 1000,
+      interTokenSeconds: 40,
+      waiting: 0,
+    }
+    await writeMachineState(data, PEER.name, {
+      servers: { "k-model": { ...kServer, metrics: prev } },
+    })
+    const peer = box({
+      containers: new Set(["local-vllm-k-model"]),
+      pages: { 8000: [page(4000, 140, 42, 16, 2)] },
+    })
+    const { deps } = stub(peer, data)
+    expect(await keepUp(deps)).toBeNull()
+    const kept = (await modelServers(data, PEER.name))["k-model"]!
+    expect(kept.metrics).toEqual({
+      at: "2026-11-17T06:00:00.000Z",
+      firstTokenCount: 16,
+      firstTokenSeconds: 42,
+      generationTokens: 4000,
+      interTokenSeconds: 140,
+      waiting: 2,
+    })
+    expect(kept.speed).toEqual({
+      at: "2026-11-17T06:00:00.000Z",
+      decodeTps: 30,
+      ttftMean: 3,
+      waiting: 2,
+    })
+  })
+
+  test("PG-2559 a /metrics that does not read drops the last snapshot and speed, so the gate reads no samples", async () => {
+    const data = scratch()
+    const speed = { at: "2026-11-17T05:55:00.000Z", decodeTps: 30, ttftMean: 3, waiting: 0 }
+    await writeMachineState(data, PEER.name, { servers: { "k-model": { ...kServer, speed } } })
+    const peer = box({ busy: { 8000: [null] }, containers: new Set(["local-vllm-k-model"]) })
+    const { deps } = stub(peer, data)
+    await keepUp(deps)
+    const kept = (await modelServers(data, PEER.name))["k-model"]!
+    expect(kept.speed).toBeUndefined()
+    expect(kept.metrics).toBeUndefined()
+  })
+})
+
 describe("the model readers (PG-2543)", () => {
   test("ssh takes the key alone, never prompts, and runs one fixed command; this machine runs it under sh", () => {
     expect(commandArgv(PEER, "/k", "cat /proc/meminfo")).toEqual([
@@ -648,5 +734,61 @@ describe("the model readers (PG-2543)", () => {
     expect(memOf("nothing")).toBeNull()
     expect(busyOf(metrics(2, 3))).toBe(5)
     expect(busyOf("")).toBeNull()
+  })
+
+  // PG-2741: the quiet skip holds a local session back only on a /metrics read that shows the model working, so every other read falls toward flagging
+  test("the model reads busy only when running and waiting are above 0", () => {
+    expect(metricsBusy(metrics(2, 3))).toBe(true)
+    expect(metricsBusy(metrics(0, 0))).toBe(false)
+    expect(metricsBusy("")).toBe(false)
+    expect(metricsBusy(null)).toBe(false)
+  })
+})
+
+describe("readModelMetrics (PG-2749)", () => {
+  // A stub HTTP server answers /metrics; the read takes the URL alone, so it needs no model record, and the test never reaches the live model or 127.0.0.1:8000.
+  test("reads /metrics at the given url, so a session the model serves is skipped with no model record", async () => {
+    const text = metrics(2, 0)
+    const server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        expect(new URL(request.url).pathname).toEqual("/metrics")
+        return new Response(text)
+      },
+    })
+    try {
+      const url = `http://127.0.0.1:${server.port}`
+      expect(await readModelMetrics(url)).toBe(text)
+      expect(metricsBusy(await readModelMetrics(url))).toBe(true)
+    } finally {
+      server.stop()
+    }
+  })
+
+  test("a failed read or a status other than 200 reads null, so the quiet session is still flagged", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("down", { status: 503 }) })
+    try {
+      expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+    } finally {
+      server.stop()
+    }
+    expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+  })
+
+  test("a body that breaks off after a 200 reads null, not a throw that fails the whole cycle", async () => {
+    const server = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data: (socket) => {
+          socket.end("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nvllm:num_requests_running 2\n")
+        },
+      },
+    })
+    try {
+      expect(await readModelMetrics(`http://127.0.0.1:${server.port}`)).toBeNull()
+    } finally {
+      server.stop(true)
+    }
   })
 })

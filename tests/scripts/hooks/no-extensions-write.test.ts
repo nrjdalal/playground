@@ -2696,6 +2696,9 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "settings set of usage.keychainService",
       "playground settings set usage.keychainService x --reason x",
     ],
+    ["settings set of wa.device", "playground settings set wa.device +15550100002 --reason x"],
+    ["settings set of wa.owner", "playground settings set wa.owner +15550100001 --reason x"],
+    ["settings reset of wa.owner", "playground settings reset wa.owner --reason x"],
     [
       "settings set of glm.readOnlyLoad5",
       "playground settings set glm.readOnlyLoad5 99 --reason x",
@@ -2706,6 +2709,72 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     ],
     ["settings reset of a guard key", "playground settings reset glm.readOnlyLoad5 --reason x"],
     ["settings set of a key the hook cannot read", 'playground settings set "$KEY" 1 --reason x'],
+    [
+      "settings set with the owner's message flag in a quoted word",
+      `playground settings set wa.alert +15550100444 "--from-owner-msg own1"`,
+    ],
+    [
+      "settings set chained after one from the owner's message",
+      "playground settings set ui.theme dark --from-owner-msg own1 && playground settings set wa.alert +15550100444 --reason x",
+    ],
+    [
+      "settings set with the owner's message flag and no id",
+      "playground settings set wa.alert +15550100444 --reason x --from-owner-msg",
+    ],
+    [
+      "settings set with the owner's message flag and an empty id",
+      `playground settings set wa.alert +15550100444 --reason x --from-owner-msg ""`,
+    ],
+    [
+      "settings set with the owner's message flag and a reason, which a CLI from before the flag writes",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --reason x",
+    ],
+    [
+      "settings set with the owner's message flag, a reason and a scope",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --reason x --scope acme",
+    ],
+    [
+      "settings set with the owner's message flag and a by",
+      "playground settings set wa.alert +15550100444 --from-owner-msg own1 --by owner",
+    ],
+    [
+      "settings set with the owner's message flag and a third word",
+      "playground settings set wa.alert +15550100444 extra --from-owner-msg own1",
+    ],
+    [
+      "settings reset with the owner's message flag",
+      "playground settings reset wa.alert --from-owner-msg own1",
+    ],
+    [
+      "settings set with the owner's message id the hook cannot read",
+      'playground settings set wa.alert +15550100444 --from-owner-msg "$ID"',
+    ],
+    [
+      "settings set proposed with a reason, which writes",
+      "playground settings set wa.replyPolicy x --propose --reason x",
+    ],
+    [
+      "settings set proposed with a scope",
+      "playground settings set wa.replyPolicy x --propose --scope acme",
+    ],
+    [
+      "settings set proposed with the owner's message flag",
+      "playground settings set wa.replyPolicy x --propose --from-owner-msg own1",
+    ],
+    [
+      "settings set proposed with a third word",
+      "playground settings set wa.replyPolicy x extra --propose",
+    ],
+    ["settings set proposed with no value", "playground settings set wa.replyPolicy --propose"],
+    ["settings reset proposed", "playground settings reset wa.replyPolicy --propose"],
+    [
+      "settings set with the propose flag in a quoted word",
+      `playground settings set wa.replyPolicy x "--propose --reason x"`,
+    ],
+    [
+      "settings set chained after a proposal",
+      "playground settings set wa.replyPolicy x --propose && playground settings set wa.owner +15550100001 --reason x",
+    ],
     ["migrate", "playground migrate --archive /tmp/a --pre-squash abc --org acme"],
     ["uninstall --purge", "playground uninstall --purge"],
     ["a command word the hook cannot read", 'playground "$CMD" put login list x /tmp/l.json'],
@@ -2844,6 +2913,18 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["settings why", "playground settings why ext.links"],
     ["settings set of a key no guard reads", "playground settings set ui.theme dark --reason x"],
     ["settings reset of a key no guard reads", "playground settings reset ui.theme --reason x"],
+    [
+      "settings set of a guard key from the owner's message, which only asks ops-wa",
+      "playground settings set wa.replyPolicy 'factory status' --from-owner-msg own1",
+    ],
+    [
+      "settings set of a guard key proposed to the owner, which only asks ops-wa",
+      "playground settings set wa.replyPolicy 'factory status' --propose",
+    ],
+    [
+      "settings set of a guard key proposed to the owner, the flag before the value",
+      "playground settings set wa.guestPolicy --propose 'status only'",
+    ],
     ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],
@@ -3999,6 +4080,165 @@ describe("a glob in / is judged by the names / holds", () => {
     "%s, which matches no name, runs",
     async (command) => {
       expect(await listed(command, ["home"])).toBeUndefined()
+    },
+  )
+})
+
+// #2522: a glob-option switch on a line ssh runs remotely or feeds a remote shell is refused by its own reason, whatever its spelling, rather than read name by name
+describe("a glob-option switch on a remote or fed line", () => {
+  const SWITCH =
+    /refuses a glob-option switch \(.+\) on a line a remote shell runs.*wider than the risk on purpose.*drop the option, or run the line locally/
+
+  test.each([
+    "ssh box 'shopt -s dotglob; touch */extensions/x'",
+    "ssh box 'GLOBIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt g_l_o_b_d_o_t_s; touch ?playground/extensions/y'",
+    `ssh box "shopt -s dot''glob; touch ?playground/extensions/y"`,
+    `ssh box "zsh -4 -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'shopt -s $(echo dot)glob; touch ?playground/extensions/y'",
+    "ssh box 'options[glob${x}dots]=on; touch ?playground/extensions/y'",
+    `ssh box 'bash -O $1 -c "touch ?playground/extensions/y"'`,
+    `ssh box "env BASHOPTS=dotglob bash -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'GLOBIGNOR\\\nE=x; touch ?playground/extensions/y'",
+    "ssh box bash -s <<'EOF'\nGLOBIGNOR\\\nE=x\ntouch ?playground/extensions/y\nEOF",
+    `printf 'shopt -s dot%sglob\\ntouch ?playground/extensions/y\\n' '' | ssh box bash`,
+    "ssh box 'touch *(D)/extensions/x'",
+    "ssh box 'FIGNORE=x; touch ?playground/extensions/y'",
+    "ssh box 'setopt EXTENDED_GLOB; ls'",
+    "ssh box 'set -euo pipefail -o globdots; touch ?playground/extensions/y'",
+    "ssh box 'set -o pipefail -o KSH_GLOB; touch ?playground/extensions/y'",
+    "ssh box 'bash -o pipefail -O extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh -o SetEnv=BASHOPTS=dotglob box 'touch */extensions/x'",
+    "ssh -oSetEnv=GLOBIGNORE=x box 'touch ?playground/extensions/y'",
+    "ssh -o 'SetEnv FIGNORE=x' box 'touch ?playground/extensions/y'",
+    "ssh -o setenv=BASHOPTS=dotglob box bash -s <<'EOF'\ntouch */extensions/x\nEOF",
+    "ssh -o SendEnv=BASHOPTS box 'touch */extensions/x'",
+    "ssh box 'touch *1*(D)/extensions/x'",
+  ])("%s is refused as a switch", async (command) => {
+    expect(await bash(command)).toMatch(SWITCH)
+  })
+
+  test.each([
+    "shopt -s dotglob; ssh box uptime",
+    "ssh box 'ls */notes'",
+    "echo 'df -h' | ssh box bash",
+    `ssh spark-9dfb 'python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"'`,
+    "ssh box 'set -euo pipefail; ls */notes'",
+    "ssh box 'set -o pipefail; ls'",
+    "ssh box 'set -e -o nounset -o errexit; uptime'",
+    "ssh box 'bash -o pipefail -c \"ls */notes\"'",
+    "ssh box bash -s <<'EOF'\nset -euo pipefail\nls */notes\nEOF",
+    "echo 'set -euo pipefail; uptime' | ssh box bash",
+    "ssh -o SetEnv=LANG=C box uptime",
+    "ssh -o SendEnv=LANG box 'ls */notes'",
+    "ssh box bash -s <<'EOF'\nawk '{ print (a[2]-a[1])*100/(b[2]-b[1]) }' f\nEOF",
+    "ssh box 'set -opipefail; uptime'",
+    "ssh box 'bash --login -c uptime'",
+    "ssh box './run.sh -o out.txt'",
+    "ssh box 'bash deploy.sh --verbose -o x'",
+    `ssh box 'bash -c "tar -xOf a.tar f | wc -l"'`,
+  ])("%s, with no switch on its remote side, runs", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each(["ssh -o 'SendEnv=BASH*' box 'touch */extensions/x'", "ssh -o SetEnv=$V box uptime"])(
+    "%s, a SetEnv or SendEnv the hook cannot read, is refused",
+    async (command) => {
+      expect(await bash(command)).toMatch(
+        /an ssh -o SetEnv or SendEnv of .+, a value or pattern the hook cannot read/,
+      )
+    },
+  )
+
+  // a qualifier after a * a digit follows is no switch, so its line counts dots as on, and a dot-led link in the home into the root is still judged; this home holds one, ~/.p1 to the data folder
+  describe("a * a digit follows, then a qualifier", () => {
+    const home = mkdtempSync(join(tmpdir(), "no-extensions-write-digit-"))
+    mkdirSync(join(home, ".playground", "extensions", "hooks"), { recursive: true })
+    writeFileSync(join(home, ".playground", "extensions", "policy.json"), "{}\n")
+    symlinkSync(join(home, ".playground"), join(home, ".p1"))
+    afterAll(() => rmSync(home, { force: true, recursive: true }))
+    const at = (command: string) =>
+      check(
+        JSON.stringify({
+          cwd: home,
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+          tool_name: "Bash",
+        }),
+        { HOME: home },
+      )
+
+    test.each(["ssh box 'touch *1/extensions/x(D)'", "ssh box 'touch *1/extensions/x(N)'"])(
+      "%s reaches the root through ~/.p1 and is refused",
+      async (command) => {
+        expect(await at(command)).toMatch(/refuses touch on .+, a glob in/)
+      },
+    )
+
+    test.each([
+      "ssh box 'awk \"{ print (a[2]-a[1])*100/(b[2]-b[1]) }\" f'",
+      "ssh box 'touch *1(D)/notes/x'",
+    ])("%s reaches nothing in the root and runs", async (command) => {
+      expect(await at(command)).toBeUndefined()
+    })
+  })
+
+  test.each([
+    "ssh box 'bash -xO extglob -c \"touch ?playground/extensions/y\"'",
+    "ssh box 'set -Oe; touch ?playground/extensions/y'",
+    "ssh box 'set -oextendedglob; touch ?playground/extensions/y'",
+    `ssh box "zsh --extendedglob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "zsh --extended-glob -c 'touch ?playground/extensions/y'"`,
+    `ssh box "bash --rcfile x -c 'touch ?playground/extensions/y'"`,
+    `ssh box "zsh -oextendedglob -c 'touch ?playground/extensions/y'"`,
+    "ssh box 'set -oe extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash -c "set -o extendedglob; touch ?playground/extensions/y"'`,
+    `ssh box 'bash -c -O extglob "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh -c -o extendedglob "touch ?playground/extensions/y"'`,
+    `ssh box 'rbash -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'rzsh -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash-5.2 -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set -$o extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --extendedglob; touch ?playground/extensions/y'",
+    "ssh box 'set --dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set -o dot-glob; touch ?playground/extensions/y'",
+    "ssh box 'set globdot; touch ?playground/extensions/y'",
+    `ssh box 'bash >/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash > /dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh 2>&1 -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash >| x -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'bash &>x -O extglob -c "touch ?playground/extensions/y"'`,
+    "ssh box 'set >x -o extendedglob; touch ?playground/extensions/y'",
+    `ssh box 'bash {fd}>/dev/null -O extglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >>! log -o extendedglob -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh {fd}>/dev/null -4 -c "touch ?playground/extensions/y"'`,
+    `ssh box 'zsh >! log -4 -c "touch ?playground/extensions/y"'`,
+  ])(
+    "%s, an option a shell reads by any of its spellings, is refused as a switch",
+    async (command) => {
+      expect(await bash(command)).toMatch(SWITCH)
+    },
+  )
+
+  test("its reason names the one form of a shell's options that runs", async () => {
+    expect(await bash("ssh box 'zsh --extended-glob -c uptime'")).toEndWith(
+      "a shell's options run there only as a cluster with no O or 4, and a -o or a long option (--login) naming errexit, errtrace, functrace, login, noclobber, noprofile, norc, nounset, pipefail, verbose, xtrace, as in set -euo pipefail",
+    )
+  })
+
+  test.each([
+    "ssh box 'cat /etc/bash-completion.d/git'",
+    "ssh box 'ls ~/zsh-config'",
+    "ssh box 'kubectl config set-context x'",
+    "ssh box 'bash 2>&1 -e -c uptime'",
+    "ssh box 'bash > log -euo pipefail -c uptime'",
+    "ssh box 'bash {fd}>/dev/null -euo pipefail -c uptime'",
+    "ssh box 'zsh >! log -e -c uptime'",
+  ])(
+    "%s, a shell's name inside a longer word or a redirect before strict mode, runs",
+    async (command) => {
+      expect(await bash(command)).toBeUndefined()
     },
   )
 })

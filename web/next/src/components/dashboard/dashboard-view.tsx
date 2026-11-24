@@ -1,6 +1,6 @@
 "use client"
 
-import { RiRobot2Line } from "@remixicon/react"
+import { RiTerminalBoxLine } from "@remixicon/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -272,7 +272,7 @@ function NoChat({
     <Empty>
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <RiRobot2Line />
+          <RiTerminalBoxLine />
         </EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{why}</EmptyDescription>

@@ -57,9 +57,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A machine with extensions whose `ext.links` or list cannot be read refuses every GLM start, naming the fix.
   A GLM start's prompt, and a resume's given `--brief`, adds that Skill, Read, Bash, Edit and Write are already loaded and ToolSearch lists only deferred tools, since two GLM workers read ToolSearch's list as their whole toolset and stopped.
   `--backend local` runs the session on this machine's local model (K) through Claude Code under GLM's limits, the launch and its checks in `LOCAL_URL` and `LOCAL_SERVED`: `ANTHROPIC_BASE_URL=http://127.0.0.1:8000`, `ANTHROPIC_AUTH_TOKEN=local` (a placeholder, with no Keychain read), every model mapped to the served name `local`, `--model local`, `ENABLE_TOOL_SEARCH=true`,
-  and `factory-settings-local-120k.json`, GLM's file with the telemetry off in a 120k window, since K serves 131,072 tokens; the launch line opens on a no-op label naming the `--effort` it passes, since K's chat template switches thinking on or off alone.
+  `CLAUDE_CODE_MAX_CONTEXT_TOKENS` at the `local` card's `max_model_len` less 8192 (120000 for a card with no number above 16384), since Claude Code assumes 1M for a name it does not know,
+  and `factory-settings-local-120k.json`, GLM's file with the telemetry off in a 120k window, capped at that declared one.
+  The model's chat template reads no effort, so each `--effort` sets Claude Code's thinking, named in the launch line's no-op label (`: effort low, thinking off;`):
+  `low` off (`CLAUDE_CODE_EXTRA_BODY='{"thinking":{"type":"disabled"}}'`, since Claude Code sends no `thinking` field at `MAX_THINKING_TOKENS=0` off Anthropic's API), `medium` capped at 8192 tokens (`MAX_THINKING_TOKENS=8192` with `CLAUDE_CODE_MODEL_CAPABILITIES=local=-adaptive_thinking`, since adaptive thinking ignores the cap), and `high` and above uncapped.
+  `packages/scripts/src/local-thinking-check.ts` prints what each level sends to a loopback stub.
   It is refused where GLM is (a reviewer or tester, an org's checkout, a brief naming a `glm-refused-sources` word), for a planner or a researcher, and beside `--account`, `--model` or `--ssh`; it is refused too when a GET of `/v1/models` on that port, 5 s at most, lists no `local`.
-  Its gate counts the live roster rows pinned `claude-code local` against the `maxSessions` the model switch's `models/state.json` gives this machine's server on that port (`packages/scripts/src/spawn/local-cap.ts`), else 6, K's measured limit (`LOCAL_SESSION_CAP`), in place of the Claude usage gate, and it takes GLM's load and memory gate; `no-glm-heavy-path` fences it as a GLM session.
+  Its gate counts the live roster rows pinned `claude-code local` against the `maxSessions` the model switch's `models/state.json` gives this machine's server on that port (`packages/scripts/src/spawn/local-cap.ts`), else 6, K's measured limit (`LOCAL_SESSION_CAP`), and that server's speed from the keep beat, under 15 minutes old,
+  against the speed and first-token floors (`localModels.minTps`, `localModels.maxFirstTokenSeconds`), refusing while a request waits, in place of the Claude usage gate, and it takes GLM's load and memory gate; `no-glm-heavy-path` fences it as a GLM session.
   A start records its harness and backend in `~/.playground/backends/<name>` once herdr has the session, as `claude-code glm`, `claude-code local`, `claude-code claude` or `codex openai` (`--backend claude` names the default; `HARNESSES` in `packages/settings/src/harnesses.ts` lists each harness with its backends), and a resume runs that backend,
   reading the pin by its words whatever their spacing,
   and a pin of the backend alone too,
@@ -150,7 +155,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A row that names none leaves the manager the prompt its start recorded in `~/.playground/resume/<name>.prompt` names.
   A brief for a role with a template in `scripts/briefs/` (`new-reviewer.md`, `new-tester.md`, `new-worker.md`) is refused, before any gate or launch, while it still holds a slot that template holds, the refusal naming each slot left and the brief, so a checker never starts on a bare slot; a slot another role's template holds, or one spelled in words, passes.
   A resume of a reviewer or tester whose roster row's `worker=` names a session the roster has ended refuses before any pane opens, naming `bun scripts/roster.ts assign <checker> "<title>" review worker=<live worker> pr=<url>`,
-  or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) ends it again on its next pass unless a live worker serves one of its open PRs (the rule: [ops/README.md](ops/README.md)'s `optimizer/` entry).
+  or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) ends it again on its next pass unless a live worker serves one of its open PRs,
+  and an ended worker never reads as coming back, which takes a live row with a resume record or a `waiting` line in the latest restore (the rule: [ops/README.md](ops/README.md)'s `optimizer/` entry).
   Every reviewer's or tester's start, a resume or a column, names the pull request it serves now with `--pr <pull url>` (its number alone, and a comma list for more than one, where an issue's URL may stand beside a pull request for a PR not yet opened), or the extension item it scores as `<scope>/<kind>/<key>`, whose kind is one of `packages/settings`' `KINDS`.
   A start naming neither refuses before any pane opens, naming `--pr`; an item alone leaves the row with no `pr`, which holds the checker in no-outside-pr-code's read mode, as reading an item needs.
   A checker's roster row is written before its pane opens, every other row once its session has started, since no-outside-pr-code reads the checker's PR at its first tool call; a checker's failed write refuses its start, and any other's warns.
@@ -250,7 +256,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A review worktree that only reads (no test run, no commit) takes no install at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time, a reviewer's `review-<n>` clone or a tester's `test-<n>` and `test-<n>-before` of its roster PR n among them,
-  and the other kind's of PR n an earlier end kept, once no other checker of it is live: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
+  and the other kind's of PR n an earlier end kept, once no other live checker row names it as its `pr`, or, until it reads merged or closed, in its `prs`: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.
 - Spotlight skips any path under a dot folder, so a new factory path under `.claude/` or `.playground/` stays out of its index with no setting, while a `.metadata_never_index` file does nothing at folder level on this macOS (measured: a plain folder holding one was indexed anyway).
   The main checkout itself stays out through System Settings > Spotlight > Search Privacy.
@@ -293,6 +299,21 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A child still in its pass's process group ends with the pass before that ([.agents/testing.md](../.agents/testing.md)), so this catches one that left the group, such as a detached spawn on macOS, since on Linux the pass's pid view ends it with the pass too.
   Tests: `bun run test:file tests/packages/scripts/src/ops-tick/orphans.test.ts tests/packages/scripts/src/ops-tick/nightly-clean.test.ts tests/packages/scripts/src/orphan-reapers.test.ts`.
 
+## After a power cut
+
+- A boot with no clean shutdown can leave a torn loose object in the shared git store, which breaks every `git fetch`, and a merge lock its dead pr:merge run held.
+  ops-tick's `boot-check` beat takes both on, once per boot, on a minute inside gh-auth's first 10 minutes (`BOOT_MS` in `packages/scripts/src/ops-tick/tick.ts`), keeping the boot it finished in `ops/tick/boot-check.json`.
+  It reads the boot alone (`readBootTime` in `packages/scripts/src/ops-machine/readings.ts`: macOS's `kern.boottime`, Linux's `/proc/stat` btime), never a wake, since every process from before a sleep lives on.
+- First it lets go of a merge lock whose `pr` file is older than the boot, into `merge-locks/<pr>-<epoch ms>-boot`, with one line to Ops: every process of the old boot is dead, and a pid from then can name a live process now.
+- Then it runs `git fsck --no-dangling` on the shared store through run-slot (3 s measured on the main checkout's store), which stops at the first torn loose object, so it runs again after each repair, 10 passes at most.
+  A torn object that only a gate-owned worktree's HEAD or HEAD reflog names (`GATE_WORKTREES`, `merge-types` today) is repaired under the merge lock: the object moved into `ops/git-torn/<sha>-<epoch ms>`, the worktree's HEAD re-pointed with `git update-ref --no-deref` to the newest commit its reflog holds that reads whole, and one line to Ops.
+  While a live merge holds the lock the repair waits for the next minute.
+  The `invalid reflog entry` fsck then names for a moved object counts as repaired.
+  fsck names a torn object two ways, both read: a `fatal: loose object <sha> ... is corrupt` stop for one a HEAD reaches, and an `error: <sha>: object corrupt or missing` line for one only a reflog names.
+- Every other break gets one line to Ops' waiter queue and one Inbox alert naming the path, and the beat changes nothing there.
+- A check that a live merge's lock or a failure kept unfinished through the window gets the same line and alert once the window ends, naming why, so a dropped check is never silent.
+  The logic lives in `packages/scripts/src/ops-tick/boot-check.ts`; tests: `bun run test:file tests/packages/scripts/src/ops-tick/boot-check.test.ts`.
+
 ## bun run test:skills
 
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
@@ -334,7 +355,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A test walks that graph through relative, `@packages/*`, a package's own `@/` and dynamic imports, and fails on a new such read until `ROOT_READS` places it.
   Canary's hooks load from canary's whole tree at the sha, unpacked by `git archive` and installed from its own lockfile (`bun install --frozen-lockfile --ignore-scripts`), so every hook loads canary's packages, `extensions/core` and dependencies, and the install leaves the shared git hooks alone.
   Each run builds its tree in a folder of its own and renames it to `hook-differential/<sha>` in the temp folder, so two runs against one sha share the finished tree alone; the tree, `node_modules` included, stays there for the next run against that sha, beside any folder a run that lost the rename left.
-  macOS's daily temp cleaner (03:35 local) empties an installed package by its files' age and leaves `.installed`, so before the run each measured hook and each `scripts/hooks/*-worker.ts` in the tree loads in a fresh `bun` process (`unloaded`), and a tree where one fails moves aside as `<sha>.pruned-<ms>` and builds again; one that still fails ends the run.
+  macOS's daily temp cleaner (03:35 local) empties an installed package by its files' age and leaves `.installed`, so before the run each measured hook and each `scripts/hooks/*-worker.ts` in the tree loads in a fresh `bun` process (`unloaded`; the runtime-apis skill's `## Bun traps` says why),
+  and a tree where one fails moves aside as `<sha>.pruned-<ms>` and builds again; one that still fails ends the run.
   After the run they load once more, and a tree emptied mid-run exits 1 and stores nothing, since a hook's Worker resolves its packages again at each call and its `onerror` allows the call, so canary's side would read every later call as allowed.
 - A replay of a hook that reads the network (the push scans' live read, `heldBy` in `packages/safe-delete/src/live-refs.ts`) runs that read for real, with this Mac's own git credentials, against each remote a replayed push names.
   Replay it only where the run is allowed to read every such remote, and write in the Evidence that the replay read them with this Mac's credentials, printing no token and no remote URL.

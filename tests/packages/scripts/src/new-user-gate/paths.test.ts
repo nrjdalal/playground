@@ -13,6 +13,7 @@ describe("the new-user gate's paths", () => {
     "packages/scripts/src/playground/uninstall.ts",
     "packages/scripts/src/new-user-gate/cli.ts",
     "api/hono/src/lib/onboard/fix.ts",
+    "api/hono/src/lib/setup/fix.ts",
     "api/hono/src/routers/onboard.ts",
     "web/next/src/components/first-run/setup.tsx",
     "web/next/src/lib/first-run.ts",

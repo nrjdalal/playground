@@ -24,6 +24,7 @@ import {
 } from "../../../../../packages/scripts/src/machine-record/notes"
 import {
   addEntries,
+  addKnown,
   check,
   dropPaths,
   type Entry,
@@ -89,6 +90,14 @@ describe("the daily check (PG-2538)", () => {
     expect(await check(data, places())).toEqual([])
   })
 
+  test("a .DS_Store in a watched folder raises no finding, and another new file there still does (#2835)", async () => {
+    await seed(data, [], places())
+    writeFileSync(join(home, ".cache", ".DS_Store"), "")
+    const made = join(home, ".cache", "by-hand")
+    writeFileSync(made, "")
+    expect(await check(data, places())).toEqual([`misplaced: ${made}`])
+  })
+
   test("a new path inside the factory's homes reads unrecorded, outside them misplaced", async () => {
     await seed(data, [], places())
     mkdirSync(join(home, "models"))
@@ -124,14 +133,65 @@ describe("the daily check (PG-2538)", () => {
     expect(await check(data, places())).toEqual([`gone: ${made}`])
   })
 
-  test("a place or a recorded path it cannot read reads unreadable once a run, never gone or new", async () => {
-    const shut = join(root, "usr-local-lib-playground")
-    const inside = join(shut, "rule")
+  test("a place the check should read but cannot reads unreadable once a run, never gone or new, and a recorded path in it too", async () => {
+    const shut = join(home, ".config", "systemd", "user")
+    const inside = join(shut, "x.service")
+    mkdirSync(shut, { recursive: true })
     writeFileSync(inside, "")
     await seed(data, [entry(inside, { kind: "file" })], places())
     chmodSync(shut, 0o000)
     try {
       expect(await check(data, places())).toEqual([`unreadable: ${shut}`, `unreadable: ${inside}`])
+    } finally {
+      chmodSync(shut, 0o755)
+    }
+  })
+
+  test("a root-only watched folder the user cannot read reads known with its reason, and a recorded path in it reads nothing, never unreadable", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    const rule = join(rootOnly, "49-playground-root.rules")
+    writeFileSync(rule, "")
+    await seed(data, [entry(rule, { kind: "file" })], places())
+    chmodSync(rootOnly, 0o000)
+    try {
+      const lines = await check(data, places({ rootOnly: [rootOnly] }))
+      expect(lines).toContain(
+        `root-only: ${rootOnly}, no root helper on this machine, so its listing is skipped`,
+      )
+      expect(lines.filter((line) => line.startsWith("unreadable:"))).toEqual([])
+    } finally {
+      chmodSync(rootOnly, 0o755)
+    }
+  })
+
+  test("a root-only watched folder the record holds no path in is left out, with no line", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    chmodSync(rootOnly, 0o000)
+    try {
+      expect(await check(data, places({ rootOnly: [rootOnly] }))).toEqual([])
+    } finally {
+      chmodSync(rootOnly, 0o755)
+    }
+  })
+
+  test("a root-only watched folder the user can list is watched as any other, so a new path in it reads misplaced", async () => {
+    const rootOnly = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    writeFileSync(join(rootOnly, "by-hand.rules"), "")
+    expect(await check(data, places({ rootOnly: [rootOnly] }))).toEqual([
+      `misplaced: ${join(rootOnly, "by-hand.rules")}`,
+    ])
+  })
+
+  test("a root-step folder the install leaves readable reads unreadable when the user cannot list it", async () => {
+    const shut = join(root, "usr-local-lib-playground")
+    await seed(data, [], places())
+    chmodSync(shut, 0o000)
+    try {
+      const lines = await check(data, places())
+      expect(lines).toContain(`unreadable: ${shut}`)
+      expect(lines.some((line) => line.startsWith("root-only:"))).toBe(false)
     } finally {
       chmodSync(shut, 0o755)
     }
@@ -167,6 +227,35 @@ describe("the daily check (PG-2538)", () => {
       "unreadable: docker image postgres:18-alpine",
       "unreadable: docker image vllm/vllm-openai:v0.32.0",
     ])
+  })
+
+  test("a known path the OS made gives no finding, and addKnown keeps the daily check clean", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    expect(await check(data, places())).toEqual([`misplaced: ${made}`])
+    expect(await addKnown(data, made, "the OS snapd made it")).toEqual(made)
+    expect(await check(data, places())).toEqual([])
+  })
+
+  test("a re-seed keeps the known paths while it rewrites the baseline", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    await addKnown(data, made, "the OS snapd made it")
+    await seed(data, [], places())
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+  })
+
+  test("recording one known path does not suppress a sibling the factory adds later", async () => {
+    await seed(data, [], places())
+    const known = join(home, ".config", "snapd")
+    const sibling = join(home, ".config", "apt")
+    mkdirSync(known)
+    expect(await check(data, places())).toEqual([`misplaced: ${known}`])
+    expect(await addKnown(data, known, "the OS snapd made it")).toEqual(known)
+    mkdirSync(sibling)
+    expect(await check(data, places())).toEqual([`misplaced: ${sibling}`])
   })
 })
 
@@ -235,6 +324,40 @@ describe("playground record (PG-2538)", () => {
     expect(checked).toEqual([`misplaced: ${join(home, ".cache", "new")}`])
     expect(await runRecord(["drop", path], io([]))).toBe(0)
     expect(await runRecord(["drop", path], io([]))).toBe(1)
+  })
+
+  test("known records a path with its reason, a second run keeps one known, and without --why it exits 2", async () => {
+    const made = join(home, ".config", "snapd")
+    mkdirSync(made)
+    const lines: string[] = []
+    expect(await runRecord(["known", made, "--why", "the OS snapd made it"], io(lines))).toBe(0)
+    expect(lines).toContain(`known ${made}`)
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+    expect(await runRecord(["known", made, "--why", "again"], io([]))).toBe(0)
+    expect((await readRecord(data)).known).toEqual([{ path: made, why: "the OS snapd made it" }])
+    expect(await runRecord(["known", made], io(lines))).toBe(2)
+    expect(lines.some((l) => l.startsWith("err: playground record: known needs its --why"))).toBe(
+      true,
+    )
+    expect(await runRecord(["known"], io(lines))).toBe(2)
+    expect(lines.some((l) => l.startsWith("err: playground record: known takes one path"))).toBe(
+      true,
+    )
+  })
+
+  test("known reads a ~/ path under this home, a path under it still gives a finding, and a relative path exits 2", async () => {
+    await seed(data, [], places())
+    const made = join(home, ".config", "systemd")
+    mkdirSync(join(made, "user"), { recursive: true })
+    const lines: string[] = []
+    expect(await runRecord(["known", "~/.config/systemd", "--why", "snapd"], io(lines))).toBe(0)
+    expect(lines).toContain(`known ${made}`)
+    expect(await check(data, places())).toEqual([])
+    const later = join(made, "user", "x.service")
+    writeFileSync(later, "")
+    expect(await check(data, places())).toEqual([`misplaced: ${later}`])
+    expect(await runRecord(["known", ".config/apt", "--why", "apt"], io(lines))).toBe(2)
+    expect(lines.some((l) => l.includes(".config/apt: a known path is absolute or ~/"))).toBe(true)
   })
 
   test("add --stdin takes a peer's JSON list, its ~/ paths read under this home", async () => {
@@ -326,6 +449,16 @@ describe("the seed's notes (PG-2538)", () => {
       paths: [{ comment: "", folder: true, path: "/h/.portless" }],
       skipped: [],
     })
+  })
+
+  test("reads a comma list's later item with a folder of its own from the first item's parent, as the usage's example says", () => {
+    const tree = "spark-test\n└── ~/\n    └── kit/a.sh, b.sh, logs/c.sh\n"
+    expect(treePaths(tree, "spark-test", "/h").paths.map((p) => p.path)).toEqual([
+      "/h/kit/a.sh",
+      "/h/kit/b.sh",
+      "/h/logs/c.sh",
+    ])
+    expect(USAGE).toContain('"kit/a.sh, b.sh, logs/c.sh"')
   })
 
   test("an item the seed cannot take as written is skipped and named, never recorded: an aside, a space, a placeholder nothing matches", () => {

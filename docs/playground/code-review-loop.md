@@ -31,6 +31,7 @@ The two stay apart in the verdict, so a well-built change that misses the ask ca
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
 They leave the review clone as it stands, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
+When the diff adds a schema refusal that a form reads, that prompt also traces each refusal the form can reach to the field that shows it on screen, since a refusal with no field shows as a whole line the person cannot place.
 
 ## State lives on the PR
 
@@ -44,6 +45,7 @@ After a `canary` merge into a JSON fixture whose rows are near-identical, the re
 Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all afternoon spends none of the GraphQL budget every session shares.
 While the head's gate checks are not all green, its `checks` waiter takes the next push's waiter's place: it also ends once each concludes at the head, and started again after a red it waits for that check's re-run, so a red that clears on a re-run, which moves no head, is still seen.
 The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose required checks have other names, the names `gh pr checks <n> --required` lists that the head's check runs also carry, passed after the head, since the waiter reads check runs alone and a required commit status never ends it.
+The reviewer leaves every other check on the head, `GitGuardian` on `factory.repo` included, to pr:merge.
 
 ## It's working if
 
@@ -93,6 +95,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A stacked child is scored on its own lines, read from its parent's branch, and a child that fails playbook's stack test is a blocking finding.
 - The touched tests run in one form, `bun --cwd=<clone> run test:file <files>` through run-slot with no `NODE_ENV`, which reads the same on the runner box as on the Mac.
   `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
+  It also runs each listed `tests/**/test_*.py` through the same `uv run` step `bun run test:skills` uses, after bun's pass, and stops naming any path it can't run.
   A file red in that run, a by-hand local merge's included, runs again alone once: red there, it is scored, and green there, it is a `BATCH-RED`, with its one issue and no second rerun.
 - When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
 - A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.
@@ -103,6 +106,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A finding against a rule written in the code, such as a ratchet that never rises, stays blocking when the brief lists the bend as agreed, unless that agreement quotes the rule's owner.
 - A branch is called untested only once a grep of the tests for its effect and its entry point finds nothing, a mutation of it turns no test red, and the repo's testing guide has been read, so a suggested test never breaks that guide.
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
+  A runner-box red that a Mac rerun turns green gets one issue to root-cause it, or to delete the test with the reason, as a `BATCH-RED` does in [code-review-loop's step 2](../../extensions/core/skills/code-review-loop/SKILL.md).
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch` (`<scratch>` the reviewer's own `~/.playground/scratch/<session name>/`, made in a call of its own first), restore the clone,
   check it at the PR's head with `git -C <clone> apply --check <scratch>/fix.patch`,
@@ -138,6 +142,8 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 - A PR body with no `test:skills` result in it is a nit, since GitHub Actions runs the suite at the head.
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
+- A fixed secret-looking value in the diff (a password, a token or a key literal, in a test too) is a blocking finding in round 1, since `GitGuardian` reads every commit, not only the head; the fix is a value made at run time.
+- A reviewer of a PR that reads live machine state (a model server, herdr, docker, a systemd unit, the usage files) asks for its read-only run on the live layout, its output beside the injected stub, and scores the stub alone as a should-fix.
 - When the diff loosens a guard, the PR's Evidence holds a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows and each bypass the review finds that canary refuses, with the refused-forms test's pass count for the rest, and a row canary refuses that runs at the head, unless the fixture's allow list names it, holds the score at 3.
   The review first checks that the loosening passes the docs-path rule in playbook's `SESSIONS.md` (Spawn), and a loosening that fails it holds the score at 3.
   Every form a verdict lists as refused, a control's as well as a bypass's, is pinned as a refused row in the same push, so a later rewrite cannot drop it unseen.
@@ -157,6 +163,7 @@ The gate checks are `Audit, Lint, and Build` and `test`, or, on a repo whose req
 
 ## Where it fits
 
-[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for GitHub Actions' `Audit, Lint, and Build` and `test` green at the head, which run on every push to the pull request, and for each PASS its diff calls for there: the tester's on a `web/next/` diff, the new-user gate's on an installer or first-run diff.
+[playbook](./playbook.md)'s **gate** names it: a reviewer session, spawned by the PR's worker, scores through code-review-loop, then the PR waits for every check on the head green (`Audit, Lint, and Build`, `test` and, on `factory.repo`, `GitGuardian`), which run on every push to the pull request, and for each PASS its diff calls for there:
+the tester's on a `web/next/` diff, the new-user gate's on an installer or first-run diff.
 The Builder's sweep runs its recovery scan.
 It leans on core's `code-review` for the two axes; for an org's PR the **classified** rule holds, so its comments carry only the `ReviewBot` name.

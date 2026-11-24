@@ -19,6 +19,7 @@ import { basename, dirname, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
+import { cardOf, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import {
   clonesOf,
   processesOf,
@@ -29,6 +30,7 @@ import {
   type RmDeps,
   rmArgs,
   rmDeps,
+  rmPeerCommand,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
@@ -60,6 +62,24 @@ test("rm takes one path, or --worktree's with an optional --discard and --pr, wi
   })
 })
 
+test("rm takes a path with --card <id>, the card that approved its removal, and an optional --peer <machine>", () => {
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--reason", "nightly-clean"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    reason: "nightly-clean",
+    worktree: false,
+  })
+  expect(rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b"])).toEqual({
+    card: "c1",
+    discard: false,
+    path: "/m/x.gguf",
+    peer: "spark-b",
+    reason: "playground rm",
+    worktree: false,
+  })
+})
+
 test("rm takes --list or --restore <id> alone", () => {
   expect(rmArgs(["--list"])).toEqual({ list: true })
   expect(rmArgs(["--restore", "20261102T120000Z-s/1"])).toEqual({ restore: "20261102T120000Z-s/1" })
@@ -79,8 +99,21 @@ test.each([
   [["--worktree", "wt", "--discard", "--decision", "#i9"]],
   [["a", "--pr", "https://github.com/o/r/pull/1"]],
   [["--worktree", "wt", "--pr"]],
+  [["--worktree", "wt", "--card", "c1"]],
+  [["a", "--card"]],
+  [["a", "--peer", "spark-b"]],
+  [["--worktree", "wt", "--card", "c1", "--peer", "spark-b"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
+})
+
+test("rm refuses a --reason alongside a --peer, since a far-end removal is the peer's own card", () => {
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "nightly-clean"]),
+  ).toEqual({ error: RM_USAGE })
+  expect(
+    rmArgs(["/m/x.gguf", "--card", "c1", "--peer", "spark-b", "--reason", "playground rm"]),
+  ).toEqual({ error: RM_USAGE })
 })
 
 const dirs: string[] = []
@@ -127,6 +160,76 @@ const machine = () => {
   }
   return { deps, home, main, root, told }
 }
+
+// A mkdtemp machine for a card: a main whose ask prints one approved card to stdout, a data folder with the ops manager's roster and the saved card, and the card id with its one pick.
+const cardMachine = () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-card-")))
+  dirs.push(root)
+  const home = join(root, "home")
+  const main = join(home, "playground")
+  const data = join(home, ".playground")
+  mkdirSync(join(data, "ops", "tick"), { recursive: true })
+  mkdirSync(main, { recursive: true })
+  const cardId = "11111111-2222-3333-4444-555555555555"
+  const item = {
+    bytes: 300 * 1024 * 1024,
+    id: "sha256:abc",
+    kind: "image",
+    machine: "here",
+    path: "docker image img:1",
+  } satisfies CardItem
+  const pick = { bytes: item.bytes, machine: item.machine, path: item.path }
+  writeFileSync(
+    join(data, "roster.json"),
+    JSON.stringify({ agents: [{ kind: "ops", name: "ops" }] }),
+  )
+  writeFileSync(
+    join(data, "ops", "tick", "nightly-clean.json"),
+    JSON.stringify({ card: { at: "2026-11-18T00:00:00.000Z", id: cardId, items: [item] } }),
+  )
+  const card = {
+    answer: { at: "2026-11-18T01:00:00.000Z", choice: "approve", options: [0] },
+    from: "ops",
+    kind: "decision",
+    preview: cardOf([item]).preview,
+    status: "approved",
+    updatedAt: "2026-11-18T00:00:00.000Z",
+  }
+  writeFileSync(join(main, "card.json"), `${JSON.stringify(card)}\n`)
+  writeFileSync(
+    join(main, "ask.sh"),
+    `#!/bin/sh\nif [ "$1" = "get" ] && [ "$#" -eq 2 ]; then cat card.json; printf '%s\\n' 'ask: picked A: Remove' >&2; exit 0; fi\nexit 1\n`,
+  )
+  writeFileSync(
+    join(main, "package.json"),
+    JSON.stringify({ name: "fake", private: true, scripts: { ask: "sh ask.sh" } }),
+  )
+  const repo0 = process.env.PLAYGROUND_REPO
+  const data0 = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_REPO = main
+  process.env.PLAYGROUND_DATA_DIR = data
+  return {
+    cardId,
+    deps: rmDeps(main),
+    pick,
+    restore: () => {
+      if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = repo0
+      if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = data0
+    },
+  }
+}
+
+test("rm --card reads ask's card from its stdout alone, so a picked line on stderr no longer breaks it", async () => {
+  const { cardId, deps, pick, restore } = cardMachine()
+  try {
+    const picks = await deps.approvals!(cardId)
+    expect(picks).toEqual([pick])
+  } finally {
+    restore()
+  }
+})
 
 test("runRm moves a path, lists it and restores it, telling no one", async () => {
   const { deps, home, told } = machine()
@@ -2066,4 +2169,380 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
     if (saved.data === undefined) delete process.env.PLAYGROUND_DATA_DIR
     else process.env.PLAYGROUND_DATA_DIR = saved.data
   }
+})
+
+const CARD = "11111111-2222-3333-4444-555555555555"
+
+test("runRm --card takes only an Inbox card id, so no flag reaches ask get", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", "--ack"], deps)
+  expect(code).toBe(2)
+  expect(err.join("\n")).toContain("--ack is not an Inbox card id")
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A machine whose ~/models holds one dropped hf repo the record names, and whose card approves it on spark-a at its size.
+type Picks = (repo: string) => { bytes: number; machine: string; path: string }[] | string
+const approvedMachine = (picks: Picks | null) => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  file(join(repo, "blobs", "b"), "weights")
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  const deps: RmDeps = {
+    ...m.deps,
+    ...(picks === null ? {} : { approvals: async () => picks(repo) }),
+    machine: "spark-a",
+  }
+  return { ...m, deps, repo }
+}
+
+test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`Deleted ${repo} outright (7 bytes), as card ${CARD} approved`)
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test.each<[string, Picks | null, string]>([
+  ["no Remove answer on the card", () => [], "holds no Remove answer from the owner"],
+  [
+    "a Remove for another machine",
+    (path) => [{ bytes: 7, machine: "spark-b", path }],
+    "holds no Remove answer",
+  ],
+  [
+    "a size other than the card's",
+    (path) => [{ bytes: 6, machine: "spark-a", path }],
+    "its size changed",
+  ],
+  ["a card that does not read", () => "ERR_POSTGRES_CONNECTION_REFUSED", "did not read"],
+  ["no Inbox here", null, "no Inbox is read here"],
+])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
+  const { deps, repo } = approvedMachine(picks)
+  const { code, err } = await rmTold([repo, "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(said)
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A mkdtemp machine whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out, and `folders` one with an empty folder, which the set takes in at 0 bytes.
+type ShardState = {
+  deps: RmDeps
+  repo: string
+  shard: (i: number) => string
+  size: number
+  total: number
+}
+const shardedMachine = (symlinks: number[] = [], folders: number[] = []): ShardState => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) => join(repo, `model-${String(i).padStart(5, "0")}-of-00004.gguf`)
+  const size = 50
+  const entries: {
+    added: string
+    by: string
+    kind: string
+    path: string
+    undo: string
+    why: string
+  }[] = []
+  for (let i = 1; i <= 4; i++) {
+    const here = shard(i)
+    mkdirSync(dirname(here), { recursive: true })
+    if (symlinks.includes(i)) {
+      writeFileSync(join(repo, `target-${i}`), "real")
+      symlinkSync(join(repo, `target-${i}`), here)
+    } else if (folders.includes(i)) mkdirSync(here)
+    else {
+      writeFileSync(here, "")
+      truncateSync(here, size)
+    }
+    entries.push({
+      added: "2026-11-17",
+      by: "ops",
+      kind: "folder",
+      path: here,
+      undo: "rm",
+      why: "seed",
+    })
+  }
+  writeFileSync(join(m.deps.data, "machine-record.json"), JSON.stringify({ baseline: [], entries }))
+  return {
+    ...m,
+    deps: {
+      ...m.deps,
+      machine: "spark-a",
+      approvals: async () => [{ bytes: size * 4, machine: "spark-a", path: shard(1) }],
+    },
+    repo,
+    shard,
+    size,
+    total: size * 4,
+  }
+}
+
+test("runRm --card deletes an approved sharded set whole: every shard at the set's total, and every record entry dropped", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, out } = await rmTold([shard(1), "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(false)
+  expect(out.join("\n")).toContain(
+    `Deleted the 4 shards outright (${total} bytes), as card ${CARD} approved on this machine; ${join(deps.data, "trash", "deleted.jsonl")} logs it`,
+  )
+  expect(out.join("\n")).toContain("its machine record entries are dropped")
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test("runRm --card refuses a sharded set whose total no longer matches the pick, deleting none", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: total + 50, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 4 shards at 200 bytes")
+  expect(err.join("\n")).toContain("approved it at 250")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+test("runRm --card leaves a symlinked shard out of the set, so its total no longer matches the pick, deleting none", async () => {
+  const { deps, shard } = shardedMachine([4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 3 shards at 150 bytes")
+  expect(err.join("\n")).toContain("approved it at 200")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+test("runRm --card refuses a sharded set whose one shard fails its own check, an empty folder, though the total matches the pick, deleting none", async () => {
+  const { deps, shard, size } = shardedMachine([], [4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: size * 3, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(`${shard(4)} is not model weights the shard set holds`)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+// A scratch hub repo whose snapshots/<rev>/ shards are links to its blobs, the record naming the repo folder (not a shard), and a card that approves it whole: shardSet returns null for the folder, so deleteWeights removes it, never removeSet, and a shard link there would be refused.
+type HubRepoState = {
+  deps: RmDeps
+  repo: string
+  shard: (i: number) => string
+  blobs: string[]
+  size: number
+}
+const hubRepoMachine = (rev = "abc123"): HubRepoState => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) =>
+    join(repo, "snapshots", rev, `model-${String(i).padStart(5, "0")}-of-00003.safetensors`)
+  const size = 100
+  const blobs: string[] = []
+  for (let i = 1; i <= 3; i++) {
+    const blob = join(repo, "blobs", `blob-${i}`)
+    file(blob)
+    truncateSync(blob, size)
+    blobs.push(blob)
+  }
+  for (let i = 1; i <= 3; i++) {
+    const here = shard(i)
+    mkdirSync(dirname(here), { recursive: true })
+    symlinkSync(blobs[i - 1]!, here)
+  }
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  return {
+    ...m,
+    deps: {
+      ...m.deps,
+      machine: "spark-a",
+      approvals: async () => [{ bytes: size * 3, machine: "spark-a", path: repo }],
+    },
+    blobs,
+    repo,
+    shard,
+    size: size * 3,
+  }
+}
+
+test("runRm --card deletes an approved hub repo whole, its shard links and blobs, and drops its record entry", async () => {
+  const { deps, repo, blobs, size } = hubRepoMachine()
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(
+    `Deleted ${repo} outright (${size} bytes), as card ${CARD} approved`,
+  )
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  for (const b of blobs) expect(existsSync(b)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+// A peer's far end: run-slot's ssh, a closure a test injects so the stub records the command.
+type PeerRun = { machine: string; command: string }
+const peerRun = (out: { code: number; out: string }) => {
+  const seen: PeerRun[] = []
+  const peer: RmDeps["peer"] = async (machine, command) => {
+    seen.push({ machine, command })
+    return out
+  }
+  return { seen, peer }
+}
+
+test("runRm --peer sends one rm-peer command to the named peer and relays its line, leaving this machine's own copy at that path and its record entry", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "Deleted the weights on the peer" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const record = readFileSync(join(deps.data, "machine-record.json"), "utf8")
+  const { code, out } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(0)
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(out.join("\n")).toContain("Deleted the weights on the peer")
+  expect(existsSync(repo)).toBe(true)
+  expect(readFileSync(join(deps.data, "machine-record.json"), "utf8")).toBe(record)
+})
+
+test("runRm --peer passes a path with a space or a quote to the peer as one word", () => {
+  expect(rmPeerCommand("/h/models/a b's.gguf", 7, "c1")).toBe(
+    `packages/scripts/src/playground/rm-peer.ts '/h/models/a b'\\''s.gguf' '7' 'c1'`,
+  )
+})
+
+test("runRm --peer refuses a pick the card does not name on that peer, and sends no ssh", async () => {
+  const { seen, peer } = peerRun({ code: 0, out: "ignored" })
+  const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("holds no Remove answer")
+  expect(seen).toEqual([])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's plain refusal once and tells the dispatcher nothing, as a local one does", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "playground: no such path" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual([])
+  expect(err).toEqual(["playground: spark-b: no such path"])
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer tells the dispatcher of a peer's protected refusal (exit 3), as a local one does", async () => {
+  const { peer } = peerRun({ code: 3, out: "playground: /m/x.gguf is protected" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], { ...deps, peer })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: /m/x.gguf is protected"])
+  expect(existsSync(repo)).toBe(true)
+})
+
+test("runRm --peer relays a peer's silence with the did-not-answer fallback", async () => {
+  const { seen, peer } = peerRun({ code: 1, out: "" })
+  const { deps, repo, told } = approvedMachine((path) => [{ bytes: 7, machine: "spark-b", path }])
+  const { code, err } = await rmTold([repo, "--card", CARD, "--peer", "spark-b"], {
+    ...deps,
+    peer,
+  })
+  expect(code).toBe(1)
+  expect(told).toEqual(["j6rjgy-worker: the peer did not answer"])
+  expect(err.join("\n")).toContain("the peer did not answer")
+  expect(seen).toEqual([
+    {
+      machine: "spark-b",
+      command: `packages/scripts/src/playground/rm-peer.ts '${repo}' '7' '${CARD}'`,
+    },
+  ])
+  expect(existsSync(repo)).toBe(true)
+})
+
+// A main checkout pushed to origin/canary with one replay worktree in a row of ~/models/kit/runs holding an untracked answer.
+const replayMachine = () => {
+  const m = machine()
+  git(m.root, "init", "--bare", "-q", join(m.root, "remote.git"))
+  git(m.main, "init", "-q", "-b", "canary")
+  file(join(m.main, "README.md"))
+  git(m.main, "add", "README.md")
+  git(m.main, "commit", "-qm", "init")
+  git(m.main, "remote", "add", "origin", join(m.root, "remote.git"))
+  git(m.main, "push", "-q", "origin", "canary")
+  const wt = join(m.home, "models", "kit", "runs", "MB-1", "pr0001")
+  mkdirSync(dirname(wt), { recursive: true })
+  git(m.main, "worktree", "add", "-q", "--detach", wt, "HEAD")
+  file(join(wt, "answer.ts"), "export const a = 1\n")
+  return { ...m, wt }
+}
+
+test("runRm --worktree keeps a replay worktree a model test is running in, and refuses --discard and --pr on one", async () => {
+  const { deps, wt } = replayMachine()
+  const running = {
+    ...deps,
+    procs: () => [{ command: "bun run kit replay", cwd: wt, pid: 4242, sockets: [] }],
+  }
+  const held = await rmTold(["--worktree", wt], running)
+  expect(held.code).toBe(1)
+  expect(held.err.join("\n")).toContain(
+    `${wt} is held by pid 4242 (bun run kit replay) working in ${wt}`,
+  )
+  for (const words of [["--discard"], ["--pr", "https://github.com/o/r/pull/1"]]) {
+    const flagged = await rmTold(["--worktree", wt, ...words], deps)
+    expect(flagged.code).toBe(2)
+    expect(flagged.err.join("\n")).toContain("takes neither --discard nor --pr")
+  }
+  expect(existsSync(wt)).toBe(true)
+  expect(existsSync(`${wt}.diff`)).toBe(false)
+})
+
+test("runRm --worktree removes a replay worktree under ~/models/kit/runs through git, its work kept in <name>.diff", async () => {
+  const { deps, wt } = replayMachine()
+  const { code, out } = await rmTold(["--worktree", wt], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`its work is kept in ${wt}.diff`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readFileSync(`${wt}.diff`, "utf8")).toContain("+export const a = 1")
 })

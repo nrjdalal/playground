@@ -267,6 +267,8 @@ export const fixtureSchema = z.object({
     screens: z.record(z.string(), z.string()),
     workspaces: z.array(json),
   }),
+  // The repo id the made-up machine's local model server serves as local (local-model.ts), which a local session's row names and draws the maker of.
+  localModel: z.string().optional(),
   // Each repo's merged PullRequest nodes, as the Usage app's query reads them (lib/usage/prs.ts).
   merged: z.record(z.string(), z.array(json)).optional(),
   // The made-up checkout's origin remote, which the sidebar's GitHub icon links to as its pull requests page.
@@ -495,6 +497,7 @@ export function writeFixture(
     account: fixture.account ?? null,
     doctor: fixture.doctor ?? null,
     git: at(fixture.git),
+    localModel: fixture.localModel ?? null,
     merged: at(fixture.merged ?? {}),
     origin: fixture.origin ?? null,
     processes: at(fixture.processes),
@@ -576,6 +579,7 @@ export type FixtureMachine = {
   account?: Fixture["account"] | null
   doctor?: Fixture["doctor"] | null
   git: Fixture["git"]
+  localModel?: string | null
   merged?: NonNullable<Fixture["merged"]>
   origin?: string | null
   processes: Fixture["processes"]

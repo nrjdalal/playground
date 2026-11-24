@@ -7,6 +7,7 @@ import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
+import { askItemText } from "../ops-job/ask-item"
 import { leadName } from "../ops-session-resume/resume"
 import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
@@ -68,6 +69,15 @@ const notifyArgv = (ctx: Context, text: string) => [
   "sweep",
   text,
 ]
+// git ls-remote reads the branch tip on the remote, not the API, whose first word on its output line is the head's sha; null when it cannot read it, so a moved or unreadable head tells nothing
+const readTip = async (ctx: Context, name: string): Promise<string | null> => {
+  const r = await ctx.run(["git", "-C", ctx.repo, "ls-remote", "origin", `refs/heads/${name}`], {
+    timeoutMs: 30_000,
+  })
+  if (r.code !== 0) return null
+  const sha = r.out.trim().split(/\s+/)[0] ?? ""
+  return sha || null
+}
 const dashboardAsk = (ctx: Context, ...args: string[]) => [
   "bun",
   "run",
@@ -295,6 +305,13 @@ export async function paceOff(ctx: Context): Promise<void> {
   await writeAtomic(recordPath, JSON.stringify({ at, forecast: projected, until: iso }))
 }
 
+// A steady beat that is not `ok` but is not a failure: up: for the tunnel, idle: for the relay, while waiting: (nothing to read yet) stays healthy for every job. The Dashboard reads this same list, its copy kept in step by a test.
+export const HEALTHY_PREFIXES: Record<string, string[]> = {
+  "ops-model-tunnel": ["up: "],
+  "ops-peer-relay": ["idle: "],
+  "ops-tunnel": ["up: "],
+}
+
 // The ops jobs by reading ps alone: each job's script must be running, and each heartbeat ok and fresh, but a paused job's; a RETIRED job's heartbeat file, which outlives it, goes unread.
 export async function opsDown(ctx: Context): Promise<string[]> {
   const cmds = (await ctx.run(["ps", "-ax", "-o", "command="])).out
@@ -315,8 +332,12 @@ export async function opsDown(ctx: Context): Promise<string[]> {
       if (disabled.has(String(b.job))) continue
       const at = Date.parse(String(b.lastBeatAt))
       if (Number.isNaN(at)) throw new Error("lastBeatAt")
-      // a waiting: beat has nothing to read yet, as opsRowOf reads it, so it is no failure
-      if (b.lastResult !== "ok" && !String(b.lastResult).startsWith("waiting: "))
+      if (
+        b.lastResult !== "ok" &&
+        !["waiting: ", ...(HEALTHY_PREFIXES[String(b.job)] ?? [])].some((p) =>
+          String(b.lastResult).startsWith(p),
+        )
+      )
         out.push(`ops-failing:${b.job}`)
       if (ctx.now() - at > 3 * Number(b.cycleSeconds ?? 60) * 1000) out.push(`ops-stale:${b.job}`)
     } catch {
@@ -365,7 +386,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
 }
 
 // A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A draft PR and a parked row wait by design, so neither raises a line; the runner check below reads the parked one.
-// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead, once per head; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
+// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead once per head, read against the branch's live tip: a head the remote moved past sends nothing and the PR stays untold for the next pass, an unreadable tip sends nothing and is named, and a matching head tells as before; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -387,7 +408,7 @@ export async function lateReviewers(
   }
   if (!workers.size) return []
   const fields =
-    "state headRefOid isDraft mergeable mergeStateStatus comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { checkSuites(first: 1, filterBy: { appId: 15368 }) { totalCount } statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+    "state headRefName headRefOid isDraft mergeable mergeStateStatus comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { checkSuites(first: 1, filterBy: { appId: 15368 }) { totalCount } statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
   const [owner, name] = repo.split("/")
   const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
@@ -404,6 +425,7 @@ export async function lateReviewers(
   const conflictPath = join(here(ctx), "conflict-told.json")
   const conflicts = (await readJson<Record<string, Conflict>>(conflictPath, {})) ?? {}
   const conflicting: Record<string, Conflict> = {}
+  const findings: string[] = []
   const now = seconds(ctx)
   for (const [n, worker] of workers) {
     const pr = pulls?.[`p${n}`] as {
@@ -420,6 +442,7 @@ export async function lateReviewers(
           }
         }[]
       }
+      headRefName?: string
       headRefOid?: string
       isDraft?: boolean
       mergeStateStatus?: string
@@ -435,13 +458,19 @@ export async function lateReviewers(
     if (conflicted && !commit?.checkSuites?.totalCount) {
       const conflict = (conflicting[n] = seen ?? { at: now, sha: pr.headRefOid, told: false })
       if (real && !conflict.told && now - conflict.at >= CONFLICT_AFTER) {
-        conflict.told = true
-        const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
-        for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
-          await ctx.run(notifyArgv(ctx, text), {
-            env: { ...process.env, NOTIFY_TO: to },
-            timeoutMs: 60_000,
-          })
+        // the branch tip on the remote moves first, so read it before telling: a head the remote moved past is gone, and an unreadable tip is a finding, not a line
+        const tip = await readTip(ctx, pr.headRefName ?? "")
+        if (tip === null) {
+          findings.push(`conflict-tip-unreadable #${n}`)
+        } else if (tip === pr.headRefOid) {
+          conflict.told = true
+          const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
+          for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
+            await ctx.run(notifyArgv(ctx, text), {
+              env: { ...process.env, NOTIFY_TO: to },
+              timeoutMs: 60_000,
+            })
+        }
       }
     }
     // a conflicting head is not ready, even while other apps' checks read SUCCESS with no Actions run
@@ -476,7 +505,7 @@ export async function lateReviewers(
   }
   await writeAtomic(path, JSON.stringify(keep))
   await writeAtomic(conflictPath, JSON.stringify(conflicting))
-  return []
+  return findings
 }
 
 // A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
@@ -715,7 +744,7 @@ export const runsForDelete = (pid: number): boolean => {
   }
 }
 
-// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, pglaunch's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
+// A test container named playground-test-<suite>-<pid> whose runner pid no longer runs is a killed test run's leftover (the kill never reaches the suite's cleanup): removed with its volumes, so a killed run leaks nothing. Every other container stays: the live dashboard's database, first run's, a Vibeground copy, a worktree's, any running stack's, and any test container whose pid still runs; a name whose last field is not a pid, such as a worktree named test-x's playground-test-x-db, is never one. runs says whether a pid has a process, a test's table in its place.
 export async function leakedTests(
   ctx: Context,
   runs: (pid: number) => boolean = runsForDelete,
@@ -777,10 +806,9 @@ export async function check(ctx: Context): Promise<string[]> {
       const r = await ctx.run(dashboardAsk(ctx, "get", /^\d+$/.test(ask) ? `#i${ask}` : ask), {
         timeoutMs: 60_000,
       })
-      const brace = r.out.indexOf("{")
       let d: Json | null = null
       try {
-        if (r.code === 0 && brace !== -1) d = JSON.parse(r.out.slice(brace)) as Json
+        if (r.code === 0) d = JSON.parse(askItemText(r.out)) as Json
       } catch {}
       if (!d || typeof d !== "object") found.push(`ask-unreadable:${ask}`)
       else if (d.status !== "open") found.push(`ask-answered:${ask}`)

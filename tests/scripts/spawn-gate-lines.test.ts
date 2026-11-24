@@ -254,7 +254,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       const r = await spawn(glm, [], { FAKE_VMSTAT_BROKEN: "1" })
       expect(r.code).not.toBe(0)
       expect(r.err).toContain(
-        "the memory gate holds it: it cannot read the swap-ins (vm_stat -c 2 1)",
+        "the memory gate holds it: it cannot read the swap-ins (vm_stat -c 4 1)",
       )
     })
   })

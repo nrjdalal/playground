@@ -16,33 +16,44 @@ import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   accountKept,
   BOX_LOAD_MULT,
+  boxContainer,
+  boxContainers,
   boxPath,
   Browser,
   capacityRefusals,
   clean,
   databaseCheck,
+  dockerRefusal,
   dropBox,
+  gateDrift,
+  hostPorts,
   hostTools,
   installCheck,
   installEnv,
   leftForYou,
   makeBox,
+  ownDatabaseVerdict,
   plantLogin,
+  postgresUrl,
   readAfter,
   report,
   resultLine,
   roomReadings,
   scriptsGroup,
+  seedArgv,
   shotAfter,
   STEP_COUNT,
   type Step,
   strayStandIns,
+  urlPort,
   usageWords,
   verdictLine,
   verdictPost,
   zshStartup,
 } from "../../../../../packages/scripts/src/new-user-gate/cli"
 import { stubs, usageReading } from "../../../../../packages/scripts/src/new-user-gate/stubs"
+import { liveSettings } from "../../../../../packages/settings/src/live"
+import { checkSetting } from "../../../../../packages/settings/src/settings"
 import { withFakeAgentBrowser } from "../../../../agent-browser-fake"
 import { machineTest, zshMissing } from "../../../../machine"
 import { scratchEnv } from "../../../../scratch-env"
@@ -571,6 +582,26 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
     )
   })
 
+  // A passed step whose shot is `no shot:` was dropped from the verdict, so the PR post named a step that reached it with none.
+  test("a passing run whose step 2 took no shot names that shot, and reads PASS even so", () => {
+    const two = all().map((s, i) =>
+      i === 1
+        ? {
+            ...s,
+            shot: "no shot: agent-browser screenshot: CDP error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+          }
+        : s,
+    )
+    expect(verdictLine(SHA, two)).toBe(
+      `## NewUserGate · PASS at a11fb88 · 7 of 7 passed; 2. step 2: no shot (agent-browser screenshot: CDP error (Page.captureScreenshot): Cannot take screenshot with 0 width.)`,
+    )
+  })
+
+  test("a passing run with every shot taken reads PASS and names no missing shot, the line unchanged", () => {
+    const taken = all().map((s, i) => ({ ...s, shot: `/box/shots/${i + 1}-shot.png` }))
+    expect(verdictLine(SHA, taken)).toBe(`## NewUserGate · PASS at a11fb88 · 7 of 7 passed`)
+  })
+
   test("--pr posts the verdict from a file, its literal path passed to gh pr comment --body-file", () => {
     const dir = mkdtempSync(join(tmpdir(), "gate-verdict-"))
     try {
@@ -629,5 +660,212 @@ describe("the gate's room readings", () => {
   ])("%s and /proc gives neither: both are null", (_, answer) => {
     process.env.PLAYGROUND_PROC = procDir({}, ["loadavg", "stat"])
     expect(roomReadings(answer)).toEqual({ cores: null, load: null })
+  })
+})
+
+// The box shares this Mac's Docker, so a run once reused the live dashboard's running database as first run's own (#2787).
+describe("the box's own database", () => {
+  const box = "/tmp/pg-gate-5d358fd-Vlv9UN"
+  const own = boxContainer(box)
+
+  test("is named after the box's folder, never the live dashboard's default, and passes live.container's schema", () => {
+    expect(own).toBe("pg-gate-5d358fd-Vlv9UN-db")
+    expect(own.startsWith("playground-dashboard-db")).toBe(false)
+    expect(liveSettings.get({ schemaVersion: 1, values: {} }, "live.container")).toBe(
+      "playground-dashboard-db",
+    )
+    expect(checkSetting("live.container", own)).toMatchObject({ ok: true })
+  })
+
+  test("counts only containers first run made under the box's name, never the host's live one", () => {
+    const listed = [
+      "playground-dashboard-db-sY08",
+      "playground-dashboard-db-sY08-old",
+      `${own}-Ab12`,
+      `${own}-Ab12-old`,
+      "pg-gate-5d358fd-Other1-db-Zz99",
+      "",
+    ].join("\n")
+    expect(boxContainers(listed, own)).toEqual([`${own}-Ab12`])
+    expect(boxContainers("playground-dashboard-db-sY08\n", own)).toEqual([])
+  })
+
+  test("is set as the box's live.container with its own checkout's CLI, a reason given", () => {
+    expect(seedArgv("/b/h", own)).toEqual([
+      "bun",
+      "--no-env-file",
+      "/b/h/playground/packages/scripts/src/playground/cli.ts",
+      "settings",
+      "set",
+      "live.container",
+      own,
+      "--reason",
+      "the new-user gate's box keeps a database of its own",
+    ])
+  })
+
+  // OwnDatabaseVerdict: the box shares this Mac's Docker, so a step 2 verdict fails closed when the box has no database of its own.
+  test("a failed seed fails, so the box never reused the host's database", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "the settings set failed",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: false,
+      }),
+    ).toEqual({
+      detail: `the box could not set its own live.container ${own}: the settings set failed`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with no container of the box's own fails", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 0,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({
+      detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    })
+  })
+
+  test("a saved database with a container of the box's own passes", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+      }),
+    ).toEqual({ detail: "", ok: true })
+  })
+
+  test("a saved URL's port must be a host port of the box's own containers", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: 45313,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port 45313 is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
+
+  test("a saved URL that names no port fails, since no host port of the box's own containers matches it", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: NaN,
+        ports: [33210],
+      }),
+    ).toEqual({
+      detail: `the saved database's port NaN is not a host port of the box's own containers`,
+      ok: false,
+    })
+  })
+
+  test("a refused docker call fails even with a saved URL on a host port of the box's own container", () => {
+    expect(
+      ownDatabaseVerdict({
+        error: "",
+        made: 1,
+        own,
+        saved: { detail: "", ok: true },
+        seeded: true,
+        port: 33210,
+        ports: [33210],
+        refused: `the box's docker refused inspect ${own}; a container or call the box did not make`,
+      }),
+    ).toEqual({
+      detail: `the box did not make its own database: the box's docker refused inspect ${own}; a container or call the box did not make`,
+      ok: false,
+    })
+  })
+})
+
+describe("from the host's own docker and the desk's .env", () => {
+  test("postgresUrl returns the value set, and '' when none is set", () => {
+    expect(postgresUrl("POSTGRES_URL=postgres://a:b@127.0.0.1:45313/db\nfoo=bar\n")).toBe(
+      "postgres://a:b@127.0.0.1:45313/db",
+    )
+    expect(postgresUrl("# nothing set\n")).toBe("")
+  })
+
+  test("urlPort takes the port a postgres:// URL names, and NaN when it names none or does not parse", () => {
+    expect(urlPort("postgres://gate:pw@127.0.0.1:45313/db")).toBe(45313)
+    expect(urlPort("postgres://gate:pw@127.0.0.1/db")).toBeNaN()
+    expect(urlPort("postgres://gate:p#w@127.0.0.1:45313/db")).toBeNaN()
+    expect(urlPort("")).toBeNaN()
+  })
+
+  test("hostPorts takes the host ports a docker port list binds, de-duped", () => {
+    expect(hostPorts("127.0.0.1:33210\n[::]:45313\n")).toEqual([33210, 45313])
+    expect(hostPorts("0.0.0.0:33210\n[::]:33210\n")).toEqual([33210])
+    expect(hostPorts("\n")).toEqual([])
+  })
+})
+
+// An older checkout's gate once ran a box with no live.container seed, which reused the live dashboard's database (#2826).
+describe("the box's own docker, in the gate", () => {
+  test("step 2 fails on any call the box's docker refused, naming each, and passes a log with none", () => {
+    const calls =
+      "docker ps\ndocker refused inspect playground-dashboard-db-sY08\ndocker refused volume: not a call the box makes\n"
+    expect(dockerRefusal(calls)).toBe(
+      "the box's docker refused inspect playground-dashboard-db-sY08; volume: not a call the box makes, a container or call the box did not make",
+    )
+    expect(dockerRefusal("docker ps\ndocker run\n")).toBeNull()
+    expect(dockerRefusal("")).toBeNull()
+  })
+
+  test("refuses a checkout whose gate code is not the sha's, naming the detached worktree run, and passes one that is", () => {
+    const sha = "647bbfe931cab96aa71eca1bb15b01a26ae3cf69"
+    expect(gateDrift(0, sha)).toBeNull()
+    const said = gateDrift(1, sha)!
+    expect(said).toContain("differs from 647bbfe's")
+    expect(said).toContain("git worktree add --detach <dir> 647bbfe")
+    expect(said).toContain("bun run --cwd <dir> gate:new-user 647bbfe")
+  })
+
+  test("clean removes every container carrying the box's label", () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-clean-")))
+    const box = makeBox("647bbfe931cab96aa71eca1bb15b01a26ae3cf69", parent)
+    const bin = join(parent, "bin")
+    const log = join(parent, "docker-calls")
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "docker"),
+      `#!/bin/sh\necho "$*" >> '${log}'\ncase "$*" in *"label=playground-gate-box=${basename(box)}"*) echo ${basename(box)}-db-Ab12 ;; esac\nexit 0\n`,
+    )
+    writeFileSync(join(bin, "portless"), "#!/bin/sh\nexit 0\n")
+    chmodSync(join(bin, "docker"), 0o755)
+    chmodSync(join(bin, "portless"), 0o755)
+    try {
+      clean(box, join(box, "h"), join(bin, "portless"), join(bin, "docker"))
+      const said = readFileSync(log, "utf8")
+      expect(said).toContain(
+        `ps -a --filter label=playground-gate-box=${basename(box)} --format {{.Names}}`,
+      )
+      expect(said).toContain(`rm -fv ${basename(box)}-db-Ab12`)
+      expect(existsSync(box)).toBe(false)
+    } finally {
+      rmSync(parent, { force: true, recursive: true })
+    }
   })
 })

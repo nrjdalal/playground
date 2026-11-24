@@ -3,7 +3,7 @@ import { join } from "node:path"
 import type { RecordEntry } from "../local-model/model"
 import { peerOf } from "../local-model/peer"
 import { PORTS } from "../local-model/state"
-import { beat } from "../ops-tick/tick"
+import { beat, CYCLE_SECONDS } from "../ops-tick/tick"
 
 // ops-model-tunnel: holds one ssh from this machine's loopback to the peer's model servers, each port in PORTS forwarded to 10000 more here, bound to 127.0.0.1 at both ends, so this machine's sessions and the Dashboard's chat reach the peer's model and nothing else on the network does. Nothing of it runs on the peer.
 export const JOB = "ops-model-tunnel"
@@ -30,6 +30,8 @@ export type Child = { exited: Promise<number>; kill: () => void; stderr: Promise
 export type KeepOptions = {
   data: string
   envText: () => Promise<string>
+  // runs tick every ms until the returned stop is called
+  every: (ms: number, tick: () => unknown) => () => void
   home: string
   // localModels.machine, read again on each start
   machine: () => string
@@ -43,10 +45,11 @@ export type KeepOptions = {
 const MIN_WAIT_MS = 2_000
 const MAX_WAIT_MS = 60_000
 
-// The job's loop until signal: starts ssh, beats up, and on a drop beats down with ssh's last line and starts it again after a wait that doubles from 2 s to 60 s, from 2 s again once a link held a minute. Its heartbeat file goes in the machine record once; its ssh is ended by its own handle on the signal.
+// The job's loop until signal: starts ssh, beats up each cycle while it holds, and on a drop beats down with ssh's last line and starts it again after a wait that doubles from 2 s to 60 s, from 2 s again once a link held a minute. Its heartbeat file goes in the machine record once; its ssh is ended by its own handle on the signal.
 export const keep = async ({
   data,
   envText,
+  every,
   home,
   machine,
   record,
@@ -82,10 +85,12 @@ export const keep = async ({
     const stop = () => child.kill()
     signal.addEventListener("abort", stop, { once: true })
     const upAt = Date.now()
-    await say(
-      `up: ${FORWARDS.map(([here, there]) => `127.0.0.1:${here} to ${peer.name}:${there}`).join(", ")}`,
-    )
+    const up = `up: ${FORWARDS.map(([here, there]) => `127.0.0.1:${here} to ${peer.name}:${there}`).join(", ")}`
+    await say(up)
+    // the sweep reads a heartbeat older than its cycle as stale, so a link that holds beats up each cycle until ssh ends
+    const stopBeats = every(CYCLE_SECONDS * 1000, () => say(up))
     const code = await child.exited
+    stopBeats()
     signal.removeEventListener("abort", stop)
     if (signal.aborted) break
     const last = (await child.stderr).trim().split("\n").at(-1)?.slice(0, 200)

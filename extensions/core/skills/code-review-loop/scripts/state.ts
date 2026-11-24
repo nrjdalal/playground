@@ -674,7 +674,7 @@ export const cmdDelta = (worktree: string, base: string, old: string, neu: strin
   console.log(kind === "BASE-MERGE" ? kind : `OWN: ${moved.join(" ")}`)
 }
 
-const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\("
+const SCAN_TS = "ls-files|Bun\\.Glob|new Glob\\(|readdirSync|readdir\\(|scanImports\\("
 const SCAN_RE = new RegExp(SCAN_TS)
 const skipQuoted = (text: string, from: number, close: string): number => {
   let j = from
@@ -977,9 +977,12 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
 
 const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
 
-// Pure: a red run's red files from its junit report: each file with a failed testcase, and each test file the report leaves out, since bun drops a file that throws as it loads (an import canary broke); a report that is missing names none.
-export const redIn = (xml: string | undefined, files: string[]): string[] => {
-  if (xml === undefined) return []
+// Pure: a red run's junit report read for its files: failed, each with a failed testcase, and leftOut, each test file the report leaves out, as bun leaves out a file that throws as it loads and one that defines no test; a report that is missing names none.
+export const redIn = (
+  xml: string | undefined,
+  files: string[],
+): { failed: string[]; leftOut: string[] } => {
+  if (xml === undefined) return { failed: [], leftOut: [] }
   const listed = new Set(
     [...xml.matchAll(/<test(?:suite|case)\b[^>]*\bfile="([^"]*)"/g)].map((m) => m[1]),
   )
@@ -988,8 +991,23 @@ export const redIn = (xml: string | undefined, files: string[]): string[] => {
       .filter((m) => /<(failure|error)\b/.test(m[2]!))
       .map((m) => m[1]),
   )
-  return files.filter((f) => failed.has(f) || (/\.test\.tsx?$/.test(f) && !listed.has(f)))
+  return {
+    failed: files.filter((f) => failed.has(f)),
+    leftOut: files.filter((f) => !failed.has(f) && /\.test\.tsx?$/.test(f) && !listed.has(f)),
+  }
 }
+
+// A file's failed testcases in a junit report, by classname and name, so a red at the head and at <base> reads as the same red only when no case of the head's fails there alone
+export const casesIn = (xml: string | undefined, file: string): Set<string> =>
+  new Set(
+    [...(xml ?? "").matchAll(/<testcase\b([^>]*?)(?<!\/)>([\s\S]*?)<\/testcase>/g)]
+      .filter((m) => m[1]!.includes(`file="${file}"`) && /<(failure|error)\b/.test(m[2]!))
+      .map((m) =>
+        ["classname", "name"]
+          .map((key) => new RegExp(`\\b${key}="([^"]*)"`).exec(m[1]!)?.[1] ?? "")
+          .join(" > "),
+      ),
+  )
 
 // Each round's first read: the PR's merge with <base>, as merge-tree writes it, then its touched tests on that merge, a test red there run again at the head; the clone ends at <head> whatever happens. --conflict-only stops after merge-tree, running none of the PR's code, for an outside author's PR.
 export const cmdMerge = (...args: string[]): void => {
@@ -1048,18 +1066,32 @@ export const cmdMerge = (...args: string[]): void => {
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
-  // A run's red files, read from its report; a red run whose report names none counts every file it ran as red, and says where.
+  // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test, or runs in the test sandbox's serial pass, which writes none); a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
-  const red = (files: string[], where: string): string[] => {
-    if (!files.length) return []
-    rmSync(report, { force: true })
-    if (io.tests(session, clone, files, report)) return []
+  const cases = new Map<string, Set<string>>()
+  const readReport = (files: string[]): string | undefined => {
     let xml: string | undefined
     try {
       xml = readFileSync(report, "utf8")
     } catch {}
-    const named = redIn(xml, files)
+    for (const f of files) cases.set(f, casesIn(xml, f))
+    return xml
+  }
+  const redAlone = (f: string): boolean => {
+    rmSync(report, { force: true })
+    if (!io.tests(session, clone, [f], report)) return true
+    const xml = readReport([f])
+    return xml !== undefined && redIn(xml, [f]).leftOut.length === 0
+  }
+  const red = (files: string[], where: string): string[] => {
+    if (!files.length) return []
+    rmSync(report, { force: true })
+    if (io.tests(session, clone, files, report)) return []
+    const xml = readReport(files)
+    if (files.length === 1) return files
+    const { failed, leftOut } = redIn(xml, files)
+    const named = files.filter((f) => failed.includes(f) || (leftOut.includes(f) && redAlone(f)))
     if (named.length) return named
     unnamed.push(where)
     return files
@@ -1085,20 +1117,22 @@ export const cmdMerge = (...args: string[]): void => {
       ? [branch]
       : ["--detach", headSha]
   const c7 = baseSha.slice(0, 7)
-  // The merge's red files run once more on the merge (green there: red only beside the others, BATCH-RED), a run whose report named none running every touched test again; what stays red runs at the head (red there: the PR's own) and then at <base> (red there: canary's own), so CANARY-RED keeps only a red the merge alone makes.
+  // The merge's red files run once more on the merge (green there: red only beside the others, BATCH-RED), a run whose report named none running every touched test again; what stays red runs at the head and at <base>: red at <base> with the head's failed cases read and each failing there too is canary's own, else red at the head (one that throws as it loads, with no case read, included) is the PR's own, so CANARY-RED keeps only a red the merge alone makes.
   let first: string[]
   let onMerge: string[]
   let atHead: string[]
   let atBase: string[]
+  const headCases = new Map<string, Set<string>>()
   try {
     first = at(merge, tests, `on the merge, so all ${tests.length} touched tests ran again`)
     onMerge = red(first, "on the merge's second run")
     atHead = at(headSha, onMerge, "at the head")
-    atBase = at(
-      baseSha,
-      onMerge.filter((f) => !atHead.includes(f)),
-      `at ${c7}`,
-    )
+    for (const f of atHead) headCases.set(f, cases.get(f) ?? new Set())
+    atBase = at(baseSha, onMerge, `at ${c7}`).filter((f) => {
+      const own = headCases.get(f)
+      return !own || (own.size > 0 && [...own].every((c) => cases.get(f)?.has(c)))
+    })
+    atHead = atHead.filter((f) => !atBase.includes(f))
   } finally {
     rmSync(report, { force: true })
     io.run("git", "-C", clone, "checkout", "-q", ...back)
@@ -1247,7 +1281,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 

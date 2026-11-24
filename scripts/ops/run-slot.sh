@@ -4,7 +4,8 @@
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
 # (a quick lane writes "<who> <pid> <iso>", the clone lane adding its two checkouts, clone_ends); runs the command as its
-# child, in a new session and process group; and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
+# child, in a new session and process group, which RUN_SLOT_HELD tells "<slot> <pid>" so it can give the slot back early (giveBackSlot);
+# and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
 # pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old, or while its age reads back empty. It prints the slot
 # it took to stderr and exits with the command's code.
 set -u
@@ -1787,7 +1788,7 @@ prio_first() {
 prio_waiting() { [ -n "$(prio_first)" ]; }
 
 free() {
-  # give the slot back only while its holder line is still ours
+  # give the slot back only while its holder line is still ours; giveBackSlot (packages/scripts/src/playground/give-back.ts) removes the same files, so a file added here goes there too
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # the holder line goes first, so a waiter whose mkdir loses to the next taker never reads our dead pid and reclaims that taker's slot (reviewer-ops-load-units, 19 Oct)
     rm -f "$SLOT.holder" "$SLOT.child" "$SLOT.preempted"
@@ -1915,6 +1916,8 @@ run_command() {
     export BUILDX_BUILDER=$DOCKER_BUILDER DOCKER_BUILDKIT=1
   fi
   [ "${DOCKER:-}" = each ] && set -- "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" each -- "$@"
+  # the lane and this pid, so a command whose last step only waits can give the lane back while it waits, as free() would (giveBackSlot in packages/scripts/src/playground/give-back.ts; issue 2644)
+  [ -z "$SLOT" ] || export RUN_SLOT_HELD="$SLOT $$"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
@@ -2011,7 +2014,7 @@ slot_open() {
   # run-slot.single (builder, 9 Oct: heavy suites one at a time) closes slots 2 and 3 to new holders while it exists
   # ...except for the dashboard's own build and the merge train (12 Oct: single-slot mode left both waiting an hour behind testers' runs), which shut lanes leave run-slot-2 open to as well (retro 22: two 5/5 PRs sat about 55 min while the train raced the queue for run-slot alone)
   # #i162: in single-slot mode run-slot-2 still opens for a second suite; since 13 Oct (dispatcher, so work runs while the
-  # machine allows) it opens on memory: free share 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
+  # machine allows) it opens on memory: on macOS a free share of 40% or more (ops, 19 Oct 01:16Z, from the optimizer: 9 Mac-only waiters at
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lifted; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
@@ -2280,7 +2283,7 @@ SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins> <the last reading's idle>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
-# vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures (on Linux proc_idle's, proc_swapins' and proc_disk_rate's over proc_swapins' second; a disk read with no swap-in read stays unread), which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
+# vm_stat -c 2 1's last row (one second, where spawn.sh's swapins() takes the median of 3) and disk_rate's two figures (on Linux proc_idle's, proc_swapins' and proc_disk_rate's over proc_swapins' second; a disk read with no swap-in read stays unread), which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins> <last idle>`, a cache written before the last idle field reading it as -) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the head waiter of a queue reads them every poll while they shut a slot, and, while they open one, whenever a fresh reading of them moves the readings past their stamp;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
@@ -2323,9 +2326,10 @@ gauges_lock() {
 }
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
-# sets FREE and LEVEL, the free share and the pressure level: macOS's (memstat), else Linux's (proc_mem), each empty when neither reads
-mem_read() { FREE=$(memstat level); LEVEL=$(memstat vm_pressure_level); [ -n "$FREE$LEVEL" ] || proc_mem; }
-# memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
+# sets FREE and LEVEL, the free share and the pressure level: macOS's (memstat), else Linux's (proc_mem) with MEM_OS=linux, each empty when neither reads
+mem_read() { MEM_OS=macos FREE=$(memstat level); LEVEL=$(memstat vm_pressure_level); [ -n "$FREE$LEVEL" ] || { MEM_OS=linux; proc_mem; }; }
+# memory room for a second suite: the pressure level normal (1; 2 is warn, 4 critical), on macOS its memorystatus free share at 40% or more too, which counts compressible pages, while Linux
+# judges by PSI and swap-ins alone, since MemAvailable leaves out what a resident model holds (issue 2660: a local model of about 60 GB held it at 33% with PSI at 0), and swap-ins under SWAPINS_MAX a
 # second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1
 # with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
@@ -2344,7 +2348,7 @@ mem_ok() {
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
     busy) told busy "$BUSY_TOLD"; return 1 ;;
   esac
-  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
+  { [ "$MEM_OS" = linux ] || [ "$free" -ge 40 ]; } && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
 }
 
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the

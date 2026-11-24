@@ -176,7 +176,7 @@ describe("WhatsApp's numbers through /api/v1/settings (#1797)", () => {
     expect(readSetting(data, "wa.owner")!.rows).toEqual([])
   })
 
-  test.each(["wa.device", "wa.owner"])(
+  test.each(["wa.alert", "wa.device", "wa.owner"])(
     "%s saves whole, and every read gives back its last 4 digits alone",
     async (key) => {
       const data = setUp()

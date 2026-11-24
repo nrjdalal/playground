@@ -1,7 +1,7 @@
 // auto_end.ts: ends a worker, reviewer or tester once its work is done, by SESSIONS.md#end (spawn.sh close, then its roster report), so no finished session sits idle.
 // Two callers: ops-tick's auto-end beat every 5 minutes (sweep, over idle_sessions.ts's flags), and pr:merge and the train's land right after a merge (endMerged, over the PR's roster rows).
 // Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes, and a worker not in `shell`, since its background task is a step of its chore; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
-// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason; a checker's end cleans the other kind's clones of its PR an earlier end kept the same way, once no other checker of that PR is live.
+// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason; a checker's end cleans the other kind's clones of its PR an earlier end kept the same way, once no other live checker row names that PR as its pr, or, until that PR reads merged or closed, in its prs.
 // Then its leftovers go to the trash too: its scratch and scratchpad folders, its memory settings file and its temp folders. Every move is charged to the ended session under safe-delete's cap of 3 a minute, and a move past the cap is carried to the next auto-end beat.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
@@ -230,7 +230,7 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
 // The managers' shared worktree under a main checkout, where spawn.sh's manager mode starts every manager, so what sits there is no single session's work (a test pins it to spawn.sh's line).
 export const LEADS_WORKTREE = ".claude/worktrees/leads"
 
-// The worktrees a session used: each linked worktree its transcript ran in, but the managers' leads worktree, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's, once no other checker of it is live); null when its transcript cannot be read.
+// The worktrees a session used: each linked worktree its transcript ran in, but the managers' leads worktree, for a worker each worktree on its PRs' branches, and, given the main checkout, a checker's clones of that checkout's PR n, a reviewer's review-<n> and a tester's test-<n> and test-<n>-before, which no cwd names when read from outside (the other kind's clones of PR n are cleanupLive's); null when its transcript cannot be read.
 export async function worktreesOf(
   target: Target,
   projectsDir: string,
@@ -287,8 +287,8 @@ async function otherClones(
   return { clones: clonesAt(leaves, n, main), n, pr: target.pr }
 }
 
-// Pure: the live reviewer and tester rows a roster's text has on a PR, as their pr or in their prs list, by name; null when the text holds no agents list.
-export const checkersOf = (text: string, pr: string): string[] | null => {
+// Pure: the live reviewer and tester rows a roster's text has on a PR, as their pr, or, while prsToo, in their prs list, by name; null when the text holds no agents list.
+export const checkersOf = (text: string, pr: string, prsToo = true): string[] | null => {
   try {
     const { agents } = JSON.parse(text) as { agents: unknown }
     if (!Array.isArray(agents)) return null
@@ -296,7 +296,7 @@ export const checkersOf = (text: string, pr: string): string[] | null => {
       (a: { kind?: unknown; name?: unknown; pr?: unknown; prs?: unknown; status?: unknown }) =>
         a &&
         typeof a.name === "string" &&
-        (a.pr === pr || (Array.isArray(a.prs) && a.prs.includes(pr))) &&
+        (a.pr === pr || (prsToo && Array.isArray(a.prs) && a.prs.includes(pr))) &&
         STATUSES.live.includes(String(a.status)) &&
         CLONES[kindOf(a.name, a.kind) ?? ""]
           ? [a.name]
@@ -345,10 +345,10 @@ export async function unsavedLive(
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
+// What one worktree's cleanup reads and runs, so a test hands it fakes: the live reviewer and tester roster rows on a PR, by their pr and, while prsToo, their prs (null when the roster cannot be read), which cleanupLive alone reads, git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm's move of a worktree with or without --discard, charged to who (else this process's own session name), the containers docker lists and its remove, whether a name is the live dashboard's database, and, for an ended session's leftovers, the folders and files named for it (leftovers), the live process still running in one (heldBy), the move of one of them charged to it (rmOwn), and whether one more move charged to a name fits the per-minute cap (room), and the record of a move it held back for the next beat (carry).
 export type CleanupDeps = {
   carry?: (item: Carried) => Promise<void>
-  checkers?: (pr: string) => Promise<string[] | null>
+  checkers?: (pr: string, prsToo: boolean) => Promise<string[] | null>
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   finished: (path: string, pr?: string) => Promise<boolean>
@@ -534,12 +534,13 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       await mkdir(dirname(CARRIED), { recursive: true })
       await appendFile(CARRIED, `${JSON.stringify(item)}\n`)
     },
-    checkers: async (pr) =>
+    checkers: async (pr, prsToo) =>
       checkersOf(
         await Bun.file(join(rm.data, "roster.json"))
           .text()
           .catch(() => ""),
         pr,
+        prsToo,
       ),
     containers: async () => {
       const { code, out } = await runIn(["docker", "ps", "-a", "--format", "{{.Names}}"])
@@ -653,7 +654,7 @@ export async function drainCarried(
   return lines
 }
 
-// After a session closes, each worktree it used, one at a time; then, for a checker, each other checker kind's clone of its PR an earlier end kept, while no other reviewer or tester row on that PR is live; then its leftovers (its scratch and scratchpad folders, its memory settings file and its temp folders). Every move is charged to the session itself, so an end never spends its worker's cap or any other session's, and one past the cap is carried to the next beat.
+// After a session closes, each worktree it used, one at a time; then, for a checker, each other checker kind's clone of its PR an earlier end kept, while no other live reviewer or tester row names that PR as its pr, or, until that PR reads merged or closed, in its prs; then its leftovers (its scratch and scratchpad folders, its memory settings file and its temp folders). Every move is charged to the session itself, so an end never spends its worker's cap or any other session's, and one past the cap is carried to the next beat.
 export const cleanupLive =
   (projectsDir: string, depsOf: () => Promise<CleanupDeps | null> = cleanupDeps) =>
   async (target: Target): Promise<string[]> => {
@@ -672,7 +673,8 @@ export const cleanupLive =
     const kept = checkers && (await otherClones(target, deps.main))
     if (checkers && kept?.clones.length) {
       const { clones, n, pr } = kept
-      const others = (await checkers(pr))?.filter((name) => name !== target.name)
+      const done = await deps.finished(clones[0]!, target.pr)
+      const others = (await checkers(pr, !done))?.filter((name) => name !== target.name)
       for (const dir of clones)
         lines.push(
           !others

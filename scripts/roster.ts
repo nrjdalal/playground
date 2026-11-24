@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
+import { readFile, rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -33,7 +34,7 @@ export const USAGE = `Usage:
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
   roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
   roster.ts holders <pr>                            (prints each live row naming the PR, number or URL, in pr or prs, else exits 1, and exits 2 on a roster that does not read; writes nothing)
-A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request, and a checker whose worker is unset or ended takes a new PR only through that assign with a live worker=.
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a prs-= of the row's own pr clears pr too, so holders stops naming it and an assign has nothing to re-add; a PR not yet opened goes in as its issue's URL, and an extension item as <scope>/<kind>/<key>, which assign's item= sets as the row's item and adds to prs (pr= adds it to prs alone); a checker whose row holds a pr or item takes worker= and pr= (or item=) together on assign, pr= naming an open pull request, and a checker whose worker is unset or ended takes a new PR only through that assign with a live worker=.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
@@ -57,6 +58,26 @@ async function load(): Promise<Roster> {
   const file = Bun.file(path)
   if (!(await file.exists())) return { agents: [], backlog: [] }
   return (await file.json()) as Roster
+}
+
+// A prs-= clears the row's pr and prs in memory, so the row read back must show the clear: if the write-back left one of the PRs the call removed still set, the clear did not persist, so refuse, naming the entry and that PR.
+async function clearedOnRead(
+  cmd: string,
+  name: string | undefined,
+  withdrawn: string[],
+): Promise<void> {
+  if (cmd !== "set" || !name || !withdrawn.length) return
+  const row = (await load()).agents.find((a) => a.name === name)
+  if (!row) return
+  const held = [...((row.prs as string[] | undefined) ?? []), row.pr].filter((pr): pr is string =>
+    Boolean(pr),
+  )
+  const still = withdrawn.find((pr) => held.includes(pr))
+  if (still)
+    throw new Refusal(
+      `roster.ts: ${name} cleared ${still} with prs-=, but the row read back still holds it in pr or prs, so the clear did not persist`,
+      1,
+    )
 }
 
 // The title cut keeps whole characters and fits the reader's 40.
@@ -150,6 +171,21 @@ const PRS_KEYS = new Set(["prs", "prs+", "prs-"])
 const isChecker = (entry: Agent): boolean =>
   ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
 
+// The PRs a prs-= call withdrew, normalized as the row holds them: the ones still set on the row when the call began, so a read-back can confirm the clear took.
+const prsWithdrawn = (entry: Agent, pairs: [string, string][], repo: string): string[] => {
+  const held = (entry.prs as string[] | undefined) ?? []
+  const removed = new Set<string>()
+  for (const [, raw] of pairs.filter(([k]) => k === "prs-"))
+    for (const pr of raw
+      .split(",")
+      .map((one) => one.trim())
+      .filter(Boolean)) {
+      const url = prsEntry(pr, repo)
+      if (entry.pr === url || held.includes(url)) removed.add(url)
+    }
+  return [...removed]
+}
+
 function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): void {
   const given = pairs.find(([k]) => k === "repo")
   const repo = (given ? given[1] : (entry.repo as string | undefined)) || factoryRepo
@@ -164,6 +200,8 @@ function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): vo
         k === "prs-" ? held.filter((u) => !named.includes(u)) : [...new Set([...held, ...named])]
       if (next.length) entry.prs = next
       else delete entry.prs
+      // A prs-= of the row's own pr clears pr too: the row no longer serves it, so holders stops naming it and an assign has nothing to re-add
+      if (k === "prs-" && typeof entry.pr === "string" && named.includes(entry.pr)) delete entry.pr
       continue
     }
     // item= names the extension item a checker is given to score: it joins prs as pr= would take one, and the row holds no pr
@@ -395,13 +433,18 @@ function checkRetask(
   apply(next, pairs, factoryRepo)
   if (!isChecker(next)) return
   const moved = (k: string) => entry[k] !== undefined && next[k] !== entry[k]
+  // A prs-= of the row's own pr clears it: clearing the PR a row served is not moving it, so the guard that moves a pr only through assign stays quiet
+  const prClearedByPrs =
+    typeof entry.pr === "string" &&
+    next.pr === undefined &&
+    prsWithdrawn(entry, pairs, factoryRepo).includes(entry.pr)
   const given = (k: string) => pairs.some(([p]) => p === k)
   // spawn.sh's restart of an ended checker names the PRs it serves now, prs and pr in one set
   const restart = entry.status === "ended" && given("prs")
   if (
     assign
       ? (entry.pr || entry.item) && (given("pr") || given("item")) !== given("worker")
-      : (moved("pr") && !restart) || moved("worker") || given("item")
+      : (!prClearedByPrs && moved("pr") && !restart) || moved("worker") || given("item")
   )
     throw new Refusal(
       `roster.ts: ${entry.name} is a checker, so it moves to another PR through roster.ts assign ${entry.name} <title> <task> worker=<worker> pr=<url> [repo=<owner>/<name>], which sets its worker, pr, repo and title together, or item=<scope>/<kind>/<key> in place of pr= for an extension item`,
@@ -449,6 +492,13 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
   console.log(names.join("\n"))
 }
 
+// The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it. A rotation that fails never blocks the write, so each step is caught and skipped.
+async function keepVersions(path: string): Promise<void> {
+  for (let n = 4; n >= 1; n--) await rename(`${path}.${n}`, `${path}.${n + 1}`).catch(() => {})
+  const text = await readFile(path, "utf8").catch(() => null)
+  if (text !== null) await writeAtomic(`${path}.1`, text).catch(() => {})
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, name, ...rest] = argv
   // any other throw exits 1 under Bun, which reads as free, so holders turns it into 2
@@ -484,6 +534,8 @@ async function main(argv: string[]): Promise<void> {
     return
   }
   const roster = await load()
+  // The PRs a prs-= withdrew, read back after the write to confirm the clear persisted.
+  let withdrawn: string[] = []
   // A bare PR number links into factory.repo, read only when one is given.
   const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
     ? await factoryRepoOf().catch((error: Error) => {
@@ -495,6 +547,8 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs)
     checkRetask(roster, entry, pairs, factoryRepo)
+    // Captured before apply clears the row, so the read-back can confirm the clear persisted.
+    withdrawn = prsWithdrawn(entry, pairs, factoryRepo)
     // A new task on an agent holding a pr would show the old PR beside it, so it goes through assign; a title alone renames the row.
     if (entry.pr && pairs.some(([k]) => k === "task"))
       throw new Refusal(
@@ -502,6 +556,10 @@ async function main(argv: string[]): Promise<void> {
         1,
       )
     apply(entry, pairs, factoryRepo)
+    // a prs+= of the same PR later in the call puts it back on purpose, so only what the call left removed is read back
+    withdrawn = withdrawn.filter(
+      (pr) => entry.pr !== pr && !((entry.prs as string[] | undefined) ?? []).includes(pr),
+    )
     parkHold(entry, pairs, false)
   } else if (cmd === "report") {
     const [text, ...more] = rest
@@ -521,7 +579,7 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(cmd, name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(roster, entry, pairs, factoryRepo, true)
-    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end keeps the checker while any is open.
     const checker = isChecker(entry)
     const served =
       checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
@@ -583,7 +641,10 @@ async function main(argv: string[]): Promise<void> {
     }
   }
   roster.updatedAt = now()
+  await keepVersions(path)
   await writeAtomic(path, JSON.stringify(roster, null, 2))
+  // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
+  await clearedOnRead(cmd, name, withdrawn)
 }
 
 if (import.meta.main) {

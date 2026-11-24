@@ -11,6 +11,8 @@ import {
   type PrState,
   prStateLive,
   type RegistryEntry,
+  restoreWaitingIn,
+  resumeNames,
   type Row,
   spend,
 } from "../../../../scripts/ops/optimizer/idle_sessions"
@@ -305,6 +307,99 @@ describe("collect: live sessions with nothing to do", () => {
       deps({ sessions: { "k3v9q2-reviewer": entry({ name: "k3v9q2-reviewer" }) } }),
     )
     expect(unlinked).toEqual([])
+  })
+
+  // #2614: after a power cut the load gate held two workers' resumes, so they had no live session yet and their reviewers were ended as gone
+  test("checker-worker-gone: kept while its worker comes back, its roster row live with a resume record or printed waiting by the latest restore", async () => {
+    const roster = (status: string) => ({
+      "k3v9q2-reviewer": { kind: "reviewer", name: "k3v9q2-reviewer", worker: "x7mh4d-worker" },
+      "x7mh4d-worker": { kind: "worker", name: "x7mh4d-worker", status },
+    })
+    const sessions = { "k3v9q2-reviewer": entry({ name: "k3v9q2-reviewer", sessionId: "sess-k3" }) }
+    const named = new Set(["x7mh4d-worker"])
+    const gone = [["checker-worker-gone (x7mh4d-worker)"]]
+    expect(await collect(deps({ resumable: named, roster: roster("working"), sessions }))).toEqual(
+      [],
+    )
+    expect(
+      await collect(deps({ restoreWaiting: named, roster: roster("waiting"), sessions })),
+    ).toEqual([])
+    expect(whys(await collect(deps({ roster: roster("working"), sessions })))).toEqual(gone)
+    for (const status of ["done", "ended", "parked"]) {
+      expect(
+        whys(await collect(deps({ resumable: named, roster: roster(status), sessions }))),
+      ).toEqual(gone)
+      expect(
+        whys(await collect(deps({ restoreWaiting: named, roster: roster(status), sessions }))),
+      ).toEqual(gone)
+    }
+  })
+
+  // #2704: a reaper beat between the lead's hand-off and the next review never ends a queue reviewer; one of its own open PRs still active keeps it on, even with the row's worker paused and no live session
+  test("checker-worker-gone: kept while one of its open PRs was active under the last day, the row's worker paused and no live session", async () => {
+    const OPEN = "https://github.com/o/r/pull/2140"
+    const recent = new Date((NOW - 60 * 60) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === OPEN ? { head: "eee5555", state: "open", updatedAt: recent, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        prState,
+        roster: {
+          "a1b2c3-reviewer": {
+            kind: "reviewer",
+            name: "a1b2c3-reviewer",
+            prs: [OPEN],
+            worker: "a1b2c3-worker",
+          },
+          "a1b2c3-worker": { kind: "worker", name: "a1b2c3-worker", status: "paused" },
+        },
+        sessions: { "a1b2c3-reviewer": entry({ name: "a1b2c3-reviewer", sessionId: "sess-a1" }) },
+      }),
+    )
+    expect(rows).toEqual([])
+  })
+
+  // #2704: an open PR last active over the day ago is no activity, so the reaper ends the queue reviewer even with the row's worker paused and no live session
+  test("checker-worker-gone: ended when one of its open PRs was last active over the last day, the row's worker paused and no live session", async () => {
+    const OPEN = "https://github.com/o/r/pull/2141"
+    const stale = new Date((NOW - 2 * 24 * 3600) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === OPEN ? { head: "eee6666", state: "open", updatedAt: stale, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        prState,
+        roster: {
+          "a1b2c4-reviewer": {
+            kind: "reviewer",
+            name: "a1b2c4-reviewer",
+            prs: [OPEN],
+            worker: "a1b2c4-worker",
+          },
+          "a1b2c4-worker": { kind: "worker", name: "a1b2c4-worker", status: "paused" },
+        },
+        sessions: { "a1b2c4-reviewer": entry({ name: "a1b2c4-reviewer", sessionId: "sess-b1" }) },
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-worker-gone (a1b2c4-worker)"]])
+  })
+
+  test("checker-worker-gone: a PR only its transcript links keeps no checker, however active", async () => {
+    const LINKED = "https://github.com/o/r/pull/2142"
+    const recent = new Date((NOW - 60 * 60) * 1000).toISOString()
+    const prState = async (url: string) =>
+      url === LINKED ? { head: "eee7777", state: "open", updatedAt: recent, verdicts: [] } : null
+    const rows = await collect(
+      deps({
+        linkedPrs: async () => [LINKED],
+        prState,
+        roster: {
+          "a1b2c5-reviewer": { kind: "reviewer", name: "a1b2c5-reviewer", worker: "a1b2c5-worker" },
+          "a1b2c5-worker": { kind: "worker", name: "a1b2c5-worker", status: "paused" },
+        },
+        sessions: { "a1b2c5-reviewer": entry({ name: "a1b2c5-reviewer", sessionId: "sess-c1" }) },
+      }),
+    )
+    expect(whys(rows)).toEqual([["checker-worker-gone (a1b2c5-worker)"]])
   })
 
   test("checker-pr-done: one merged PR flags, and so do two closed ones", async () => {
@@ -621,6 +716,38 @@ describe("collect: a checker's prs list (#706)", () => {
   test("a row with no prs list, or one whose PRs are all scored, is flagged as today", async () => {
     expect(whys(await reviewer())).toEqual([["checker-nothing (head scored)"]])
     expect(whys(await reviewer([SCORED]))).toEqual([["checker-nothing (head scored)"]])
+  })
+})
+
+describe("liveInput's readers of who comes back (#2614)", () => {
+  test("resumeNames names each record in the resume folder, and none for a folder that is not there", () => {
+    const dir = emptyDir()
+    writeFileSync(join(dir, "x7mh4d-worker.sh"), "#!/bin/bash\n")
+    writeFileSync(join(dir, "k3v9q2-reviewer.sh"), "#!/bin/bash\n")
+    writeFileSync(join(dir, "notes.txt"), "")
+    expect([...resumeNames(dir)].sort()).toEqual(["k3v9q2-reviewer", "x7mh4d-worker"])
+    expect(resumeNames(join(dir, "gone")).size).toBe(0)
+  })
+
+  test("restoreWaitingIn names each session a server's latest restore log prints as waiting, and no other line", async () => {
+    const dir = emptyDir()
+    writeFileSync(
+      join(dir, "playground.restore.log"),
+      [
+        "restored dispatcher",
+        "skipped b7k2mq-worker: live",
+        "skipped p4r7ya-worker: its roster row reads ended",
+        "waiting x7mh4d-worker: the load gate holds it: load 18.2 is over 15",
+        "not restored a3f9d1-worker: it cannot read the roster",
+      ].join("\n"),
+    )
+    writeFileSync(
+      join(dir, "playground-probes.restore.log"),
+      "waiting s8hk2v-probe: focus stands for builder\n",
+    )
+    writeFileSync(join(dir, "playground.restore"), "waiting q9z1xx-worker: not a log\n")
+    expect([...(await restoreWaitingIn(dir))].sort()).toEqual(["s8hk2v-probe", "x7mh4d-worker"])
+    expect((await restoreWaitingIn(join(dir, "gone"))).size).toBe(0)
   })
 })
 

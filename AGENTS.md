@@ -15,7 +15,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   The `db-migration` skill's step 0 holds both whole, with the shape to show first.
 - ALWAYS: Point local database work at a disposable container of the worktree's own, published on loopback alone: `docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine`, then `docker port playground-<worktree>-db 5432` for its port.
   Never point it at the live dashboard's database, whose local Postgres holds every real session and transcript, so a migration or a rename applied there breaks the running dashboard; seed fake rows, since real rows never reach a screenshot or a PR.
-  The `db-migration` skill's step 3 holds the rest whole: the two exceptions (first run's pglaunch database and a Vibeground's copy), the worktree's `.env`, the removal with `docker rm -fv`, and the merge lock's Redis container.
+  The `db-migration` skill's step 3 holds the rest whole: the two exceptions (first run's container and a Vibeground's copy), the worktree's `.env`, the removal with `docker rm -fv`, and the merge lock's Redis container.
 - ALWAYS: Keep documentation in sync with every change.
   Whenever code, structure, conventions, or tooling change, update the matching docs in the same change (e.g. `web/next/content/docs/`, `README.md`, the `llms.txt`/`llms-full.txt` context routes, skill docs under `skills/`, and these agent guides `AGENTS.md`/`CLAUDE.md`).
   Docs must never drift.
@@ -169,7 +169,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 
 - Stack: read `.agents/dashboard/stack.md` before you change how `bun run dev` starts, which machine a stack reads, the fixture, the dashboard's data folder, the organisation's config (`packages/config/src/org.ts`), the hosted build or the `claude_*` tables.
   - ALWAYS: Start it (`bun run dev`) as a process of a herdr pane, or as a background task of an agent session in one, never detached with `( … &)` or `nohup`.
-  - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
+  - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is first run's container as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception (stack.md's hosted rule): it deploys, mounting only sign-in, health and Yard's routes.
@@ -214,7 +214,7 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
 1. Make the change on a branch from `origin/canary` in `.claude/worktrees/`, with a test or a red-first check when behaviour changes, and open it as a draft into `canary` whose body paraphrases its ask.
    Read [.agents/shipping.md](./.agents/shipping.md) before you write its body and again before the review's round 1: it holds the body's template and its gate, and the pass that settles docs, skills and the body first.
 2. Have a reviewer agent other than its author (a session started for the review, in its own scratch clone, its brief carrying The factory's signal rule, above) score it out of 5 through the [code-review-loop](./extensions/core/skills/code-review-loop/SKILL.md) skill, and fix what it finds, until it scores 5/5 on the latest head,
-   `Audit, Lint, and Build`, `test` and each PASS pr:merge asks hold there, and only nits are left (SESSIONS.md, Fix pushes and nits).
+   every check there is green (`Audit, Lint, and Build`, `test` and, on `factory.repo`, `GitGuardian`), each PASS pr:merge asks holds there, and only nits are left (SESSIONS.md, Fix pushes and nits).
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>` bare and unpiped, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
    Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or gate ruling.
 4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule), whose step 5 then brings the main checkout up to it; say what landed.

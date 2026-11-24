@@ -23,16 +23,19 @@ import {
   stale,
   tree,
 } from "../../../../../packages/scripts/src/trace-count/count"
-import {
-  EMPTY_LIST,
-  reposOf,
-  UNSET_REPOS,
-} from "../../../../../packages/scripts/src/trace-count/kinds"
+import { EMPTY_LIST, reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { originCheckout } from "../../../../machine"
 import { capital } from "../../../../session-names"
 
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // Built at run time, so this file's own text adds no trace to the tree's count.
 const ref = (n: number) => `#${n}`
+
+// A stub origin list, the same on every machine, so the count rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 const OLD = ["light", "kid"].join("")
 const OLD_NAME = { builder: OLD, dispatcher: ["light", "man"].join("") }
 const OLD_SKILL = ["light", "review"].join("")
@@ -163,14 +166,22 @@ describe("the trace count", () => {
   })
 
   test("reads past a live name the migration moves, the public repositories' names and the seed's left-out paths", () => {
-    const counts = count([
-      {
-        path: "a.ts",
-        text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${UNSET_REPOS.public.join(" and ")}`,
-      },
-      { path: "packages/scripts/src/trace-count/counts.json", text: `#123 ${OLD_NAME.dispatcher}` },
-      { path: "packages/scripts/src/trace-count/kept.json", text: "#456" },
-    ])
+    const counts = count(
+      [
+        {
+          path: "a.ts",
+          text: `const db = "${OLD_NAME.dispatcher}-desk-db"\nsee ${REPOS.public.join(" and ")}`,
+        },
+        {
+          path: "packages/scripts/src/trace-count/counts.json",
+          text: `#123 ${OLD_NAME.dispatcher}`,
+        },
+        { path: "packages/scripts/src/trace-count/kept.json", text: "#456" },
+      ],
+      { ...EMPTY_LIST, handles: ["example-owner"] },
+      REPOS,
+    )
+    expect(counts.handles).toBe(0)
     expect(counts.oldNames).toBe(0)
     expect(counts.issueRefs).toBe(0)
   })
@@ -229,9 +240,9 @@ describe("the ratchet", () => {
     expect(risen({ emails: 2 }, { emails: 3 })).toEqual([])
   })
 
-  test("a risen issueRefs count names its fix, and another kind keeps the plain reason", () => {
+  test("a risen issueRefs count names its fix and where the number goes, and another kind keeps the plain reason", () => {
     expect(refusal(risen({ emails: 2, issueRefs: 4 }, { emails: 3, issueRefs: 3 }))).toBe(
-      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number:\nissueRefs: 4 in the tree, counts.json allows 3",
+      "trace-count: a count rose; write the new text in plain words; describe the case in words; a doc cites no issue number, and the PR body's Merge Danger or Links carry it:\nissueRefs: 4 in the tree, counts.json allows 3",
     )
     expect(refusal(risen({ emails: 4 }, { emails: 3 }))).toBe(
       "trace-count: a count rose; write the new text in plain words:\nemails: 4 in the tree, counts.json allows 3",
@@ -251,7 +262,7 @@ describe("the ratchet", () => {
     const baseline = (await Bun.file(COUNTS).json()) as Counts
     const kept = (await Bun.file(KEPT).json()) as Kept[]
     const files = await tree(root)
-    const repos = { ...UNSET_REPOS, owner: [["zq", "made", "up"].join("-")] }
+    const repos = { ...REPOS, owner: [["zq", "made", "up"].join("-")] }
     const over = risen(count(files, undefined, repos, kept), baseline)
     const at = () => located(files, risenKinds(over), undefined, repos, kept, changedFiles(root))
     expect(over.length ? refusal(over, at()) : "").toBe("")
@@ -674,4 +685,8 @@ describe("the pull request's list gate", () => {
     ])
     expect(listKindsIn("plain words", LIST)).toEqual([])
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

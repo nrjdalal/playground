@@ -66,7 +66,7 @@
   `memory_pressure` stays off the list (its `-l` simulates pressure, and `kern.memorystatus_level` is the free share it prints), and `sysctl` is never handed a `name=value`.
   On Linux the memory readings are file reads of `/proc` (`memory.ts`, dashboard.md's System report), so `sysctl` and `vm_stat` run on macOS alone.
   `tests/api/hono/src/lib/spawn-allowlist.test.ts` fails when a file outside those it names starts a process anywhere under the api's `lib/`, so a new reading arrives as a `COMMANDS` entry.
-  There are six exceptions.
+  There are seven exceptions.
   The first is the update check the System report carries (`api/hono/src/lib/dashboard/update.ts`), whose `git fetch` of the one branch the checkout follows is not a read, so it and the `git rev-list`, `git log` and `git rev-parse` reads beside it stay out of `COMMANDS`: it runs git with no shell, a fixed argv and no argument from a request.
   The second is first run's Start a local container, the Database row's fix (`api/hono/src/lib/setup/container.ts`, stack.md), whose `docker run`, `docker exec` and `docker rm -f -v` are not reads: it runs docker with no shell and a fixed argv, the container's name from the checkout's path and never from a request, the password in the child's environment alone, and reads back only the port,
   from `docker port`.
@@ -82,3 +82,4 @@
   The fifth is a Vibeground's Start and Stop (`api/hono/src/lib/dashboard/vibe.ts`, stack.md), whose `docker run`, `docker exec`, `docker rm -fv`, `bun run dev` and `bun run dev:stop` are not reads: each runs with no shell and a fixed argv, the worktree's path from the listed stacks and never from a request's words, the copy's password in the child's environment alone,
   and the live database touched only by `pg_dump` inside its own container.
   The sixth is a grant decision's Approve (`api/hono/src/lib/dashboard/run-argv.ts`, asks.md), whose `open` of System Settings is not a read: it runs `/usr/bin/open` with no shell and an argv built from the preview's checked permission alone, one of two fixed panes, and a fixture or test stack runs nothing in its place.
+  The seventh is a local pick's model start (`api/hono/src/lib/dashboard/local-load.ts`, messages.md), whose `playground model use` is not a read: it runs through run-argv.ts's runner with no shell, an argv `loadArgv()` builds from the kept model's name once `MODEL_NAME` passes it, killed past `START_MS`, and a fixture or test stack runs nothing in its place.

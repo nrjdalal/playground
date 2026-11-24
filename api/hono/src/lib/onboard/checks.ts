@@ -272,6 +272,14 @@ const databaseCheck = (database: "ok" | SetupState, docker: Check | undefined): 
     return row("waiting", "waits for docker", "It starts once Docker runs.")
   if (database.status === "starting") return row("waiting", database.step, "Starting it now.")
   const start = { id: "database", label: "Start the database" } as const
+  if (database.status === "failed" && database.exposed) {
+    return row(
+      "MISSING",
+      database.reason,
+      "Other devices on your network can reach this database. Moving it keeps its data and lets only this Mac reach it.",
+      { id: "database", label: "Move the database onto this Mac alone" },
+    )
+  }
   return database.status === "failed"
     ? row("MISSING", database.reason, "Starting the database did not finish.", start)
     : row("MISSING", "not started", `${site.name} keeps its data in a database on this Mac.`, start)
