@@ -2,13 +2,15 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, userInfo } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 import { MARKER, makeScratch } from "@packages/safe-delete"
@@ -136,9 +138,15 @@ export const hidden = (home: string, uid: number, env: Record<string, string | u
 // The root tools a test could call by full path, where a fake first on PATH cannot reach
 export const ROOT_TOOLS = ["/usr/bin/pkexec", "/usr/bin/sudo"]
 
+// A file's own path past every link, resolving only its folder by realpath, since bun's realpathSync opens the file and so throws EACCES on one this user cannot read, as macOS's /usr/bin/sudo
+const ownFile = (path: string): string =>
+  lstatSync(path).isSymbolicLink()
+    ? ownFile(resolve(realpathSync(dirname(path)), readlinkSync(path)))
+    : join(realpathSync(dirname(path)), basename(path))
+
 // Each root tool's own file, since bwrap cannot bind over a symlink and GitHub's runner image links /usr/bin/sudo to the binary it picks; a call by the link's path then reaches the stand-in too
 export const rootFiles = (tools = ROOT_TOOLS) => [
-  ...new Set(tools.filter((tool) => existsSync(tool)).map((tool) => realpathSync(tool))),
+  ...new Set(tools.filter((tool) => existsSync(tool)).map(ownFile)),
 ]
 
 // On Linux each child runs under bwrap in a pid view of its own, so no test can signal a live process (portless's stop finds the live proxy's pid by its port and signals it), with an empty folder over each live one, the root stand-in over each root tool and ~/.ssh read-only; the host network stays, since the Docker tests reach their containers on 127.0.0.1, only a path that exists is mounted over, since bwrap would make a missing one on the real disk, and argv leads a process group of its own, as on macOS, since a group whose leader is bwrap outside the view reads as group 0 there (the dev launcher's record then names none); macOS runs argv as it is
@@ -177,9 +185,11 @@ export const wrap = (
   ]
 }
 
-// Why bwrap cannot start the box here, or null, tried as wrap's own argv around a no-op: missing, or refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap) or one of wrap's mounts, so a Linux run fails at its start with this line rather than running any test unsandboxed
+// Why bwrap cannot start the box here, or null, tried as wrap's own argv around a no-op: missing, or, once it ran, refused a user namespace (Ubuntu 24.04's AppArmor restriction, lifted by an AppArmor profile for bwrap) or one of wrap's mounts, so a Linux run fails at its start with this line rather than running any test unsandboxed
 export const bwrapRefusal = (probe: string[]): string | null => {
-  const tool = Bun.which("bwrap")
+  if (basename(probe[0] ?? "") !== "bwrap")
+    throw new Error(`bwrapRefusal takes wrap's argv, whose program is bwrap, not ${probe[0]}`)
+  const tool = Bun.which("bwrap", { PATH: process.env.PATH ?? "" })
   if (!tool)
     return "the test sandbox needs bwrap on Linux: install the bubblewrap package (sandbox.ts)"
   const run = Bun.spawnSync([tool, ...probe.slice(1)], {
@@ -188,5 +198,5 @@ export const bwrapRefusal = (probe: string[]): string | null => {
   })
   if (run.exitCode === 0) return null
   const line = run.stderr.toString().trim().split("\n").at(-1) ?? ""
-  return `the test sandbox could not start bwrap (${line}): install the bubblewrap package, and where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them (sandbox.ts)`
+  return `the test sandbox's bwrap refused the box (${line}): where AppArmor restricts unprivileged user namespaces, give bwrap an AppArmor profile that allows them, else fix the mount its line names (sandbox.ts)`
 }

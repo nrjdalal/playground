@@ -6143,6 +6143,11 @@ var JOBS = {
     description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 }
   }),
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description: "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true }
+  }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
     schedule: { every: 60 }
@@ -6436,7 +6441,8 @@ function filled(script, mark, value) {
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
-var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
+var REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)";
+var REDIRECT = new RegExp(`^(\\d*|&)${REDIRECT_OP}`);
 var RESERVED = new Set([
   "!",
   "{",
@@ -6723,7 +6729,7 @@ var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
 function sshCall({ args, first }) {
   if (program(first?.value ?? "") !== "ssh")
     return;
-  const call = { local: [], noStdin: false, remote: [], unread: false };
+  const call = { env: [], local: [], noStdin: false, remote: [], unread: false };
   let remoteCommand;
   const option = (word) => {
     const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
@@ -6734,6 +6740,8 @@ function sshCall({ args, first }) {
       call.local.push({ ...word, value: m?.[2] ?? "" });
     else if (key === "remotecommand")
       remoteCommand = { ...word, value: m?.[2] ?? "" };
+    else if (key === "sendenv" || key === "setenv")
+      call.env.push({ ...word, value: m?.[2] ?? "" });
   };
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -6782,7 +6790,70 @@ function staticLine(line) {
   const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
   return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename2(w.value).toLowerCase()));
 }
-function remoteEnv(env, line, fed = false) {
+var GLOB_SWITCHES = [
+  /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
+  /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
+];
+var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
+var bareText = (text) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+var NO_GLOB = new Set([
+  "errexit",
+  "errtrace",
+  "functrace",
+  "login",
+  "noclobber",
+  "noprofile",
+  "norc",
+  "nounset",
+  "pipefail",
+  "verbose",
+  "xtrace"
+]);
+var OPTION_REDIRECT = `(?:\\d*|&|\\{[A-Za-z_]\\w*\\})${REDIRECT_OP}`;
+var SHELL_HEAD = new RegExp(`(?<=^|[\\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\\d.]*\\d)?(?=[\\s<>;&|)]|$)(?=((?:${OPTION_REDIRECT}|[^;&|\\n])*))`, "gi");
+var LEADING_REDIRECT = new RegExp(`^${OPTION_REDIRECT}`);
+function optionSwitch(bare) {
+  for (const [, head, rest] of bare.matchAll(SHELL_HEAD)) {
+    const words = rest.split(/\s+/).filter(Boolean);
+    for (let i = 0;i < words.length; i++) {
+      const word = words[i];
+      const redirect = LEADING_REDIRECT.exec(word);
+      if (redirect) {
+        if (redirect[0] === word)
+          i++;
+        continue;
+      }
+      if (word === "--" || !/^[-+]/.test(word))
+        break;
+      const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word);
+      if (long) {
+        if (!NO_GLOB.has(long[1].replace(/-/g, "").toLowerCase()))
+          return `${head} ${word}`;
+        continue;
+      }
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word) || /[O4]/.test(word))
+        return `${head} ${word}`;
+      const o = word.indexOf("o");
+      if (o >= 0) {
+        const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean);
+        if (names.length === 0 || names.some((name) => !NO_GLOB.has(name.toLowerCase())))
+          return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
+        i++;
+      }
+    }
+  }
+}
+function globSwitch(text) {
+  const bare = bareText(text);
+  for (const pattern of GLOB_SWITCHES) {
+    const found = pattern.exec(bare);
+    if (found)
+      return found[0].trim();
+  }
+  return optionSwitch(bare);
+}
+function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -6802,7 +6873,8 @@ function remoteEnv(env, line, fed = false) {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: fed || !staticLine(line),
+    remoteDots: fed || !staticLine(line) || DIGIT_QUALIFIER.test(bareText(text)),
+    remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };
 }
@@ -7333,7 +7405,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -7354,6 +7430,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -7421,13 +7498,19 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
         opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
       }
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
@@ -10610,6 +10693,7 @@ var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWit
 var refuseUnwritten = (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} If this command writes nothing, report it to your lead as a false positive.`;
 var refuseNearEval = (program) => (what) => `no-extensions-write hook refuses ${what}: ${WHY_ROOT} Code ${program} -e runs from this folder may write there by a relative path; run ${program} -e from a worktree, with absolute paths built from process.env.HOME.`;
 var EVALUATES_ROOT = "text the shell runs as code (a glob qualifier, a parameter flag, a zsh =(\u2026) or a prompt expansion) that names the guarded folder; run its commands as calls of their own, with no expansion that evaluates";
+var GLOB_SWITCH = (found) => `no-extensions-write hook refuses a glob-option switch (${found.slice(0, 80)}) on a line a remote shell runs, which the hook refuses rather than reads, wider than the risk on purpose, since a switch can let a glob in the remote home match the data folder: drop the option, or run the line locally; a shell's options run there only as a cluster with no O or 4, and a -o or a long option (--login) naming ${[...NO_GLOB].join(", ")}, as in set -euo pipefail`;
 var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
 var READERS = new Set([
   "[",
@@ -11328,6 +11412,12 @@ var GUARD_KEYS = new Set([
   "sessions.names",
   "slack.gatedSends",
   "usage.keychainService",
+  "wa.alert",
+  "wa.alertCheck",
+  "wa.device",
+  "wa.guestPolicy",
+  "wa.owner",
+  "wa.replyPolicy",
   "yard.logReaders"
 ]);
 var JOB_PREFIX = "jobs.";
@@ -11408,7 +11498,7 @@ var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "s
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
   ext: ["--dry-run", "--yes"],
-  settings: ["--dry-run"]
+  settings: ["--dry-run", "--propose"]
 };
 function isCli(word, dirs) {
   tick();
@@ -12091,6 +12181,10 @@ function rooted(commands, files) {
     return true;
   return commands.some((cmd) => !!stdinShell(cmd) && !sshSpared(cmd, files) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
+async function xargsStdin(cmd, env) {
+  const own = cmd.redirects.some((r) => /^0?$/.test(r.fd) && r.op.startsWith("<"));
+  return stdinOf(cmd.braceFed && !own && !cmd.stdin ? { ...cmd, stdin: cmd.braceFed } : cmd, env);
+}
 function sshSpared(cmd, files) {
   if (cmd.stdin || !sshCall(parse3(cmd)))
     return false;
@@ -12244,16 +12338,24 @@ function cliWrite(words, tuning) {
   const positional = [];
   let dry = false;
   let scoped = false;
+  const options = [];
+  let ownerId;
   for (let k = 0;k < rest.length; k++) {
     const word = rest[k];
-    if (word !== undefined && switches.includes(word))
+    if (word !== undefined && switches.includes(word)) {
       dry ||= word === "--dry-run";
-    else if (word?.startsWith("--")) {
+      options.push(word);
+    } else if (word?.startsWith("--")) {
       scoped ||= word.startsWith("--scope");
+      if (word === "--from-owner-msg")
+        ownerId = rest[k + 1];
+      options.push(word);
       k++;
     } else
       positional.push(word);
   }
+  const ownerMsg = options.length === 1 && options[0] === "--from-owner-msg" && !!ownerId && positional.length === 2;
+  const proposal = options.length === 1 && options[0] === "--propose" && positional.length === 2;
   if (command === "settings") {
     if (verb === "import-jobs")
       return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;
@@ -12262,6 +12364,10 @@ function cliWrite(words, tuning) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
+    if (verb === "set" && ownerMsg)
+      return;
+    if (verb === "set" && proposal)
+      return;
     const job = key.startsWith(JOB_PREFIX);
     if (!GUARD_KEYS.has(key) && !job)
       return;
@@ -12328,8 +12434,6 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     reachSeen.set(at, names);
     return names;
   };
-  const bare = typeof input.command === "string" ? input.command.replace(/\\\n/g, "").replace(/['"\\_]/g, "") : "";
-  const dotsOn = /dotglob|globdots|globignore/i.test(bare) || /\b(?:emulate|set|setopt|zsh)\b[^;&|\n]*\s[-+][a-z0-9]*4/i.test(bare);
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
     const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
@@ -12387,7 +12491,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
         const folder = dir && dirname4(dir);
         const segment = text.value.slice(text.value.lastIndexOf("/", glob.index) + 1).split("/")[0];
         const climbs = text.value.slice(glob.index).split("/").includes("..");
-        const reaches = (folder) => inRoot(folder) || (real(folder) === sep2 ? rootNames().some((entry) => mayMatch(segment, entry)) : !env.remote || remover || climbs || reachNames(folder).some((name) => globMatches2(segment, name, dotsOn || !!env.remoteDots)));
+        const reaches = (folder) => inRoot(folder) || (real(folder) === sep2 ? rootNames().some((entry) => mayMatch(segment, entry)) : !env.remote || remover || climbs || reachNames(folder).some((name) => globMatches2(segment, name, !!env.remoteDots)));
         if (folder && (inRoot(folder) || above(folder, true)) && reaches(folder))
           return `${text.value}, a glob in ${folder}`;
       }
@@ -12498,8 +12602,11 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const visit = async (cmd, parsed, env) => {
     if (patterns.has(cmd))
       return;
+    if (env.remote && env.remoteSwitch)
+      return GLOB_SWITCH(env.remoteSwitch);
     if (sshFed.has(cmd) && !env.remote) {
-      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true));
+      const fed = cmd.words.map((word) => word.value).join(" ");
+      const verdict = await visit(cmd, parsed, remoteEnv(env, "", true, fed));
       if (verdict)
         return verdict;
     }
@@ -12507,6 +12614,12 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const fedText = ssh && stdinShell(cmd) ? sshInput(cmd)?.body : undefined;
     if (fedText && (fedText.unknown || marked(fedText.value)))
       return refuse("an ssh whose remote shell runs a here-string or heredoc holding a part the hook cannot read; write the script literally");
+    const envSwitch = globSwitch((ssh?.env ?? []).map((w) => w.value).join(" "));
+    if (envSwitch)
+      return GLOB_SWITCH(`ssh -o ${envSwitch}`);
+    const envUnread = ssh?.env.find((w) => marked(w.value) || /[*?]/.test(w.value));
+    if (envUnread)
+      return refuse(`an ssh -o SetEnv or SendEnv of ${shown(envUnread)}, a value or pattern the hook cannot read, which may start the remote shell with a glob-option switch; name each variable literally`);
     for (const local of ssh?.local ?? []) {
       if (marked(local.value.split(/[=\s]/)[0] ?? ""))
         return refuse(`an ssh -o of ${shown(local)}, a value the hook cannot read, which may name a command ssh runs on this machine through a shell; write the option literally`);
@@ -12520,17 +12633,18 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const own = { ...cmd, words: cmd.words.filter((word) => !ssh.remote.includes(word)) };
       sshOwn.add(own);
       const remote = lex(line, at.known);
-      const head = remote.commands[0];
-      const input = sshInput(cmd);
-      if (head && !head.stdin && !sshInput(head) && !ssh.noStdin && parse3(head).xargs) {
-        const target = input?.op === "<" ? input.target : undefined;
-        const path = target && pathOf(target, env);
+      const input = ssh.noStdin ? { body: { value: "" }, fd: "", op: "<<<" } : sshInput(cmd);
+      const target = input?.op === "<" ? input.target : undefined;
+      const path = target && pathOf(target, env);
+      for (const each of remote.commands) {
+        if (each.stdin || each.braceFed || sshInput(each) || !parse3(each).xargs)
+          continue;
         if (input?.body)
-          head.redirects = [input, ...head.redirects];
+          each.redirects = [input, ...each.redirects];
         else if (input && target && path)
-          head.redirects = [{ ...input, target: { ...target, value: path } }, ...head.redirects];
+          each.redirects = [{ ...input, target: { ...target, value: path } }, ...each.redirects];
         else if (!input && cmd.stdin)
-          head.stdin = cmd.stdin;
+          each.stdin = cmd.stdin;
       }
       return await visit(own, parse3(own), env) ?? run(remote, at, visit, true);
     }
@@ -12740,7 +12854,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const delimiter = xargsOwn.some((word) => XARGS_DELIMITER.test(word));
     const argFile = xargsOwn.some((word) => XARGS_ARG_FILE.test(word));
     const argWord = argFile ? { quoted: false, value: UNKNOWN } : undefined;
-    const fed = xargs ? await stdinOf(cmd, env) : undefined;
+    const fed = xargs ? await xargsStdin(cmd, env) : undefined;
     const fedSplit = !fed || fed.unknown ? undefined : delimiter || xargsOwn.some((word) => XARGS_NUL.test(word)) ? fed.value.split(/\s+/).filter(Boolean) : xargsWords(fed.value);
     const stdinWords = [
       ...!fed ? [] : fedSplit ? fedSplit.map((value) => ({ quoted: false, value })) : [{ quoted: false, value: UNKNOWN }],
@@ -12881,7 +12995,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       }
       if (!(name === "tee" && !rootLine) && cmd.redirects.some((r) => r.body && holds(r.body.value, here)))
         return refuse(`${verb} with a script that names ${root}`);
-      const unreadFeed = fed && remover ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
+      const unreadFeed = fed && (remover || WRITERS.has(tool) && textDepth === 0 && !argFile) ? argFile ? "the file its -a names" : fed.unknown || marked(fed.value) || !fedSplit ? fed.unknown ?? (fedSplit ? "a value it cannot read" : "stdin holding a quote it does not close") : undefined : undefined;
       if (unreadFeed)
         return refuse(`${verb} under xargs fed by ${unreadFeed}, a value the hook does not hold; write the paths literally in the call`);
       if (fed) {
@@ -12963,16 +13077,18 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     vars: new Map,
     visitShells: true
   };
-  const [only, ...rest] = lexed.commands;
+  const shellAt = lexed.commands.findIndex((cmd) => !!stdinShell(cmd));
+  const fed = lexed.commands[shellAt];
   const plain = (cmd) => !cmd.inner && ![...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => word.procs);
   const fedBy = (cmd) => {
-    for (let at = cmd.stdin;at; at = at.stdin)
-      if (at === only)
+    for (let from = cmd.stdin;from; from = from.stdin)
+      if (from === fed)
         return true;
     return false;
   };
-  const alone = !!only && plain(only) && rest.every((cmd) => plain(cmd) && fedBy(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? "")));
-  rootLine = rooted(lexed.commands, alone ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
+  const reader = (cmd) => plain(cmd) && PIPE_READERS.has(program(parse3(cmd).name)) && cmd.redirects.every((r) => r.op === ">&" && /^\d$/.test(r.target?.value ?? ""));
+  const feedUnwritten = !!fed && plain(fed) && lexed.commands.every((cmd, k) => k === shellAt || (k < shellAt || fedBy(cmd) ? reader(cmd) : plain(cmd) && !stdinShell(cmd) && cmd.follows !== "&"));
+  rootLine = rooted(lexed.commands, feedUnwritten ? { from: /\b(?:cd|popd|pushd)\b/.test(command) ? undefined : directory } : undefined);
   sshFed = new Set([...codeFed(lexed.commands)].filter(([, { consumer }]) => !!sshCall(parse3(consumer))).map(([producer]) => producer));
   if (evaluatedParts(command).some((part) => touches(part, env)))
     return refuse(EVALUATES_ROOT);

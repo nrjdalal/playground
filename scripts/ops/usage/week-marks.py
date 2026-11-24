@@ -40,14 +40,17 @@ samples, others_samples = os.path.join(HERE, "week-samples.jsonl"), os.path.join
 
 
 def pace(rows):
-    """The week's %/h, its words naming the window, and its bound: the last hour's, else the last 6 hours' while the whole-percent reading held through the hour; one held through every window reads under one point over the span it covers, rounded up, as 0 bounded by that. None with under 15 minutes of readings."""
+    """The week's %/h, its words naming the window, and its bound: the last hour's, else the last 6 hours' while the whole-percent reading held through the hour; a single whole-point step in the last hour is read over the 6-hour window instead while that window holds an older reading, since one point over a short span reads as a steep rate; one held through every window reads under one point over the span it covers, rounded up, as 0 bounded by that. None with under 15 minutes of readings."""
     flat, seen = None, 0
     for hours in (1, 6):
         w = [r for r in rows if r["t"] >= now - hours * 3600]
         span = w[-1]["t"] - w[0]["t"] if w else 0
         if span < 900 or len(w) == seen:
             continue
-        seen, rate = len(w), (w[-1]["week"] - w[0]["week"]) / span * 3600
+        if hours == 1 and w[-1]["week"] - w[0]["week"] == 1 and sum(r["t"] >= now - 6 * 3600 for r in rows) > len(w):
+            continue
+        seen = len(w)
+        rate = (w[-1]["week"] - w[0]["week"]) / span * 3600
         if rate:
             return rate, f"{rate:.1f}%/h over {hours}h", rate
         bound = math.ceil(3600 / span * 10) / 10
@@ -56,10 +59,17 @@ def pace(rows):
 
 
 def sample(path, t, account, used, reset):
-    """Append this reading, and return the account's samples in this week with its pace()."""
-    with open(path, "a") as f:
-        f.write(json.dumps({"t": t, "week": used, "reset": reset, "account": account}) + "\n")
-    rows = [r for r in (json.loads(l) for l in open(path) if l.strip()) if r.get("account", account) == account and abs(r["reset"] - reset) < 300]
+    """Append this reading, unless it is the account's newest row already (a stale reading usage.json still holds), and return the account's samples in this week with its pace()."""
+    try:
+        mine = [r for r in (json.loads(l) for l in open(path) if l.strip()) if r.get("account", account) == account]
+    except FileNotFoundError:
+        mine = []
+    if not mine or mine[-1]["t"] != t:
+        row = {"t": t, "week": used, "reset": reset, "account": account}
+        with open(path, "a") as f:
+            f.write(json.dumps(row) + "\n")
+        mine.append(row)
+    rows = [r for r in mine if abs(r["reset"] - reset) < 300]
     return rows, pace(rows)
 
 

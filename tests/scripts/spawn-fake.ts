@@ -130,6 +130,14 @@ fake(
 case " $* " in *" -w "*) [ -n "$FAKE_EMPTY_TOKEN" ] || echo "${TOKEN}" ;; *) echo 'keychain: "/fake.keychain-db"' ;; esac
 exit 0`,
 )
+// The local model's server, which no case reaches: curl logs its args to curl.args and answers the model list with FAKE_LOCAL_MODELS (K's served name and its 131072-token window by default), or fails as a closed port does under FAKE_LOCAL_DOWN.
+fake(
+  "curl",
+  `printf '%s\\n' "$*" >> "$HOME/curl.args"
+[ -n "$FAKE_LOCAL_DOWN" ] && { echo "curl: (7) Failed to connect to 127.0.0.1 port 8000" >&2; exit 7; }
+[ -n "$FAKE_LOCAL_MODELS" ] && { echo "$FAKE_LOCAL_MODELS"; exit 0; }
+echo '{"object":"list","data":[{"id":"local","max_model_len":131072}]}'`,
+)
 // A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
 fake(
   "bun",
@@ -182,7 +190,7 @@ fake(
   `[ -n "$FAKE_UPTIME_BROKEN" ] && exit 1
 echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
 )
-// The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
+// The swap-in read, vm_stat -c <n> 1: its first row the totals since boot, then one row a second for the n-1 seconds after, swap-ins at FAKE_SWAPINS's words in turn (0 by default), its last word held for any second past them.
 fake(
   "vm_stat",
   `[ -n "$FAKE_LINUX" ] && { echo "vm_stat: command not found" >&2; exit 127; }
@@ -190,7 +198,10 @@ fake(
 echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
 echo "    free  pageins  pageout  swapins swapouts"
 echo "    8023  346118K   502178  9966113 12153731"
-echo "    7698      542        0  \${FAKE_SWAPINS:-0}        0"`,
+vals=(\${FAKE_SWAPINS:-0})
+for ((i = 0; i < \${2:-2} - 1; i++)); do
+  echo "    7698      542        0  \${vals[i]:-\${vals[\${#vals[@]} - 1]}}        0"
+done`,
 )
 // sleep as it is, but first the next second read's /proc text moves in (FAKE_SLEEP)
 fake("sleep", FAKE_SLEEP.replace("#!/bin/bash\n", ""))
@@ -445,6 +456,7 @@ export async function spawn(
     rosterLog: (await read("roster.log"))?.filter(Boolean),
     rosterAtClose: (await read("roster-at-close.log"))?.filter(Boolean),
     rosterAtRun: (await read("roster-at-run.log"))?.filter(Boolean),
+    curl: (await read("curl.args"))?.filter(Boolean),
     security: (await read("security.args"))?.filter(Boolean),
   }
 }

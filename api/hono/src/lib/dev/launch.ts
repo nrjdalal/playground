@@ -30,6 +30,7 @@ import {
   locate as locateOwner,
   prove as proveOwner,
 } from "@/lib/sessions/guard"
+import { isNamedContainer, setupName } from "@/lib/setup/container"
 
 // What `bun run dev` hands turbo: the shell's environment, less what would boot the wrong stage, plus the settings and the sha the stack runs with.
 
@@ -300,7 +301,7 @@ export type Dashboard =
   | { kind: "live"; rule: DashboardRule }
 
 export type Preflight =
-  | { dashboard: Dashboard; ok: true; proof: string }
+  | { dashboard: Dashboard; ok: true; proof: string; warning?: string }
   | { ok: false; refusal: string }
 
 const refuse = (refusal: string): Preflight => ({ ok: false, refusal })
@@ -422,10 +423,21 @@ export async function preflight(
   }
   if (!url) return { dashboard, ok: true, proof: SETUP_MODE }
   let located: Located
+  let warning: string | undefined
   try {
     located = locate(url)
   } catch (error) {
-    return refuseFor(error)
+    // First run's own container predates the loopback rule, so the guard refuses it as exposed though it holds this stack's data: let it through to the checks below, and warn with the guard's keep-data fix.
+    if (
+      !(error instanceof GuardError) ||
+      error.failure !== "exposed" ||
+      !error.located ||
+      !isNamedContainer(setupName(root, branch, liveDashboard), error.located.owner.name)
+    ) {
+      return refuseFor(error)
+    }
+    located = error.located
+    warning = error.message
   }
   if (othersLiveDashboard(located.owner.name, branch, liveDashboard)) {
     return refuse(
@@ -441,7 +453,7 @@ export async function preflight(
         `database lacks ${lacking} migration${lacking === 1 ? "" : "s"}: run bun run db:migrate`,
       )
     }
-    return { dashboard, ok: true, proof }
+    return { dashboard, ok: true, proof, ...(warning && { warning }) }
   } catch (error) {
     return refuseFor(error)
   }

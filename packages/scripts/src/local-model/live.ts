@@ -1,6 +1,7 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 
+import { LOCAL_URL } from "@packages/config/console"
 import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import { localModelSettings, readPolicyOrDefaults } from "@packages/settings"
@@ -146,4 +147,14 @@ export const keepBeat = async (data: string): Promise<string[]> => {
     if (line) lines.push(line)
   }
   return lines
+}
+
+// The local model's current /metrics, read at LOCAL_URL, where every local session reaches it with or without a model record, so a session's stuck read can skip a session the model still serves; null when the read fails or its status is not 200.
+export const readModelMetrics = async (url = LOCAL_URL): Promise<string | null> => {
+  try {
+    const res = await fetch(`${url}/metrics`, { signal: AbortSignal.timeout(5_000) })
+    return res.status === 200 ? await res.text() : null
+  } catch {
+    return null
+  }
 }

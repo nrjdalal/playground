@@ -2,26 +2,31 @@ import { hostname } from "node:os"
 import { join } from "node:path"
 
 import { writeAtomic } from "../write-atomic"
+import type { Snapshot, Speed } from "./speed"
 
 // The loopback ports a model server takes on its machine, the first free one first; on the peer, ops-model-tunnel forwards each to this machine's loopback at 10000 more.
 export const PORTS = [8000, 8001] as const
 
-// One server playground model use started: the container it started it under, the only name it ever stops; its port on its machine; the memory share and the most sessions it was sized for; when it started, and when it last had a request, which the keep beat reads.
+// One server playground model use started: the container it started it under, the only name it ever stops; its port on its machine; the memory share and the most sessions it was sized for; when it started, and when it last had a request, which the keep beat reads; the beat's last /metrics snapshot and the speed since the one before, which the local gate reads.
 export type ModelServer = {
   busyAt: string
   container: string
   maxSessions: number
+  metrics?: Snapshot
   port: number
   share: number
+  speed?: Speed
   startedAt: string
 }
 
-// One machine's part: each server left running there, by its model's folder, the hold while a swap runs there, and the keep beat's last refusal, said once.
+// One machine's part: each server left running there, by its model's folder, the hold while a swap runs there, the keep beat's last refusal, said once, and each entry it skips, each named once.
 export type MachineState = {
   // while set, nothing starts on that machine but `for`
   hold?: { for: string; since: string }
   refused?: string
   servers?: Record<string, ModelServer>
+  // each entry the keep beat skips, with the line ops was told, so each is told once
+  skipped?: Record<string, string>
 }
 
 // What playground model use did, kept in this machine's data folder, by machine: this one by its short hostname, a peer by its PLAYGROUND_PEERS name. The local-worker gate and the Dashboard's chat read it.

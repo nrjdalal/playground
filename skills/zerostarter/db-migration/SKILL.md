@@ -45,14 +45,14 @@ docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0
 docker port playground-<worktree>-db 5432    # 127.0.0.1:<port>, the host port Docker picked
 ```
 
-With `POSTGRES_URL` left empty, `bun run dev` opens `/dashboard` on first run's checks, whose Database row's Start a local container starts its container with pglaunch instead, listening on every interface with pglaunch's own credentials, then migrates and writes the URL into `.env` (`.agents/dashboard/stack.md`); a worktree's test database keeps the loopback `docker run` above.
+With `POSTGRES_URL` left empty, `bun run dev` opens `/dashboard` on first run's checks, whose Database row's Start a local container starts its container on loopback alone with the container's own credentials, then migrates and writes the URL into `.env` (`.agents/dashboard/stack.md`); a worktree's test database keeps the loopback `docker run` above.
 
 `127.0.0.1::5432` publishes the database on loopback alone, so nothing on the network reaches it. Start the worktree's `.env` from `.env.example` rather than a copy of another checkout's, which carries that checkout's database (the live dashboard's included), and set `POSTGRES_URL=postgres://postgres:<pw>@127.0.0.1:<port>/postgres` in it; then migrate and seed into it. Docker picks a new port each time the container starts again (`docker start` of a stopped container, `docker restart`, or Docker itself restarting), so read it again with `docker port playground-<worktree>-db 5432` then and update `POSTGRES_URL` in `.env`; a password unique to the worktree makes a stale URL fail to sign in rather than reach whichever container took its old port. One container per worktree, so two branches with different migrations cannot corrupt each other. Two things follow:
 
 - Seed your own fake rows rather than copying real ones. The live dashboard's database holds real sessions, secrets and customer data among them, and a screenshot or a response body from it must never reach a PR.
 - Applying to the live dashboard's database is the dashboard runner's act, after the change merges, not while it is being built.
 
-Two containers stand apart from that rule, each by the owner's choice: first run's pglaunch database, on all interfaces (above), and a Vibeground's copy, which holds real data so a Vibeground shows real rows while its database changes stay in a copy that is thrown away, seeded by the one read above (`api/hono/src/lib/dashboard/vibe.ts`). Its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
+Two containers stand apart from that rule, each by the owner's choice: first run's container, on loopback alone (above), and a Vibeground's copy, which holds real data so a Vibeground shows real rows while its database changes stay in a copy that is thrown away, seeded by the one read above (`api/hono/src/lib/dashboard/vibe.ts`). Its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
 
 A worktree that works on the merge lock's Redis (`@packages/redis`) runs its own the same way, `docker run -d --name playground-<worktree>-redis -p 127.0.0.1::6379 redis:alpine`, with `REDIS_URL` in its `.env`; left blank, the lock keeps to its folder.
 

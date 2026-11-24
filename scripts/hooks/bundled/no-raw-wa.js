@@ -317,7 +317,8 @@ function filled(script, mark, value) {
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
-var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
+var REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)";
+var REDIRECT = new RegExp(`^(\\d*|&)${REDIRECT_OP}`);
 var RESERVED = new Set([
   "!",
   "{",
@@ -604,7 +605,7 @@ var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
 function sshCall({ args, first }) {
   if (program(first?.value ?? "") !== "ssh")
     return;
-  const call = { local: [], noStdin: false, remote: [], unread: false };
+  const call = { env: [], local: [], noStdin: false, remote: [], unread: false };
   let remoteCommand;
   const option = (word) => {
     const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
@@ -615,6 +616,8 @@ function sshCall({ args, first }) {
       call.local.push({ ...word, value: m?.[2] ?? "" });
     else if (key === "remotecommand")
       remoteCommand = { ...word, value: m?.[2] ?? "" };
+    else if (key === "sendenv" || key === "setenv")
+      call.env.push({ ...word, value: m?.[2] ?? "" });
   };
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -663,7 +666,70 @@ function staticLine(line) {
   const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
   return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()));
 }
-function remoteEnv(env, line, fed = false) {
+var GLOB_SWITCHES = [
+  /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
+  /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
+];
+var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
+var bareText = (text) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+var NO_GLOB = new Set([
+  "errexit",
+  "errtrace",
+  "functrace",
+  "login",
+  "noclobber",
+  "noprofile",
+  "norc",
+  "nounset",
+  "pipefail",
+  "verbose",
+  "xtrace"
+]);
+var OPTION_REDIRECT = `(?:\\d*|&|\\{[A-Za-z_]\\w*\\})${REDIRECT_OP}`;
+var SHELL_HEAD = new RegExp(`(?<=^|[\\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\\d.]*\\d)?(?=[\\s<>;&|)]|$)(?=((?:${OPTION_REDIRECT}|[^;&|\\n])*))`, "gi");
+var LEADING_REDIRECT = new RegExp(`^${OPTION_REDIRECT}`);
+function optionSwitch(bare) {
+  for (const [, head, rest] of bare.matchAll(SHELL_HEAD)) {
+    const words = rest.split(/\s+/).filter(Boolean);
+    for (let i = 0;i < words.length; i++) {
+      const word = words[i];
+      const redirect = LEADING_REDIRECT.exec(word);
+      if (redirect) {
+        if (redirect[0] === word)
+          i++;
+        continue;
+      }
+      if (word === "--" || !/^[-+]/.test(word))
+        break;
+      const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word);
+      if (long) {
+        if (!NO_GLOB.has(long[1].replace(/-/g, "").toLowerCase()))
+          return `${head} ${word}`;
+        continue;
+      }
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word) || /[O4]/.test(word))
+        return `${head} ${word}`;
+      const o = word.indexOf("o");
+      if (o >= 0) {
+        const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean);
+        if (names.length === 0 || names.some((name) => !NO_GLOB.has(name.toLowerCase())))
+          return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
+        i++;
+      }
+    }
+  }
+}
+function globSwitch(text) {
+  const bare = bareText(text);
+  for (const pattern of GLOB_SWITCHES) {
+    const found = pattern.exec(bare);
+    if (found)
+      return found[0].trim();
+  }
+  return optionSwitch(bare);
+}
+function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -683,7 +749,8 @@ function remoteEnv(env, line, fed = false) {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: fed || !staticLine(line),
+    remoteDots: fed || !staticLine(line) || DIGIT_QUALIFIER.test(bareText(text)),
+    remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };
 }
@@ -1210,7 +1277,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -1231,6 +1302,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -1298,13 +1370,19 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
         opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
       }
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;

@@ -3,6 +3,7 @@ import {
   RiAlarmWarningLine,
   RiCheckboxBlankCircleLine,
   RiCheckboxCircleLine,
+  RiCircleLine,
   RiErrorWarningLine,
   RiEyeFill,
   RiGitMergeLine,
@@ -13,7 +14,6 @@ import {
   RiPauseCircleLine,
   RiPauseLine,
   RiQuestionLine,
-  RiRobot2Line,
   RiSearchEyeLine,
   RiShieldLine,
   RiShutDownLine,
@@ -29,10 +29,7 @@ import {
   type RemixiconComponentType,
 } from "@remixicon/react"
 
-import { logoOf } from "@/components/dashboard/model-logo"
 import { checkerOf, LIGHT_LABELS, STUCK } from "@/lib/dashboard"
-import MODEL_ICONS from "@/lib/model-icons.json"
-import type { Provider } from "@/lib/model-label"
 
 // Worker Lights: every agent's one icon, the most urgent state first (lightOf, below), so the sidebar, its collapsed rail and the Agents table draw the same mark for the same state. Its shape says what the agent is doing, its colour whether anyone needs to act. A reviewer or tester that has given its verdict at the head reads done.
 export type ShownState =
@@ -146,17 +143,8 @@ const EFFORT_ICONS: Record<string, RemixiconComponentType> = {
 export const effortIcon = (effort: string | null): RemixiconComponentType | null =>
   effort && Object.hasOwn(EFFORT_ICONS, effort) ? (EFFORT_ICONS[effort] ?? null) : null
 
-// Each maker's icon, by providerOf's provider, from the vendored model-icons.json (bun run model-icons): models.dev's logo, else its Hugging Face avatar; a maker with neither is absent and draws the fallback.
-export const PROVIDER_ICONS: Partial<Record<Provider, RemixiconComponentType>> = Object.fromEntries(
-  MODEL_ICONS.makers.flatMap(({ icon, id }) => (icon ? [[id, logoOf(icon)]] : [])),
-)
-
-export const FALLBACK_PROVIDER_ICON: RemixiconComponentType = RiRobot2Line
-
-// A provider's icon, else the one fallback.
-export const providerIcon = (provider: Provider | null): RemixiconComponentType =>
-  (provider && Object.hasOwn(PROVIDER_ICONS, provider) && PROVIDER_ICONS[provider]) ||
-  FALLBACK_PROVIDER_ICON
+// The plain circle a local model's row draws in the effort's place while it has no effort set (rowEffort); with one set it draws that effort's bars, as a Claude row does.
+export const LOCAL_EFFORT_ICON: RemixiconComponentType = RiCircleLine
 
 // A session busy with no new transcript line for this long is hung (a stuck command, a frozen Docker, a network call that never returns).
 export const NO_PROGRESS_MS = 30 * 60_000

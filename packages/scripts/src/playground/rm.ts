@@ -1,53 +1,81 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, hostname } from "node:os"
 import { dirname, join } from "node:path"
 
+import { managerOf } from "@packages/config/kinds"
+import { cloneOf } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
+  deleteWeights,
   isAgentBrowser,
+  isWeights,
   linkPlaces,
   listTrash,
   type Proc,
   quarantine,
+  removeReplay,
+  replayPlace,
   restore,
   type Roots,
+  type Refusal,
   type WorktreeGit,
   worktreeRepo,
 } from "@packages/safe-delete"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { ghRead, isUnreachable, type Unreachable } from "../gh-read"
+import { dropPaths, peerArgv, readRecord } from "../machine-record/record"
 import { mainCheckout } from "../main-checkout"
+import { peersOf } from "../ops-tick/peers"
+import {
+  CARD_ID,
+  type CardPick,
+  type CardState,
+  readCard,
+  savedPicks,
+} from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
+import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
   | {
+      card?: string
       discard: boolean
       path: string
+      peer?: string
       pr?: string
       reason: string
       worktree: boolean
     }
 
-// playground rm's words: one path, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path with an optional --card, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
+  let reasonGiven = false
   let worktree = false
   let discard = false
   let pr: string | undefined
+  let card: string | undefined
+  let peer: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
-    if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
+    if (word === "--reason" && words[i + 1] !== undefined) {
+      reason = words[++i]!
+      reasonGiven = true
+    } else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
+      card = words[++i]!
+    else if (word === "--peer" && words[i + 1] !== undefined && peer === undefined)
+      peer = words[++i]!
     else if (word === "--discard" && !discard) discard = true
     else if (word === "--pr" && words[i + 1] !== undefined && pr === undefined) pr = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
@@ -56,11 +84,19 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined || (discard && !worktree) || (pr !== undefined && !worktree)
+  return path === undefined ||
+    (discard && !worktree) ||
+    (pr !== undefined && !worktree) ||
+    (card !== undefined && worktree) ||
+    (peer !== undefined && card === undefined) ||
+    (peer !== undefined && worktree) ||
+    (peer !== undefined && reasonGiven)
     ? { error: RM_USAGE }
     : {
+        ...(card === undefined ? {} : { card }),
         discard,
         path,
+        ...(peer === undefined ? {} : { peer }),
         ...(pr === undefined ? {} : { pr }),
         reason,
         worktree,
@@ -81,15 +117,23 @@ export const freedOf = (
 
 // What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, the default branch gh names for a worktree's repo, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR read by its --pr or else its branch (PrRead), and the session's name.
 export type RmDeps = {
+  // Each Remove the owner picked on a nightly-clean card, read from the Inbox by its id, or why it did not read; absent where no Inbox is read, which refuses every --card.
+  approvals?: (card: string) => Promise<CardPick[] | string>
   clones: () => Clone[]
   data: string
   defaultBranch: (at: string) => string | null
   home: string
   // The live.branch setting, whose worktree rm never removes; it throws when the policy does not parse.
   liveBranch: () => string
+  // this machine's short name, the one a card's question names
+  machine?: string
   main: string
   merged: (sha: string, at: string) => boolean | null
+  // The head of the PR at url once it reads MERGED, from gh in the worktree, else null.
+  mergedHead: (path: string, url: string) => string | null
   notify: (text: string) => void
+  // The one ssh to a peer: one command it runs on the named peer, or why the peer cannot be reached.
+  peer?: (machine: string, command: string) => Promise<{ code: number; out: string }>
   places: () => string[]
   prState: (path: string, pr?: string) => Promise<PrRead>
   procs: () => Proc[] | null
@@ -205,6 +249,25 @@ export const prStateOf = (
     : null
 }
 
+// The head of the PR at url once it reads MERGED, from gh in the worktree through ghRead, by the URL so it answers for that PR's own repo; null while it reads open or closed, or when gh cannot answer, a skipped or stopped read included.
+const mergedHead = (path: string, url: string): string | null =>
+  ghOut(
+    [
+      "pr",
+      "view",
+      url,
+      "--json",
+      "state,headRefOid",
+      "--jq",
+      'if .state == "MERGED" then .headRefOid else "" end',
+    ],
+    path,
+  ) || null
+
+// The worktree's own PR number as a holder field, from rm's prState answer, none when it names no PR or gh was unreachable.
+export const ownPrOf = (own: PrRead | undefined): { ownPr?: number } =>
+  own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}
+
 // A worktree's PR state from gh in it through ghRead, the --pr URL's else its branch's, by prStateOf, unreachable when ghRead skips or stops gh, or null when gh or git cannot answer.
 const prState = async (path: string, pr?: string): Promise<PrRead> => {
   const gh = (args: string[]): unknown => {
@@ -247,16 +310,65 @@ export const rmDeps = (repo: string): RmDeps => ({
   liveBranch,
   main: mainCheckout(repo),
   merged,
+  mergedHead,
   notify: (text) =>
     void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
       env: { ...process.env, NOTIFY_TO: "dispatcher" },
       stderr: "ignore",
       stdout: "ignore",
     }),
+  // The one ssh to a peer: shape sshArgs's argv, run it, and return its code with its stdout and stderr, where the far end prints a refusal, or why the peer cannot be reached.
+  peer: async (machine, command) => {
+    const home = homedir()
+    const cluster = await peersOf(repo, home)
+    if ("why" in cluster) return { code: 1, out: cluster.why }
+    const peer = cluster.peers.find((p) => p.name === machine)
+    if (!peer) return { code: 1, out: `no peer ${machine} in the cluster` }
+    const clone = cloneOf(repo, home)
+    if (clone === null) return { code: 1, out: `this checkout is not a plain path under ${home}` }
+    const argv = peerArgv(cluster.key, peer.target, clone, command)
+    const ran = await Bun.spawn(argv, { stdin: "ignore", stderr: "pipe", stdout: "pipe" })
+    const [stdout, stderr] = await Promise.all([
+      new Response(ran.stdout).text(),
+      new Response(ran.stderr).text(),
+      ran.exited,
+    ])
+    return { code: ran.exitCode ?? 1, out: `${stdout}${stderr}` }
+  },
   places: linkPlaces,
   prState,
   procs: processes,
   session: sessionName,
+  // the card's picks, counted only on the card as nightly-clean saved it in its state file
+  approvals: async (id) => {
+    const item = await readCard(async (args) => {
+      const read = Bun.spawnSync(
+        ["bun", "run", "--silent", "--cwd", mainCheckout(repo), "ask", ...args],
+        {
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      )
+      // stdout is the card, stderr only on a failure, so --card's stdout parses whole
+      return {
+        code: read.exitCode,
+        out: read.exitCode === 0 ? read.stdout.toString() : `${read.stderr}${read.stdout}`,
+      }
+    }, id)
+    if (typeof item === "string") return item
+    try {
+      const roster = JSON.parse(readFileSync(join(dataDir(), "roster.json"), "utf8")) as {
+        agents?: unknown
+      }
+      const state = JSON.parse(
+        readFileSync(join(dataDir(), "ops", "tick", "nightly-clean.json"), "utf8"),
+      ) as { card?: CardState }
+      return savedPicks(item, managerOf(roster.agents, "ops"), state.card, id)
+    } catch (error) {
+      return (error as Error).message
+    }
+  },
+  machine: hostname().split(".")[0]!,
 })
 
 const gitIn = (cwd: string, ...args: string[]) => {
@@ -355,6 +467,35 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     )
     return 0
   }
+  const folders = (await readRecord(deps.data).catch(() => ({ entries: [] }))).entries
+    .filter((e) => e.kind === "folder")
+    .map((e) => e.path)
+  if (args.card !== undefined) {
+    if (!CARD_ID.test(args.card)) {
+      console.error(`playground: ${args.card} is not an Inbox card id`)
+      return 2
+    }
+    return removeApproved(args, args.card, folders, roots, deps)
+  }
+  if (
+    args.worktree &&
+    !worktreeRepo(args.path, roots) &&
+    replayPlace(args.path, deps.home, folders)
+  ) {
+    if (args.discard || args.pr !== undefined) {
+      console.error(
+        `playground: ${args.path} is a replay worktree, which takes neither --discard nor --pr: its work is written to ${args.path}.diff first`,
+      )
+      return 2
+    }
+    const done = removeReplay(args.path, { folders, procs: deps.procs() }, roots)
+    if ("refused" in done) {
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    console.log(`Removed the replay worktree ${args.path}; its work is kept in ${done.diff}`)
+    return 0
+  }
   const moved = await removePath(args, await deps.session(), deps, (line) =>
     console.log(`playground: ${line}`),
   )
@@ -363,6 +504,115 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   console.log(moved.line)
+  return 0
+}
+
+// Pure: the far end's command for one approved weights path on a peer, each word single-quoted, since peerArgv hands it to the peer's shell.
+export const rmPeerCommand = (path: string, bytes: number, card: string): string =>
+  [
+    "packages/scripts/src/playground/rm-peer.ts",
+    ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
+  ].join(" ")
+
+// The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
+const approvedWeights = (
+  path: string,
+  opts: {
+    approved: { bytes: number; card: string }
+    folders: string[]
+    reason: string
+    session: string
+  },
+  roots: Roots,
+): { paths: string[]; size: number; shards?: number } | Refusal => {
+  const set = shardSet(path)
+  if (!set) {
+    const done = deleteWeights(path, opts, roots)
+    return "refused" in done ? done : { paths: [path], size: done.size }
+  }
+  const done = removeSet(
+    set,
+    { bytes: opts.approved.bytes, card: opts.approved.card },
+    { folders: opts.folders, reason: opts.reason, session: opts.session },
+    roots,
+  )
+  if ("refused" in done) return done
+  return { paths: done.paths, size: done.size, shards: set.length }
+}
+
+// playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
+async function removeApproved(
+  args: { path: string; peer?: string; reason: string },
+  card: string,
+  folders: string[],
+  roots: Roots,
+  deps: RmDeps,
+): Promise<number> {
+  const picks = deps.approvals ? await deps.approvals(card) : "no Inbox is read here"
+  if (typeof picks === "string") {
+    console.error(`playground: card ${card} did not read: ${picks}`)
+    return 1
+  }
+  const machine = args.peer ?? deps.machine
+  const pick = picks.find((p) => p.path === args.path && p.machine === machine)
+  if (!pick) {
+    console.error(
+      `playground: card ${card} holds no Remove answer from the owner for ${args.path} on ${args.peer ?? deps.machine ?? "this machine"}, so it stays`,
+    )
+    return 1
+  }
+  // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
+  const session = await deps.session()
+  if (args.peer !== undefined) {
+    if (!deps.peer) {
+      console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
+      return 1
+    }
+    const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
+    if (ran.code !== 0) {
+      const said = ran.out.trim().replace(/^playground: /, "")
+      const refused = said || "the peer did not answer"
+      // a plain refusal (exit 1) stays quiet, as a local one does; a protected or tripwire one (exit 3), silence or a failed ssh reaches the dispatcher
+      if (ran.code !== 1 || !said) deps.notify(`${session}: ${refused}`)
+      console.error(`playground: ${args.peer}: ${refused}`)
+      return 1
+    }
+    console.log(ran.out.trim())
+    return 0
+  }
+  const approved = { bytes: pick.bytes, card }
+  let line: string
+  let drop: string[]
+  if (isWeights(args.path, deps.home, folders)) {
+    const done = approvedWeights(
+      args.path,
+      { approved, folders, reason: args.reason, session },
+      roots,
+    )
+    if ("refused" in done) {
+      if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    line = done.shards
+      ? `Deleted the ${done.shards} shards outright (${done.size} bytes), as card ${card} approved on this machine; ${join(roots.trash, "deleted.jsonl")} logs it`
+      : `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+    drop = done.paths
+  } else {
+    const done = quarantine(args.path, { approved, reason: args.reason, session }, roots)
+    if ("refused" in done) {
+      if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+      console.error(`playground: ${done.refused}`)
+      return 1
+    }
+    line = `Moved to the trash as ${done.id} (${done.files} files), as card ${card} approved; playground rm --restore ${done.id} brings it back`
+    drop = [args.path]
+  }
+  const dropped = await dropPaths(deps.data, drop).catch(() => [])
+  const suffix = dropped.length
+    ? `its machine record ${drop.length > 1 ? "entries are" : "entry is"} dropped`
+    : ""
+  console.log(suffix ? `${line}; ${suffix}` : line)
   return 0
 }
 
@@ -384,10 +634,10 @@ export async function removePath(
       ok: false,
     }
   const freed = own === undefined ? undefined : freedOf(own)
-  let liveBranch: string | undefined
+  let dashboardBranch: string | undefined
   if (args.worktree)
     try {
-      liveBranch = deps.liveBranch()
+      dashboardBranch = deps.liveBranch()
     } catch (error) {
       return {
         line: `the live.branch setting cannot be read (${(error as Error).message}), so no worktree is removed`,
@@ -409,10 +659,11 @@ export async function removePath(
             discard: args.discard,
             ...(freed ? { freed } : {}),
             live: STATUSES.live,
-            ...(liveBranch ? { liveBranch } : {}),
+            ...(dashboardBranch ? { liveBranch: dashboardBranch } : {}),
             merged: deps.merged,
+            mergedHead: (url: string) => deps.mergedHead(args.path, url),
             note,
-            ...(own && own !== "none" && !isUnreachable(own) ? { ownPr: own.number } : {}),
+            ...ownPrOf(own),
             places: deps.places,
             ...(args.pr ? { pr: args.pr } : {}),
             procs: deps.procs(),

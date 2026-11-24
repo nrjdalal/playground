@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -128,6 +129,24 @@ except SystemExit as e:
 print(json.dumps({"code": code, "started": started}))
 `
 
+// Loads up.py and runs main() with one job, every job down, its start recorded within GRACE, its heartbeat pid dead and no heartbeat.startedAt, but boot_time is BOOT, so the grace ends only when the machine booted after the recorded start.
+const STARTED_AFTER_BOOT = `${LOAD}import os
+started = []
+up.healthy = lambda job: (False, "no heartbeat")
+up.ptable.table = lambda: {4101: None}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (0, "")
+up.start = lambda job: started.append(job["name"]) or True
+up.herdr = lambda: ("/x/herdr", "")
+up.boot_time = lambda: int(os.environ.get("BOOT") or 0)
+sys.argv = ["up.py"]
+try:
+    up.main()
+except SystemExit:
+    pass
+print(json.dumps({"started": started}))
+`
+
 const exitOf = (jobs: object[], ...args: string[]) => {
   const config = mkdtempSync(join(scratch, "exit-"))
   mkdirSync(join(dataOf(config), "ops"), { recursive: true })
@@ -186,8 +205,15 @@ test("an argument up.py does not know is refused with its usage and runs no pass
     })
 })
 
-// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
+// up.py's own clock, which the clock-ahead pass leaves real, so a start the test records is as old to up.py as the test means it.
+const pyNow = () =>
+  Number(
+    Bun.spawnSync(["python3", "-I", "-c", "import time; print(time.time())"]).stdout.toString(),
+  )
+
+// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made, and the machine booted long ago: a CI runner boots seconds before the suite, which would end the grace of a start a minute old.
 const RESTARTED = `${LOAD}started = []
+up.boot_time = lambda: 0
 up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
 up.once.running = lambda name, marker: None
@@ -206,7 +232,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
   mkdirSync(ops, { recursive: true })
   const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
   writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
-  const now = Date.now() / 1000
+  // each start a minute old: made before the job stopped, as ops-restart's TERM'd job's was
+  const now = pyNow() - 60
   writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": now, "ops-y": now }))
   const env = {
     CLAUDE_CONFIG_DIR: config,
@@ -247,6 +274,57 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
     "ops-z",
     "ops-x",
   ])
+})
+
+// Loads up.py and runs main() with the arguments after its path, every job down, each start appended to the file named first rather than made.
+const RACE = `${LOAD}import fcntl
+up.healthy = lambda job: (False, "process gone")
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.run = lambda argv, timeout=60: (0, "")
+path = sys.argv[2]
+up.start = lambda job: open(path, "a").write(job["name"] + "\\n") or True
+up.herdr = lambda: ("/x/herdr", "")
+sys.argv = sys.argv[3:]
+up.main()
+`
+
+// PG-2882: on an accept, each job of the item restarts itself through up.py --restarted <job>; the first pass starts both, so the second job's own pass, under up.lock right behind it, must not drop that fresh start and start the job again.
+test("two jobs' --restarted passes at once start each job once, the second start skipped and logged", async () => {
+  const config = mkdtempSync(join(scratch, "race-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = (name: string) => ({ command: `bash /x/${name}.sh`, name, runtime: "herdr" })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job("ops-x"), job("ops-y")] }))
+  // both last started an hour ago, past GRACE, so either pass starts both
+  const old = pyNow() - 3600
+  writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-x": old, "ops-y": old }))
+  const starts = join(ops, "starts.txt")
+  const env = {
+    CLAUDE_CONFIG_DIR: config,
+    PLAYGROUND_DATA_DIR: join(config, "playground"),
+    HOME: scratch,
+    PATH: SYS_PATH,
+    ...SYSTEMD_ENV,
+  }
+  const pass = (name: string) =>
+    Bun.spawn(["python3", "-I", "-c", RACE, upPy, starts, "up.py", "--restarted", name], {
+      env,
+      stderr: "pipe",
+      stdout: "ignore",
+    })
+  const passes = [pass("ops-x"), pass("ops-y")]
+  for (const p of passes) {
+    expect(await new Response(p.stderr).text()).toBe("")
+    expect(await p.exited).toBe(0)
+  }
+  expect(readFileSync(starts, "utf8").split("\n").filter(Boolean).sort()).toEqual([
+    "ops-x",
+    "ops-y",
+  ])
+  expect(readFileSync(join(ops, "up.log"), "utf8")).toMatch(
+    /another pass started ops-[xy] within 10s of this restart's call; not starting it again/,
+  )
 })
 
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
@@ -336,6 +414,124 @@ test("a job on a deleted executable is restarted, or reported once when launchd 
   expect(log).not.toContain("ops-w")
 })
 
+// Loads up.py and runs one pass per [lastResult, host answers] given, the job's holder and heartbeat pid 4800 plus the pass's number, every TERM and start recorded rather than made.
+const NO_CONNECT = `${LOAD}import datetime, os
+passes = json.loads(sys.argv[2])
+hosts, kills, started = [], [], []
+up.ptable.table = lambda: {4800 + i: None for i in range(1, len(passes) + 1)}
+up.run = lambda argv, timeout=60: (0, "")
+up.os.kill = lambda pid, sig: kills.append([pid, sig])
+up.alive = lambda pid: [pid, 15] not in kills
+up.start = lambda job: started.append(job["name"]) or True
+up.herdr = lambda: ("/x/herdr", "")
+up.in_grid = lambda job, binary: True
+up.grace_ended = lambda job, start_at: True
+for i, (result, answers) in enumerate(passes, 1):
+    up.once.running = lambda name, marker, pid=4800 + i: pid
+    up.answers = lambda host, answers=answers: hosts.append(host) or answers
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(os.path.join(up.OPS, "ops-wa.json"), "w") as f:
+        json.dump({"pid": 4800 + i, "lastBeatAt": now, "startedAt": now, "lastResult": result, "cycleSeconds": 60}, f)
+    up.up(True)
+print(json.dumps({"hosts": hosts, "kills": kills, "started": started}))
+`
+
+// #2980: ops-wa beat a no-connect stop through a network outage and stayed stopped after the network came back, so ops-up starts it again once WhatsApp's host answers, once per recovery, and leaves a logout alone.
+test("a no-connect stop starts again once its host answers, once per recovery, and a logout stop stays", () => {
+  const config = mkdtempSync(join(scratch, "no-connect-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = {
+    command: "bun /x/ops-wa/cli.ts",
+    heartbeat: "ops-wa",
+    name: "ops-wa",
+    runtime: "herdr",
+  }
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
+  const stopped = "stopped: no connect in 12 tries"
+  const passes = [
+    [stopped, false],
+    [stopped, true],
+    [stopped, true],
+    [stopped, false],
+    [stopped, true],
+    ["ok", true],
+    [stopped, true],
+    ["stopped: WhatsApp logged out the device", true],
+  ]
+  const child = Bun.spawnSync(["python3", "-I", "-c", NO_CONNECT, upPy, JSON.stringify(passes)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const { hosts, kills, started } = JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!)
+  // only each retried pass's own recorded holder is signalled: pass 2 after the host answers again, pass 5 after an outage pass 4 saw, pass 7 after pass 6's ok beat
+  expect(kills).toEqual([
+    [4802, 15],
+    [4805, 15],
+    [4807, 15],
+  ])
+  expect(started).toEqual(["ops-wa", "ops-wa", "ops-wa"])
+  // the host is asked only on a no-connect beat, never on an ok or a logout beat
+  expect(hosts).toEqual(Array(6).fill("web.whatsapp.com"))
+  const log = readFileSync(join(ops, "up.log"), "utf8")
+  expect(log).toContain(
+    `ops-wa pid 4802 ${stopped}, and web.whatsapp.com answers again; stopped it`,
+  )
+  expect(log).not.toContain("logged out")
+})
+
+// a start recorded within GRACE, its heartbeat pid dead and no heartbeat.startedAt, but the machine booted after the recorded start, so ops-up ends the grace and starts the job in that pass.
+test("a job recorded within GRACE starts when the machine booted after its recorded start", () => {
+  const config = mkdtempSync(join(scratch, "grace-boot-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  const job = {
+    command: "bash /x/ops-dashboard.sh",
+    heartbeat: "ops-dashboard",
+    name: "ops-dashboard",
+    runtime: "herdr",
+    stop: "dashboard",
+  }
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [job] }))
+  const now = Math.floor(Date.now() / 1000)
+  writeFileSync(join(ops, "up-state.json"), JSON.stringify({ "ops-dashboard": now - 30 }))
+  // a dead heartbeat pid and no heartbeat.startedAt, so only the boot ends the grace
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 4101,
+      lastBeatAt: new Date((now - 60) * 1000).toISOString(),
+      lastResult: "ok",
+      cycleSeconds: 60,
+    }),
+  )
+  const child = Bun.spawnSync(["python3", "-I", "-c", STARTED_AFTER_BOOT, upPy], {
+    env: {
+      BOOT: String(now - 20),
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  // the harness prints a line per start before its JSON summary, so read the last line
+  expect(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!).started).toEqual([
+    "ops-dashboard",
+  ])
+})
+
 // Loads up.py and runs one pass per health answer given, every notify.sh call recorded rather than made.
 const DOWN = `${LOAD}sys.platform = "darwin"
 calls = []
@@ -378,6 +574,93 @@ test("a launchd job down 3 passes in a row is told to ops once, and again only a
     "ops-l has been unhealthy (no heartbeat) for 3 passes in a row; launchd job com.x.ops-l is not bringing it back, so check it is installed and loaded (playground doctor)",
   ]
   expect(JSON.parse(child.stdout.toString())).toEqual([told, told])
+})
+
+// Loads up.py and runs one pass per step, the herdr job ops-h always down and started, GRACE off; a step's "last" is written to ops/ops-h.last first, "age" seconds old, as once.py's reader leaves a dead copy's line. Prints each pass's started line, then every notify.sh call.
+const LAST = `${LOAD}import os, time
+calls, said = [], []
+up.render_jobs = lambda: None
+up.GRACE = 0
+up.ptable.table = lambda: {}
+up.once.running = lambda name, marker: None
+up.herdr = lambda: ("/x/herdr", "")
+up.healthy = lambda job: (False, "no heartbeat")
+up.start = lambda job: True
+up.run = lambda argv, timeout=60, env=None: (calls.append(argv + ["private" if (env or {}).get("NOTIFY_PRIVATE") == "1" else "public"]) if argv[0].endswith("notify.sh") else None, (0, ""))[1]
+up.print = lambda line: said.append(line)
+for step in json.loads(sys.argv[2]):
+    path = os.path.join(up.OPS, "ops-h.last")
+    if step.get("last") is not None:
+        open(path, "w").write(step["last"])
+        then = time.time() - step.get("age", 0)
+        os.utime(path, (then, then))
+    up.up(False)
+print(json.dumps({"calls": calls, "said": said}))
+`
+
+const lastOf = (steps: object[]) => {
+  const config = mkdtempSync(join(scratch, "last-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(
+    join(ops, "jobs.json"),
+    JSON.stringify({
+      jobs: [{ command: "bash /x/h.sh", heartbeat: "ops-h", name: "ops-h", runtime: "herdr" }],
+    }),
+  )
+  const child = Bun.spawnSync(["python3", "-I", "-c", LAST, upPy, JSON.stringify(steps)], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      HOME: scratch,
+      PATH: SYS_PATH,
+      PLAYGROUND_DATA_DIR: dataOf(config),
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  const out = JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!) as {
+    calls: string[][]
+    said: string[]
+  }
+  return { ...out, ops, told: out.calls.map((c) => c[2]) }
+}
+
+// PG-2878: herdr closes a dead job's pane with it, so a restart tells ops the job's last line, from once.py's ops/<job>.last, once per line
+test("a job restarted three times on the same last line tells ops once, and a new last line tells it again, each a private line kept out of up.log and the printed line", () => {
+  const unreadable = "vault: cache unreadable: no cached copy"
+  const { calls, ops, said, told } = lastOf([
+    { last: unreadable },
+    { last: unreadable },
+    { last: unreadable },
+    { last: "made-up: a new reason" },
+  ])
+  expect(told).toEqual([
+    `ops-h stopped, and ops-up started it again; its last line: ${unreadable}`,
+    "ops-h stopped, and ops-up started it again; its last line: made-up: a new reason",
+  ])
+  // ops-tick sends each printed line to ops in public, so the printed line keeps the last line out
+  expect(said).toEqual(Array(4).fill("started ops-h in herdr (no heartbeat)"))
+  expect(statSync(join(ops, "up-last-lines.json")).mode & 0o777).toBe(0o600)
+  expect(calls.map((c) => c.at(-1))).toEqual(["private", "private"])
+  expect(readFileSync(join(ops, "up.log"), "utf8")).not.toContain("cache unreadable")
+})
+
+test("a last line written before the job's last start is never told, and one with no file keeps today's line", () => {
+  const { said, told } = lastOf([{}, { age: 3600, last: "made-up: yesterday's death" }])
+  expect(told).toEqual([])
+  expect(said).toEqual([
+    "started ops-h in herdr (no heartbeat)",
+    "started ops-h in herdr (no heartbeat)",
+  ])
+})
+
+test("a last line is told at 200 characters at most", () => {
+  const { told } = lastOf([{ last: "y".repeat(300) }])
+  expect(told).toEqual([
+    `ops-h stopped, and ops-up started it again; its last line: ${"y".repeat(200)}`,
+  ])
 })
 
 // #2203: on Linux systemd holds the job as a user unit of the same label, so the report names that unit
@@ -948,4 +1231,105 @@ test("a relative PLAYGROUND_DATA_DIR is refused from any folder, and an absolute
     expect(r.out).toBe("")
     expect(r.err).toContain("PLAYGROUND_DATA_DIR is relative (d)")
   }
+})
+
+// #2613: on a Mac the host start comes from sysctl's `{ sec = N, usec = U }` line, so boot_time parses N out of it instead of falling through to 0 or the Linux /proc/stat read.
+const BOOTSYSCTL = `${LOAD}import subprocess
+class _R:
+    returncode = 0
+    stdout = """{ sec = 1700000000, usec = 500 } Tue Nov 14 10:00:00 2026"""
+subprocess.run = lambda *a, **k: _R()
+print(up.boot_time())
+`
+
+test("boot_time reads the macOS boot epoch out of sysctl's sec value", () => {
+  const child = Bun.spawnSync(["python3", "-I", "-c", BOOTSYSCTL, upPy], {
+    env: {
+      HOME: scratch,
+      PATH: SYS_PATH,
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(1700000000)
+})
+
+// #2613: a heartbeat startedAt is a UTC (Z) stamp, so beat_started must read it as its UTC epoch, not a zone-bent one that is off under DST.
+test("beat_started reads a summer heartbeat start as its UTC epoch", () => {
+  const config = mkdtempSync(join(scratch, "beat-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 4101,
+      lastBeatAt: "2026-07-01T10:00:00Z",
+      startedAt: "2026-07-01T10:00:00Z",
+    }),
+  )
+  const expected = Math.floor(Date.parse("2026-07-01T10:00:00Z") / 1000)
+  const child = Bun.spawnSync(
+    [
+      "python3",
+      "-I",
+      "-c",
+      `${LOAD}print(up.beat_started({"heartbeat": "ops-dashboard"}))\n`,
+      upPy,
+    ],
+    {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        HOME: scratch,
+        PATH: SYS_PATH,
+        // a zone that observes DST in summer, so the old mktime/time.timezone read is one hour early
+        TZ: "America/New_York",
+        ...SYSTEMD_ENV,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  )
+  expect(child.stderr.toString()).toBe("")
+  expect(parseInt(child.stdout.toString().trim(), 10)).toEqual(expected)
+})
+
+// #2665: lastBeatAt is a UTC stamp, so under a July New York clock the old mktime read is an hour early and the minute-old beat reads 61m old.
+test("healthy reads a minute-old July beat as healthy under New York's summer time", () => {
+  const config = mkdtempSync(join(scratch, "healthy-dst-"))
+  const ops = join(dataOf(config), "ops")
+  mkdirSync(ops, { recursive: true })
+  writeFileSync(join(ops, "jobs.json"), JSON.stringify({ jobs: [] }))
+  const beat = "2026-07-01T10:00:00Z"
+  writeFileSync(
+    join(ops, "ops-dashboard.json"),
+    JSON.stringify({
+      pid: 1,
+      lastBeatAt: beat,
+      startedAt: beat,
+      lastResult: "ok",
+      cycleSeconds: 60,
+    }),
+  )
+  const snippet = `${LOAD}up.alive = lambda pid: True
+up.time.time = lambda: ${Date.parse(beat) / 1000 + 60}
+print(up.healthy({"heartbeat": "ops-dashboard"})[0])
+`
+  const child = Bun.spawnSync(["python3", "-I", "-c", snippet, upPy], {
+    env: {
+      CLAUDE_CONFIG_DIR: config,
+      PLAYGROUND_DATA_DIR: join(config, "playground"),
+      HOME: scratch,
+      PATH: SYS_PATH,
+      TZ: "America/New_York",
+      ...SYSTEMD_ENV,
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(child.stdout.toString().trim()).toEqual("True")
 })

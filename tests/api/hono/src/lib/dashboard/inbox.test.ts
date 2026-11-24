@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -18,7 +19,7 @@ import {
   readAttachment,
   storeAttachment,
 } from "../../../../../../api/hono/src/lib/dashboard/attachments"
-import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
+import { MAX_CHARS, QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import { standingFocus } from "../../../../../../api/hono/src/lib/dashboard/focus"
 import {
   acceptArgs,
@@ -886,12 +887,27 @@ describe("an answer", () => {
     expect(checkAnswer(item({ kind: "update" }), { action: "approve", note: "x" })).toEqual({
       message: "An update is read, not answered",
     })
-    expect(answerInputSchema.safeParse({ action: "approve", note: "x".repeat(4000) }).success).toBe(
-      true,
-    )
-    expect(answerInputSchema.safeParse({ action: "approve", note: "x".repeat(4001) }).success).toBe(
-      false,
-    )
+  })
+
+  // the card's text takes any length (#2970), but an answer's note and changed words ride deliver()'s one line, so they keep a cap sized to fit it
+  test("the longest note and changed draft an answer takes make a line deliver() takes", () => {
+    const longest = { note: '"'.repeat(1500), text: "y".repeat(4000) }
+    const parsed = answerInputSchema.safeParse({ action: "send", ...longest })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    const draft = item({ kind: "draft", title: '"'.repeat(200) })
+    const checked = checkAnswer(draft, parsed.data)
+    if (!("answer" in checked)) throw new Error(checked.message)
+    const line = answerLine(answerPayload(draft, { ...checked.answer, at: AT }))
+    expect(payloadOf(line)).toMatchObject({ comment: longest.note, text: longest.text })
+    expect(line.length).toBeLessThanOrEqual(MAX_CHARS)
+    // one character more, or a line break that JSON writes as two, is refused at the box
+    for (const over of [
+      { note: "x".repeat(3001) },
+      { note: `x\n${"x".repeat(2998)}` },
+      { text: "y".repeat(4001) },
+    ])
+      expect(answerInputSchema.safeParse({ action: "send", ...over }).success).toBe(false)
   })
 
   test("leaves an update and an answered item alone", () => {
@@ -2333,6 +2349,22 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       title: "Weekly plan, final",
     })
     expect(await store.attachmentDownloadName(db, lone)).toBe("Weekly plan, final.html")
+  })
+
+  test("a card's text past 4000 characters posts, edits and reads back whole (#2970)", async () => {
+    const long = "The ledger lists every open ticket with its owner and its age. ".repeat(80).trim()
+    expect(long.length).toBeGreaterThan(4000)
+    const card = (text: string) => ({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding", text },
+      title: "Firefighting ledger",
+    })
+    const posted = await post(card(long))
+    expect((await store.getItem(db, posted.id))?.preview).toMatchObject({ text: long })
+    const longer = `${long}\n\n${long}`
+    expect((await store.editItem(db, posted.id, card(longer)))?.ok).toBe(true)
+    expect((await store.getItem(db, posted.id))?.preview).toMatchObject({ text: longer })
   })
 
   test("an item gets a tag that counts up, and is found by its id or its tag", async () => {
@@ -6679,6 +6711,50 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         `the owner approved it in the Inbox (#i${posted.ref})`,
       )
     })
+
+    test("a wa.alert card's Approve stands in for that number's first message, and a set any other way seeds nothing (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+      expect(statSync(seed).mode & 0o777).toBe(0o600)
+      expect(statSync(join(data, "whatsapp")).mode & 0o777).toBe(0o700)
+      const other = folder()
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(other, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      expect(existsSync(join(other, "whatsapp", "alert-seed.json"))).toBe(false)
+    })
+
+    test("a wa.alert card's Approve seeds the number when it was already set by hand, as the README says (#2748)", async () => {
+      const data = folder()
+      const number = "+15550100003"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "by hand" }
+      expect(
+        setSetting(data, { key: "wa.alert", scope: "made-up-me", value: number }, who).ok,
+      ).toBe(true)
+      const seed = join(data, "whatsapp", "alert-seed.json")
+      expect(existsSync(seed)).toBe(false)
+      const card = { ...GUARD, key: "wa.alert", scope: "made-up-me", value: number }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(JSON.parse(readFileSync(seed, "utf8"))).toEqual({ at: expect.any(Number), number })
+    })
+
+    test.each(["wa.device", "wa.owner"])(
+      "a %s card's Approve sets the number, so first run's WhatsApp setup works through the Inbox (PG-2821)",
+      async (key) => {
+        const data = folder()
+        const number = "+15550100004"
+        const posted = await post(decision({ ...GUARD, key, scope: "made-up-me", value: number }))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        expect(readSetting(data, key)?.rows).toEqual([{ key, scope: "made-up-me", value: number }])
+      },
+    )
 
     test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {
       const data = folder()

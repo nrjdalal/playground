@@ -1,5 +1,9 @@
 # The owner's WhatsApp answers an Inbox card
 
+> Superseded in part by [ADR 0039](./0039-an-inbox-draft-reaches-the-owners-whatsapp.md): each open draft goes to the owner's own chat, and the owner's quoted reply sends it through the Inbox's own Send.
+
+> Superseded in part by [ADR 0042](./0042-a-whatsapp-card-keeps-tracker-ids.md): a card's WhatsApp copy keeps tracker ids (`linearKeys`) as written.
+
 [ADR 0023](0023-the-owners-whatsapp-chat-is-the-owners-words.md) made the owner's WhatsApp chat the owner's words, reaching the dispatcher through the ops relay, and left `deliver()` and its rule as they were.
 The owner then asked to answer Inbox cards from WhatsApp too (door 3), with factory status alone over the chat (door 2).
 An Inbox answer is typed into its poster through `deliver()`, whose rule allowed only the owner's own clicks, so this changes that rule's meaning; by [ADR 0015](0015-versions-the-old-one-stays-the-latest-is-used.md), a changed contract takes a version beside the old one, so this ADR stands beside 0023 and leaves it as written.

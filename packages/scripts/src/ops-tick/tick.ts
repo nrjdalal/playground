@@ -25,15 +25,18 @@ import {
   liveDeps,
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
-import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth } from "../gh-read"
-import { procSource, readSysctl, readUpSince } from "../ops-machine/readings"
+import STATUSES from "../../../../scripts/roster-statuses.json"
+import { GH_HANGS, GH_TIMEOUT_MS, type GhAuth, KEYRING_LOCKED } from "../gh-read"
+import { procSource, readBootTime, readSysctl, readUpSince } from "../ops-machine/readings"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
 import { lapse } from "../playground/priority"
 import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
+import { lockRootOf } from "../pr-merge/merge"
 import { ALERT_JOB, waiterLive } from "../stuck-alert"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
+import { bootCheckPass } from "./boot-check"
 import { dashboardWatch } from "./dashboard-watch"
 import { extLock } from "./ext-lock"
 import { guardProbe } from "./guard-probe"
@@ -565,8 +568,8 @@ const resumeRelay = async (ctx: Context, line: string): Promise<boolean> => {
   return false
 }
 
-// A session the roster holds on purpose, or a probe, is never named as felled.
-const HELD = new Set(["done", "ended", "parked", "paused", "starting"])
+// A session the roster holds finished (roster-statuses.json) or starting is never named as felled, so a status added to that file is held without a second edit.
+const HELD = new Set<string>([...(STATUSES.finished as string[]), "starting"])
 
 type Agent = { kind?: unknown; name?: string; status?: string; worker?: unknown }
 
@@ -765,7 +768,7 @@ const freeBytes = (dir: string): number => {
   return fs.bavail * fs.bsize
 }
 
-// The trash playground rm fills, beside ops in the data folder, emptied hourly: purgeTrash (@packages/safe-delete) takes each batch over 7 days old, then the oldest while its disk has under 50 GB free, deleting being cheap whatever the load, and stripTrash beside it removes each batch's node_modules folders and web/next/.next, oldest first and paced, which an install or a build rebuilds; one line in ops/log/trash-purge.log.
+// The trash playground rm fills, beside ops in the data folder, emptied hourly: purgeTrash (@packages/safe-delete) takes each batch over 7 days old, then the oldest while its disk has under 50 GB free, deleting being cheap whatever the load, and stripTrash beside it removes each batch's node_modules folders and web/next/.next, oldest first and paced, which an install or a build rebuilds; one line in ops/log/trash-purge.log, naming once each batch it cannot remove.
 export const trashPurge =
   (
     trash?: string,
@@ -774,9 +777,12 @@ export const trashPurge =
   ) =>
   async (ctx: Context) => {
     const root = trash ?? join(dirname(ctx.ops), "trash")
-    const { removed, skipped } = purgeTrash(root, { free: () => free(root), now: ctx.now })
+    const { removed, skipped, stuck } = purgeTrash(root, {
+      free: () => free(root),
+      now: ctx.now,
+    })
     const strip = await stripTrash(root, { sleep })
-    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}${strip.failed.length ? `, not finished (${strip.failed.join(", ")})` : ""}`
+    const line = `removed ${removed.length}${removed.length ? ` (${removed.join(", ")})` : ""}${skipped.length ? `, skipped ${skipped.join(", ")}` : ""}${stuck.length ? `, cannot remove ${stuck.join(", ")}` : ""}${strip.folders ? `, stripped ${strip.folders} folders (${strip.batches.join(", ")})` : ""}${strip.failed.length ? `, not finished (${strip.failed.join(", ")})` : ""}`
     await mkdir(join(ctx.ops, "log"), { recursive: true })
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
@@ -1060,7 +1066,6 @@ const relayWatch = async (ctx: Context) => {
   }
 }
 
-export const KEYRING_LOCKED = "sign in at the desktop to unlock the keyring"
 export const TOKEN_INVALID = "gh token invalid"
 const BOOT_MS = 10 * 60_000
 const HOUR_MS = 60 * 60_000
@@ -1133,6 +1138,22 @@ export const ghAuth =
     await writeAtomic(path, JSON.stringify({ ...failing, ...posted }))
   }
 
+// boot-check: once per boot, never a wake, inside BOOT_MS (bootCheckPass in boot-check.ts): a merge lock taken before the boot let go, git fsck on the shared store, a gate-owned worktree's torn object repaired, and every other break one line to Ops' waiter queue and one Inbox alert; a check that never finished inside BOOT_MS is one line to Ops after it.
+export const bootCheck = (lockRoot?: string) => async (ctx: Context) => {
+  const boot = await readBootTime(ctx.run)
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  const ops = managerOf(roster?.agents, "ops")
+  await bootCheckPass(ctx, boot, ctx.now.getTime() - boot < BOOT_MS, {
+    alert: async (title, text) => {
+      await postAlert(ctx, title, text)
+    },
+    lockRoot: lockRoot ?? lockRootOf(),
+    tell: (text) => queueWaiterLine(ctx, ops, text),
+  })
+}
+
 // Each beat at its old cron, with the target its output goes to.
 export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "roll-gate", run: rollGate, to: "ops" },
@@ -1173,6 +1194,12 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "priority-lapse", run: priorityLapse, to: "ops" },
   { cron: "*/5 * * * *", name: "run-slot-hold", run: runSlotHold, to: "ops" },
   { cron: "* * * * *", name: "gh-auth", run: ghAuth(), to: "ops and the Inbox, once a failure" },
+  {
+    cron: "* * * * *",
+    name: "boot-check",
+    run: bootCheck(),
+    to: "ops, and the Inbox for a break it leaves",
+  },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

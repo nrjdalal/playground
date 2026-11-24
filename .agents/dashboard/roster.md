@@ -45,7 +45,7 @@
     "backlog": [
       "P2b: the stream folds newlines in multi-line messages",
       "An ETA beside every working agent",
-      "Fix: pglaunch publishes on every interface"
+      "Guard: first run's database must publish on loopback alone"
     ],
     "updatedAt": "2026-10-05T22:10:00Z"
   }

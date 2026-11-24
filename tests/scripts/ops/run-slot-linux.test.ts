@@ -44,8 +44,13 @@ describe("on Linux the lanes read /proc", () => {
     expect(look({ idle: 80, load1: 45, load5: 2 }).slots).toBe("1\n")
   })
 
-  test("MemAvailable under 40% shuts them", () => {
-    expect(look({ free: 39, idle: 80 }).slots).toBe("1\n")
+  // issue 2660: a resident local model of about 60 GB held MemAvailable at 33% of MemTotal with PSI and swap-ins near 0, and macOS's 40% free bar kept slots 2 to 4 shut
+  test("MemAvailable at 33%, PSI 0 and 5 swap-ins a second open them, since Linux reads PSI and swap-ins alone", () => {
+    expect(look({ free: 33, idle: 80, swapins: 5 }).slots).toBe("4\n")
+  })
+
+  test("MemAvailable at 33% with PSI's some avg10 at 10% shuts them", () => {
+    expect(look({ free: 33, idle: 80, some: 10, swapins: 5 }).slots).toBe("1\n")
   })
 
   test("PSI's some avg10 at 10%, pressure level 2, shuts them", () => {

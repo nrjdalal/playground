@@ -21,6 +21,7 @@ import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
 import { addEntries, peerRecordArgv, rootEntries } from "@packages/scripts/machine-record/record"
+import { seedAlert } from "@packages/scripts/ops-wa/seed"
 import {
   checkSetting,
   extensionsDir,
@@ -68,13 +69,14 @@ import {
   ROOT_TIMEOUT_MS,
   stepArgv,
 } from "../system/root"
+import { holdsProgressBlock, type InflightCard, isDispatcher, isLedgerTitle } from "./ask-shape"
 import { ID_PATTERN } from "./attachments"
 import { checkoutRoot, currentSource, type DashboardSource } from "./fixture"
 import { OWNER_APPS } from "./owner-apps"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, a clone's, an apps change's, a grant's, a guard setting's, an own account change's or a root step's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
-const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
+const LIMITS = { changed: 4000, line: 200, link: 4000, name: 120, note: 3000, prs: 50 }
 
 const oneLine = (max: number) =>
   z
@@ -84,7 +86,7 @@ const oneLine = (max: number) =>
     .max(max)
     .refine((value) => !/[\r\n]/.test(value), "Must be one line")
 
-const words = z.string().trim().min(1).max(LIMITS.text)
+const words = z.string().trim().min(1)
 
 // A Slack link reaches the owner in the app form they open, never the archives form; slack.linkConverter names the command that rewrites one, and slack.sendServer the MCP server a send goes through, each read from the extensions' policy when a message is made, "" when unset or unreadable.
 const ARCHIVES = /\b(?:[a-z0-9-]+\.)?slack\.com\/archives\//i
@@ -1001,10 +1003,20 @@ export type InboxList = {
   snoozed: InboxItem[]
 }
 
+// An answer's note and changed words ride the one line deliver() types, which holds at most 8000 characters, so each is capped as JSON writes it there, a line break or a quote counting twice.
+const sent = (max: number) =>
+  z
+    .string()
+    .trim()
+    .refine(
+      (value) => JSON.stringify(value).length - 2 <= max,
+      `Must be at most ${max} characters as sent, a line break or a quote counting twice`,
+    )
+
 // What the dashboard posts for an item: the action, the words that go with Edit or with a draft changed before Send or Draft, and seen, the updatedAt of the card he answered, so an answer never lands on words its poster edited after he read them.
 export const answerInputSchema = z.strictObject({
   action: z.enum(ACTIONS),
-  note: z.string().trim().max(LIMITS.text).optional(),
+  note: sent(LIMITS.note).optional(),
   option: z
     .number()
     .int()
@@ -1023,7 +1035,7 @@ export const answerInputSchema = z.strictObject({
     .max(MAX_QUESTIONS)
     .optional(),
   seen: z.iso.datetime().optional(),
-  text: z.string().trim().max(LIMITS.text).optional(),
+  text: sent(LIMITS.changed).optional(),
 })
 
 export type AnswerInput = z.input<typeof answerInputSchema>
@@ -1044,11 +1056,15 @@ export type Deliver = (delivery: Delivery) => Promise<DeliveryResult>
 export type InboxFailure = { code: "CONFLICT" | "NOT_FOUND" | "VALIDATION_ERROR"; message: string }
 type Refused = { ok: false } & InboxFailure
 
-export const zodMessage = (error: z.ZodError): string =>
+// A zod error's issues, or a route validator's standard-schema ones, as one line naming each field.
+export const zodMessage = (error: {
+  issues: readonly { message: string; path?: ReadonlyArray<PropertyKey | { key: PropertyKey }> }[]
+}): string =>
   error.issues
-    .map((issue) =>
-      issue.path.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message,
-    )
+    .map((issue) => {
+      const path = (issue.path ?? []).map((p) => String(typeof p === "object" ? p.key : p))
+      return path.length ? `${path.join(".")}: ${issue.message}` : issue.message
+    })
     .join("; ")
 
 // The short id an item goes by, in the list, in a reply and in bun run ask get.
@@ -1748,6 +1764,9 @@ const ownerDone = (item: InboxItem): boolean => {
   return !("choice" in answer)
 }
 
+// Pure: an update a poster may still edit, its twin postOrEdit takes, a closed one except the owner's Done (PG-2720).
+const stillEditable = (item: InboxItem): boolean => !closed(item) || ownerDone(item)
+
 // Pure: what a card says, its files by name alone, since bun run ask copies a file under a new id on every edit.
 const wordsOf = ({ preview, title }: { preview: unknown; title: string }): unknown =>
   JSON.parse(
@@ -1847,6 +1866,23 @@ export async function postOrEdit(
     return { item: twin, ok: true, unchanged: true }
   const edited = await editItem(db, twin.id, input, now, settingsData)
   return edited.ok ? { ...edited, edited: true } : edited
+}
+
+// Pure: the dispatcher's one open in-flight card among items newest first: its newest item it may still edit that holds a progress block, or null on none. Another poster's card, one posted before the rule, is never it, so it neither blocks the dispatcher's card nor is named in a refusal (PG-2720); nor is the daily ledger card, which posts beside it.
+export function inflightOf(items: InboxItem[], ledger: string): InflightCard {
+  const card = items.find(
+    (item) =>
+      isDispatcher(item.from) &&
+      stillEditable(item) &&
+      holdsProgressBlock(item.preview) &&
+      !isLedgerTitle(item.title, ledger),
+  )
+  return card ? { ref: card.ref, title: card.title } : null
+}
+
+export async function inflightCard(db: Database, ledger: string): Promise<InflightCard> {
+  const rows = await db.select().from(inboxItem).orderBy(desc(inboxItem.createdAt))
+  return inflightOf(rows.map(toItem), ledger)
 }
 
 // By its id, or by its tag (#i41, i41), as a person or an agent would name it.
@@ -2640,15 +2676,22 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
   if (part && orgJobKey(key) && held === undefined)
     return { exitCode: 1, line: `${key} has no row at ${scope} to change` }
   const next = part ? { ...(held as object | undefined), ...(value as object) } : value
-  if (held !== undefined && isDeepStrictEqual(held, next))
+  // the owner's Approve of wa.alert stands in for that number's first message, so an alert may reach it, a value already held included (ADR 0028)
+  const seed = (approved: unknown) => {
+    if (key === "wa.alert" && typeof approved === "string" && approved)
+      seedAlert(data, approved, Date.now())
+  }
+  if (held !== undefined && isDeepStrictEqual(held, next)) {
+    seed(held)
     return {
       exitCode: 0,
       line: `${key} at ${scope} is already ${JSON.stringify(held)}, so nothing changed`,
     }
+  }
   const set = setSetting(data, { key, scope, value: next }, who)
-  return set.ok
-    ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
-    : { exitCode: 1, line: set.message }
+  if (!set.ok) return { exitCode: 1, line: set.message }
+  seed(set.value)
+  return { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
 }
 
 // Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.
@@ -3385,7 +3428,7 @@ export async function dismissItems(
 const settleNoteSchema = oneLine(LIMITS.line)
 
 // Where the poster carried the answer out (a Slack message's permalink, a ticket, a pull request), which the card links to; https alone, since the dashboard opens it.
-const linkSchema = z.url({ protocol: /^https$/ }).max(LIMITS.text)
+const linkSchema = z.url({ protocol: /^https$/ }).max(LIMITS.link)
 
 // What the link is, as the card names it ("Filed ABC-123"); one line.
 const linkLabelSchema = oneLine(LIMITS.line)

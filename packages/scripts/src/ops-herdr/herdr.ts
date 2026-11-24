@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs"
 import { rm } from "node:fs/promises"
-import { homedir, userInfo } from "node:os"
+import { userInfo } from "node:os"
 import { join } from "node:path"
 
 import { envValue } from "@packages/config/org"
-import { dataDir, dataDirOf } from "@packages/env/data-dir"
+import { dataDir, herdrDir } from "@packages/env/data-dir"
 
 import { writeAtomic } from "../write-atomic"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "./pin"
@@ -37,9 +37,8 @@ export const CONFIG_SOURCE = readFileSync(join(import.meta.dir, "config.toml"), 
 
 export const dataFolder = (env: Record<string, string | undefined>): string => dataDir(env)
 
-// The sockets follow HOME, as herdr's own state folder does, never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR, so a session on another Claude login reaches the same servers rather than starting a second factory on one state. PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSIONS move a scratch server off the factory's socket and session names.
-export const herdrDir = (env: Record<string, string | undefined>): string =>
-  envValue(env, "PLAYGROUND_HERDR_DIR") || join(dataDirOf({}, env.HOME || homedir()), "herdr")
+// The sockets' folder, herdrDir in @packages/env/data-dir, which follows HOME; PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSIONS move a scratch server off the factory's socket and session names.
+export { herdrDir }
 
 // A server's name is a word, as spawn.sh takes it, since it names a socket file and a state folder, and never default, herdr's own server; any other name in the list is skipped and named on every beat.
 const WORD = /^[a-z0-9]+(-[a-z0-9]+)*$/

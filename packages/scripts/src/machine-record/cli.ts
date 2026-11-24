@@ -22,9 +22,14 @@ import {
 
 export const USAGE = `usage: playground record add <path> --kind <${KINDS.join("|")}> --why "<why>" --undo "<undo>" [--by <who>]
        playground record add --stdin            (a JSON list of entries, the form a peer's add takes over ssh)
+       an undo with a delete word (rm, rmdir, docker rm -fv) goes in through --stdin < entry.json, a JSON list holding the entry, since the no-raw-delete hook reads a quoted --undo value as a command
        playground record drop <path>
        playground record seed [--machine <name>] [--notes <folder>]
-       playground record check`
+       playground record check
+
+seed reads footprint.md's tree: a comma list's later item that names a folder of its own is read
+from the first item's parent, so in "kit/a.sh, b.sh, logs/c.sh" b.sh is kit/b.sh and logs/c.sh is
+logs/c.sh beside kit/; write every item with its full prefix ("kit/a.sh, kit/b.sh, kit/logs/c.sh").`
 
 export type RecordIo = {
   data: string

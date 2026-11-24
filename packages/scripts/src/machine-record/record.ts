@@ -1,5 +1,5 @@
 import { lstat, readdir } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import {
   PEER_POLICY,
@@ -36,8 +36,14 @@ export type MachineRecord = { baseline: string[]; entries: Entry[] }
 
 export type Run = (argv: string[]) => Promise<{ code: number; out: string }>
 
-// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders and docker through run, each a test's seam.
-export type Places = { home: string; homes: string[]; run: Run; system?: string[] }
+// What a check reads: the home folder, the factory's homes as absolute paths (factoryHomes), the root-step folders, the root-only ones among them and docker through run, each a test's seam.
+export type Places = {
+  home: string
+  homes: string[]
+  rootOnly?: string[]
+  run: Run
+  system?: string[]
+}
 
 // The folders a root step writes into, from ROOT_STEPS and the peer install's polkit files.
 export const ROOT_FOLDERS: string[] = [
@@ -50,6 +56,9 @@ export const ROOT_FOLDERS: string[] = [
     ...Object.values(ROOT_STEPS).flatMap((step) => step.adds.map((path) => dirname(path))),
   ]),
 ].sort()
+
+// The watched folders root-only by design: polkit's rules folder is root:polkitd 0750, where the install leaves every other root-step folder 0755, so only these read as known when the user cannot list them.
+export const ROOT_ONLY: string[] = [dirname(PEER_RULE)]
 
 // spawn.sh's --ssh probe folder on the peer: a temp folder under /tmp, which no watched place holds, so the check skips it.
 export const TEMP_PREFIX = "/tmp/playground-"
@@ -175,27 +184,36 @@ const dockerItems = async (run: Run): Promise<string[] | null> => {
 
 export const DOCKER_UNREAD = "docker images and containers"
 
-// What the watched places hold now, and each place that cannot be read.
-export async function snapshot(places: Places): Promise<{ seen: string[]; unreadable: string[] }> {
+// What the watched places hold now, each root-only place the user cannot read (known, with its reason), and each place the check should read but cannot.
+export async function snapshot(
+  places: Places,
+): Promise<{ seen: string[]; known: string[]; unreadable: string[] }> {
   const seen: string[] = []
+  const known: string[] = []
   const unreadable: string[] = []
+  const rootOnly = new Set(places.rootOnly ?? ROOT_ONLY)
   for (const folder of watchedFolders(places.home, places.system)) {
     const entries = await listed(folder)
-    if (entries === "unreadable") unreadable.push(folder)
-    else seen.push(...entries)
+    if (entries === "unreadable") {
+      if (rootOnly.has(folder)) known.push(folder)
+      else unreadable.push(folder)
+    } else seen.push(...entries)
   }
   const docker = await dockerItems(places.run)
   if (docker === null) unreadable.push(DOCKER_UNREAD)
   else seen.push(...docker)
-  return { seen: [...new Set(seen)].sort(), unreadable }
+  return { seen: [...new Set(seen)].sort(), known: known.sort(), unreadable }
 }
 
 const inside = (path: string, home: string) => path === home || path.startsWith(`${home}/`)
 
-// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; and each place or path that cannot be read, which is neither gone nor new, so a root-only folder is named every run and never hides a loss.
+// Why a known root-only place is not listed: the check runs as the user and no root helper exists on this machine to read it, so its listing is skipped, not a loss.
+const ROOT_ONLY_REASON = "no root helper on this machine, so its listing is skipped"
+
+// Pure: one line per finding: a new path no entry holds, misplaced outside the factory's homes and unrecorded inside them (a docker item has no place, so it is unrecorded); a recorded path that is gone; each root-only place the user cannot read, named as known with its reason, and a recorded path in one, which is then not named again; and each place or path the check should read but cannot, which is neither gone nor new, so it is named every run and never hides a loss.
 export function findings(
   record: MachineRecord,
-  now: { seen: string[]; unreadable: string[] },
+  now: { seen: string[]; known: string[]; unreadable: string[] },
   stat: Map<string, "gone" | "here" | "unreadable">,
   homes: string[],
 ): string[] {
@@ -204,6 +222,8 @@ export function findings(
   const lines: string[] = []
   for (const path of now.seen) {
     if (held.has(path) || before.has(path)) continue
+    // Finder writes .DS_Store in any folder it opens, so it is never the factory's
+    if (basename(path) === ".DS_Store") continue
     const placed = path.startsWith("/") && !homes.some((home) => inside(path, home))
     lines.push(`${placed ? "misplaced" : "unrecorded"}: ${path}`)
   }
@@ -211,9 +231,12 @@ export function findings(
     const state = stat.get(entry.path)
     if (state === "gone") lines.push(`gone: ${entry.path}`)
   }
+  for (const path of now.known) lines.push(`root-only: ${path}, ${ROOT_ONLY_REASON}`)
   const unread = [
     ...now.unreadable,
-    ...record.entries.filter((e) => stat.get(e.path) === "unreadable").map((e) => e.path),
+    ...record.entries
+      .filter((e) => stat.get(e.path) === "unreadable" && !now.known.includes(dirname(e.path)))
+      .map((e) => e.path),
   ]
   for (const path of [...new Set(unread)]) lines.push(`unreadable: ${path}`)
   return lines
@@ -242,11 +265,12 @@ async function states(
   return out
 }
 
-// The check: the record against what the watched places hold now, as findings' lines.
+// The check: the record against what the watched places hold now, as findings' lines; a root-only folder the user cannot list and the record holds no path in gets no line, since nothing of the factory's sits there to read.
 export async function check(data: string, places: Places): Promise<string[]> {
   const record = await readRecord(data)
   const now = await snapshot(places)
-  return findings(record, now, await states(record, now), places.homes)
+  const known = now.known.filter((folder) => record.entries.some((e) => dirname(e.path) === folder))
+  return findings(record, { ...now, known }, await states(record, now), places.homes)
 }
 
 // The peer install's staging folder in the ssh user's home (api/hono/src/lib/system/peer-root.ts's PEER_STAGE), as a ~/ path the peer's own add reads under its home.
@@ -299,6 +323,15 @@ export const peerRecordArgv = (
   target: string,
   clone: string,
   verb: "add" | "check",
+): string[] =>
+  peerArgv(key, target, clone, `${RECORD_CLI} ${verb === "add" ? "add --stdin" : "check"}`)
+
+// The one ssh a factory script runs on a peer: no ssh config, the factory's key alone when given, never prompting, a 10-second connect, then `bun --no-env-file <command>` in the peer's clone.
+export const peerArgv = (
+  key: string | undefined,
+  target: string,
+  clone: string,
+  command: string,
 ): string[] => [
   "ssh",
   "-F",
@@ -306,7 +339,7 @@ export const peerRecordArgv = (
   ...(key ? ["-i", key, "-o", "IdentitiesOnly=yes"] : []),
   ...["BatchMode=yes", "ConnectTimeout=10"].flatMap((option) => ["-o", option]),
   target,
-  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${RECORD_CLI} ${verb === "add" ? "add --stdin" : "check"}`,
+  `cd ${clone} && PATH="$HOME/.bun/bin:$PATH" exec bun --no-env-file ${command}`,
 ]
 
 // The seed: the record takes each entry the notes list for this machine, and the watched places' listing now as its baseline, so the first check names only what comes after.

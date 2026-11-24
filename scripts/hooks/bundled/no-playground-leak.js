@@ -6369,7 +6369,8 @@ function filled(script, mark, value) {
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
-var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
+var REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)";
+var REDIRECT = new RegExp(`^(\\d*|&)${REDIRECT_OP}`);
 var RESERVED = new Set([
   "!",
   "{",
@@ -6656,7 +6657,7 @@ var SSH_LOCAL = new Set(["knownhostscommand", "localcommand", "proxycommand"]);
 function sshCall({ args, first }) {
   if (program(first?.value ?? "") !== "ssh")
     return;
-  const call = { local: [], noStdin: false, remote: [], unread: false };
+  const call = { env: [], local: [], noStdin: false, remote: [], unread: false };
   let remoteCommand;
   const option = (word) => {
     const m = /^\s*([A-Za-z]+)\s*(?:=\s*|\s+)([\s\S]*)$/.exec(word.value);
@@ -6667,6 +6668,8 @@ function sshCall({ args, first }) {
       call.local.push({ ...word, value: m?.[2] ?? "" });
     else if (key === "remotecommand")
       remoteCommand = { ...word, value: m?.[2] ?? "" };
+    else if (key === "sendenv" || key === "setenv")
+      call.env.push({ ...word, value: m?.[2] ?? "" });
   };
   for (let k = 0;k < args.length; k++) {
     const { value } = args[k];
@@ -6715,7 +6718,70 @@ function staticLine(line) {
   const words = (cmds) => cmds.flatMap((c) => [...c.words, ...c.inner ? words(c.inner()) : []]);
   return !words(lex(joined).commands).some((w) => marked(w.value) || DYNAMIC.test(basename(w.value).toLowerCase()));
 }
-function remoteEnv(env, line, fed = false) {
+var GLOB_SWITCHES = [
+  /\b(?:emulate|setopt|shopt|unsetopt)\b|\boptions\[/i,
+  /bashopts|dotglob|fignore|globdot|globignore/i,
+  /(?:[?[]|\*(?!\d))[^\s;&|()]*\([^()\s|]*\)/
+];
+var DIGIT_QUALIFIER = /\*\d[^\s;&|()]*\([^()\s|]*\)/;
+var bareText = (text) => text.replace(/\\\n/g, "").replace(/['"\\_]/g, "");
+var NO_GLOB = new Set([
+  "errexit",
+  "errtrace",
+  "functrace",
+  "login",
+  "noclobber",
+  "noprofile",
+  "norc",
+  "nounset",
+  "pipefail",
+  "verbose",
+  "xtrace"
+]);
+var OPTION_REDIRECT = `(?:\\d*|&|\\{[A-Za-z_]\\w*\\})${REDIRECT_OP}`;
+var SHELL_HEAD = new RegExp(`(?<=^|[\\s;&|(/])(r?(?:bash|ksh|zsh)|dash|ksh93|mksh|set|sh|yash)(?:-?[\\d.]*\\d)?(?=[\\s<>;&|)]|$)(?=((?:${OPTION_REDIRECT}|[^;&|\\n])*))`, "gi");
+var LEADING_REDIRECT = new RegExp(`^${OPTION_REDIRECT}`);
+function optionSwitch(bare) {
+  for (const [, head, rest] of bare.matchAll(SHELL_HEAD)) {
+    const words = rest.split(/\s+/).filter(Boolean);
+    for (let i = 0;i < words.length; i++) {
+      const word = words[i];
+      const redirect = LEADING_REDIRECT.exec(word);
+      if (redirect) {
+        if (redirect[0] === word)
+          i++;
+        continue;
+      }
+      if (word === "--" || !/^[-+]/.test(word))
+        break;
+      const long = /^--([a-zA-Z][a-zA-Z0-9-]*)$/.exec(word);
+      if (long) {
+        if (!NO_GLOB.has(long[1].replace(/-/g, "").toLowerCase()))
+          return `${head} ${word}`;
+        continue;
+      }
+      if (!/^[-+][a-zA-Z0-9]+$/.test(word) || /[O4]/.test(word))
+        return `${head} ${word}`;
+      const o = word.indexOf("o");
+      if (o >= 0) {
+        const names = [word.slice(o + 1), words[i + 1] ?? ""].filter(Boolean);
+        if (names.length === 0 || names.some((name) => !NO_GLOB.has(name.toLowerCase())))
+          return `${head} ${word}${words[i + 1] ? ` ${words[i + 1]}` : ""}`;
+        i++;
+      }
+    }
+  }
+}
+function globSwitch(text) {
+  const bare = bareText(text);
+  for (const pattern of GLOB_SWITCHES) {
+    const found = pattern.exec(bare);
+    if (found)
+      return found[0].trim();
+  }
+  return optionSwitch(bare);
+}
+function remoteEnv(env, line, fed = false, text = line) {
   const home = env.process.HOME || undefined;
   const { PWD: _pwd, ...known } = env.known;
   return {
@@ -6735,7 +6801,8 @@ function remoteEnv(env, line, fed = false) {
     old: { dir: home },
     oldFrom: undefined,
     remote: true,
-    remoteDots: fed || !staticLine(line),
+    remoteDots: fed || !staticLine(line) || DIGIT_QUALIFIER.test(bareText(text)),
+    remoteSwitch: env.remoteSwitch ?? globSwitch(text),
     vars: new Map
   };
 }
@@ -7262,7 +7329,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -7283,6 +7354,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -7350,13 +7422,19 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
+      }
       for (const w of done.words) {
         if (w.value !== "{" || w.quoted)
           break;
         opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
       }
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
@@ -10091,6 +10169,11 @@ var JOBS = {
     description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
     schedule: { every: 60 }
   }),
+  "ops-keep-awake": terminal("ops-keep-awake", `${bunJob("ops-keep-awake")} --data {data}`, {
+    description: "Keeps an idle Mac from sleeping, so the ops jobs and the WhatsApp link run on, with caffeinate as its one child; macOS alone.",
+    enabled: true,
+    schedule: { always: true }
+  }),
   "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
     description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
     schedule: { every: 60 }
@@ -10238,10 +10321,11 @@ var gateSettings = defineSettings({
 });
 // packages/settings/src/harnesses.ts
 var HARNESSES = [
-  { backends: ["claude", "glm"], id: "claude-code" },
+  { backends: ["claude", "glm", "local"], id: "claude-code" },
   { backends: ["openai"], id: "codex" }
 ];
 var GLM_MODEL = "glm";
+var LOCAL_MODEL = "local";
 
 // packages/settings/src/harness-alpha.ts
 var HARNESS_IDS = HARNESSES.map((harness) => harness.id);
@@ -10335,6 +10419,16 @@ var localModelSettings = defineSettings({
       literal(""),
       string2().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "a peer's name")
     ])
+  },
+  "localModels.maxFirstTokenSeconds": {
+    default: 10,
+    description: "The first-token floor: a local worker starts only while its server's mean wait for a first token, over the last keep beat's window, stays under this many seconds.",
+    schema: number2().positive().max(600)
+  },
+  "localModels.minTps": {
+    default: 15,
+    description: "The speed floor: a local worker starts only while each session on its server would still decode at least this many tokens a second with one more beside it, the last keep beat's speed times n/(n+1).",
+    schema: number2().min(0).max(1000)
   },
   "localModels.models": {
     default: {
@@ -10461,6 +10555,12 @@ var sessionTemplate = strictObject({
   model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
 }).refine((t) => t.model !== GLM_MODEL || t.account === undefined && t.effort === undefined, {
   message: "a GLM template runs on models.glm and its first GLM row, so it takes no account or effort"
+}).refine((t) => t.model !== LOCAL_MODEL || t.account === undefined, {
+  message: "a local template runs on this machine's local model, so it takes no account",
+  path: ["account"]
+}).refine((t) => t.model !== LOCAL_MODEL || t.kind !== "dispatcher" && t.kind !== "planner", {
+  message: "a dispatcher or a planner plans on Claude, so it takes no local model",
+  path: ["kind"]
 });
 var storedTemplates = (value) => Array.isArray(value) ? value.map((row) => {
   if (typeof row !== "object" || row === null || !("backend" in row) || "harness" in row)
@@ -10546,19 +10646,58 @@ var slotSettings = defineSettings({
   }
 });
 // packages/settings/src/whatsapp.ts
+var DEFAULT_POLICY = "factory status; no secrets or customer personal data";
+var policy = string2().trim().min(1).max(400);
+var hour = number2().int().min(0).max(23);
 var e1642 = string2().regex(/^(?:\+[1-9]\d{7,14})?$/, "a phone number is + and 8 to 15 digits, as +15550100001");
 var whatsappSettings = defineSettings({
-  "wa.device": {
+  "wa.alert": {
     default: "",
-    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set.",
+    description: "A second WhatsApp number in E.164, a guest: each playground wa alert goes to it once the owner has not handled it within wa.alertDelayMinutes, or at once with --now-both, the dispatcher replies to it with playground wa send --to alert, and its messages reach the dispatcher as data, never an order or an Inbox answer. Empty sends alerts to the owner alone.",
     masked: true,
     schema: e1642
   },
-  "wa.owner": {
+  "wa.alertCheck": {
     default: "",
-    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages and sends only to it; ops-wa does not run until it is set.",
+    description: "The checker ops-wa runs when an urgent alert's delay ends, a file in the extensions (such as scripts/<key>/check.ts) run with bun and given the alert's --source and its send time: exit 0 means handled, so the alert stays with the owner; any other exit, a crash or 20 s with no exit sends it on to wa.alert. Empty: only the owner's WhatsApp reaction on the alert handles it. A guard key, set by the owner alone.",
+    schema: string2().trim().max(300)
+  },
+  "wa.alertDelayMinutes": {
+    default: 3,
+    description: "The minutes an urgent alert waits with the owner before it goes on to wa.alert, unless the owner's reaction or wa.alertCheck says it was handled; read for each alert.",
+    schema: number2().int().positive()
+  },
+  "wa.device": {
+    default: "",
+    description: "The spare number ops-wa links to as a device, in E.164: its pairing code is for this number. Never the owner's own number; ops-wa does not run until it is set. A guard key, set by the owner alone.",
     masked: true,
     schema: e1642
+  },
+  "wa.guestPolicy": {
+    default: DEFAULT_POLICY,
+    description: "What the dispatcher may answer the wa.alert number, a guest, with: the policy line ops-wa adds to each of its messages. A guard key, set by the owner alone.",
+    schema: policy
+  },
+  "wa.owner": {
+    default: "",
+    description: "The owner's WhatsApp number in E.164, the allowlist of one: ops-wa hands on only this number's 1:1 messages as the owner's and sends replies only to it; ops-wa does not run until it is set. A guard key, set by the owner alone.",
+    masked: true,
+    schema: e1642
+  },
+  "wa.quietEndHour": {
+    default: 6,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window ends at: ops-wa then sends the texts it held as one catch-up. Equal to wa.quietStartHour, there is no window.",
+    schema: hour
+  },
+  "wa.quietStartHour": {
+    default: 0,
+    description: "The hour, 0 to 23 in clock.ownerZone, the quiet window starts at: inside it, a reply to the owner goes out only within an hour of the owner's last read or message, and ops-wa holds it otherwise; an urgent alert goes at any hour.",
+    schema: hour
+  },
+  "wa.replyPolicy": {
+    default: DEFAULT_POLICY,
+    description: "What the dispatcher may answer the owner's WhatsApp with: the policy line ops-wa adds to each message it hands on and to each update it asks for. A guard key, set by the owner alone.",
+    schema: policy
   }
 });
 // packages/settings/src/yard.ts
@@ -10968,7 +11107,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
-async function inspect(raw, environment) {
+async function inspect(raw, environment, checkout) {
   let payload;
   try {
     payload = JSON.parse(raw);
@@ -10980,7 +11119,7 @@ async function inspect(raw, environment) {
   const { cwd, tool_input: input, tool_name: tool } = payload;
   const factoryOf = () => {
     const read = readPolicyOrDefaults(dataDir(environment));
-    return read.refusal === undefined ? factoryRepo(read.settings) : "";
+    return read.refusal === undefined ? factoryRepo(read.settings, checkout) : "";
   };
   if (typeof tool === "string" && MCP_TOOL2.test(tool))
     return judgeTool(tool, input ?? {}, factoryOf());
@@ -11047,9 +11186,9 @@ async function inspect(raw, environment) {
   };
   return run2(lex(command, env.known), env, visit);
 }
-async function check2(raw, environment = process.env) {
+async function check2(raw, environment = process.env, checkout) {
   try {
-    return await inspect(raw, environment);
+    return await inspect(raw, environment, checkout);
   } catch (error) {
     if (!/push|merge|refs|contents|graphql|_file/i.test(raw))
       return;

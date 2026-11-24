@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { SDK_PROBE } from "../../../../../packages/config/src/kinds"
 import {
   boxRoute,
   chaseStale,
@@ -392,6 +393,20 @@ describe("check", () => {
       "down:plain-job",
       "probe-gone-unended:b7k2mq-probe",
       "probe-gone-unended:plain-test",
+      "probe-over-15m:x7mh4d-probe",
+      "probe-unrecorded:x7mh4d-probe",
+    ])
+  })
+
+  // #2597: the dashboard's hosted session runs as a probe for the factory's hooks, but no lead spawns or records it, so it raised probe-unrecorded:probe-sdk
+  test("the dashboard's hosted session raises no probe alert, while an unrecorded probe past 15 minutes raises both", async () => {
+    const { ctx, sweep } = setup({ [DASHBOARD_DB]: { out: "playground-dispatcher-db\n" } })
+    roster(ctx, [])
+    session(ctx, SDK_PROBE, process.pid)
+    session(ctx, "x7mh4d-probe", process.pid)
+    const old = NOW / 1000 - 16 * 60
+    write(join(sweep, "probe-first-seen.json"), { [SDK_PROBE]: old, "x7mh4d-probe": old })
+    expect((await check(ctx)).sort()).toEqual([
       "probe-over-15m:x7mh4d-probe",
       "probe-unrecorded:x7mh4d-probe",
     ])
@@ -1231,6 +1246,38 @@ describe("opsDown", () => {
       "spark-b: up: copying ops-peer.jsonl both ways with me@spark-b; spark-c: down: ssh exited 255; ssh starts again in 2s",
     )
     expect(await opsDown(ctx)).toEqual(["ops-failing:ops-peer-relay"])
+  })
+
+  test("treats a steady up:, waiting:, or idle: beat as healthy and a failed beat as failing (PG-2637)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const beat = (file: string, lastResult: string) =>
+      write(join(ops, `${file}.json`), {
+        cycleSeconds: 60,
+        job: file,
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    beat("ops-tunnel", "up: 127.0.0.1:18000")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-tunnel", "waiting: nothing to read yet")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-peer-relay", "idle: PLAYGROUND_PEERS names no peer")
+    expect(await opsDown(ctx)).toEqual([])
+    beat("ops-tunnel", "failed: x")
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-tunnel"])
+  })
+
+  test("reads ops-tick's failing up: beat as failing, since up: is steady only for the tunnel (PG-2637)", async () => {
+    const { ctx, ops } = setup({ "ps -ax": { out: "dashboard/supervisor.sh" } })
+    const beat = (lastResult: string) =>
+      write(join(ops, "ops-tick.json"), {
+        cycleSeconds: 60,
+        job: "ops-tick",
+        lastBeatAt: new Date(NOW - 30_000).toISOString(),
+        lastResult,
+      })
+    beat("up: spawn.sh exited 1")
+    expect(await opsDown(ctx)).toEqual(["ops-failing:ops-tick"])
   })
 
   test.each([

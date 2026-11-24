@@ -516,6 +516,15 @@ describe("the Database row", () => {
     })
     expect(await run("ok", false)).toMatchObject({ action: null, status: "ok" })
   })
+
+  test("offers the move as its button when the guard refused a database published beyond loopback", async () => {
+    const reason = "playground-db-Ab12 publishes port 55432 beyond loopback (0.0.0.0)"
+    expect(await run({ exposed: true, reason, status: "failed" })).toMatchObject({
+      action: { id: "database", label: "Move the database onto this Mac alone" },
+      detail: reason,
+      status: "MISSING",
+    })
+  })
 })
 
 // The done mark as the database would hold it, counting each read and write.

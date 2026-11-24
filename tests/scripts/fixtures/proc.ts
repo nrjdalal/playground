@@ -22,8 +22,8 @@ export type Proc = {
   load5?: number
   // PSI's some avg10 for memory, in percent
   some?: number
-  // pswpin's rise between the two /proc/vmstat reads
-  swapins?: number
+  // pswpin's rise between each two /proc/vmstat reads, or each read's own rise in turn
+  swapins?: number | number[]
   // SwapTotal less SwapFree, in MB
   swapUsedMB?: number
 }
@@ -87,15 +87,23 @@ export const procText = ({
   vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN}\npswpout 116968\n`,
 })
 
-// The text the `step`th move of a file brings in: 1000 more jiffies of CPU at `idle`, `swapins` more pages swapped in, and `diskIos` more transfers of `diskMB` more MB, each step on from the last.
+// The text the `step`th move of a file brings in: 1000 more jiffies of CPU at `idle`, `swapins` more pages swapped in (a list's `step`th rise, its last held past it), and `diskIos` more transfers of `diskMB` more MB, each step on from the last.
 export const laterText = (
   { boot = BOOT, cores = 20, diskIos = 0, diskMB = 0, idle = 60, swapins = 0 }: Proc = {},
   step = 1,
 ): Record<string, string> => ({
   diskstats: diskstats(step * diskIos, step * diskMB),
   stat: `cpu  ${100000 + step * (1000 - Math.round(idle * 10))} 200 50000 ${850000 + step * Math.round(idle * 10)} 1000 0 300 0 0 0\n${cpus(cores)}btime ${boot}\n`,
-  vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + step * swapins}\npswpout 116968\n`,
+  vmstat: `nr_free_pages 3276800\npgpgin 123456\npswpin ${PSWPIN + swappedIn(swapins, step)}\npswpout 116968\n`,
 })
+
+const swappedIn = (swapins: number | number[], step: number) =>
+  Array.isArray(swapins)
+    ? Array.from({ length: step }, (_, i) => swapins[Math.min(i, swapins.length - 1)]!).reduce(
+        (a, b) => a + b,
+        0,
+      )
+    : step * swapins
 
 // A folder of /proc text for `proc`, with each name in `omit` left out, and its sys folder standing for /sys's block links (omit "sys" to leave it out). `later` lists the second reads in the order the readings take them, run-slot's gauges (stat, then vmstat with diskstats) first wherever spawn.sh reads its room: the fake sleep moves later/1's files in, then later/2's.
 export const procDir = (proc: Proc = {}, omit: string[] = [], later: string[][] = []): string => {

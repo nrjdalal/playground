@@ -25,8 +25,13 @@ setDefaultTimeout(20_000)
 const TOKEN = "AAAREGTOKEN0123456789"
 // the box's user home a stub ssh answers ci.sh's first read with, the state folder under it, and free memory well past the floor
 const BOX_HOME = "/home/box"
-const BOX_CI = `${BOX_HOME}/.cache/playground-ci`
+const BOX_CI_DIR =
+  readFileSync(join(DIR, "ci.sh"), "utf8").match(/^BOX_CI_DIR=(\S+)$/m)?.[1] ?? "BOX_CI_DIR unread"
+const BOX_CI = `${BOX_HOME}/${BOX_CI_DIR}`
 const BIG_KB = 64 * 1024 * 1024
+// the MemAvailable ci.sh passes suite.sh as a run's need: the model server's 15 GiB floor past a suite's 4.5 GiB peak, or an exec's 2 GiB
+const SUITE_NEED_KB = (15 * 1024 + 4608) * 1024
+const EXEC_NEED_KB = 17 * 1024 * 1024
 
 const dirs: string[] = []
 afterAll(() => {
@@ -484,7 +489,13 @@ const slotWait = (queued: string[], live: string[], wait: number) => {
     .slice(suite.indexOf("SLOTS=$("), suite.indexOf('rm -f "$TICKET"\n') + 16)
     .replaceAll("/proc/meminfo", join(root, "meminfo"))
   const p = Bun.spawnSync(["bash", "-c", `${block}\necho got`], {
-    env: { CI: root, MODE: "exec", PATH: `${b}:/usr/bin:/bin`, RUN: "0123456789ab-zzzzzz" },
+    env: {
+      CI: root,
+      MODE: "exec",
+      NEED_KB: String(EXEC_NEED_KB),
+      PATH: `${b}:/usr/bin:/bin`,
+      RUN: "0123456789ab-zzzzzz",
+    },
     timeout: wait,
   })
   const read = (name: string) =>
@@ -511,23 +522,34 @@ case " ${busy.join(" ")} " in *" $n "*) exit 1 ;; esac; exit 0`,
   )
   writeFileSync(join(root, "meminfo"), `MemAvailable:   ${BIG_KB} kB\n`)
   const suite = readFileSync(join(DIR, "suite.sh"), "utf8")
-  const floor = suite.slice(suite.indexOf("FLOOR_KB="), suite.indexOf("Q=$CI/queue"))
   const block = suite.slice(suite.indexOf("TAKE=$MODE"), suite.indexOf("\n}\nwhile :; do") + 3)
   const p = Bun.spawnSync(
     [
       "bash",
       "-c",
-      `${floor}${block.replaceAll("/proc/meminfo", join(root, "meminfo"))}\ntake; echo "$? \${#LOCKS[@]}"`,
+      `${block.replaceAll("/proc/meminfo", join(root, "meminfo"))}\ntake; echo "$? \${#LOCKS[@]}"`,
     ],
     {
-      env: { CI: root, F: join(root, "run"), MODE: mode, PATH: `${b}:/usr/bin:/bin`, SLOTS: "3" },
+      env: {
+        CI: root,
+        F: join(root, "run"),
+        MODE: mode,
+        NEED_KB: String(SUITE_NEED_KB),
+        PATH: `${b}:/usr/bin:/bin`,
+        SLOTS: "3",
+      },
     },
   )
   return p.stdout.toString().trim()
 }
 
-// suite.sh's take() over 2 slots in a scratch folder, /proc/meminfo a file holding `availableKb`, and the suites in `lanes` holding every slot shared and their lane (the stub reads a descriptor's file from /proc, or lsof on a Mac)
-const suiteBeside = (mode: string, lanes: number[], availableKb: number) => {
+// suite.sh's take() over 2 slots in a scratch folder for a run whose need is `needKb`, /proc/meminfo a file holding `availableKb`, and the suites in `lanes` holding every slot shared and their lane (the stub reads a descriptor's file from /proc, or lsof on a Mac)
+const suiteBeside = (
+  mode: string,
+  lanes: number[],
+  availableKb: number,
+  needKb = mode === "exec" ? EXEC_NEED_KB : SUITE_NEED_KB,
+) => {
   const root = mkdtempSync(join(tmpdir(), "runner-beside-"))
   dirs.push(root)
   const b = join(root, "bin")
@@ -558,6 +580,7 @@ exit 0`,
       CI: root,
       F: join(root, "run"),
       MODE: mode,
+      NEED_KB: String(needKb),
       PATH: `${b}:/usr/bin:/bin`,
       RUN: "0123456789ab-zzzzzz",
     },
@@ -611,6 +634,32 @@ exit 1`,
   return p.stdout.toString()
 }
 
+// suite.sh's test step when a file fails in the batch, passes alone, and the rerun is green: it names the file a BATCH-RED and still passes
+const testStepRedTurnsGreen = (
+  bun = `[ "$2" = test:file ] && exit 0
+n=$(($(cat "ROOT/n" 2> /dev/null || echo 0) + 1)); echo "$n" > "ROOT/n"
+if [ "$n" -lt 2 ]; then
+printf 'tests/a.test.ts:\n(fail) a > breaks [1.00ms]\n\n 9 pass\n 1 fail\n'
+exit 1
+fi
+printf ' 10 pass\n 0 fail\ntest-sandbox: parallel pass passed, serial pass passed\n'
+exit 0`,
+) => {
+  const root = mkdtempSync(join(tmpdir(), "runner-test-red-green-"))
+  dirs.push(root)
+  const b = join(root, "bin")
+  mkdirSync(b)
+  bin(b, "timeout", `shift; exec "$@"`)
+  bin(b, "bun", bun.replaceAll("ROOT", root))
+  const script = ["failing_files", "failing_names", "sandbox_ok", "summary", "test_step"]
+    .map(suiteFn)
+    .join("\n")
+  const p = Bun.spawnSync(["bash", "-c", `failed=0\n${script}\ntest_step`], {
+    env: { F: join(root, "run"), LOG: join(root, "log"), PATH: `${b}:/usr/bin:/bin` },
+  })
+  return p.stdout.toString()
+}
+
 describe("suite.sh", () => {
   test("a second full run that fails names its own files, so the Mac never re-runs the first run's", () => {
     const out = testStep()
@@ -618,6 +667,15 @@ describe("suite.sh", () => {
     expect(out).toContain("files test tests/b.test.ts\n")
     expect(out).not.toContain("files test tests/a.test.ts")
     expect(out).toContain("tally test 1 0\n")
+  })
+
+  test("a red its rerun turns green is named a BATCH-RED, and the step still passes", () => {
+    const out = testStepRedTurnsGreen()
+    expect(out).toContain(
+      "BATCH-RED: tests/a.test.ts (open one issue to root-cause it, by code-review-loop's step 2)\n",
+    )
+    expect(out).toContain("ok test ")
+    expect(out).not.toContain("fail test ")
   })
 
   test("only the oldest live waiter tries a slot, first come first served, and dead tickets drop", () => {
@@ -716,24 +774,41 @@ exit 0`)
   })
 
   // #2529: the box is spark-9dfb, whose model server keeps 15 GiB; a suite or web build peaks at 4.5 GiB, an exec at 2 GiB
-  test("a run takes a slot only while the box's free memory keeps the 15 GiB floor past its own peak", () => {
+  test("a run takes a slot only while the box's free memory covers the need ci.sh passed it, the floor past its own peak", () => {
     const gib = (n: number) => Math.round(n * 1024 * 1024)
     expect(suiteBeside("suite", [], gib(19.4))).toBe("1 0")
     expect(suiteBeside("suite", [], gib(19.5))).toBe("0 2")
     expect(suiteBeside("web", [], gib(19.4))).toBe("1 0")
     expect(suiteBeside("exec", [], gib(16.9))).toBe("1 0")
     expect(suiteBeside("exec", [], gib(17))).toBe("0 1")
+    expect(suiteBeside("exec", [], gib(17), gib(18))).toBe("1 0")
+    expect(suiteBeside("suite", [], gib(18), gib(18))).toBe("0 2")
+  })
+
+  // a box can hold a suite.sh beside an older ci.sh that passes no need, so the run refuses before it queues rather than take a slot past the floor
+  test("suite.sh refuses a run with no need, or one that is not a number, before it queues", () => {
+    const root = mkdtempSync(join(tmpdir(), "runner-need-"))
+    dirs.push(root)
+    cpSync(join(DIR, "suite.sh"), join(root, "suite.sh"))
+    const run = (...args: string[]) =>
+      Bun.spawnSync(["bash", join(root, "suite.sh"), "0123456789ab-aaaaaa", ...args], {
+        env: { HOME: root, PATH: "/usr/bin:/bin" },
+      })
+    for (const args of [["suite"], ["exec"], ["web"], ["exec", "17G"]]) {
+      const p = run(...args)
+      expect(p.exitCode).toBe(2)
+      expect(p.stderr.toString()).toContain(
+        "the MemAvailable in KiB the run needs, which ci.sh passes",
+      )
+    }
+    expect(existsSync(join(root, "queue"))).toBe(false)
   })
 
   test.skipIf(!BASH4)(
     "an exec run of the whole suite takes every slot, and one of a file takes one",
     () => {
-      expect(
-        slotTake("exec", [], ["bun", "--cwd=/home/box/.cache/playground-ci/x", "run", "test"]),
-      ).toBe("0 3")
-      expect(
-        slotTake("exec", [], ["bun", "run", "--cwd", "/home/box/.cache/playground-ci/x", "test"]),
-      ).toBe("0 3")
+      expect(slotTake("exec", [], ["bun", `--cwd=${BOX_CI}/x`, "run", "test"])).toBe("0 3")
+      expect(slotTake("exec", [], ["bun", "run", "--cwd", `${BOX_CI}/x`, "test"])).toBe("0 3")
       expect(slotTake("exec", [3], ["bun", "run", "test"])).toBe("1 0")
       expect(slotTake("exec", [], ["bun", "run", "test", "tests/a.test.ts"])).toBe("0 1")
       expect(slotTake("exec", [], ["bun", "test", "a.test.ts"])).toBe("0 1")
@@ -745,16 +820,8 @@ exit 0`)
   // as a suite, 10 queued test:skills runs of about 200s each held the box one at a time; one 37-minute wait was 5 suites in a row
   test.skipIf(!BASH4)("an exec run of dispatcher's checks takes one slot, as any exec does", () => {
     expect(slotTake("exec", [], ["bun", "run", "test:skills"])).toBe("0 1")
-    expect(
-      slotTake("exec", [], ["bun", "--cwd=/home/box/.cache/playground-ci/x", "run", "test:skills"]),
-    ).toBe("0 1")
-    expect(
-      slotTake(
-        "exec",
-        [1],
-        ["bun", "run", "--cwd", "/home/box/.cache/playground-ci/x", "test:skills"],
-      ),
-    ).toBe("0 1")
+    expect(slotTake("exec", [], ["bun", `--cwd=${BOX_CI}/x`, "run", "test:skills"])).toBe("0 1")
+    expect(slotTake("exec", [1], ["bun", "run", "--cwd", `${BOX_CI}/x`, "test:skills"])).toBe("0 1")
     expect(slotTake("exec", [1, 2, 3], ["bun", "run", "test:skills"])).toBe("1 0")
   })
 
@@ -916,7 +983,7 @@ esac`,
 })
 
 // ci.sh exec (or the given mode) against a box faked on this machine: ssh runs each command here, the box's home this scratch folder and its
-// free memory past the floor, systemd-run runs the unit in place, and the unit runs a stand-in suite that records its mode and prints the given output
+// free memory past the floor, systemd-run runs the unit in place, and the unit runs a stand-in suite that records its mode and need and prints the given output
 const fakeBox = (
   output: string,
   { argv = (repo: string) => ["exec", repo, "--", "true"], code = 0, clone = true } = {},
@@ -937,7 +1004,7 @@ const fakeBox = (
   }
   writeFileSync(
     join(root, "fake-suite.sh"),
-    `echo "$2" > "${root}/mode"; printf '%s' '${output}'; exit ${code}\n`,
+    `echo "$2" > "${root}/mode"; echo "$3" > "${root}/need"; printf '%s' '${output}'; exit ${code}\n`,
   )
   bin(
     b,
@@ -946,7 +1013,7 @@ const fakeBox = (
 BIG
 '; exit 0 ;; esac
 printf '%s\n' "${"$"}{@: -1}" >> ROOT/argv
-c=$(printf '%s' "${"$"}{@: -1}" | sed -e 's#ROOT/.cache/playground-ci/suite.sh #ROOT/fake-suite.sh #g')
+c=$(printf '%s' "${"$"}{@: -1}" | sed -e 's#ROOT/${BOX_CI_DIR}/suite.sh #ROOT/fake-suite.sh #g')
 exec bash -c "$c"`
       .replaceAll("ROOT", root)
       .replace("BIG", String(BIG_KB)),
@@ -971,14 +1038,14 @@ exec bash -c "$c"`
     cwd: repo,
     env,
   })
-  const mode = existsSync(join(root, "mode")) ? readFileSync(join(root, "mode"), "utf8").trim() : ""
   const read = (name: string) =>
     existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8") : ""
   return {
     argv: read("argv"),
     code: p.exitCode,
     err: p.stderr.toString(),
-    mode,
+    mode: read("mode").trim(),
+    need: read("need").trim(),
     out: p.stdout.toString(),
     recorded: read("recorded"),
     root,
@@ -996,7 +1063,7 @@ describe("what a run puts on the box goes into the box's machine record (PG-2538
       clone,
       "--no-env-file packages/scripts/src/machine-record/cli.ts add --stdin",
     ])
-    const ci = join(r.root, ".cache", "playground-ci")
+    const ci = join(r.root, BOX_CI_DIR)
     expect(JSON.parse(stdin!)).toEqual([
       {
         by: "ci.sh",
@@ -1020,7 +1087,7 @@ describe("what a run puts on the box goes into the box's machine record (PG-2538
     expect(r.code).toBe(0)
     expect(r.out).toBe("done\n")
     expect(r.err.split("\n")[0]).toBe(
-      `ci.sh: ${r.root}/.cache/playground-ci and docker image postgres:alpine are not in the box's machine record (its clone ${r.root}/clone); its next check names them`,
+      `ci.sh: ${r.root}/${BOX_CI_DIR} and docker image postgres:alpine are not in the box's machine record (its clone ${r.root}/clone); its next check names them`,
     )
     expect(r.err.split("\n")[1]).toMatch(/^ci\.sh: ci-\S+ started on the box; /)
   })
@@ -1061,8 +1128,9 @@ describe("ci.sh exec", () => {
     expect(rel).toBe("/web")
     const argv = args.split("\0").filter(Boolean)
     expect(argv.slice(0, 2)).toEqual(["bun", "test"])
-    expect(argv[2]).toMatch(
-      /^\/home\/box\/\.cache\/playground-ci\/\.claude\/worktrees\/[0-9a-f]{12}-[0-9a-z]{6}\/web\/a\.test\.ts$/,
+    expect(argv[2]).toStartWith(`${BOX_CI}/.claude/worktrees/`)
+    expect(argv[2].slice(BOX_CI.length)).toMatch(
+      /^\/\.claude\/worktrees\/[0-9a-f]{12}-[0-9a-z]{6}\/web\/a\.test\.ts$/,
     )
   })
 
@@ -1106,8 +1174,8 @@ describe("ci.sh exec", () => {
     expect(boxExec("ok\nexit 0\n").code).toBe(0)
   })
 
-  // #2529: the box is a peer of this user's own, reached with no root, under user units; #2554: its state sits outside that user's ~/.playground, which a test sandbox hides
-  test("it logs in as this user, never root, and keeps every remote path under the box user's ~/.cache/playground-ci in user units", () => {
+  // #2529: the box is a peer of this user's own, reached with no root, under user units; #2554: its state sits outside that user's data folder, which a test sandbox may hide
+  test(`it logs in as this user, never root, and keeps every remote path under the box user's ~/${BOX_CI_DIR} in user units`, () => {
     const r = boxExec("exit 0\n")
     expect(r.code).toBe(0)
     const me = Bun.spawnSync(["id", "-un"]).stdout.toString().trim()
@@ -1118,7 +1186,6 @@ describe("ci.sh exec", () => {
     expect(sent).not.toMatch(/\/srv\/ci|\/root|root@|runuser/)
     expect(sent).toContain(`cat > ${BOX_CI}/`)
     expect(sent).not.toContain(`${BOX_HOME}/.playground`)
-    expect(readFileSync(join(DIR, "ci.sh"), "utf8")).toContain("BOX_CI_DIR=.cache/playground-ci\n")
     expect(sent).toContain("systemd-run --user ")
     expect(sent).toContain("systemctl --user is-active ")
   })
@@ -1162,6 +1229,20 @@ describe("ci.sh exec", () => {
   test("an exec of named test files keeps the exec's 2 GiB peak, so 18 GiB free takes it", () => {
     const argv = ["bun", "run", "test:file", "tests/a.test.ts"]
     expect(boxExec("exit 0\n", { cmd: () => argv, freeKb: 18 * 1024 * 1024 }).code).toBe(0)
+  })
+
+  // ci.sh holds the floor and the peaks alone, and suite.sh's slot wait reads the need it passes
+  test.each([
+    ["an exec", (repo: string) => ["exec", repo, "--", "true"], EXEC_NEED_KB],
+    [
+      "a whole-suite exec",
+      (repo: string) => ["exec", repo, "--", "bun", "run", "test"],
+      SUITE_NEED_KB,
+    ],
+    ["a web build", () => ["web", "HEAD"], SUITE_NEED_KB],
+    ["a suite", () => ["HEAD"], SUITE_NEED_KB],
+  ])("%s passes suite.sh the floor past its own peak as its need", (_, argv, need) => {
+    expect(fakeBox("ok\n", { argv }).need).toBe(String(need))
   })
 
   // dispatcher, 17 Nov: on spark-a566, linger kept a locked keyring daemon alive, and the factory's calls jammed on it

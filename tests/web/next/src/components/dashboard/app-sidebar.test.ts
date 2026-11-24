@@ -13,7 +13,7 @@ import {
   ThreadsGroup,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
 import { SidebarMenu, SidebarProvider } from "../../../../../../web/next/src/components/ui/sidebar"
-import MODEL_ICONS from "../../../../../../web/next/src/lib/model-icons.json"
+import { drawingOf, keepMakerIcon } from "../../../../../../web/next/src/lib/model-icons"
 import { groupOrder } from "../../../../../../web/next/src/lib/sidebar-groups"
 import { iconTone, STATES, statusIcon } from "../../../../../../web/next/src/lib/status-icons"
 import { tipsOf } from "../../tooltips"
@@ -28,12 +28,18 @@ const { createElement } = (await import(Bun.resolveSync("react", web))) as {
 const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server", web))) as {
   renderToStaticMarkup: (node: Node) => string
 }
-const { RiHammerFill, RiRobot2Line, RiSignalCellular3Fill, RiSkull2Fill } = (await import(
-  Bun.resolveSync("@remixicon/react", web)
-)) as Record<"RiHammerFill" | "RiRobot2Line" | "RiSignalCellular3Fill" | "RiSkull2Fill", unknown>
+const { RiCircleLine, RiHammerFill, RiRobot2Line, RiSignalCellular3Fill, RiSkull2Fill } =
+  (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
+    "RiCircleLine" | "RiHammerFill" | "RiRobot2Line" | "RiSignalCellular3Fill" | "RiSkull2Fill",
+    unknown
+  >
 
-// A maker's vendored icon as its logo draws it, to find it in a row.
-const logoOf = (id: string) => MODEL_ICONS.makers.find((maker) => maker.id === id)!.icon!.data
+// Each maker's icon as the API would serve it, kept as read, so a row draws it; Ornith's a full-colour image.
+const logoOf = (id: string) =>
+  id === "ornith-ai"
+    ? "data:image/png;base64,iVBORw0KGgo="
+    : `data:image/svg+xml;base64,${Buffer.from(`<svg data-maker="${id}"><path fill="currentColor" d="M0 0"/></svg>`).toString("base64")}`
+for (const id of ["anthropic", "ornith-ai", "zai"]) keepMakerIcon(id, drawingOf(logoOf(id)))
 const ANTHROPIC = logoOf("anthropic")
 
 type Worker = Parameters<typeof SessionRow>[0]["worker"]
@@ -493,20 +499,113 @@ describe("SessionRow", () => {
     ])
     expect(shownText(html)).toBe("Message dispatcher from the dashboard")
     expect(shape(html)).toEqual(stock)
-    // a GLM model draws Z.ai's logo, a maker with no icon (Ornith, until its avatar is fetched on the machine) or none known the fallback, and a row with no model or effort draws neither
+    // a GLM model draws Z.ai's logo, a local org/repo model its org's image, a bare id or a maker none knows its name's initials in a chip and never the robot, a maker still read an empty place, and a row with no model or effort draws neither
     const glm = row("worker-greed", "worker", [], { model: "glm-5.3-flash" })
     expect(glm).toContain(logoOf("zai"))
     expect(tipsOf(glm)).toContain("GLM 5.3 Flash")
-    const ornith = row("worker-greed", "worker", [], { model: "Ornith-1.5-122B-NVFP4" })
-    expect(ornith).toContain(pathOf(RiRobot2Line))
-    expect(tipsOf(ornith)).toContain("Ornith-1.5-122B-NVFP4")
+    const ornith = row("worker-greed", "worker", [], { model: "ornith-ai/Ornith-1.5-122B-NVFP4" })
+    expect(ornith).toContain(logoOf("ornith-ai"))
+    expect(ornith).toContain("<clipPath")
+    expect(tipsOf(ornith)).toContain("ornith-ai/Ornith-1.5-122B-NVFP4")
+    const bareLocal = row("worker-greed", "worker", [], { model: "Ornith-1.5-122B-NVFP4" })
+    expect(bareLocal).toContain('data-initials="Or"')
+    expect(bareLocal).not.toContain(pathOf(RiRobot2Line))
+    const reading = row("worker-greed", "worker", [], { model: "NotReadYet/Model-1" })
+    expect(reading).not.toContain(pathOf(RiRobot2Line))
+    expect(reading).not.toContain("<image")
     const unknown = row("worker-greed", "worker", [], { model: "gpt-9" })
-    expect(unknown).toContain(pathOf(RiRobot2Line))
+    expect(unknown).toContain('data-initials="Gp"')
+    expect(unknown).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(unknown)).toContain("gpt-9")
     const bare = row("worker-greed", "worker")
     expect(bare).not.toContain(ANTHROPIC)
     expect(bare).not.toContain(pathOf(RiRobot2Line))
     expect(tipsOf(bare)).toHaveLength(1)
+  })
+
+  test("a local session's row draws its served model's maker and names its level, high: Ornith 122B, thinking, where a Claude row draws its effort; with no served repo known, its initials chip (PG-2642)", () => {
+    const local = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+      model: "local",
+    })
+    expect(local).toContain(logoOf("ornith-ai"))
+    expect(local).toContain(pathOf(RiSignalCellular3Fill))
+    expect(local).not.toContain(pathOf(RiCircleLine))
+    expect(local).not.toContain(pathOf(RiRobot2Line))
+    expect(tipsOf(local)).toEqual([
+      "worker-greed\nMessage dispatcher from the dashboard\nhigh: Ornith 122B, thinking · Working",
+      "high: Ornith 122B, thinking",
+      "high",
+    ])
+    expect(shape(local)).toEqual(stock)
+    for (const [effort, words] of [
+      ["low", "low: Ornith 122B, no thinking"],
+      ["medium", "medium: Ornith 122B, thinking capped"],
+    ]) {
+      const level = row("worker-greed", "worker", [], {
+        effort,
+        localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+        model: "local",
+      })
+      expect(tipsOf(level)).toContain(words)
+    }
+    const unknown = row("worker-greed", "worker", [], { effort: "high", model: "local" })
+    expect(unknown).toContain('data-initials="Lo"')
+    expect(unknown).toContain(pathOf(RiSignalCellular3Fill))
+    expect(unknown).not.toContain(pathOf(RiRobot2Line))
+    expect(tipsOf(unknown)).toContain("high: local, thinking")
+    const claude = row("worker-greed", "worker", [], { effort: "high", model: "claude-opus-5-5" })
+    expect(claude).toContain(pathOf(RiSignalCellular3Fill))
+  })
+
+  test("a local row with no effort set draws a plain circle in the effort's place, named No effort set, and one with its effort set draws that effort's bars as a Claude row does", () => {
+    const none = row("worker-greed", "worker", [], {
+      effort: null,
+      localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+      model: "local",
+    })
+    expect(none).toContain(pathOf(RiCircleLine))
+    expect(none).not.toContain(pathOf(RiSignalCellular3Fill))
+    expect(tipsOf(none)).toContain("No effort set")
+    const set = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModel: "ornith-ai/Ornith-1.5-122B-NVFP4",
+      model: "local",
+    })
+    expect(set).toContain(pathOf(RiSignalCellular3Fill))
+    expect(set).not.toContain(pathOf(RiCircleLine))
+    expect(tipsOf(set)).toContain("high")
+    const picked = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModels: [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }],
+      model: "ornith-1.5-122b-nvfp4",
+    })
+    expect(picked).toContain(pathOf(RiCircleLine))
+    expect(tipsOf(picked)).toContain("No effort set")
+    const claude = row("worker-greed", "worker", [], { effort: "high", model: "claude-opus-5-5" })
+    expect(claude).toContain(pathOf(RiSignalCellular3Fill))
+    expect(claude).not.toContain(pathOf(RiCircleLine))
+    expect(row("worker-greed", "worker", [], { effort: null, model: null })).not.toContain(
+      pathOf(RiCircleLine),
+    )
+  })
+
+  test("the hosted session's row on a local model it picked, which reports that model's id, draws no effort bars and its tooltip names no effort (PG-2651)", () => {
+    const localModels = [{ id: "ornith-1.5-122b-nvfp4", label: "Ornith 122B" }]
+    const picked = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModels,
+      model: "ornith-1.5-122b-nvfp4",
+    })
+    expect(picked).not.toContain(pathOf(RiSignalCellular3Fill))
+    expect(tipsOf(picked).join("\n")).not.toContain("high")
+    const claude = row("worker-greed", "worker", [], {
+      effort: "high",
+      localModels,
+      model: "claude-opus-5-5",
+    })
+    expect(claude).toContain(pathOf(RiSignalCellular3Fill))
   })
 
   for (const [name, role] of [
