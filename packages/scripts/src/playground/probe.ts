@@ -232,7 +232,13 @@ export const alive = (pid: number): boolean => {
   }
 }
 
-const pidAlive = (file: string): boolean => alive(Number.parseInt(readFileSync(file, "utf8"), 10))
+const pidAlive = (file: string): boolean => {
+  try {
+    return alive(Number.parseInt(readFileSync(file, "utf8"), 10))
+  } catch {
+    return false
+  }
+}
 
 // The follower the supervisor started, by the pid it recorded; nothing reads the dashboard's database.
 export const followerRunning = (): boolean => pidAlive(join(opsDashboard(), "dashboard-ingest.pid"))
