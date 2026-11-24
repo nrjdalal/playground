@@ -13,7 +13,7 @@ to LAST_MAX characters, in ops/<job>.last (0600): herdr closes a job's pane the 
 job died there. A start drops the last copy's line first, and the reader ends once the job has; it ignores the pane's
 hangup, and writes the line only while ops/<job>.reader names it.
 """
-import fcntl, json, os, shlex, signal, subprocess, sys
+import fcntl, json, os, secrets, shlex, signal, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from beat import ops_dir
@@ -58,11 +58,19 @@ def running(job, marker):
 
 
 def private(path, text):
-    """Write text to path whole, mode 0600, by a rename, so a reader never sees half a line."""
-    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(path + ".tmp", path)
+    """Write text to path whole, mode 0600, by renaming a temp of its own onto path, so a reader never sees half a line and two callers never clash."""
+    tmp = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp, path)
 
 
 def read_stderr(log, last, pane, job_pid, reader=None, poll=0.2):
@@ -94,7 +102,7 @@ def read_stderr(log, last, pane, job_pid, reader=None, poll=0.2):
                 offset = 0
             if ended and not chunk:
                 return
-            __import__("time").sleep(poll)
+            time.sleep(poll)
 
 
 def ours(reader):
@@ -146,7 +154,7 @@ def main():
             # ops-up closes an unhealthy copy's pane just before this start: give that copy a moment to exit
             if not holder:
                 break
-            __import__("time").sleep(1)
+            time.sleep(1)
             holder = running(job, marker)
         if holder:
             print(f"{job} already running (pid {holder}); not starting another")
