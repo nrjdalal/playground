@@ -177,7 +177,7 @@ const usageAccounts = async (
   return rows.map((row, at) => ({
     account: accountKey(row).toLowerCase(),
     label: row.label ?? `account ${at + 1}`,
-    parkedUntil: (row as Json).parkedUntil as string | undefined,
+    parkedUntil: "parkedUntil" in row ? row.parkedUntil : undefined,
   }))
 }
 
@@ -202,32 +202,30 @@ const fiveHourOf = (account: string | undefined, s: Json, samples: Json[]): numb
 // One entry per usage.accounts Claude row, by the label pickable() names it: the account's projected week at its reset from weekOf, plus, for the account usage.json logs, its 5-hour window from the recent rate, or a state string for an account with too few readings, or parked in the future.
 export async function forecast(ctx: Context): Promise<Record<string, ForecastEntry>> {
   const samples = join(here(ctx), "usage-samples.jsonl")
-  let s: Json
-  let history: Json[]
+  const t = Math.floor(seconds(ctx))
   let login: string | undefined
+  let fiveHour: number | undefined
   try {
     const u = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text())
     const rl = u.rate_limits
     login = typeof u.account === "string" ? u.account.toLowerCase() : undefined
-    s = {
-      // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+    const s = {
       account: login,
       f5: rl.five_hour?.used_percentage,
       r5: rl.five_hour?.resets_at,
-      r7: rl.seven_day.resets_at,
+      r7: rl.seven_day?.resets_at,
       s7: rl.seven_day?.used_percentage,
-      t: Math.floor(seconds(ctx)),
+      t,
     }
     await appendFile(samples, `${JSON.stringify(s)}\n`)
-    history = (await Bun.file(samples).text())
+    const history = (await Bun.file(samples).text())
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l) as Json)
+    fiveHour = fiveHourOf(login, s, history)
   } catch {
-    return {}
+    // an unreadable usage.json leaves every account its week alone
   }
-  const t = s.t as number
-  const fiveHour = fiveHourOf(login, s, history)
   const [factory, others] = [
     await samplesOf(ctx, "week-samples.jsonl"),
     await samplesOf(ctx, "account-samples.jsonl"),
@@ -251,16 +249,10 @@ export async function forecast(ctx: Context): Promise<Record<string, ForecastEnt
 
 // The accounts login-flip.py's split gives a share of new sessions while it is under 30 minutes old, as spawn.sh reads it, else usage.json's account; each by its usage.accounts label, else `account <n>` by its row, else `unlisted <n>` in the order met, never its address.
 const pickable = async (ctx: Context): Promise<Map<string, string>> => {
-  const policy = await readPolicy(ctx.data)
-  const rows =
-    policy.refusal === undefined
-      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
-      : []
+  const rows = await usageAccounts(ctx)
   let unlisted = 0
-  const labelOf = (account: string) => {
-    const at = rows.findIndex((row) => accountKey(row).toLowerCase() === account)
-    return at === -1 ? `unlisted ${++unlisted}` : (rows[at]!.label ?? `account ${at + 1}`)
-  }
+  const labelOf = (account: string) =>
+    rows.find((row) => row.account === account)?.label ?? `unlisted ${++unlisted}`
   const split = (await readJson<Json>(join(ctx.ops, "usage", "login-flip.json"), {})).split as Json
   const shares =
     typeof split?.at === "number" && seconds(ctx) - split.at < 1800 ? split.shares : null

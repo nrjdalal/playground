@@ -1475,6 +1475,20 @@ describe("forecast", () => {
     })
     expect(await forecast(ctx)).toEqual({ main: "no forecast yet" })
   })
+
+  test("with no usage.json, every account still reads its week", async () => {
+    const { ctx } = setup()
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [
+      { email: A, label: "main" },
+      { email: B, label: "backup" },
+    ])
+    week(ctx, [
+      { account: A, week: 39, at: -10800 },
+      { account: A, week: 40, at: 0 },
+    ])
+    expect(await forecast(ctx)).toEqual({ main: { week: 48 }, backup: "no forecast yet" })
+  })
 })
 
 describe("pace off", () => {
