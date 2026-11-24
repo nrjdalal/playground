@@ -90,6 +90,7 @@ Commit before a red-first swap, so the file's edits sit in a commit, and restore
 A chain stops when that commit fails (`git commit ... || exit 1`), so the swap never runs over uncommitted edits: on 7 Nov trace-count refused a chain's commit, the chain went on to its swap, and the restore wiped the fix, re-applied from a patch.
 The `no-extensions-write` hook refuses a write whose target or folder it cannot resolve, such as a `cp` loop to `~/.playground/scratch/<name>/keep-$(basename $f)`, or a `cd $D` followed by a write under `$D`: write each path out literally, or make the red-first swap with `git diff > <scratch>/patch` and `git apply`.
 A red commit for a new module adds a stub of it, its exports typed and returning the wrong value or throwing, so the pre-commit check-types passes and the test fails on behaviour, not on a missing import.
+A red-first commit whose rows call an export not built yet also commits a stub of it, typed as the real one with a body that throws and any new field optional, so check-types-tests passes and the rows go red at run time instead of on a missing import; one worker lost 40 minutes to that refusal.
 `tests/install.test.ts` copies into its scratch clone the files the installer runs by walking every relative import from its entries (`withImports`), so a new import of an installer file arrives on its own.
 A file the installer reaches by path rather than by import (a script `install.sh` or `link-skills.sh` runs, a JSON read with `readFileSync`) joins those entries, since a scratch clone that lacks it fails the test's install rows.
 A test file is the smallest piece a shard takes, and its cases run one after another, so a file whose every case starts a subprocess (`spawn.sh` under `tests/scripts/spawn-fake.ts` or `run-slot.sh` under `tests/scripts/ops/run-slot-fake.ts`, spawn.sh's about 0.5s a case, measured) grows by that much with every case it gains.
@@ -151,7 +152,7 @@ Edit a bash script only once every live run of it has ended, since bash reads a 
 No end-to-end suite exists: `bun run test:e2e` matches no file.
 
 The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box,
-with stand-ins for claude, gh, brew, security and sudo, a logging curl (`stubs.ts`), a docker that reaches only the containers the box made (`docker.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
+with stand-ins for claude, gh, brew, security and sudo, a logging curl (`stubs.ts`), a docker that reaches only the containers the box made (`docker.ts`) and its own portless proxy on port 14155.
 That docker labels each container the box starts, lists only those, takes `run` with first run's own flags alone (no volume, host path or host network, a publish on 127.0.0.1 alone), and refuses and logs any other call or one naming another's container, which fails step 2.
 It runs from a checkout at that sha, since the box is the calling checkout's gate code, and stops with exit 2 when that code differs from the sha's (the release skill's detached worktree).
 The install runs on this host's OS, since `installEnv` sets no `INSTALL_OS` and install.sh reads `uname -s`.

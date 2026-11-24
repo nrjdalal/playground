@@ -2238,6 +2238,172 @@ test.each<[string, Picks | null, string]>([
   expect(existsSync(repo)).toBe(true)
 })
 
+// A mkdtemp machine whose hf repo holds one approved sharded set: four .gguf shards, each at its own size and on the record, at the set's total. `symlinks` replaces a shard with a symlink, which the set reads as left out, and `folders` one with an empty folder, which the set takes in at 0 bytes.
+type ShardState = {
+  deps: RmDeps
+  repo: string
+  shard: (i: number) => string
+  size: number
+  total: number
+}
+const shardedMachine = (symlinks: number[] = [], folders: number[] = []): ShardState => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) => join(repo, `model-${String(i).padStart(5, "0")}-of-00004.gguf`)
+  const size = 50
+  const entries: {
+    added: string
+    by: string
+    kind: string
+    path: string
+    undo: string
+    why: string
+  }[] = []
+  for (let i = 1; i <= 4; i++) {
+    const here = shard(i)
+    mkdirSync(dirname(here), { recursive: true })
+    if (symlinks.includes(i)) {
+      writeFileSync(join(repo, `target-${i}`), "real")
+      symlinkSync(join(repo, `target-${i}`), here)
+    } else if (folders.includes(i)) mkdirSync(here)
+    else {
+      writeFileSync(here, "")
+      truncateSync(here, size)
+    }
+    entries.push({
+      added: "2026-11-17",
+      by: "ops",
+      kind: "folder",
+      path: here,
+      undo: "rm",
+      why: "seed",
+    })
+  }
+  writeFileSync(join(m.deps.data, "machine-record.json"), JSON.stringify({ baseline: [], entries }))
+  return {
+    ...m,
+    deps: {
+      ...m.deps,
+      machine: "spark-a",
+      approvals: async () => [{ bytes: size * 4, machine: "spark-a", path: shard(1) }],
+    },
+    repo,
+    shard,
+    size,
+    total: size * 4,
+  }
+}
+
+test("runRm --card deletes an approved sharded set whole: every shard at the set's total, and every record entry dropped", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, out } = await rmTold([shard(1), "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(false)
+  expect(out.join("\n")).toContain(
+    `Deleted the 4 shards outright (${total} bytes), as card ${CARD} approved on this machine; ${join(deps.data, "trash", "deleted.jsonl")} logs it`,
+  )
+  expect(out.join("\n")).toContain("its machine record entries are dropped")
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
+test("runRm --card refuses a sharded set whose total no longer matches the pick, deleting none", async () => {
+  const { deps, shard, total } = shardedMachine()
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: total + 50, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 4 shards at 200 bytes")
+  expect(err.join("\n")).toContain("approved it at 250")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+test("runRm --card leaves a symlinked shard out of the set, so its total no longer matches the pick, deleting none", async () => {
+  const { deps, shard } = shardedMachine([4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain("shard set holds 3 shards at 150 bytes")
+  expect(err.join("\n")).toContain("approved it at 200")
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+test("runRm --card refuses a sharded set whose one shard fails its own check, an empty folder, though the total matches the pick, deleting none", async () => {
+  const { deps, shard, size } = shardedMachine([], [4])
+  const { code, err } = await rmTold([shard(1), "--card", CARD], {
+    ...deps,
+    approvals: async () => [{ bytes: size * 3, machine: "spark-a", path: shard(1) }],
+  })
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(`${shard(4)} is not model weights the shard set holds`)
+  for (let i = 1; i <= 4; i++) expect(existsSync(shard(i))).toBe(true)
+})
+
+// A scratch hub repo whose snapshots/<rev>/ shards are links to its blobs, the record naming the repo folder (not a shard), and a card that approves it whole: shardSet returns null for the folder, so deleteWeights removes it, never removeSet, and a shard link there would be refused.
+type HubRepoState = {
+  deps: RmDeps
+  repo: string
+  shard: (i: number) => string
+  blobs: string[]
+  size: number
+}
+const hubRepoMachine = (rev = "abc123"): HubRepoState => {
+  const m = machine()
+  const repo = join(m.home, "models", "hf", "hub", "models--nvidia--Qwen-27B")
+  const shard = (i: number) =>
+    join(repo, "snapshots", rev, `model-${String(i).padStart(5, "0")}-of-00003.safetensors`)
+  const size = 100
+  const blobs: string[] = []
+  for (let i = 1; i <= 3; i++) {
+    const blob = join(repo, "blobs", `blob-${i}`)
+    file(blob)
+    truncateSync(blob, size)
+    blobs.push(blob)
+  }
+  for (let i = 1; i <= 3; i++) {
+    const here = shard(i)
+    mkdirSync(dirname(here), { recursive: true })
+    symlinkSync(blobs[i - 1]!, here)
+  }
+  writeFileSync(
+    join(m.deps.data, "machine-record.json"),
+    JSON.stringify({
+      baseline: [],
+      entries: [
+        { added: "2026-11-17", by: "ops", kind: "folder", path: repo, undo: "rm", why: "seed" },
+      ],
+    }),
+  )
+  return {
+    ...m,
+    deps: {
+      ...m.deps,
+      machine: "spark-a",
+      approvals: async () => [{ bytes: size * 3, machine: "spark-a", path: repo }],
+    },
+    blobs,
+    repo,
+    shard,
+    size: size * 3,
+  }
+}
+
+test("runRm --card deletes an approved hub repo whole, its shard links and blobs, and drops its record entry", async () => {
+  const { deps, repo, blobs, size } = hubRepoMachine()
+  const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(
+    `Deleted ${repo} outright (${size} bytes), as card ${CARD} approved`,
+  )
+  expect(out.join("\n")).toContain("its machine record entry is dropped")
+  expect(existsSync(repo)).toBe(false)
+  for (const b of blobs) expect(existsSync(b)).toBe(false)
+  expect(JSON.parse(readFileSync(join(deps.data, "machine-record.json"), "utf8")).entries).toEqual(
+    [],
+  )
+})
+
 // A peer's far end: run-slot's ssh, a closure a test injects so the stub records the command.
 type PeerRun = { machine: string; command: string }
 const peerRun = (out: { code: number; out: string }) => {

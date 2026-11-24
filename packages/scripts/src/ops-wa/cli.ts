@@ -10,6 +10,7 @@ import {
   loginOf,
   readPolicy,
   readRendered,
+  ruleSettings,
   setSetting,
   whatsappSettings,
 } from "@packages/settings"
@@ -37,10 +38,10 @@ import { mediaDir, modelPath, stdoutRun, transcriber } from "./media"
 import { outboxDir } from "./outbound"
 import { seedAlert } from "./seed"
 import { socketPath, serve } from "./server"
-import { applyOwnerSetting, confirm, settingSet } from "./setting-set"
+import { applyOwnerSetting, ownerSettings } from "./setting-set"
 import { votedOptions } from "./votes"
 
-// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so up.py does not start it again and its row reads the reason.
+// ops-wa: the WhatsApp link on the spare number, held by ops-wa's life; it beats ok while the linked device is connected, waiting while it connects or waits for its numbers or its pairing code, and, once stopped, why, idle, so its row reads the reason and up.py starts it again only after a no-connect stop, once per network outage, when WhatsApp answers again.
 process.umask(0o077)
 const data = engineData("ops-wa")
 const dir = join(data, "whatsapp")
@@ -205,6 +206,16 @@ const main = async () => {
     dir,
     now: Date.now,
     owner,
+    // the quiet window, read afresh for each send, so the owner's change reaches a running ops-wa
+    quiet: async () => {
+      const read = await readPolicy(data)
+      const settings = read.settings ?? { schemaVersion: 1, values: {} }
+      return {
+        end: whatsappSettings.get(settings, "wa.quietEndHour"),
+        start: whatsappSettings.get(settings, "wa.quietStartHour"),
+        zone: ruleSettings.get(settings, "clock.ownerZone"),
+      }
+    },
     sleep: Bun.sleep,
     sock: {
       ev: { on: () => {} },
@@ -238,20 +249,24 @@ const main = async () => {
     )
     return was
   }
-  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035)
+  // a setting from the owner's own message: its value must be in the message, and a key a guard reads waits for the owner's yes (ADR 0035); a session's proposal waits for it too, its question's id the reason (ADR 0041)
   const owned = {
-    apply: (key: string, value: string, id: string) => applyOwnerSetting(data, key, value, id),
+    apply: (key: string, value: string, id: string, proposed?: boolean) =>
+      applyOwnerSetting(data, key, value, id, proposed),
     dir,
     log: (line: string) => console.log(line),
     now: Date.now,
-    tell: (line: string) => send(line, "reply"),
+    question: (line: string) => send.card(line),
+    tell: (line: string) => send.out(line, "reply").then((out) => out.ids),
   }
+  const settings = ownerSettings(owned)
   serve(
     path,
     send.out,
     (id) => alertSet({ device, dir, now: Date.now, owner, set: setAlert }, id),
     send.react,
-    (id, key, value) => settingSet(owned, id, key, value),
+    settings.set,
+    settings.propose,
   )
   const relay = sendAs("wa", true, true)
   // the alert number's lines go under their own tag, [ops-wa-data], so none reads as the owner's [ops-wa]
@@ -263,9 +278,11 @@ const main = async () => {
     assistant: () => assistantOf(data),
     busy: () => busyOf("dispatcher", data, config, seconds()),
     card: send.card,
+    catchUp: send.catchUp,
     check,
-    confirm: (text, reaction) => confirm(owned, text, reaction),
+    confirm: settings.confirm,
     dir,
+    draft: send.draft,
     escalate: (body) => send(body, "escalate"),
     inbox: inboxOf(),
     log: (line) => console.log(line),
@@ -302,7 +319,7 @@ const main = async () => {
     },
     relay: (to, text, data) => (data ? relayData : relay)(to, text),
     poll: send.poll,
-    react: send.react,
+    remind: send.remind,
     reply: send,
     sleep: Bun.sleep,
     stuck: () => stuckOf("dispatcher", data, config, seconds()),

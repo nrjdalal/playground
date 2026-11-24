@@ -7,7 +7,9 @@ install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
-                             back no job ops-restart stopped (packages/scripts/src/ops-restart)
+                             back no job ops-restart stopped (packages/scripts/src/ops-restart); a start made from START_WINDOW
+                             before the call on, one made while it waits on up.lock included, is kept and logged, since
+                             another pass started the job after it stopped
   up.py --sessions           list, never run, the commands that bring the factory's Claude sessions back
 
 Any other argument is refused with the usage line, exit 1, and runs no pass.
@@ -17,10 +19,17 @@ is not an exit. An unhealthy job's old herdr pane, which ops opened, is closed f
 recorded process groups are gone, stopping them through procs.sh);
 nothing is ever selected by name or pattern. A launchd job is only reported, once after DOWN_PASSES unhealthy passes in a row: launchd, or on Linux its systemd user unit, keeps it alive. A job whose holder runs an
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
-terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
+terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A terminal job beating
+`stopped: no connect in N tries` whose host (REACH) answers on 443 again is stopped by its recorded pid and started again,
+once per recovery: up-state.json's _no_connect holds the retry until a pass finds the host silent or the job beats ok;
+any other stopped beat (a logout, a held lock) is left alone, since a new start fixes neither. A job that fails to start is logged
 with herdr's whole answer and tried again on the next pass; only one that started waits out GRACE. Every pass exits 0.
+herdr closes a job's pane the moment its job exits, so a restart reads why the job stopped from ops/<job>.last, the last
+stderr line once.py's reader kept, when it was written after the job's last start, and a private notify.sh line tells
+ops once per job until the line changes (ops/up-last-lines.json, 0600) or the job is healthy again; the printed started
+line leaves it out, since ops-tick sends every printed line to ops in public.
 """
-import calendar, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, time
+import calendar, fcntl, glob, hashlib, json, os, re, shutil, socket, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -38,6 +47,9 @@ REGISTRY = (
 # spawn.sh's data folder, as dataDir() reads it: PLAYGROUND_DATA_DIR when set, else .playground in the home folder; it keeps the backend pins and the roster there
 DATA = (os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground")) if os.path.isabs(os.environ.get("PLAYGROUND_DATA_DIR") or "/") else sys.exit(f"PLAYGROUND_DATA_DIR is relative ({os.environ['PLAYGROUND_DATA_DIR']}), so each process would read it from its own folder: set it to an absolute path"))
 GRACE = 600  # a job started this recently has not had time to write its first heartbeat, so it is left alone
+START_WINDOW = 10  # a start this close before a --restarted call, or after it, came from another pass after the job stopped, so that call keeps it
+NO_CONNECT = re.compile(r"stopped: no connect in \d+ tries$")  # ops-wa's beat once its connects ran out (packages/scripts/src/ops-wa/life.ts)
+REACH = {"ops-wa": "web.whatsapp.com"}  # the host each job's no-connect stop waits on
 DOWN_PASSES = 3  # a launchd job unhealthy this many passes in a row is told to ops once, since launchd is not bringing it back
 SPAWN = os.path.join(os.path.dirname(HERE), "spawn.sh")  # the one way a session comes back, through the factory's capacity gate
 ONCE = os.path.join(HERE, "once.py")  # every job starts through it: one copy per job, held by its recorded pid
@@ -50,6 +62,7 @@ import ptable
 OPS = once.OPS
 LOG = os.path.join(OPS, "up.log")
 STARTS = os.path.join(OPS, "up-state.json")
+LAST_TOLD = os.path.join(OPS, "up-last-lines.json")  # each job's last line already told to ops
 
 HERDR_DIR = os.environ.get("PLAYGROUND_HERDR_DIR") or os.environ.get("DESK_HERDR_DIR") or os.path.expanduser("~/.playground/herdr")
 HERDR_SESSION = os.environ.get("PLAYGROUND_HERDR_SESSION") or os.environ.get("DESK_HERDR_SESSION") or "playground"
@@ -60,17 +73,17 @@ def log(msg):
         f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {msg}\n")
 
 
-def run_streams(argv, timeout=60):
+def run_streams(argv, timeout=60, env=None):
     """(exit code, stdout, stderr) of the command, its streams apart, as a caller that reads one alone needs."""
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
         return r.returncode, r.stdout or "", r.stderr or ""
     except Exception as e:
         return 1, "", str(e)
 
 
-def run(argv, timeout=60):
-    code, out, err = run_streams(argv, timeout)
+def run(argv, timeout=60, env=None):
+    code, out, err = run_streams(argv, timeout, env)
     return code, out + err
 
 
@@ -138,6 +151,22 @@ def beat_pid(job):
         return 0
 
 
+def beat_result(job):
+    try:
+        return str(json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json"))).get("lastResult") or "")
+    except Exception:
+        return ""
+
+
+def answers(host):
+    """Whether host takes a TCP connect on 443 within 5 seconds, the network's answer a no-connect stop waits on."""
+    try:
+        socket.create_connection((host, 443), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
 def boot_time():
     """The machine's boot time as epoch seconds, from sysctl on macOS and /proc/stat on Linux, else 0, so a just-started job is left alone only while the machine that ran it is still up."""
     try:
@@ -193,6 +222,33 @@ def stale_of(holder, beat, gone):
     if beat in gone:
         return f"holds pid {beat}, which runs a deleted executable ({gone[beat]})"
     return ""
+
+
+def last_line(name, since):
+    """The job's last stderr line, as once.py's reader kept it, when written after the job's last start (since), else ""."""
+    path = os.path.join(OPS, f"{name}.last")
+    try:
+        if os.path.getmtime(path) < since:
+            return ""
+        return open(path).read().strip()[: once.LAST_MAX]
+    except OSError:
+        return ""
+
+
+def told_last(name, line):
+    """Record line as the job's last line told to ops, line None forgetting it; True when it differs from the one told before."""
+    try:
+        told = json.load(open(LAST_TOLD))
+    except Exception:
+        told = {}
+    if told.get(name) == line:
+        return False
+    if line is None:
+        told.pop(name)
+    else:
+        told[name] = line
+    once.private(LAST_TOLD, json.dumps(told))
+    return line is not None
 
 
 def herdr():
@@ -392,8 +448,22 @@ def up(quiet):
         stale = stale_of(holder, beats.get(job["name"]) if holder or not job.get("command") else None, gone)
         if ok and stale:
             ok, why = False, stale
+        # a no-connect stop beats on, so it reads healthy: once its host answers again its holder is stopped and started, once until the host goes silent or the job beats ok
+        retry, tried = "", starts.get("_no_connect", {})
+        result = beat_result(job) if ok and job["name"] in REACH else ""
+        if NO_CONNECT.match(result):
+            if not answers(REACH[job["name"]]):
+                tried.pop(job["name"], None)
+            elif holder in procs and job["name"] not in tried:
+                retry = f"{result}, and {REACH[job['name']]} answers again"
+                ok, why = False, retry
+        elif result == "ok":
+            tried.pop(job["name"], None)
         if ok:
             starts.get("_down", {}).pop(job["name"], None)
+            # a healthy job's told line is forgotten, so a later stop on the same line is told again
+            if os.path.exists(LAST_TOLD):
+                told_last(job["name"], None)
             continue
         binary = None
         if is_herdr(job):
@@ -405,7 +475,7 @@ def up(quiet):
                     print(f"{job['name']} is down, and herdr cannot start it: {refused}")
                 continue
         # a holder on a deleted executable stops; a pid the snapshot lacks started after it was read (a restart during this pass), so it is left to the next pass
-        moved = stale if holder and holder in procs else ""
+        moved = (stale or retry) if holder and holder in procs else ""
         if moved:
             # on a deleted executable: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
             os.kill(holder, 15)
@@ -443,9 +513,17 @@ def up(quiet):
         log(f"{job['name']} unhealthy ({why}); starting")
         # the printed line is told to ops once until it changes, so a heartbeat's age stays out of it
         told = re.sub(r"\d+m old", "stale", why)
-        # only a job that started waits out GRACE; a failed start is tried again on the next pass
+        # read before the start, whose once.py drops the line: herdr closed the dead job's pane, so this file holds why it stopped
+        last = last_line(job["name"], start_at)
+        # a job's error can carry a key's name or a token's piece, so the line goes to ops in private alone: ops-tick sends every printed line in public
+        if last and told_last(job["name"], last):
+            run([os.path.join(HERE, "notify.sh"), "up", f"{job['name']} stopped, and ops-up started it again; its last line: {last}"], 60, {**os.environ, "NOTIFY_PRIVATE": "1"})
+        # only a job that started waits out GRACE; a failed start is tried again on the next pass; stamped before the start, so a line the new copy writes at once is never read as older than it
+        at = time.time()
         if start(job):
-            starts[job["name"]] = time.time()
+            starts[job["name"]] = at
+            if retry:
+                starts.setdefault("_no_connect", {})[job["name"]] = at
             with open(STARTS, "w") as f:
                 json.dump(starts, f)
             if not quiet:
@@ -569,6 +647,8 @@ def main():
     if args == ["--sessions"]:
         sessions()
         return
+    # read before the lock's wait: a start after this, or just before it, came from another pass after the job stopped
+    asked = time.time()
     restarted = args[1].split(",") if len(args) == 2 and args[0] == "--restarted" else []
     if args and not restarted:
         print("usage: up.py [--restarted <a,b> | --sessions]", file=sys.stderr)
@@ -586,6 +666,10 @@ def main():
         except Exception:
             starts = {}
         for name in restarted:
+            # an accept restarts each of its jobs by its own --restarted call, and the first call's pass starts them all
+            if starts.get(name, 0) >= asked - START_WINDOW:
+                log(f"another pass started {name} within {START_WINDOW}s of this restart's call; not starting it again")
+                continue
             starts.pop(name, None)
         with open(STARTS, "w") as f:
             json.dump(starts, f)

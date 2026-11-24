@@ -13,7 +13,9 @@ import {
   type Inbox,
   type Media,
   NOTICE,
+  ownerReadAt,
   type Policy,
+  type Quiet,
   OFF,
   REPLY,
   sender,
@@ -70,10 +72,10 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     // whether the dispatcher's alerts-wait runs, and when it last handed over an alert, as its cursor's time
     waiter: true,
     printedAt: undefined as number | undefined,
-    // whether the bridge's own 👀 goes out, on in the reactions' tests alone, so every other test reads its texts as they were
-    react: false,
-    // whether a decision's pin goes out, on in the pins' tests alone, for the same reason
+    // whether a decision's pin goes out, on in the pins' tests alone, so every other test reads its texts as they were
     pins: false,
+    // the quiet window as ops-wa reads it afresh, none unless a test sets one, so every other test sends as it did
+    quiet: undefined as Quiet | undefined,
   }
   let now = START
   fake.setClock(() => now)
@@ -89,13 +91,13 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       now += ms
     },
   }
-  const send = sender({ ...base, device: SPARE, sock: fake.sock })
-  // the bridge's own 👀, which it leaves running, so settle waits for each
-  const reacting: Promise<unknown>[] = []
+  const send = sender({ ...base, device: SPARE, quiet: async () => mode.quiet, sock: fake.sock })
   const watched = bridge({
     ...base,
     assistant: async () => mode.seat,
     busy: async () => mode.busy,
+    catchUp: send.catchUp,
+    remind: send.remind,
     log: (line) => logs.push(line),
     on: async () => mode.on,
     relay: async (to: string, text: string, isData?: boolean) => {
@@ -105,15 +107,11 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
       if (to === "dispatcher") relayed.push(text)
     },
     card: (text: string) => (mode.pins ? send.card(text) : send(text).then(() => undefined)),
+    draft: send.draft,
     pin: async (id: string, off?: boolean) => {
       if (mode.pins) await send.pin(id, off)
     },
     poll: send.poll,
-    react: (emoji: string, on: Parameters<typeof send.react>[1]) => {
-      const run = mode.react ? send.react(emoji, on) : Promise.resolve("a test with no reactions")
-      reacting.push(run.catch(() => {}))
-      return run
-    },
     reply: send,
     stuck: async () => mode.stuck,
     votes: votedOptions,
@@ -147,11 +145,8 @@ const harness = (inbox?: Inbox, media?: Media, alert?: string) => {
     relayed,
     routed,
     send,
-    // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue and the 👀 it left running before it reads
-    settle: async () => {
-      await watched.idle()
-      await Promise.all(reacting)
-    },
+    // the handlers queue on the emitter's turn and each writes a file, so a test waits for the queue before it reads
+    settle: watched.idle,
     waits,
   }
 }
@@ -766,6 +761,12 @@ describe("WhatsApp mode", () => {
     )
   })
 
+  test("the update line names wa send --status, the one live status message (#2861)", () => {
+    expect(UPDATE).toContain(
+      "Send it with playground wa send --status, which edits the one live status message.",
+    )
+  })
+
   test("a quiet window, no owner message and no send to the owner since the last line, queues no line; an owner message or a send queues it", async () => {
     const h = harness()
     h.fake.upsert([h.fake.message(jid(OWNER), "keep me posted")])
@@ -1114,12 +1115,33 @@ describe("Inbox cards on WhatsApp", () => {
     expect(h.texts()).toEqual([expect.stringContaining("#i12"), "📥 Card 40\n📥 Card 41"])
     await h.pass()
     expect(h.texts()).toHaveLength(2)
-    open.push(
-      card(42, { kind: "draft" }, { text: "a reply", to: "a thread", type: undefined } as never),
-    )
+    open.push(card(42, {}, { scope: undefined }))
     await h.pass()
     expect(h.texts().at(-1)).toBe("📥 Card 40\n📥 Card 41\n📥 Card 42")
     expect(h.texts().join("\n")).not.toContain("Acmeworks")
+  })
+
+  test("a three-part card whose second part fails sends its first part once, then the other two on the next pass (#2899)", async () => {
+    const long = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([card(12, { kind: "update" }, { text: long })])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts).toHaveLength(3)
+    expect(texts[0]).toStartWith(`*Card 12*\n${"a".repeat(3_000)}`)
+    expect(texts[1]).toBe("b".repeat(3_000))
+    expect(texts[2]).toStartWith("c".repeat(3_000))
   })
 
   test("a card that goes is redacted first", async () => {
@@ -1599,9 +1621,8 @@ describe("every kind the owner sends (#2789)", () => {
     )
   })
 
-  test("an edit is relayed as such, naming the message, and gets no 👀", async () => {
+  test("an edit is relayed as such, naming the message, and ops-wa sends nothing", async () => {
     const h = harness()
-    h.mode.react = true
     const protocolMessage = {
       editedMessage: { conversation: "merge it after lunch" },
       key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) },
@@ -1647,7 +1668,6 @@ describe("every kind the owner sends (#2789)", () => {
 
   test("a delete is relayed as such, naming the message, asks no reply and is never handed on", async () => {
     const h = harness()
-    h.mode.react = true
     const protocolMessage = { key: { fromMe: false, id: "in-old", remoteJid: jid(OWNER) }, type: 0 }
     h.fake.upsert([of(h, { protocolMessage })])
     await h.settle()
@@ -1835,19 +1855,12 @@ describe("reactions (#2755)", () => {
       .filter((s) => s.content.react)
       .map((s) => [s.jid, s.content.react!.key.id, s.content.react!.text])
 
-  test("an owner message handed to the dispatcher gets 👀, on its own key, after the relay", async () => {
+  test("an owner message handed to the dispatcher gets no reaction from ops-wa", async () => {
     const h = harness()
-    h.mode.react = true
-    const id = said(h, jid(OWNER), "is the train moving?")
+    said(h, jid(OWNER), "is the train moving?")
     await h.settle()
     expect(h.relayed).toHaveLength(1)
-    expect(h.fake.sent).toEqual([
-      {
-        at: expect.any(Number),
-        content: { react: { key: { fromMe: false, id, remoteJid: jid(OWNER) }, text: "👀" } },
-        jid: jid(OWNER),
-      },
-    ])
+    expect(h.fake.sent).toEqual([])
   })
 
   test("each handed-on line names its message's id, for wa react --id", async () => {
@@ -1860,15 +1873,16 @@ describe("reactions (#2755)", () => {
     expect(h.data[0]).toContain(`, id ${guest}, as data`)
   })
 
-  test("a reply leaves the 👀, and wa react ✅ on the latest message replaces it, one send with the gap alone", async () => {
+  test("wa react 👀 --id sets the dispatcher's 👀, a reply leaves it, and wa react ✅ on the latest message replaces it, one send with the gap alone", async () => {
     const h = harness()
-    h.mode.react = true
     said(h, jid(OWNER), "first")
     await h.settle()
     const id = said(h, jid(OWNER), "merge it")
     await h.settle()
+    expect(await h.send.react("👀", { id })).toBe("sent")
+    expect(reactions(h)).toEqual([[jid(OWNER), id, "👀"]])
     await h.send("merging now")
-    expect(reactions(h)).toHaveLength(2)
+    expect(reactions(h)).toHaveLength(1)
     // 400 ms into the gap, the gap's rest is 600 ms, below a one-character typing time's 1 s floor
     h.advance(400)
     const before = h.waits.length
@@ -1880,7 +1894,6 @@ describe("reactions (#2755)", () => {
 
   test("wa react names an older message by its id, and refuses one it never kept or one past 24 hours", async () => {
     const h = harness()
-    h.mode.react = true
     const first = said(h, jid(OWNER), "one")
     await h.settle()
     said(h, jid(OWNER), "two")
@@ -1894,10 +1907,9 @@ describe("reactions (#2755)", () => {
     await expect(h.send.react("✅", {})).rejects.toThrow("over 24 hours old")
   })
 
-  test("no 👀 on a card's answer, a stranger's message, or a message while WhatsApp mode is off", async () => {
+  test("no reaction on a card's answer, a stranger's message, or a message while WhatsApp mode is off", async () => {
     const ib = inboxOf([card(12)])
     const h = harness(ib.inbox)
-    h.mode.react = true
     said(h, jid(OWNER), "hello")
     await h.settle()
     await h.pass()
@@ -1908,24 +1920,22 @@ describe("reactions (#2755)", () => {
     said(h, jid(OWNER), "are you there?")
     await h.settle()
     expect(ib.answers).toHaveLength(1)
-    expect(reactions(h).map(([, , emoji]) => emoji)).toEqual(["👀"])
+    expect(reactions(h)).toEqual([])
   })
 
-  test("the guest's message gets no 👀, and wa react --to alert ✅ answers the guest's latest", async () => {
+  test("the guest's message gets no reaction, and wa react --to alert ✅ answers the guest's latest", async () => {
     const h = harness(undefined, undefined, ALERT)
-    h.mode.react = true
     said(h, jid(OWNER), "hi")
     await h.settle()
     const id = said(h, jid(ALERT), "what is the factory on?")
     await h.settle()
-    expect(reactions(h).map(([to]) => to)).toEqual([jid(OWNER)])
+    expect(reactions(h)).toEqual([])
     await h.send.react("✅", { who: "alert" })
     expect(reactions(h).at(-1)).toEqual([jid(ALERT), id, "✅"])
   })
 
   test("wa react ✅ on an owner message that came by LID is the dispatcher's answer, so the failover leaves it", async () => {
     const h = harness()
-    h.mode.react = true
     h.fake.upsert([h.fake.message("99887766554433@lid", "thanks", { remoteJidAlt: jid(OWNER) })])
     await h.settle()
     await h.send.react("✅", {})
@@ -1934,20 +1944,41 @@ describe("reactions (#2755)", () => {
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 
-  test("the automatic 👀 is no answer, so the failover still hands on, and wa react ✅ is one", async () => {
+  test("a message with no reply still goes on to the assistant seat at 3 minutes, and the dispatcher's wa react 👀 holds that timer", async () => {
     const h = harness()
-    h.mode.react = true
     said(h, jid(OWNER), "is it green?")
     await h.settle()
     h.advance(3 * 60_000)
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
-    said(h, jid(OWNER), "thanks")
+    said(h, jid(OWNER), "what broke overnight?")
     await h.settle()
-    await h.send.react("✅", {})
+    await h.send.react("👀", {})
     h.advance(3 * 60_000)
     await h.pass()
     expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT, "dispatcher"])
+  })
+
+  test("a 👀'd message still goes to the assistant seat once the dispatcher reads stuck with no reply sent", async () => {
+    const h = harness()
+    said(h, jid(OWNER), "what broke overnight?")
+    await h.settle()
+    await h.send.react("👀", {})
+    h.mode.stuck = { at: "2026-11-11T03:01:00.000Z", state: "stuck" }
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher", ASSISTANT])
+  })
+
+  test("a 👀'd message with a reply sent stays with the dispatcher, stuck or not", async () => {
+    const h = harness()
+    said(h, jid(OWNER), "what broke overnight?")
+    await h.settle()
+    await h.send.react("👀", {})
+    await h.send("the nightly build, fixed now")
+    h.mode.stuck = { at: "2026-11-11T03:01:00.000Z", state: "stuck" }
+    h.advance(3 * 60_000)
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toEqual(["dispatcher"])
   })
 })
 
@@ -1962,7 +1993,6 @@ describe("typing time (#2755)", () => {
 
   test("each text part waits its own typing time, a reaction the gap alone", async () => {
     const h = harness()
-    h.mode.react = true
     h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
     await h.settle()
     const body = `${"a".repeat(SEND.partChars)}\n\n${"b".repeat(30)}`
@@ -2008,5 +2038,650 @@ describe("quoted replies (#2799)", () => {
     await expect(h.send("x", "reply", undefined, { quote: old.key.id })).rejects.toThrow(
       "is kept to quote",
     )
+  })
+})
+
+// An org-scoped draft in the Inbox: its words, its thread and who it goes to, all made up, and when its poster last changed it.
+const POSTED = "2026-11-11T02:00:00.000Z"
+const draftCard = (ref: number) =>
+  card(
+    ref,
+    { kind: "draft", updatedAt: POSTED },
+    {
+      approve: undefined,
+      deny: undefined,
+      link: "https://example.com/thread/1",
+      scope: "zyx-org",
+      text: "Shipped the fix, thanks for the wait.",
+      to: "#made-up-channel",
+      type: "draft",
+    },
+  )
+const DRAFT_TEXT =
+  "*Card 20*\nShipped the fix, thanks for the wait.\nIt goes to #made-up-channel: https://example.com/thread/1.\nReply send to this message to post it as written, or reply to it with your own words to post those instead. #i20"
+// A reply that quotes the draft's message, as the owner's phone sends one.
+const replyTo = async (
+  h: Awaited<ReturnType<typeof withCards>>,
+  text: string,
+  from = OWNER,
+  quoted = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`,
+) => {
+  const before = h.fake.sent.length
+  h.fake.upsert([
+    {
+      ...h.fake.message(jid(from), ""),
+      message: {
+        extendedTextMessage: {
+          contextInfo: { quotedMessage: { conversation: DRAFT_TEXT }, stanzaId: quoted },
+          text,
+        },
+      },
+    },
+  ])
+  await h.settle()
+  return h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])
+}
+
+describe("Inbox drafts on WhatsApp (#2873)", () => {
+  test("an open draft reaches the owner's chat once with its reply line, kept out of the waiting line and recorded at 0600", async () => {
+    const h = await withCards([draftCard(20)])
+    expect(h.texts()).toEqual([DRAFT_TEXT])
+    await h.pass()
+    expect(h.texts()).toEqual([DRAFT_TEXT])
+    expect(statSync(join(h.dir, "drafts.json")).mode & 0o777).toBe(0o600)
+  })
+
+  test("a reply of send posts the draft as written through the Inbox's Send, and says so", async () => {
+    const h = await withCards([draftCard(20)])
+    const relayed = h.relayed.length
+    expect(await replyTo(h, "Send")).toEqual(["Sent #i20 as written."])
+    expect(h.answers).toEqual([{ answer: { action: "send", seen: POSTED }, id: "id-20" }])
+    expect(h.relayed).toHaveLength(relayed)
+  })
+
+  test("a reply in the owner's own words posts those words in the draft's place", async () => {
+    const h = await withCards([draftCard(20)])
+    expect(await replyTo(h, "  Fixed now, thanks!  ")).toEqual(["Sent #i20 with your words."])
+    expect(h.answers).toEqual([
+      { answer: { action: "send", seen: POSTED, text: "Fixed now, thanks!" }, id: "id-20" },
+    ])
+  })
+
+  test("a draft sent in the Inbox first makes a later reply say already sent, and posts nothing", async () => {
+    const h = await withCards([draftCard(20)])
+    h.open[0]!.status = "sent"
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 is already sent or settled in the Inbox, so this posts nothing.",
+    ])
+    expect(h.answers).toEqual([])
+  })
+
+  test("a refusal by the draft's gate comes back as one line, and the draft stays open", async () => {
+    const h = await withCards([draftCard(20)])
+    h.inbox.answer = async () => "the text holds a word the leak check refuses"
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 was not sent: the text holds a word the leak check refuses. Send it in the Inbox.",
+    ])
+    expect(h.open[0]!.status).toBe("open")
+  })
+
+  test("a draft its poster changed after it came posts nothing on a reply to the old words, and its new words come next", async () => {
+    const h = await withCards([draftCard(20)])
+    const old = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`
+    h.open[0]!.preview.text = "Shipped the fix tonight."
+    h.open[0]!.updatedAt = "2026-11-11T02:30:00.000Z"
+    expect(await replyTo(h, "send", OWNER, old)).toEqual([
+      "#i20 changed after it came here, so this posts nothing; its new words come next.",
+    ])
+    expect(h.answers).toEqual([])
+    await h.pass()
+    const fresh = h.fake.sent.findIndex((s) => s.content.text?.includes("Shipped the fix tonight."))
+    expect(fresh).toBeGreaterThan(-1)
+    expect(await replyTo(h, "send", OWNER, `m${fresh + 1}`)).toEqual(["Sent #i20 as written."])
+    expect(h.answers).toEqual([
+      { answer: { action: "send", seen: "2026-11-11T02:30:00.000Z" }, id: "id-20" },
+    ])
+  })
+
+  test("a draft whose send fails goes on the next pass, and one the sender refuses never goes, logged once", async () => {
+    const refused = draftCard(21)
+    refused.preview.text = `token ghp_${"a".repeat(36)}`
+    const ib = inboxOf([draftCard(20), refused])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    h.fake.sock.sendMessage = async () => {
+      throw new Error("the socket dropped")
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    expect(h.fake.sent).toEqual([])
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent.flatMap((s) => s.content.text ?? [])).toEqual([DRAFT_TEXT])
+    expect(h.logs.filter((line) => line.includes("#i21"))).toHaveLength(1)
+  })
+
+  test("a three-part draft whose second part fails sends its first part once, then the other two, and a reply to any part answers it (#2899)", async () => {
+    const long = draftCard(20)
+    long.preview.text = ["a", "b", "c"].map((c) => c.repeat(3_000)).join("\n\n")
+    const ib = inboxOf([long])
+    const h = harness(ib.inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hello")])
+    await h.settle()
+    const real = h.fake.sock.sendMessage
+    let calls = 0
+    h.fake.sock.sendMessage = async (to, content) => {
+      if (++calls === 2) throw new Error("the socket dropped")
+      return real(to, content)
+    }
+    await h.pass()
+    h.fake.sock.sendMessage = real
+    await h.pass()
+    await h.pass()
+    const texts = h.fake.sent.flatMap((s) => s.content.text ?? [])
+    expect(texts.map((t) => t.replace("*Card 20*\n", "")[0])).toEqual(["a", "b", "c"])
+    const answer = await replyTo({ ...h, ...ib } as never, "send", OWNER, "m1")
+    expect(answer).toEqual(["Sent #i20 as written."])
+  })
+
+  test("a draft with files posts nothing from WhatsApp", async () => {
+    const draft = draftCard(20)
+    draft.preview.attachments = [{ name: "made-up.png" }]
+    const h = await withCards([draft])
+    expect(await replyTo(h, "send")).toEqual([
+      "#i20 was not sent: it holds files, which go only from the Inbox. Send it in the Inbox.",
+    ])
+    expect(h.answers).toEqual([])
+  })
+
+  test("the alert number's or a stranger's reply quoting the draft posts nothing", async () => {
+    const h = await withCards([draftCard(20)], undefined, ALERT)
+    await replyTo(h, "send", ALERT)
+    await replyTo(h, "send", STRANGER)
+    expect(h.answers).toEqual([])
+    expect(h.open[0]!.status).toBe("open")
+  })
+
+  test("a reaction on the draft's message posts nothing", async () => {
+    const h = await withCards([draftCard(20)])
+    const id = `m${h.fake.sent.findIndex((s) => s.content.text === DRAFT_TEXT) + 1}`
+    h.fake.upsert([
+      {
+        ...h.fake.message(jid(OWNER), ""),
+        message: {
+          reactionMessage: { key: { fromMe: true, id, remoteJid: jid(OWNER) }, text: "👍" },
+        },
+      },
+    ])
+    await h.settle()
+    expect(h.answers).toEqual([])
+    expect(h.open[0]!.status).toBe("open")
+  })
+})
+
+describe("delivery and read receipts (#2868)", () => {
+  // WhatsApp's statuses on messages.update, proto.WebMessageInfo.Status
+  const SERVER_ACK = 2
+  const DELIVERED = 3
+  const READ = 4
+  // a voice note's played, past READ, and a send that failed
+  const PLAYED = 5
+  const ERROR = 0
+  // a 1:1 chat's receipt, as Baileys gives it on messages.update: the message's key and its new status at the receipt's time in seconds
+  const receipt = (id: string, status: number, at: number, chat = jid(OWNER), fromMe = true) => ({
+    key: { fromMe, id, remoteJid: chat },
+    update: { messageTimestamp: Math.floor(at / 1000), status },
+  })
+  const kept = async (dir: string) =>
+    (
+      (await Bun.file(join(dir, "receipts.json"))
+        .json()
+        .catch(() => ({}))) as { receipts?: unknown[] }
+    ).receipts ?? []
+  const talking = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi")])
+    await h.settle()
+    return h
+  }
+
+  test("a delivered, then a read receipt for a message ops-wa sent is kept with both times, to its owner alone", async () => {
+    const h = await talking()
+    await h.send("on it")
+    h.fake.emit("messages.update", [receipt("m1", DELIVERED, START + 60_000)])
+    h.fake.emit("messages.update", [receipt("m1", READ, START + 120_000)])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([
+      { delivered: START + 60_000, id: "m1", read: START + 120_000 },
+    ])
+    expect(statSync(join(h.dir, "receipts.json")).mode & 0o777).toBe(0o600)
+    expect(await ownerReadAt(h.dir, OWNER)).toBe(START + 120_000)
+  })
+
+  test("a read or a played with no delivered before it counts as both, a receipt with no time takes the clock, and a second read moves neither", async () => {
+    const h = await talking()
+    await h.send("first")
+    await h.send("second")
+    await h.send("third")
+    h.fake.emit("messages.update", [
+      receipt("m1", READ, START + 60_000),
+      receipt("m3", PLAYED, START + 2 * 60_000),
+    ])
+    h.fake.emit("messages.update", [
+      { ...receipt("m2", DELIVERED, 0), update: { status: DELIVERED } },
+    ])
+    await h.settle()
+    h.advance(60_000)
+    h.fake.emit("messages.update", [receipt("m1", READ, START + 5 * 60_000)])
+    await h.settle()
+    const clock = h.fake.sent[2]!.at
+    expect(await kept(h.dir)).toEqual([
+      { delivered: START + 60_000, id: "m1", read: START + 60_000 },
+      { delivered: START + 2 * 60_000, id: "m3", read: START + 2 * 60_000 },
+      { delivered: clock, id: "m2" },
+    ])
+  })
+
+  test("a receipt for a message ops-wa did not send is ignored: another device's, the spare phone's read of the owner's message, a server's ack, an error and an edit's update", async () => {
+    const h = await talking()
+    await h.send("on it")
+    const theirs = h.fake.message(jid(OWNER), "and this?")
+    h.fake.upsert([theirs])
+    await h.settle()
+    h.fake.emit("messages.update", [
+      receipt("sent-from-the-spare-phone", READ, START),
+      receipt(theirs.key.id, READ, START, jid(OWNER), false),
+      receipt("m1", SERVER_ACK, START),
+      receipt("m1", ERROR, START),
+      { key: { fromMe: true, id: "m1", remoteJid: jid(OWNER) }, update: { message: null } },
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([])
+    expect(await ownerReadAt(h.dir, OWNER)).toBeUndefined()
+  })
+
+  test("a receipt from a guest's chat, a stranger's or a group's, is ignored", async () => {
+    const h = await talking()
+    await h.send("on it")
+    h.fake.emit("messages.update", [
+      receipt("to-a-stranger", READ, START, jid(STRANGER)),
+      receipt("to-a-group", READ, START, groupJid("120363000000000001")),
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toEqual([])
+  })
+
+  test("wa status prints the owner's last read time, and whether the last alert to the alert number was delivered and read", async () => {
+    const h = harness(undefined, undefined, ALERT)
+    h.fake.upsert([h.fake.message(jid(OWNER), "hi"), h.fake.message(jid(ALERT), "hello")])
+    await h.settle()
+    const status = () => statusOf(h.dir, { alert: ALERT, owner: OWNER }, START + HOUR)
+    expect((await status()).join("\n")).not.toContain("read ops-wa's messages")
+    await h.send("ops-tick is down", "alert")
+    const went = new Date(h.fake.sent[1]!.at).toISOString()
+    expect(await status()).toContain(
+      `alert ••••0003: the last alert went at ${went}; not delivered yet`,
+    )
+    h.fake.emit("messages.update", [
+      receipt("m1", READ, START + 60_000),
+      receipt("m2", DELIVERED, START + 2 * 60_000, jid(ALERT)),
+    ])
+    await h.settle()
+    expect(await status()).toEqual(
+      expect.arrayContaining([
+        "owner ••••0001: read ops-wa's messages last at 2026-11-11T03:01:00.000Z",
+        `alert ••••0003: the last alert went at ${went}; delivered at 2026-11-11T03:02:00.000Z, not read yet`,
+      ]),
+    )
+    // a guest reply to the alert number after it is no alert, so the line still names the alert
+    await h.send("thanks", "guest")
+    h.fake.emit("messages.update", [receipt("m2", READ, START + 3 * 60_000, jid(ALERT))])
+    await h.settle()
+    expect(await status()).toContain(
+      `alert ••••0003: the last alert went at ${went}; delivered at 2026-11-11T03:02:00.000Z, read at 2026-11-11T03:03:00.000Z`,
+    )
+    // the alert number's read is not the owner's
+    expect(await ownerReadAt(h.dir, OWNER)).toBe(START + 60_000)
+  })
+
+  test("the receipt path is receive-only: it makes no socket call, so nothing is marked read and no presence or receipt goes out", async () => {
+    const h = await talking()
+    await h.send("on it")
+    const before = h.fake.sent.length
+    h.fake.emit("messages.update", [
+      receipt("m1", DELIVERED, START + 60_000),
+      receipt("m1", READ, START + 120_000),
+    ])
+    await h.settle()
+    expect(await kept(h.dir)).toHaveLength(1)
+    expect(h.fake.sent).toHaveLength(before)
+    expect(h.fake.calls).toEqual([])
+  })
+})
+
+describe("quiet hours (#2887)", () => {
+  const MIN = 60_000
+  const QUIET: Quiet = { end: 6, start: 0, zone: "UTC" }
+  // the chat starts at 03:00 UTC with the owner's message and ops-wa's m1, and the quiet window then runs from hour 0 to hour 6 UTC
+  const night = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    await h.send("sleep well")
+    h.mode.quiet = { ...QUIET }
+    return h
+  }
+  // the owner's read of ops-wa's m1, as WhatsApp's receipt brings it
+  const read = (h: Awaited<ReturnType<typeof night>>, at: number) => {
+    h.fake.emit("messages.update", [
+      {
+        key: { fromMe: true, id: "m1", remoteJid: jid(OWNER) },
+        update: { messageTimestamp: Math.floor(at / 1000), status: 4 },
+      },
+    ])
+    return h.settle()
+  }
+  const texts = (h: Awaited<ReturnType<typeof night>>) => h.fake.sent.map((s) => s.content.text)
+  const held = async (dir: string) =>
+    (
+      (await Bun.file(join(dir, "quiet.json"))
+        .json()
+        .catch(() => ({}))) as { held?: { at: number; body: string }[] }
+    ).held ?? []
+
+  test("inside the window, a message goes out while the owner read in the last hour", async () => {
+    const h = await night()
+    h.advance(90 * MIN)
+    await read(h, START + 60 * MIN)
+    expect(await h.send("the train is green")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("the train is green")
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("with the last read or reply 61 minutes back, a text is held in the owner's own file, and a poll or a file waits for the owner", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    expect(await h.send("the train is green")).toContain("held for quiet hours")
+    expect(h.fake.sent).toHaveLength(before)
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["the train is green"])
+    expect(statSync(join(h.dir, "quiet.json")).mode & 0o777).toBe(0o600)
+    await expect(h.send.poll("pick one", ["a", "b"])).rejects.toThrow("quiet hours")
+    await expect(
+      h.send("a spot", "reply", undefined, { location: { lat: 1.5, lon: 2.5 } }),
+    ).rejects.toThrow("quiet hours")
+    expect(h.fake.sent).toHaveLength(before)
+  })
+
+  test("a new read or reply opens the hour again, and the held texts go out first, as one catch-up", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("first")
+    await read(h, h.advance(0))
+    await h.pass()
+    expect(texts(h).at(-1)).toContain("first")
+    expect(await held(h.dir)).toEqual([])
+    h.advance(61 * MIN)
+    await h.send("second")
+    expect(texts(h).at(-1)).not.toContain("second")
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    expect(await h.send("third")).toBe("sent")
+    expect(texts(h).slice(-2)).toEqual([expect.stringContaining("second"), "third"])
+  })
+
+  test("the catch-up answers nothing, so the owner's message that set it off still goes to the assistant seat in 3 minutes", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("the train is green")
+    h.advance(MIN)
+    h.fake.upsert([h.fake.message(jid(OWNER), "is it green?")])
+    await h.settle()
+    await h.pass()
+    expect(texts(h).at(-1)).toContain("the train is green")
+    h.advance(3 * MIN)
+    await h.pass()
+    await h.pass()
+    expect(h.routed.map((r) => r.to)).toContain(ASSISTANT)
+    expect(h.routed.at(-1)!.text).toContain("is it green?")
+  })
+
+  test("a decision card waits whole in quiet hours, and goes out with its poll and pin once the owner reads or writes", async () => {
+    const ib = inboxOf([card(12)])
+    const h = harness(ib.inbox)
+    h.mode.pins = true
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    const poll = h.fake.sent.find((s) => s.content.poll)
+    expect(poll).toBeDefined()
+    expect(
+      h.fake.sent.some(
+        (s) => (s.content.pin as OwnKey | undefined)?.id === `m${h.fake.sent.indexOf(poll!) + 1}`,
+      ),
+    ).toBe(true)
+  })
+
+  test("a draft waits whole in quiet hours, unsent and unheld, and goes out once with its ids when the owner reads or writes", async () => {
+    const h = harness(inboxOf([draftCard(20)]).inbox)
+    h.fake.upsert([h.fake.message(jid(OWNER), "good night")])
+    await h.settle()
+    h.mode.quiet = { ...QUIET }
+    h.advance(61 * MIN)
+    const before = h.fake.sent.length
+    await h.pass()
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    expect(await held(h.dir)).toEqual([])
+    expect(h.logs.join("\n")).not.toContain("draft")
+    h.fake.upsert([h.fake.message(jid(OWNER), "awake again")])
+    await h.settle()
+    await h.pass()
+    await h.pass()
+    expect(texts(h).filter((t) => t === DRAFT_TEXT)).toHaveLength(1)
+    const { sent } = (await Bun.file(join(h.dir, "drafts.json")).json()) as {
+      sent: Record<string, { ref: number }>
+    }
+    expect(Object.values(sent).map((d) => d.ref)).toEqual([20])
+  })
+
+  test("a night of held statuses leaves the newest alone for the catch-up, and none counts as a send", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    const status = (body: string) => h.send(body, "reply", undefined, { status: true })
+    expect(await status("3 PRs in review")).toContain("held for quiet hours")
+    const answeredAt = h.advance(15 * MIN)
+    await h.send("the train is green")
+    h.advance(15 * MIN)
+    expect(await status("2 PRs in review")).toContain("held for quiet hours")
+    h.advance(15 * MIN)
+    expect(await status("1 PR in review")).toContain("held for quiet hours")
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["the train is green", "1 PR in review"])
+    const { sends } = (await Bun.file(join(h.dir, "sends.json")).json()) as { sends: number[] }
+    expect(sends).toEqual([answeredAt])
+    await read(h, h.advance(0))
+    await h.pass()
+    const catchUp = texts(h).at(-1)!
+    expect(catchUp).toContain("the train is green")
+    expect(catchUp).toContain("1 PR in review")
+    expect(catchUp).not.toContain("2 PRs in review")
+    expect(catchUp).not.toContain("3 PRs in review")
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("the held texts go out at the window's end as one catch-up message, oldest first", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("first")
+    h.advance(30 * MIN)
+    await h.send("second")
+    const before = h.fake.sent.length
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before)
+    h.advance(2 * 60 * MIN)
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before + 1)
+    const catchUp = texts(h).at(-1)!
+    expect(catchUp.startsWith("Held in quiet hours, oldest first:")).toBe(true)
+    expect(catchUp.indexOf("first")).toBeLessThan(catchUp.indexOf("second"))
+    expect(await held(h.dir)).toEqual([])
+    await h.pass()
+    expect(h.fake.sent).toHaveLength(before + 1)
+  })
+
+  test("an urgent alert goes out at 3 am with no activity", async () => {
+    const h = await night()
+    h.advance(24 * 60 * MIN)
+    expect(await h.send("ops-tick is down", "alert")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("ops-tick is down")
+  })
+
+  test("outside the window, a message goes out as before", async () => {
+    const h = await night()
+    h.advance(4 * 60 * MIN)
+    expect(await h.send("good morning")).toBe("sent")
+    expect(texts(h).at(-1)).toBe("good morning")
+  })
+
+  test("the settings move the window: its hours and the owner's zone are read for each send", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    h.mode.quiet = { end: 2, start: 22, zone: "UTC" }
+    expect(await h.send("late hours")).toBe("sent")
+    h.mode.quiet = { ...QUIET, zone: "Asia/Kolkata" }
+    expect(await h.send("morning there")).toBe("sent")
+    h.mode.quiet = { end: 12, start: 9, zone: "Asia/Kolkata" }
+    expect(await h.send("held there")).toContain("held for quiet hours")
+    h.mode.quiet = { end: 0, start: 0, zone: "UTC" }
+    expect(await h.send("no window")).not.toContain("held")
+  })
+
+  test("the held texts are kept across a restart, and a new ops-wa sends them as the catch-up", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("kept through a restart")
+    const fake = fakeSocket()
+    let now = START + 3 * 60 * MIN
+    fake.setClock(() => now)
+    const again = sender({
+      dir: h.dir,
+      device: SPARE,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => QUIET,
+      random: () => 0.5,
+      sleep: async (ms: number) => void (now += ms),
+      sock: fake.sock,
+    })
+    await again.catchUp()
+    expect(fake.sent.map((s) => s.content.text)).toEqual([
+      expect.stringContaining("kept through a restart"),
+    ])
+    expect(await held(h.dir)).toEqual([])
+  })
+
+  test("a restart inside the catch-up's typing wait keeps the held texts", async () => {
+    const h = await night()
+    h.advance(61 * MIN)
+    await h.send("kept through the wait")
+    const fake = fakeSocket()
+    const now = START + 7 * 60 * MIN
+    fake.setClock(() => now)
+    let waiting!: () => void
+    const reached = new Promise<void>((resolve) => (waiting = resolve))
+    // a wait that never ends, as a process stopped mid-wait never sends
+    const stopped = sender({
+      dir: h.dir,
+      device: SPARE,
+      now: () => now,
+      owner: OWNER,
+      quiet: async () => QUIET,
+      random: () => 0.5,
+      sleep: () => {
+        waiting()
+        return new Promise<void>(() => {})
+      },
+      sock: fake.sock,
+    })
+    void stopped.catchUp()
+    await reached
+    expect(fake.sent).toEqual([])
+    expect((await held(h.dir)).map((m) => m.body)).toEqual(["kept through the wait"])
+  })
+})
+
+describe("the reminder before the owner's 24 hours close (#2905)", () => {
+  // the owner writes at 03:00 UTC, so 22 hours on is 01:00 UTC the next day and the window closes at 03:00
+  const opened = async () => {
+    const h = harness()
+    h.fake.upsert([h.fake.message(jid(OWNER), "away for a while")])
+    await h.settle()
+    return h
+  }
+  const reminders = (h: Awaited<ReturnType<typeof opened>>) =>
+    h.fake.sent.flatMap((s) => s.content.text ?? []).filter((t) => t.includes("24 hours"))
+
+  test("at 22 hours one line asks for any reply, and none goes at 21 hours", async () => {
+    const h = await opened()
+    h.advance(21 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    expect(reminders(h)[0]).toContain("reply")
+  })
+
+  test("past 24 hours the window has closed, and no line goes", async () => {
+    const h = await opened()
+    h.advance(24 * HOUR + 60_000)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
+  })
+
+  test("a window gets one line alone, and the owner's next message opens a new window with its own", async () => {
+    const h = await opened()
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(30 * 60_000)
+    await h.pass()
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+    h.fake.upsert([h.fake.message(jid(OWNER), "still here")])
+    await h.settle()
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(2)
+  })
+
+  test("at 22 hours inside quiet hours the line waits for their end while the window is open", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 2, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    expect(reminders(h)).toEqual([])
+    h.advance(HOUR)
+    await h.pass()
+    expect(reminders(h)).toHaveLength(1)
+  })
+
+  test("quiet hours that end after the window closes leave no line", async () => {
+    const h = await opened()
+    h.mode.quiet = { end: 6, start: 0, zone: "UTC" }
+    h.advance(22 * HOUR)
+    await h.pass()
+    h.advance(3 * HOUR)
+    await h.pass()
+    expect(h.fake.sent).toEqual([])
   })
 })
