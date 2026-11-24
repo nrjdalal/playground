@@ -739,7 +739,7 @@ describe("rollOutcome", () => {
       expect(parseEtime("2-01:05:07")).toBe(176707)
     })
 
-    // #2658 item 1: the pid's elapsed reads up to a second late, so a live pid whose start clears the file by under 2 s still reads queued
+    // #2658 item 2: the pid's elapsed reads up to a second late, so a live pid whose start clears the file by under 2 s still reads queued
     test("a pid whose computed start clears the file by under 2 s still reads queued", () => {
       const fileMtime = Date.parse("2026-11-17T12:15:30Z")
       const live = (pid: number) => pid === 4242

@@ -425,7 +425,7 @@ describe("a pid reader whose pid file is gone", () => {
     }
   }
 
-  // #2658 item 3: the supervisor's rm -f prebuild.pid can drop the file between the read and the stat, so a gone pid file reads not queued instead of throwing
+  // #2658 item 2: a prebuild.pid the supervisor's rm -f has removed reads not queued instead of throwing
   test("a prebuild.pid the supervisor removed reads not queued, not a throw", () => {
     const data = join(dir, "prebuild-gone")
     mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
