@@ -11,7 +11,7 @@ const SPELLINGS = [
   ["a quoted builtin in front", "'builtin' exec"],
 ] as const
 
-const rows = (): Row[] =>
+const held = (): Row[] =>
   SPELLINGS.flatMap(([how, exec]): Row[] => [
     [
       `an echo whose stdout is duplicated to a descriptor an earlier exec spelt with ${how} opened on a git hook`,
@@ -23,6 +23,23 @@ const rows = (): Row[] =>
     ],
   ])
 
+// Pass controls: each spelling's descriptor on a log, and an exec word that is an argument, not the command, still run.
+const controls = (): Row[] => [
+  ...SPELLINGS.map(([how, exec]): Row => [
+    `an echo of the data folder through a descriptor an earlier exec spelt with ${how} opened on a log`,
+    `${exec} 3> out.log; echo 'touch ~/.playground/extensions/x' >&3`,
+  ]),
+  [
+    "an echo of the word exec with a descriptor on a git hook, then an echo to that descriptor",
+    `echo exec 3> .git/hooks/pre-commit; echo 'touch ~/.playground/extensions/x' >&3`,
+  ],
+  ["a lookup of exec through command -v", "command -v exec"],
+]
+
+const rows = () => [...held(), ...controls()]
+
 export const groups: Group[] = [
   { folders: ["data folder", "home", "process worktree"], guards: ["no-extensions-write"], rows },
 ]
+
+export const allowed: string[] = controls().map(([what]) => what)
