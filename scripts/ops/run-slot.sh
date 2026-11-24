@@ -39,12 +39,12 @@ unset RUN_SLOT_ASK_STAMP
 # program and exited 0); a closed stdin gives it /dev/null, as before
 { exec 3<&0; } 2>/dev/null || exec 3</dev/null
 # the stat flavour, probed once on the ops folder, which always exists, since ticket() alone makes the queue folder and a run that skips it would probe a missing path on a GNU box, whose stat -f then reads its flags as a path (issues 1654 and 1818)
-if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n'); else ST=(-f '%m %N'); fi
-# a file's mtime, single flavour from the probe above; its stamp (inode and mtime, through a symlink) stays two flavours, since stamp() reads a symlink not an mtime
+if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n') SF=(-c '%i %Y'); else ST=(-f '%m %N') SF=(-f '%i %m'); fi
+# a file's mtime, and its stamp (inode and mtime, through a symlink), each in the flavour probed above, so a Mac starts no failed GNU try first
 mtime() { local o; o=$(stat "${ST[@]}" "$1" 2>/dev/null) || return 1; printf '%s\n' "${o%% *}"; }
 # the call's clock, moved by SECONDS with no process, so a long wait reads the time as it is now
 clock() { NOW=$((T0 + SECONDS)); }
-stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/null; }
+stamp() { stat -L "${SF[@]}" "$1" 2>/dev/null; }
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
@@ -115,8 +115,7 @@ stale() {
     ! alive "$pid"
   else
     clock
-    # a caller that read the holder's mtime this pass hands it as $3, so stale takes no stat or date of its own; the read path passes the file's mtime once, no per-field read (issue 2852)
-    if [ "$#" -ge 3 ]; then m=$3; else m=$(mtime "$1.holder" || mtime "$1" || printf '%s' "$NOW"); fi
+    m=$(mtime "$1.holder" || mtime "$1" || printf '%s' "$NOW")
     # an mtime that reads back empty counts as young, rather than as a shell error (4 Nov: "<epoch> -  : syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
     [ $(( NOW - m )) -ge 7200 ]
