@@ -18,6 +18,7 @@ import {
   replayPlace,
   restore,
   type Roots,
+  type Refusal,
   type WorktreeGit,
   worktreeRepo,
 } from "@packages/safe-delete"
@@ -36,6 +37,7 @@ import {
 } from "../ops-tick/unused-card"
 import { sessionName } from "../trash"
 import { liveBranch } from "./probe"
+import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
   'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
@@ -59,6 +61,7 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
+  let reasonGiven = false
   let worktree = false
   let discard = false
   let pr: string | undefined
@@ -66,8 +69,10 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let peer: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
-    if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
-    else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
+    if (word === "--reason" && words[i + 1] !== undefined) {
+      reason = words[++i]!
+      reasonGiven = true
+    } else if (word === "--card" && words[i + 1] !== undefined && card === undefined)
       card = words[++i]!
     else if (word === "--peer" && words[i + 1] !== undefined && peer === undefined)
       peer = words[++i]!
@@ -84,7 +89,8 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
     (pr !== undefined && !worktree) ||
     (card !== undefined && worktree) ||
     (peer !== undefined && card === undefined) ||
-    (peer !== undefined && worktree)
+    (peer !== undefined && worktree) ||
+    (peer !== undefined && reasonGiven)
     ? { error: RM_USAGE }
     : {
         ...(card === undefined ? {} : { card }),
@@ -508,6 +514,32 @@ export const rmPeerCommand = (path: string, bytes: number, card: string): string
     ...[path, String(bytes), card].map((word) => `'${word.replaceAll("'", `'\\''`)}'`),
   ].join(" ")
 
+// The approved weights one path names, deleted outright and logged in <trash>/deleted.jsonl: the shard set it is, if so, each shard at its own size, else the one path, or why its size changed and it stays.
+const approvedWeights = (
+  path: string,
+  opts: {
+    approved: { bytes: number; card: string }
+    folders: string[]
+    reason: string
+    session: string
+  },
+  roots: Roots,
+): { paths: string[]; size: number; shards?: number } | Refusal => {
+  const set = shardSet(path)
+  if (!set) {
+    const done = deleteWeights(path, opts, roots)
+    return "refused" in done ? done : { paths: [path], size: done.size }
+  }
+  const done = removeSet(
+    set,
+    { bytes: opts.approved.bytes, card: opts.approved.card },
+    { folders: opts.folders, reason: opts.reason, session: opts.session },
+    roots,
+  )
+  if ("refused" in done) return done
+  return { paths: done.paths, size: done.size, shards: set.length }
+}
+
 // playground rm --card: the path removed only as the owner's Remove on that nightly-clean card names it, on this machine at the size it showed: weights deleted outright (deleteWeights), anything else moved to the trash whole (quarantine's approved), and its machine record entry dropped once it is gone.
 async function removeApproved(
   args: { path: string; peer?: string; reason: string },
@@ -530,6 +562,7 @@ async function removeApproved(
     return 1
   }
   // A peer's pick: one narrow ssh to that peer, whose far end re-checks the path and deletes it there; nothing on this machine is touched, its own copy at the same path and its record included.
+  const session = await deps.session()
   if (args.peer !== undefined) {
     if (!deps.peer) {
       console.error(`playground: ${args.path} is on ${args.peer}, not this machine, so it stays`)
@@ -537,17 +570,21 @@ async function removeApproved(
     }
     const ran = await deps.peer(args.peer, rmPeerCommand(args.path, pick.bytes, card))
     if (ran.code !== 0) {
-      console.error(`playground: ${args.peer}: ${ran.out.trim() || "the peer did not answer"}`)
+      const said = ran.out.trim().replace(/^playground: /, "")
+      const refused = said || "the peer did not answer"
+      // a plain refusal (exit 1) stays quiet, as a local one does; a protected or tripwire one (exit 3), silence or a failed ssh reaches the dispatcher
+      if (ran.code !== 1 || !said) deps.notify(`${session}: ${refused}`)
+      console.error(`playground: ${args.peer}: ${refused}`)
       return 1
     }
     console.log(ran.out.trim())
     return 0
   }
   const approved = { bytes: pick.bytes, card }
-  const session = await deps.session()
   let line: string
+  let drop: string[]
   if (isWeights(args.path, deps.home, folders)) {
-    const done = deleteWeights(
+    const done = approvedWeights(
       args.path,
       { approved, folders, reason: args.reason, session },
       roots,
@@ -557,7 +594,10 @@ async function removeApproved(
       console.error(`playground: ${done.refused}`)
       return 1
     }
-    line = `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+    line = done.shards
+      ? `Deleted the ${done.shards} shards outright (${done.size} bytes), as card ${card} approved on this machine; ${join(roots.trash, "deleted.jsonl")} logs it`
+      : `Deleted ${args.path} outright (${done.size} bytes), as card ${card} approved; ${join(roots.trash, "deleted.jsonl")} logs it`
+    drop = done.paths
   } else {
     const done = quarantine(args.path, { approved, reason: args.reason, session }, roots)
     if ("refused" in done) {
@@ -566,9 +606,13 @@ async function removeApproved(
       return 1
     }
     line = `Moved to the trash as ${done.id} (${done.files} files), as card ${card} approved; playground rm --restore ${done.id} brings it back`
+    drop = [args.path]
   }
-  const dropped = await dropPaths(deps.data, [args.path]).catch(() => [])
-  console.log(dropped.length ? `${line}; its machine record entry is dropped` : line)
+  const dropped = await dropPaths(deps.data, drop).catch(() => [])
+  const suffix = dropped.length
+    ? `its machine record ${drop.length > 1 ? "entries are" : "entry is"} dropped`
+    : ""
+  console.log(suffix ? `${line}; ${suffix}` : line)
   return 0
 }
 

@@ -243,7 +243,15 @@ test("a peer's image runs `docker image rm`, a rehearsal a `playground rm` with 
     `playground rm ${rehearsal.path} --reason "nightly-clean card ${ID}"`,
   )
   expect(peerCommand(item(weights), ID)).toBe(
-    `playground rm --card ${ID} --peer peer ${weights.path}`,
+    `playground rm --card ${ID} --peer peer '${weights.path.replaceAll("'", `'\\''`)}'`,
+  )
+  const spaced = { ...weights, path: `${HOME}/models/a b/gguf` }
+  expect(peerCommand(item(spaced), ID)).toBe(
+    `playground rm --card ${ID} --peer peer '/home/me/models/a b/gguf'`,
+  )
+  const quoted = { ...weights, path: `${HOME}/models/it's/gguf` }
+  expect(peerCommand(item(quoted), ID)).toBe(
+    `playground rm --card ${ID} --peer peer '/home/me/models/it'\\''s/gguf'`,
   )
 })
 
@@ -475,4 +483,44 @@ test("a card holds CARD_MAX questions at most, the largest first", () => {
   const items = offered([here(...many)], HOME, out, {}).slice(0, CARD_MAX)
   expect((cardOf(items).preview as { questions: unknown[] }).questions).toHaveLength(CARD_MAX)
   expect(items[0]!.bytes).toBe((200 + CARD_MAX + 2) * MB)
+})
+
+test("a sharded set is one item, listed once at its total, its line naming the model stem and the shard count", () => {
+  const stem = "models--nvidia--Qwen"
+  const shards = ["00001", "00002", "00003", "00004"].map(
+    (n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`,
+  )
+  const bytes = 13 * GB
+  const item: CardItem = {
+    bytes,
+    kind: "weights",
+    machine: "here",
+    path: shards[0]!,
+    shards,
+  }
+  const card = cardOf([item])
+  expect(card.title).toBe("Remove 1 unused item?")
+  expect((card.preview as { text: string }).text.split("\n")[0]).toBe(
+    `Remove \`${shards[0]!}\` on here, ${bytes} bytes (${(bytes / GB).toFixed(1)} GB)?`,
+  )
+  const line = (card.preview as { options: { description: string }[] }).options[0]!.description
+  expect(line).toContain(stem)
+  expect(line).toContain("all 4 of 4 shards.")
+})
+
+test("a sharded set missing a shard is still one item, its line naming the shards that are there and the set's total", () => {
+  const stem = "models--nvidia--Qwen"
+  const shards = ["00002"].map((n) => `${HOME}/models/loose/${stem}-${n}-of-00004.gguf`)
+  const bytes = 13 * GB
+  const item: CardItem = {
+    bytes,
+    kind: "weights",
+    machine: "here",
+    path: shards[0]!,
+    shards,
+  }
+  const line = (cardOf([item]).preview as { options: { description: string }[] }).options[0]!
+    .description
+  expect(line).toContain(stem)
+  expect(line).toContain("with only shards 2 of 4 here.")
 })

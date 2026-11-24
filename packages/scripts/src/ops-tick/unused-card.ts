@@ -1,6 +1,8 @@
+import { basename } from "node:path"
+
 import { picksOf } from "@packages/config/inbox"
 
-import { MIN_LIST_BYTES, type Machine, type Unused } from "./unused"
+import { MIN_LIST_BYTES, type Machine, SHARD, type Unused } from "./unused"
 
 // The owner's one Inbox card for each machine's unused space: nightly-clean posts it, edits it in place while it stands open, and once answered removes each Remove pick by its own handle; `playground rm --card` reads the same card to check its approval itself.
 
@@ -16,6 +18,7 @@ export type CardItem = {
   machine: string
   path: string
   recorded?: true
+  shards?: string[]
 }
 // One Remove the owner picked, as its question names it.
 export type CardPick = { bytes: number; machine: string; path: string }
@@ -53,6 +56,16 @@ export const questionOf = (item: CardItem): string =>
 
 const QUESTION = /^Remove `(.+)` on ([A-Za-z0-9._-]+), (\d+) bytes \([\d.]+ GB\)\?$/
 
+// A sharded set's note, read through SHARD: a whole set reads "all N of N shards", and a set missing a shard names each shard that is present.
+const shardedNote = (shards: string[]): string => {
+  const [, stem, , total] = SHARD.exec(basename(shards[0]!))!
+  const present = shards.map((p) => Number(SHARD.exec(basename(p))![2]))
+  const complete = present.length === Number(total) && present.every((n, i) => n === i + 1)
+  return complete
+    ? ` It is ${stem}, all ${present.length} of ${Number(total)} shards.`
+    : ` It is ${stem}, with only shards ${present.join(", ")} of ${Number(total)} here.`
+}
+
 const removeRow = (item: CardItem) => ({
   description: `${
     item.kind === "weights"
@@ -60,7 +73,9 @@ const removeRow = (item: CardItem) => ({
       : item.kind === "image"
         ? "docker image rm removes it; a pull brings it back."
         : "Moved to the trash; playground rm --restore brings it back for 7 days."
-  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}`,
+  }${item.recorded && item.kind !== "image" ? " The machine record holds it, and its entry there goes too." : ""}${
+    item.shards ? shardedNote(item.shards) : ""
+  }`,
   label: "Remove",
 })
 
@@ -82,13 +97,14 @@ export const offered = (
             .filter((i) => !KIT_RECORD.some((rel) => inside(i.path, `${home}/${rel}`)))
             .filter((i) => i.kind !== "rehearsal" || out(i.path))
             .filter((i) => kept[keyOf({ machine: m.machine, path: i.path })] !== i.bytes)
-            .map(({ bytes, id, kind, path, recorded }) => ({
+            .map(({ bytes, id, kind, path, recorded, shards }) => ({
               bytes,
               ...(id ? { id } : {}),
               kind,
               machine: m.machine,
               path,
               ...(recorded ? { recorded: true as const } : {}),
+              ...(shards ? { shards } : {}),
             })),
     )
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
@@ -223,7 +239,7 @@ export const peerCommand = (item: CardItem, card: string): string =>
   item.kind === "image"
     ? `docker image rm ${item.id ?? item.path.replace(/^docker image /, "")}`
     : item.kind === "weights"
-      ? `playground rm --card ${card} --peer ${item.machine} ${item.path}`
+      ? `playground rm --card ${card} --peer ${item.machine} '${item.path.replaceAll("'", `'\\''`)}'`
       : `playground rm ${item.path} --reason "nightly-clean card ${card}"`
 
 // One night of the card: an answered card's Remove picks still listed tonight at the same size are removed here (deps.remove) or sent to Ops for a peer, every other item kept at its size, and the card closed; an open card is edited in place to tonight's items, or settled with none; then a new card is posted for what is left, from the ops manager's name. Returns the card and kept to save, the log's words (none on a night with no card), and each line for Ops.

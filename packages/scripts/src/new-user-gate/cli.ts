@@ -21,7 +21,7 @@ import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
 import { BOX_LABEL } from "./docker"
-import { GATE_LABEL, stubs, usageReading } from "./stubs"
+import { stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
@@ -50,7 +50,7 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
-// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count and each step that did not pass.
+// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count, each step that did not pass, and each step that passed with a `no shot:` shot named by its reason.
 export const verdictLine = (sha: string, steps: Step[]): string => {
   const short = steps.length < STEP_COUNT
   const unsure = steps.filter((s) => s.inconclusive).length
@@ -60,6 +60,13 @@ export const verdictLine = (sha: string, steps: Step[]): string => {
     `${steps.filter((s) => s.ok).length} of ${STEP_COUNT} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
     ...steps.flatMap((s, i) =>
       s.ok ? [] : [`${i + 1}. ${s.name}${s.detail ? `: ${s.detail.replace(/\s+/g, " ")}` : ""}`],
+    ),
+    ...steps.flatMap((s, i) =>
+      s.ok && s.shot && s.shot.startsWith("no shot: ")
+        ? [
+            `${i + 1}. ${s.name}: no shot (${s.shot.replace(/^no shot: /, "").replace(/\s+/g, " ")})`,
+          ]
+        : [],
     ),
     ...(short ? [`stopped after ${steps.length} of ${STEP_COUNT} steps`] : []),
   ]
@@ -395,6 +402,32 @@ export const gateDrift = (diffCode: number, sha: string): string | null =>
     ? null
     : `this checkout's packages/scripts/src/new-user-gate/ differs from ${sha.slice(0, 7)}'s, so its box is not the one that sha ships; run the gate from a checkout at that sha: git worktree add --detach <dir> ${sha.slice(0, 7)}, bun install there, then bun run --cwd <dir> gate:new-user ${sha.slice(0, 7)}`
 
+// Pure: the POSTGRES_URL a dotenv file sets, or "" when it sets none.
+export const postgresUrl = (env: string): string =>
+  (/^POSTGRES_URL=(.*)/m.exec(env)?.[1] || "").trim()
+
+// Pure: the port a postgres:// URL names, or NaN when the URL names none or does not parse, so step 2 fails with its own detail and screenshot.
+export const urlPort = (url: string): number => {
+  const port = URL.parse(url)?.port
+  return port ? Number(port) : NaN
+}
+
+// Pure: the host ports `docker port <name> 5432` prints, one per line like 127.0.0.1:33210 or [::]:33210, de-duped.
+export const hostPorts = (out: string): number[] =>
+  Array.from(
+    new Set(
+      out
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((l) => {
+          const m = /:(\d+)/.exec(l)
+          return m ? Number(m[1]) : NaN
+        })
+        .filter((n) => !Number.isNaN(n)),
+    ),
+  )
+
 // Pure: the box's own `playground settings set` of its live.container, run with its checkout's CLI.
 export const seedArgv = (home: string, name: string): string[] => [
   "bun",
@@ -407,6 +440,48 @@ export const seedArgv = (home: string, name: string): string[] => [
   "--reason",
   "the new-user gate's box keeps a database of its own",
 ]
+
+// The box's own database, so a first run that shares this Mac's Docker fails closed when it has no container of the box's own.
+export const ownDatabaseVerdict = ({
+  error,
+  made,
+  own,
+  saved,
+  seeded,
+  port,
+  ports,
+  refused,
+}: {
+  error: string
+  made: number
+  own: string
+  saved: { detail: string; ok: boolean }
+  seeded: boolean
+  port?: number
+  ports?: number[]
+  refused?: string | null
+}): { detail: string; ok: boolean } => {
+  // fail closed: with no live.container of its own the click would reuse the host's live database
+  if (!seeded) {
+    return { detail: `the box could not set its own live.container ${own}: ${error}`, ok: false }
+  }
+  if (refused) {
+    return { detail: `the box did not make its own database: ${refused}`, ok: false }
+  }
+  if (saved.ok && made === 0) {
+    return {
+      detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
+      ok: false,
+    }
+  }
+  if (saved.ok && ports && port !== undefined && !ports.includes(port)) {
+    return {
+      detail: `the saved database's port ${port} is not a host port of the box's own containers`,
+      ok: false,
+    }
+  }
+  return { detail: saved.detail, ok: saved.ok }
+}
 
 // Step 2's wait: the click can land before the button renders under load, so the click retries each poll until POSTGRES_URL lands, the way step 3 retries Continue; the button has buttonMs to show, after which the step gives up and names it, and the URL has urlMs, whose miss names it. Each poll the button is missing, reopen runs before the next click, since a page read before the box's name registered stays a 404.
 export const databaseCheck = async (
@@ -581,11 +656,17 @@ export const clean = (box: string, home: string, portless = PORTLESS, docker = "
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
-  const names = [GATE_LABEL, `${BOX_LABEL}=${basename(box)}`].flatMap((label) =>
-    run([docker, "ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
-      .out.split("\n")
-      .filter(Boolean),
-  )
+  const names = run([
+    docker,
+    "ps",
+    "-a",
+    "--filter",
+    `label=${BOX_LABEL}=${basename(box)}`,
+    "--format",
+    "{{.Names}}",
+  ])
+    .out.split("\n")
+    .filter(Boolean)
   const own = boxContainers(
     run([docker, "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
@@ -674,12 +755,14 @@ const main = async (args: string[]) => {
     const own = boxContainer(box)
     const seeded = run(seedArgv(home, own), { env: boxEnv(home) })
     await check("first run starts the database with one click", async () => {
-      // fail closed: with no live.container of its own the click would reuse the host's live database
       if (seeded.code !== 0) {
-        return {
-          detail: `the box could not set its own live.container ${own}: ${(seeded.err || seeded.out).trim().slice(-200)}`,
-          ok: false,
-        }
+        return ownDatabaseVerdict({
+          error: (seeded.err || seeded.out).trim().slice(-200),
+          made: 0,
+          own,
+          saved: { detail: "", ok: true },
+          seeded: false,
+        })
       }
       const env = join(desk, ".env")
       const saved = await databaseCheck(
@@ -695,21 +778,22 @@ const main = async (args: string[]) => {
       const made = boxContainers(run(["docker", "ps", "-a", "--format", "{{.Names}}"]).out, own)
       const calls = join(box, "calls.log")
       const refused = dockerRefusal(existsSync(calls) ? readFileSync(calls, "utf8") : "")
-      if (refused) {
-        return {
-          detail: refused,
-          ok: false,
-          shot: browser.shot("2-database"),
-        }
+      const port = saved.ok ? urlPort(postgresUrl(readFileSync(env, "utf8"))) : NaN
+      const ports = made.flatMap((name) => hostPorts(run(["docker", "port", name, "5432"]).out))
+      const verdict = ownDatabaseVerdict({
+        error: "",
+        made: made.length,
+        own,
+        saved,
+        seeded: true,
+        port,
+        ports,
+        refused,
+      })
+      return {
+        ...verdict,
+        shot: browser.shot("2-database"),
       }
-      if (saved.ok && made.length === 0) {
-        return {
-          detail: `first run saved a database, but no container of the box's own (${own}-<4>) exists`,
-          ok: false,
-          shot: browser.shot("2-database"),
-        }
-      }
-      return { ...saved, shot: browser.shot("2-database") }
     })
     await check("the Dashboard shows Alpha", async () => {
       browser.cmd("open", `${web}/dashboard`)

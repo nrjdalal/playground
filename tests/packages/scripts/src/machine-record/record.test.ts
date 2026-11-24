@@ -90,6 +90,14 @@ describe("the daily check (PG-2538)", () => {
     expect(await check(data, places())).toEqual([])
   })
 
+  test("a .DS_Store in a watched folder raises no finding, and another new file there still does (#2835)", async () => {
+    await seed(data, [], places())
+    writeFileSync(join(home, ".cache", ".DS_Store"), "")
+    const made = join(home, ".cache", "by-hand")
+    writeFileSync(made, "")
+    expect(await check(data, places())).toEqual([`misplaced: ${made}`])
+  })
+
   test("a new path inside the factory's homes reads unrecorded, outside them misplaced", async () => {
     await seed(data, [], places())
     mkdirSync(join(home, "models"))

@@ -149,8 +149,8 @@ Edit a bash script only once every live run of it has ended, since bash reads a 
 No end-to-end suite exists: `bun run test:e2e` matches no file.
 
 The new-user gate is the one end-to-end run: `bun run gate:new-user <sha>` (`packages/scripts/src/new-user-gate/`) installs that sha the way `curl | bash` does, in a scratch HOME inside its box,
-with stand-ins for claude, gh, brew, security and sudo, a logging curl (`stubs.ts`), a docker that reaches only the containers the box made (`docker.ts`), its own portless proxy on port 14155, and a pglaunch stand-in that publishes its container on loopback alone.
-That docker labels each container the box starts, lists only those, and refuses and logs any call naming another, which fails step 2.
+with stand-ins for claude, gh, brew, security and sudo, a logging curl (`stubs.ts`), a docker that reaches only the containers the box made (`docker.ts`) and its own portless proxy on port 14155.
+That docker labels each container the box starts, lists only those, takes `run` with first run's own flags alone (no volume, host path or host network, a publish on 127.0.0.1 alone), and refuses and logs any other call or one naming another's container, which fails step 2.
 It runs from a checkout at that sha, since the box is the calling checkout's gate code, and stops with exit 2 when that code differs from the sha's (the release skill's detached worktree).
 The install runs on this host's OS, since `installEnv` sets no `INSTALL_OS` and install.sh reads `uname -s`.
 The box's PATH (`boxPath`) carries this host's uv, linked alone into the box's `tools` folder, so install.sh's uv step downloads nothing on Linux, as `/opt/homebrew/bin` gives it on a Mac; a `curl` stand-in logs each URL to calls.log, so a download shows there.

@@ -24,6 +24,39 @@ export const listedOf = (out: string): Listed[] =>
       return { id: id.trim(), label: label.trim(), names: names.trim().split(",") }
     })
 
+// The flags a box's docker run takes, each with whether it takes a value: those first run (startArgv) and its move (loopbackArgv) use, so a run mounts no volume or host path and joins no host network.
+const RUN_FLAGS = new Map([
+  ["--detach", false],
+  ["--env", true],
+  ["--label", true],
+  ["--name", true],
+  ["--publish", true],
+  ["--restart", true],
+  ["--volumes-from", true],
+  ["-d", false],
+  ["-e", true],
+  ["-l", true],
+  ["-p", true],
+])
+
+// Pure: the first run flag the box's docker refuses, or a publish past 127.0.0.1, up to the image, or null when every flag is first run's own.
+export const runRefusal = (rest: string[]): string | null => {
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i]!
+    if (!arg.startsWith("-")) return null
+    const [flag = "", inline] =
+      arg.startsWith("--") && arg.includes("=")
+        ? [arg.slice(0, arg.indexOf("=")), arg.slice(arg.indexOf("=") + 1)]
+        : [arg, undefined]
+    const takes = RUN_FLAGS.get(flag)
+    if (takes === undefined) return arg
+    const value = takes ? (inline ?? rest[++i] ?? "") : ""
+    if ((flag === "-p" || flag === "--publish") && !value.startsWith("127.0.0.1:"))
+      return `${flag} ${value}`
+  }
+  return null
+}
+
 const READS = new Set(["info", "version", "--version", "images", "pull"])
 const NAMED = new Set([
   "exec",
@@ -71,6 +104,8 @@ export const narrow = (
       )
   const other = words.find((w) => resolved(w).some((c) => c.label !== box))
   if (other) return { refused: `${sub} ${other}` }
+  const flag = sub === "run" ? runRefusal(rest) : null
+  if (flag) return { refused: `run ${flag}` }
   // a bare stats reads every container on the machine, so the box's reads its own alone, and none answers empty
   if (sub === "stats" && !words.some((w) => resolved(w).length)) {
     const mine = listed.filter((c) => c.label === box).flatMap((c) => c.names.slice(0, 1))
