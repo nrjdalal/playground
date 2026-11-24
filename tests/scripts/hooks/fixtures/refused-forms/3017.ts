@@ -1,6 +1,6 @@
 import type { Group, Row } from "./_shared"
 
-// A write into a git hook whose redirect target is a variable is judged by the value the line's steady variables give it, a for loop's literal words each in turn, on every redirect path; one whose value the hook cannot read counts as a hook when the text names the root, so it fails closed; rows are data, as refused-forms.ts says.
+// A write into a git hook whose target is a variable is judged by the value the line's steady variables give it, a for loop's literal words each in turn, on every redirect path and through tee, dd, cp and another program's stdout; one whose value the hook cannot read counts as a hook when the text names the root or the hook-file rule refuses it, so it fails closed; rows are data, as refused-forms.ts says.
 const HOOK = ".git/hooks/pre-commit"
 const ECHO = "echo 'touch ~/.playground/extensions/x'"
 
@@ -79,9 +79,17 @@ const held = (): Row[] => [
     "a remover word echoed through a variable the line never sets",
     `echo 'rm -rf dist' > "$UNSET_X"`,
   ],
+  [
+    "a line led by a question echoed through a mktemp variable",
+    `f=$(mktemp); echo "Done? yes" > "$f"`,
+  ],
+  [
+    "a variable as a program word echoed through a variable the line never sets",
+    `echo '$EDITOR notes.md' > "$UNSET_X"`,
+  ],
 ]
 
-// Pass controls: a variable naming an ordinary file, a plain text into a hook through a variable, and a plain write through a variable the hook cannot read.
+// Pass controls: a variable naming an ordinary file, a scratch file or a note, a for loop over ordinary files, a plain text into a hook through a variable, and a plain write through a variable the hook cannot read.
 const controls = (): Row[] => [
   ["an echo of the data folder into a log through a variable", `P=out.log; ${ECHO} > "$P"`],
   [
