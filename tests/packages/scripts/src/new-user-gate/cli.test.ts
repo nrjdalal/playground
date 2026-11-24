@@ -582,6 +582,26 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
     )
   })
 
+  // A passed step whose shot is `no shot:` was dropped from the verdict, so the PR post named a step that reached it with none.
+  test("a passing run whose step 2 took no shot names that shot, and reads PASS even so", () => {
+    const two = all().map((s, i) =>
+      i === 1
+        ? {
+            ...s,
+            shot: "no shot: agent-browser screenshot: CDP error (Page.captureScreenshot): Cannot take screenshot with 0 width.",
+          }
+        : s,
+    )
+    expect(verdictLine(SHA, two)).toBe(
+      `## NewUserGate · PASS at a11fb88 · 7 of 7 passed; 2. step 2: no shot (agent-browser screenshot: CDP error (Page.captureScreenshot): Cannot take screenshot with 0 width.)`,
+    )
+  })
+
+  test("a passing run with every shot taken reads PASS and names no missing shot, the line unchanged", () => {
+    const taken = all().map((s, i) => ({ ...s, shot: `/box/shots/${i + 1}-shot.png` }))
+    expect(verdictLine(SHA, taken)).toBe(`## NewUserGate · PASS at a11fb88 · 7 of 7 passed`)
+  })
+
   test("--pr posts the verdict from a file, its literal path passed to gh pr comment --body-file", () => {
     const dir = mkdtempSync(join(tmpdir(), "gate-verdict-"))
     try {
