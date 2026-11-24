@@ -842,6 +842,8 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   and past the wrappers before it (zsh's `builtin`, `noglob`, `nocorrect` and `-`, bash's `command` and its `-p`), since that shell still runs it as exec; one behind a wrapper that runs it in a child (`env`, `sudo`) counts too, which errs toward refusing.
   A target through a variable is read by each value the line's steady variables give it (`heldReadings`, a for loop's literal words each in turn),
   and one whose value the hook cannot read (set under `||` or `&&`, by `read` or in a loop, or never set) counts as a hook file only for text that names the root or that the hook-file rule refuses (`hookWord`), so `echo hi > "$X"` runs.
+  Another program's own text that names the root counts through such a target too (`git log --format=… > "$X"`), as a printer's does.
+  A function body's write is judged as a top-level one, its positional parameters (`"$1"`) read as values the hook cannot read, the body's first command included, though the name's empty `()` lexes as a group before it (`f() { … > "$1"; }`).
   A hook file takes no remover, whatever its target, since a hook learns its targets only when it runs and no reading of its text can rule out the root (`hookRemover`), so a text written into one is refused with a route of its own when it holds any of these.
   A remover word anywhere in it, a comment included, matched in any case with each backslash-newline, which the shell joins a word across, then its quotes and backslashes dropped, and a `g` name read as its tool (`HOOK_REMOVERS`):
   `REMOVERS`, find's `-delete`, `rimraf`, `shred`, `srm`, `trash`, `trash-put`, `wipe`, and the language kin `rm_f`, `rm_r`, `rm_rf`, `rmdirSync`, `rmSync`, `rmtree` and `unlinkSync`.
