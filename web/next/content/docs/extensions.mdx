@@ -132,7 +132,9 @@ playground ext check-modes   # once: lists the scripts stored before put kept th
 - `list` names every scope's items, `core`'s among them marked `readOnly`, and passes over a folder's `.gitkeep`.
 - `put` writes the item's next revision from a file, from a folder for a `skill` or a `script`, or from standard input with `-`, as one commit in its scope.
   It keeps each file's executable bit, under `proposed/` and once accepted, so a script a skill runs directly stays runnable.
-- `check-modes` is for one run: it lists each stored file that starts with `#!` but was stored without its executable bit, by an older `put`, and changes nothing; put each one again from a copy that has the bit.
+  A `skill`'s or a `script`'s file that starts with `#!` is stored executable even from a copy without the bit, such as one rebuilt from `show`.
+- `show` names the item's files that run in its content's `executable`, so a copy rebuilt from it can set their bit.
+- `check-modes` is for one run: it lists each stored file that starts with `#!` but was stored without its executable bit, by an older `put`, and changes nothing; put each one again, and it is stored executable.
 - A `list` revision lands accepted.
   Any other kind lands under `proposed/`, for review, unless you write it from the dashboard yourself.
 - `--attach` takes a file, repeated for more, kept under `attachments/` by the hash of its bytes; a file over 50 MB is refused.
