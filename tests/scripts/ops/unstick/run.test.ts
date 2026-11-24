@@ -1431,6 +1431,8 @@ describe("ops-unstick's slot alerts", () => {
     "  999472 999471 bash /x/.playground/ops/run-slot.sh commit-PG-2831-commit-slot-check -- bun run test:skills",
     "  999473 999472 bun run test:skills /x/.claude/worktrees/PG-2831-commit-slot-check",
   ]
+  // the same tree while run-slot.sh still waits: it starts the step only once it holds the slot
+  const waitingHook = () => committingHook().slice(0, 2)
   // the commit slot's holder as run-slot.sh writes it, its own pid the child that holds the slot, under the slot name commit-slot.ts acquires
   const committingHookSlot = () => {
     const config = scratch()
@@ -1475,7 +1477,7 @@ describe("ops-unstick's slot alerts", () => {
 
   // the commit lane writes no holder or ticket while its run-slot.sh waits, so the run-slot.sh child alone shows the run is in line for a slot
   test("a pre-push run whose run-slot child still waits for the commit slot reads inside a slot", async () => {
-    const jobs = await call(scratch(), "heavy_jobs", committingHook())
+    const jobs = await call(scratch(), "heavy_jobs", waitingHook())
     expect(jobs).toEqual([
       { inside: true, kind: "suite", pid: "999471", where: "PG-2831-commit-slot-check" },
     ])
@@ -1505,6 +1507,36 @@ describe("ops-unstick's slot alerts", () => {
     test(`a run with a suite beside its run-slot child stays outside-slot while that child ${state}`, async () => {
       expect(await call(config(), "heavy_jobs", besideHook)).toEqual([
         { inside: false, kind: "suite", pid: "999491", where: "pg-3-beside" },
+      ])
+    })
+
+  // a run inside a slot, listed first, never hides a bare suite in the same worktree: the bare suite's own pid raises the alert
+  const besideBare = (where: string, pid: string) =>
+    `  ${pid}      1 bun run test:file tests/d.test.ts /x/.claude/worktrees/${where}`
+  for (const [name, config, rows, where] of [
+    [
+      "a waiting pre-push",
+      scratch,
+      [...waitingHook(), besideBare("PG-2831-commit-slot-check", "999474")],
+      "PG-2831-commit-slot-check",
+    ],
+    [
+      "a run-slot chain",
+      () => held("run-slot"),
+      [...committing("999441"), besideBare("pg-334-x", "999474")],
+      "pg-334-x",
+    ],
+  ] as const)
+    test(`${name} beside a bare suite in the same worktree alerts for the bare suite's pid`, async () => {
+      const jobs = await call(config(), "heavy_jobs", rows)
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+        {
+          at,
+          kind: "outside-slot",
+          line: "a suite runs outside the run slots (pid 999474); use run-slot.sh",
+          name: where,
+          since: at,
+        },
       ])
     })
 
