@@ -76,7 +76,7 @@ export function endsOn(row: Row): string | null {
 const leadOf = (lead?: string, worker?: string) =>
   lead ?? (managerKindOfName(worker ?? "") === "ops" ? "ops" : "builder")
 
-// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it on the account its resume record names, read before the close.
+// One session ended, its unsaved work checked first; the line for its lead either way, and a reviewer ended idle tells its worker too, who resumes it in the folder, by the session id and on the account its resume record names, read before the close.
 export async function endOne(target: Target, why: string, deps: EndDeps): Promise<Line[]> {
   const to = leadOf(target.lead, target.worker)
   if (!ENDABLE.has(target.kind ?? ""))
@@ -85,7 +85,7 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   if (unsaved)
     return [{ text: `Not ended ${target.name} (${why}): ${unsaved}; push it, then close it`, to }]
   const idle = why.startsWith("checker-nothing")
-  const account = idle ? await accountOf(target.name, deps.resumeDir) : undefined
+  const record = idle ? await resumeOf(target.name, deps.resumeDir) : null
   const closed = await deps.close(target.name)
   if (!closed.ok)
     return [
@@ -95,7 +95,14 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
-  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --force --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
+  const where = deps.resumeDir ? ` at ${join(deps.resumeDir, `${target.name}.sh`)}` : ""
+  const missing = !record
+    ? ` (no resume record${where}, so fill in its folder and session id)`
+    : record.dir
+      ? ""
+      : ` (its resume record${where} names no folder, so fill in its folder and session id)`
+  const { account, dir = "<dir>", sessionId = "<session id>" } = record ?? {}
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push${missing}: scripts/spawn.sh resume ${target.name} ${dir} ${sessionId} --force --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
   return target.worker && target.worker !== to
     ? [
         { text, to },
@@ -202,14 +209,25 @@ const git = async (dir: string, args: string[]) => {
   return code === 0 ? out : null
 }
 
-// The account a session's resume record names, which spawn.sh writes at every herdr start and resume: its account line, a login the usage gate picked included, else its --account, as no-headless-login reads it.
-async function accountOf(name: string, resumeDir?: string): Promise<string | undefined> {
-  if (!resumeDir) return
+// One shell word as spawn.sh's printf %q writes it, an escaped space included.
+const WORD = String.raw`(?:\\.|[^\s\\])+`
+
+// What a session's resume record names, which spawn.sh writes at every herdr start and resume, or null when there is none: its account line, a login the usage gate picked included, else its --account, as no-headless-login reads it, and its exec line's folder and session id, kept quoted.
+async function resumeOf(
+  name: string,
+  resumeDir?: string,
+): Promise<{ account?: string; dir?: string; sessionId?: string } | null> {
+  if (!resumeDir) return null
   try {
     const record = await Bun.file(join(resumeDir, `${name}.sh`)).text()
-    return /^# account: (\S+)/m.exec(record)?.[1] ?? /--account (\S+)/.exec(record)?.[1]
+    const exec = new RegExp(`^exec ${WORD} resume ${WORD} (${WORD}) (${WORD})`, "m").exec(record)
+    return {
+      account: /^# account: (\S+)/m.exec(record)?.[1] ?? /--account (\S+)/.exec(record)?.[1],
+      dir: exec?.[1],
+      sessionId: exec?.[2],
+    }
   } catch {
-    return
+    return null
   }
 }
 
@@ -470,6 +488,19 @@ export async function cleanWorktree(
 // Whether a worktree's PR, as rm's reader returns it (its head beside its number and state, or none), is finished: merged or closed, rm's freed reading.
 export const finishedOf = (pr: PrRead): boolean => freedOf(pr) !== undefined
 
+// Whether a worktree's PR is finished, read through the worktree's own HEAD: rm's freed reading, or, for a checker's clone of that PR n, HEAD at or behind the PR's own merged head, as safe-delete's atMergedHead reads it, since rm's reader reads a clone behind the head as no PR of its own, and any other checkout from an older canary sits behind some merged head.
+export async function finishedAt(
+  path: string,
+  pr: string | undefined,
+  rm: Pick<RmDeps, "main" | "mergedHead" | "prState">,
+): Promise<boolean> {
+  if (finishedOf(await rm.prState(path, pr))) return true
+  const n = pr ? await ownPr(pr, rm.main) : undefined
+  const clone = !!n && clonesAt(Object.values(CLONES).flat(), n, rm.main).includes(path)
+  const merged = clone && pr ? rm.mergedHead(path, pr) : null
+  return !!merged && (await git(path, ["merge-base", "--is-ancestor", "HEAD", merged])) !== null
+}
+
 // Why the cleanup's held check keeps a worktree, with rm's roster, clone and link holders and the worktree's own PR's freed state among them: null when nothing holds it. Its process check reads none, since the stack dev:stop is about to stop, and rm's saved-work checks run after it.
 export const cleanupHeld = async (
   path: string,
@@ -550,7 +581,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       const { code, out } = await runIn(["bun", "run", "--cwd", dir, "dev:stop"])
       return { ok: code === 0, out: reasonOf(out) }
     },
-    finished: async (path, pr) => finishedOf(await rm.prState(path, pr)),
+    finished: (path, pr) => finishedAt(path, pr, rm),
     git,
     held: (path, pr) => cleanupHeld(path, pr, rm),
     heldBy: (path) => {
@@ -673,9 +704,10 @@ export const cleanupLive =
     const kept = checkers && (await otherClones(target, deps.main))
     if (checkers && kept?.clones.length) {
       const { clones, n, pr } = kept
-      const done = await deps.finished(clones[0]!, target.pr)
-      const others = (await checkers(pr, !done))?.filter((name) => name !== target.name)
-      for (const dir of clones)
+      for (const dir of clones) {
+        // each clone's own HEAD reads its PR finished, so one clone behind the merged head never holds another
+        const done = await deps.finished(dir, target.pr)
+        const others = (await checkers(pr, !done))?.filter((name) => name !== target.name)
         lines.push(
           !others
             ? `kept ${dir}: the roster could not be read`
@@ -683,6 +715,7 @@ export const cleanupLive =
               ? `kept ${dir}: ${others.join(", ")} still checks #${n}`
               : await cleanWorktree(dir, reason, deps, { pr: target.pr, who }),
         )
+      }
     }
     for (const path of leftovers) lines.push(await cleanLeftover(path, reason, who, deps))
     return lines
