@@ -130,3 +130,14 @@ PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; [ -n "$f" ] && : > ${shi
     expect(await b.run.ran()).toBe(true)
   })
 })
+
+// review round 3: drop() named its folder <slot>.gone-$ (one $), the same name for every run, so a folder an earlier drop left there took the next free's folder in, or refused it, and the slot stood held by nobody
+test("each build frees run-slot-docker past a folder an earlier drop left behind", async () => {
+  const m = dockerMachine()
+  const slot = join(m.ops, "run-slot-docker")
+  mkdirSync(join(`${slot}.gone-$`, "run-slot-docker", "reclaim"), { recursive: true })
+  for (const who of ["worker-a", "worker-b"]) {
+    expect(await m.start(who, {}, SCRIPT, ["docker", "build", "."]).ran()).toBe(true)
+    expect(existsSync(slot)).toBe(false)
+  }
+})
