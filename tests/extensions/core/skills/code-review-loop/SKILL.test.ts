@@ -678,3 +678,23 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     expect(text).not.toContain("playground ext export")
   })
 })
+
+// #3069: a round whose head brought in a dependency runs the clone's install again, else the merge check reads the missing package as the PR's red
+describe("code-review-loop installs its clone again after a dependency change (#3069)", () => {
+  test("step 1 runs the install again before step 2 when the head changed bun.lock or a package.json, and its Done when checks it", async () => {
+    const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
+    const [steps, done] = recover.split("**Done when**")
+    expect(steps).toContain(
+      "`git -C <clone> diff --name-only <the head of the clone's last install> <head> -- bun.lock '*package.json'`",
+    )
+    expect(steps).toContain(
+      "run the install line above again through run-slot and let it end before step 2",
+    )
+    expect(done ?? "").toContain(
+      "on a later round whose head changed `bun.lock` or a `package.json` since the clone's last install, that install ran again and ended",
+    )
+    expect(await page()).toContain(
+      "A clone whose head changed `bun.lock` or a `package.json` since its last install runs that install again before the check",
+    )
+  })
+})
