@@ -698,3 +698,12 @@ describe("code-review-loop installs its clone again after a dependency change (#
     )
   })
 })
+
+describe("code-review-loop's last 5/5 installs a pnpm repo's merge again after a lockfile change (#3091)", () => {
+  test("the merge install names the pnpm install line for a pnpm-lock.yaml or package.json change", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "or, in a pnpm repo, `~/.playground/ops/run-slot.sh <your session name> -- /usr/bin/env -C <clone>/<pkg> pnpm install --frozen-lockfile` when it changed `pnpm-lock.yaml` or a `package.json`",
+    )
+  })
+})
