@@ -3536,8 +3536,11 @@ var READERS = new Set([
   "bat",
   "cat",
   "cmp",
+  "column",
+  "cut",
   "diff",
   "dirname",
+  "du",
   "echo",
   "egrep",
   "fgrep",
@@ -3548,11 +3551,15 @@ var READERS = new Set([
   "less",
   "ls",
   "md5",
+  "md5sum",
   "more",
+  "nl",
+  "od",
   "printf",
   "readlink",
   "realpath",
   "rg",
+  "sha1sum",
   "sha256sum",
   "shasum",
   "stat",
@@ -3635,7 +3642,11 @@ var tailOf = (source) => {
   return rest.replace(/^(?:\w+|[-@*#?$!])/, "");
 };
 var SEDS = new Set(["sed"]);
-var KNOWN = new Set([...PLACERS, ...READERS, ...SEDS, ...WRITERS]);
+var FINDS = new Set(["find"]);
+var FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+var FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"]);
+var FIND_OR = new Set(["!", "-not", "-o", "-or"]);
+var KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS]);
 var shown = (word) => word.source ?? visible(word.value);
 var inPlace = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
 var destinationOf = (tool, args) => {
@@ -3676,14 +3687,77 @@ async function judgeBash(command, cwd, environment) {
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob));
   };
-  const visit = async (cmd, { args, name }, at) => {
+  const roster = { quoted: true, source: targets[0], value: targets[0] };
+  const toolOf = (name) => {
+    const prog = program(name);
+    return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
+  };
+  const reaches = (args, at) => {
+    const opts = args.findIndex((a) => !/^-[HLP]+$/.test(a.value));
+    const rest = opts < 0 ? [] : args.slice(opts);
+    const end = rest.findIndex((a) => /^[-(!]/.test(a.value));
+    const starts = end < 0 ? rest : rest.slice(0, end);
+    const holds = (starts.length ? starts : [{ quoted: false, value: "." }]).some((w) => {
+      const paths = pathsOf(w, at);
+      if (!paths)
+        return true;
+      return paths.some(({ path }) => {
+        const dir = path.toLowerCase().replace(/\/*$/, "/");
+        return targets.some((t) => t === path.toLowerCase() || t.startsWith(dir));
+      });
+    });
+    if (!holds)
+      return false;
+    const names = args.flatMap((a, i) => (a.value === "-name" || a.value === "-iname") && args[i + 1] ? [{ insensitive: a.value === "-iname", pattern: args[i + 1].value }] : []);
+    if (!names.length || args.some((a) => FIND_OR.has(a.value)))
+      return true;
+    return names.some(({ insensitive, pattern }) => new Bun.Glob(insensitive ? pattern.toLowerCase() : pattern).match("roster.json"));
+  };
+  const fedRoster = async (cmd, at) => {
+    const feed = cmd.stdin;
+    if (feed && FINDS.has(toolOf(feed.words[0]?.value ?? "")) && reaches(feed.words.slice(1), at))
+      return true;
+    const input = await stdinOf(cmd, at);
+    return marked(input.value) ? named : namesRoster(input.value, targets);
+  };
+  const visit = async (cmd, parsed, at) => {
+    const { args, name, xargs } = parsed;
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse(`a redirect onto ${shown(r.target)}`);
-    const prog = program(name);
-    if (!prog)
+    if (!program(name))
       return;
-    const tool = /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
+    const tool = toolOf(name);
+    if (xargs && await fedRoster(cmd, at)) {
+      const mark = xargs.replace;
+      const fed = mark ? args.map((a) => a.value.includes(mark) ? roster : a) : [...args, roster];
+      return visit(cmd, { ...parsed, args: fed, xargs: undefined }, at);
+    }
+    if (FINDS.has(tool)) {
+      for (const [i, a] of args.entries())
+        if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1], at, true))
+          return refuse(`${tool} ${a.value} onto ${shown(args[i + 1])}`);
+      if (!reaches(args, at))
+        return;
+      if (args.some((a) => a.value === "-delete"))
+        return refuse(`${tool} -delete reaching the roster`);
+      for (const [i, a] of args.entries()) {
+        if (!FIND_EXECS.has(a.value) || !args[i + 1])
+          continue;
+        const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"));
+        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end);
+        const found = await visit(cmd, {
+          ...parsed,
+          args: rest.map((w) => w.value.includes("{}") ? roster : w),
+          first,
+          name: first.value,
+          xargs: undefined
+        }, at);
+        if (found)
+          return found;
+      }
+      return;
+    }
     if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
       return refuse(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {

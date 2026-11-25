@@ -16,6 +16,20 @@ const call = (tool_name: string, tool_input: Record<string, unknown>, env: objec
     env as Record<string, string>,
   )
 const bash = (command: string, env: object = environment) => call("Bash", { command }, env)
+// A Codex session's edit (codex-cli 0.167.1): its apply_patch call carries the patch as its command, and a turn_id
+const patch = (path: string) =>
+  check(
+    JSON.stringify({
+      cwd: root,
+      hook_event_name: "PreToolUse",
+      tool_input: {
+        command: `*** Begin Patch\n*** Update File: ${path}\n@@\n-a\n+b\n*** End Patch`,
+      },
+      tool_name: "apply_patch",
+      turn_id: "turn-1",
+    }),
+    environment,
+  )
 
 describe("a write to the live roster is refused, naming roster.ts", () => {
   test.each([
@@ -60,10 +74,41 @@ describe("a write to the live roster is refused, naming roster.ts", () => {
     `bun /tmp/probe.ts 'echo x > "$(echo ~/.playground/roster.json)"'`,
     'echo x > "$D"/roster.json # ~/.playground/roster.json',
     'echo x > "$(echo ~/.playground/roster.json)"',
+    // #3036: a write that reaches the roster through stdin or a search
+    `echo ${ROSTER} | xargs rm`,
+    `echo ${ROSTER} | xargs -I{} cp /tmp/x {}`,
+    "find ~/.playground -name roster.json -delete",
+    "find ~/.playground -name roster.json -exec rm {} \\;",
+    "find ~/.playground -exec rm {} +",
+    "find ~/.playground ! -name x.json -delete",
+    "gfind ~/.playground -iname ROSTER.JSON -delete",
+    "cd ~/.playground && find -name roster.json -delete",
+    "find ~/.playground -name '*.json' -delete",
+    "find ~/.playground -name roster.json | xargs rm",
+    "find /tmp -fprint ~/.playground/roster.json",
+    // #3040: the programs kept refused on the roster, which can write it or run code
+    `awk '{print > "${ROSTER}"}' /tmp/x`,
+    `awk '{print $1}' ${ROSTER}`,
+    `sort -o ${ROSTER} /tmp/x`,
+    `sort ${ROSTER}`,
+    `xxd /tmp/x ${ROSTER}`,
+    `xxd ${ROSTER}`,
+    `python3 -m json.tool ${ROSTER}`,
+    `python3 /tmp/x.py ${ROSTER}`,
+    `node /tmp/x.js ${ROSTER}`,
+    `git diff --no-index ${ROSTER} /tmp/x`,
+    `watch -n5 cat ${ROSTER}`,
+    `yq . ${ROSTER}`,
+    `fx ${ROSTER}`,
   ])("%s", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-roster-write hook refuses")
     expect(reason).toContain("bun scripts/roster.ts set")
+  })
+
+  // #3037: a Codex session's apply_patch reaches the file-tool check as one Write per file
+  test("a Codex apply_patch of the roster", async () => {
+    expect(await patch(ROSTER)).toContain("no-roster-write hook refuses")
   })
 
   test("it follows PLAYGROUND_DATA_DIR", async () => {
@@ -127,6 +172,34 @@ describe("roster.ts and every read run", () => {
     // real calls the replay found, each a read of the roster
     'n="$(head -c 6 /dev/urandom | xxd -p)-worker"; grep -c "$n" ~/.playground/roster.json; sed "s/x/y/" /tmp/t.md > ~/.playground/brief-$n.md',
     `bun scripts/roster.ts assign x-reviewer "Review: $(jq -r '.title' ~/.playground/roster.json)" "score PR 1" worker=x-worker`,
+    // #3036: a read through stdin or a search
+    "find ~/.playground -name roster.json",
+    "find ~/.playground -name roster.json | xargs cat",
+    `echo ${ROSTER} | xargs cat`,
+    `echo ${ROSTER} | xargs -I{} cp {} /tmp/roster.json`,
+    "find ~/.playground -name roster.json -exec cat {} \\;",
+    "find ~/.playground -name '*.tmp' -delete",
+    "find ~/.playground/scratch -delete",
+    "echo /tmp/x | xargs rm",
+    // pass controls: ordinary find and xargs calls, none of which reaches the roster
+    "find . -name '*.ts' -exec grep -l roster {} +",
+    "find ~ -name '*.log' -mtime +7 -delete",
+    "find ~/.playground -maxdepth 1 -type f",
+    "find ~/.playground/scratch -name '*.png' -exec rm {} \\;",
+    "find /tmp -fprint /tmp/list.txt",
+    "git ls-files | xargs grep -l roster",
+    "ls /tmp/*.json | xargs -I{} mv {} /tmp/old/",
+    "printf '%s\\0' a b | xargs -0 rm",
+    // #3040: plain readers and their GNU copies
+    `cut -d, -f1 ${ROSTER}`,
+    `column -t ${ROSTER}`,
+    `du -h ${ROSTER}`,
+    `md5sum ${ROSTER}`,
+    `nl ${ROSTER}`,
+    `od -c ${ROSTER}`,
+    `sha1sum ${ROSTER}`,
+    `gcut -c1-5 ${ROSTER}`,
+    `gmd5sum ${ROSTER}`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -138,6 +211,10 @@ describe("roster.ts and every read run", () => {
     ["Edit", { file_path: "/tmp/roster.json", new_string: "b", old_string: "a" }],
   ] as const)("%s %o", async (tool, input) => {
     expect(await call(tool, input)).toBeUndefined()
+  })
+
+  test("a Codex apply_patch of another file", async () => {
+    expect(await patch(join(DATA, "merge-queue.json"))).toBeUndefined()
   })
 })
 

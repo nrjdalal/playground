@@ -1,4 +1,4 @@
-// A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets every read run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A call that names the file where the hook cannot read whether it writes is refused, failing closed.
+// A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets its readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, in a call that names the file, is refused, failing closed.
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, resolve } from "node:path"
@@ -6,12 +6,14 @@ import { basename, resolve } from "node:path"
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { eachInput } from "./codex"
 import {
+  type Command,
   knownVariables,
   lex,
   marked,
   places,
   program,
   run,
+  stdinOf,
   type Env,
   type Visit,
   visible,
@@ -30,8 +32,11 @@ const READERS = new Set([
   "bat",
   "cat",
   "cmp",
+  "column",
+  "cut",
   "diff",
   "dirname",
+  "du",
   "echo",
   "egrep",
   "fgrep",
@@ -42,11 +47,15 @@ const READERS = new Set([
   "less",
   "ls",
   "md5",
+  "md5sum",
   "more",
+  "nl",
+  "od",
   "printf",
   "readlink",
   "realpath",
   "rg",
+  "sha1sum",
   "sha256sum",
   "shasum",
   "stat",
@@ -149,9 +158,16 @@ const tailOf = (source: string): string => {
 }
 
 const SEDS = new Set(["sed"])
+const FINDS = new Set(["find"])
+// find's actions that run a program on each path it reaches, up to a ; or a +, its {} standing for the path
+const FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
+// find's actions that write the file named after them, wherever the search starts
+const FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"])
+// find's operators that let a path a -name test misses through
+const FIND_OR = new Set(["!", "-not", "-o", "-or"])
 
-// The programs this hook reads by name, each of which GNU also installs with a g before it
-const KNOWN = new Set([...PLACERS, ...READERS, ...SEDS, ...WRITERS])
+// The programs this hook reads by name; a g before one (gmv, gtee) is GNU's copy of it, read as the plain program.
+const KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS])
 
 const shown = (word: Word) => word.source ?? visible(word.value)
 
@@ -201,14 +217,85 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob))
   }
-  const visit: Visit = async (cmd, { args, name }, at) => {
+  // The roster as a word a program takes, for a path stdin or a search may hand it
+  const roster: Word = { quoted: true, source: targets[0]!, value: targets[0]! }
+  const toolOf = (name: string) => {
+    const prog = program(name)
+    // GNU coreutils, find and sed under their g-prefixed names (gmv, gtee, gfind, gsed) run as the plain ones
+    return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog
+  }
+  // Whether a find's search may reach the roster: a start point (the folder the shell is in by default) is or holds it, and its -name and -iname tests do not all miss roster.json with no !, -not or -or to let a miss through.
+  const reaches = (args: Word[], at: Env): boolean => {
+    const opts = args.findIndex((a) => !/^-[HLP]+$/.test(a.value))
+    const rest = opts < 0 ? [] : args.slice(opts)
+    const end = rest.findIndex((a) => /^[-(!]/.test(a.value))
+    const starts = end < 0 ? rest : rest.slice(0, end)
+    const holds = (starts.length ? starts : [{ quoted: false, value: "." } as Word]).some((w) => {
+      const paths = pathsOf(w, at)
+      if (!paths) return true
+      return paths.some(({ path }) => {
+        const dir = path.toLowerCase().replace(/\/*$/, "/")
+        return targets.some((t) => t === path.toLowerCase() || t.startsWith(dir))
+      })
+    })
+    if (!holds) return false
+    const names = args.flatMap((a, i) =>
+      (a.value === "-name" || a.value === "-iname") && args[i + 1]
+        ? [{ insensitive: a.value === "-iname", pattern: args[i + 1]!.value }]
+        : [],
+    )
+    if (!names.length || args.some((a) => FIND_OR.has(a.value))) return true
+    return names.some(({ insensitive, pattern }) =>
+      new Bun.Glob(insensitive ? pattern.toLowerCase() : pattern).match("roster.json"),
+    )
+  }
+  // Whether the input an xargs reads may be the roster: text naming it, a find whose search may reach it, or input the hook cannot see in a call that names it.
+  const fedRoster = async (cmd: Command, at: Env): Promise<boolean> => {
+    const feed = cmd.stdin
+    if (feed && FINDS.has(toolOf(feed.words[0]?.value ?? "")) && reaches(feed.words.slice(1), at))
+      return true
+    const input = await stdinOf(cmd, at)
+    return marked(input.value) ? named : namesRoster(input.value, targets)
+  }
+  const visit: Visit = async (cmd, parsed, at) => {
+    const { args, name, xargs } = parsed
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse(`a redirect onto ${shown(r.target)}`)
-    const prog = program(name)
-    if (!prog) return
-    // GNU coreutils and sed under their g-prefixed names (gmv, gtee, gsed) run as the plain ones
-    const tool = /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog
+    if (!program(name)) return
+    const tool = toolOf(name)
+    // a program xargs runs takes its input as words: its -I string's place, else after its own words
+    if (xargs && (await fedRoster(cmd, at))) {
+      const mark = xargs.replace
+      const fed = mark ? args.map((a) => (a.value.includes(mark) ? roster : a)) : [...args, roster]
+      return visit(cmd, { ...parsed, args: fed, xargs: undefined }, at)
+    }
+    if (FINDS.has(tool)) {
+      for (const [i, a] of args.entries())
+        if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1]!, at, true))
+          return refuse(`${tool} ${a.value} onto ${shown(args[i + 1]!)}`)
+      if (!reaches(args, at)) return
+      if (args.some((a) => a.value === "-delete"))
+        return refuse(`${tool} -delete reaching the roster`)
+      for (const [i, a] of args.entries()) {
+        if (!FIND_EXECS.has(a.value) || !args[i + 1]) continue
+        const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"))
+        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end)
+        const found = await visit(
+          cmd,
+          {
+            ...parsed,
+            args: rest.map((w) => (w.value.includes("{}") ? roster : w)),
+            first,
+            name: first!.value,
+            xargs: undefined,
+          },
+          at,
+        )
+        if (found) return found
+      }
+      return
+    }
     if (
       CODE_RUNNERS.has(tool) &&
       args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
