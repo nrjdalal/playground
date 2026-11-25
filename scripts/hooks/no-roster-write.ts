@@ -167,7 +167,7 @@ const FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
 const FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"])
 // find's operators that let a path a -name test misses through, GNU's and bfs's , among them
 const FIND_OR = new Set(["!", ",", "-not", "-o", "-or"])
-// The items of fed text the hook reads one by one before it judges the rest as the roster
+// The items of fed text the hook reads one by one; past them the text counts as input it cannot see
 const ITEMS = 100
 // find's option words before its start points: BSD's flags, GNU's -O level and -D list attached
 const FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/
@@ -225,7 +225,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   }
   // The roster as a word a program takes, for a path stdin or a search may hand it
   const roster: Word = { quoted: true, source: targets[0]!, value: targets[0]! }
-  // The roster stood in for input the hook cannot see, which only a program that writes each operand it names (WRITERS, an in-place sed) or a placer's destination is refused on, as an unread operand is
+  // The roster stood in for input the hook cannot see, which only a program that writes each operand it names (WRITERS, an in-place sed), a program the hook cannot name or a placer's destination is refused on, as an unread operand is
   const unseen = new WeakSet<Word>()
   const unseenRoster: Word = { ...roster }
   unseen.add(unseenRoster)
@@ -309,16 +309,16 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     args: Word[],
     tool: string,
     at: Env,
-    unseen: boolean,
+    viaXargs: boolean,
   ) => {
     if (FINDS.has(tool)) return reaches(args, at)
     const out = await outputOf(cmd, at)
-    if (marked(out.value)) return unseen && unseenHolds(at)
+    if (marked(out.value)) return viaXargs && unseenHolds(at)
     const items = itemsOf(out.value)
-    if (items.length > ITEMS) return unseen && unseenHolds(at)
+    if (items.length > ITEMS) return viaXargs && unseenHolds(at)
     return namesRoster(out.value, targets) || items.some((w) => writes(w, at))
   }
-  // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see where unseenHolds.
+  // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see (unread, or past ITEMS items) where unseenHolds.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
     const fill = (a: Word, mark: string, item: Word): Word => {
@@ -341,7 +341,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
       return unseenHolds(at) ? put([unseenRoster]) : []
     const items = itemsOf(input.value, xargs)
-    if (items.length > ITEMS) return put([unseenRoster])
+    if (items.length > ITEMS) return unseenHolds(at) ? put([unseenRoster]) : []
     return items.length ? put(items) : []
   }
   const visit: Visit = async (cmd, parsed, at) => {
@@ -433,8 +433,9 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     }
     if (READERS.has(tool)) return
     const writer = WRITERS.has(tool) || SEDS.has(tool)
+    // the unseen roster reaches a writer, and a program the hook cannot name, which may be one
     for (const word of args)
-      if ((writer || !unseen.has(word)) && writes(word, at, writer))
+      if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
         return refuse(`${tool} on ${shown(word)}`)
   }
   return run(lexed, env, visit, true)

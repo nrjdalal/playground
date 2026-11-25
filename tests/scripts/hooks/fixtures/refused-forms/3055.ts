@@ -148,6 +148,18 @@ export const groups: Group[] = [
         "100 other paths and the roster, one a line, fed to xargs -I{} rm {}",
         `printf '%s\\n' ${Array.from({ length: 100 }, (_, i) => `/tmp/a${i + 1}`).join(" ")} ~/.playground/roster.json | xargs -I{} rm {}`,
       ],
+      [
+        "the roster as a process substitution after --arg-file= into xargs rm",
+        "xargs --arg-file=<(echo ~/.playground/roster.json) rm",
+      ],
+      [
+        "the roster as a process substitution after --arg-file into xargs rm",
+        "xargs --arg-file <(echo ~/.playground/roster.json) rm",
+      ],
+      [
+        "the roster as a process substitution after -a into xargs rm",
+        "xargs -a <(echo ~/.playground/roster.json) rm",
+      ],
     ],
   },
 ]

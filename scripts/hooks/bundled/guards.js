@@ -19929,15 +19929,15 @@ async function judgeBash(command, cwd, environment) {
     const at = xargs?.delimiters?.length ? new RegExp(xargs.delimiters.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")) : xargs?.replace ? /\n/ : /\s+/;
     return text.split(at).map((v) => xargs?.replace ? v.trim() : v.replace(/["']/g, "")).filter(Boolean).map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }));
   };
-  const listsRoster = async (cmd, args, tool, at, unseen) => {
+  const listsRoster = async (cmd, args, tool, at, viaXargs) => {
     if (FINDS.has(tool))
       return reaches(args, at);
     const out = await outputOf(cmd, at);
     if (marked(out.value))
-      return unseen && unseenHolds(at);
+      return viaXargs && unseenHolds(at);
     const items = itemsOf(out.value);
     if (items.length > ITEMS)
-      return unseen && unseenHolds(at);
+      return viaXargs && unseenHolds(at);
     return namesRoster(out.value, targets) || items.some((w) => writes(w, at));
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
@@ -19962,7 +19962,7 @@ async function judgeBash(command, cwd, environment) {
       return unseenHolds(at) ? put([unseenRoster]) : [];
     const items = itemsOf(input.value, xargs);
     if (items.length > ITEMS)
-      return put([unseenRoster]);
+      return unseenHolds(at) ? put([unseenRoster]) : [];
     return items.length ? put(items) : [];
   };
   const visit = async (cmd, parsed, at) => {
@@ -20043,7 +20043,7 @@ async function judgeBash(command, cwd, environment) {
       return;
     const writer = WRITERS2.has(tool) || SEDS3.has(tool);
     for (const word of args)
-      if ((writer || !unseen.has(word)) && writes(word, at, writer))
+      if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
         return refuse15(`${tool} on ${shown3(word)}`);
   };
   return run2(lexed, env, visit, true);

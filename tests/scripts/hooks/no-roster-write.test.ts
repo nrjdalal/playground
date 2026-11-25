@@ -212,6 +212,8 @@ describe("roster.ts and every read run", () => {
     // past ITEMS fed items, a program that writes no operand still runs, as the differential's touched-test runs do
     `echo ${Array.from({ length: 101 }, (_, i) => `tests/x${i}.test.ts`).join(" ")} | xargs bun run test:file`,
     `echo ${Array.from({ length: 101 }, (_, i) => `w${i}`).join(" ")} | python3 -c 'import sys; print(sys.stdin.read())'`,
+    // past ITEMS fed items with no roster near, a writer runs too, as at canary
+    `echo ${Array.from({ length: 101 }, (_, i) => `/opt/none/x${i}`).join(" ")} | xargs rm`,
     // #3040: plain readers and their GNU copies
     `cut -d, -f1 ${ROSTER}`,
     `column -t ${ROSTER}`,
@@ -221,6 +223,7 @@ describe("roster.ts and every read run", () => {
     `od -c ${ROSTER}`,
     `sha1sum ${ROSTER}`,
     `gcut -c1-5 ${ROSTER}`,
+    `ghead -1 ${ROSTER}`,
     `gmd5sum ${ROSTER}`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
