@@ -217,6 +217,8 @@ const FREES = new Set(["\n", ";", ";;", "&", "||"])
 // Tokens are handed out across every script the hook reads, so a script's own run never shares one with the line that read it.
 let tokens = 0
 const freshToken = () => ++tokens
+// The reserved words a brace group may follow in command position, so `! { …; }`, `then { …; }` and `do { …; }` open a group as a bare `{ …; }` does
+const GROUP_LEADS = new Set(["!", "do", "elif", "else", "if", "then", "until", "while"])
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
 // The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
@@ -1439,12 +1441,15 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         fedOpens.push(fedOpens.at(-1))
       }
       for (const w of done.words) {
-        if (w.value !== "{" || w.quoted) break
+        if (w.quoted || (w.value !== "{" && !GROUP_LEADS.has(w.value))) break
+        if (w.value !== "{") continue
         opens.push(lx.commands.length)
         fedOpens.push(done.stdin ?? done.braceFed)
       }
       // an exec with a redirect swaps the group's descriptors (`{ exec 0<&3; xargs …; }`), so the commands after it read the pipe no more
-      const called = done.words.find((w) => w.value !== "{" || w.quoted)
+      const called = done.words.find(
+        (w) => w.quoted || (w.value !== "{" && !GROUP_LEADS.has(w.value)),
+      )
       if (
         fedOpens.length > 0 &&
         called?.value === "exec" &&

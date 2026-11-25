@@ -1,6 +1,6 @@
 import type { Group, Row } from "./_shared"
 
-// A group's, a subshell's or a compound's stdout redirect reaches every command inside it, so another program's own text that names the root, written there through a variable the hook cannot read, fails closed as the same program's at top level does; rows are data, as refused-forms.ts says.
+// A group's, a subshell's or a compound's stdout redirect reaches every command inside it, a duplicate of a descriptor an exec opened and a group after a reserved word included, so another program's own text that names the root, written there through a variable the hook cannot read, fails closed as the same program's at top level does; rows are data, as refused-forms.ts says.
 const LOG = "git log -1 --format='touch ~/.playground/extensions/x'"
 const PLAIN = "git log -1 --format=%h"
 
@@ -9,6 +9,16 @@ const blocks = (call: string) =>
     ["a brace group", `{ ${call}; } > "$UNSET_X"`],
     ["a subshell", `( ${call} ) > "$UNSET_X"`],
     ["a while loop", `while true; do ${call}; break; done > "$UNSET_X"`],
+    ["a brace group writing a descriptor an exec opened", `exec 3>"$UNSET_X"; { ${call}; } >&3`],
+    ["a subshell writing a descriptor an exec opened", `exec 3>"$UNSET_X"; ( ${call} ) >&3`],
+    [
+      "a while loop writing a descriptor an exec opened",
+      `exec 3>"$UNSET_X"; while true; do ${call}; break; done >&3`,
+    ],
+    ["a brace group writing the stderr an exec opened", `exec 2>"$UNSET_X"; { ${call}; } 1>&2`],
+    ["a negated brace group", `! { ${call}; } > "$UNSET_X"`],
+    ["a brace group after then", `if true; then { ${call}; } > "$UNSET_X"; fi`],
+    ["a brace group after do", `while true; do { ${call}; } > "$UNSET_X"; break; done`],
   ] as const
 
 const held = (): Row[] =>
