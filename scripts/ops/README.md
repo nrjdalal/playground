@@ -182,6 +182,11 @@ How to read an account's week for the factory's **usage** rule (`extensions/core
   While one projects under 100% at its own week reset, it writes `usage-pace-off-until` an hour on, never past that account's reset, renewed each pass, so the pace comes back within the hour of a stopped sweep; once none does, it removes the time it wrote.
   `ops/sweep/pace-off.json` records each pass's forecast, `{at, forecast, until}` (a pass that a hand-written future time holds returns before it forecasts and writes none, so the file keeps the last), each account by its `usage.accounts` label, else `account <n>` by its row, else `unlisted <n>` for one `usage.accounts` does not list, and `until` null while the pace stays on.
   A future time in the file that `until` does not name is a person's, written by hand, and stands as it is; the forecast takes no account floor: no code holds an account floor today, and the Ops lead holds any floor the owner sets by hand.
+- `forecast()` (`packages/scripts/src/ops-sweep/sweep.ts`) is one entry per `usage.accounts` Claude row, and one for `usage.json`'s account when no row lists it, by the label `pickable()` names it.
+  An entry is the account's projected week at its reset from `weekOf()`, `no forecast yet` while the account's readings do not span 3 hours, its newest is 30 minutes old or more, or its reset is under 10 minutes away, and `parked until <time>` while the row's `parkedUntil` is in the future, so a parked one carries no figure.
+  The account `usage.json` logs also carries its 5-hour window as `fiveHour` while that projects (none while `usage.json` does not read), so it reads `{week, fiveHour}`, its `week` `no forecast yet` when only the window has a figure, and the rest read `{week}`.
+  `bun run ops:sweep --forecast` (`packages/scripts/src/ops-sweep/cli.ts`) prints it, keyed by label.
+  The headroom finding (`check()`) reads each figure of an account `pickable()` names, its week and its 5-hour window, and skips a parked entry and any account `pickable()` does not name, so `headroom` or `no-headroom` comes off those figures, or none while none has a figure.
 
 ## Ops switches
 

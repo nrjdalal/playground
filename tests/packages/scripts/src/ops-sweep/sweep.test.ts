@@ -1358,47 +1358,166 @@ describe("opsDown", () => {
 })
 
 describe("forecast", () => {
-  test("projects each window to its reset from the recent rate", async () => {
-    const { ctx, sweep } = setup()
-    const t = NOW / 1000
-    const r5 = t + 7200
-    const r7 = t + 86400
-    write(join(ctx.data, "usage.json"), {
-      rate_limits: {
-        five_hour: { resets_at: r5, used_percentage: 50 },
-        seven_day: { resets_at: r7, used_percentage: 40 },
-      },
-    })
+  const A = "one@example.com"
+  const B = "two@example.com"
+  const T = NOW / 1000
+  // A run of week-marks.py's sample, each account's week, `reset` seconds on, at each time `at` from now, all in usage/week-samples.jsonl.
+  const week = (
+    ctx: Context,
+    samples: { account: string; week: number; at: number }[],
+    reset = 86400,
+  ) => {
+    const lines = samples
+      .map((s) =>
+        JSON.stringify({ account: s.account, reset: T + reset, t: T + s.at, week: s.week }),
+      )
+      .join("\n")
+    if (lines.length) writeFileSync(join(ctx.ops, "usage", "week-samples.jsonl"), lines + "\n")
+  }
+  // A prior 5-hour sample, so fiveHourOf can read the account's 5-hour window, its reset 7200s on, at `f5`% used, `at` seconds before now.
+  const prior = (ctx: Context, account: string, f5: number, at: number) =>
     writeFileSync(
-      join(sweep, "usage-samples.jsonl"),
-      `${JSON.stringify({ f5: 40, r5, r7, s7: 39, t: t - 3600 })}\n`,
+      join(ctx.ops, "sweep", "usage-samples.jsonl"),
+      `${JSON.stringify({ account, f5, r5: T + 7200, t: T + at })}\n`,
     )
-    expect(await forecast(ctx)).toEqual({ "5h": 70, "7d": 64 })
-  })
+  // one usage.accounts, each by its email and the label pickable() names it, a parked one until its parkedUntil.
+  const accounts = (
+    ctx: Context,
+    rows: { email: string; label?: string; parkedUntil?: string }[],
+  ) => storeWith(ctx.data, {}, { "usage.accounts": rows })
+  // usage.json's account and its rate_limits.
+  const usage = (ctx: Context, account: string, rate_limits: Record<string, unknown>) =>
+    write(join(ctx.data, "usage.json"), { account, rate_limits })
+  // login-flip.json's split, so pickable() also picks these accounts.
+  const loginSplit = (ctx: Context, shares: Record<string, number>, at = 0) =>
+    write(join(ctx.ops, "usage", "login-flip.json"), { at: T + at, shares })
 
-  test("a window with no reset is left out", async () => {
+  test("one parked and one live: parked reads until it unparks, live its week and 5-hour window", async () => {
     const { ctx } = setup()
-    write(join(ctx.data, "usage.json"), {
-      rate_limits: {
-        five_hour: { resets_at: null, used_percentage: 0 },
-        seven_day: { resets_at: NOW / 1000 + 86400, used_percentage: 40 },
-      },
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [
+      { email: A, label: "main" },
+      { email: B, label: "backup", parkedUntil: "2026-10-21T00:00:00Z" },
+    ])
+    week(ctx, [
+      { account: A, week: 39, at: -10800 },
+      { account: A, week: 40, at: 0 },
+    ])
+    prior(ctx, A, 40, -3600)
+    usage(ctx, A, {
+      five_hour: { resets_at: T + 7200, used_percentage: 50 },
+      seven_day: { resets_at: T + 86400, used_percentage: 40 },
     })
-    expect(await forecast(ctx)).toEqual({})
+    expect(await forecast(ctx)).toEqual({
+      main: { week: 48, fiveHour: 70 },
+      backup: "parked until 2026-10-21T00:00:00Z",
+    })
   })
 
-  test("an account with no 5-hour window still has its week projected", async () => {
-    const { ctx, sweep } = setup()
-    const t = NOW / 1000
-    const r7 = t + 86400
-    write(join(ctx.data, "usage.json"), {
-      rate_limits: { seven_day: { resets_at: r7, used_percentage: 40 } },
+  test("a parked account at a high week leaves the headroom finding to the live one alone", async () => {
+    const { ctx } = setup()
+    roster(ctx, [])
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [
+      { email: A, label: "main" },
+      { email: B, label: "backup", parkedUntil: "2026-10-21T00:00:00Z" },
+    ])
+    // the split picks both, but only A projects a figure: B is parked at a high week
+    loginSplit(ctx, { [A]: 1, [B]: 1 })
+    week(ctx, [
+      { account: A, week: 39, at: -10800 },
+      { account: A, week: 40, at: 0 },
+      { account: B, week: 80, at: -10800 },
+      { account: B, week: 90, at: 0 },
+    ])
+    usage(ctx, A, { seven_day: { resets_at: T + 86400, used_percentage: 90 } })
+    const findings = await check(ctx)
+    expect(findings).toContain("headroom")
+    expect(findings).not.toContain("no-headroom")
+  })
+
+  test("a parkedUntil in the past reads the account as a live one", async () => {
+    const { ctx } = setup()
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [
+      { email: A, label: "main" },
+      { email: B, label: "backup", parkedUntil: "2026-10-19T00:00:00Z" },
+    ])
+    week(ctx, [
+      { account: A, week: 39, at: -10800 },
+      { account: A, week: 40, at: 0 },
+      { account: B, week: 39, at: -10800 },
+      { account: B, week: 40, at: 0 },
+    ])
+    prior(ctx, A, 40, -3600)
+    usage(ctx, A, {
+      five_hour: { resets_at: T + 7200, used_percentage: 50 },
+      seven_day: { resets_at: T + 86400, used_percentage: 40 },
     })
-    writeFileSync(
-      join(sweep, "usage-samples.jsonl"),
-      `${JSON.stringify({ r7, s7: 39, t: t - 3600 })}\n`,
-    )
-    expect(await forecast(ctx)).toEqual({ "7d": 64 })
+    expect(await forecast(ctx)).toEqual({
+      main: { week: 48, fiveHour: 70 },
+      backup: { week: 48 },
+    })
+  })
+
+  test("an account with too few readings reads no forecast yet", async () => {
+    const { ctx } = setup()
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [{ email: A, label: "main" }])
+    // two readings only 30 minutes apart, under the 3-hour span weekOf needs
+    week(ctx, [
+      { account: A, week: 39, at: -1800 },
+      { account: A, week: 40, at: 0 },
+    ])
+    usage(ctx, A, {
+      five_hour: { resets_at: T + 7200, used_percentage: 50 },
+      seven_day: { resets_at: T + 86400, used_percentage: 40 },
+    })
+    expect(await forecast(ctx)).toEqual({ main: "no forecast yet" })
+  })
+
+  test("with no usage.json, every account still reads its week", async () => {
+    const { ctx } = setup()
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [
+      { email: A, label: "main" },
+      { email: B, label: "backup" },
+    ])
+    week(ctx, [
+      { account: A, week: 39, at: -10800 },
+      { account: A, week: 40, at: 0 },
+    ])
+    expect(await forecast(ctx)).toEqual({ main: { week: 48 }, backup: "no forecast yet" })
+  })
+
+  // usage.json's 5-hour window, 10% an hour ago and 50% now, projects to 130 at its reset 2 hours on.
+  const highFiveHour = (ctx: Context) => {
+    prior(ctx, A, 10, -3600)
+    usage(ctx, A, {
+      five_hour: { resets_at: T + 7200, used_percentage: 50 },
+      seven_day: { resets_at: T + 86400, used_percentage: 40 },
+    })
+  }
+
+  test("with no usage.accounts, usage.json's account still reads its 5-hour window, and it counts for headroom", async () => {
+    const { ctx } = setup()
+    roster(ctx, [])
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    highFiveHour(ctx)
+    expect(await forecast(ctx)).toEqual({
+      "unlisted 1": { week: "no forecast yet", fiveHour: 130 },
+    })
+    expect(await check(ctx)).toContain("no-headroom")
+  })
+
+  test("a listed account with too few week readings keeps its 5-hour window, and it counts for headroom", async () => {
+    const { ctx } = setup()
+    roster(ctx, [])
+    mkdirSync(join(ctx.ops, "usage"), { recursive: true })
+    accounts(ctx, [{ email: A, label: "main" }])
+    highFiveHour(ctx)
+    expect(await forecast(ctx)).toEqual({ main: { week: "no forecast yet", fiveHour: 130 } })
+    expect(await check(ctx)).toContain("no-headroom")
   })
 })
 
