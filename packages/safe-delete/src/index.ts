@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path"
 
-import { hasManagerRole, placedKindOf } from "@packages/config/kinds"
+import { hasManagerRole, placedKindOf, type RosterKind } from "@packages/config/kinds"
 
 import { liveHeads, present, type Tip } from "./live-refs"
 
@@ -228,9 +228,20 @@ const whyHolds = (path: string, roots: Roots): string | null => {
 const SCRATCH_DIRS = ["scratch", "scratchpad"] as const
 type ScratchDir = (typeof SCRATCH_DIRS)[number]
 
-// The memory folder a session's own settings file names as its autoMemoryDirectory, the one spawn.sh picked by its role (ADR 0022), its parent resolved: when the file is a regular file and the folder an absolute path to a real folder (not a symlink) directly in the data folder's memory/, itself a real folder; else undefined.
-const memoryFolderOf = (home: string, settings: string): string | undefined => {
-  if (!lstat(settings)?.isFile()) return undefined
+// The memory folder spawn.sh picks for each kind of session that runs with memory on (ADR 0022).
+const MEMORY_FOLDERS: Partial<Record<RosterKind, string>> = {
+  builder: "builder",
+  dispatcher: "dispatcher",
+  ops: "ops",
+  planner: "planner",
+  worker: "worker-b",
+}
+
+// The memory folder a session's own settings file names as its autoMemoryDirectory, its parent resolved: when the file is a regular file and the folder an absolute path to a real folder (not a symlink) directly in the data folder's memory/, itself a real folder, under the name spawn.sh picks for the session's kind (MEMORY_FOLDERS); else undefined.
+const memoryFolderOf = (home: string, session: string, settings: string): string | undefined => {
+  const kind = placedKindOf(session, undefined)
+  const role = kind ? MEMORY_FOLDERS[kind] : undefined
+  if (!role || !lstat(settings)?.isFile()) return undefined
   let folder: unknown
   try {
     folder = JSON.parse(readFileSync(settings, "utf8"))?.autoMemoryDirectory
@@ -239,8 +250,7 @@ const memoryFolderOf = (home: string, settings: string): string | undefined => {
   }
   if (typeof folder !== "string" || !isAbsolute(folder)) return undefined
   const own = join(real(dirname(folder)), basename(folder))
-  return dirname(own) === join(real(join(home, ".playground")), "memory") &&
-    lstat(own)?.isDirectory()
+  return own === join(real(join(home, ".playground")), "memory", role) && lstat(own)?.isDirectory()
     ? own
     : undefined
 }
@@ -261,7 +271,7 @@ const ownScratchOf = (home: string, session: string, path: string): string[] => 
     `factory-settings-400k-memory-${session}.json`,
   )
   const note =
-    dirname(path) === memoryFolderOf(home, settings) &&
+    dirname(path) === memoryFolderOf(home, session, settings) &&
     name.toLowerCase() !== "memory.md" &&
     (!stat || stat.isFile())
   return [

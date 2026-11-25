@@ -276,6 +276,19 @@ describe("isProtected", () => {
     expect(isProtected(note, roots, opts.session)).toBeString()
   })
 
+  test("takes no memory folder a settings file names for another role than its session's kind", () => {
+    const roots = machine()
+    const data = join(roots.home, ".playground")
+    const note = file(join(data, "memory", "ops", "a-note.md"))
+    for (const session of [opts.session, "builder", "a4b5c6-reviewer"]) {
+      file(
+        join(data, `factory-settings-400k-memory-${session}.json`),
+        JSON.stringify({ autoMemoryDirectory: join(data, "memory", "ops") }),
+      )
+      expect(isProtected(note, roots, session)).toBeString()
+    }
+  })
+
   test("takes no memory folder from a settings file that names one outside memory/ or none", () => {
     const roots = machine()
     const data = join(roots.home, ".playground")
