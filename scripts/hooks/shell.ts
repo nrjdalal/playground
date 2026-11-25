@@ -217,6 +217,8 @@ const FREES = new Set(["\n", ";", ";;", "&", "||"])
 // Tokens are handed out across every script the hook reads, so a script's own run never shares one with the line that read it.
 let tokens = 0
 const freshToken = () => ++tokens
+// The reserved words a brace group may follow in command position, so `! { …; }`, `then { …; }`, `do { …; }` and `coproc { …; }` open a group as a bare `{ …; }` does
+const GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"])
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
 // The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
@@ -1439,13 +1441,16 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         opens.push(lx.commands.length)
         fedOpens.push(fedOpens.at(-1))
       }
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted) break
+      const lead = done.words.findIndex(
+        (w) => w.quoted || (w.value !== "{" && !GROUP_LEADS.has(w.value)),
+      )
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{") continue
         opens.push(lx.commands.length)
         fedOpens.push(done.stdin ?? done.braceFed)
       }
       // an exec with a redirect swaps the group's descriptors (`{ exec 0<&3; xargs …; }`), so the commands after it read the pipe no more
-      const called = done.words.find((w) => w.value !== "{" || w.quoted)
+      const called = lead < 0 ? undefined : done.words[lead]
       if (
         fedOpens.length > 0 &&
         called?.value === "exec" &&
@@ -2823,7 +2828,7 @@ const unquote = (part: string): string =>
     : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
 // A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text, and a zsh group in them globbed after (`/usr/bin/pk{(i|x),y}ll`), as zsh expands braces first; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees whose words do not lex as one command, code a guard reads as a line (`f({a, b})`), and for any other program word
-function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
+export function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
   if (first?.unknown !== BRACE) return
   const source = (first.source ?? "").replace(/\\\n/g, "")
   if (/[$`]/.test(source)) return null
