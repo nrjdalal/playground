@@ -243,6 +243,31 @@ describe("roster.ts and every read run", () => {
   })
 })
 
+// The session's own folder is the shell's: a relative path and unseen input are read from it, with no cd in the call
+describe("a call whose session sits in the data folder", () => {
+  const inData = (command: string) =>
+    check(
+      JSON.stringify({
+        cwd: DATA,
+        hook_event_name: "PreToolUse",
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      environment,
+    )
+
+  test.each(["rm roster.json", "ls | xargs rm"])("refuses %s", async (command) => {
+    expect(await inData(command)).toContain("scripts/roster.ts")
+  })
+
+  test.each(["cat roster.json", "jq -r '.agents[].name' roster.json", "ls | xargs cat"])(
+    "runs %s",
+    async (command) => {
+      expect(await inData(command)).toBeUndefined()
+    },
+  )
+})
+
 // It has no process of its own: no-raw-wa's, registered on the file tools, runs it there.
 test("no-raw-wa's process refuses a factory session's Write of the roster, in this hook's name", async () => {
   const proc = Bun.spawn(["bun", "--no-env-file", join(root, "scripts", "hooks", "no-raw-wa.ts")], {

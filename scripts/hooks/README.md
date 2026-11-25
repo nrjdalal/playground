@@ -1514,7 +1514,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - The live roster, the data folder's `roster.json` (`PLAYGROUND_DATA_DIR`'s when set), changes only through `scripts/roster.ts` (the **roster** rule), so every reader sees it whole: `scripts/hooks/no-roster-write.ts` refuses a factory session's Edit, MultiEdit, NotebookEdit or Write of it, and a shell write onto it, naming `bun scripts/roster.ts set` as the way.
   It reads the file as typed and through the data folder's links, in any case, as macOS opens it, and a glob that may match it.
-- On Bash it walks the call through `shell.ts`'s reader, in each folder the shell may be in:
+- On Bash it walks the call through `shell.ts`'s reader, in each folder the shell may be in, starting from the session's own folder, so `rm roster.json` from the data folder is refused with no `cd` in the call:
   - a writing redirect (`>`, `>>`, `>|`, `<>`) onto the file;
   - a placer (`cp`, `ditto`, `install`, `ln`, `mv`, `rsync`: `PLACERS`) with the file as its destination (its last operand, or `-t` for `cp`, `install`, `ln` and `mv`, since rsync's `-t` keeps times), or a `roster.json` it places into the data folder;
   - `sed` with `-i` or `--in-place`, or whose script names the file, `-i` or not, since a `w` or `W` with any address, an `s` command's `w` flag with any delimiter, or GNU sed's `e` each write it, so the hook fails closed past the commands it would have to parse; the file as an operand of its own runs, since sed only reads it;

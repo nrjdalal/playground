@@ -194,6 +194,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   const named = namesRoster(command, targets)
   const env: Env = {
     cwd,
+    cwdSure: cwd,
     files: new Map(),
     known: knownVariables(command, environment, cwd),
     process: environment,
