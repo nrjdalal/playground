@@ -1588,7 +1588,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       `removed ${clone}`,
       ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
     ])
-    expect(asked).toEqual([target.pr!])
+    expect(asked).toEqual(rest.map(() => target.pr!))
     expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
     expect(rest.filter((p) => existsSync(p))).toEqual(rest)
   })
