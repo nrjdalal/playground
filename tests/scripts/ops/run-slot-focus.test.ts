@@ -85,6 +85,17 @@ describe("run-slot.focus", () => {
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
   })
 
+  // issue 2852: the call reads its ISO clock once, so a focus read through a subshell must refresh it, or a waiter never sees the focus lapse
+  test("a run waiting under another session's focus goes on once the focus lapses mid-wait", async () => {
+    const m = machine()
+    const now = Date.now()
+    writeFileSync(
+      join(m.ops, "run-slot.focus"),
+      `worker-f ${iso(now - 60_000)} ${iso(now + 4_000)} demo\n`,
+    )
+    expect(await m.runs("worker-x", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
   // issue 1491: a second process lifts the focus right after focus_holder's switch_on reads it, the second focus read (the first is the startup sweep's) and the point both sides pass through, so each side's read meets no file
   test("the focus file going between the presence check and the read reads as no focus, with no cut error", async () => {
     const m = machine({ idle: 30 })

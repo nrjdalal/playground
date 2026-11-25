@@ -28,6 +28,7 @@ import { check as rawSpawn } from "./no-raw-spawn"
 import { check as rawVercel } from "./no-raw-vercel"
 import { check as rawWa } from "./no-raw-wa"
 import { check as releaseComment } from "./no-release-comment"
+import { check as rosterWrite } from "./no-roster-write"
 import { check as stash } from "./no-stash"
 import { check as unslottedRun } from "./no-unslotted-run"
 import { fromFactory } from "./role"
@@ -73,6 +74,7 @@ export const GUARDS: readonly Guard[] = [
   { factory: true, name: "no-raw-vercel", run: (raw, env) => rawVercel(raw, env) },
   { factory: true, name: "no-raw-wa", run: (raw, env) => rawWa(raw, env) },
   { factory: false, name: "no-release-comment", run: (raw, env) => releaseComment(raw, env) },
+  { factory: true, name: "no-roster-write", run: (raw, env) => rosterWrite(raw, env) },
   { factory: true, name: "no-stash", run: (raw, env) => stash(raw, env) },
   { factory: true, name: "no-unslotted-run", run: (raw, env) => unslottedRun(raw, env) },
 ]
