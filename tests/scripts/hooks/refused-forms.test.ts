@@ -15,6 +15,8 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
+import fc from "fast-check"
+
 import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
@@ -46,6 +48,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { pinPlatform } from "./platform"
+import { programWord, REWRITE_NAMES, spell, SPELLING, type Spelling } from "./refused-spellings"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -852,6 +855,53 @@ describe("every refused form stays refused in its Codex shape", () => {
         "apply_patch in the shell",
       ])
   })
+})
+
+// Each case's seed is its own, so a seeded draw is the same on every run, CI's included; REFUSED_FORMS_SEED=<n> sets every case's seed, which draws once a rewrite with a random part raises numRuns past the examples
+const SEED = process.env.REFUSED_FORMS_SEED ? Number(process.env.REFUSED_FORMS_SEED) : undefined
+if (SEED !== undefined && !Number.isInteger(SEED))
+  throw new Error(`REFUSED_FORMS_SEED=${process.env.REFUSED_FORMS_SEED} is not a whole number`)
+
+// A spelling stays refused when the row's own guard refuses it, or when its program word is no plain name, which no-hidden-program refuses beside every guard guards.ts gates to a factory session, the one gate it runs behind
+const speltRefused = async (c: (typeof CASES)[number], text: string, [cwd, home]: string[]) => {
+  if ((await verdict({ ...c, call: text }, cwd!, home!))?.includes(`${c.guard} hook `)) return true
+  const hidden = await GUARDS["no-hidden-program"].run(input(text, cwd!), home!)
+  return !!hidden?.includes("no-hidden-program hook ")
+}
+
+// the cases whose guard runs behind the factory gate, where no-hidden-program backs it
+const SPELT = CASES.filter(
+  (c) =>
+    typeof c.call === "string" &&
+    !!programWord(c.call) &&
+    !!dispatched(c.guard)?.factory &&
+    !allowed(c),
+)
+
+describe("every generated spelling of a refused form stays refused", () => {
+  test.each(SPELT.map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const call = c.call as string
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      await fc.assert(
+        fc.asyncProperty(SPELLING, async (s) => {
+          const text = spell(call, s)
+          expect({ refused: await speltRefused(c, text, at), text }).toEqual({
+            refused: true,
+            text,
+          })
+        }),
+        // fast-check counts the examples inside numRuns, so each case runs every rewrite once and draws nothing, since a draw from the fixed rewrites only repeats one
+        {
+          examples: REWRITE_NAMES.map((s) => [s] as [Spelling]),
+          numRuns: REWRITE_NAMES.length,
+          seed: SEED ?? Bun.hash.crc32(c.key) | 0,
+        },
+      )
+    },
+    60_000,
+  )
 })
 
 // Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
