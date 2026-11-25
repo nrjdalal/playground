@@ -1761,16 +1761,17 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(existsSync(first)).toBe(true)
   })
 
-  test("finishedAt frees a clone at the merged head or behind it, and holds one with a commit the merged head lacks", async () => {
+  // rm's reader for one machine: MERGED only for the clone at the PR's head, as for a clone at or past it, and null for one behind it or another PR's worktree
+  const rmAt = (main: string, at: string, merged: string) => ({
+    main,
+    mergedHead: (_path: string, url: string) => (url === URL7 ? merged : null),
+    prState: async (path: string, pr?: string) =>
+      pr === URL7 && path === at ? ({ head: merged, number: 7, state: "MERGED" } as const) : null,
+  })
+
+  test("finishedAt frees a clone of the PR at its merged head or behind it, and holds one with a commit the merged head lacks", async () => {
     const { clone, commit, first, main, merged, projects, roster, second, target } = twoClones()
-    const rm = {
-      // rm's reader answers MERGED only for a clone at or past the PR's head, and null for one behind it
-      mergedHead: (_path: string, url: string) => (url === URL7 ? merged : null),
-      prState: async (path: string, pr?: string) =>
-        pr === URL7 && path === second
-          ? ({ head: merged, number: 7, state: "MERGED" } as const)
-          : null,
-    }
+    const rm = rmAt(main, second, merged)
     expect(await finishedAt(second, URL7, rm)).toBe(true)
     expect(await finishedAt(first, URL7, rm)).toBe(true)
     expect(await finishedAt(first, undefined, rm)).toBe(false)
@@ -1783,8 +1784,26 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     )
     const past = twoClones()
     commit(past.first, "c.txt")
-    const pastRm = { ...rm, mergedHead: () => past.merged }
-    expect(await finishedAt(past.first, URL7, pastRm)).toBe(false)
+    expect(await finishedAt(past.first, URL7, rmAt(past.main, past.second, past.merged))).toBe(
+      false,
+    )
+  })
+
+  test("a worktree whose own PR is open, behind another PR's merged head with uncommitted work, stays held", async () => {
+    const { main, merged, second } = twoClones()
+    const wt = join(main, ".claude", "worktrees", "PG-9-other")
+    run(main, "git", "worktree", "add", "-q", "-b", "PG-9-other", wt, "HEAD")
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    const rm = rmAt(main, second, merged)
+    expect(await finishedAt(wt, URL7, rm)).toBe(false)
+    const { calls, deps } = fakes(main, [], undefined, {
+      finished: (path, pr) => finishedAt(path, pr, rm),
+    })
+    expect(await cleanWorktree(wt, "r ended", deps, { pr: URL7 })).toBe(
+      `kept ${wt}: uncommitted work`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(join(wt, "wip.txt"))).toBe(true)
   })
 
   // #2407: safe-delete's cap of 3 moves a minute for each charged name, as a count; each move's name and each carried move kept

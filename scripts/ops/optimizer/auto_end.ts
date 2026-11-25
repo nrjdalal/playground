@@ -484,14 +484,20 @@ export async function cleanWorktree(
 // Whether a worktree's PR, as rm's reader returns it (its head beside its number and state, or none), is finished: merged or closed, rm's freed reading.
 export const finishedOf = (pr: PrRead): boolean => freedOf(pr) !== undefined
 
-// Whether a worktree's PR is finished, read through the worktree's own HEAD: rm's freed reading, or HEAD at or behind the PR's merged head, as safe-delete's atMergedHead reads it, since rm's reader reads a clone behind the head as no PR of its own.
+// Whether a worktree's PR is finished, read through the worktree's own HEAD: rm's freed reading, or, for a checker's clone of that PR n, HEAD at or behind the PR's own merged head, as safe-delete's atMergedHead reads it, since rm's reader reads a clone behind the head as no PR of its own, and any other checkout from an older canary sits behind some merged head.
 export async function finishedAt(
   path: string,
   pr: string | undefined,
-  rm: Pick<RmDeps, "mergedHead" | "prState">,
+  rm: Pick<RmDeps, "main" | "mergedHead" | "prState">,
 ): Promise<boolean> {
   if (finishedOf(await rm.prState(path, pr))) return true
-  const merged = pr ? rm.mergedHead(path, pr) : null
+  const n = pr ? await ownPr(pr, rm.main) : undefined
+  const clone =
+    !!n &&
+    Object.values(CLONES)
+      .flat()
+      .some((leaf) => path === join(rm.main, ".claude", "worktrees", leaf.replace("<n>", n)))
+  const merged = clone && pr ? rm.mergedHead(path, pr) : null
   return !!merged && (await git(path, ["merge-base", "--is-ancestor", "HEAD", merged])) !== null
 }
 
