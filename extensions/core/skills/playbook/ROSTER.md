@@ -9,7 +9,7 @@ The dispatcher or the lead that starts a session, dispatches to it, hears its re
 `scripts/spawn.sh` writes what it knows as it starts a session, whoever runs it: its `kind`, a worker's or checker's `title`, a checker's `worker=` and, for an entry that holds neither a task nor a pr, a `task`: its brief's file name, else its role and name (`probe probe-api`).
 spawn.sh writes a checker start's `--pr <url>` ([SPAWN.md](SPAWN.md#modes)), the PR it serves now, to the row before the pane opens.
 On an ended or done row it sets the row back to starting with `prs` of that PR alone and `pr` of the first pull request named, since auto-end reads the PRs an ended row still lists as done.
-On a live row, or none, `--pr` joins `prs` and gives a row with no `pr` the first pull request named.
+On any other row, a parked one included, or none, `--pr` joins `prs` and gives a row with no `pr` the first pull request named.
 A new probe's `title` defaults to `Probe: <name>` and a new runner's to its own name while its entry holds none, so neither row reads its first ask.
 Each lead's sweep ends its own down agents, and Ops keeps the rest of the file in order.
 
