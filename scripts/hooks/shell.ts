@@ -1151,13 +1151,14 @@ const SHELL_OWN = new Set([
   "unalias",
   "unset",
 ])
-// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+// Homebrew's g-named copies of the wrappers (coreutils', and findutils' gxargs), each run with its plain name's options
 const G_WRAPPERS = new Map([
   ["genv", "env"],
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
   ["gtimeout", "timeout"],
+  ["gxargs", "xargs"],
 ])
 // A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
 export const program = (value: string): string => {

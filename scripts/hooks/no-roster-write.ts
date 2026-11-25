@@ -10,6 +10,7 @@ import {
   knownVariables,
   lex,
   marked,
+  outputOf,
   places,
   program,
   run,
@@ -18,6 +19,7 @@ import {
   type Visit,
   visible,
   type Word,
+  type Xargs,
 } from "./shell"
 
 type Environment = Record<string, string | undefined>
@@ -163,8 +165,10 @@ const FINDS = new Set(["find"])
 const FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
 // find's actions that write the file named after them, wherever the search starts
 const FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"])
-// find's operators that let a path a -name test misses through
-const FIND_OR = new Set(["!", "-not", "-o", "-or"])
+// find's operators that let a path a -name test misses through, GNU's and bfs's , among them
+const FIND_OR = new Set(["!", ",", "-not", "-o", "-or"])
+// find's option words before its start points: BSD's flags, GNU's -O level and -D list attached
+const FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/
 
 // The programs this hook reads by name; a g before one (gmv, gtee) is GNU's copy of it, read as the plain program.
 const KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS])
@@ -224,38 +228,114 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     // GNU coreutils, find and sed under their g-prefixed names (gmv, gtee, gfind, gsed) run as the plain ones
     return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog
   }
-  // Whether a find's search may reach the roster: a start point (the folder the shell is in by default) is or holds it, and its -name and -iname tests do not all miss roster.json with no !, -not or -or to let a miss through.
-  const reaches = (args: Word[], at: Env): boolean => {
-    const opts = args.findIndex((a) => !/^-[HLP]+$/.test(a.value))
-    const rest = opts < 0 ? [] : args.slice(opts)
-    const end = rest.findIndex((a) => /^[-(!]/.test(a.value))
-    const starts = end < 0 ? rest : rest.slice(0, end)
-    const holds = (starts.length ? starts : [{ quoted: false, value: "." } as Word]).some((w) => {
-      const paths = pathsOf(w, at)
-      if (!paths) return true
-      return paths.some(({ path }) => {
-        const dir = path.toLowerCase().replace(/\/*$/, "/")
-        return targets.some((t) => t === path.toLowerCase() || t.startsWith(dir))
-      })
+  // Whether a path, a glob's pattern when glob is set, is the roster or a folder holding it.
+  const holds = (path: string, glob: boolean) =>
+    targets.some((target) => {
+      const p = segments(path)
+      const t = segments(target)
+      if (glob && p.some((s) => s.includes("**"))) return true
+      return (
+        p.length <= t.length &&
+        p.every((s, i) => (glob ? new Bun.Glob(s).match(t[i]!) : s === t[i]))
+      )
     })
-    if (!holds) return false
+  const holdsWord = (word: Word, at: Env) =>
+    pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false
+  const lexed = lex(command, env.known)
+  // Whether the call reaches toward the roster: it names it, or a word of it is the roster or a folder holding it.
+  const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)))
+  // Whether output the hook cannot see may list the roster: the call reaches toward it, or the shell's folder holds it.
+  const unseenHolds = (at: Env) => near || places(at).some(({ cwd }) => !!cwd && holds(cwd, false))
+  // A find's start points past its leading options (BSD's -f names one), else the shell's folder.
+  const startsOf = (args: Word[]): Word[] => {
+    const starts: Word[] = []
+    let i = 0
+    for (; i < args.length; i++) {
+      const v = args[i]!.value
+      if (v === "--") {
+        i++
+        break
+      }
+      if (v === "-D" || v === "-f") {
+        if (v === "-f" && args[i + 1]) starts.push(args[i + 1]!)
+        i++
+      } else if (!FIND_FLAGS.test(v)) break
+    }
+    for (; i < args.length && !/^[-(!,]/.test(args[i]!.value); i++) starts.push(args[i]!)
+    return starts.length ? starts : [{ quoted: false, value: "." }]
+  }
+  // Whether a find's search may reach the roster: a start point is or holds it, or cannot be read, and its -name and -iname tests do not all miss roster.json with none of FIND_OR's operators to let a miss through; a pattern it cannot read, or one with a backslash escape, may match.
+  const reaches = (args: Word[], at: Env): boolean => {
+    const start = startsOf(args).some((w) => {
+      const paths = pathsOf(w, at)
+      return !paths || paths.some(({ glob, path }) => holds(path, glob))
+    })
+    if (!start) return false
     const names = args.flatMap((a, i) =>
       (a.value === "-name" || a.value === "-iname") && args[i + 1]
-        ? [{ insensitive: a.value === "-iname", pattern: args[i + 1]!.value }]
+        ? [{ insensitive: a.value === "-iname", word: args[i + 1]! }]
         : [],
     )
     if (!names.length || args.some((a) => FIND_OR.has(a.value))) return true
-    return names.some(({ insensitive, pattern }) =>
-      new Bun.Glob(insensitive ? pattern.toLowerCase() : pattern).match("roster.json"),
-    )
+    return names.some(({ insensitive, word }) => {
+      const read = readOf(word, at)
+      if (!read || read.value.includes("\\")) return true
+      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match("roster.json")
+    })
   }
-  // Whether the input an xargs reads may be the roster: text naming it, a find whose search may reach it, or input the hook cannot see in a call that names it.
-  const fedRoster = async (cmd: Command, at: Env): Promise<boolean> => {
-    const feed = cmd.stdin
-    if (feed && FINDS.has(toolOf(feed.words[0]?.value ?? "")) && reaches(feed.words.slice(1), at))
-      return true
+  const isFind = (cmd: Command | undefined) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""))
+  // Fed text as the words it hands on: split at its delimiters, else at lines for an -I string, else at blanks.
+  const itemsOf = (text: string, xargs?: NonNullable<Xargs>): Word[] => {
+    const at = xargs?.delimiters?.length
+      ? new RegExp(xargs.delimiters.map((d) => d!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"))
+      : xargs?.replace
+        ? /\n/
+        : /\s+/
+    return text
+      .split(at)
+      .map((v) => (xargs?.replace ? v.trim() : v.replace(/["']/g, "")))
+      .filter(Boolean)
+      .slice(0, 100)
+      .map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }))
+  }
+  // Whether a command's output may list the roster: a find that reaches it, text holding it as a path, or output the hook cannot see where unseenHolds.
+  const listsRoster = async (
+    cmd: Command,
+    args: Word[],
+    tool: string,
+    at: Env,
+    unseen: boolean,
+  ) => {
+    if (FINDS.has(tool)) return reaches(args, at)
+    const out = await outputOf(cmd, at)
+    if (marked(out.value)) return unseen && unseenHolds(at)
+    return namesRoster(out.value, targets) || itemsOf(out.value).some((w) => writes(w, at))
+  }
+  // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see where unseenHolds.
+  const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
+    const mark = xargs.replace
+    const put = (items: Word[]): Word[][] =>
+      mark
+        ? items.map((item) =>
+            args.map((a) =>
+              a.value.includes(mark)
+                ? {
+                    ...a,
+                    glob: a.glob || item.glob,
+                    raw: undefined,
+                    source: undefined,
+                    value: a.value.replaceAll(mark, item.value),
+                  }
+                : a,
+            ),
+          )
+        : [[...args, ...items]]
+    if (isFind(cmd.stdin)) return reaches(cmd.stdin!.words.slice(1), at) ? put([roster]) : []
     const input = await stdinOf(cmd, at)
-    return marked(input.value) ? named : namesRoster(input.value, targets)
+    if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
+      return unseenHolds(at) ? put([roster]) : []
+    const items = itemsOf(input.value, xargs)
+    return items.length ? put(items) : []
   }
   const visit: Visit = async (cmd, parsed, at) => {
     const { args, name, xargs } = parsed
@@ -264,34 +344,42 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         return refuse(`a redirect onto ${shown(r.target)}`)
     if (!program(name)) return
     const tool = toolOf(name)
+    // a program a pipe feeds as code (`| xargs sh -c 'rm "$0"'`) runs on this one's output, read past the script's own words; unseen output counts only when xargs hands it on
+    if (cmd.feedsShell) {
+      const xargsFed = lexed.commands.some(
+        (c) => c.stdin === cmd && program(c.words[0]?.value ?? "") === "xargs",
+      )
+      if (await listsRoster(cmd, args, tool, at, xargsFed))
+        return refuse(`${tool} feeding the roster to a program that runs it as code`)
+    }
     // a program xargs runs takes its input as words: its -I string's place, else after its own words
-    if (xargs && (await fedRoster(cmd, at))) {
-      const mark = xargs.replace
-      const fed = mark ? args.map((a) => (a.value.includes(mark) ? roster : a)) : [...args, roster]
-      return visit(cmd, { ...parsed, args: fed, xargs: undefined }, at)
+    if (xargs) {
+      const runs = await xargsRuns(cmd, args, xargs, at)
+      for (const fed of runs) {
+        const found = await visit(cmd, { ...parsed, args: fed, xargs: undefined }, at)
+        if (found) return found
+      }
+      if (runs.length) return
     }
     if (FINDS.has(tool)) {
       for (const [i, a] of args.entries())
         if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1]!, at, true))
           return refuse(`${tool} ${a.value} onto ${shown(args[i + 1]!)}`)
-      if (!reaches(args, at)) return
-      if (args.some((a) => a.value === "-delete"))
+      const reached = reaches(args, at)
+      if (reached && args.some((a) => a.value === "-delete"))
         return refuse(`${tool} -delete reaching the roster`)
+      // each command find runs is read as a line of its own, an sh -c script included, with {} as the roster where the search may reach it
       for (const [i, a] of args.entries()) {
         if (!FIND_EXECS.has(a.value) || !args[i + 1]) continue
         const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"))
-        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end)
-        const found = await visit(
-          cmd,
-          {
-            ...parsed,
-            args: rest.map((w) => (w.value.includes("{}") ? roster : w)),
-            first,
-            name: first!.value,
-            xargs: undefined,
-          },
-          at,
-        )
+        const line = args
+          .slice(i + 1, end < 0 ? undefined : end)
+          .map((w) => {
+            const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`
+            return reached ? typed.replaceAll("{}", roster.value) : typed
+          })
+          .join(" ")
+        const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true)
         if (found) return found
       }
       return
@@ -327,7 +415,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     for (const word of args)
       if (writes(word, at, writer)) return refuse(`${tool} on ${shown(word)}`)
   }
-  return run(lex(command, env.known), env, visit, true)
+  return run(lexed, env, visit, true)
 }
 
 const FILE_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"])
