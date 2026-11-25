@@ -5,6 +5,7 @@ import {
   aliasFailure,
   extraWordRefusal,
   HELP,
+  parseEtime,
   planStart,
   rollOutcome,
   rollTimedOut,
@@ -652,7 +653,8 @@ describe("rollOutcome", () => {
         phase: "waiting",
         why: "prebuild build still queued after 1200s; it keeps waiting",
       })
-      expect(rollTimedOut(rollOutcome(log, []), 18).ok).toBe(true)
+      // #2658 item 1: a still-queued prebuild line reads waiting only while the step is still queued (cli passes prebuildQueued(), here true)
+      expect(rollTimedOut(rollOutcome(log, []), 18, true).ok).toBe(true)
     })
 
     test("still waiting at 30 minutes reads as waiting and passes, never Failed, since the roll goes on by itself", () => {
@@ -702,6 +704,72 @@ describe("rollOutcome", () => {
           ["2026-11-17T12:40:00Z ROLL roll-now abc1234 FAIL build before the stop: tsc failed"],
         ),
       ).toEqual({ done: "Failed: build before the stop: tsc failed", ok: false })
+    })
+
+    // #2658 item 1: a still-queued why waits only while its step is still queued, else the failure
+    test("a still-queued why waits only while stepQueued agrees the step is queued", () => {
+      const waiting = {
+        phase: "waiting" as const,
+        why: "prebuild build still queued after 1200s; it keeps waiting",
+      }
+      expect(rollTimedOut(waiting, 18, false).ok).toBe(false)
+      expect(rollTimedOut(waiting, 18, true).ok).toBe(true)
+    })
+
+    // #2658 item 2: a start line before the pid file's mtime still reads queued, a pid started after it reads not queued
+    test("a pid that started after the pid file's mtime reads not queued", () => {
+      const fileMtime = Date.parse("2026-11-17T12:15:30Z")
+      const live = (pid: number) => pid === 4242
+      const runs = [
+        "2026-11-17T12:10:00Z ask ops-dashboard 4242 bun run build",
+        "2026-11-17T12:14:30Z start worker-a 4242 run-slot waited=3s",
+      ]
+      expect(stepQueued("4242", live, runs, fileMtime, Date.parse("2026-11-17T12:14:00Z"))).toBe(
+        true,
+      )
+      expect(stepQueued("4242", live, [], fileMtime, Date.parse("2026-11-17T12:16:00Z"))).toBe(
+        false,
+      )
+    })
+
+    // #2658 item 2: the elapsed, as macOS and Linux print
+    test("parses a pid's elapsed to seconds", () => {
+      expect(parseEtime("05:07")).toBe(307)
+      expect(parseEtime("01:05:07")).toBe(3907)
+      expect(parseEtime("2-01:05:07")).toBe(176707)
+    })
+
+    // #2658 item 2: a sandbox that refuses ps prints no elapsed, so its start is unknown and only the start lines decide
+    test("an elapsed that does not parse skips the reuse guard, so a queued pid still reads queued", () => {
+      expect(parseEtime("")).toBeNaN()
+      expect(parseEtime("ps: refused")).toBeNaN()
+      const fileMtime = Date.parse("2026-11-17T12:15:30Z")
+      const live = (pid: number) => pid === 4242
+      const pidStart = Date.now() - parseEtime("") * 1000
+      expect(stepQueued("4242", live, [], fileMtime, pidStart)).toBe(true)
+    })
+
+    // #2658 item 2: the pid's elapsed reads up to a second late, so a live pid whose start clears the file by under 2 s still reads queued
+    test("a pid whose computed start clears the file by under 2 s still reads queued", () => {
+      const fileMtime = Date.parse("2026-11-17T12:15:30Z")
+      const live = (pid: number) => pid === 4242
+      expect(stepQueued("4242", live, [], fileMtime, fileMtime + 900)).toBe(true)
+      expect(stepQueued("4242", live, [], fileMtime, fileMtime + 2001)).toBe(false)
+    })
+
+    // #2658 item 2: run-slot can log start before the echo writes the file, so a start line 1 s before the file's mtime counts as started, reading not queued
+    test("a start line 1 s before the file's mtime counts as started, reading not queued", () => {
+      const fileMtime = Date.parse("2026-11-17T12:15:30Z")
+      const live = (pid: number) => pid === 4242
+      expect(
+        stepQueued(
+          "4242",
+          live,
+          ["2026-11-17T12:15:29Z start worker-a 4242 run-slot waited=0s"],
+          fileMtime,
+          0,
+        ),
+      ).toBe(false)
     })
   })
 })
