@@ -1800,8 +1800,8 @@ prio_first() {
 # true while the priority holder has a ticket whose waiter still runs
 prio_waiting() { [ -n "$(prio_first)" ]; }
 
-# removes slot folder $1 in one mv out of the slot path, so a reclaimer's claim that lands in it beforehand leaves with it and one that comes after finds no folder or a new taker's (issue 3039), then the folder and any claim in it there
-drop() { mv "$1" "$1.gone-$" 2>/dev/null && rmdir "$1.gone-$/reclaim" "$1.gone-$" 2>/dev/null; }
+# gives slot folder $1 back: one mv out of the slot path to a name of this run's own, then an rmdir there of the folder and any claim in it, so a reclaimer's claim that lands before the mv leaves with the folder and one after finds no folder or a new taker's (issue 3039)
+drop() { mv "$1" "$1.gone-$$" 2>/dev/null && rmdir "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null; }
 free() {
   # give the slot back only while its holder line is still ours; giveBackSlot (packages/scripts/src/playground/give-back.ts) removes the same files, so a file added here goes there too
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
@@ -1962,7 +1962,7 @@ reclaim() {
   dir=$(stamp "$1")
   # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
   stale "$1" "$line" || return 0
-  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and every free of a slot is an rmdir, so the folder holding it stays at $1 until this reclaimer moves it (issue 3039)
+  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and a folder holding it leaves $1 only by a drop, which a run makes of its own live folder or a reclaimer under its claim, so the stale folder stays at $1 until this reclaimer moves it (issue 3039)
   # a claim left by a reclaimer killed holding it goes once it is 2 hours old, and a folder whose holder line that reclaimer had removed then ages 2 hours more, since the claim's removal moved its mtime
   mkdir "$1/reclaim" 2>/dev/null || { stale "$1/reclaim" "" && rmdir "$1/reclaim" 2>/dev/null; return 0; }
   # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free's drop takes a claim left there with the folder
