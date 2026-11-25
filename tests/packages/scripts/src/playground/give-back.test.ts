@@ -17,3 +17,13 @@ test("a lane holding a reclaimer's claim is given back whole", () => {
   expect(existsSync(slot)).toBe(false)
   expect(existsSync(`${slot}.holder`)).toBe(false)
 })
+
+// #3052: a claim taken over inside a stale one goes with the folder too, as run-slot's drop() removes it
+test("a lane holding a claim inside a claim is given back whole", () => {
+  const slot = join(root, "run-slot-2")
+  mkdirSync(join(slot, "reclaim", "reclaim"), { recursive: true })
+  writeFileSync(`${slot}.holder`, "worker-a 4242 2026-11-25T06:00:00Z 1 small\n")
+  expect(giveBackSlot(`${slot} 4242`)).toBe(true)
+  expect(existsSync(slot)).toBe(false)
+  expect(existsSync(`${slot}.gone-${process.pid}`)).toBe(false)
+})

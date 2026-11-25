@@ -81,8 +81,8 @@ The reviewer leaves every other check on the head, `GitGuardian` on `factory.rep
   and a red run whose report names no file runs the whole list once more and says so.
   The check runs exactly the touched tests, whose repo scanners put about 155 files in every list, a one-line docs change's included (measured: 38,004 tests, 167 s of tests, 18 minutes' wall time mostly spent queueing for a slot).
   On an outside author's PR it runs `--conflict-only`, merge-tree alone, since the reviewer never runs that PR's code, and no-outside-pr-code refuses the check without it in read mode.
-  When canary changed `bun.lock` or a `package.json`, the check runs no test, since the clone's install is the head's, so a canary-only red there waits for the last 5/5's merge.
-  A clone whose head changed `bun.lock` or a `package.json` since its last install runs that install again before the check, so a dependency a canary merge brought in is there when the tests run.
+  When canary changed `bun.lock`, a `package.json` or a `pnpm-lock.yaml`, the check runs no test, since the clone's install is the head's, so a canary-only red there waits for the last 5/5's merge.
+  A clone whose head changed `bun.lock`, a `package.json` or a `pnpm-lock.yaml` since its last install runs that install again before the check, so a dependency a canary merge brought in is there when the tests run.
 - `state.ts merge` runs the touched tests in chunks of 200 files or fewer; a chunk the sandbox's deadline cuts prints `TIMEOUT`, naming the chunk and the files it left unreported, and reads those files as neither red nor clean, while a failed case its report names still reads red.
 - A clone with no `test:file` script runs its touched tests with pytest from its own `.venv` when it holds a `pyproject.toml`, and a clone with neither prints `NO-RUNNER` and runs none.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
