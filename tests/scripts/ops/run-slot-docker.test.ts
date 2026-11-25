@@ -937,16 +937,17 @@ PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; [ -n "$f" ] && : > ${shi
         run,
       }
     }
-    // whether worker-a's holder line stands within 10 s, its take after its reclaim; the polls are 0.2 s apart
-    const aHolds = async () => {
+    // whether a holder line of one of `who` stands within 10 s, its take after the reclaim; the polls are 0.2 s apart
+    const holds = async (...who: string[]) => {
       for (let i = 0; i < 500; i++) {
-        if (existsSync(holder) && readFileSync(holder, "utf8").startsWith("worker-a ")) return true
+        const line = existsSync(holder) ? readFileSync(holder, "utf8") : ""
+        if (who.some((name) => line.startsWith(`${name} `))) return true
         await Bun.sleep(20)
       }
       return false
     }
     const release = () => rmSync(hold, { force: true })
-    return { aHolds, holder, m, reclaimer, release, slot }
+    return { holder, holds, m, reclaimer, release, slot }
   }
 
   test("leave the taker between them its slot", async () => {
@@ -955,7 +956,7 @@ PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; [ -n "$f" ] && : > ${shi
     const b = r.reclaimer("worker-b", [1])
     await b.at(1)
     const a = r.reclaimer("worker-a", [], true)
-    expect(await r.aHolds()).toBe(true)
+    expect(await r.holds("worker-a")).toBe(true)
     b.go(1)
     await b.done(2)
     expect(existsSync(r.slot)).toBe(true)
@@ -971,7 +972,7 @@ PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; [ -n "$f" ] && : > ${shi
     const b = r.reclaimer("worker-b", [1, 2])
     await b.at(1)
     const a = r.reclaimer("worker-a", [], true)
-    expect(await r.aHolds()).toBe(true)
+    expect(await r.holds("worker-a")).toBe(true)
     b.go(1)
     await b.at(2)
     expect(existsSync(join(r.slot, "reclaim"))).toBe(true)
@@ -997,7 +998,8 @@ PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; [ -n "$f" ] && : > ${shi
     a.go("folder")
     await a.done("folder")
     b.go(2)
-    expect(await r.aHolds()).toBe(true)
+    // either run may take the freed slot first, as both poll it
+    expect(await r.holds("worker-a", "worker-b")).toBe(true)
     r.release()
     expect(await a.run.ran()).toBe(true)
     expect(await b.run.ran()).toBe(true)
