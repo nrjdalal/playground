@@ -371,6 +371,7 @@ export async function factsOf(
     removed,
     state: view.state,
     title: view.title,
+    trainRuns: mergeOnReadyRuns(),
     unfound,
   }
 }

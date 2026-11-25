@@ -373,12 +373,15 @@ export const GATE_CODE = [
   "packages/scripts/src/pr-merge",
 ]
 
-// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
-export function codeGate(differs: string[], _way: { n: number; trainRuns: boolean }): Gate {
+// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included; its ✗ names merge-on-ready only where it runs (way.trainRuns), else the commands for pr:merge from a detached worktree on origin/canary.
+export function codeGate(differs: string[], way: { n: number; trainRuns: boolean }): Gate {
+  const on = way.trainRuns
+    ? `run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`
+    : `run pr:merge from a detached worktree on origin/${BASE}: git fetch origin ${BASE} && git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/merge-${way.n}" origin/${BASE}, bun install there through run-slot, then bun run pr:merge ${way.n} there`
   return differs.length === 0
     ? { detail: `this checkout's gate code is ${BASE}'s`, name: "code", ok: true }
     : {
-        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`,
+        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); ${on}`,
         name: "code",
         ok: false,
       }

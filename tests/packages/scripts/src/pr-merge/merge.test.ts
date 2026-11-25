@@ -378,7 +378,7 @@ describe("prMerge", () => {
     expect(outcome.kind).toBe("refused")
     expect(outcome.gates.filter((gate) => !gate.ok)).toEqual([
       {
-        detail: `this checkout's gate code differs from origin/canary's (${differs.join(", ")}); run pr:merge from a checkout on origin/canary, or let merge-on-ready land it`,
+        detail: codeGate(differs, { n: 112, trainRuns: false }).detail,
         name: "code",
         ok: false,
       },
