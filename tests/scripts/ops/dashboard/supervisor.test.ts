@@ -1549,7 +1549,7 @@ roll_to ${c2} canary; echo "$running"`,
   })
 })
 
-// bash's setpgid note is a race, so set -x's trace stands in for it: a background child traces its start to the stderr it forked with, before its own redirections, where bash prints the note
+// bash's setpgid note is a race, so set -x's trace stands in for it: the poll's sleep traces its start to the stderr it forked with, before its own redirections, where bash prints the note, and the shell traces the run-slot start's `p=$!` to its stderr of that moment, /dev/null while the start holds it off the log
 describe("the supervisor's background starts keep bash's setpgid note out of supervisor.log (#3059)", () => {
   test("a prebuild step started while the shell's stderr is supervisor.log forks with that stderr on /dev/null, and its own stderr still reaches the log", async () => {
     const dir = join(scratch, "setpgid")
@@ -1569,6 +1569,7 @@ describe("the supervisor's background starts keep bash's setpgid note out of sup
     const text = readFileSync(log, "utf8")
     expect(text).toContain("the made-up child's own stderr\n")
     expect(text.match(/^\++ sleep .*$/gm)).toBeNull()
+    expect(text.match(/^\++ p=.*$/gm)).toBeNull()
     const [pid, pgid] = readFileSync(join(dir, "group"), "utf8").trim().split(/\s+/)
     expect(pgid).toBe(pid)
   })
