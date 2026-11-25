@@ -5559,7 +5559,6 @@ var FREES = new Set([`
 `, ";", ";;", "&", "||"]);
 var tokens = 0;
 var freshToken = () => ++tokens;
-var GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"]);
 var BODIES = new Set(["do", "elif", "else", "then"]);
 var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
@@ -6365,7 +6364,8 @@ var G_WRAPPERS = new Map([
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
-  ["gtimeout", "timeout"]
+  ["gtimeout", "timeout"],
+  ["gxargs", "xargs"]
 ]);
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
@@ -6599,14 +6599,13 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
         fedOpens.push(fedOpens.at(-1));
       }
-      const lead = done.words.findIndex((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
-      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
-        if (w.value !== "{")
-          continue;
+      for (const w of done.words) {
+        if (w.value !== "{" || w.quoted)
+          break;
         opens.push(lx.commands.length);
         fedOpens.push(done.stdin ?? done.braceFed);
       }
-      const called = lead < 0 ? undefined : done.words[lead];
+      const called = done.words.find((w) => w.value !== "{" || w.quoted);
       if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
         fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);

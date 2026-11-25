@@ -1549,6 +1549,32 @@ roll_to ${c2} canary; echo "$running"`,
   })
 })
 
+// bash's setpgid note is a race, so set -x's trace stands in for it: the poll's sleep traces its start to the stderr it forked with, before its own redirections, where bash prints the note, and the shell traces the run-slot start's `p=$!` to its stderr of that moment, /dev/null while the start holds it off the log
+describe("the supervisor's background starts keep bash's setpgid note out of supervisor.log (#3059)", () => {
+  test("a prebuild step started while the shell's stderr is supervisor.log forks with that stderr on /dev/null, and its own stderr still reaches the log", async () => {
+    const dir = join(scratch, "setpgid")
+    mkdirSync(dir, { recursive: true })
+    const log = join(dir, "supervisor.log")
+    await Bun.write(
+      join(dir, "run-slot.sh"),
+      `#!/bin/bash\necho "the made-up child's own stderr" >&2\necho "$$ $(ps -o pgid= -p $$)" > ${dir}/group\nsleep 0.5\n`,
+    )
+    chmodSync(join(dir, "run-slot.sh"), 0o755)
+    const proc = Bun.spawn([
+      "bash",
+      "-c",
+      `set -m\nS=${dir} RUNS=${dir}/runs.log RS=${dir}/run-slot.sh LOG=${log} PREBUILD_SLOW=1200 PREBUILD_POLL=0.1\nsay() { echo "say $*" >> "$LOG"; }; alive() { :; }\n${block("slot_step")}\n{ set -x; slot_step clone . made-up; set +x; } >> "$LOG" 2>&1`,
+    ])
+    expect(await proc.exited).toBe(0)
+    const text = readFileSync(log, "utf8")
+    expect(text).toContain("the made-up child's own stderr\n")
+    expect(text.match(/^\++ sleep .*$/gm)).toBeNull()
+    expect(text.match(/^\++ p=.*$/gm)).toBeNull()
+    const [pid, pgid] = readFileSync(join(dir, "group"), "utf8").trim().split(/\s+/)
+    expect(pgid).toBe(pid)
+  })
+})
+
 // A roll with no migration swaps the web with no gap: the target's web starts beside the serving one from the kept build, the route moves to it, and the old one stops before the API restarts alone
 describe("the supervisor's web swap (#122)", () => {
   const WEBS = /^(build|web|route|stop|serve)/
