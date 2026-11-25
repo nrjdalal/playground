@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs"
 import { join } from "node:path"
 
 import { KINDS } from "../../packages/settings/src/settings"
@@ -420,6 +420,47 @@ describe("under the gates it spawns", () => {
       expect(r.roster?.filter((arg) => arg.startsWith("status="))).toEqual(want)
     },
   )
+
+  // A row parked while its start waited on a gate read parked after the session ran, so the sweep read a working session as parked (#3051); leaving parked drops the hold in roster.ts.
+  test.each([
+    ["parked", ["status=starting"]],
+    ["ended", ["status=starting"]],
+    ["done", ["status=starting"]],
+    ["working", []],
+  ] as [string, string[]][])("a worker's start on a %s row writes %p", async (status, want) => {
+    const hold = status === "parked" ? { hold: "#12" } : {}
+    const r = await spawn(["worker", "worker-brave-otter", "b.md", "--title", "T"], [], {
+      ROSTER_JSON: JSON.stringify({ agents: [{ name: "worker-brave-otter", status, ...hold }] }),
+    })
+    expect(r.code).toBe(0)
+    expect(r.roster?.filter((arg) => arg.startsWith("status="))).toEqual(want)
+  })
+
+  test("a worker's start on a parked row leaves it starting with no hold, through roster.ts (#3051)", async () => {
+    const r = await spawn(["worker", "worker-brave-otter", "b.md", "--title", "T"], [], {
+      FAKE_ROSTER_REAL: "1",
+      ROSTER_JSON: JSON.stringify({
+        agents: [
+          { hold: "#12", name: "worker-brave-otter", role: "worker", status: "parked", task: "t" },
+        ],
+      }),
+    })
+    expect(r.code).toBe(0)
+    const { agents } = JSON.parse(readFileSync(join(r.home, ".playground", "roster.json"), "utf8"))
+    const row = agents.find((a: { name: string }) => a.name === "worker-brave-otter")
+    expect(row.status).toBe("starting")
+    expect(row).not.toHaveProperty("hold")
+  })
+
+  test("a resume of a parked row writes status=starting, so the sweep reads it live (#3051)", async () => {
+    const r = await spawn(["resume", OLD.planner, root, "--backend", "claude"], [], {
+      ROSTER_JSON: JSON.stringify({
+        agents: [{ hold: "#12", name: OLD.planner, status: "parked" }],
+      }),
+    })
+    expect(r.code).toBe(0)
+    expect(r.roster?.filter((arg) => arg.startsWith("status="))).toEqual(["status=starting"])
+  })
 
   test("a resume by session id, as up.py --sessions prints it", async () => {
     const id = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
