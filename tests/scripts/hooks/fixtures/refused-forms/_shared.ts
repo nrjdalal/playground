@@ -20,6 +20,7 @@ export type Guard =
   | "no-raw-delete"
   | "no-raw-spawn"
   | "no-release-comment"
+  | "no-roster-write"
   | "no-stash"
   | "no-unslotted-run"
 

@@ -145,7 +145,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
   the rest are `after-compact`, `after-resume`, `guards`, `no-chat-question`, `no-desktop-owner-app`, `no-env-dump`, `no-extension-repo-write`, `no-extensions-write`, `no-false-green`, `no-glm-heavy-path`, `no-headless-login`,
-  `no-hidden-program`, `no-kill-by-name`, `no-live-sign-in`, `no-mac-web-build`, `no-main-checkout`, `no-off-palette-label`, `no-ours-merge`, `no-outside-pr-code`, `no-prompt-stop`, `no-protected-push`, `no-public-leak`, `no-raw-delete`, `no-raw-vercel`, `no-raw-wa`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
+  `no-hidden-program`, `no-kill-by-name`, `no-live-sign-in`, `no-mac-web-build`, `no-main-checkout`, `no-off-palette-label`, `no-ours-merge`, `no-outside-pr-code`, `no-prompt-stop`, `no-protected-push`, `no-public-leak`, `no-raw-delete`, `no-raw-vercel`, `no-raw-wa`, `no-roster-write`, `no-stash`, `no-unslotted-run`, `rules`, `session-state` and `writing-first`.
 
 ### The factory
 

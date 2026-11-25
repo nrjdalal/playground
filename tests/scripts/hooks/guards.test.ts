@@ -38,16 +38,18 @@ const BASH_GUARDS = [
   "no-raw-vercel",
   "no-raw-wa",
   "no-release-comment",
+  "no-roster-write",
   "no-stash",
   "no-unslotted-run",
 ]
 
-// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs no-prepare-write and no-protected-push on the MCP tools, and no-hidden-program and no-raw-vercel guard Bash alone.
+// A check module guards.ts runs that has no process of its own, so no main block: no-playground-leak's process runs no-prepare-write and no-protected-push on the MCP tools, no-raw-wa's runs no-roster-write on the file tools, and no-hidden-program and no-raw-vercel guard Bash alone.
 const MODULES = new Set([
   "no-hidden-program",
   "no-prepare-write",
   "no-protected-push",
   "no-raw-vercel",
+  "no-roster-write",
 ])
 const MAIN_GUARDS = BASH_GUARDS.filter((name) => !MODULES.has(name))
 

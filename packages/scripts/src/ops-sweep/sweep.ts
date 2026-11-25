@@ -55,10 +55,6 @@ const PRUNES = [
 ]
 // The usage rule's least span of an account's week readings for a forecast, since each is a whole percent.
 const WEEK_SPAN = 10800
-const WINDOWS = [
-  ["5h", "f5", "r5", 3600, 1200],
-  ["7d", "s7", "r7", 10800, 3600],
-] as const
 
 const here = (ctx: Context) => join(ctx.ops, "sweep")
 const seconds = (ctx: Context) => ctx.now() / 1000
@@ -166,58 +162,95 @@ export async function sshLive(ctx: Context, names: string[]): Promise<string[]> 
   return out
 }
 
-// Records a usage sample, then projects each window to its reset from the recent rate (5h: the last hour, 7d: the last 3 hours).
-export async function forecast(ctx: Context): Promise<Record<string, number>> {
+// A forecast entry, by its label: one account's projected week, or "no forecast yet" beside a 5-hour figure, and, when usage.json logs it, the 5-hour window projected to its reset; else a state string ("no forecast yet", "parked until ...").
+type ForecastEntry = { week: number | "no forecast yet"; fiveHour?: number } | string
+
+// usage.accounts' Claude rows, each by its account key and the label pickable() names it, with the time it is parked until, when set.
+const usageAccounts = async (
+  ctx: Context,
+): Promise<{ account: string; label: string; parkedUntil?: string }[]> => {
+  const policy = await readPolicy(ctx.data)
+  const rows =
+    policy.refusal === undefined
+      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
+      : []
+  return rows.map((row, at) => ({
+    account: accountKey(row).toLowerCase(),
+    label: row.label ?? `account ${at + 1}`,
+    parkedUntil: "parkedUntil" in row ? row.parkedUntil : undefined,
+  }))
+}
+
+// The 5-hour window the account usage.json logs, projected to its reset from the first sample within the last hour sharing its reset, else undefined when the account has no 5-hour window, its readings do not yet span 20 minutes or its reset is under 10 minutes away, so it projects its week alone.
+const fiveHourOf = (account: string | undefined, s: Json, samples: Json[]): number | undefined => {
+  const used = s.f5 as number | undefined
+  const reset = s.r5 as number | undefined
+  // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+  if (typeof used !== "number" || typeof reset !== "number") return undefined
+  const t = s.t as number
+  const first = samples.find(
+    (x) => x.account === account && (x.r5 as number) === reset && (x.t as number) >= t - 3600,
+  )
+  if (!first || typeof first.f5 !== "number") return undefined
+  const span = t - (first.t as number)
+  // a sample set only now has no span to read a rate from
+  if (span < 1200 || reset - t < 600) return undefined
+  const rate = (used - (first.f5 as number)) / span
+  return Math.round((used + rate * (reset - t)) * 10) / 10
+}
+
+// One entry per usage.accounts Claude row, and for usage.json's account when no row lists it, by the label pickable() names it: the account's projected week at its reset from weekOf, plus, for the account usage.json logs, its 5-hour window from the recent rate, or a state string for an account with no figure, or parked in the future.
+export async function forecast(ctx: Context): Promise<Record<string, ForecastEntry>> {
   const samples = join(here(ctx), "usage-samples.jsonl")
-  let s: Json
-  let rows: Json[]
+  const t = Math.floor(seconds(ctx))
+  let login: string | undefined
+  let fiveHour: number | undefined
   try {
-    const rl = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text()).rate_limits
-    s = {
-      // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+    const u = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text())
+    const rl = u.rate_limits
+    login = typeof u.account === "string" ? u.account.toLowerCase() : undefined
+    const s = {
+      account: login,
       f5: rl.five_hour?.used_percentage,
       r5: rl.five_hour?.resets_at,
-      r7: rl.seven_day.resets_at,
-      s7: rl.seven_day.used_percentage,
-      t: Math.floor(seconds(ctx)),
+      t,
     }
     await appendFile(samples, `${JSON.stringify(s)}\n`)
-    rows = (await Bun.file(samples).text())
+    const history = (await Bun.file(samples).text())
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l) as Json)
+    fiveHour = fiveHourOf(login, s, history)
   } catch {
-    return {}
+    // an unreadable usage.json leaves every account its week alone
   }
-  const t = s.t as number
-  const out: Record<string, number> = {}
-  for (const [key, u, r, look, need] of WINDOWS) {
-    const used = s[u]
-    const reset = s[r]
-    // a window with no reset time (Anthropic sends null once a 5-hour window has reset at 0%) has nothing to project to
-    if (typeof used !== "number" || typeof reset !== "number") continue
-    const first = rows.find((x) => x[r] === reset && (x.t as number) >= t - look)
-    if (!first || typeof first[u] !== "number") continue
-    const span = t - (first.t as number)
-    if (span < need || reset - t < 600) continue
-    const rate = (used - first[u]) / span
-    out[key] = Math.round((used + rate * (reset - t)) * 10) / 10
+  const [factory, others] = [
+    await samplesOf(ctx, "week-samples.jsonl"),
+    await samplesOf(ctx, "account-samples.jsonl"),
+  ]
+  const accounts = await usageAccounts(ctx)
+  if (login && !accounts.some((row) => row.account === login))
+    accounts.push({ account: login, label: (await pickable(ctx)).get(login) ?? "unlisted" })
+  const out: Record<string, ForecastEntry> = {}
+  for (const { account: key, label, parkedUntil } of accounts) {
+    if (parkedUntil && Date.parse(parkedUntil) > ctx.now()) {
+      out[label] = `parked until ${parkedUntil}`
+      continue
+    }
+    const week = weekOf(factory, others, key, t)?.week ?? "no forecast yet"
+    const five = key === login ? fiveHour : undefined
+    if (five === undefined) out[label] = typeof week === "number" ? { week } : week
+    else out[label] = { week, fiveHour: five }
   }
   return out
 }
 
 // The accounts login-flip.py's split gives a share of new sessions while it is under 30 minutes old, as spawn.sh reads it, else usage.json's account; each by its usage.accounts label, else `account <n>` by its row, else `unlisted <n>` in the order met, never its address.
 const pickable = async (ctx: Context): Promise<Map<string, string>> => {
-  const policy = await readPolicy(ctx.data)
-  const rows =
-    policy.refusal === undefined
-      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
-      : []
+  const rows = await usageAccounts(ctx)
   let unlisted = 0
-  const labelOf = (account: string) => {
-    const at = rows.findIndex((row) => accountKey(row).toLowerCase() === account)
-    return at === -1 ? `unlisted ${++unlisted}` : (rows[at]!.label ?? `account ${at + 1}`)
-  }
+  const labelOf = (account: string) =>
+    rows.find((row) => row.account === account)?.label ?? `unlisted ${++unlisted}`
   const split = (await readJson<Json>(join(ctx.ops, "usage", "login-flip.json"), {})).split as Json
   const shares =
     typeof split?.at === "number" && seconds(ctx) - split.at < 1800 ? split.shares : null
@@ -830,8 +863,15 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await lateReviewers(ctx, agents, live)))
   found.push(...(await prlessBranches(ctx, agents)))
   found.push(...(await stalledPrs(ctx, agents)))
-  const projected = Object.values(await forecast(ctx))
-  if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
+  const picked = new Set((await pickable(ctx)).values())
+  const figures: number[] = []
+  for (const [label, entry] of Object.entries(await forecast(ctx))) {
+    // only the accounts the split can pick, each by the figures it has, never a parked one
+    if (!picked.has(label) || typeof entry === "string") continue
+    if (typeof entry.week === "number") figures.push(entry.week)
+    if (typeof entry.fiveHour === "number") figures.push(entry.fiveHour)
+  }
+  if (figures.length) found.push(figures.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   try {
     await paceOff(ctx)
   } catch (err) {

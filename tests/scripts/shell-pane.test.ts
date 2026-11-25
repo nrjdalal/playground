@@ -86,6 +86,7 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-public-leak": [`gh pr comment 1 --repo ${REPOS.public[0]} --body "$X"`],
   "no-raw-vercel": ["vercel env pull"],
   "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
+  "no-roster-write": [`touch ${join(dataDir(), "roster.json")}`],
   "no-unslotted-run": ["bun run test"],
 }
 
