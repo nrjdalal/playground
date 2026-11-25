@@ -33,6 +33,7 @@ import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
+import { check as rosterWrite } from "../../../scripts/hooks/no-roster-write"
 import { check as stash } from "../../../scripts/hooks/no-stash"
 import { check as unslottedRun } from "../../../scripts/hooks/no-unslotted-run"
 import {
@@ -273,6 +274,7 @@ const CHECK_NAMES = [
   "rawDelete",
   "rawSpawn",
   "releaseComment",
+  "rosterWrite",
   "stash",
   "unslottedRun",
 ] as const
@@ -294,6 +296,7 @@ const SOURCE: Checks = {
   rawDelete,
   rawSpawn,
   releaseComment,
+  rosterWrite,
   stash,
   unslottedRun,
 }
@@ -315,6 +318,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
+  rosterWrite: "no-roster-write",
   stash: "no-stash",
   unslottedRun: "no-unslotted-run",
 }
@@ -570,6 +574,10 @@ const guardsOf = (
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
     run: (raw) => c.releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
+  },
+  "no-roster-write": {
+    folders: { "process home": [homedir(), homedir()] },
+    run: (raw, home) => c.rosterWrite(raw, { HOME: home }),
   },
   "no-stash": {
     folders: {
