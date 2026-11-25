@@ -25,10 +25,13 @@ import {
   databaseCheck,
   dockerRefusal,
   dropBox,
+  groupLimit,
   gateDrift,
   hostPorts,
   hostTools,
+  INSTALL_LIMIT_S,
   installCheck,
+  installSpawn,
   installEnv,
   leftForYou,
   makeBox,
@@ -42,6 +45,7 @@ import {
   scriptsGroup,
   seedArgv,
   shotAfter,
+  spawnOrFault,
   STEP_COUNT,
   type Step,
   strayStandIns,
@@ -626,6 +630,85 @@ describe("the gate's last line, which ship:merge reads (#1659)", () => {
       join(import.meta.dir, "../../../../../packages/scripts/src/new-user-gate/cli.ts"),
     ).text()
     expect(source.match(/\bawait check\((?!\))/g)?.length).toBe(STEP_COUNT)
+  })
+})
+
+// The install's spawn threw ENOENT from posix_spawn on #2875's first run, which read as 0 of 7 failed checks, a false red on a merge gate (#3049).
+describe("a spawn the gate cannot start (#3049)", () => {
+  const SHA = "a11fb8850c8304a91ab714b2ff46ad89fe7411a7"
+  const dir = mkdtempSync(join(tmpdir(), "gate-spawn-"))
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+
+  test("a program missing from the made-up PATH is a gate environment fault naming it, never a throw", () => {
+    const started = spawnOrFault("pg-gate-no-such-program", dir, () =>
+      Bun.spawn(["pg-gate-no-such-program", "1"], { cwd: dir, env: { PATH: join(dir, "bin") } }),
+    )
+    expect("fault" in started && started.fault).toStartWith(
+      "gate environment fault: could not start pg-gate-no-such-program in ",
+    )
+  })
+
+  // the exact form #2875's run met: Bun's posix_spawn fails once the lookup found the program, as a missing folder makes it (measured on Bun 1.4.4)
+  test("a folder the spawn runs in that is missing is a fault naming the folder, though the program is found", () => {
+    const gone = join(dir, "gone")
+    const started = spawnOrFault("bash", gone, () =>
+      Bun.spawn(["bash", "-c", "true"], { cwd: gone, env: { PATH: "/usr/bin:/bin" } }),
+    )
+    expect("fault" in started && started.fault).toContain(
+      `could not start bash in ${gone}, which is missing`,
+    )
+    expect("fault" in started && started.fault).toContain("posix_spawn")
+  })
+
+  test("a spawn that starts gives its child, which runs", async () => {
+    const started = spawnOrFault("bash", dir, () =>
+      Bun.spawn(["bash", "-c", "exit 3"], { cwd: dir, env: { PATH: "/usr/bin:/bin" } }),
+    )
+    expect("child" in started && (await started.child.exited)).toBe(3)
+  })
+
+  test("a fault's verdict reads INCONCLUSIVE with the fault, not 0 of 7 failed checks", () => {
+    const fault = "gate environment fault: could not start bash in /box/h, which is missing: ENOENT"
+    expect(verdictLine(SHA, [], fault)).toBe(`## NewUserGate · INCONCLUSIVE at a11fb88 · ${fault}`)
+    expect(resultLine(SHA, [])).toBe(`New-user gate at ${SHA}: FAIL`)
+  })
+
+  test("install runs bash alone in a process group of its own, under the gate's limit, so no coreutils timeout is needed", () => {
+    expect(installSpawn()).toEqual({
+      argv: ["bash"],
+      detached: true,
+      limitMs: INSTALL_LIMIT_S * 1000,
+    })
+  })
+
+  // Bun's own spawn timeout signals bash alone, so a hung grandchild kept the pipes open 30 s past a 2 s limit (measured on Bun 1.4.4)
+  test("the limit stops bash's whole group, so a hung grandchild holding the pipes ends at the limit too", async () => {
+    const child = Bun.spawn(["bash"], {
+      cwd: dir,
+      detached: true,
+      env: { PATH: "/usr/bin:/bin" },
+      stderr: "pipe",
+      stdin: new Blob(["sleep 30; echo done\n"]),
+      stdout: "pipe",
+    })
+    const t0 = Date.now()
+    groupLimit(child, 500)
+    const [out, , code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    expect(Date.now() - t0).toBeLessThan(10_000)
+    expect(code).toBe(143)
+    expect(out).toBe("")
+  })
+
+  test("a child that exits before the limit is never signalled", async () => {
+    const sent: number[] = []
+    const child = { exited: Promise.resolve(0), pid: 4242 }
+    groupLimit(child, 20, (pid) => void sent.push(pid))
+    await Bun.sleep(60)
+    expect(sent).toEqual([])
   })
 })
 
