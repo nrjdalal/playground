@@ -25,6 +25,7 @@ On a first run, **Start a local container** on the Database row of **Let's check
   Fix what it names, then click **Start a local container** again.
 - **`<container> publishes port <port> beyond loopback`**: the database was made before it listened on 127.0.0.1 alone, so other devices on your network can reach it, and the Dashboard refuses to write to it.
   On the Database row, click **Move the database onto this Mac alone**; otherwise `playground update` moves it as the Dashboard rolls.
+  Before it moves, it saves a backup of the database in the data folder (`~/.playground`, or the one `PLAYGROUND_DATA_DIR` names) as `pg_dump_<UTC time>.dump`, readable by you alone; when the backup fails, nothing moves, the database keeps running, and the move names why.
   The move keeps its data and leaves the old container stopped as `<container>-old`; once the Dashboard shows your sessions, remove that one with `docker rm -v <container>-old`.
   A failed move starts the old container again as it was and names why.
 - **Postgres in `<container>` did not start in 30 seconds** on the Database row: the container started, but its database did not answer.
