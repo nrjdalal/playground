@@ -82,6 +82,7 @@ The reviewer leaves every other check on the head, `GitGuardian` on `factory.rep
   The check runs exactly the touched tests, whose repo scanners put about 155 files in every list, a one-line docs change's included (measured: 38,004 tests, 167 s of tests, 18 minutes' wall time mostly spent queueing for a slot).
   On an outside author's PR it runs `--conflict-only`, merge-tree alone, since the reviewer never runs that PR's code, and no-outside-pr-code refuses the check without it in read mode.
   When canary changed `bun.lock` or a `package.json`, the check runs no test, since the clone's install is the head's, so a canary-only red there waits for the last 5/5's merge.
+  A clone whose head changed `bun.lock` or a `package.json` since its last install runs that install again before the check, so a dependency a canary merge brought in is there when the tests run.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
   `state.ts touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
   In any repo, a diff that adds a line of text also lists each Python test whose text holds `ls-files`, `os.walk` or `rglob`, a guard such as `tests/test_kill_by_name.py` that names no changed path.
