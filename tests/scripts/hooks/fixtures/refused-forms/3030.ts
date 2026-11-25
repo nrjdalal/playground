@@ -1,8 +1,9 @@
 import type { Group, Row } from "./_shared"
 
-// A function's positional parameters read its call's words as the shell expands them: a brace list into its parts, a quoted read whole and an unquoted one both split on blanks, as bash gives it, and whole, as zsh does, beside the literal text around it, so a write through "$1" into the git hook the shell gives it is judged as the same write at top level; a call word the hook cannot read leaves every parameter from it unread, so a write through one refuses; rows are data, as refused-forms.ts says.
+// A function's positional parameters read its call's words as the shell expands them: a brace list into its parts, a quoted read whole and an unquoted one both split on blanks, as bash gives it, and whole, as zsh does, beside the literal text around it, so a write through "$1" into the git hook the shell gives it is judged as the same write at top level; a call word the hook cannot read, an unquoted read beside a quoted part among them, leaves every parameter from it unread, so a write through one refuses; rows are data, as refused-forms.ts says.
 const HOOK = ".git/hooks/pre-commit"
 const CAT = `f() { cat payload > "$1"; }`
+const CAT2 = `f() { cat payload > "$2"; }`
 
 const calls = (target: string) =>
   [
@@ -53,9 +54,29 @@ const held = (): Row[] => [
     "a cat's output written by a function into its first parameter a substitution gives",
     `${CAT}; f "$(cat name)"`,
   ],
+  [
+    "a cat's output written by a function into its second parameter after a double-quoted blank beside an unquoted variable",
+    `X='y ${HOOK}'; ${CAT2}; f "a b"$X`,
+  ],
+  [
+    "a cat's output written by a function into its second parameter after a single-quoted blank beside an unquoted variable",
+    `X='y ${HOOK}'; ${CAT2}; f 'a b'$X`,
+  ],
+  [
+    "a cat's output written by a function into its third parameter after a quoted variable beside the same unquoted one",
+    `X='b c'; f() { cat payload > "$3"; }; f "$X"$X ${HOOK}`,
+  ],
+  [
+    "a cat's output written by a function into its second parameter after an empty variable before empty quotes",
+    `X=; ${CAT2}; f $X"" ${HOOK}`,
+  ],
+  [
+    "a cat's output written by a function into its second parameter after empty quotes before an empty variable",
+    `X=; ${CAT2}; f ""$X ${HOOK}`,
+  ],
 ]
 
-// Pass controls: the same calls giving the first parameter an ordinary file, a quoted variable, whose whole value with its blank is the first parameter, a folder no hook is in, and a quoted variable with a file after it; a brace list in a folder that holds the data folder reads as a glob there, so its control runs in the process worktree alone.
+// Pass controls: the same calls giving the first parameter an ordinary file, a quoted variable, whose whole value with its blank is the first parameter, a folder no hook is in, a quoted variable with a file after it, an unquoted variable after a letter, and a parameter before a word the hook cannot read; a brace list in a folder that holds the data folder reads as a glob there, so its control runs in the process worktree alone.
 const logs = () =>
   calls("out.log").map(([how, command]): Row => [
     `a cat's output written by a function into the log ${how} gives its first parameter`,
@@ -72,6 +93,14 @@ const controls = (): Row[] => [
   [
     "a cat's output written by a function into the log a quoted variable and the file after it give",
     `X=logs; ${CAT}; f "$X"/out.log`,
+  ],
+  [
+    "a cat's output written by a function into the log an unquoted variable after a letter gives its second parameter",
+    `X='b out.log'; ${CAT2}; f a$X`,
+  ],
+  [
+    "a cat's output written by a function into the log its first parameter gives before a quoted blank beside an unquoted variable",
+    `X='y ${HOOK}'; ${CAT}; f out.log "a b"$X`,
   ],
 ]
 

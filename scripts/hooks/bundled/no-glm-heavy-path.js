@@ -5559,7 +5559,7 @@ var FREES = new Set([`
 `, ";", ";;", "&", "||"]);
 var tokens = 0;
 var freshToken = () => ++tokens;
-var GROUP_LEADS = new Set(["!", "do", "elif", "else", "if", "then", "until", "while"]);
+var GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"]);
 var BODIES = new Set(["do", "elif", "else", "then"]);
 var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
@@ -6599,15 +6599,14 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
         fedOpens.push(fedOpens.at(-1));
       }
-      for (const w of done.words) {
-        if (w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value))
-          break;
+      const lead = done.words.findIndex((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
         if (w.value !== "{")
           continue;
         opens.push(lx.commands.length);
         fedOpens.push(done.stdin ?? done.braceFed);
       }
-      const called = done.words.find((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
+      const called = lead < 0 ? undefined : done.words[lead];
       if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
         fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);

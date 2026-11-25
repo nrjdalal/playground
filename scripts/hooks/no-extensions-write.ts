@@ -1872,21 +1872,27 @@ function functionArgs(commands: Command[], line: string) {
   return out
 }
 const CALL_READINGS = 64
-// Whether a raw word holds a read outside quotes, whose value the shell splits again (`$X/name`, but not `"$X"/name`)
-function unquotedRead(raw: string): boolean {
+// How the shell gives a raw word's reads: "quoted" when each sits in quotes (`"$X"/name`), "split" when one sits outside them, whose value it splits again (`$X/name`), and "mixed" when one does beside a quoted or escaped part, whose blanks and empty text it keeps (`"a b"$X`, `$X""`, `$X\ y`), so the hook cannot split the whole value
+function readSplit(raw: string): "mixed" | "quoted" | "split" {
   let quote = ""
+  let bare = false
+  let held = false
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i]
-    if (c === "\\" && quote !== "'") i++
-    else if (quote) quote = c === quote ? "" : quote
-    else if (c === "'" || c === '"') quote = c
-    else if (c === "$") return true
+    if (c === "\\" && quote !== "'") {
+      held = true
+      i++
+    } else if (quote) quote = c === quote ? "" : quote
+    else if (c === "'" || c === '"') {
+      held = true
+      quote = c
+    } else if (c === "$") bare = true
   }
-  return false
+  return !bare ? "quoted" : held ? "mixed" : "split"
 }
 // A function's positional parameters in one reading, as `known`'s digit keys, and the first one a word the hook cannot read gives (`from`, Infinity when it read every word)
 type Positionals = { args: Record<string, string>; from: number }
-// Each reading of a function call's positional parameters: a literal word as written, and a word holding a read in each value the call's steady variables give it (heldReadings), whole when the read is quoted, and when not both split on blanks, as bash gives it, and whole, as zsh does; it stops at the first word the hook cannot read (an unread value, which every read is on a line that names IFS, since it holds no steady variable, a glob, an unquoted value holding a glob or a brace, which the shell expands again, a brace sequence, or past CALL_READINGS), so every parameter from there is unread and a write through it refuses
+// Each reading of a function call's positional parameters: a literal word as written, and a word holding a read in each value the call's steady variables give it (heldReadings), whole when the read is quoted, and when not both split on blanks, as bash gives it, and whole, as zsh does; it stops at the first word the hook cannot read (an unread value, which every read is on a line that names IFS, since it holds no steady variable, a glob, an unquoted read beside a quoted or escaped part (readSplit), an unquoted value holding a glob or a brace, which the shell expands again, a brace sequence, or past CALL_READINGS), so every parameter from there is unread and a write through it refuses
 function positionals({ cut, words }: FunctionCall, env: Env, steady: Steady): Positionals[] {
   let sets: string[][] = [[]]
   let unread = cut
@@ -1895,8 +1901,9 @@ function positionals({ cut, words }: FunctionCall, env: Env, steady: Steady): Po
       sets = sets.map((set) => [...set, w.value])
       continue
     }
-    const readings = w.glob ? undefined : heldReadings(w, env, steady)
-    const splits = unquotedRead(w.raw ?? "")
+    const shape = readSplit(w.raw ?? "")
+    const readings = w.glob || shape === "mixed" ? undefined : heldReadings(w, env, steady)
+    const splits = shape === "split"
     const ways = (value: string) => {
       const split = value.split(/[ \t\n]+/).filter(Boolean)
       const whole = value ? [value] : []
