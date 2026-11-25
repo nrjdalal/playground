@@ -3758,7 +3758,9 @@ async function judgeBash(command, cwd, environment) {
     if (marked(out.value))
       return unseen && unseenHolds(at);
     const items = itemsOf(out.value);
-    return items.length > ITEMS || namesRoster(out.value, targets) || items.some((w) => writes(w, at));
+    if (items.length > ITEMS)
+      return unseen && unseenHolds(at);
+    return namesRoster(out.value, targets) || items.some((w) => writes(w, at));
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
@@ -3782,7 +3784,7 @@ async function judgeBash(command, cwd, environment) {
       return unseenHolds(at) ? put([unseenRoster]) : [];
     const items = itemsOf(input.value, xargs);
     if (items.length > ITEMS)
-      return put([roster]);
+      return put([unseenRoster]);
     return items.length ? put(items) : [];
   };
   const visit = async (cmd, parsed, at) => {

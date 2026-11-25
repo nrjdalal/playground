@@ -209,6 +209,9 @@ describe("roster.ts and every read run", () => {
     "find ~/.playground/scratch -name '*.png' -exec sh -c 'rm \"$0\"' {} \\;",
     `jq -r '.agents[].name' ${ROSTER} | head -3 | xargs -n1 bun scripts/roster.ts get`,
     `echo ${Array.from({ length: 101 }, (_, i) => `/tmp/x${i}`).join(" ")} | xargs cat`,
+    // past ITEMS fed items, a program that writes no operand still runs, as the differential's touched-test runs do
+    `echo ${Array.from({ length: 101 }, (_, i) => `tests/x${i}.test.ts`).join(" ")} | xargs bun run test:file`,
+    `echo ${Array.from({ length: 101 }, (_, i) => `w${i}`).join(" ")} | python3 -c 'import sys; print(sys.stdin.read())'`,
     // #3040: plain readers and their GNU copies
     `cut -d, -f1 ${ROSTER}`,
     `column -t ${ROSTER}`,
