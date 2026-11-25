@@ -4,17 +4,20 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  alive,
   apiRead,
   apiUp,
   bootTime,
   cutDashboardCheckout,
   dashboardCheckout,
   dashboardUrls,
+  followerRunning,
   graceEnded,
   homeDataDir,
   liveBranch,
   linesSince,
   liveSessions,
+  prebuildQueued,
   upHolds,
   webUp,
 } from "../../../../../packages/scripts/src/playground/probe"
@@ -408,5 +411,38 @@ describe("upHolds", () => {
     const beat = { startedAt: new Date((start - 10) * 1000).toISOString() }
     writeOps(data, { "ops-dashboard": start }, beat)
     expect(withData(data, () => upHolds(start * 1000 + 700_000))).toBe(false)
+  })
+})
+
+describe("alive", () => {
+  // #2658 item 3: the kernel refuses signal 0 to another user's process or one outside Claude Code's sandbox (EPERM), and that process still runs
+  test("a pid the kernel refuses a signal to reads alive", () => {
+    expect(alive(1)).toBe(true)
+  })
+})
+
+describe("a pid reader whose pid file is gone", () => {
+  const withData = (data: string, read: () => boolean): boolean => {
+    const saved = process.env.PLAYGROUND_DATA_DIR
+    try {
+      process.env.PLAYGROUND_DATA_DIR = data
+      return read()
+    } finally {
+      if (saved === undefined) delete process.env.PLAYGROUND_DATA_DIR
+      else process.env.PLAYGROUND_DATA_DIR = saved
+    }
+  }
+
+  // #2658 item 2: a prebuild.pid the supervisor's rm -f has removed reads not queued instead of throwing
+  test("a prebuild.pid the supervisor removed reads not queued, not a throw", () => {
+    const data = join(dir, "prebuild-gone")
+    mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
+    expect(withData(data, () => prebuildQueued())).toBe(false)
+  })
+
+  test("a follower with no dashboard-ingest.pid reads not running, not a throw", () => {
+    const data = join(dir, "follower-gone")
+    mkdirSync(join(data, "ops", "dashboard"), { recursive: true })
+    expect(withData(data, () => followerRunning())).toBe(false)
   })
 })

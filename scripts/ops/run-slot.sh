@@ -19,9 +19,12 @@ ARGS=("$@")
 # LANES is capacity()'s one lanes verdict for a count (lanes_now), and HELD5 its one load5 verdict (load5_held), so a value from the caller's env would steer every slot check outside a count
 unset LANES HELD5
 # a waiter that runs a newer copy hands it its first ask's time, so the runs log has one ask and the whole wait; the command never sees it
+# the clock this call reads once, then `clock` moves it by SECONDS: its seconds feed ASKED and every age the read path, its ISO form the switch lines (issue 2852: the read loop ran a `date` per switch and per slot field, so a head at load took a second or more)
+now=$(date -u +%s' '%FT%TZ); NOW=${now%% *}; NOW_ISO=${now#* }
+T0=$((NOW - SECONDS)) ISO_AT=$NOW
 REREAD=""
 case "${RUN_SLOT_ASKED:-}" in
-  ''|*[!0-9]*) ASKED=$(date +%s) ;;
+  ''|*[!0-9]*) ASKED=$NOW ;;
   *) ASKED=$RUN_SLOT_ASKED; REREAD=1 ;;
 esac
 unset RUN_SLOT_ASKED
@@ -35,30 +38,38 @@ unset RUN_SLOT_ASK_STAMP
 # the command reads run-slot's own stdin through fd 3, since bash gives a script's background job /dev/null (a heredoc ran as an empty
 # program and exited 0); a closed stdin gives it /dev/null, as before
 { exec 3<&0; } 2>/dev/null || exec 3</dev/null
-# a file's mtime, and its stamp (inode and mtime, through a symlink), in GNU stat's form (the runner host's Linux) or BSD's (the Mac)
-mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
-stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/null; }
+# the stat flavour, probed once on the ops folder, which always exists, since ticket() alone makes the queue folder and a run that skips it would probe a missing path on a GNU box, whose stat -f then reads its flags as a path (issues 1654 and 1818)
+if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n') SF=(-c '%i %Y'); else ST=(-f '%m %N') SF=(-f '%i %m'); fi
+# a file's mtime, and its stamp (inode and mtime, through a symlink), each in the flavour probed above, so a Mac starts no failed GNU try first
+mtime() { local o; o=$(stat "${ST[@]}" "$1" 2>/dev/null) || return 1; printf '%s\n' "${o%% *}"; }
+# the call's clock, moved by SECONDS with no process, so a long wait reads the time as it is now
+clock() { NOW=$((T0 + SECONDS)); }
+# NOW_ISO as of the clock's NOW, one date only once NOW has moved since the last read, so an expiry read in a subshell, whose refresh the parent never sees, still reads the time now
+iso_clock() { [ "$ISO_AT" = "$NOW" ] || { NOW_ISO=$(date -u +%FT%TZ); ISO_AT=$NOW; }; }
+stamp() { stat -L "${SF[@]}" "$1" 2>/dev/null; }
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
 SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load1-max run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
-  local f="$OPS/$1" line ends now m
+  local f="$OPS/$1" line ends m
   [ -e "$f" ] || return 1
+  clock
   line=$(head -n 1 "$f" 2>/dev/null)
   switch_ends "$1"
   ends=$ENDS
-  now=$(date -u +%FT%TZ)
   if [ -n "$ends" ]; then
-    [[ "$now" < "$ends" ]] && return 0
+    iso_clock
+    [[ "$NOW_ISO" < "$ends" ]] && return 0
   else
-    m=$(mtime "$f" || date +%s)
+    m=$(mtime "$f" || printf '%s' "$NOW")
     # an mtime that reads back empty counts as the file gone, rather than as a shell error (4 Nov: the same read in stale printed "syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - m )) -lt 14400 ] && return 0
+    [ $(( NOW - m )) -lt 14400 ] && return 0
+    iso_clock
   fi
-  mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$now expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
+  mv "$f" "$f.expired-$(date -u +%Y%m%dT%H%M%SZ)" 2>/dev/null && echo "$NOW_ISO expire ${WHO:-run-slot} $$ $1 $line" >> "$OPS/run-slot.runs.log"
   return 1
 }
 # the expiry a switch line carries, read with builtins into ENDS, so switch_on and due_at parse one line with no process (issue 1378's fork bound)
@@ -105,10 +116,11 @@ stale() {
   if printf '%s' "$pid" | grep -Eq '^[0-9]+$'; then
     ! alive "$pid"
   else
-    m=$(mtime "$1.holder" || mtime "$1" || date +%s)
+    clock
+    m=$(mtime "$1.holder" || mtime "$1" || printf '%s' "$NOW")
     # an mtime that reads back empty counts as young, rather than as a shell error (4 Nov: "<epoch> -  : syntax error: operand expected")
     case "$m" in '' | *[!0-9]*) return 1 ;; esac
-    [ $(( $(date +%s) - m )) -ge 7200 ]
+    [ $(( NOW - m )) -ge 7200 ]
   fi
 }
 # a setting's value as JSON, as the settings reader in this script's checkout prints it, its default on a machine with no extensions; a reader that cannot answer says why on stderr
@@ -1433,8 +1445,6 @@ clone_brake() {
 # or its waiter ends. The dashboard's own build and the merge train take run-slot-2 outside the queue, as in single-slot mode.
 QUEUE="$OPS/run-slot.waiters"
 NEXTF="$OPS/run-slot.next"
-# the stat flavour, probed once on the ops folder, which always exists, since ticket() alone makes the queue folder and a run that skips it would probe a missing path on a GNU box, whose stat -f then reads its flags as a path (issues 1654 and 1818)
-if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n'); else ST=(-f '%m %N'); fi
 TICKET=""
 CLONE_TICKET=""
 ticket() {
@@ -1489,7 +1499,8 @@ ordered_waiters() {
   # the tickets' mtimes, one stat call for every ticket, name and time paired by the name the line carries and checked against the loop's own, with a
   # stat of its own for a line that does not pair (a ticket gone between the two reads; a ticket that arrives between them reads in with the stat
   # line's own name, and the final sort orders it, so nothing is passed over), instead of a stat a ticket a call (issue 1654)
-  now=$(date +%s)
+  clock
+  now=$NOW
   ready=$(ready_line)
   while read -r t name mt; do
     [ -n "$t" ] || continue
@@ -1615,7 +1626,8 @@ windows_sig() {
 due_at() {
   local now f m e l ends d= name mt
   # the candidates' mtimes, one stat call for every file, each line carrying its own name, in the script's one stat flavour (issue 1654)
-  now=$(date +%s)
+  clock
+  now=$NOW
   while read -r mt name; do
     case "$name" in
       */run-slot.priority) m=3600 ;;
@@ -1717,8 +1729,9 @@ prio_holder() {
   # while run-slot.focus stands its session is the pick, whatever run-slot.priority says or its age, so focus never loses its slot to a lapse
   focus_holder && return
   # an mtime that reads back empty counts as no pick, rather than as a shell error, as in stale
+  clock
   if m=$(mtime "$OPS/run-slot.priority"); then
-    case "$m" in '' | *[!0-9]*) ;; *) [ $(( $(date +%s) - m )) -lt 3600 ] && h=$(cut -d' ' -f1 "$OPS/run-slot.priority") ;; esac
+    case "$m" in '' | *[!0-9]*) ;; *) [ $(( $NOW - m )) -lt 3600 ] && h=$(cut -d' ' -f1 "$OPS/run-slot.priority") ;; esac
   fi
   # a standing priority window (playground priority on) comes after the lead's pick, which is Ops acting now, and goes ahead of it while the pick's session has no run waiting
   if windows_stand; then
@@ -1940,11 +1953,16 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
 
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
-  # read again just before the rmdir, so a waiter that freed and took the slot meanwhile keeps it
+  # read again just before the rmdir, so a waiter that freed and took the slot meanwhile keeps it; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
+  [ -d "$1" ] || return 0
   local line dir
-  line=$(cat "$1.holder" 2>/dev/null); dir=$(stamp "$1")
+  line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
-  [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
+  dir=$(stamp "$1")
+  # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
+  stale "$1" "$line" || return 0
+  # the stale holder line goes before the rmdir, as in free, so a reclaimer that read it before this one freed the slot finds it gone once the next taker holds the slot
+  [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rm -f "$1.holder" && rmdir "$1" 2>/dev/null
 }
 
 # the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
