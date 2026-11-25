@@ -4,10 +4,13 @@
 limit=${NET_GIT_LIMIT:-20}
 out=$(mktemp) || exit 1
 trap 'rm -f "$out"' EXIT
+# the job starts with this shell's stderr on /dev/null and gets it back before the loop: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", 3 runs in 1300 at load 10 to 18 on macOS, with git still leading its own group
+exec 3>&2 2>/dev/null
 set -m
-GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@" > "$out" 2>/dev/null &
+GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@" > "$out" 2>/dev/null 3>&- &
 pid=$!
 set +m
+exec 2>&3 3>&-
 i=0
 while kill -0 "$pid" 2>/dev/null; do
   if [ "$i" -ge $((limit * 10)) ]; then
