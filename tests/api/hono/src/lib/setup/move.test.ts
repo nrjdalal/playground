@@ -29,7 +29,7 @@ type Box = {
   volumesFrom?: string
 }
 
-// dump is what a stubbed `pg_dump` returns: its stdout on success.
+// dump is what the stubbed `docker cp` writes to the host's dump file.
 type Dump = {
   content?: string
 }
@@ -134,6 +134,13 @@ const noWait = async () => {}
 
 const writes = (calls: string[][]) =>
   calls.filter(([verb]) => !["inspect", "ps", "exec"].includes(verb!))
+
+// the container's copy of the dump was removed
+const cleared = (calls: string[][]) =>
+  calls.some(
+    ([verb, , sub, flag, path]) =>
+      verb === "exec" && sub === "rm" && flag === "-f" && /^\/tmp\/pg_dump_/.test(path ?? ""),
+  )
 
 const dumpIn = (dir: string): string =>
   readdirSync(dir).find((name) => name.startsWith("pg_dump_")) ?? ""
@@ -251,7 +258,7 @@ describe("moveIfExposed", () => {
     expect(dumpIdx).toBeLessThan(stopIdx)
     const name = dumpIn(dumpDir)
     expect(name).toBeTruthy()
-    // the dump file is mode 600, named with the UTC time, and carries the dump's stdout
+    // the dump file is mode 600, named with the UTC time, and holds what the copy wrote
     expect(statSync(join(dumpDir, name)).mode & 0o777).toBe(0o600)
     expect(readFileSync(join(dumpDir, name), "utf8")).toBe("PGDUMP-DATA")
     expect(/pg_dump_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/.test(name)).toBe(true)
@@ -368,6 +375,53 @@ describe("moveToLoopback", () => {
     expect(docker.calls.some(([verb]) => verb === "stop")).toBe(false)
     expect(docker.boxes.get(NAME)).toMatchObject({ running: true })
     expect(dumpIn(dumpDir)).toBe("")
+    expect(cleared(docker.calls)).toBe(true)
+  })
+
+  test("a dump that fails part way is cleared from the container, and a failed chmod refuses too", async () => {
+    for (const verb of ["pg_dump", "chmod"]) {
+      const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+      const docker = fakeDocker("0.0.0.0", { [verb]: 1 })
+      const failure = await moveToLoopback(NAME, PORT, docker.run, noWait, dumpDir).catch(
+        (error) => error,
+      )
+      expect(failure).toBeInstanceOf(MoveError)
+      expect(failure.message).toContain(`${verb} broke, so ${NAME} is left running, untouched`)
+      expect(cleared(docker.calls)).toBe(true)
+      expect(docker.calls.some(([call]) => call === "stop" || call === "cp")).toBe(false)
+    }
+  })
+
+  test("the dump is set to 600 inside the container before the copy, so it never lands readable by others", async () => {
+    const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+    const docker = fakeDocker("0.0.0.0")
+    await moveToLoopback(NAME, PORT, docker.run, noWait, dumpDir)
+    const chmodIdx = docker.calls.findIndex(
+      ([verb, , sub, mode]) => verb === "exec" && sub === "chmod" && mode === "600",
+    )
+    const cpIdx = docker.calls.findIndex(([verb]) => verb === "cp")
+    expect(chmodIdx).toBeGreaterThanOrEqual(0)
+    expect(chmodIdx).toBeLessThan(cpIdx)
+    expect(docker.calls[chmodIdx]!.at(-1)).toBe(docker.calls[cpIdx]![1]!.split(":")[1])
+  })
+
+  test("a dump's error over several lines reaches the note as one line, its error first", async () => {
+    const dumpDir = mkdtempSync(join(systemTmp(), "move-dump-"))
+    const docker = fakeDocker("0.0.0.0")
+    const run: Run = async (args) =>
+      args[0] === "exec" && args[2] === "pg_dump"
+        ? {
+            code: 1,
+            stderr:
+              "pg_dump: error: query failed: ERROR:  permission denied for table t\npg_dump: detail: Query was: LOCK TABLE public.t IN ACCESS SHARE MODE\n",
+            stdout: "",
+          }
+        : docker.run(args)
+    const failure = await moveToLoopback(NAME, PORT, run, noWait, dumpDir).catch((error) => error)
+    expect(failure.message).not.toContain("\n")
+    expect(failure.message).toBe(
+      `the dump of ${NAME} failed: pg_dump: error: query failed: ERROR:  permission denied for table t; pg_dump: detail: Query was: LOCK TABLE public.t IN ACCESS SHARE MODE, so ${NAME} is left running, untouched`,
+    )
   })
 
   test("names the dump's path in its note", async () => {

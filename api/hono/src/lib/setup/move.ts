@@ -76,8 +76,13 @@ export const loopbackArgv = (name: string, port: number, kept: Kept): string[] =
 // Pure: the one command that removes the old container once the moved one holds the data; its -v leaves every volume the moved one still mounts.
 export const removeLine = (name: string): string => `docker rm -v ${name}-old`
 
+// one line, since the roll keeps only the last line of the move's output
 const said = (result: { code: number; stderr: string }) =>
-  result.stderr.trim().slice(0, 200) || `exit ${result.code}`
+  result.stderr
+    .trim()
+    .split(/\s*\n\s*/)
+    .join("; ")
+    .slice(0, 200) || `exit ${result.code}`
 
 // Moves name onto 127.0.0.1:port, healthy before it returns, and returns the lines that say so; a failure puts the old container back as it was, started, and throws why.
 export async function moveToLoopback(
@@ -96,10 +101,14 @@ export async function moveToLoopback(
   const inspected = await docker(["inspect", name])
   if (inspected.code !== 0) throw new MoveError(`docker inspect ${name} failed: ${said(inspected)}`)
   const kept = keptOf(inspected.stdout, port)
-  // The live database is dumped into the data folder before the container stops, in three calls through the same docker Run: dump inside the container (a 265 MB binary is not read through stdout), copy it out, and clear the container's copy. A failure stops here and names the step, the container left running.
+  // The live database is dumped into the data folder before the container stops, through the same docker Run: dump inside the container (a 265 MB binary is not read through stdout), set it to 600 there so the copy lands at 600, copy it out, and clear the container's copy, on a failure too. A failure stops here and names the step, the container left running.
   const filename = `pg_dump_${new Date().toISOString().replace(/[:.]/g, "-")}.dump`
   const dumpPath = join(dumpDir, filename)
   const insidePath = join("/tmp", filename)
+  const refuse = async (step: string, result: { code: number; stderr: string }) => {
+    await docker(["exec", name, "rm", "-f", insidePath])
+    return new MoveError(`${step} failed: ${said(result)}, so ${name} is left running, untouched`)
+  }
   const dumped = await docker([
     "exec",
     name,
@@ -112,15 +121,11 @@ export async function moveToLoopback(
     "-f",
     insidePath,
   ])
-  if (dumped.code !== 0)
-    throw new MoveError(
-      `the dump of ${name} failed: ${said(dumped)}, so ${name} is left running, untouched`,
-    )
+  if (dumped.code !== 0) throw await refuse(`the dump of ${name}`, dumped)
+  const locked = await docker(["exec", name, "chmod", "600", insidePath])
+  if (locked.code !== 0) throw await refuse(`setting the dump of ${name} to 600`, locked)
   const copied = await docker(["cp", `${name}:${insidePath}`, dumpPath])
-  if (copied.code !== 0)
-    throw new MoveError(
-      `copying the dump of ${name} failed: ${said(copied)}, so ${name} is left running, untouched`,
-    )
+  if (copied.code !== 0) throw await refuse(`copying the dump of ${name}`, copied)
   chmodSync(dumpPath, 0o600)
   await docker(["exec", name, "rm", "-f", insidePath])
   const stopped = await docker(["stop", name])
