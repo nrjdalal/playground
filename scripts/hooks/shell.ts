@@ -1826,7 +1826,7 @@ function dollar(lx: Lexer, plain = false): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain)
     // ${NAME:?message} and ${NAME?message} expand to NAME's value whenever it is set and not empty, the only way a known one is
-    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1]
+    const name = /^\$\{([A-Za-z_]\w*|\d+)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1]
     readText(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)
@@ -1846,9 +1846,10 @@ function dollar(lx: Lexer, plain = false): Text {
     lx.i += 2
     return { value: "99999" }
   }
+  // a positional parameter is one digit unbraced (`$10` is `$1` then `0`), read only from a value a guard binds in `known`
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
-    return unknown("a shell variable")
+    return /\d/.test(next) ? variable(next) : unknown("a shell variable")
   }
   lx.i++
   return { value: "$" }

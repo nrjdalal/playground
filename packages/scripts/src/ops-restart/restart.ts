@@ -186,7 +186,7 @@ export const restart = async (opts: {
     )
     return lines
   }
-  // up.py skips a job it started within GRACE (10 minutes), so --restarted drops each stopped job's start under its lock, and the pass judges it by its health
+  // up.py skips a job it started within its grace, so --restarted drops each stopped job's start under its lock, and the pass judges it by its health
   const up = await run([
     "python3",
     "-I",

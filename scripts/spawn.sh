@@ -896,7 +896,7 @@ try:
             status_fresh = False
         login_ended = login_status["loginEnded"] if status_fresh and isinstance(login_status.get("loginEnded"), str) and login_status["loginEnded"] else None
         expired_cause = "its Claude Code access token has expired (stored-login-status.json tokenExpired), and Claude Code refreshes it only while it runs: opening Claude Code refreshes it, the owner's /login brings it back, and `playground accounts add` keeps a seat token for it" if status_fresh and not login_ended and login_status.get("tokenExpired") is True else None
-        # an --account start on the own login whose stored-login.json gives no reading (stale, missing, or its Claude Code login ended) starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
+        # an --account start on the own login whose stored-login.json gives no reading (stale or missing), or whose fresh status reads loginEnded whichever account usage.json reads, starts on the login's seat token under usage.keychainService, as a second login does, judged as a probed login is by login-flip.json's seen reading of it, which run.py's seat probe keeps; the item's existence alone is checked, with no -w, and inside the sandbox it is left to the new pane, as keychain_has does
         def seat_start(email, stale):
             service = os.environ.get("KEYCHAIN_SERVICE", "")
             if subprocess.run(["security", "find-generic-password", "-s", service, "-a", email], capture_output=True).returncode:
@@ -992,6 +992,10 @@ try:
             logins.append((email, name, email, seen, detail))
             if detail is None:
                 known.add(email.lower())
+        # an --account start on the own login whose fresh status reads loginEnded starts on its seat token whichever account usage.json reads and however fresh stored-login.json is, since the config login stops at /login; it is judged as that login alone, as below
+        if own_pick and login_ended and not on_seat:
+            seat_name, seat_seen, seat_detail, on_seat = seat_start(own_pick, f"its Claude Code login has ended (loginEnded: {login_ended})")
+            logins = [(own_pick, seat_name, None, seat_seen, seat_detail)]
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
         # --account naming the own login: that login alone, judged as a bare start judges it, refused on its reading's failure and never split
         if own_pick:
@@ -1067,7 +1071,7 @@ why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessio
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
 elif own_pick and on_seat:
-    print(f"ok {own_pick} --account {own_pick} is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at {fmt(readings['week'])}% ({chosen[1]})")
+    print(f"ok {own_pick} --account {own_pick} is this machine's own login, whose {'Claude Code login has ended (loginEnded: ' + login_ended + ')' if login_ended else 'stored reading reads nothing'}, so it starts on its seat token, the split skipped: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
@@ -2531,8 +2535,8 @@ herdr_answer() {
 # The roster row: a checker's is written before its pane opens, since no-outside-pr-code reads the PR it names at the session's first tool call, and every other row once its session has started.
 write_row() {
   set -- set "$NAME" "kind=$KIND"
-  # A resume, or a start that reuses an ended name, runs the session again, so a row close or auto-end ended, or one marked done, reads starting once more; a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
-  [[ $(roster_field "$NAME" status) =~ ^(done|ended)$ ]] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
+  # A resume, or a start that reuses an ended name, runs the session again, so a row close or auto-end ended, one marked done, or one parked while its start waited, reads starting once more (roster.ts drops a parked row's hold as it leaves parked); a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
+  [[ $(roster_field "$NAME" status) =~ ^(done|ended|parked)$ ]] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
   # A checker's --pr replaces an ended or done row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=

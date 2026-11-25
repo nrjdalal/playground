@@ -260,7 +260,7 @@ failing_files() { awk '/^tests\/.*\.test\.tsx?:$/ { f = $0; sub(/:$/, "", f) } /
 failing_names() { grep '^(fail)' "$1" | sort -u | head -5 | cut -c8-110 | paste -sd ';' -; }
 # the parallel pass and the serial pass each print their own counts, summed here
 summary() { awk '/^ *[0-9]+ (pass|fail|errors?)$/ { n[$2 ~ /^error/ ? "errors" : $2] += $1 } END { s = (n["pass"] + 0) " pass, " (n["fail"] + 0) " fail"; if (n["errors"]) s = s ", " n["errors"] " errors"; print s }' "$1"; }
-# the last test-sandbox: line says how both passes went; an older tree prints none, and its exit alone decides
+# the last test-sandbox: parallel pass line says how both passes went; an older tree prints none, and its exit alone decides
 sandbox_ok() {
   local last
   last=$(grep '^test-sandbox: parallel pass' "$1" | tail -1)

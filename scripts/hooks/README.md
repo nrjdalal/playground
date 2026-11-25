@@ -7,6 +7,7 @@ Widen what a hook allows only by one literal form it reads whole, tracking no sh
 A guard that models a shell feature refuses every spelling of it that it does not read, by a pattern wide enough to hold the feature's family, so the next spelling a review finds is refused already; no-extensions-write's glob-option switch on a remote line is the shape (`globSwitch` in `scripts/hooks/shell.ts`).
 Every bypass form a review has found stays refused through a widening: each is a row of `tests/scripts/hooks/fixtures/refused-forms/`, one file a source (`<n>.ts` holds #<n>'s rows), which `tests/scripts/hooks/refused-forms.test.ts` runs through each guard it names, and a bypass a new review finds that canary refuses joins it as a row in the same PR.
 The test spells every path flag a row names again (its `PATH_FLAGS` lists each, with the joins its program reads), by its other joins, a relative folder, a `./` hop, an `<x>/../<x>` hop and a link, and holds each spelling to the row's verdict.
+It also generates spellings of the Bash rows with fast-check, and holds each to a refusal; [.agents/testing.md](../../.agents/testing.md#the-property-test) names which cases it covers.
 `no-raw-spawn` guards `scripts/spawn.sh` and refuses hc, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 Every hook reads a wrapper (`doas`, `env`, `nice`, `nohup`, `stdbuf`, `sudo`, `time`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
@@ -342,7 +343,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-hidden-program, no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools.
+  no-hidden-program, no-prepare-write, no-protected-push, no-raw-vercel and no-roster-write, checks with no process of their own, run behind `fromFactory` through their `check`, [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools, and [no-raw-wa](#no-raw-wa)'s runs no-roster-write on the file tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -834,11 +835,20 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   so a replacement whose text holds the root behind escaped slashes is refused as its `s|||` twin is, while a `/regex/` address or an `s///` pattern behind escaped slashes, which writes nothing, runs (`sed -n '/\/tmp\/x/p' f`).
   What a printer or such a sed or perl call writes into a hook file is judged by the `sedWrites` reading above (`printed`): an `echo`'s or `printf`'s output as the shell prints it, a bare `cat`'s or `tee`'s stdin (a pipe, a heredoc or a here-string), or the text `escapedWrites` reads,
   when a redirect of its stdout (`>`, `>>`, `1>`, `&>`), one of a group, subshell or compound around it (`{ }`, `( )`, `if … fi`, a loop's `done`), a descriptor its stdout is duplicated to (`>&3` with `3>` on the same command or a group around it,
-  or an earlier `exec 3>` that runs no program in a reading `parse` gives: its name quoted or escaped, past reserved words (`{`, `then`, `do`, `!`), assignments, its own options (`--`, `-a`, `-c`, `-l`)
-  and the wrappers before it (zsh's `builtin`, `noglob`, `nocorrect` and `-`, bash's `command` and its `-p`), since that shell still runs it as exec, and an exec behind a wrapper that runs it in a child (`env`, `sudo`) is followed too, which errs toward refusing),
+  or an earlier `exec 3>`, read as the sentence after this one says),
   or the `tee` or `gtee` it pipes into (`fdFiles`, `compoundBodies`) writes a file in a `.git/hooks` folder or in the folder git runs that repo's hooks from (`core.hooksPath`, read once a folder by `git rev-parse --git-path hooks` at its nearest folder that exists, so a hook folder the same line makes counts),
   that git call runs only when the text can name the root or holds what the hook-file rule below refuses, with every `GIT_` variable dropped, in the C locale and under a 2 s cap, and a folder git cannot answer for (any failure but "not a git repository", or the cap) reads as a hook folder, so the write is refused,
   so `echo 'touch ~/.play*/extensions/x' > .git/hooks/pre-commit` and a `sed -n` whose output names the data folder piped into `tee .git/hooks/pre-commit` are refused from every folder, while the same echo into `notes.md` and an echo of another folder into a hook keep canary's verdict.
+  An earlier `exec 3>` counts when it runs no program in a reading `parse` gives: its name quoted or escaped, past reserved words (`{`, `then`, `do`, `!`), assignments and its own options (`--`, `-a`, `-c`, `-l`),
+  and past the wrappers before it (zsh's `builtin`, `noglob`, `nocorrect` and `-`, bash's `command` and its `-p`), since that shell still runs it as exec; one behind a wrapper that runs it in a child (`env`, `sudo`) counts too, which errs toward refusing.
+  A target through a variable is read by each value the line's steady variables give it (`heldReadings`, a for loop's literal words each in turn),
+  and one whose value the hook cannot read (set under `||` or `&&`, by `read` or in a loop, or never set) counts as a hook file only for text that names the root or that the hook-file rule refuses (`hookWord`), so `echo hi > "$X"` runs.
+  Another program's own text that names the root counts through such a target too (`git log --format=… > "$X"`), as a printer's does.
+  A function body's write is judged as a top-level one, the body's first command included, though the name's empty `()` lexes as a group before it (`f() { … > "$1"; }`).
+  Its positional parameters (`"$1"`, `"${2}"`) read the literal words of the line's one call of it, up to the first word the hook cannot read (`functionArgs`, through the shared lexer's `known`, where no other guard sets a digit key),
+  so `f() { cat payload > "$1"; }; f .git/hooks/pre-commit` is refused as `cat payload > .git/hooks/pre-commit` is.
+  A definition's name is read past the reserved words that open a body around it (`f() { g() { … > "$1"; }; g .git/hooks/pre-commit; }`), so a nested function binds its own call's words.
+  They stay values the hook cannot read when the body holds another definition, the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs `eval`, `source`, `.` or a program the hook cannot read, or the body moves them (`shift`, `set`, `getopts`, zsh's `argv` or `N=`).
   A hook file takes no remover, whatever its target, since a hook learns its targets only when it runs and no reading of its text can rule out the root (`hookRemover`), so a text written into one is refused with a route of its own when it holds any of these.
   A remover word anywhere in it, a comment included, matched in any case with each backslash-newline, which the shell joins a word across, then its quotes and backslashes dropped, and a `g` name read as its tool (`HOOK_REMOVERS`):
   `REMOVERS`, find's `-delete`, `rimraf`, `shred`, `srm`, `trash`, `trash-put`, `wipe`, and the language kin `rm_f`, `rm_r`, `rm_rf`, `rmdirSync`, `rmSync`, `rmtree` and `unlinkSync`.
@@ -1391,8 +1401,10 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   a retired data folder, a folder inside the caller's own `scratchpad/<name>/` (a ship rehearsal's two clones) and the caller's own temp folder (`/tmp/playground-<name>.*`, a real folder directly in `/tmp`) skip the file count and keep the 2 GB cap.
   An invitee rehearsal's scratch folder, about 140,000 entries, takes its own route past that cap: `bun run ship:rehearsal new` makes it and `bun run ship:rehearsal clear <dir>` removes it whole (`packages/scripts/src/ship/rehearsal.ts`, the release skill's Rehearse step).
   It removes only a folder holding safe-delete's marker, directly in the caller's temp folder and named `ops-r`, and nightly-clean removes such a folder left over a day.
-  Inside `~/.playground`, `playground rm` clears five kinds of path and refuses every other: the caller's own `scratch/<name>/` and `scratchpad/<name>/`, by the session name Claude Code's registry gives it, the caller's own loose regular file directly in `scratch/` named `<name>-*` or `<name>.*` (a symlink or folder of that name stays refused),
-  the caller's own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file), an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/`, or a path inside one, and a retired data folder whole, a real folder directly in the data folder that safe-delete's `RETIRED` list names with the PR that retired it (`ci`, the runner host's old run folder).
+  Inside `~/.playground`, `playground rm` clears six kinds of path and refuses every other: the caller's own `scratch/<name>/` and `scratchpad/<name>/`, by the session name Claude Code's registry gives it, the caller's own loose regular file directly in `scratch/` named `<name>-*` or `<name>.*` (a symlink or folder of that name stays refused),
+  the caller's own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file),
+  a regular file directly in the caller's own memory folder but `MEMORY.md`, the folder that settings file names as its `autoMemoryDirectory` when that is a real folder directly in the data folder's `memory/` under the name spawn.sh picks for the caller's kind (`<kind>` for the dispatcher and the builder, ops and planner leads, `worker-b` for a worker),
+  an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/`, or a path inside one, and a retired data folder whole, a real folder directly in the data folder that safe-delete's `RETIRED` list names with the PR that retired it (`ci`, the runner host's old run folder).
   A folder counts as ended when it is a real folder no live roster row names as itself or as `<folder>-<role>`, refused while the roster cannot be read, so Ops clears a closed session's folder on a lead's word (`endedPadOf` in `packages/safe-delete/src/index.ts`).
   Two routes take what the nightly clean's unused list finds, each in safe-delete: `playground rm <path> --card <id>`, only for a path the owner's Remove on that Inbox card names at its size, deletes model weights outright (`deleteWeights`, logged in the trash's `deleted.jsonl`) and moves anything else to the trash whole (quarantine's `approved`),
   and `playground rm --worktree` on a replay worktree under `~/models/kit/runs/` or a recorded folder writes its work to `<name>.diff`, then removes it through the main checkout's own forced `git worktree remove` (`removeReplay`).
@@ -1475,6 +1487,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
   [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
+  Its process also runs [no-roster-write](#no-roster-write) first on the file tools.
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
 - A factory session queues no line as an owner-word job, ops-wa or ops-dm-watch: the relay leads each line with `[ops-<job>]` from its queue file's name (`packages/scripts/src/ops-outbox/drain.ts`), and a line led by either tag reads as the owner's own words (the `whatsapp` and `slack` skills).
   no-raw-wa refuses a `notify.sh` call whose job is `wa` or `dm-watch`, or a word it cannot read, run as the program or as a shell's script (`bash notify.sh wa …`), and a call that reaches either job's queue file in the data folder's `ops/outbox/` (`ops-wa.jsonl`, `ops-dm-watch.jsonl`), as typed, through its links, by a glob that may match it, and on Read, Write, Edit, MultiEdit and NotebookEdit.
@@ -1496,6 +1509,28 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   On a machine with extensions the owners come from the data folder's `extensions/hooks/release-owners.json`, built from each scope's `lists/release-owners.json`, so a search of the checkout finds no owner while the hook still guards one; `bun packages/scripts/src/playground/rendered.ts hooks/release-owners.json` prints that file's path.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
+
+## no-roster-write
+
+- The live roster, the data folder's `roster.json` (`PLAYGROUND_DATA_DIR`'s when set), changes only through `scripts/roster.ts` (the **roster** rule), so every reader sees it whole: `scripts/hooks/no-roster-write.ts` refuses a factory session's Edit, MultiEdit, NotebookEdit or Write of it, and a shell write onto it, naming `bun scripts/roster.ts set` as the way.
+  It reads the file as typed and through the data folder's links, in any case, as macOS opens it, and a glob that may match it.
+- On Bash it walks the call through `shell.ts`'s reader, in each folder the shell may be in:
+  - a writing redirect (`>`, `>>`, `>|`, `<>`) onto the file;
+  - a placer (`cp`, `ditto`, `install`, `ln`, `mv`, `rsync`: `PLACERS`) with the file as its destination (its last operand, or `-t` for `cp`, `install`, `ln` and `mv`, since rsync's `-t` keeps times), or a `roster.json` it places into the data folder;
+  - `sed` with `-i` or `--in-place`, or whose script names the file, `-i` or not, since a `w` or `W` with any address, an `s` command's `w` flag with any delimiter, or GNU sed's `e` each write it, so the hook fails closed past the commands it would have to parse; the file as an operand of its own runs, since sed only reads it;
+  - any other program given the file as a word (`tee`, `mv`, `ln`, `rm`, `truncate`, an editor), since only a reader leaves it as it is;
+  - inline code (`bun -e`, `python3 -c`, `node`, `perl` and the rest of `CODE_RUNNERS`) that names the file and holds a write word (`WRITE_WORDS`: `write`, an `open(` to write or append, `rename`, `unlink`, `rm`, `truncate`, a `>` but `=>` and `>=`), since it does not parse that code;
+    so a write to another file beside a read of the roster is refused too, and a read alone runs.
+- It fails closed: a write position it cannot read, built from a substitution or an unknown variable, is refused when the call names the file anywhere and the text after the word's last expansion may end its path (`$F` and `"$(…)"` may, `brief-$n.md` may not), and so is a call it cannot parse whose text names the file.
+  A write position is a redirect target, a placer's destination, or an operand of a program that writes each one it names (`tee`, `rm`, `truncate`, an in-place `sed` and the rest of `WRITERS`).
+  An unread operand of any other program runs, since a real `roster.ts` call carries one (`"Review: $(jq … roster.json)"`).
+  A `bash -c` or `sh -c` script is read as shell, so its forms are judged as the line's own.
+- It reads a GNU program under its g-prefixed name (`gmv`, `gcp`, `gtee`, `grm`, `gsed`) as the plain one, for each program it knows by name (`KNOWN`).
+- Every other call runs: `bun scripts/roster.ts …`, a reader of the file (`cat`, `jq`, `grep`, `head`, `ls`, `stat`, `diff`, `sed` without `-i`, the rest of `READERS`), a copy from it, the versions and temp file beside it (`roster.json.1`, `roster.json.tmp`), and text that only names it on its way elsewhere (a commit message, a `--body`, a heredoc or an `echo` into another file).
+  `merge-queue.json` stays out of it, since the Builder writes that file by hand (playbook's SWEEP.md).
+- It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-raw-wa](#no-raw-wa)'s process runs it first on the file tools, since that hook's registration already takes them, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  A change to no-raw-wa's registration or its `fromFactory` gate moves this guard with it.
+  Its tests are `bun run test:file tests/scripts/hooks/no-roster-write.test.ts`.
 
 ## no-stash
 

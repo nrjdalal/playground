@@ -12,6 +12,8 @@ spawn.sh picks each start's arm by role and writes it into that session's own se
 
 The roster row records the arm as `memory=on` or `memory=off`, for the A/B to read. Memory holds the verified rules and facts a later session of the role will need, never state that changes, which the roster and the handoffs hold. Claude Code loads only an index's first 200 lines or 25 KB, so the index stays a small top layer. `bun run verify memory` scans every memory file for a secret, a person's or org's name, a private record, or prod data by its shape (a production host, a public IP address), flags an index over 200 lines or 18 KB, and exits 1 on a hit. A production figure, such as a count or an amount, has no shape the scan can tell from a fair number, so the optimizer's review reads each note for one. ops-unstick raises nothing for a note of a memory-on session.
 
+A session removes a note that turns out wrong or done with `playground rm <path> --reason "<why>"`, which takes a regular file directly in the folder the session's own settings file names when that is the one spawn.sh picks for its kind, and refuses `MEMORY.md`, a symlink, a subfolder and another role's folder, so the session edits the note's line out of `MEMORY.md` itself.
+
 ## The bar
 
 The metric is review rounds to 5/5 per merged PR, and tokens per merged PR, both for workers, over 20 merged PRs per arm. B passes when its median rounds are at most 85% of A's, or its tokens per merged PR are at most 90% of A's, with the other figure no more than 10% worse. The guardrails: memory adds at most 5k first-request tokens, the scan finds 0 hits over the trial, under 10% of the notes the optimizer's review reads are wrong, no index write is lost, and each index stays at 18 KB or less.

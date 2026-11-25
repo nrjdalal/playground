@@ -1740,6 +1740,108 @@ function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Comma
   })
   return bodies
 }
+// the programs that run a text which may call a function, and those that move its positional parameters from inside its body
+const RUNS_TEXT = new Set([".", "eval", "source"])
+const MOVES_ARGS = new Set(["getopts", "set", "shift"])
+// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+function functionArgs(commands: Command[], line: string) {
+  const seen = new Set<Command>()
+  const walk = (list: Command[]) => {
+    for (const c of list) {
+      seen.add(c)
+      if (c.inner) walk(c.inner())
+    }
+  }
+  walk(commands)
+  const all = [...seen]
+  const out = new WeakMap<Command, Record<string, string>>()
+  const names = new Map(all.map((c) => [c, parse(c).name]))
+  const name = (c: Command) => names.get(c) ?? parse(c).name
+  if (all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))) return out
+  const plain = (w: Word | undefined) => !!w && !w.quoted && /^[A-Za-z_]\w*$/.test(w.value)
+  const unquoted = (w: Word | undefined, value: string) => !!w && !w.quoted && w.value === value
+  const below = (list: Command[]): Command[] =>
+    list.flatMap((c) => [c, ...below(c.inner?.() ?? [])])
+  const definitions: { at: Command; body: Command[]; fn: string; group?: Command }[] = []
+  const find = (list: Command[]) =>
+    list.forEach((c, k) => {
+      if (c.inner) find(c.inner())
+      // a definition's name follows the reserved words that open the body around it (`{ g() …`, `then g() …`)
+      const lead = c.words.findIndex((w) => w.quoted || !LEADS.has(w.value))
+      const own = lead === -1 ? [] : c.words.slice(lead)
+      const [first, second, third] = own
+      // `function f { … }`: the body runs from this command, which holds its first words, to the brace that closes it
+      if (unquoted(first, "function") && plain(second) && unquoted(third, "{")) {
+        let depth = 0
+        for (let j = k; j < list.length; j++) {
+          const words = j === k ? own.slice(2) : list[j].words
+          const opens = words.findIndex((w) => !unquoted(w, "{"))
+          depth += opens === -1 ? words.length : opens
+          if (unquoted(list[j].words[0], "}")) depth--
+          if (depth === 0)
+            return definitions.push({ at: c, body: below(list.slice(k, j + 1)), fn: second.value })
+        }
+        return
+      }
+      // `f() …` and `function f() …`: the name, then the empty group the `()` makes, which holds the body's first words
+      const fn =
+        own.length === 1 && plain(first)
+          ? first.value
+          : own.length === 2 && unquoted(first, "function") && plain(second)
+            ? second.value
+            : undefined
+      if (!fn) return
+      // a substitution in the body's first command lexes its own commands ahead of it, with no operator before them
+      let at = k + 1
+      while (list[at] && !list[at].group && list[at].follows === undefined) at++
+      const group = list[at]
+      if (!group?.group || group.inner?.().length !== 0) return
+      const opener = group.words.length === 0 ? list[at + 1] : group
+      const closer =
+        group.words.length === 0 || unquoted(group.words[0], "{")
+          ? list.slice(at + 1).find((x) => x !== opener && x.inner?.().includes(opener))
+          : group
+      if (closer)
+        definitions.push({
+          at: c,
+          body: below([...(closer.inner?.() ?? []), closer]),
+          fn,
+          group,
+        })
+    })
+  find(commands)
+  for (const { at, body, fn, group } of definitions) {
+    const calls = all.filter((c) => c !== at && name(c) === fn)
+    const [call] = calls
+    const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length
+    // a definition inside the body, another `()` group or a `function` word, whose own parameters are not the body's
+    const nests = body.some(
+      (c) =>
+        (c !== group && !!c.group && c.inner?.().length === 0) ||
+        c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")),
+    )
+    const moves = body.some(
+      (c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)),
+    )
+    const bound: Record<string, string> = {}
+    if (
+      calls.length === 1 &&
+      named === 2 &&
+      !moves &&
+      !nests &&
+      !body.includes(call) &&
+      all.indexOf(call) > all.indexOf(at)
+    )
+      for (const [k, w] of parse(call).args.entries()) {
+        if (marked(w.value) || w.glob) break
+        bound[String(k + 1)] = w.value
+      }
+    for (const c of body)
+      if (Object.keys(bound).length > 0) out.set(c, bound)
+      else out.delete(c)
+  }
+  return out
+}
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
 // the commands a group, a subshell or a compound's closer holds, none for any other command
@@ -2403,6 +2505,8 @@ async function inspect(
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
   let bodies = new WeakMap<Command, Command[]>()
+  // each function body command's positional parameters, bound from the line's one call (functionArgs)
+  let fnArgs = new WeakMap<Command, Record<string, string>>()
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
   let lineTexts: string[] = []
@@ -2596,7 +2700,19 @@ async function inspect(
       : undefined
     if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // the text a printer or a sed or perl that edits no file in place writes (printed) into a hook file, by its stdout's redirect or one of a group, subshell or compound around it, a descriptor its stdout is duplicated to or an earlier exec opened included (fdFiles), or as the input of a tee, piped or fed a heredoc or here-string, is refused when it holds a remover or text the hook cannot read (hookRemover), else judged as an in-place edit's script is (scriptNames)
-    const kids: Kids = (c) => c.inner?.() ?? bodies.get(c)
+    // a function name's empty `()` leaves the lexer's empty group on the body's first command (`f() { echo x > "$U"; }`), which holds that command's own words and so is no group
+    const kids: Kids = (c) => {
+      const inner = c.inner?.()
+      return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
+    }
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's word (functionArgs), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    const hookWord = (word: Word, here: Env, sure = false): boolean => {
+      if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
+      const args = fnArgs.get(slotOf.get(cmd) ?? cmd)
+      const known = args ? { ...here, known: { ...here.known, ...args } } : here
+      const held = heldReadings(word, known, steadyAt(cmd))
+      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+    }
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
       for (const text of await printed(source, env, kids))
@@ -2605,12 +2721,12 @@ async function inspect(
           let into: Word | undefined
           const removes = hookRemover(
             text,
-            (sure) => !!(into = targets.find((word) => hookFile(pathOf(word, here), sure))),
+            (sure) => !!(into = targets.find((word) => hookWord(word, here, sure))),
           )
           if (removes && into) return hookRemoval(shown(into), removes)
           if (text === undefined) continue
           const named = scriptNames(text, here)
-          const hook = named && targets.find((word) => hookFile(pathOf(word, here)))
+          const hook = named && targets.find((word) => hookWord(word, here))
           if (hook) return `${shown(hook)}, a hook file, written with a script that names ${named}`
         }
     }
@@ -2681,11 +2797,11 @@ async function inspect(
       ...cmd.redirects.flatMap((r) => (r.body ? [r.body.value] : [])),
     ]
     for (const here of hookTargets.length > 0 && textDepth === 0 ? places(env) : []) {
-      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run
-      const hookAt = () =>
+      // a target that is a hook file, or a hook folder a copy writes its sources into, read only where git answers, since every write on such a line asks git where its folder's hooks run; for the command's own text that names the root, a target the hook cannot read counts, as it does for a printer's (`git log --format=… > "$X"`)
+      const hookAt = (sure = true) =>
         hookTargets.find((word) => {
           const path = pathOf(word, here)
-          return hookFile(path, true) || (copies && !!path && hookFile(join(path, "x"), true))
+          return hookWord(word, here, sure) || (copies && !!path && hookFile(join(path, "x"), true))
         })
       // the folder a symbolic link is made in: its target when that is a folder or ends in a slash, else the target's own folder; undefined when the reader cannot settle it
       const linkFolder = () => {
@@ -2755,7 +2871,7 @@ async function inspect(
         [copied, "copied from a file whose text"],
       ] as const)
         for (const { named, removes } of texts.flatMap((text) => hookFinding(text, here) ?? [])) {
-          const hook = hookAt()
+          const hook = hookAt(texts !== ownTexts || !!removes)
           if (hook && removes) return refuse(hookRemoval(shown(hook), removes))
           if (hook) return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`)
         }
@@ -3256,6 +3372,7 @@ async function inspect(
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
   bodies = compoundBodies(lexed.commands)
+  fnArgs = functionArgs(lexed.commands, command)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
   lineTexts = lineTextsOf(lexed.commands)

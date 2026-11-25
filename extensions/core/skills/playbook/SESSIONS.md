@@ -31,6 +31,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A worker that only reads (research, a fetch, an investigation) starts with `--reads-only` ([SPAWN.md](SPAWN.md#capacity-gate) holds the gate it passes), and its brief bars every run-slot run (a build, a suite, a type check, an install), since its start took no room.
    Read [SPAWN.md](SPAWN.md) for the command of the mode you start (a worker, a runner, a checker's or probe's column, a manager) and for each flag you pass,
    and before you act on a refusal: it holds the capacity gate, the launch line with its model and effort, the resume, `--account`, `--backend glm`, `--backend local`, `--runtime herdr` with `spawn.sh restore`, `--check`, `--sandbox`, and the role and settings every launch carries.
+   A lead that makes a worktree for a building worker's `--in` sets up its `.env` there by the `dev` skill's Start before the start, or briefs a no-stack chore to commit under `env NODE_ENV=production SKIP_ENV_VALIDATION=true`, as `scripts/briefs/new-worker.md:18` says.
    Done when spawn.sh has printed herdr's `herdr pane <id> workspace <id>` line for the session, or a refusal you have acted on by its gate's section in SPAWN.md.
 
 3. Brief it with `SendMessage` once `ListAgents` lists the name, writing the brief with writing-for-agents loaded (SKILL.md's **writing** rule).
@@ -63,7 +64,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    whose checks on the head gate it (`Audit, Lint, and Build`, `test` and, on `factory.repo`, `GitGuardian`) (**ci**).
    A brief names a `CLOCK_AHEAD_DAYS=30` run only for touched test files outside `CLOCK_EXEMPT` (`packages/scripts/src/clock-exempt.ts`), since a run over exempt files alone runs nothing, a no-op its report names as one rather than a pass: on one PR all 3 files a brief named were exempt.
    A brief that has its session clone a repo no org guards places the clone under `.claude/worktrees/<name>` in the Playground checkout and has the session name the clone's path in its last report, since no automated cleanup reaches a plain clone (two clones left in a session's scratch folder stayed behind), so its lead removes it by hand with `playground rm --worktree <path>`;
-   under `~/.playground` only the caller's own `scratch/<name>/` and `scratchpad/<name>/`, its own loose file in `scratch/` (below), its own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file), an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/` and a retired data folder whole (safe-delete's `RETIRED` list, `ci` today) clear,
+   under `~/.playground` only the caller's own `scratch/<name>/` and `scratchpad/<name>/`, its own loose file in `scratch/` (below), its own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file),
+   a note directly in its own memory folder but `MEMORY.md` (a regular file), an ended session's whole `scratchpad/<folder>/` or `scratch/<folder>/` and a retired data folder whole (safe-delete's `RETIRED` list, `ci` today) clear,
    through a plain `playground rm <path>`, and every other path there stays refused;
    the ended folder, a retired data folder, a folder inside the caller's own `scratchpad/<name>/` (a ship rehearsal's two clones) and the caller's own temp folder (`/tmp/playground-<name>.*`) skip the 5,000-file tripwire and keep the 2 GB cap.
    A guarded org's clone goes where `scripts/briefs/new-reviewer.md` puts it, in the org's folder (code-review-loop says why).
@@ -140,6 +142,7 @@ An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n
 
 An extension item's revision goes up with `playground ext put`, and its reviewer scores it with `playground ext score`.
 A put on an item whose earlier revision is still proposed moves the proposal's head, so a score on the earlier one is refused (`the proposal is at <sha>, not <rev>; read it again`): put a stacked revision once the one under it is judged.
+Build an extension item's test tree as copies from the rendered `~/.playground/orgs/<org>/<newest>/skills`, never symlinks into the store.
 
 ## Write a handoff
 
@@ -300,9 +303,12 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
   The worktrees a session used are each linked worktree its transcript ran in, for a worker each worktree on its PRs' branches, and, for a checker whose roster `pr` is the main checkout's own PR n, each of its clones in `.claude/worktrees/` that exists: a reviewer's `review-<n>`, a tester's `test-<n>` and `test-<n>-before` (`worktreesOf` in `scripts/ops/optimizer/auto_end.ts`).
   The managers' `.claude/worktrees/leads`, where spawn.sh starts every manager, is the managers' alone (`LEADS_WORKTREE`): a worker resumed from it ends on its PRs' state, its own PR worktrees are still cleaned, and the managers' files there stay.
-  A checker's end then takes the other kind's clones of its PR n too, the ones an earlier end kept while this checker held them, once no other reviewer or tester row naming that PR is live in the roster (a roster it cannot read keeps them), each through the same `cleanWorktree` checks (`cleanupLive`).
+  A checker's end then takes the other kind's clones of its PR n too, the ones an earlier end kept while this checker held them, once no other live reviewer or tester row in the roster names that PR as its `pr`, or, until that PR reads merged or closed, in its `prs` (a roster it cannot read keeps them), each through the same `cleanWorktree` checks (`cleanupLive`).
+  Each clone's PR is read through that clone's own HEAD (`finishedAt`), so one clone's reading never holds or frees another.
   A clone is taken by its PR's number, since a checker that reads it from outside it, as code-review-loop has a reviewer do, leaves no transcript `cwd` naming it, and a transcript that cannot be read cleans nothing, the clones included.
-  A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work on neither canary nor a branch origin holds stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), then goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision;
+  A Playground worktree in `.claude/worktrees/` with uncommitted work, unpushed commits or work on neither canary nor a branch origin holds stays until `playground rm` confirms its PR has merged or closed (its own PR, by its branch or its exact head), or, for a checker's clone of that PR (`review-<n>`, `test-<n>`, `test-<n>-before`), its HEAD sits at or behind its own PR's merged head,
+  then goes through `playground rm --worktree <path> --discard` whatever it holds,
+  with no Inbox decision;
   `--discard` first writes its commits no remote holds, read live by `git ls-remote`, to a git bundle beside it in the trash, and another repo's such worktree stays.
   The live dashboard's checkout stays, by its branch.
   A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count while the worktree sits at or behind that PR's head,
@@ -319,15 +325,19 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   A move past the cap is carried to the next auto-end beat, which makes it before it ends anyone; a folder over the tripwire (5,000 files or 2 GB) stays whole, named in the lead's line, for the nightly clean (`scratch/<name>/`) or its lead's cleanup (`scratchpad/<name>/`, below).
   A temp folder skips the file count, since hook test data fills one past 5,000 files, and moves whole up to 2 GB; one past 2 GB stays in place with a plain refusal and no alert.
   A leftover that a live process still runs in, by its working folder or a file it holds open (an orphan that outlived the session), stays, and the lead's line names its pid.
-  Its `~/.playground/scratch/<name>/` and `scratchpad/<name>/`, each path resolved past symlinks, its own loose file in `scratch/` (below) and its own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file) are the places `playground rm` clears there for that session alone, and every other path there stays refused,
+  Its `~/.playground/scratch/<name>/` and `scratchpad/<name>/`, each path resolved past symlinks, its own loose file in `scratch/` (below), its own memory settings file `factory-settings-400k-memory-<name>.json` (a regular file)
+  and a note directly in its own memory folder but `MEMORY.md` (a regular file) are the places `playground rm` clears there for that session alone, and every other path there stays refused,
   another live session's scratch included,
   but the ended session's `scratchpad/<folder>/` or `scratch/<folder>/` below.
   A `scratchpad/<folder>/` or `scratch/<folder>/` whose session has ended, a real folder no live roster row names as itself or as `<folder>-<role>`, clears whole through `playground rm <path>`, so Ops clears it on its lead's word as it does a worktree.
   A session saves every download inside one of its own folders, `~/.playground/scratch/<name>/` or `scratchpad/<name>/` beside it; a loose regular file directly in `scratch/` named `<name>-*` or `<name>.*` is also its own, which `playground rm` clears, and every other loose entry there it refuses.
   A `scratch/` folder or loose `<id>-*` file left once its session is gone, with no live session and no roster row naming it that has not ended, the nightly clean moves to the trash whole, past the 5,000-file tripwire and under its 2 GB cap ([LIFECYCLE.md](LIFECYCLE.md)).
-- Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
-- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --force --pr <its PR's URL> --account <its account>`, or its extension item as `<scope>/<kind>/<key>` (the `--pr` rule is [SPAWN.md](SPAWN.md#modes)'s); its `Ended` line goes to its worker too.
-  That line gives the whole command: `--account` names the account its resume record (`~/.playground/resume/<name>.sh`) held before the close, its `# account:` line, else its exec line's `--account`, and the line leaves it out when the record names none, so the resume stays on the reviewer's own seat.
+- Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, nor a checker's clone of a PR (`review-<n>`, `test-<n>`, `test-<n>-before`) whose HEAD sits at or behind its own PR's merged head,
+  which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
+- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> <session id> --force --pr <its PR's URL> --account <its account>`, or its extension item as `<scope>/<kind>/<key>` (the `--pr` rule is [SPAWN.md](SPAWN.md#modes)'s).
+  Its `Ended` line goes to its worker too.
+  That line gives the whole command: its folder and session id are the ones its resume record's exec line names, kept as placeholders beside a note naming the missing record when there is none.
+  Its `--account` names the account its resume record (`~/.playground/resume/<name>.sh`) held before the close, its `# account:` line, else its exec line's `--account`, and the line leaves it out when the record names none, so the resume stays on the reviewer's own seat.
 
 A session ends by closing its pane, so the workspace's other sessions live on, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
 

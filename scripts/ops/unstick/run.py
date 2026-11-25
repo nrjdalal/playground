@@ -4,7 +4,7 @@
 Every CYCLE seconds it reads the screen of every live Claude Code session herdr runs (`herdr pane list`, then
 `herdr pane read --source visible` per pane), and matches the blocking states: the
 usage-limit dialog, a permission prompt, a picker (AskUserQuestion, plan approval), the folder-trust and MCP-server dialogs, and
-"Please run /login". The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
+"Please run /login". A compacting pane is not one of these: its "esc to interrupt" footer makes blocked() return at once, so compaction is read separately (compaction()). The usage-limit dialog alone is answered, with Escape, and only while the usage file of the account the session's
 resume record names, else the machine's own login, says it has room (and was written in the last 15 minutes: room());
 it checks 5s later that the dialog cleared and no limit line before its reset
 still shows. Nothing else is ever answered (no permission prompt is cancelled; the managers handle
@@ -12,6 +12,8 @@ it"): a limit dialog with no room sends a probe's block to its spawner alone (li
 block goes to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
+A compacting pane is alerted to its manager when it has held the "Compacting conversation…"
+screen past 10 minutes, or at first sight when the stop already sits above the line (a ⎿ notice line reading "Prompt is too long" or an invalid_request API error), naming the session and how long it has compacted; only then is it listed in state.json as a block. For a session the local model does not serve the 10-minute line is wall-clock; a healthy local compaction can run past it (48m on 2026-11-19), so for the local model the 10-minute line reads the spinner's ↓ count unchanged for those 10 minutes, and a count that moves raises nothing. Each re-alerts every REALERT; nothing is pressed in the pane.
 A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
@@ -48,6 +50,10 @@ KINDS = [
     ("mcp", re.compile(r"new MCP servers? found|MCP servers? found in", re.I)),
     ("picker", re.compile(r"Enter to select|Would you like to proceed\?|↑/↓ to navigate|Esc to cancel · Tab", re.I)),
 ]
+# a compaction that hangs is not one of the KINDS above (blocked() bails on its "esc to interrupt" footer), so it is matched below on the compaction spinner line, the lowest such line taken. A "Prompt is too long" or invalid_request stop above the line is a hang (the hung one on 2026-11-19 ran shorter than a healthy one, so time alone cannot tell them apart); STOP takes it only as the ⎿ notice line a turn ends on, as the limit line is, so a line quoting the words is none. TOKEN_RE is the spinner's ↓ N, frozen when a compaction stalls.
+COMPACT = re.compile(r"^\s*.\s*Compacting conversation…\s*\(\s*\d")
+STOP = re.compile(r"^\s*⎿\s+(?:Prompt is too long|API Error: 4\d\d\b.*invalid_request)", re.I)
+TOKEN_RE = re.compile(r"↓\s*([0-9]+(?:\.[0-9]+)?[kmb]?)", re.I)
 # The limit dialog proper (a menu under its question), as against the one-line notice a turn prints when it stops on the limit.
 # A factory session by its name: an old name's prefix (worker-greed), or an <id>-<kind> name's last word (k3m9px-worker), as kindOfName in packages/config/src/kinds.ts reads it.
 FACTORY = re.compile(r"^(?:(worker|reviewer|tester|runner|probe)-.|[23456789bcdfghjkmnpqrstvwxyz]{6}-(worker|reviewer|tester|runner|probe)$)")
@@ -428,6 +434,10 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
+# the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper, `zsh -c ... eval '<command>'`) is never a job (builder, 8 Oct)
+HEAVY_PROGRAM = re.compile(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)")
+# run-slot.sh as ps shows it, run by a shell or by its own shebang
+RUN_SLOT = re.compile(r"^((\S*/)?(ba|z)?sh\s+)?(\S*/)?run-slot\.sh(\s|$)")
 # precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
 PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
@@ -474,11 +484,19 @@ def heavy_jobs(rows=None):
                 holders.add(open(os.path.join(OPS, name + ".holder")).read().split()[1])
         except (OSError, IndexError):
             pass
+    # owners is the parent of every run-slot.sh, holding (the holder is run-slot.sh's own pid) or still waiting (it writes no holder, and the commit lane leaves no ticket either), so `pid in owners` counts a run that started run-slot.sh, never one that merely shares an ancestor with it
+    owners = {parent[p] for p, c in cmds.items() if RUN_SLOT.match(c) and p in parent}
+    # bare is every pid above a heavy process with no run-slot.sh between them, so a run that also runs a suite itself beside its run-slot.sh child never reads as inside
+    bare = set()
+    for p, c in cmds.items():
+        if HEAVY.search(c) and HEAVY_PROGRAM.match(c):
+            pp = parent.get(p)
+            while pp and pp not in ("0", "1") and pp not in bare and not RUN_SLOT.match(cmds.get(pp, "")):
+                bare.add(pp)
+                pp = parent.get(pp)
     jobs, seen = [], set()
     for pid, cmd in cmds.items():
-        # the program itself must be bun, node, turbo, tsc or next: a shell whose argv merely holds the words (Claude Code's Bash wrapper,
-        # `zsh -c ... eval '<command>'`) is never a job (builder, 8 Oct)
-        if not HEAVY.search(cmd) or not re.match(r"^(\S*/)?(bun|node|turbo|tsc|next)(\s|$)", cmd):
+        if not HEAVY.search(cmd) or not HEAVY_PROGRAM.match(cmd):
             continue
         chain, p = [], parent.get(pid)
         while p and p not in ("0", "1") and len(chain) < 40:
@@ -500,11 +518,14 @@ def heavy_jobs(rows=None):
         where = m.group(1) if m else "?"
         if where in ("canary", "desk") and "dev.ts" in cmd:
             continue  # the live dashboard's own stack (its worktree read canary before the dashboard one)
-        if (where, "dev" if "dev.ts" in cmd else "suite") in seen:
+        kind = "dev stack" if "dev.ts" in cmd else "suite"
+        # inside a slot when the slot's holder is one of its ancestors, or the run itself started run-slot.sh (holding or waiting) and runs no heavy step outside it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child
+        inside = bool(holders & set(chain)) or (pid in owners and pid not in bare)
+        # one job per worktree, kind and slot state, so a run inside a slot never hides a bare one in the same worktree
+        if (where, kind, inside) in seen:
             continue
-        seen.add((where, "dev" if "dev.ts" in cmd else "suite"))
-        # inside a slot when run-slot.sh (the holder pid) is one of its ancestors
-        jobs.append({"inside": bool(holders & set(chain)), "kind": "dev stack" if "dev.ts" in cmd else "suite", "pid": pid, "where": where})
+        seen.add((where, kind, inside))
+        jobs.append({"inside": inside, "kind": kind, "pid": pid, "where": where})
     return jobs
 
 
@@ -521,8 +542,8 @@ def heavy_cap():
 
 
 def slot_alerts(jobs, cap, at):
-    """outside-slot for a suite or build with no run-slot holder above it; a dev stack holds no slot (run-slot refuses `bun run dev`) and a
-    self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
+    """outside-slot for a suite or build that holds no slot: a run counts as holding the slot when the slot's holder is one of its ancestors, or the run itself started run-slot.sh, holding or still waiting, and runs no
+    heavy step outside it, as commit-slot.ts's pre-commit and pre-push hold run-slot as a child; a dev stack holds no slot (run-slot refuses `bun run dev`) and a self-hosted runner's CI job takes none, so neither raises one, but each still counts toward the cap."""
     alerts = []
     for j in jobs:
         if not j["inside"] and j["kind"] not in ("ci job", "dev stack"):
@@ -591,15 +612,34 @@ def limit_line(lines):
 
 
 def read_block(lines, s):
-    """The screen's block, its line and its limit line (limit_line's pair, or None): a live menu first, else a limit line before its reset
-    is a usage-limit block ("⎿ You've hit your weekly limit · resets Oct 20 at 9:30pm" sat unseen on 5 sessions)."""
+    """The screen's block, its line and its limit line (limit_line's pair, or None), plus the compaction it shows or None: a live menu first,
+    else a limit line before its reset is a usage-limit block ("⎿ You've hit your weekly limit · resets Oct 20 at 9:30pm" sat unseen on 5 sessions);
+    the compaction is "Compacting conversation" with its spinner's ↓ N and whether a hang sits above it (a compaction that hangs is not one of the KINDS, since blocked() bails on its "esc to interrupt" footer)."""
     kind, line = blocked(lines)
     stuck = None if kind else limit_line(lines)
     if stuck and transcript_live(s):
         stuck = None  # the limit line is old scrollback: the session wrote a transcript line in the last minute (dispatcher, 13 Oct)
     if stuck and stuck[1] <= 120:
         kind, line = "usage-limit", stuck[0]  # paused on the limit until its reset
-    return kind, line, stuck
+    return kind, line, stuck, compaction(lines)
+
+
+def compaction(lines):
+    """The compaction the screen shows or None: the "Compacting conversation" line, its spinner's ↓ N (frozen when the compaction stalls), and
+    whether a "Prompt is too long" or invalid_request stop sits above it. A hang is alerted on first sight, since the hung one on 2026-11-19 ran
+    shorter than a healthy compaction, so wall-clock alone cannot tell it apart from one that is just still working."""
+    idx = next((i for i in range(len(lines) - 1, -1, -1) if COMPACT.search(lines[i])), None)
+    if idx is None:
+        return None
+    tick = next((TOKEN_RE.search(l) for l in lines[idx:] if TOKEN_RE.search(l)), None)
+    stopped = any(STOP.search(l) for l in lines[:idx])
+    return lines[idx].strip()[:100], tick_count(tick.group(1)) if tick else None, stopped
+
+
+def tick_count(raw):
+    """The spinner's ↓ N as one whole number, so a frozen count compares like for like: 1.8k and 1800 are the same."""
+    val = float(raw[:-1]) if raw[-1].lower() in "kmb" else float(raw)
+    return int(round(val * {"k": 1e3, "m": 1e6, "b": 1e9}.get(raw[-1].lower(), 1)))
 
 
 def dialog_room(name, lines):
@@ -906,6 +946,17 @@ def session_account(name):
         return None
 
 
+def is_local(name):
+    """Whether the named session runs on the machine's local model, the same ~/.playground/backends/<name> account file session_account reads for "glm":
+    it is local when that file is "claude-code local", else the session is not (a local model cannot be told apart from a healthy compaction by time alone,
+    so only it is held to a frozen token count, see the compaction branch in the pass loop)."""
+    try:
+        with open(os.path.join(LW, "backends", name)) as f:
+            return f.read().split() == ["claude-code", "local"]
+    except OSError:
+        return False
+
+
 def readings():
     """Each account's newest reading, from usage.json, every usage-<name>.json and usage.json's storedLogin, a week alone that takes the
     reset of its account's own file while that reset is ahead, since no running job keeps the own login's file fresh."""
@@ -1017,7 +1068,7 @@ def ending_alert():
 
 def cycle(state):
     live = herdr_sessions()
-    blocks, now_t, cleared = {}, time.time(), []
+    blocks, compacting, now_t, cleared = {}, {}, time.time(), []
     mover = moving(now_t)
     kinds = roster_kinds()
     skipped, api_found = 0, {}
@@ -1042,7 +1093,37 @@ def cycle(state):
             state["unreadable"][s["surface_id"]] = name
             continue
         state.setdefault("unreadable", {}).pop(s["surface_id"], None)
-        kind, line, stuck = read_block(lines, s)
+        kind, line, stuck, comp = read_block(lines, s)
+        if comp is not None:
+            # tracked apart from blocks, since state.json lists every block as Stuck and most compactions are healthy; it joins blocks only once alertable
+            comp_line, count, stopped = comp
+            prev = state.get("compacting", {}).get(s["surface_id"], {})
+            is_loc = is_local(name)
+            track = {
+                "alerted": prev.get("alerted", 0),
+                "count": count,
+                "countSince": prev.get("countSince", now_t) if count == prev.get("count") else now_t,
+                "since": prev.get("since", now_t),
+            }
+            compacting[s["surface_id"]] = track
+            # a stop above the line alerts at first sight; else a local session's ↓ count unmoved for 10 minutes, or a non-local one compacting 10 minutes; each re-alerted every REALERT
+            frozen = is_loc and count is not None and count == prev.get("count")
+            hold = (now_t - track["countSince"] >= 600) if frozen else (not is_loc and now_t - track["since"] >= 600)
+            if not (stopped or hold):
+                continue
+            if stopped:
+                detail = f"a stop sits above the line, compacting for {ago(track['since'])}: {comp_line}"
+            elif frozen:
+                detail = f"stuck past 10 minutes: {comp_line} (the spinner's ↓ count is frozen at {count} for {ago(track['countSince'])})"
+            else:
+                detail = f"stuck past 10 minutes: {comp_line} (compacting for {ago(track['since'])})"
+            blocks[f"{s['surface_id']}:compacting"] = {"kind": "compacting", "line": detail, "name": name, "since": track["since"], "alerted": track["alerted"],
+                                                       "surface": s["surface_id"], "workspace": s["workspace_id"]}
+            if now_t - track["alerted"] >= REALERT and not hook_owned(s["session_id"]):
+                track["alerted"] = now_t
+                notify(f"{name} is compacting, {detail}", to=alert_to(name, s.get("transcript_path")))
+                log(f"{name} is compacting, {detail}")
+            continue
         if not kind:
             if stuck:
                 key = f"{s['surface_id']}:usage-limit-stuck"
@@ -1092,6 +1173,7 @@ def cycle(state):
                 notify(msg, to=alert_to(name, s.get("transcript_path")))
             log(msg)
     state["blocks"] = blocks
+    state["compacting"] = compacting
     # a limit block's own alert went once; while any alerted one holds, the builder and dispatcher get one summary an hour (a move's dispatcher gets its own, below)
     if mover or not any(b["kind"] in LIMIT_KINDS and b["alerted"] for b in blocks.values()):
         state.pop("limitSummaryAt", None)
