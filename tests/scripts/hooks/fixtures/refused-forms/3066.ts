@@ -27,6 +27,33 @@ export const groups: Group[] = [
         'find ~/.playground -maxdepth 1 | while read f; do rm "$f"; done',
       ],
       ["a listing of the roster into xargs gzip", "ls ~/.playground/roster.json | xargs gzip"],
+      ["a listing of the roster into xargs bzip2", "ls ~/.playground/roster.json | xargs bzip2"],
+      ["a listing of the roster into xargs xz", "ls ~/.playground/roster.json | xargs xz"],
+      [
+        "a listing of the roster into xargs chown",
+        "ls ~/.playground/roster.json | xargs chown nobody",
+      ],
+      [
+        "a listing of the roster into xargs chgrp",
+        "ls ~/.playground/roster.json | xargs chgrp staff",
+      ],
+      [
+        "a listing of the roster into an xargs -I string that sorts onto it with -o attached",
+        "ls ~/.playground/roster.json | xargs -I{} sort -o{} /dev/null",
+      ],
+      [
+        "a listing of the roster into an xargs -I string that sorts onto it with -uo",
+        "ls ~/.playground/roster.json | xargs -I{} sort -uo {} /dev/null",
+      ],
+      [
+        "a listing of the roster into an xargs -I string that sorts onto it with -mo",
+        "ls ~/.playground/roster.json | xargs -I{} sort -mo {} /dev/null",
+      ],
+      [
+        "a listing of the roster into an xargs -I string that sorts onto it with --output and a space",
+        "ls ~/.playground/roster.json | xargs -I{} sort --output {} /dev/null",
+      ],
+      ["a sort onto the roster with -o attached", "sort -o~/.playground/roster.json /dev/null"],
       [
         "a listing of the roster into xargs chmod",
         "ls ~/.playground/roster.json | xargs chmod 000",
