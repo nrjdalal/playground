@@ -73,6 +73,8 @@ export type PrFacts = {
   state: string
   // The PR's title, whose fix( opening ships a ship-now PR (shipNowLine); absent only in a test.
   title?: string
+  // Whether merge-on-ready lands PRs on this machine (mergeOnReadyRuns), which the code gate's ✗ names as its way on; absent reads as off.
+  trainRuns?: boolean
   // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
   unfound?: string[]
 }
@@ -372,7 +374,7 @@ export const GATE_CODE = [
 ]
 
 // Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
-export function codeGate(differs: string[]): Gate {
+export function codeGate(differs: string[], _way: { n: number; trainRuns: boolean }): Gate {
   return differs.length === 0
     ? { detail: `this checkout's gate code is ${BASE}'s`, name: "code", ok: true }
     : {
@@ -453,7 +455,8 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       ok: facts.base === BASE,
     },
   ]
-  if (facts.gateCode) gates.push(codeGate(facts.gateCode))
+  if (facts.gateCode)
+    gates.push(codeGate(facts.gateCode, { n: facts.n, trainRuns: facts.trainRuns ?? false }))
   const parent = parentGate(facts)
   if (parent) gates.push(parent)
   gates.push(upToDate(facts), keepsCanary(facts.lost))
