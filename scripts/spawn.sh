@@ -992,6 +992,10 @@ try:
             logins.append((email, name, email, seen, detail))
             if detail is None:
                 known.add(email.lower())
+        # an --account start on the own login whose fresh status reads loginEnded starts on its seat token whichever account usage.json reads and however fresh stored-login.json is, since the config login stops at /login; it is judged as that login alone, as below
+        if own_pick and login_ended and not on_seat:
+            seat_name, seat_seen, seat_detail, on_seat = seat_start(own_pick, f"its Claude Code login has ended (loginEnded: {login_ended})")
+            logins = [(own_pick, seat_name, None, seat_seen, seat_detail)]
         logins = [(email, name, acct, seen, detail or (f"it is parked until {parked[email.lower()]} (usage.accounts parkedUntil)" if email.lower() in parked else None)) for email, name, acct, seen, detail in logins]
         # --account naming the own login: that login alone, judged as a bare start judges it, refused on its reading's failure and never split
         if own_pick:
@@ -1067,7 +1071,7 @@ why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessio
 if any(gate == "usage" for gate, _ in skips):
     print("ok")
 elif own_pick and on_seat:
-    print(f"ok {own_pick} --account {own_pick} is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at {fmt(readings['week'])}% ({chosen[1]})")
+    print(f"ok {own_pick} --account {own_pick} is this machine's own login, whose {'Claude Code login has ended (loginEnded: ' + login_ended + ')' if login_ended else 'stored reading reads nothing'}, so it starts on its seat token, the split skipped: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif own_pick:
     week = f"its week is at {fmt(readings['week'])}%" if "week" in readings else f"its usage {readings.get('usage', 'unread')}"
     print(f"ok - --account {own_pick} is this machine's own login, so it starts there, the split skipped: {week} ({chosen[1]})")
