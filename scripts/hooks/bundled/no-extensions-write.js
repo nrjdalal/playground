@@ -12089,8 +12089,8 @@ function compoundBodies(commands, bodies = new WeakMap) {
     const lead = cmd.words.find((w) => w.quoted || !LEADS2.has(w.value));
     if (lead && !lead.quoted && OPENERS.has(lead.value))
       open.push(k);
-    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
-      bodies.set(cmd, commands.slice(open.pop(), k));
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value))
+      bodies.set(cmd, commands.slice(open.pop() ?? 0, k));
     if (cmd.inner)
       compoundBodies(cmd.inner(), bodies);
   });

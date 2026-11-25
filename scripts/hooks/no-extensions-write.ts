@@ -1729,14 +1729,14 @@ function fdFiles(redirects: Command["redirects"], inherited: Map<string, Word[]>
 const LEADS = new Set(["!", "(", "do", "elif", "else", "then", "{"])
 const OPENERS = new Set(["case", "for", "if", "select", "until", "while"])
 const CLOSERS = new Set(["done", "esac", "fi"])
-// The commands each compound's closer (fi, done, esac) holds, its opener's included, in every scope of a line, so a redirect on the closer writes what they print
+// The commands each compound's closer (fi, done, esac) holds, its opener's included, in every scope of a line, so a redirect on the closer writes what they print; a closer whose opener the hook cannot see (`time while …`, `coproc w while …`, `nocorrect while …`) holds every command before it in its scope, failing closed on any prefix spelling
 function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Command[]>()) {
   const open: number[] = []
   commands.forEach((cmd, k) => {
     const lead = cmd.words.find((w) => w.quoted || !LEADS.has(w.value))
     if (lead && !lead.quoted && OPENERS.has(lead.value)) open.push(k)
-    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
-      bodies.set(cmd, commands.slice(open.pop(), k))
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value))
+      bodies.set(cmd, commands.slice(open.pop() ?? 0, k))
     if (cmd.inner) compoundBodies(cmd.inner(), bodies)
   })
   return bodies
