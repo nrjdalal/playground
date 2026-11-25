@@ -50,6 +50,60 @@ export const groups: Group[] = [
         "a sed script's own w command onto the roster",
         `sed -n "w $HOME/.playground/roster.json" /tmp/new.json`,
       ],
+      [
+        "a sed script's addressed w command onto the roster",
+        'sed -n "1w $HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      [
+        "a sed script's last-line w command onto the roster",
+        'sed -n "\\$w $HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      [
+        "a sed script's ranged w command onto the roster",
+        'sed -n "1,5w $HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      [
+        "a sed s command's w flag onto the roster past a bar delimiter",
+        'sed -n "s|a|b|w $HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      [
+        "a sed s command's w flag onto the roster past a comma delimiter",
+        'sed -n "s,a,b,w $HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      [
+        "a sed w command onto the roster with no blank",
+        'sed -n "w$HOME/.playground/roster.json" /tmp/new.json',
+      ],
+      ["a sed W command onto the roster", 'sed -n "W $HOME/.playground/roster.json" /tmp/new.json'],
+      [
+        "a g-named move of a roster.json into the data folder",
+        "gmv /tmp/roster.json ~/.playground/",
+      ],
+      ["a g-named move into the data folder named by -t", "gmv -t ~/.playground /tmp/roster.json"],
+      [
+        "a g-named copy of a roster.json into the data folder",
+        "gcp /tmp/roster.json ~/.playground/",
+      ],
+      [
+        "a g-named link of a roster.json into the data folder",
+        "gln -sf /tmp/roster.json ~/.playground/",
+      ],
+      [
+        "a g-named install of a roster.json into the data folder",
+        "ginstall /tmp/roster.json ~/.playground/",
+      ],
+      [
+        "a g-named tee onto the roster through an unread variable",
+        "F=$(echo ~/.playground/roster.json); jq . /tmp/x | gtee $F",
+      ],
+      [
+        "a g-named removal of the roster through an unread variable",
+        'F=$(echo ~/.playground/roster.json); grm "$F"',
+      ],
+      [
+        "a g-named truncate of the roster through an unread variable",
+        'F=$(echo ~/.playground/roster.json); gtruncate -s0 "$F"',
+      ],
     ],
   },
 ]

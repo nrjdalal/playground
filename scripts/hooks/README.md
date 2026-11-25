@@ -1514,7 +1514,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 - On Bash it walks the call through `shell.ts`'s reader, in each folder the shell may be in:
   - a writing redirect (`>`, `>>`, `>|`, `<>`) onto the file;
   - a placer (`cp`, `ditto`, `install`, `ln`, `mv`, `rsync`: `PLACERS`) with the file as its destination (its last operand, or `-t` for `cp`, `install`, `ln` and `mv`, since rsync's `-t` keeps times), or a `roster.json` it places into the data folder;
-  - `sed` or `gsed` with `-i` or `--in-place`, or whose script writes the file by its own `w` command or an `s` command's `w` flag (`SED_WRITE`), `-i` or not;
+  - `sed` with `-i` or `--in-place`, or whose script names the file, `-i` or not, since a `w` or `W` with any address, an `s` command's `w` flag with any delimiter, or GNU sed's `e` each write it, so the hook fails closed past the commands it would have to parse; the file as an operand of its own runs, since sed only reads it;
   - any other program given the file as a word (`tee`, `mv`, `ln`, `rm`, `truncate`, an editor), since only a reader leaves it as it is;
   - inline code (`bun -e`, `python3 -c`, `node`, `perl` and the rest of `CODE_RUNNERS`) that names the file and holds a write word (`WRITE_WORDS`: `write`, an `open(` to write or append, `rename`, `unlink`, `rm`, `truncate`, a `>` but `=>` and `>=`), since it does not parse that code;
     so a write to another file beside a read of the roster is refused too, and a read alone runs.
@@ -1522,6 +1522,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   A write position is a redirect target, a placer's destination, or an operand of a program that writes each one it names (`tee`, `rm`, `truncate`, an in-place `sed` and the rest of `WRITERS`).
   An unread operand of any other program runs, since a real `roster.ts` call carries one (`"Review: $(jq … roster.json)"`).
   A `bash -c` or `sh -c` script is read as shell, so its forms are judged as the line's own.
+- It reads a GNU program under its g-prefixed name (`gmv`, `gcp`, `gtee`, `grm`, `gsed`) as the plain one, for each program it knows by name (`KNOWN`).
 - Every other call runs: `bun scripts/roster.ts …`, a reader of the file (`cat`, `jq`, `grep`, `head`, `ls`, `stat`, `diff`, `sed` without `-i`, the rest of `READERS`), a copy from it, the versions and temp file beside it (`roster.json.1`, `roster.json.tmp`), and text that only names it on its way elsewhere (a commit message, a `--body`, a heredoc or an `echo` into another file).
   `merge-queue.json` stays out of it, since the Builder writes that file by hand (playbook's SWEEP.md).
 - It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-raw-wa](#no-raw-wa)'s process runs it first on the file tools, since that hook's registration already takes them, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).

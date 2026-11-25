@@ -115,6 +115,13 @@ describe("roster.ts and every read run", () => {
     "install -m 600 /tmp/x ~/.playground/scratch/x",
     "sed -E 's/a/b/' ~/.playground/roster.json > /tmp/out.json",
     "sed -n 'w /tmp/out.json' ~/.playground/roster.json",
+    "sed -n 's/x/y/w /tmp/out' ~/.playground/roster.json",
+    "sed -n '/x/{p;w /tmp/o\n}' ~/.playground/roster.json",
+    "sed -n 1p ~/.playground/roster.json",
+    "gsed -n 1p ~/.playground/roster.json",
+    "grep -c worker ~/.playground/roster.json",
+    "gcat ~/.playground/roster.json",
+    "gcp ~/.playground/roster.json /tmp/roster.json",
     "rm /tmp/x.json; tee /tmp/y < ~/.playground/roster.json",
     'F=$(mktemp); touch "$F"',
     // real calls the replay found, each a read of the roster

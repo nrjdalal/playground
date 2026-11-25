@@ -75,9 +75,6 @@ const WRITERS = new Set([
   "unlink",
 ])
 
-// A sed script's own write, its w command or an s command's w flag, which writes a file with no -i.
-const SED_WRITE = /(?:^|[;{}\n]|\/[gpiImMe0-9]*)\s*w\s+\S/
-
 // Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
   "awk",
@@ -151,7 +148,10 @@ const tailOf = (source: string): string => {
   return rest.replace(/^(?:\w+|[-@*#?$!])/, "")
 }
 
-const SEDS = new Set(["gsed", "sed"])
+const SEDS = new Set(["sed"])
+
+// The programs this hook reads by name, each of which GNU also installs with a g before it
+const KNOWN = new Set([...PLACERS, ...READERS, ...SEDS, ...WRITERS])
 
 const shown = (word: Word) => word.source ?? visible(word.value)
 
@@ -205,8 +205,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse(`a redirect onto ${shown(r.target)}`)
-    const tool = program(name)
-    if (!tool) return
+    const prog = program(name)
+    if (!prog) return
+    // GNU coreutils and sed under their g-prefixed names (gmv, gtee, gsed) run as the plain ones
+    const tool = /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog
     if (
       CODE_RUNNERS.has(tool) &&
       args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
@@ -226,8 +228,11 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       if (COPIERS.has(tool)) return
     }
     if (SEDS.has(tool)) {
-      if (args.some((a) => SED_WRITE.test(a.value) && namesRoster(a.source ?? a.value, targets)))
-        return refuse(`${tool} whose script writes the roster`)
+      // a script naming the roster may write it (w, W, e, s///w with any address or delimiter), so it fails closed; the roster as an operand of its own is only read
+      const script = (a: Word) =>
+        namesRoster(a.source ?? a.value, targets) &&
+        !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob))
+      if (args.some(script)) return refuse(`${tool} whose script names the roster`)
       if (!inPlace(args)) return
     }
     if (READERS.has(tool)) return

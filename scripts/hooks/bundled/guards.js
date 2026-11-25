@@ -19753,7 +19753,6 @@ var WRITERS2 = new Set([
   "truncate",
   "unlink"
 ]);
-var SED_WRITE = /(?:^|[;{}\n]|\/[gpiImMe0-9]*)\s*w\s+\S/;
 var CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -19813,7 +19812,8 @@ var tailOf = (source) => {
     return rest.slice(rest.lastIndexOf(")") + 1);
   return rest.replace(/^(?:\w+|[-@*#?$!])/, "");
 };
-var SEDS3 = new Set(["gsed", "sed"]);
+var SEDS3 = new Set(["sed"]);
+var KNOWN = new Set([...PLACERS, ...READERS4, ...SEDS3, ...WRITERS2]);
 var shown3 = (word) => word.source ?? visible(word.value);
 var inPlace2 = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
 var destinationOf = (tool, args) => {
@@ -19858,9 +19858,10 @@ async function judgeBash(command, cwd, environment) {
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse15(`a redirect onto ${shown3(r.target)}`);
-    const tool = program(name);
-    if (!tool)
+    const prog = program(name);
+    if (!prog)
       return;
+    const tool = /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
     if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
       return refuse15(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
@@ -19875,8 +19876,9 @@ async function judgeBash(command, cwd, environment) {
         return;
     }
     if (SEDS3.has(tool)) {
-      if (args.some((a) => SED_WRITE.test(a.value) && namesRoster(a.source ?? a.value, targets)))
-        return refuse15(`${tool} whose script writes the roster`);
+      const script = (a) => namesRoster(a.source ?? a.value, targets) && !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob));
+      if (args.some(script))
+        return refuse15(`${tool} whose script names the roster`);
       if (!inPlace2(args))
         return;
     }
