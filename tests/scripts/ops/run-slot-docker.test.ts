@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { machine, runSlot, SCRIPT, spawn } from "./run-slot-fake"
@@ -879,5 +879,97 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.err).toContain("refuses a chain that builds a docker image")
       expect(r.ran).toBe(false)
     })
+  })
+})
+
+// #3039: two reclaimers of one stale run-slot-docker could both pass their re-read, so the second's rmdir removed the slot the next taker had just made
+describe("two reclaimers of one stale run-slot-docker", () => {
+  // a machine whose stale run-slot-docker names a pid no process holds, whose fake build waits while the hold file stands, and whose reclaimer B runs its rm and mkdir of the slot's files, and its rmdir of them and of the slot, through a shim: before its nth such call it writes at-<n> and waits for go-<n> while pause-<n> stands, and after it writes done-<n>
+  const race = () => {
+    const m = dockerMachine()
+    m.holdDocker()
+    const holder = join(m.ops, "run-slot-docker.holder")
+    writeFileSync(holder, "worker-gone 99999999 2026-11-06T01:00:00Z\n")
+    const hold = join(m.root, "hold")
+    const docker = join(m.bin, "docker")
+    writeFileSync(
+      docker,
+      readFileSync(docker, "utf8").replace(
+        'touch "${@: -1}"',
+        `while [ -e ${hold} ]; do sleep 0.05; done\ntouch "\${@: -1}"`,
+      ),
+    )
+    const shims = join(m.root, "reclaimer-b")
+    mkdirSync(shims)
+    const rest = m.env().PATH
+    const count = join(shims, "count")
+    for (const name of ["mkdir", "rm", "rmdir"]) {
+      writeFileSync(
+        join(shims, name),
+        `#!/bin/bash
+case " $* " in
+  *"/run-slot-docker.holder "* | *"/run-slot-docker/"*${name === "rmdir" ? ` | *"/run-slot-docker "*` : ""})
+    n=$(($(cat ${count} 2>/dev/null || echo 0) + 1)); echo $n > ${count}
+    [ -e ${shims}/pause-$n ] && { : > ${shims}/at-$n; until [ -e ${shims}/go-$n ]; do sleep 0.05; done; }
+    PATH=${rest} ${name} "$@"; rc=$?; : > ${shims}/done-$n; exit $rc ;;
+esac
+PATH=${rest} exec ${name} "$@"
+`,
+      )
+      chmodSync(join(shims, name), 0o755)
+    }
+    const until = async (path: string) => {
+      while (!existsSync(path)) await Bun.sleep(20)
+    }
+    const build = ["docker", "build", "."]
+    const b = (...pauses: number[]) => {
+      for (const n of pauses) writeFileSync(join(shims, `pause-${n}`), "")
+      return m.start("worker-b", { PATH: `${shims}:${rest}` }, SCRIPT, build)
+    }
+    // reclaimer A, which reclaims the slot and takes it, its build held until the hold file goes
+    const a = async () => {
+      writeFileSync(hold, "")
+      const run = m.start("worker-a", {}, SCRIPT, build)
+      while (!(existsSync(holder) && readFileSync(holder, "utf8").startsWith("worker-a ")))
+        await Bun.sleep(20)
+      return run
+    }
+    const at = (n: number) => until(join(shims, `at-${n}`))
+    const go = (n: number) => writeFileSync(join(shims, `go-${n}`), "")
+    const done = (n: number) => until(join(shims, `done-${n}`))
+    const release = () => rmSync(hold, { force: true })
+    return { a, at, b, done, go, holder, m, release }
+  }
+
+  test("leave the taker between them its slot", async () => {
+    const r = race()
+    // B stops at its first act on the slot, past its checks of the stale holder line
+    const b = r.b(1)
+    await r.at(1)
+    const a = await r.a()
+    r.go(1)
+    await r.done(2)
+    expect(existsSync(join(r.m.ops, "run-slot-docker"))).toBe(true)
+    expect(readFileSync(r.holder, "utf8")).toStartWith("worker-a ")
+    r.release()
+    expect(await a.ran()).toBe(true)
+    expect(await b.ran()).toBe(true)
+  })
+
+  test("free the slot when the taker gives it back while B's claim sits in its folder", async () => {
+    const r = race()
+    // B stops before its claim, and again before it takes the claim back out of the taker's folder
+    const b = r.b(1, 2)
+    await r.at(1)
+    const a = await r.a()
+    r.go(1)
+    await r.at(2)
+    expect(existsSync(join(r.m.ops, "run-slot-docker", "reclaim"))).toBe(true)
+    r.release()
+    expect(await a.ran()).toBe(true)
+    expect(existsSync(join(r.m.ops, "run-slot-docker"))).toBe(false)
+    expect(existsSync(r.holder)).toBe(false)
+    r.go(2)
+    expect(await b.ran()).toBe(true)
   })
 })
