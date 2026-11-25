@@ -2333,7 +2333,7 @@ test("13c merge reads a chunk the sandbox's deadline cut, with no failed case, a
     () => 124,
   )
   expect(out.lines).toEqual([
-    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean: ${[1, 2, 3, 4, 5, 6, 7, 8].map(t).join(" ")}`,
   ])
   expect(out.code).toBe(1)
   expect(out.calls).toHaveLength(1)
@@ -2350,7 +2350,7 @@ test("13d merge still reads a real failed case in a chunk the deadline cut as th
     files.length > 1 ? 124 : reds.length ? 1 : 0,
   )
   expect(out.lines).toEqual([
-    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean: ${[1, 2, 4, 5, 6, 7, 8].map(t).join(" ")}`,
     `HEAD-RED: ${t(3)}`,
   ])
   expect(out.code).toBe(1)
@@ -2443,8 +2443,8 @@ const cutAt = (n: number) => {
     report: (files: string[], reds: string[]) => (++call === n ? undefined : junit(files, reds)),
   }
 }
-const cutLine = (canary: string, where: string) =>
-  `TIMEOUT on ${canary}: ${where} (1 file) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`
+const cutLine = (canary: string, where: string, file: string) =>
+  `TIMEOUT on ${canary}: ${where} (1 file) hit the sandbox's deadline, so the files it had not reported read neither red nor clean: ${file}`
 
 test("13i merge reads a cut on the merge's second run as TIMEOUT alone, never a BATCH-RED (#3045)", () => {
   const [repo, head] = mergeRepo(
@@ -2454,7 +2454,7 @@ test("13i merge reads a cut on the merge's second run as TIMEOUT alone, never a 
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   const { exit, report } = cutAt(2)
   const out = runMerge(repo, head, undefined, undefined, report, exit)
-  expect(out.lines).toEqual([cutLine(canary, "on the merge's second run, chunk 1 of 1")])
+  expect(out.lines).toEqual([cutLine(canary, "on the merge's second run, chunk 1 of 1", t(3))])
   expect(out.code).toBe(1)
   expect(out.calls).toHaveLength(2)
 })
@@ -2467,7 +2467,7 @@ test("13j merge reads a cut at the head as TIMEOUT alone, never a CANARY-RED (#3
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   const { exit, report } = cutAt(3)
   const out = runMerge(repo, head, undefined, undefined, report, exit)
-  expect(out.lines).toEqual([cutLine(canary, "at the head, chunk 1 of 1")])
+  expect(out.lines).toEqual([cutLine(canary, "at the head, chunk 1 of 1", t(3))])
   expect(out.code).toBe(1)
   expect(git(repo, "rev-parse", "HEAD")).toBe(head)
 })
@@ -2480,7 +2480,7 @@ test("13k merge reads a cut at canary as TIMEOUT alone, never a HEAD-RED for a r
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   const { exit, report } = cutAt(4)
   const out = runMerge(repo, head, undefined, undefined, report, exit)
-  expect(out.lines).toEqual([cutLine(canary, `at ${canary}, chunk 1 of 1`)])
+  expect(out.lines).toEqual([cutLine(canary, `at ${canary}, chunk 1 of 1`, "tests/src/a.test.ts")])
   expect(out.code).toBe(1)
   expect(out.calls).toHaveLength(4)
 })
@@ -2503,7 +2503,9 @@ test("13l merge reads a cut lone run of a file the report left out as TIMEOUT al
           ),
     (_files, reds) => (call === 2 ? 124 : reds.length ? 1 : 0),
   )
-  expect(out.lines).toEqual([cutLine(canary, `on the merge, chunk 1 of 1, a lone run of ${t(8)}`)])
+  expect(out.lines).toEqual([
+    cutLine(canary, `on the merge, chunk 1 of 1, a lone run of ${t(8)}`, t(8)),
+  ])
   expect(out.code).toBe(1)
   expect(out.calls.map((c) => c.slice(1))).toEqual([[1, 2, 3, 4, 5, 6, 7, 8].map(t), [t(8)]])
 })

@@ -1132,12 +1132,16 @@ export const cmdMerge = (...args: string[]): void => {
     return xml
   }
   // A run the sandbox's deadline cut keeps the failed cases its report names as red; each other file it ran goes in cut, which TIMEOUT alone names and every red state leaves out, so a cut never reads as a red or a green.
-  const timedOut: string[] = []
+  const timedOut: { label: string; files: string[] }[] = []
   const cut = new Set<string>()
   const timeout = (files: string[], xml: string | undefined, label: string): string[] => {
     const { failed } = redIn(xml, files)
-    for (const f of files) if (!failed.includes(f)) cut.add(f)
-    timedOut.push(`${label} (${files.length} file${files.length === 1 ? "" : "s"})`)
+    const unreported = files.filter((f) => !failed.includes(f))
+    for (const f of unreported) cut.add(f)
+    timedOut.push({
+      label: `${label} (${files.length} file${files.length === 1 ? "" : "s"})`,
+      files: unreported,
+    })
     return failed
   }
   const redAlone = (f: string, label: string): boolean => {
@@ -1218,9 +1222,9 @@ export const cmdMerge = (...args: string[]): void => {
   const canaryOnly = onMerge.filter(
     (f) => !atHead.includes(f) && !atBase.includes(f) && !cut.has(f),
   )
-  for (const cut of timedOut)
+  for (const { label, files } of timedOut)
     console.log(
-      `TIMEOUT on ${c7}: ${cut} hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+      `TIMEOUT on ${c7}: ${label} hit the sandbox's deadline, so the files it had not reported read neither red nor clean: ${files.join(" ")}`,
     )
   if (timedOut.length) process.exitCode = 1
   if (canaryOnly.length) {
