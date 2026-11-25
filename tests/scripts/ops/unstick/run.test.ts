@@ -1958,7 +1958,7 @@ run.named_kind = lambda name: None
 run.quiet_for = lambda path, now_t: 3600
 run.screen = lambda s: ["You've hit your weekly limit"]
 stuck = sys.argv[2] == "usage-limit-stuck"
-run.read_block = lambda lines, s: (None, None, ("You've hit your weekly limit", 1800)) if stuck else (sys.argv[2], "You've hit your weekly limit", None)
+run.read_block = lambda lines, s: (None, None, ("You've hit your weekly limit", 1800), None) if stuck else (sys.argv[2], "You've hit your weekly limit", None, None)
 run.session_account = lambda name: "acct-spent"
 run.moving = lambda now_t=None: None
 for fn in ("stall",):
@@ -2296,5 +2296,199 @@ describe("the live dashboard's db reading", () => {
     expect(readFileSync(log, "utf8")).toBe(
       `bunx portless get api.playground|${pdir}\ncurl -s -m 5 --cacert ${pdir}/ca.pem http://127.0.0.1:9/api/health\n`,
     )
+  })
+})
+
+// The compaction the pane shows is not one of the blocking KINDS (blocked() bails on its "esc to interrupt" footer), so these run run.py's real compaction() and tick_count() through cycle(), stubbing only the herdr, roster and side checks; the manager is "lead" and is_local picks the local path.
+describe("ops-unstick reads a compacting pane", () => {
+  const DRIVER = `
+import importlib.util, json, os, sys, time
+spec = importlib.util.spec_from_file_location("run", sys.argv[1])
+run = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(run)
+clock = [1_800_000_000.0]
+run.time.time = lambda: clock[0]
+run.time.sleep = lambda s: None
+_screens = json.loads(os.environ["SCREEN"])
+_screen_idx = [0]
+def _screen(s):
+    if _screen_idx[0] < len(_screens):
+        i = _screen_idx[0]
+        _screen_idx[0] += 1
+        return _screens[i]
+    return _screens[-1]
+run.screen = _screen
+run.quiet_for = lambda path, now_t: 3600
+run.is_local = lambda name: os.environ.get("IS_LOCAL", "false").lower() == "true"
+run.herdr_sessions = lambda: [session]
+run.name_of = lambda s: "worker-a"
+run.roster_kinds = lambda: {}
+run.kind_of = lambda name, kinds=None: "worker"
+run.is_lead = lambda name, kinds: False
+run.manager_kind_of_name = lambda name: None
+run.named_kind = lambda name: None
+run.alert_to = lambda name, transcript: "lead"
+run.session_account = lambda name: "acct"
+run.moving = lambda now_t=None: None
+run.api_error_stop = lambda s, now_t: None
+run.hook_owned = lambda sid: os.environ.get("HOOK_OWNED") == "true"
+sent = []
+run.notify = lambda text, to="dispatcher": sent.append([to, text])
+run.log = lambda line: None
+for fn in ("capped_alert", "ending_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
+    setattr(run, fn, lambda *a, **k: [])
+setattr(run, "stall", lambda *a, **k: None)
+setattr(run, "slot_stuck", lambda *a, **k: None)
+setattr(run, "move_summary", lambda *a, **k: [])
+run.heavy_cap = lambda: 1
+session = {"session_id": "s-1", "surface_id": "w1:p1", "workspace_id": "w1", "transcript_path": ""}
+os.makedirs(run.HERE, exist_ok=True)
+state = {"blocks": {}}
+for _ in range(int(os.environ.get("PASSES", "1"))):
+    run.cycle(state)
+    clock[0] += float(os.environ.get("STEP", "1200"))
+blocked = [b["kind"] for b in json.load(open(os.path.join(run.HERE, "state.json")))["blocked"]]
+print(json.dumps({"blocked": blocked, "sent": sent}))
+`
+  const compact = async (
+    screens: string[][],
+    passes = 1,
+    step = 1200,
+    isLocal = false,
+    hookOwned = false,
+  ): Promise<{ blocked: string[]; sent: [string, string][] }> => {
+    const config = scratch()
+    const env = {
+      HOOK_OWNED: hookOwned ? "true" : "false",
+      IS_LOCAL: isLocal ? "true" : "false",
+      PASSES: String(passes),
+      SCREEN: JSON.stringify(screens),
+      STEP: String(step),
+    }
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", DRIVER, RUN_PY], {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        TZ: "UTC",
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
+        ...env,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (code !== 0) throw new Error(`unstick exited ${code}: ${err}`)
+    return JSON.parse(out) as { blocked: string[]; sent: [string, string][] }
+  }
+  // A real compacting pane, the "Compacting conversation…" line, its spinner, and the esc footer the kind matcher bails on.
+  const compaction = (tick: string) => [
+    "  ? Esc to interrupt",
+    "────────────────────────────────────────",
+    `✶ Compacting conversation… (16m 32s · ↓ ${tick} tokens)`,
+    "  ? esc to interrupt",
+  ]
+  test("a Prompt is too long stop above the line alerts the manager at first sight", async () => {
+    const { sent } = await compact([["  ⎿  Prompt is too long", ...compaction("1.8k")]], 1)
+    expect(sent, "one alert").toHaveLength(1)
+    expect(sent[0][0]).toBe("lead")
+    expect(sent[0][1]).toContain("Compacting conversation")
+    expect(sent[0][1]).toContain("above the line")
+  })
+
+  test("a stop above the line re-alerts every REALERT while it holds, its count still moving", async () => {
+    const stopped = (tick: string) => ["  ⎿  Prompt is too long", ...compaction(tick)]
+    const { sent } = await compact([stopped("1.8k"), stopped("2.0k")], 2, 1200, true)
+    expect(sent, "two alerts").toHaveLength(2)
+  })
+
+  test("a stop that shows past 10 minutes sends one alert on that pass, not two", async () => {
+    const { sent } = await compact(
+      [compaction("1.8k"), ["  ⎿  Prompt is too long", ...compaction("2.0k")]],
+      2,
+      1200,
+    )
+    expect(sent, "one alert").toHaveLength(1)
+    expect(sent[0][1]).toContain("above the line")
+  })
+
+  // state.json's blocked list is what the Dashboard shows as Stuck and the leads' sweep reads, and most compactions are healthy.
+  test("a healthy compaction is not listed as blocked in state.json", async () => {
+    const { blocked, sent } = await compact([compaction("300")], 1)
+    expect(sent, "nothing").toEqual([])
+    expect(blocked, "no blocked entry").toEqual([])
+  })
+
+  test("a compaction past the 10-minute line is listed as blocked in state.json", async () => {
+    const { blocked, sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200)
+    expect(sent, "one alert").toHaveLength(1)
+    expect(blocked, "one compacting entry").toEqual(["compacting"])
+  })
+
+  test("a line that only quotes the stop's words above a healthy compaction raises nothing", async () => {
+    const quoted = [
+      '+STOP = re.compile(r"Prompt is too long|invalid_request", re.I)',
+      "  ⎿  run.py:55: Prompt is too long",
+      ...compaction("300"),
+    ]
+    const { blocked, sent } = await compact([quoted], 1)
+    expect(sent, "nothing").toEqual([])
+    expect(blocked, "no blocked entry").toEqual([])
+  })
+
+  test("a compaction the session-state hook recorded as stuck or failed raises nothing", async () => {
+    const { sent } = await compact(
+      [["  ⎿  Prompt is too long", ...compaction("1.8k")]],
+      1,
+      1200,
+      false,
+      true,
+    )
+    expect(sent, "nothing").toEqual([])
+  })
+
+  test("a local compaction whose ↓ count is unchanged past 10 minutes alerts, with the frozen count", async () => {
+    const { sent } = await compact([compaction("1.8k"), compaction("1.8k")], 2, 1200, true)
+    expect(sent, "one alert").toHaveLength(1)
+    expect(sent[0][0]).toBe("lead")
+    expect(sent[0][1]).toContain("Compacting conversation")
+    expect(sent[0][1]).toContain("frozen at 1800")
+  })
+
+  test("a slow local compaction whose ↓ count moves raises nothing", async () => {
+    const { sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, true)
+    expect(sent, "nothing").toEqual([])
+  })
+
+  test("a Claude-served session still compacting 10 minutes on alerts", async () => {
+    const { sent } = await compact([compaction("1.8k"), compaction("2.0k")], 2, 1200, false)
+    expect(sent, "one alert").toHaveLength(1)
+    expect(sent[0][0]).toBe("lead")
+    expect(sent[0][1]).toContain("Compacting conversation")
+    expect(sent[0][1]).toContain("stuck past 10 minutes")
+  })
+
+  test("a session that moved on between passes raises nothing", async () => {
+    const { sent } = await compact([compaction("1.8k"), ["⏺ Working on the fix."]], 2, 1200, false)
+    expect(sent, "nothing").toEqual([])
+  })
+
+  // A pane quoting the phrase on a tool output line and prose only, with no real spinner line, must match no compaction and so raises nothing.
+  test("a pane that only quotes the phrase on a tool line and prose raises nothing", async () => {
+    const quoted = [
+      "  ? Esc to interrupt",
+      "────────────────────────────────────────",
+      "⎿  Compacting conversation: a running summary is not in progress",
+      "   the log names the phrase again below the tool output as plain prose",
+      "  ? esc to interrupt",
+    ]
+    const { sent } = await compact([quoted, quoted], 2, 1200, false)
+    expect(sent, "nothing").toEqual([])
   })
 })
