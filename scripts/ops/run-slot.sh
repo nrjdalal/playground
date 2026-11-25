@@ -123,34 +123,45 @@ stale() {
     [ $(( NOW - m )) -ge 7200 ]
   fi
 }
-# gives slot folder $1 back: one mv out of the slot path to a name of this run's own, then an rmdir there of the folder, any claim in it and a claim taken over inside that, so a reclaimer's claim that lands before the mv leaves with the folder and one after finds no folder or a new taker's (issues 3039 and 3052); it fails only when the mv does
-drop() { mv "$1" "$1.gone-$$" 2>/dev/null || return 1; rmdir "$1.gone-$$/reclaim/reclaim" "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null; return 0; }
+# gives slot folder $1 back: one mv out of the slot path to a name of this run's own, then an rmdir there of each claim in it, the deepest first, and of the folder, so a reclaimer's claim that lands before the mv leaves with the folder and one after finds no folder or a new taker's (issues 3039 and 3052); it fails only when the mv does
+drop() {
+  local g="$1.gone-$$" d
+  mv "$1" "$g" 2>/dev/null || return 1
+  d=$g
+  while [ -d "$d/reclaim" ]; do d=$d/reclaim; done
+  while [ "$d" != "$g" ]; do rmdir "$d" 2>/dev/null; d=${d%/reclaim}; done
+  rmdir "$g" 2>/dev/null
+  return 0
+}
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale, returning 0 only when this call moved it out; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
   [ -d "$1" ] || return 1
-  local line dir again c=
+  local line dir now c="$1/reclaim" was
   line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 1
   dir=$(stamp "$1")
   # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
   stale "$1" "$line" || return 1
   # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and a folder holding it leaves $1 only by a drop, which a run makes of its own live folder or a reclaimer under its claim, so the stale folder stays at $1 until this reclaimer moves it (issue 3039)
-  if ! mkdir "$1/reclaim" 2>/dev/null; then
-    # a claim left by a reclaimer killed holding it is taken over once it is 2 hours old, never removed, so a live claim made since its age was read stands: one mkdir of a claim inside it, then the outer claim must still be the one stamped before that read, by inode and birth time (issue 3052)
-    c=$(stamp "$1/reclaim")
-    stale "$1/reclaim" "" && mkdir "$1/reclaim/reclaim" 2>/dev/null || return 1
-    again=$(stamp "$1/reclaim")
-    [ -n "$c" ] && [ "${again% *}" = "${c% *}" ] || { rmdir "$1/reclaim/reclaim" 2>/dev/null; return 1; }
+  if ! mkdir "$c" 2>/dev/null; then
+    # a claim left by a reclaimer killed holding it is taken over once it is 2 hours old by one mkdir of a claim inside it, never removed, and a takeover killed in turn the same way one level down, so a live claim at any level stands; the claim taken over must still be the one stamped before its age was read, by inode and birth time (issue 3052)
+    while :; do
+      was=$(stamp "$c")
+      [ -n "$was" ] && stale "$c" "" || return 1
+      c=$c/reclaim
+      mkdir "$c" 2>/dev/null && break
+    done
+    now=$(stamp "${c%/reclaim}")
+    [ "${now% *}" = "${was% *}" ] || { rmdir "$c" 2>/dev/null; return 1; }
   fi
   # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free's drop takes a claim left there with the folder
-  again=$(stamp "$1")
-  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${again% *}" = "${dir% *}" ]; then
+  now=$(stamp "$1")
+  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${now% *}" = "${dir% *}" ]; then
     # the stale holder line goes first, as in free; drop then moves the folder out with this claim still in it, so no second claim lands between the claim's removal and the folder's
     rm -f "$1.holder"
     drop "$1"
   else
-    [ -n "$c" ] && rmdir "$1/reclaim/reclaim" 2>/dev/null
-    rmdir "$1/reclaim" 2>/dev/null
+    rmdir "$c" 2>/dev/null
     return 1
   fi
 }
@@ -267,7 +278,7 @@ if [ "${1:-}" = box-off ]; then
   exit 0
 fi
 # run-slot.sh clear-stale: remove each slot's leftover holder (and its directory) whose pid is dead, or whose directory is already gone,
-# and each slot directory with no holder line that is 2 hours old, each only through reclaim's claim and drop, so a take between a check and a removal keeps its folder and holder line (issue 3052).
+# and each slot directory with no holder line that is 2 hours old, a folder only through reclaim's claim and drop and a line with no folder only by one mv, so a take between a check and a removal keeps its folder and holder line (issue 3052).
 # Sessions call this instead of a bare rm under ~/.claude, which raises Claude Code's delete prompt even in bypass mode (dispatcher, 12 Oct).
 if [ "${1:-}" = clear-stale ]; then
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\(\.holder\)\{0,1\}$/\1/p' | sort -u); do
@@ -280,16 +291,14 @@ if [ "${1:-}" = clear-stale ]; then
         pid=$(printf '%s' "$line" | cut -d' ' -f2)
         printf '%s' "$pid" | grep -Eq '^[0-9]+$' && alive "$pid" && echo "$s: held by ${line%% *} (pid $pid, alive); left alone"
       fi
-    # a holder line with no folder: the path is taken and claimed first, and the line goes only while it reads as before the take, since a reclaimer that freed the folder since removed it first
-    elif [ -n "$line" ] && mkdir "$p" 2>/dev/null; then
-      if mkdir "$p/reclaim" 2>/dev/null; then
-        if [ "$(cat "$p.holder" 2>/dev/null)" = "$line" ]; then
-          rm -f "$p.holder"
-          drop "$p" && echo "$s: cleared a stale holder ($line)"
-        else
-          rmdir "$p/reclaim" 2>/dev/null
-        fi
+    # a holder line with no folder goes by one mv to a name of this run's own, and comes back by ln when that file no longer reads as the line read, since a taker wrote its own line there in between; a taker's write after the mv makes a new file
+    elif [ -n "$line" ] && mv "$p.holder" "$p.holder.gone-$$" 2>/dev/null; then
+      if [ "$(cat "$p.holder.gone-$$" 2>/dev/null)" = "$line" ]; then
+        echo "$s: cleared a stale holder ($line)"
+      else
+        ln "$p.holder.gone-$$" "$p.holder" 2>/dev/null
       fi
+      rm -f "$p.holder.gone-$$"
     fi
   done
   exit 0
