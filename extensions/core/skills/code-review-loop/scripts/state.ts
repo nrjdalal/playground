@@ -88,7 +88,7 @@ export const runnerOf = (clone: string): Runner | undefined => {
 }
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
-export const CHUNK = 200
+const CHUNK = 200
 export const chunksOf = (files: string[]): string[][] =>
   Array.from({ length: Math.ceil(files.length / CHUNK) }, (_, i) =>
     files.slice(i * CHUNK, (i + 1) * CHUNK),
@@ -1131,42 +1131,55 @@ export const cmdMerge = (...args: string[]): void => {
     for (const f of files) cases.set(f, casesIn(xml, f))
     return xml
   }
-  const redAlone = (f: string): boolean => {
+  // A run the sandbox's deadline cut keeps the failed cases its report names as red; each other file it ran goes in cut, which TIMEOUT alone names and every red state leaves out, so a cut never reads as a red or a green.
+  const timedOut: string[] = []
+  const cut = new Set<string>()
+  const timeout = (files: string[], xml: string | undefined, label: string): string[] => {
+    const { failed } = redIn(xml, files)
+    for (const f of files) if (!failed.includes(f)) cut.add(f)
+    timedOut.push(`${label} (${files.length} file${files.length === 1 ? "" : "s"})`)
+    return failed
+  }
+  const redAlone = (f: string, label: string): boolean => {
     rmSync(report, { force: true })
-    if (io.tests(session, clone, [f], report, runner!) !== 0) return true
+    const code = io.tests(session, clone, [f], report, runner!)
+    if (code === DEADLINE)
+      return timeout([f], readReport([f]), `${label}, a lone run of ${f}`).length > 0
+    if (code !== 0) return true
     const xml = readReport([f])
     return xml !== undefined && redIn(xml, [f]).leftOut.length === 0
   }
-  // A chunk the sandbox's deadline cut keeps the failed cases its report names as red and reads the rest as neither red nor clean, so a cut never reads as every file red.
-  const timedOut: string[] = []
-  const chunkRed = (files: string[], where: string, stage: string, label: string): string[] => {
+  const chunkRed = (files: string[], stage: string, label: string): string[] => {
     rmSync(report, { force: true })
     const code = io.tests(session, clone, files, report, runner!)
     if (code === 0) return []
     const xml = readReport(files)
-    if (code === DEADLINE) {
-      timedOut.push(`${stage}, ${label} (${files.length} files)`)
-      return redIn(xml, files).failed
-    }
+    if (code === DEADLINE) return timeout(files, xml, `${stage}, ${label}`)
     if (files.length === 1) return files
     const { failed, leftOut } = redIn(xml, files)
-    const named = files.filter((f) => failed.includes(f) || (leftOut.includes(f) && redAlone(f)))
-    if (named.length) return named
-    unnamed.push(where)
+    const named = files.filter(
+      (f) => failed.includes(f) || (leftOut.includes(f) && redAlone(f, `${stage}, ${label}`)),
+    )
+    if (named.length || leftOut.some((f) => cut.has(f))) return named
+    unnamed.push(
+      stage === "on the merge"
+        ? `on the merge, so all ${tests.length} touched tests ran again`
+        : stage,
+    )
     return files
   }
-  const red = (files: string[], where: string, stage: string): string[] => {
+  const red = (files: string[], stage: string): string[] => {
     const chunks = chunksOf(files)
-    return chunks.flatMap((c, i) => chunkRed(c, where, stage, `chunk ${i + 1} of ${chunks.length}`))
+    return chunks.flatMap((c, i) => chunkRed(c, stage, `chunk ${i + 1} of ${chunks.length}`))
   }
   const treeOf = (sha: string): Set<string> =>
     new Set(io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", sha).split("\0"))
-  const at = (sha: string, files: string[], where: string, stage: string): string[] => {
+  const at = (sha: string, files: string[], stage: string): string[] => {
     const tree = treeOf(sha)
     const there = files.filter((f) => tree.has(f))
     if (!there.length) return []
     io.run("git", "-C", clone, "checkout", "-q", "--detach", sha)
-    return red(there, where, stage)
+    return red(there, stage)
   }
   let branch = ""
   try {
@@ -1187,26 +1200,24 @@ export const cmdMerge = (...args: string[]): void => {
   let atBase: string[]
   const headCases = new Map<string, Set<string>>()
   try {
-    first = at(
-      merge,
-      tests,
-      `on the merge, so all ${tests.length} touched tests ran again`,
-      "on the merge",
-    )
-    onMerge = red(first, "on the merge's second run", "on the merge's second run")
-    atHead = at(headSha, onMerge, "at the head", "at the head")
+    first = at(merge, tests, "on the merge")
+    onMerge = red(first, "on the merge's second run")
+    atHead = at(headSha, onMerge, "at the head")
     for (const f of atHead) headCases.set(f, cases.get(f) ?? new Set())
-    atBase = at(baseSha, onMerge, `at ${c7}`, `at ${c7}`).filter((f) => {
+    atBase = at(baseSha, onMerge, `at ${c7}`).filter((f) => {
       const own = headCases.get(f)
       return !own || (own.size > 0 && [...own].every((c) => cases.get(f)?.has(c)))
     })
-    atHead = atHead.filter((f) => !atBase.includes(f))
+    atHead = atHead.filter((f) => !atBase.includes(f) && !cut.has(f))
+    atBase = atBase.filter((f) => !cut.has(f))
   } finally {
     rmSync(report, { force: true })
     io.run("git", "-C", clone, "checkout", "-q", ...back)
   }
-  const together = first.filter((f) => !onMerge.includes(f))
-  const canaryOnly = onMerge.filter((f) => !atHead.includes(f) && !atBase.includes(f))
+  const together = first.filter((f) => !onMerge.includes(f) && !cut.has(f))
+  const canaryOnly = onMerge.filter(
+    (f) => !atHead.includes(f) && !atBase.includes(f) && !cut.has(f),
+  )
   for (const cut of timedOut)
     console.log(
       `TIMEOUT on ${c7}: ${cut} hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,

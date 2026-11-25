@@ -2435,6 +2435,79 @@ test("13h merge on a Python clone runs pytest and reads its red by the report, w
   expect([...new Set(out.runners)]).toEqual(["pytest"])
 })
 
+// The nth call alone hits the sandbox's deadline and writes no report; every other call runs as the default fake does.
+const cutAt = (n: number) => {
+  let call = 0
+  return {
+    exit: (_files: string[], reds: string[]) => (call === n ? 124 : reds.length ? 1 : 0),
+    report: (files: string[], reds: string[]) => (++call === n ? undefined : junit(files, reds)),
+  }
+}
+const cutLine = (canary: string, where: string) =>
+  `TIMEOUT on ${canary}: ${where} (1 file) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`
+
+test("13i merge reads a cut on the merge's second run as TIMEOUT alone, never a BATCH-RED (#3045)", () => {
+  const [repo, head] = mergeRepo(
+    { ...eight, [t(3)]: "RED in the PR\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const { exit, report } = cutAt(2)
+  const out = runMerge(repo, head, undefined, undefined, report, exit)
+  expect(out.lines).toEqual([cutLine(canary, "on the merge's second run, chunk 1 of 1")])
+  expect(out.code).toBe(1)
+  expect(out.calls).toHaveLength(2)
+})
+
+test("13j merge reads a cut at the head as TIMEOUT alone, never a CANARY-RED (#3045)", () => {
+  const [repo, head] = mergeRepo(
+    { ...eight, [t(3)]: "RED in the PR\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const { exit, report } = cutAt(3)
+  const out = runMerge(repo, head, undefined, undefined, report, exit)
+  expect(out.lines).toEqual([cutLine(canary, "at the head, chunk 1 of 1")])
+  expect(out.code).toBe(1)
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("13k merge reads a cut at canary as TIMEOUT alone, never a HEAD-RED for a red the head may share (#3045)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n", "tests/src/a.test.ts": "RED on both\n" },
+    { "tests/src/a.test.ts": "RED on both\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const { exit, report } = cutAt(4)
+  const out = runMerge(repo, head, undefined, undefined, report, exit)
+  expect(out.lines).toEqual([cutLine(canary, `at ${canary}, chunk 1 of 1`)])
+  expect(out.code).toBe(1)
+  expect(out.calls).toHaveLength(4)
+})
+
+test("13l merge reads a cut lone run of a file the report left out as TIMEOUT alone, never a red or a NO-REPORT (#3045)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  let call = 0
+  const out = runMerge(
+    repo,
+    head,
+    onCanary(t(8)),
+    undefined,
+    (files, reds) =>
+      ++call === 2
+        ? undefined
+        : junit(
+            files.filter((f) => !reds.includes(f)),
+            [],
+          ),
+    (_files, reds) => (call === 2 ? 124 : reds.length ? 1 : 0),
+  )
+  expect(out.lines).toEqual([cutLine(canary, `on the merge, chunk 1 of 1, a lone run of ${t(8)}`)])
+  expect(out.code).toBe(1)
+  expect(out.calls.map((c) => c.slice(1))).toEqual([[1, 2, 3, 4, 5, 6, 7, 8].map(t), [t(8)]])
+})
+
 test("12o redIn reads bun's own junit report: a failed testcase's file is failed, a test file left out is leftOut, a green file and a non-test file are neither (#2468)", () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites name="bun test" tests="3" assertions="3" failures="1" skipped="0" time="0.01">
