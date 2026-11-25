@@ -342,7 +342,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
 
 - Every Bash guard runs in one bun process per Bash call: `scripts/hooks/guards.ts` runs each guard `GUARDS` names, all at once.
   Each runs as its own main block runs it: behind `fromFactory` when that block reads it, and through the entry that block calls, `check` for most, `guarded` for no-extensions-write and `refusal` for no-glm-heavy-path.
-  no-hidden-program, no-prepare-write, no-protected-push and no-raw-vercel, checks with no process of their own, run behind `fromFactory` through their `check`, and [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools.
+  no-hidden-program, no-prepare-write, no-protected-push, no-raw-vercel and no-roster-write, checks with no process of their own, run behind `fromFactory` through their `check`, [no-playground-leak](#no-playground-leak)'s process runs no-prepare-write and no-protected-push on the GitHub tools, and [no-raw-wa](#no-raw-wa)'s runs no-roster-write on the file tools.
   It refuses with every refusal they give, one paragraph each, in `GUARDS`' order, and reads `fromFactory` once a call for the gated ones.
   A guard that throws refuses the call, naming the guard and the fix, so one broken guard fails closed and the others still judge the call.
   Each guard keeps the state a check holds per call in its own async context, `inspectAs`'s policy and `withDeadline`'s deadline, so guards judging one call at once never read each other's.
@@ -1484,6 +1484,7 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   It is a speed bump, as no-raw-delete is: a word it cannot expand, built from a variable no command on the call sets, and a program's own code that builds the path, pass it.
   It fails open on a call it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-raw-wa.test.ts`.
   [guards](#guards) runs it on Bash, and both settings files register it for Edit, Glob, Grep, MultiEdit, NotebookEdit, Read and Write, after its script reached `main` by the order in [Registered in both settings files](#registered-in-both-settings-files).
+  Its process also runs [no-roster-write](#no-roster-write) first on the file tools.
   ops-wa pairs a device only while that registration stands (`unguarded()` in `packages/scripts/src/ops-wa/life.ts`), so no auth state exists for a session to reach without it.
 - A factory session queues no line as an owner-word job, ops-wa or ops-dm-watch: the relay leads each line with `[ops-<job>]` from its queue file's name (`packages/scripts/src/ops-outbox/drain.ts`), and a line led by either tag reads as the owner's own words (the `whatsapp` and `slack` skills).
   no-raw-wa refuses a `notify.sh` call whose job is `wa` or `dm-watch`, or a word it cannot read, run as the program or as a shell's script (`bash notify.sh wa …`), and a call that reaches either job's queue file in the data folder's `ops/outbox/` (`ops-wa.jsonl`, `ops-dm-watch.jsonl`), as typed, through its links, by a glob that may match it, and on Read, Write, Edit, MultiEdit and NotebookEdit.
@@ -1505,6 +1506,28 @@ Done when your plan names the hook script, whether it is on `origin/main`, and t
   The owners it guards are its `release-owners` list, A to Z, read as [Guard lists](#guard-lists) says; core's `release-owners.json` names none, so a fresh clone guards no owner until one is added.
   On a machine with extensions the owners come from the data folder's `extensions/hooks/release-owners.json`, built from each scope's `lists/release-owners.json`, so a search of the checkout finds no owner while the hook still guards one; `bun packages/scripts/src/playground/rendered.ts hooks/release-owners.json` prints that file's path.
   Its tests are `bun run test:file tests/scripts/hooks`, which `bun run test` runs rather than `test:skills`; run them before pushing a change to the hook.
+
+## no-roster-write
+
+- The live roster, the data folder's `roster.json` (`PLAYGROUND_DATA_DIR`'s when set), changes only through `scripts/roster.ts` (the **roster** rule), so every reader sees it whole: `scripts/hooks/no-roster-write.ts` refuses a factory session's Edit, MultiEdit, NotebookEdit or Write of it, and a shell write onto it, naming `bun scripts/roster.ts set` as the way.
+  It reads the file as typed and through the data folder's links, in any case, as macOS opens it, and a glob that may match it.
+- On Bash it walks the call through `shell.ts`'s reader, in each folder the shell may be in:
+  - a writing redirect (`>`, `>>`, `>|`, `<>`) onto the file;
+  - a placer (`cp`, `ditto`, `install`, `ln`, `mv`, `rsync`: `PLACERS`) with the file as its destination (its last operand, or `-t` for `cp`, `install`, `ln` and `mv`, since rsync's `-t` keeps times), or a `roster.json` it places into the data folder;
+  - `sed` with `-i` or `--in-place`, or whose script names the file, `-i` or not, since a `w` or `W` with any address, an `s` command's `w` flag with any delimiter, or GNU sed's `e` each write it, so the hook fails closed past the commands it would have to parse; the file as an operand of its own runs, since sed only reads it;
+  - any other program given the file as a word (`tee`, `mv`, `ln`, `rm`, `truncate`, an editor), since only a reader leaves it as it is;
+  - inline code (`bun -e`, `python3 -c`, `node`, `perl` and the rest of `CODE_RUNNERS`) that names the file and holds a write word (`WRITE_WORDS`: `write`, an `open(` to write or append, `rename`, `unlink`, `rm`, `truncate`, a `>` but `=>` and `>=`), since it does not parse that code;
+    so a write to another file beside a read of the roster is refused too, and a read alone runs.
+- It fails closed: a write position it cannot read, built from a substitution or an unknown variable, is refused when the call names the file anywhere and the text after the word's last expansion may end its path (`$F` and `"$(…)"` may, `brief-$n.md` may not), and so is a call it cannot parse whose text names the file.
+  A write position is a redirect target, a placer's destination, or an operand of a program that writes each one it names (`tee`, `rm`, `truncate`, an in-place `sed` and the rest of `WRITERS`).
+  An unread operand of any other program runs, since a real `roster.ts` call carries one (`"Review: $(jq … roster.json)"`).
+  A `bash -c` or `sh -c` script is read as shell, so its forms are judged as the line's own.
+- It reads a GNU program under its g-prefixed name (`gmv`, `gcp`, `gtee`, `grm`, `gsed`) as the plain one, for each program it knows by name (`KNOWN`).
+- Every other call runs: `bun scripts/roster.ts …`, a reader of the file (`cat`, `jq`, `grep`, `head`, `ls`, `stat`, `diff`, `sed` without `-i`, the rest of `READERS`), a copy from it, the versions and temp file beside it (`roster.json.1`, `roster.json.tmp`), and text that only names it on its way elsewhere (a commit message, a `--body`, a heredoc or an `echo` into another file).
+  `merge-queue.json` stays out of it, since the Builder writes that file by hand (playbook's SWEEP.md).
+- It is a check with no process of its own: [guards](#guards) runs it on Bash, and [no-raw-wa](#no-raw-wa)'s process runs it first on the file tools, since that hook's registration already takes them, so it went live in one ship ([Plan a hook's ships](#plan-a-hooks-ships), step 1).
+  A change to no-raw-wa's registration or its `fromFactory` gate moves this guard with it.
+  Its tests are `bun run test:file tests/scripts/hooks/no-roster-write.test.ts`.
 
 ## no-stash
 
