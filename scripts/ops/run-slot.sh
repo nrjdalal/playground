@@ -1800,20 +1800,21 @@ prio_first() {
 # true while the priority holder has a ticket whose waiter still runs
 prio_waiting() { [ -n "$(prio_first)" ]; }
 
+# removes slot folder $1 in one mv out of the slot path, so a reclaimer's claim that lands in it beforehand leaves with it and one that comes after finds no folder or a new taker's (issue 3039), then the folder and any claim in it there
+drop() { mv "$1" "$1.gone-$" 2>/dev/null && rmdir "$1.gone-$/reclaim" "$1.gone-$" 2>/dev/null; }
 free() {
   # give the slot back only while its holder line is still ours; giveBackSlot (packages/scripts/src/playground/give-back.ts) removes the same files, so a file added here goes there too
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # the holder line goes first, so a waiter whose mkdir loses to the next taker never reads our dead pid and reclaims that taker's slot (reviewer-ops-load-units, 19 Oct)
     rm -f "$SLOT.holder" "$SLOT.child" "$SLOT.preempted"
-    # a reclaimer's claim that landed in this folder goes with it (reclaim)
-    rmdir "$SLOT/reclaim" "$SLOT" 2>/dev/null
+    drop "$SLOT"
   fi
   SLOT=""
   if [ -n "$DOCKER_SLOT" ] && [ "$(cut -d' ' -f2 "$DOCKER_SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # however the build ended, a TERM included, its builder stops before the next build may start, so its idle memory goes back to the VM
     env -u BUILDX_BUILDER docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
     rm -f "$DOCKER_SLOT.holder"
-    rmdir "$DOCKER_SLOT/reclaim" "$DOCKER_SLOT" 2>/dev/null
+    drop "$DOCKER_SLOT"
   fi
   DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
@@ -1964,12 +1965,12 @@ reclaim() {
   # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and every free of a slot is an rmdir, so the folder holding it stays at $1 until this reclaimer moves it (issue 3039)
   # a claim left by a reclaimer killed holding it goes once it is 2 hours old, and a folder whose holder line that reclaimer had removed then ages 2 hours more, since the claim's removal moved its mtime
   mkdir "$1/reclaim" 2>/dev/null || { stale "$1/reclaim" "" && rmdir "$1/reclaim" 2>/dev/null; return 0; }
-  # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free takes a claim left there with the folder
+  # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free's drop takes a claim left there with the folder
   again=$(stamp "$1")
   if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${again% *}" = "${dir% *}" ]; then
-    # the stale holder line goes first, as in free; then one mv takes the folder out of $1 with the claim still in it, so no second claim lands between the claim's removal and the folder's
+    # the stale holder line goes first, as in free; drop then moves the folder out with this claim still in it, so no second claim lands between the claim's removal and the folder's
     rm -f "$1.holder"
-    mv "$1" "$1.gone-$$" 2>/dev/null && rmdir "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null
+    drop "$1"
   else
     rmdir "$1/reclaim" 2>/dev/null
   fi

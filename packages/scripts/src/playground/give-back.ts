@@ -1,4 +1,4 @@
-import { readFileSync, rmdirSync, rmSync } from "node:fs"
+import { readFileSync, renameSync, rmdirSync, rmSync } from "node:fs"
 
 // Gives back the run-slot lane this process runs in, which run-slot names in RUN_SLOT_HELD as "<lane folder> <run-slot pid>", the way run-slot's own free() does: only while the lane's holder line still names that run-slot, so a lane another run has taken since stays that run's. The process then goes on outside the queue, and run-slot's free() at its end finds the line gone and leaves the lane alone.
 export const giveBackSlot = (held = process.env.RUN_SLOT_HELD): boolean => {
@@ -12,7 +12,14 @@ export const giveBackSlot = (held = process.env.RUN_SLOT_HELD): boolean => {
   }
   if (line.split(" ")[1] !== pid) return false
   for (const file of [".holder", ".child", ".preempted"]) rmSync(`${slot}${file}`, { force: true })
-  for (const dir of [`${slot}/reclaim`, slot])
+  // one rename out of the slot path, as run-slot's drop() does, so a reclaimer's claim that lands beforehand leaves with the folder
+  const gone = `${slot}.gone-${process.pid}`
+  try {
+    renameSync(slot, gone)
+  } catch {
+    return true
+  }
+  for (const dir of [`${gone}/reclaim`, gone])
     try {
       rmdirSync(dir)
     } catch {}
