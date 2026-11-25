@@ -19869,6 +19869,9 @@ async function judgeBash(command, cwd, environment) {
     return paths.some(({ glob, path }) => isRoster(path, targets, glob));
   };
   const roster = { quoted: true, source: targets[0], value: targets[0] };
+  const unseen = new WeakSet;
+  const unseenRoster = { ...roster };
+  unseen.add(unseenRoster);
   const toolOf = (name) => {
     const prog = program(name);
     return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
@@ -19937,18 +19940,24 @@ async function judgeBash(command, cwd, environment) {
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
-    const put = (items) => mark ? items.map((item) => args.map((a) => a.value.includes(mark) ? {
-      ...a,
-      glob: a.glob || item.glob,
-      raw: undefined,
-      source: undefined,
-      value: a.value.replaceAll(mark, item.value)
-    } : a)) : [[...args, ...items]];
+    const fill = (a, mark, item) => {
+      const word = {
+        ...a,
+        glob: a.glob || item.glob,
+        raw: undefined,
+        source: undefined,
+        value: a.value.replaceAll(mark, item.value)
+      };
+      if (unseen.has(item))
+        unseen.add(word);
+      return word;
+    };
+    const put = (items) => mark ? items.map((item) => args.map((a) => a.value.includes(mark) ? fill(a, mark, item) : a)) : [[...args, ...items]];
     if (isFind(cmd.stdin))
       return reaches(cmd.stdin.words.slice(1), at) ? put([roster]) : [];
     const input = await stdinOf(cmd, at);
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
-      return unseenHolds(at) ? put([roster]) : [];
+      return unseenHolds(at) ? put([unseenRoster]) : [];
     const items = itemsOf(input.value, xargs);
     if (items.length > ITEMS)
       return put([roster]);
@@ -20032,7 +20041,7 @@ async function judgeBash(command, cwd, environment) {
       return;
     const writer = WRITERS2.has(tool) || SEDS3.has(tool);
     for (const word of args)
-      if (writes(word, at, writer))
+      if ((writer || !unseen.has(word)) && writes(word, at, writer))
         return refuse15(`${tool} on ${shown3(word)}`);
   };
   return run2(lexed, env, visit, true);

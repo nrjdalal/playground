@@ -136,6 +136,18 @@ export const groups: Group[] = [
         "fed text past the items the hook reads, ending in the roster, into xargs rm",
         `echo ${Array.from({ length: 101 }, (_, i) => `/tmp/x${i}`).join(" ")} ~/.playground/roster.json | xargs rm`,
       ],
+      [
+        "100 other paths and the roster fed to xargs rm",
+        `echo ${Array.from({ length: 100 }, (_, i) => `/tmp/a${i + 1}`).join(" ")} ~/.playground/roster.json | xargs rm`,
+      ],
+      [
+        "100 other paths and the roster, one a line, fed to xargs rm",
+        `printf '%s\\n' ${Array.from({ length: 100 }, (_, i) => `/tmp/a${i + 1}`).join(" ")} ~/.playground/roster.json | xargs rm`,
+      ],
+      [
+        "100 other paths and the roster, one a line, fed to xargs -I{} rm {}",
+        `printf '%s\\n' ${Array.from({ length: 100 }, (_, i) => `/tmp/a${i + 1}`).join(" ")} ~/.playground/roster.json | xargs -I{} rm {}`,
+      ],
     ],
   },
 ]

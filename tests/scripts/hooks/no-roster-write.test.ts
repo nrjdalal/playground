@@ -207,6 +207,7 @@ describe("roster.ts and every read run", () => {
     `echo ${ROSTER} | gxargs cat`,
     `cat ${ROSTER} | python3 -c 'import json,sys; print(json.load(sys.stdin))'`,
     "find ~/.playground/scratch -name '*.png' -exec sh -c 'rm \"$0\"' {} \\;",
+    `jq -r '.agents[].name' ${ROSTER} | head -3 | xargs -n1 bun scripts/roster.ts get`,
     `echo ${Array.from({ length: 101 }, (_, i) => `/tmp/x${i}`).join(" ")} | xargs cat`,
     // #3040: plain readers and their GNU copies
     `cut -d, -f1 ${ROSTER}`,

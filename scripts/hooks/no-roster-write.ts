@@ -225,6 +225,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   }
   // The roster as a word a program takes, for a path stdin or a search may hand it
   const roster: Word = { quoted: true, source: targets[0]!, value: targets[0]! }
+  // The roster stood in for input the hook cannot see, which only a program that writes each operand it names (WRITERS, an in-place sed) or a placer's destination is refused on, as an unread operand is
+  const unseen = new WeakSet<Word>()
+  const unseenRoster: Word = { ...roster }
+  unseen.add(unseenRoster)
   const toolOf = (name: string) => {
     const prog = program(name)
     // GNU coreutils, find and sed under their g-prefixed names (gmv, gtee, gfind, gsed) run as the plain ones
@@ -318,26 +322,25 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see where unseenHolds.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
+    const fill = (a: Word, mark: string, item: Word): Word => {
+      const word = {
+        ...a,
+        glob: a.glob || item.glob,
+        raw: undefined,
+        source: undefined,
+        value: a.value.replaceAll(mark, item.value),
+      }
+      if (unseen.has(item)) unseen.add(word)
+      return word
+    }
     const put = (items: Word[]): Word[][] =>
       mark
-        ? items.map((item) =>
-            args.map((a) =>
-              a.value.includes(mark)
-                ? {
-                    ...a,
-                    glob: a.glob || item.glob,
-                    raw: undefined,
-                    source: undefined,
-                    value: a.value.replaceAll(mark, item.value),
-                  }
-                : a,
-            ),
-          )
+        ? items.map((item) => args.map((a) => (a.value.includes(mark) ? fill(a, mark, item) : a)))
         : [[...args, ...items]]
     if (isFind(cmd.stdin)) return reaches(cmd.stdin!.words.slice(1), at) ? put([roster]) : []
     const input = await stdinOf(cmd, at)
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
-      return unseenHolds(at) ? put([roster]) : []
+      return unseenHolds(at) ? put([unseenRoster]) : []
     const items = itemsOf(input.value, xargs)
     if (items.length > ITEMS) return put([roster])
     return items.length ? put(items) : []
@@ -432,7 +435,8 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (READERS.has(tool)) return
     const writer = WRITERS.has(tool) || SEDS.has(tool)
     for (const word of args)
-      if (writes(word, at, writer)) return refuse(`${tool} on ${shown(word)}`)
+      if ((writer || !unseen.has(word)) && writes(word, at, writer))
+        return refuse(`${tool} on ${shown(word)}`)
   }
   return run(lexed, env, visit, true)
 }
