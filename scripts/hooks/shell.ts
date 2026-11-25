@@ -3675,7 +3675,7 @@ const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
 // Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it; each counts only as its bare lower-case word, since `COMMAND` runs macOS's /usr/bin/command in a child and `BUILTIN` is not found.
-const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
+export const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
   if (!first) return false
   const before = cmd.words.slice(0, cmd.words.indexOf(first))
   return (
