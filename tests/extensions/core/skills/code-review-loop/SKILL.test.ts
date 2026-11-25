@@ -252,8 +252,8 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
 describe("code-review-loop's touched tests come from the diff (#1104, #1525)", () => {
   test("one definition runs state.ts touched-tests and names its four rules", async () => {
     const text = await skill()
-    expect(text.match(/\*\*The touched tests\*\*/g)?.length).toBe(1)
-    const rule = text.split("**The touched tests**")[1]?.split("**Done when** every test")[0] ?? ""
+    expect(text.match(/\*\*The touched tests\*\* /g)?.length).toBe(1)
+    const rule = text.split("**The touched tests** ")[1]?.split("**Done when** every test")[0] ?? ""
     expect(rule).toContain("come from the diff")
     expect(rule).toContain("state.ts touched-tests <clone> <merge base> <head>")
     expect(rule).toContain(
@@ -645,7 +645,8 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     const text = await last()
     const line = text.split("\n").find((l) => l.startsWith("**The whole suite**")) ?? ""
     expect(line).toContain("a change to the root `package.json` or `bun.lock`")
-    expect(line).toContain("chunks of 200 files per `bun run test:file` call")
+    expect(line).toContain("`state.ts merge` runs it in chunks of 200 files a call itself")
+    expect(line).toContain("200 files per `bun run test:file` call")
     expect(line).toContain("1200 s deadline")
     expect(line).toContain("CI's green run does not stand in for it")
   })

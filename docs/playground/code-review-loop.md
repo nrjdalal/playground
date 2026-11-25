@@ -83,6 +83,8 @@ The reviewer leaves every other check on the head, `GitGuardian` on `factory.rep
   On an outside author's PR it runs `--conflict-only`, merge-tree alone, since the reviewer never runs that PR's code, and no-outside-pr-code refuses the check without it in read mode.
   When canary changed `bun.lock` or a `package.json`, the check runs no test, since the clone's install is the head's, so a canary-only red there waits for the last 5/5's merge.
   A clone whose head changed `bun.lock` or a `package.json` since its last install runs that install again before the check, so a dependency a canary merge brought in is there when the tests run.
+- `state.ts merge` runs the touched tests in chunks of 200 files or fewer; a chunk the sandbox's deadline cuts prints `TIMEOUT`, naming the chunk and the files it left unreported, and reads those files as neither red nor clean, while a failed case its report names still reads red.
+- A clone with no `test:file` script runs its touched tests with pytest from its own `.venv` when it holds a `pyproject.toml`, and a clone with neither prints `NO-RUNNER` and runs none.
 - The touched tests a reviewer runs come from the diff: the test of every file the PR changes, every test file it changes, every test that names or imports one of those files, by its path or from the test's own folder, plus the tests that scan the whole repo;
   `state.ts touched-tests` lists them, and in a Python repo it adds each test that scans a folder holding a changed file and, when a prompt template changes, each test that pins a built prompt's digest.
   In any repo, a diff that adds a line of text also lists each Python test whose text holds `ls-files`, `os.walk` or `rglob`, a guard such as `tests/test_kill_by_name.py` that names no changed path.
@@ -98,7 +100,7 @@ The reviewer leaves every other check on the head, `GitGuardian` on `factory.rep
   `test:file` builds every shared package whose `dist` is missing, beside the unbuilt packages the files import, before it runs, so a fresh clone runs it directly.
   It also runs each listed `tests/**/test_*.py` through the same `uv run` step `bun run test:skills` uses, after bun's pass, and stops naming any path it can't run.
   A file red in that run, a by-hand local merge's included, runs again alone once: red there, it is scored, and green there, it is a `BATCH-RED`, with its one issue and no second rerun.
-- When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), the reviewer runs them in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
+- When the touched tests are the whole suite (a change to the root `package.json` or `bun.lock`), `state.ts merge` and the reviewer's run by hand go in chunks of 200 files a call, since one call misses the sandbox's deadline, and CI does not stand in for that run; a wait on a run's log ends on its `Ran N tests` summary line.
 - A pnpm repo's package installs and runs its tests from its own folder (`/usr/bin/env -C <clone>/<pkg> pnpm ...`), since pnpm's `--dir` from a Bun checkout fails.
 - Neither side of a review queues a run the other side has already measured at the same head: the result is asked for and cited.
   A box run's id is `ci-<first 12 of the tree>-<random>`, so a cited run's prefix is checked against the first 12 characters of `git -C <clone> rev-parse <head>^{tree}` before citing.
