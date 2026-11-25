@@ -312,12 +312,28 @@ export const spawnOrFault = <T>(
   }
 }
 
-// Pure: install's spawn, bash alone with the time limit in the gate's own spawn and the signal coreutils' timeout sent, so no program outside the clean PATH holds it.
+// Pure: install's spawn, bash alone in a process group of its own (detached), which groupLimit stops whole at the limit, so no program outside the clean PATH holds it.
 export const installSpawn = () => ({
   argv: ["bash"],
-  killSignal: "SIGTERM" as const,
-  timeout: INSTALL_LIMIT_S * 1000,
+  detached: true as const,
+  limitMs: INSTALL_LIMIT_S * 1000,
 })
+
+// Sends SIGTERM to child's whole process group once limitMs passes, as coreutils' timeout does, so a hung grandchild holding the pipes ends with it; a child that exits first is never signalled.
+export const groupLimit = (
+  child: { exited: Promise<unknown>; pid: number },
+  limitMs: number,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+) => {
+  const timer = setTimeout(() => {
+    try {
+      kill(-child.pid, "SIGTERM")
+    } catch {
+      return
+    }
+  }, limitMs)
+  void child.exited.finally(() => clearTimeout(timer))
+}
 
 // install.sh piped to bash as `curl | bash` runs it, with installEnv's clean environment; a fault when bash cannot start.
 const install = async (
@@ -325,11 +341,11 @@ const install = async (
   home: string,
   path: string,
 ): Promise<{ fault: string } | { out: string }> => {
-  const { argv, ...limit } = installSpawn()
+  const { argv, detached, limitMs } = installSpawn()
   const started = spawnOrFault(argv[0], home, () =>
     Bun.spawn(argv, {
-      ...limit,
       cwd: home,
+      detached,
       env: installEnv(box, home, path),
       stderr: "pipe",
       stdin: Bun.file(join(home, "playground", "install.sh")),
@@ -338,6 +354,7 @@ const install = async (
   )
   if ("fault" in started) return started
   const { child } = started
+  groupLimit(child, limitMs)
   const [out, err, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
