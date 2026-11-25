@@ -662,24 +662,41 @@ describe("the capacity gate refuses and spawns nothing", () => {
     "its Claude Code access token has expired (stored-login-status.json tokenExpired), and Claude Code refreshes it only while it runs: opening Claude Code refreshes it, the owner's /login brings it back, and `playground accounts add` keeps a seat token for it"
   const seatLine =
     "--account own@example.com is this machine's own login, whose stored reading reads nothing, so it starts on its seat token, the split skipped: its week is at 76% (login-flip.json seen)"
+  const endedLine =
+    "--account own@example.com is this machine's own login, whose Claude Code login has ended (loginEnded: time_limit), so it starts on its seat token, the split skipped: its week is at 76% (login-flip.json seen)"
+  // usage.json naming the own login, as on a machine whose one login is the config's, which judges no stored-login.json
+  const ownUsage = { USAGE_JSON: login("own@example.com", 20) }
 
-  test.each<[string, Parameters<typeof ownFiles>[0]]>([
-    ["its stored reading is stale", {}],
-    ["it has no stored reading", { stored: "missing" }],
-    ["its Claude Code login has ended", { ended: "time_limit", stored: 600 }],
+  // #3058: a fresh loginEnded moves the start onto the seat token whichever account usage.json reads and however fresh stored-login.json is, since the config login it would start on stops at /login
+  test.each<[string, Parameters<typeof ownFiles>[0], object, string]>([
+    ["its stored reading is stale", {}, {}, seatLine],
+    ["it has no stored reading", { stored: "missing" }, {}, seatLine],
+    ["its Claude Code login has ended", { ended: "time_limit", stored: 600 }, {}, endedLine],
+    [
+      "its Claude Code login has ended and its stored reading is fresh",
+      { ended: "time_limit", stored: 0 },
+      {},
+      endedLine,
+    ],
+    [
+      "its Claude Code login has ended and usage.json names it",
+      { ended: "time_limit" },
+      ownUsage,
+      endedLine,
+    ],
   ])(
     "--account naming the own login starts on its seat token while %s, judged by login-flip.json's seen reading",
-    async (_, files) => {
+    async (_, files, env, line) => {
       const r = await spawn(
         ownStart,
         [],
-        ownEnv(),
+        ownEnv(env),
         script,
         undefined,
         ownFiles({ seat: { five: 30, week: 76 }, ...files }),
       )
       expect(r.code).toBe(0)
-      expect(r.out).toContain(seatLine)
+      expect(r.out).toContain(line)
       expect(r.security).toContain(
         "find-generic-password -s playground-claude-oauth -a own@example.com",
       )
@@ -692,6 +709,30 @@ describe("the capacity gate refuses and spawns nothing", () => {
           verdict: "pass",
         }),
       ])
+    },
+  )
+
+  test.each<[string, Parameters<typeof ownFiles>[0], object, string]>([
+    ["usage.json names it", {}, ownUsage, "its week is at 20% (usage.json)"],
+    ["its stored reading is fresh", { stored: 0 }, {}, "its week is at 20% (stored-login.json)"],
+  ])(
+    "--account naming the own login whose Claude Code login is live stays on the config login while %s, a seat token beside it",
+    async (_, files, env, week) => {
+      const r = await spawn(
+        ownStart,
+        [],
+        ownEnv(env),
+        script,
+        undefined,
+        ownFiles({ seat: { five: 30, week: 76 }, ...files }),
+      )
+      expect(r.code).toBe(0)
+      expect(r.out).toContain(
+        `--account own@example.com is this machine's own login, so it starts there, the split skipped: ${week}`,
+      )
+      expect(launchOf(r)).not.toContain("CLAUDE_CODE_OAUTH_TOKEN")
+      expect(r.security).toBeUndefined()
+      expect(execLine(r, "worker-brave-otter")).toContain("--account own@example.com")
     },
   )
 
