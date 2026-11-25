@@ -236,7 +236,8 @@ describe("roster.ts and every read run", () => {
     `f=$(mktemp); ls ~ > "$f"; rm "$f"`,
     `ls -la ${DATA}/ > "$OUT"`,
     `du -sh ${DATA}; rm -f "$out"`,
-    `ls ${DATA} | while read f; do rm /tmp/$f; done`,
+    // a sibling of the data folder, never a folder holding it, wherever the sandbox puts HOME (CI's sits under /tmp)
+    `ls ${DATA} | while read f; do rm ${DATA}-other/$f; done`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

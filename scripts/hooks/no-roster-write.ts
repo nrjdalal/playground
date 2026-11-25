@@ -237,7 +237,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word is all expansion and a read in the line takes a listing that reaches toward it.
+  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word is all expansion, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
   const builtToward = (typed: Word, at: Env) => {
     if (named) return true
     const prefix = typed.value.slice(0, typed.value.search(/[\u0000\u0001]/))
@@ -245,13 +245,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1)
       return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at)
     }
-    return lexed.commands.some(
-      (c) =>
-        !!c.stdin &&
-        c.words.some((w) => w.value === "read") &&
-        (c.stdin.words.some((w) => holdsWord(w, env)) ||
-          (isFind(c.stdin) && reaches(c.stdin.words.slice(1), env))),
-    )
+    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at)
   }
   // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand, sort's -o) may write the roster when it may be built toward it (builtToward) and the text after its last expansion may end its path; an unread operand of any other program runs.
   const writes = (typed: Word, at: Env, position = false) => {

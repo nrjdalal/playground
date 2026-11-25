@@ -26,6 +26,42 @@ export const groups: Group[] = [
         "a find of the data folder into a while read loop that removes each path",
         'find ~/.playground -maxdepth 1 | while read f; do rm "$f"; done',
       ],
+      [
+        "a listing after a cd into the data folder into a while read loop that removes each quoted name",
+        'cd ~/.playground && ls | while read f; do rm "$f"; done',
+      ],
+      [
+        "a listing after a cd into the data folder into a while read loop that removes each bare name",
+        "cd ~/.playground && ls | while read f; do rm $f; done",
+      ],
+      [
+        "a one-a-line listing after a cd into the data folder into a while read loop that removes each name past --",
+        'cd ~/.playground && ls -1 | while read f; do rm -- "$f"; done',
+      ],
+      [
+        "a find of the data folder through sort into a while read loop that removes each path",
+        'find ~/.playground -maxdepth 1 | sort | while read f; do rm "$f"; done',
+      ],
+      [
+        "a find of the data folder through head into a while read loop that removes each path",
+        'find ~/.playground | head -50 | while read f; do rm "$f"; done',
+      ],
+      [
+        "a glob listing of the data folder through grep into a while read loop that removes each path",
+        'ls -d ~/.playground/* | grep json | while read f; do rm "$f"; done',
+      ],
+      [
+        "a find of the data folder through xargs echo into a while read loop that removes each path",
+        'find ~/.playground | xargs -n1 echo | while read f; do rm "$f"; done',
+      ],
+      [
+        "a while read loop that removes each path a find of the data folder gives through a process substitution",
+        'while read f; do rm "$f"; done < <(find ~/.playground)',
+      ],
+      [
+        "a while read loop that removes each path from a file a find of the data folder wrote first",
+        'find ~/.playground > /tmp/l; while read f; do rm "$f"; done < /tmp/l',
+      ],
       ["a listing of the roster into xargs gzip", "ls ~/.playground/roster.json | xargs gzip"],
       ["a listing of the roster into xargs bzip2", "ls ~/.playground/roster.json | xargs bzip2"],
       ["a listing of the roster into xargs xz", "ls ~/.playground/roster.json | xargs xz"],

@@ -19889,7 +19889,7 @@ async function judgeBash(command, cwd, environment) {
       const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1);
       return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at);
     }
-    return lexed.commands.some((c) => !!c.stdin && c.words.some((w) => w.value === "read") && (c.stdin.words.some((w) => holdsWord(w, env)) || isFind(c.stdin) && reaches(c.stdin.words.slice(1), env)));
+    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at);
   };
   const writes = (typed, at, position = false) => {
     const paths = pathsOf(typed, at);
