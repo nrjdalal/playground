@@ -141,6 +141,7 @@ An extension repository's PR merges through `bun run ext:merge <owner>/<repo> <n
 
 An extension item's revision goes up with `playground ext put`, and its reviewer scores it with `playground ext score`.
 A put on an item whose earlier revision is still proposed moves the proposal's head, so a score on the earlier one is refused (`the proposal is at <sha>, not <rev>; read it again`): put a stacked revision once the one under it is judged.
+Build an extension item's test tree as copies from the rendered `~/.playground/orgs/<org>/<newest>/skills`, never symlinks into the store.
 
 ## Write a handoff
 
