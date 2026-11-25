@@ -138,7 +138,7 @@ fake(
 [ -n "$FAKE_LOCAL_MODELS" ] && { echo "$FAKE_LOCAL_MODELS"; exit 0; }
 echo '{"object":"list","data":[{"id":"local","max_model_len":131072}]}'`,
 )
-// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
+// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log, then under FAKE_ROSTER_REAL this checkout's roster.ts on the case's own roster. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
 fake(
   "bun",
   `[ "$1" = install ] && { printf '%s\\n' "$*" >> "$HOME/bun-install.log"; [ -z "$FAKE_INSTALL_FAIL" ] || { echo "error: lockfile had changes, but lockfile is frozen"; exit 1; }; exit 0; }
@@ -152,6 +152,7 @@ shift
 printf '%s\\n' "$*" >> "$HOME/roster.log"
 (IFS=$'\\n'; printf '%s' "$*") > "$HOME/roster.args"
 [ -n "$FAKE_ROSTER_BROKEN" ] && { echo "roster broken" >&2; exit 1; }
+[ -n "$FAKE_ROSTER_REAL" ] && exec "${process.execPath}" "${join(root, "scripts", "roster.ts")}" "$@"
 exit 0`,
 )
 // The launch file runs claude once its pane starts, which only the self-removal test does; the fake logs and stops there.
