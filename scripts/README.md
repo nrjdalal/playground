@@ -117,7 +117,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   in the restored pane holding its label;
   a live one is skipped (the live-name refusal exits 3), and each resume of a herdr session stamps its run in `<name>.ran`.
   Each of those resumes runs with `SPAWN_RESTORING=1`: it reads the row again once the live-name check finds the session gone and again just before the launch, exiting 4 on a down row, which restore prints as `skipped <name>: its roster row reads <status>`, and its roster write leaves an ended row ended, so a close landing at any point of the resume keeps the session down;
-  a resume by hand sets an ended or done row back to starting, and refuses a row that reads done, or ended with an `endReason` (auto-end's, ROSTER.md), naming its status and reason, unless `--force`, anywhere among its words, brings it back on purpose;
+  a resume by hand sets an ended, done or parked row back to starting, a parked row's hold dropped with it, and refuses a row that reads done, or ended with an `endReason` (auto-end's, ROSTER.md), naming its status and reason, unless `--force`, anywhere among its words, brings it back on purpose;
   a plain `spawn.sh close` writes no reason, so a close then a resume, as an account move runs, needs no `--force`.
   It prints one line a record on its server, `restored <name>`, `skipped <name>: <reason>`, `waiting <name>: <reason>` or `not restored <name>: <reason>`, so a session it passed over, held or could not bring back is named with the reason.
   A resume waits (`restore_waits`) when a gate holds it over a reading that falls (`the <gate> gate holds it:`) or focus stands for another session; a gate that cannot read its input or reads a bad setting is no wait, since waiting never ends it.
