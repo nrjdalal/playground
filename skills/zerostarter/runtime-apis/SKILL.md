@@ -51,6 +51,7 @@ Bun-first therefore applies to the Bun-only files: `packages/scripts/src/*.ts` (
 
 - Call `process.exit()` after the import in a check that a Worker module loads, since a module that sets `self.onmessage` keeps a plain `bun -e` import alive forever and the check never returns.
 - Run each Worker module's load check in a fresh process of its own, since Bun keeps a failed package lookup for every later Worker in the same process, so one missed resolve fails every Worker the run starts after it.
+- Spawn a child that may fork with `detached: true` and stop its whole process group on a timer cleared on exit (`process.kill(-child.pid, "SIGTERM")`, as `groupLimit` in `packages/scripts/src/new-user-gate/cli.ts` does), since `Bun.spawn`'s `timeout` signals the child alone, so a forked grandchild holds the pipes open past the limit.
 
 ## Audit
 
