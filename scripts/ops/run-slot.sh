@@ -1805,14 +1805,15 @@ free() {
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # the holder line goes first, so a waiter whose mkdir loses to the next taker never reads our dead pid and reclaims that taker's slot (reviewer-ops-load-units, 19 Oct)
     rm -f "$SLOT.holder" "$SLOT.child" "$SLOT.preempted"
-    rmdir "$SLOT" 2>/dev/null
+    # a reclaimer's claim that landed in this folder goes with it (reclaim)
+    rmdir "$SLOT/reclaim" "$SLOT" 2>/dev/null
   fi
   SLOT=""
   if [ -n "$DOCKER_SLOT" ] && [ "$(cut -d' ' -f2 "$DOCKER_SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # however the build ended, a TERM included, its builder stops before the next build may start, so its idle memory goes back to the VM
     env -u BUILDX_BUILDER docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
     rm -f "$DOCKER_SLOT.holder"
-    rmdir "$DOCKER_SLOT" 2>/dev/null
+    rmdir "$DOCKER_SLOT/reclaim" "$DOCKER_SLOT" 2>/dev/null
   fi
   DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
@@ -1952,17 +1953,24 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
 }
 
 reclaim() {
-  # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the line and the directory are
-  # read again just before the rmdir, so a waiter that freed and took the slot meanwhile keeps it; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
+  # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
   [ -d "$1" ] || return 0
-  local line dir
+  local line dir now
   line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
   dir=$(stamp "$1")
   # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
   stale "$1" "$line" || return 0
-  # the stale holder line goes before the rmdir, as in free, so a reclaimer that read it before this one freed the slot finds it gone once the next taker holds the slot
-  [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rm -f "$1.holder" && rmdir "$1" 2>/dev/null
+  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and every free of a slot is an rmdir, so the folder it lands in stays at $1 until the claim goes (issue 3039); a claim left by a reclaimer that was killed holding it goes by the 2-hour rule
+  mkdir "$1/reclaim" 2>/dev/null || { stale "$1/reclaim" "" && rmdir "$1/reclaim" 2>/dev/null; return 0; }
+  # under the claim the folder must be the one stamped, by its inode since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free takes a claim left there with the folder
+  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && now=$(stamp "$1") && [ "${now%% *}" = "${dir%% *}" ]; then
+    # the stale holder line goes before the rmdir, as in free; the folder goes only once this claim does, so a claim another run took out leaves it be
+    rm -f "$1.holder"
+    rmdir "$1/reclaim" 2>/dev/null && rmdir "$1" 2>/dev/null
+  else
+    rmdir "$1/reclaim" 2>/dev/null
+  fi
 }
 
 # the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most

@@ -12,8 +12,9 @@ export const giveBackSlot = (held = process.env.RUN_SLOT_HELD): boolean => {
   }
   if (line.split(" ")[1] !== pid) return false
   for (const file of [".holder", ".child", ".preempted"]) rmSync(`${slot}${file}`, { force: true })
-  try {
-    rmdirSync(slot)
-  } catch {}
+  for (const dir of [`${slot}/reclaim`, slot])
+    try {
+      rmdirSync(dir)
+    } catch {}
   return true
 }
