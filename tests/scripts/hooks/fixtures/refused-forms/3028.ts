@@ -71,12 +71,16 @@ const held = (): Row[] => [
   ],
 ]
 
-// Pass controls: the same blocks writing a git log whose text names no root, and the root's text into an ordinary file.
-const controls = (): Row[] => [
-  ...blocks(PLAIN).map(([block, command]): Row => [
+// Pass controls: the same blocks writing a git log whose text names no root, and the root's text into an ordinary file; a brace group after time or a coproc's name lexes as a `{` word, a glob in a folder that holds the data folder, so its control runs in the process worktree alone.
+const hashes = () =>
+  blocks(PLAIN).map(([block, command]): Row => [
     `a git log of its hash in ${block} through a variable the line never sets`,
     command,
-  ]),
+  ])
+const globbed = ([what]: Row) => / a brace group after (time|coproc and its name) /.test(what)
+const globControls = (): Row[] => hashes().filter(globbed)
+const controls = (): Row[] => [
+  ...hashes().filter((row) => !globbed(row)),
   ["a git log naming the data folder in a brace group into a log", `{ ${LOG}; } > out.log`],
   [
     "a git log naming the data folder in a while loop after coproc into a log",
@@ -88,6 +92,7 @@ const rows = () => [...held(), ...controls()]
 
 export const groups: Group[] = [
   { folders: ["data folder", "home", "process worktree"], guards: ["no-extensions-write"], rows },
+  { folders: ["process worktree"], guards: ["no-extensions-write"], rows: globControls },
 ]
 
-export const allowed: string[] = controls().map(([what]) => what)
+export const allowed: string[] = [...controls(), ...globControls()].map(([what]) => what)
