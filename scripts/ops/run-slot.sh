@@ -39,8 +39,8 @@ unset RUN_SLOT_ASK_STAMP
 # program and exited 0); a closed stdin gives it /dev/null, as before
 { exec 3<&0; } 2>/dev/null || exec 3</dev/null
 # the stat flavour, probed once on the ops folder, which always exists, since ticket() alone makes the queue folder and a run that skips it would probe a missing path on a GNU box, whose stat -f then reads its flags as a path (issues 1654 and 1818)
-if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n') SF=(-c '%i %Y'); else ST=(-f '%m %N') SF=(-f '%i %m'); fi
-# a file's mtime, and its stamp (inode and mtime, through a symlink), each in the flavour probed above, so a Mac starts no failed GNU try first
+if stat -c %Y "$OPS" > /dev/null 2>&1; then ST=(-c '%Y %n') SF=(-c '%i %W %Y'); else ST=(-f '%m %N') SF=(-f '%i %B %m'); fi
+# a file's mtime, and its stamp (inode, birth time and mtime, through a symlink; where stat knows no birth time, reclaim's compare under its claim rests on the inode alone), each in the flavour probed above, so a Mac starts no failed GNU try first
 mtime() { local o; o=$(stat "${ST[@]}" "$1" 2>/dev/null) || return 1; printf '%s\n' "${o%% *}"; }
 # the call's clock, moved by SECONDS with no process, so a long wait reads the time as it is now
 clock() { NOW=$((T0 + SECONDS)); }
@@ -1955,19 +1955,21 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
 reclaim() {
   # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
   [ -d "$1" ] || return 0
-  local line dir now
+  local line dir again
   line=$(cat "$1.holder" 2>/dev/null)
   stale "$1" "$line" || return 0
   dir=$(stamp "$1")
   # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
   stale "$1" "$line" || return 0
-  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and every free of a slot is an rmdir, so the folder it lands in stays at $1 until the claim goes (issue 3039); a claim left by a reclaimer that was killed holding it goes by the 2-hour rule
+  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and every free of a slot is an rmdir, so the folder holding it stays at $1 until this reclaimer moves it (issue 3039)
+  # a claim left by a reclaimer killed holding it goes once it is 2 hours old, and a folder whose holder line that reclaimer had removed then ages 2 hours more, since the claim's removal moved its mtime
   mkdir "$1/reclaim" 2>/dev/null || { stale "$1/reclaim" "" && rmdir "$1/reclaim" 2>/dev/null; return 0; }
-  # under the claim the folder must be the one stamped, by its inode since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free takes a claim left there with the folder
-  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && now=$(stamp "$1") && [ "${now%% *}" = "${dir%% *}" ]; then
-    # the stale holder line goes before the rmdir, as in free; the folder goes only once this claim does, so a claim another run took out leaves it be
+  # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free takes a claim left there with the folder
+  again=$(stamp "$1")
+  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${again% *}" = "${dir% *}" ]; then
+    # the stale holder line goes first, as in free; then one mv takes the folder out of $1 with the claim still in it, so no second claim lands between the claim's removal and the folder's
     rm -f "$1.holder"
-    rmdir "$1/reclaim" 2>/dev/null && rmdir "$1" 2>/dev/null
+    mv "$1" "$1.gone-$$" 2>/dev/null && rmdir "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null
   else
     rmdir "$1/reclaim" 2>/dev/null
   fi
