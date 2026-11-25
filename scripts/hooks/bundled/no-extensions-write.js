@@ -6487,6 +6487,7 @@ var FREES = new Set([`
 `, ";", ";;", "&", "||"]);
 var tokens = 0;
 var freshToken = () => ++tokens;
+var GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"]);
 var BODIES = new Set(["do", "elif", "else", "then"]);
 var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
@@ -7524,13 +7525,14 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
         fedOpens.push(fedOpens.at(-1));
       }
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted)
-          break;
+      const lead = done.words.findIndex((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{")
+          continue;
         opens.push(lx.commands.length);
         fedOpens.push(done.stdin ?? done.braceFed);
       }
-      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      const called = lead < 0 ? undefined : done.words[lead];
       if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
         fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
@@ -12088,12 +12090,29 @@ function compoundBodies(commands, bodies = new WeakMap) {
     const lead = cmd.words.find((w) => w.quoted || !LEADS2.has(w.value));
     if (lead && !lead.quoted && OPENERS.has(lead.value))
       open.push(k);
-    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
-      bodies.set(cmd, commands.slice(open.pop(), k));
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value))
+      bodies.set(cmd, commands.slice(open.pop() ?? 0, k));
     if (cmd.inner)
       compoundBodies(cmd.inner(), bodies);
   });
   return bodies;
+}
+function blockRedirects(commands, bodies) {
+  const out = new WeakMap;
+  const assign = (c, around) => {
+    const inner = c.inner?.();
+    const held = inner && inner.length > 0 ? inner : bodies.get(c);
+    if (!held)
+      return;
+    const chain = [...around, c.redirects];
+    for (const k of held) {
+      out.set(k, chain);
+      assign(k, chain);
+    }
+  };
+  for (const c of commands)
+    assign(c, []);
+  return out;
 }
 var RUNS_TEXT2 = new Set([".", "eval", "source"]);
 var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
@@ -12162,21 +12181,81 @@ function functionArgs(commands, line) {
     const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length;
     const nests = body.some((c) => c !== group && !!c.group && c.inner?.().length === 0 || c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")));
     const moves = body.some((c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)));
-    const bound = {};
+    const words = [];
+    let cut = false;
     if (calls.length === 1 && named === 2 && !moves && !nests && !body.includes(call) && all.indexOf(call) > all.indexOf(at))
-      for (const [k, w] of parse3(call).args.entries()) {
-        if (marked(w.value) || w.glob)
+      for (const w of parse3(call).args) {
+        if (w.unknown !== BRACE) {
+          words.push(w);
+          continue;
+        }
+        const expanded = braceRun({ ...call, words: [w] }, w);
+        if (!expanded) {
+          cut = true;
           break;
-        bound[String(k + 1)] = w.value;
+        }
+        words.push(...expanded.words);
       }
     for (const c of body)
-      if (Object.keys(bound).length > 0)
-        out.set(c, bound);
+      if (words.length > 0 || cut)
+        out.set(c, { call, cut, words });
       else
         out.delete(c);
   }
   return out;
 }
+var CALL_READINGS = 64;
+function readSplit(raw) {
+  let quote = "";
+  let bare = false;
+  let held = false;
+  for (let i = 0;i < raw.length; i++) {
+    const c = raw[i];
+    if (c === "\\" && quote !== "'") {
+      held = true;
+      i++;
+    } else if (quote)
+      quote = c === quote ? "" : quote;
+    else if (c === "'" || c === '"') {
+      held = true;
+      quote = c;
+    } else if (c === "$")
+      bare = true;
+  }
+  return !bare ? "quoted" : held ? "mixed" : "split";
+}
+function positionals({ cut, words }, env, steady) {
+  let sets = [[]];
+  let unread = cut;
+  for (const w of words) {
+    if (!marked(w.value) && !w.glob) {
+      sets = sets.map((set) => [...set, w.value]);
+      continue;
+    }
+    const shape = readSplit(w.raw ?? "");
+    const readings = w.glob || shape === "mixed" ? undefined : heldReadings(w, env, steady);
+    const splits = shape === "split";
+    const ways = (value) => {
+      const split = value.split(/[ \t\n]+/).filter(Boolean);
+      const whole = value ? [value] : [];
+      return !splits ? [[value]] : split.join(`
+`) === whole.join(`
+`) ? [whole] : [split, whole];
+    };
+    const unreadable = (value) => marked(value) || splits && /[*?[\]{}]/.test(value);
+    const next = readings && !readings.some((r) => unreadable(r.value)) ? sets.flatMap((set) => readings.flatMap((r) => ways(r.value).map((parts) => [...set, ...parts]))) : undefined;
+    if (!next || next.length > CALL_READINGS) {
+      unread = true;
+      break;
+    }
+    sets = next;
+  }
+  return sets.map((set) => ({
+    args: Object.fromEntries(set.map((value, k) => [String(k + 1), value])),
+    from: unread ? set.length + 1 : Infinity
+  }));
+}
+var readsPositional = (raw) => [...raw.matchAll(/\$(?:\{(\d+)|(\d)|\{?[@*])/g)].map(([, braced, bare]) => Number(braced ?? bare ?? 1));
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 async function printed(cmd, env, kids) {
   const held = kids(cmd);
@@ -12683,6 +12762,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const sshOwn = new WeakSet;
   let patterns = new Set;
   let bodies = new WeakMap;
+  let blocksAround = new WeakMap;
   let fnArgs = new WeakMap;
   let execFds = new Map;
   let lineWrites = false;
@@ -12818,10 +12898,15 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const hookWord = (word, here, sure = false) => {
       if (word.procs || !marked(word.value))
         return hookFile(pathOf(word, here), sure);
-      const args = fnArgs.get(slotOf.get(cmd) ?? cmd);
-      const known = args ? { ...here, known: { ...here.known, ...args } } : here;
-      const held = heldReadings(word, known, steadyAt(cmd));
-      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure;
+      const call = fnArgs.get(slotOf.get(cmd) ?? cmd);
+      const reads = call ? readsPositional(word.raw ?? "") : [];
+      const readings = call ? positionals(call, here, steadyAt(call.call)) : [{ args: {}, from: Infinity }];
+      return readings.some(({ args, from }) => {
+        if (reads.some((n) => n >= from))
+          return true;
+        const held = heldReadings(word, { ...here, known: { ...here.known, ...args } }, steadyAt(cmd));
+        return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure;
+      });
     };
     const intoHook = async (targets, source) => {
       if (targets.length === 0)
@@ -12863,8 +12948,9 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const copies = ["cp", "dd", "install", "ln", "mv"].includes(copier);
     const into = copies ? writeTargets(copier, args, copier !== program(name) || onLinux()) : [];
     const hookEdits = copier === "sed" || copier === "perl" ? inPlace(copier, args) : [];
+    const around = (blocksAround.get(cmd) ?? []).reduce((fds, r) => fdFiles(r, fds), execFds);
     const hookTargets = [
-      ...fdFiles(cmd.redirects, execFds).get("1") ?? [],
+      ...fdFiles(cmd.redirects, around).get("1") ?? [],
       ...copier === "tee" ? args.filter((word) => !/^-./.test(word.value)) : [],
       ...into,
       ...hookEdits
@@ -13209,6 +13295,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
   bodies = compoundBodies(lexed.commands);
+  blocksAround = blockRedirects(lexed.commands, bodies);
   fnArgs = functionArgs(lexed.commands, command);
   execFds = new Map;
   lineWrites = redirectsWrite(lexed.commands);
