@@ -2822,7 +2822,7 @@ const unquote = (part: string): string =>
     : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
 // A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text, and a zsh group in them globbed after (`/usr/bin/pk{(i|x),y}ll`), as zsh expands braces first; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees whose words do not lex as one command, code a guard reads as a line (`f({a, b})`), and for any other program word
-function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
+export function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
   if (first?.unknown !== BRACE) return
   const source = (first.source ?? "").replace(/\\\n/g, "")
   if (/[$`]/.test(source)) return null

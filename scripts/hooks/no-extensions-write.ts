@@ -33,6 +33,7 @@ import {
 import { fromFactory, opsLead } from "./role"
 import {
   BRACE,
+  braceRun,
   braceWords,
   casePatterns,
   codeFed,
@@ -1740,10 +1741,28 @@ function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Comma
   })
   return bodies
 }
+// The descriptors each command inside a group, a subshell or a compound's closer inherits from the blocks around it (fdFiles), an inner block's over an outer's; a compound's closer comes after the commands it holds, so its walk sets them last
+function blockFds(commands: Command[], bodies: WeakMap<Command, Command[]>) {
+  const out = new WeakMap<Command, Map<string, Word[]>>()
+  const assign = (c: Command, inherited: Map<string, Word[]>) => {
+    const inner = c.inner?.()
+    const held = inner && inner.length > 0 ? inner : bodies.get(c)
+    if (!held) return
+    const fds = fdFiles(c.redirects, inherited)
+    for (const k of held) {
+      out.set(k, fds)
+      assign(k, fds)
+    }
+  }
+  for (const c of commands) assign(c, new Map())
+  return out
+}
 // the programs that run a text which may call a function, and those that move its positional parameters from inside its body
 const RUNS_TEXT = new Set([".", "eval", "source"])
 const MOVES_ARGS = new Set(["getopts", "set", "shift"])
-// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+// Each function body command's positional parameters, from the words of the line's one call of the function as the shell gives them (positionals), up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+// A function's one call, whose words bind its body's positional parameters (positionals)
+type FunctionCall = { call: Command; words: Word[] }
 function functionArgs(commands: Command[], line: string) {
   const seen = new Set<Command>()
   const walk = (list: Command[]) => {
@@ -1754,7 +1773,7 @@ function functionArgs(commands: Command[], line: string) {
   }
   walk(commands)
   const all = [...seen]
-  const out = new WeakMap<Command, Record<string, string>>()
+  const out = new WeakMap<Command, FunctionCall>()
   const names = new Map(all.map((c) => [c, parse(c).name]))
   const name = (c: Command) => names.get(c) ?? parse(c).name
   if (all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))) return out
@@ -1823,7 +1842,8 @@ function functionArgs(commands: Command[], line: string) {
     const moves = body.some(
       (c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)),
     )
-    const bound: Record<string, string> = {}
+    // the call's words as the shell gives them, a brace list expanded into its parts (braceRun), up to the first the hook cannot expand
+    const words: Word[] = []
     if (
       calls.length === 1 &&
       named === 2 &&
@@ -1832,15 +1852,46 @@ function functionArgs(commands: Command[], line: string) {
       !body.includes(call) &&
       all.indexOf(call) > all.indexOf(at)
     )
-      for (const [k, w] of parse(call).args.entries()) {
-        if (marked(w.value) || w.glob) break
-        bound[String(k + 1)] = w.value
+      for (const w of parse(call).args) {
+        if (w.unknown !== BRACE) {
+          words.push(w)
+          continue
+        }
+        const expanded = braceRun({ ...call, words: [w] }, w)
+        if (!expanded) break
+        words.push(...expanded.words)
       }
     for (const c of body)
-      if (Object.keys(bound).length > 0) out.set(c, bound)
+      if (words.length > 0) out.set(c, { call, words })
       else out.delete(c)
   }
   return out
+}
+const CALL_READINGS = 64
+const VARIABLE = /^(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})$/
+// Each reading of a function call's positional parameters, as `known`'s digit keys: a literal word as written, and a variable word in each value the call's steady variables give it (heldReadings), whole when quoted and split on blanks when not, up to the first word the hook cannot read, an unquoted value holding a glob or a brace included, since the shell expands those again
+function positionals({ words }: FunctionCall, env: Env, steady: Steady): Record<string, string>[] {
+  let sets: string[][] = [[]]
+  for (const w of words) {
+    if (!marked(w.value) && !w.glob) {
+      sets = sets.map((set) => [...set, w.value])
+      continue
+    }
+    const raw = w.raw ?? ""
+    const variable = w.quoted ? /^"\$(.*)"$/.exec(raw)?.[1] : /^\$(.*)$/.exec(raw)?.[1]
+    const readings =
+      variable !== undefined && VARIABLE.test(variable) ? heldReadings(w, env, steady) : undefined
+    const expands = (value: string) => !w.quoted && /[*?[\]{}]/.test(value)
+    if (!readings || readings.some((r) => marked(r.value) || expands(r.value))) break
+    if (sets.length * readings.length > CALL_READINGS) break
+    sets = sets.flatMap((set) =>
+      readings.map((r) => [
+        ...set,
+        ...(w.quoted ? [r.value] : r.value.split(/[ \t\n]+/).filter(Boolean)),
+      ]),
+    )
+  }
+  return sets.map((set) => Object.fromEntries(set.map((value, k) => [String(k + 1), value])))
 }
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
@@ -2505,8 +2556,10 @@ async function inspect(
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
   let bodies = new WeakMap<Command, Command[]>()
+  // the descriptors each command inside a block inherits from the blocks around it (blockFds)
+  let inheritedFds = new WeakMap<Command, Map<string, Word[]>>()
   // each function body command's positional parameters, bound from the line's one call (functionArgs)
-  let fnArgs = new WeakMap<Command, Record<string, string>>()
+  let fnArgs = new WeakMap<Command, FunctionCall>()
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
   let lineTexts: string[] = []
@@ -2705,13 +2758,18 @@ async function inspect(
       const inner = c.inner?.()
       return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
     }
-    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's word (functionArgs), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
       if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
-      const args = fnArgs.get(slotOf.get(cmd) ?? cmd)
-      const known = args ? { ...here, known: { ...here.known, ...args } } : here
-      const held = heldReadings(word, known, steadyAt(cmd))
-      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+      const call = fnArgs.get(slotOf.get(cmd) ?? cmd)
+      return (call ? positionals(call, here, steadyAt(call.call)) : [{}]).some((args) => {
+        const held = heldReadings(
+          word,
+          { ...here, known: { ...here.known, ...args } },
+          steadyAt(cmd),
+        )
+        return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+      })
     }
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
@@ -2756,13 +2814,15 @@ async function inspect(
           )
         : undefined)
     if (hookWrite) return refuse(hookWrite)
-    // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
+    // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, its own or one of a group, subshell or compound around it (blockFds), tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
     const copier = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
     const copies = ["cp", "dd", "install", "ln", "mv"].includes(copier)
     const into = copies ? writeTargets(copier, args, copier !== program(name) || onLinux()) : []
     const hookEdits = copier === "sed" || copier === "perl" ? inPlace(copier, args) : []
     const hookTargets = [
-      ...(fdFiles(cmd.redirects, execFds).get("1") ?? []),
+      ...(fdFiles(cmd.redirects, new Map([...execFds, ...(inheritedFds.get(cmd) ?? [])])).get(
+        "1",
+      ) ?? []),
       ...(copier === "tee" ? args.filter((word) => !/^-./.test(word.value)) : []),
       ...into,
       ...hookEdits,
@@ -3372,6 +3432,7 @@ async function inspect(
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
   bodies = compoundBodies(lexed.commands)
+  inheritedFds = blockFds(lexed.commands, bodies)
   fnArgs = functionArgs(lexed.commands, command)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)

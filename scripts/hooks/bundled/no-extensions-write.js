@@ -12094,6 +12094,23 @@ function compoundBodies(commands, bodies = new WeakMap) {
   });
   return bodies;
 }
+function blockFds(commands, bodies) {
+  const out = new WeakMap;
+  const assign = (c, inherited) => {
+    const inner = c.inner?.();
+    const held = inner && inner.length > 0 ? inner : bodies.get(c);
+    if (!held)
+      return;
+    const fds = fdFiles(c.redirects, inherited);
+    for (const k of held) {
+      out.set(k, fds);
+      assign(k, fds);
+    }
+  };
+  for (const c of commands)
+    assign(c, new Map);
+  return out;
+}
 var RUNS_TEXT2 = new Set([".", "eval", "source"]);
 var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
 function functionArgs(commands, line) {
@@ -12161,20 +12178,49 @@ function functionArgs(commands, line) {
     const named = line.match(new RegExp(`(?<![\\w])${fn}(?![\\w])`, "g"))?.length;
     const nests = body.some((c) => c !== group && !!c.group && c.inner?.().length === 0 || c.words.slice(c === at ? 1 : 0).some((w) => unquoted(w, "function")));
     const moves = body.some((c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)));
-    const bound = {};
+    const words = [];
     if (calls.length === 1 && named === 2 && !moves && !nests && !body.includes(call) && all.indexOf(call) > all.indexOf(at))
-      for (const [k, w] of parse3(call).args.entries()) {
-        if (marked(w.value) || w.glob)
+      for (const w of parse3(call).args) {
+        if (w.unknown !== BRACE) {
+          words.push(w);
+          continue;
+        }
+        const expanded = braceRun({ ...call, words: [w] }, w);
+        if (!expanded)
           break;
-        bound[String(k + 1)] = w.value;
+        words.push(...expanded.words);
       }
     for (const c of body)
-      if (Object.keys(bound).length > 0)
-        out.set(c, bound);
+      if (words.length > 0)
+        out.set(c, { call, words });
       else
         out.delete(c);
   }
   return out;
+}
+var CALL_READINGS = 64;
+var VARIABLE = /^(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})$/;
+function positionals({ words }, env, steady) {
+  let sets = [[]];
+  for (const w of words) {
+    if (!marked(w.value) && !w.glob) {
+      sets = sets.map((set) => [...set, w.value]);
+      continue;
+    }
+    const raw = w.raw ?? "";
+    const variable = w.quoted ? /^"\$(.*)"$/.exec(raw)?.[1] : /^\$(.*)$/.exec(raw)?.[1];
+    const readings = variable !== undefined && VARIABLE.test(variable) ? heldReadings(w, env, steady) : undefined;
+    const expands = (value) => !w.quoted && /[*?[\]{}]/.test(value);
+    if (!readings || readings.some((r) => marked(r.value) || expands(r.value)))
+      break;
+    if (sets.length * readings.length > CALL_READINGS)
+      break;
+    sets = sets.flatMap((set) => readings.map((r) => [
+      ...set,
+      ...w.quoted ? [r.value] : r.value.split(/[ \t\n]+/).filter(Boolean)
+    ]));
+  }
+  return sets.map((set) => Object.fromEntries(set.map((value, k) => [String(k + 1), value])));
 }
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 async function printed(cmd, env, kids) {
@@ -12682,6 +12728,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const sshOwn = new WeakSet;
   let patterns = new Set;
   let bodies = new WeakMap;
+  let inheritedFds = new WeakMap;
   let fnArgs = new WeakMap;
   let execFds = new Map;
   let lineWrites = false;
@@ -12817,10 +12864,11 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const hookWord = (word, here, sure = false) => {
       if (word.procs || !marked(word.value))
         return hookFile(pathOf(word, here), sure);
-      const args = fnArgs.get(slotOf.get(cmd) ?? cmd);
-      const known = args ? { ...here, known: { ...here.known, ...args } } : here;
-      const held = heldReadings(word, known, steadyAt(cmd));
-      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure;
+      const call = fnArgs.get(slotOf.get(cmd) ?? cmd);
+      return (call ? positionals(call, here, steadyAt(call.call)) : [{}]).some((args) => {
+        const held = heldReadings(word, { ...here, known: { ...here.known, ...args } }, steadyAt(cmd));
+        return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure;
+      });
     };
     const intoHook = async (targets, source) => {
       if (targets.length === 0)
@@ -12863,7 +12911,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const into = copies ? writeTargets(copier, args, copier !== program(name) || onLinux()) : [];
     const hookEdits = copier === "sed" || copier === "perl" ? inPlace(copier, args) : [];
     const hookTargets = [
-      ...fdFiles(cmd.redirects, execFds).get("1") ?? [],
+      ...fdFiles(cmd.redirects, new Map([...execFds, ...inheritedFds.get(cmd) ?? []])).get("1") ?? [],
       ...copier === "tee" ? args.filter((word) => !/^-./.test(word.value)) : [],
       ...into,
       ...hookEdits
@@ -13208,6 +13256,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   whole = rootLine || wholeLine(lexed.commands, env);
   patterns = casePatterns(lexed.commands);
   bodies = compoundBodies(lexed.commands);
+  inheritedFds = blockFds(lexed.commands, bodies);
   fnArgs = functionArgs(lexed.commands, command);
   execFds = new Map;
   lineWrites = redirectsWrite(lexed.commands);
