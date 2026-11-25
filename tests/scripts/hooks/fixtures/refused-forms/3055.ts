@@ -120,6 +120,22 @@ export const groups: Group[] = [
         "a find feeding an xargs shell script that removes $@",
         "find ~/.playground -name roster.json -print0 | xargs -0 sh -c 'rm \"$@\"' _",
       ],
+      [
+        "a find exec shell script that removes its {} as $0",
+        "find ~/.playground -name roster.json -exec sh -c 'rm \"$0\"' {} \\;",
+      ],
+      [
+        "a find exec shell script that removes its {} as $1",
+        "find ~/.playground -name roster.json -exec sh -c 'rm \"$1\"' _ {} \\;",
+      ],
+      [
+        "a find exec bash script that removes its {} batch as $@",
+        "find ~/.playground -name roster.json -exec bash -c 'rm \"$@\"' _ {} +",
+      ],
+      [
+        "fed text past the items the hook reads, ending in the roster, into xargs rm",
+        `echo ${Array.from({ length: 101 }, (_, i) => `/tmp/x${i}`).join(" ")} ~/.playground/roster.json | xargs rm`,
+      ],
     ],
   },
 ]

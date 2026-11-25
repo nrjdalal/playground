@@ -167,6 +167,8 @@ const FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"])
 const FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"])
 // find's operators that let a path a -name test misses through, GNU's and bfs's , among them
 const FIND_OR = new Set(["!", ",", "-not", "-o", "-or"])
+// The items of fed text the hook reads one by one before it judges the rest as the roster
+const ITEMS = 100
 // find's option words before its start points: BSD's flags, GNU's -O level and -D list attached
 const FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/
 
@@ -284,7 +286,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     })
   }
   const isFind = (cmd: Command | undefined) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""))
-  // Fed text as the words it hands on: split at its delimiters, else at lines for an -I string, else at blanks.
+  // Fed text as the words it hands on: split at its delimiters, else at lines for an -I string, else at blanks; text holding more than ITEMS of them is judged as the roster, failing closed.
   const itemsOf = (text: string, xargs?: NonNullable<Xargs>): Word[] => {
     const at = xargs?.delimiters?.length
       ? new RegExp(xargs.delimiters.map((d) => d!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"))
@@ -295,7 +297,6 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       .split(at)
       .map((v) => (xargs?.replace ? v.trim() : v.replace(/["']/g, "")))
       .filter(Boolean)
-      .slice(0, 100)
       .map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }))
   }
   // Whether a command's output may list the roster: a find that reaches it, text holding it as a path, or output the hook cannot see where unseenHolds.
@@ -309,7 +310,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (FINDS.has(tool)) return reaches(args, at)
     const out = await outputOf(cmd, at)
     if (marked(out.value)) return unseen && unseenHolds(at)
-    return namesRoster(out.value, targets) || itemsOf(out.value).some((w) => writes(w, at))
+    const items = itemsOf(out.value)
+    return (
+      items.length > ITEMS || namesRoster(out.value, targets) || items.some((w) => writes(w, at))
+    )
   }
   // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see where unseenHolds.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
@@ -335,6 +339,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
       return unseenHolds(at) ? put([roster]) : []
     const items = itemsOf(input.value, xargs)
+    if (items.length > ITEMS) return put([roster])
     return items.length ? put(items) : []
   }
   const visit: Visit = async (cmd, parsed, at) => {
@@ -381,6 +386,20 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
           .join(" ")
         const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true)
         if (found) return found
+        // the command itself, its {} a word of its own as find hands it (`sh -c 'rm "$0"' {}`), so a program the roster reaches as an argument is judged with it
+        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end)
+        const own = await visit(
+          cmd,
+          {
+            ...parsed,
+            args: rest.map((w) => (reached && w.value.includes("{}") ? roster : w)),
+            first,
+            name: first!.value,
+            xargs: undefined,
+          },
+          at,
+        )
+        if (own) return own
       }
       return
     }

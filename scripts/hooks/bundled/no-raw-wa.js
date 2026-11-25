@@ -3647,6 +3647,7 @@ var FINDS = new Set(["find"]);
 var FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
 var FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"]);
 var FIND_OR = new Set(["!", ",", "-not", "-o", "-or"]);
+var ITEMS = 100;
 var FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/;
 var KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS]);
 var shown = (word) => word.source ?? visible(word.value);
@@ -3745,7 +3746,7 @@ async function judgeBash(command, cwd, environment) {
   const isFind = (cmd) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""));
   const itemsOf = (text, xargs) => {
     const at = xargs?.delimiters?.length ? new RegExp(xargs.delimiters.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")) : xargs?.replace ? /\n/ : /\s+/;
-    return text.split(at).map((v) => xargs?.replace ? v.trim() : v.replace(/["']/g, "")).filter(Boolean).slice(0, 100).map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }));
+    return text.split(at).map((v) => xargs?.replace ? v.trim() : v.replace(/["']/g, "")).filter(Boolean).map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }));
   };
   const listsRoster = async (cmd, args, tool, at, unseen) => {
     if (FINDS.has(tool))
@@ -3753,7 +3754,8 @@ async function judgeBash(command, cwd, environment) {
     const out = await outputOf(cmd, at);
     if (marked(out.value))
       return unseen && unseenHolds(at);
-    return namesRoster(out.value, targets) || itemsOf(out.value).some((w) => writes(w, at));
+    const items = itemsOf(out.value);
+    return items.length > ITEMS || namesRoster(out.value, targets) || items.some((w) => writes(w, at));
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
@@ -3770,6 +3772,8 @@ async function judgeBash(command, cwd, environment) {
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
       return unseenHolds(at) ? put([roster]) : [];
     const items = itemsOf(input.value, xargs);
+    if (items.length > ITEMS)
+      return put([roster]);
     return items.length ? put(items) : [];
   };
   const visit = async (cmd, parsed, at) => {
@@ -3813,6 +3817,16 @@ async function judgeBash(command, cwd, environment) {
         const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true);
         if (found)
           return found;
+        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end);
+        const own = await visit(cmd, {
+          ...parsed,
+          args: rest.map((w) => reached && w.value.includes("{}") ? roster : w),
+          first,
+          name: first.value,
+          xargs: undefined
+        }, at);
+        if (own)
+          return own;
       }
       return;
     }
