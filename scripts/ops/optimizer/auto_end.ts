@@ -96,7 +96,11 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
   const where = deps.resumeDir ? ` at ${join(deps.resumeDir, `${target.name}.sh`)}` : ""
-  const missing = record ? "" : ` (no resume record${where}, so fill in its folder and session id)`
+  const missing = !record
+    ? ` (no resume record${where}, so fill in its folder and session id)`
+    : record.dir
+      ? ""
+      : ` (its resume record${where} names no folder, so fill in its folder and session id)`
   const { account, dir = "<dir>", sessionId = "<session id>" } = record ?? {}
   const text = `Ended ${target.name}: ${why}${after}; resume it on the next push${missing}: scripts/spawn.sh resume ${target.name} ${dir} ${sessionId} --force --pr ${target.pr ?? "<PR url>"}${account ? ` --account ${account}` : ""}`
   return target.worker && target.worker !== to
@@ -492,11 +496,7 @@ export async function finishedAt(
 ): Promise<boolean> {
   if (finishedOf(await rm.prState(path, pr))) return true
   const n = pr ? await ownPr(pr, rm.main) : undefined
-  const clone =
-    !!n &&
-    Object.values(CLONES)
-      .flat()
-      .some((leaf) => path === join(rm.main, ".claude", "worktrees", leaf.replace("<n>", n)))
+  const clone = !!n && clonesAt(Object.values(CLONES).flat(), n, rm.main).includes(path)
   const merged = clone && pr ? rm.mergedHead(path, pr) : null
   return !!merged && (await git(path, ["merge-base", "--is-ancestor", "HEAD", merged])) !== null
 }

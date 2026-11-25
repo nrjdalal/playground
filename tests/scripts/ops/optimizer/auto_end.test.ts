@@ -308,6 +308,16 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       )
       expect(lines).toEqual([missing, missing])
     })
+
+    test("a record whose exec line names no folder keeps its placeholders and says so", async () => {
+      const { lines, path } = await end(`${head}# account: seat-b@example.test\n`)
+      const unnamed = hint(
+        " --account seat-b@example.test",
+        "<dir> <session id>",
+        ` (its resume record at ${path} names no folder, so fill in its folder and session id)`,
+      )
+      expect(lines).toEqual([unnamed, unnamed])
+    })
   })
 
   test("a line goes to the roster lead, its worker's, or ops for a ops checker; a roster-says flag ends nobody", async () => {
