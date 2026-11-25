@@ -849,8 +849,7 @@ describe("every refused form stays refused in its Codex shape", () => {
   })
 })
 
-// Each case's seed is its own, so every run tries the same spellings and CI prints no new one; REFUSED_FORMS_SEED=<n> tries another seed's, and the seed a failure prints replays it
-const SPELLING_RUNS = 4
+// Each case's seed is its own, so a seeded draw is the same on every run, CI's included; REFUSED_FORMS_SEED=<n> sets every case's seed, which draws once a rewrite with a random part raises numRuns past the examples
 const SEED = process.env.REFUSED_FORMS_SEED ? Number(process.env.REFUSED_FORMS_SEED) : undefined
 if (SEED !== undefined && !Number.isInteger(SEED))
   throw new Error(`REFUSED_FORMS_SEED=${process.env.REFUSED_FORMS_SEED} is not a whole number`)
@@ -885,10 +884,10 @@ describe("every generated spelling of a refused form stays refused", () => {
             text,
           })
         }),
-        // every rewrite runs once as an example, so no case leaves one untried, and the seeded draws come after
+        // fast-check counts the examples inside numRuns, so each case runs every rewrite once and draws nothing, since a draw from the fixed rewrites only repeats one
         {
           examples: REWRITE_NAMES.map((s) => [s] as [Spelling]),
-          numRuns: SPELLING_RUNS,
+          numRuns: REWRITE_NAMES.length,
           seed: SEED ?? Bun.hash.crc32(c.key) | 0,
         },
       )

@@ -86,11 +86,11 @@ Any other red in the pass is a real clock mix: fix it so the code takes one cloc
 ## The property test
 
 `tests/scripts/hooks/refused-forms.test.ts`'s "every generated spelling of a refused form stays refused" is a fast-check property over every Bash case of the refused-forms fixture whose call opens on a plain program word (`programWord`) and whose guard runs behind guards.ts's factory gate, each fed to the guards as `check()` input alone.
-For each case, `fc.assert` runs every rewrite `refused-spellings.ts` lists once as an example, each keeping what the call runs, then `SPELLING_RUNS` seeded draws from `SPELLING`.
+For each case, `fc.assert` runs every rewrite `refused-spellings.ts` lists once as an example, each keeping what the call runs, and nothing more: fast-check counts the examples inside `numRuns`, which equals the rewrite count.
 A spelling stays refused when the row's own guard refuses it, or when no-hidden-program, which runs behind the same gate, refuses its program word as no plain name.
-Each case seeds from its own key, so every run, CI's included, tries the same spellings and prints no new one.
-A failure prints `{ seed, path }` and the shrunk spelling; replay it with `REFUSED_FORMS_SEED=<seed> bun run test:file tests/scripts/hooks/refused-forms.test.ts`, which the sandbox passes through `SANDBOX_KEYS`.
-Any other seed explores the same way, every case then taking that seed.
+Today the property is a regression net that no-hidden-program alone satisfies: every rewrite puts an expansion in the program word, which no-hidden-program refuses by design, so the property goes red only when that refusal goes missing, never on a row's own guard, until rewrites land that keep the program word literal and judge each spelling by the row's own guard.
+Each case seeds from its own key, and `REFUSED_FORMS_SEED=<n> bun run test:file tests/scripts/hooks/refused-forms.test.ts` gives every case seed `<n>`, which the sandbox passes through `SANDBOX_KEYS`.
+Until a rewrite with a random part lands and raises `numRuns` past the example count, every seed runs the same spellings; from then on a seed draws more, and the seed a failure prints with its spelling replays it.
 A spelling a guard lets through is a guard hole: send your lead its spelling, seed and guard, and keep it off GitHub until its fix merges ([scripts/hooks/README.md](../scripts/hooks/README.md)).
 The fix's PR adds its rewrite to `refused-spellings.ts` with its refused-forms rows, so the property holds the fix; it is done when the default seed runs green with the rewrite in.
 
