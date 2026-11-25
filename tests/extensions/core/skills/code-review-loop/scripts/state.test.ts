@@ -1915,17 +1915,20 @@ test("11b pr over REST marks another account's comment and thread untrusted too 
   )
 })
 
-// A PR branch off canary, then canary's own move; the fake test run reads each file in the clone as it stands, and a file holding RED is red.
+// A PR branch off canary, then canary's own move; the fake test run reads each file in the clone as it stands, and a file holding RED is red. The base is a Bun repo with a test:file script unless the case gives its own.
+const BUN_BASE = {
+  "b.txt": "b\n",
+  "package.json": '{"scripts":{"test:file":"bun test"}}\n',
+  "src/a.ts": "export const a = 1\n",
+  "tests/src/a.test.ts": "green\n",
+}
 const mergeRepo = (
   pr: Record<string, string>,
   canary: Record<string, string>,
+  base: Record<string, string> = BUN_BASE,
 ): [string, string] => {
   const repo = scratch()
-  scratchRepo(repo, {
-    "b.txt": "b\n",
-    "src/a.ts": "export const a = 1\n",
-    "tests/src/a.test.ts": "green\n",
-  })
+  scratchRepo(repo, base)
   writeFiles(repo, pr)
   git(repo, "add", ".")
   git(repo, "commit", "-qm", "pr")
@@ -1951,7 +1954,7 @@ const junit = (files: string[], red: string[]): string =>
     )
     .join("")}</testsuites>`
 
-// The fake run: `red` names a run's red files, `report` writes its report (undefined writes none), and the run is green when none is red.
+// The fake run: `red` names a run's red files, `report` writes its report (undefined writes none), and `exit` gives its exit code, 0 when none is red and 1 otherwise unless the case gives its own.
 const runMerge = (
   repo: string,
   head: string,
@@ -1959,15 +1962,18 @@ const runMerge = (
     files.filter((f) => readFileSync(join(clone, f), "utf8").includes("RED")),
   args: string[] = [repo, head, "canary", "probe-worker"],
   report: (files: string[], red: string[]) => string | undefined = junit,
-): { calls: string[][]; code: number | undefined; lines: string[] } => {
+  exit: (files: string[], red: string[]) => number = (_files, reds) => (reds.length ? 1 : 0),
+): { calls: string[][]; code: number | undefined; lines: string[]; runners: string[] } => {
   const real = { ...state.io }
   const calls: string[][] = []
-  state.io.tests = (session, clone, files, path) => {
+  const runners: string[] = []
+  state.io.tests = (session, clone, files, path, runner) => {
     calls.push([session, ...files])
+    runners.push(runner)
     const reds = red(clone, files)
     const xml = report(files, reds)
     if (xml !== undefined) writeFileSync(path, xml)
-    return reds.length === 0
+    return exit(files, reds)
   }
   const lines: string[] = []
   const realLog = console.log
@@ -1978,7 +1984,7 @@ const runMerge = (
   process.exitCode = 0
   try {
     state.cmdMerge(...args)
-    return { calls, code: process.exitCode, lines }
+    return { calls, code: process.exitCode, lines, runners }
   } finally {
     console.log = realLog
     process.exitCode = realCode
@@ -2295,6 +2301,138 @@ test("12p merge's test run stays on this machine, where its junit report is writ
     "--reporter-outfile=/t/r.xml",
     "tests/a.test.ts",
   ])
+})
+
+test("13a chunksOf splits a whole-suite list of 855 files into 5 chunks of 200 or fewer (#3045)", () => {
+  const files = Array.from({ length: 855 }, (_, i) => `tests/s${i}.test.ts`)
+  const chunks = state.chunksOf(files)
+  expect(chunks.map((c) => c.length)).toEqual([200, 200, 200, 200, 55])
+  expect(chunks.flat()).toEqual(files)
+})
+
+test("13b merge runs a touched list past 200 files in chunks, one call each (#3045)", () => {
+  const many = Object.fromEntries(
+    Array.from({ length: 201 }, (_, i) => [`tests/src/c${i}.test.ts`, "green\n"]),
+  )
+  const [repo, head] = mergeRepo(many, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 201 touched tests`])
+  expect(out.calls.map((c) => c.length - 1)).toEqual([200, 1])
+})
+
+test("13c merge reads a chunk the sandbox's deadline cut, with no failed case, as TIMEOUT naming its chunk, never a red (#3045)", () => {
+  const [repo, head] = mergeRepo(eight, { "b.txt": "b, from canary\n" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(
+    repo,
+    head,
+    undefined,
+    undefined,
+    () => undefined,
+    () => 124,
+  )
+  expect(out.lines).toEqual([
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+  ])
+  expect(out.code).toBe(1)
+  expect(out.calls).toHaveLength(1)
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("13d merge still reads a real failed case in a chunk the deadline cut as the PR's own red (#3045)", () => {
+  const [repo, head] = mergeRepo(
+    { ...eight, [t(3)]: "RED in the PR\n" },
+    { "b.txt": "b, from canary\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head, undefined, undefined, undefined, (files, reds) =>
+    files.length > 1 ? 124 : reds.length ? 1 : 0,
+  )
+  expect(out.lines).toEqual([
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (8 files) hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+    `HEAD-RED: ${t(3)}`,
+  ])
+  expect(out.code).toBe(1)
+})
+
+test("13e runnerOf: a test:file script runs bun, a pyproject.toml with a .venv runs pytest, neither runs none (#2971, #2974, #2987)", () => {
+  const bun = scratch()
+  writeFiles(bun, {
+    "package.json": '{"scripts":{"test:file":"bun test"}}',
+    "pyproject.toml": "[project]\n",
+  })
+  const py = scratch()
+  writeFiles(py, {
+    "pyproject.toml": "[project]\n",
+    ".venv/bin/python": "",
+    "package.json": '{"scripts":{}}',
+  })
+  const bare = scratch()
+  writeFiles(bare, { "pyproject.toml": "[project]\n", "package.json": "not json" })
+  expect(state.runnerOf(bun)).toBe("bun")
+  expect(state.runnerOf(py)).toBe("pytest")
+  expect(state.runnerOf(bare)).toBeUndefined()
+})
+
+test("13f testsArgv's pytest form runs the clone's own venv from the clone, its junit report with each case's file (#2971, #2974, #2987)", () => {
+  const argv = state.testsArgv(
+    "probe-worker",
+    "/s/review-501",
+    ["tests/test_a.py"],
+    "/t/r.xml",
+    "pytest",
+  )
+  expect(argv.slice(1)).toEqual([
+    "probe-worker",
+    "--",
+    "env",
+    "RUN_SLOT_HERE=1",
+    "/usr/bin/env",
+    "-C",
+    "/s/review-501",
+    "/s/review-501/.venv/bin/python",
+    "-m",
+    "pytest",
+    "-o",
+    "junit_family=xunit1",
+    "--junitxml=/t/r.xml",
+    "tests/test_a.py",
+  ])
+})
+
+test("13g merge on a clone with no test runner says so, runs no test and names no red (#2974)", () => {
+  const [repo, head] = mergeRepo(
+    { "tests/src/a.test.ts": "RED in the PR\n" },
+    { "b.txt": "b, from canary\n" },
+    { "b.txt": "b\n", "src/a.ts": "export const a = 1\n", "tests/src/a.test.ts": "green\n" },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([
+    `NO-RUNNER on ${canary}: the clone has no test:file script and no pyproject.toml with a .venv, so no touched test ran; run them by hand by code-review-loop's touched-tests form`,
+  ])
+  expect(out.code).toBe(1)
+  expect(out.calls).toEqual([])
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("13h merge on a Python clone runs pytest and reads its red by the report, with no false HEAD-RED for a green file (#2971, #2987)", () => {
+  const [repo, head] = mergeRepo(
+    { "tests/test_a.py": "RED in the PR\n", "tests/test_b.py": "green, changed\n" },
+    { "b.txt": "b, from canary\n" },
+    {
+      "b.txt": "b\n",
+      "pyproject.toml": "[project]\n",
+      "tests/test_a.py": "green\n",
+      "tests/test_b.py": "green\n",
+    },
+  )
+  writeFiles(repo, { ".venv/bin/python": "" })
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 2 touched tests`, "HEAD-RED: tests/test_a.py"])
+  expect([...new Set(out.runners)]).toEqual(["pytest"])
 })
 
 test("12o redIn reads bun's own junit report: a failed testcase's file is failed, a test file left out is leftOut, a green file and a non-test file are neither (#2468)", () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
-import { readFileSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
@@ -38,25 +38,64 @@ export class Called extends Error {
 
 // The seam the tests swap: run() is one gh or git call's stdout, gh skipped while ghDown names why, sleep() waits, time() reads the clock in seconds.
 // io.tests's command: RUN_SLOT_HERE=1 keeps the run on this machine, since run-slot sends a test:file run to the runner box by default, whose junit report never comes back, so every red would read as NO-REPORT.
+// A Python repo's runs take its own venv's pytest from the clone, the skill's form for one, its junit report in xunit1, whose testcases carry the file= that redIn and casesIn read.
+export type Runner = "bun" | "pytest"
 export const testsArgv = (
   session: string,
   clone: string,
   files: string[],
   report: string,
+  runner: Runner = "bun",
 ): string[] => [
   join(homedir(), ".playground", "ops", "run-slot.sh"),
   session,
   "--",
   "env",
   "RUN_SLOT_HERE=1",
-  "bun",
-  `--cwd=${clone}`,
-  "run",
-  "test:file",
-  "--reporter=junit",
-  `--reporter-outfile=${report}`,
+  ...(runner === "pytest"
+    ? [
+        "/usr/bin/env",
+        "-C",
+        clone,
+        join(clone, ".venv", "bin", "python"),
+        "-m",
+        "pytest",
+        "-o",
+        "junit_family=xunit1",
+        `--junitxml=${report}`,
+      ]
+    : [
+        "bun",
+        `--cwd=${clone}`,
+        "run",
+        "test:file",
+        "--reporter=junit",
+        `--reporter-outfile=${report}`,
+      ]),
   ...files,
 ]
+
+// The clone's test runner: its test:file script, else a pyproject.toml's pytest in its .venv, else none, which the merge names rather than read every file red.
+export const runnerOf = (clone: string): Runner | undefined => {
+  try {
+    if (JSON.parse(readFileSync(join(clone, "package.json"), "utf8"))?.scripts?.["test:file"])
+      return "bun"
+  } catch {}
+  return existsSync(join(clone, "pyproject.toml")) &&
+    existsSync(join(clone, ".venv", "bin", "python"))
+    ? "pytest"
+    : undefined
+}
+
+// The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
+export const CHUNK = 200
+export const chunksOf = (files: string[]): string[][] =>
+  Array.from({ length: Math.ceil(files.length / CHUNK) }, (_, i) =>
+    files.slice(i * CHUNK, (i + 1) * CHUNK),
+  )
+
+// The test sandbox's exit on its deadline (timeout(1)'s code).
+const DEADLINE = 124
 
 // GH_STALE_MS in packages/scripts/src/gh-read.ts, in seconds, which a test holds equal; a skill's script imports nothing outside its folder, so ghDown's rule is kept here too.
 export const GH_STALE_SECONDS = 120
@@ -87,12 +126,18 @@ export const io = {
     return stdout
   },
   sleep: (s: number): Promise<void> => Bun.sleep(s * 1000),
-  // One run of test files in the clone through run-slot, green or not, its junit report written to <report>.
-  tests: (session: string, clone: string, files: string[], report: string): boolean =>
-    Bun.spawnSync(testsArgv(session, clone, files, report), {
+  // One run of test files in the clone through run-slot, its exit code (0 green), its junit report written to <report>.
+  tests: (
+    session: string,
+    clone: string,
+    files: string[],
+    report: string,
+    runner: Runner,
+  ): number =>
+    Bun.spawnSync(testsArgv(session, clone, files, report, runner), {
       stdout: "inherit",
       stderr: "inherit",
-    }).exitCode === 0,
+    }).exitCode ?? 1,
   time: (): number => Date.now() / 1000,
 }
 
@@ -1066,6 +1111,14 @@ export const cmdMerge = (...args: string[]): void => {
     return
   }
   const tests = touchedTests(clone, baseSha, merge)
+  const runner = runnerOf(clone)
+  if (tests.length && !runner) {
+    console.log(
+      `NO-RUNNER on ${baseSha.slice(0, 7)}: the clone has no test:file script and no pyproject.toml with a .venv, so no touched test ran; run them by hand by code-review-loop's touched-tests form`,
+    )
+    process.exitCode = 1
+    return
+  }
   // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test, or runs in the test sandbox's serial pass, which writes none); a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
@@ -1080,15 +1133,21 @@ export const cmdMerge = (...args: string[]): void => {
   }
   const redAlone = (f: string): boolean => {
     rmSync(report, { force: true })
-    if (!io.tests(session, clone, [f], report)) return true
+    if (io.tests(session, clone, [f], report, runner!) !== 0) return true
     const xml = readReport([f])
     return xml !== undefined && redIn(xml, [f]).leftOut.length === 0
   }
-  const red = (files: string[], where: string): string[] => {
-    if (!files.length) return []
+  // A chunk the sandbox's deadline cut keeps the failed cases its report names as red and reads the rest as neither red nor clean, so a cut never reads as every file red.
+  const timedOut: string[] = []
+  const chunkRed = (files: string[], where: string, stage: string, label: string): string[] => {
     rmSync(report, { force: true })
-    if (io.tests(session, clone, files, report)) return []
+    const code = io.tests(session, clone, files, report, runner!)
+    if (code === 0) return []
     const xml = readReport(files)
+    if (code === DEADLINE) {
+      timedOut.push(`${stage}, ${label} (${files.length} files)`)
+      return redIn(xml, files).failed
+    }
     if (files.length === 1) return files
     const { failed, leftOut } = redIn(xml, files)
     const named = files.filter((f) => failed.includes(f) || (leftOut.includes(f) && redAlone(f)))
@@ -1096,14 +1155,18 @@ export const cmdMerge = (...args: string[]): void => {
     unnamed.push(where)
     return files
   }
+  const red = (files: string[], where: string, stage: string): string[] => {
+    const chunks = chunksOf(files)
+    return chunks.flatMap((c, i) => chunkRed(c, where, stage, `chunk ${i + 1} of ${chunks.length}`))
+  }
   const treeOf = (sha: string): Set<string> =>
     new Set(io.run("git", "-C", clone, "ls-tree", "-r", "--name-only", "-z", sha).split("\0"))
-  const at = (sha: string, files: string[], where: string): string[] => {
+  const at = (sha: string, files: string[], where: string, stage: string): string[] => {
     const tree = treeOf(sha)
     const there = files.filter((f) => tree.has(f))
     if (!there.length) return []
     io.run("git", "-C", clone, "checkout", "-q", "--detach", sha)
-    return red(there, where)
+    return red(there, where, stage)
   }
   let branch = ""
   try {
@@ -1124,11 +1187,16 @@ export const cmdMerge = (...args: string[]): void => {
   let atBase: string[]
   const headCases = new Map<string, Set<string>>()
   try {
-    first = at(merge, tests, `on the merge, so all ${tests.length} touched tests ran again`)
-    onMerge = red(first, "on the merge's second run")
-    atHead = at(headSha, onMerge, "at the head")
+    first = at(
+      merge,
+      tests,
+      `on the merge, so all ${tests.length} touched tests ran again`,
+      "on the merge",
+    )
+    onMerge = red(first, "on the merge's second run", "on the merge's second run")
+    atHead = at(headSha, onMerge, "at the head", "at the head")
     for (const f of atHead) headCases.set(f, cases.get(f) ?? new Set())
-    atBase = at(baseSha, onMerge, `at ${c7}`).filter((f) => {
+    atBase = at(baseSha, onMerge, `at ${c7}`, `at ${c7}`).filter((f) => {
       const own = headCases.get(f)
       return !own || (own.size > 0 && [...own].every((c) => cases.get(f)?.has(c)))
     })
@@ -1139,10 +1207,16 @@ export const cmdMerge = (...args: string[]): void => {
   }
   const together = first.filter((f) => !onMerge.includes(f))
   const canaryOnly = onMerge.filter((f) => !atHead.includes(f) && !atBase.includes(f))
+  for (const cut of timedOut)
+    console.log(
+      `TIMEOUT on ${c7}: ${cut} hit the sandbox's deadline, so the files it had not reported read neither red nor clean`,
+    )
+  if (timedOut.length) process.exitCode = 1
   if (canaryOnly.length) {
     console.log(`CANARY-RED on ${c7}: ${canaryOnly.join(" ")}`)
     process.exitCode = 1
-  } else if (!together.length) console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
+  } else if (!together.length && !timedOut.length)
+    console.log(`CLEAN on ${c7}: ${tests.length} touched tests`)
   if (together.length)
     console.log(
       `BATCH-RED on ${c7}: ${together.join(" ")} (merged with head ${headSha.slice(0, 7)}); open or link one issue for each by code-review-loop's step 2, never a second rerun`,
@@ -1281,7 +1355,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline cut (exit 124) with no failed case prints TIMEOUT <where>, chunk <i> of <n> (exit 1), never a red; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none; the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
