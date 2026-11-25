@@ -6,6 +6,8 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
+  rmSync,
   statSync,
   utimesSync,
   writeFileSync,
@@ -92,7 +94,7 @@ describe("a take between clear-stale's check and its removal keeps its folder an
     ["a holder line with no folder", (slot) => writeFileSync(`${slot}.holder`, DEAD)],
   ]
   test.each(rows)("%s", async (_, plant) => {
-    // call 1 is clear-stale's first act on the slot after its checks: the claim's mkdir (canary: the folder's rmdir, or the holder's rm when no folder stood)
+    // call 1 is clear-stale's first act on the slot after its checks: the claim's mkdir, or the holder line's mv when no folder stood (canary: the folder's rmdir, or the holder's rm when no folder stood)
     const r = paused(plant, "clear-stale", 1)
     await r.at()
     take(r.slot)
@@ -127,6 +129,40 @@ test("a live claim made between the stale claim's check and its removal stands",
   expect(readFileSync(r.holder, "utf8")).toBe(DEAD)
 })
 
+// review round 1: a run that ended between clear-stale's read of its live holder line and its folder check sent clear-stale down the no-folder branch, which made a folder of its own and left it, so the slot read held for 2 hours
+test("a run that frees its slot between clear-stale's read and its folder check leaves the slot free", async () => {
+  const m = machine()
+  const slot = join(m.ops, "run-slot")
+  mkdirSync(slot)
+  writeFileSync(`${slot}.holder`, LIVE)
+  // cat pauses clear-stale right after its first read of the holder line, writing at and waiting for go
+  const shims = join(m.root, "shims")
+  mkdirSync(shims)
+  const rest = m.env().PATH
+  writeFileSync(
+    join(shims, "cat"),
+    `#!/bin/bash
+PATH=${rest} cat "$@"; rc=$?
+case " $* " in *"/run-slot.holder "*) [ -e ${shims}/at ] || { : > ${shims}/at; until [ -e ${shims}/go ]; do sleep 0.05; done; } ;; esac
+exit $rc
+`,
+  )
+  chmodSync(join(shims, "cat"), 0o755)
+  const run = runSlot(["bash", SCRIPT, "clear-stale"], {
+    env: m.env({ PATH: `${shims}:${rest}` }),
+    stdout: "pipe",
+    ops: m.ops,
+  })
+  while (!existsSync(join(shims, "at"))) await Bun.sleep(20)
+  // free()'s two steps: the holder line, then the folder
+  rmSync(`${slot}.holder`)
+  rmdirSync(slot)
+  writeFileSync(join(shims, "go"), "")
+  expect(await run.exited).toBe(0)
+  expect(existsSync(slot)).toBe(false)
+  expect(existsSync(`${slot}.holder`)).toBe(false)
+})
+
 describe("a slot that really is stale is still cleared", () => {
   const cleared = async (plant: (slot: string) => void, line: string) => {
     const m = machine()
@@ -158,6 +194,15 @@ describe("a slot that really is stale is still cleared", () => {
   test("a folder holding a claim 2 hours old", () =>
     cleared((slot) => {
       mkdirSync(join(slot, "reclaim"), { recursive: true })
+      aged(join(slot, "reclaim"))
+      writeFileSync(`${slot}.holder`, DEAD)
+    }, "cleared a stale holder"))
+
+  // review round 1: a takeover killed holding its claim inside the old one left two claims, which the next reclaimer must take over one level down
+  test("a folder holding a claim taken over inside another, both 2 hours old", () =>
+    cleared((slot) => {
+      mkdirSync(join(slot, "reclaim", "reclaim"), { recursive: true })
+      aged(join(slot, "reclaim", "reclaim"))
       aged(join(slot, "reclaim"))
       writeFileSync(`${slot}.holder`, DEAD)
     }, "cleared a stale holder"))
