@@ -72,9 +72,14 @@ const COPIERS = new Set(["cp", "ditto", "rsync"])
 // The placers whose -t or --target-directory names the folder they place into; rsync's -t keeps times.
 const TARGET_FLAG = new Set(["cp", "install", "ln", "mv"])
 
-// Programs that write every file operand they name, so an operand the hook cannot read is a write position.
+// Programs that write or change every file operand they name (a mode, an owner, a compressed copy in its place), so an operand the hook cannot read is a write position.
 const WRITERS = new Set([
+  "bzip2",
+  "chgrp",
+  "chmod",
+  "chown",
   "dd",
+  "gzip",
   "install",
   "ln",
   "mv",
@@ -84,6 +89,7 @@ const WRITERS = new Set([
   "touch",
   "truncate",
   "unlink",
+  "xz",
 ])
 
 // Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
@@ -104,6 +110,9 @@ const CODE_RUNNERS = new Set([
 // A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
   /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i
+// A path in the code, its segments up to a quote, a blank, a bracket or a shell operator: a temp folder's -rMNlX1 or a no-roster-write folder holds no write.
+const PATHS = /[^\s"'`/()<>|&;=,]*(?:\/[^\s"'`/()<>|&;=,]*)+/g
+const writesCode = (code: string) => WRITE_WORDS.test(code.replace(PATHS, "/"))
 
 // The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
 const targetsOf = (environment: Environment): string[] => {
@@ -215,12 +224,12 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand) may write the roster when the call names it and the text after its last expansion may end its path; an unread operand of any other program runs.
+  // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand, sort's -o) may write the roster when the call reaches toward it (near) and the text after its last expansion may end its path; an unread operand of any other program runs.
   const writes = (typed: Word, at: Env, position = false) => {
     const paths = pathsOf(typed, at)
     if (!paths) {
       const tail = tailOf(typed.source ?? typed.raw ?? "").toLowerCase()
-      return position && named && targets.some((t) => t.endsWith(tail))
+      return position && near && targets.some((t) => t.endsWith(tail))
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob))
   }
@@ -323,12 +332,14 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
     const fill = (a: Word, mark: string, item: Word): Word => {
+      // an unseen item after a folder in the -I string may be any name in it (`xargs -I{} rm <data folder>/{}`)
+      const anyName = unseen.has(item) && !a.value.startsWith(mark)
       const word = {
         ...a,
-        glob: a.glob || item.glob,
+        glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, item.value),
+        value: a.value.replaceAll(mark, anyName ? "*" : item.value),
       }
       if (unseen.has(item)) unseen.add(word)
       return word
@@ -408,7 +419,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     }
     if (
       CODE_RUNNERS.has(tool) &&
-      args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
+      args.some((a) => namesRoster(a.value, targets) && writesCode(a.value))
     )
       return refuse(`${tool} code that names the roster and holds a write word`)
     if (PLACERS.has(tool)) {
@@ -431,6 +442,12 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob))
       if (args.some(script)) return refuse(`${tool} whose script names the roster`)
       if (!inPlace(args)) return
+    }
+    // sort writes the file its -o or --output names
+    if (tool === "sort") {
+      const o = args.findIndex((a) => a.value === "-o")
+      const out = o >= 0 ? args[o + 1] : args.find((a) => a.value.startsWith("--output="))
+      if (out && writes(out, at, true)) return refuse(`sort -o onto ${shown(out)}`)
     }
     if (READERS.has(tool)) return
     const writer = WRITERS.has(tool) || SEDS.has(tool)

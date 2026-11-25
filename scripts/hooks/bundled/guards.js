@@ -19750,7 +19750,12 @@ var PLACERS = new Set(["cp", "ditto", "install", "ln", "mv", "rsync"]);
 var COPIERS2 = new Set(["cp", "ditto", "rsync"]);
 var TARGET_FLAG = new Set(["cp", "install", "ln", "mv"]);
 var WRITERS2 = new Set([
+  "bzip2",
+  "chgrp",
+  "chmod",
+  "chown",
   "dd",
+  "gzip",
   "install",
   "ln",
   "mv",
@@ -19759,7 +19764,8 @@ var WRITERS2 = new Set([
   "tee",
   "touch",
   "truncate",
-  "unlink"
+  "unlink",
+  "xz"
 ]);
 var CODE_RUNNERS = new Set([
   "awk",
@@ -19775,6 +19781,8 @@ var CODE_RUNNERS = new Set([
   "ruby"
 ]);
 var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
+var PATHS = /[^\s"'`/()<>|&;=,]*(?:\/[^\s"'`/()<>|&;=,]*)+/g;
+var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, "/"));
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);
   let real = data;
@@ -19865,7 +19873,7 @@ async function judgeBash(command, cwd, environment) {
     const paths = pathsOf(typed, at);
     if (!paths) {
       const tail = tailOf(typed.source ?? typed.raw ?? "").toLowerCase();
-      return position && named && targets.some((t) => t.endsWith(tail));
+      return position && near && targets.some((t) => t.endsWith(tail));
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob));
   };
@@ -19944,12 +19952,13 @@ async function judgeBash(command, cwd, environment) {
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
     const fill = (a, mark, item) => {
+      const anyName = unseen.has(item) && !a.value.startsWith(mark);
       const word = {
         ...a,
-        glob: a.glob || item.glob,
+        glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, item.value)
+        value: a.value.replaceAll(mark, anyName ? "*" : item.value)
       };
       if (unseen.has(item))
         unseen.add(word);
@@ -20020,7 +20029,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && writesCode(a.value)))
       return refuse15(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
@@ -20039,6 +20048,12 @@ async function judgeBash(command, cwd, environment) {
         return refuse15(`${tool} whose script names the roster`);
       if (!inPlace2(args))
         return;
+    }
+    if (tool === "sort") {
+      const o = args.findIndex((a) => a.value === "-o");
+      const out = o >= 0 ? args[o + 1] : args.find((a) => a.value.startsWith("--output="));
+      if (out && writes(out, at, true))
+        return refuse15(`sort -o onto ${shown3(out)}`);
     }
     if (READERS4.has(tool))
       return;

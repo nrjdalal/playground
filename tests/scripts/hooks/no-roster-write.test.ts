@@ -225,6 +225,11 @@ describe("roster.ts and every read run", () => {
     `gcut -c1-5 ${ROSTER}`,
     `ghead -1 ${ROSTER}`,
     `gmd5sum ${ROSTER}`,
+    // #3066: reads beside its refused forms, of names from a listing the hook never sees
+    `ls ${DATA} | xargs -I{} cat ${DATA}/{}`,
+    `ls ${DATA} | while read f; do cat ${DATA}/"$f"; done`,
+    `ls ${ROSTER} | xargs wc -c`,
+    `sort ${DATA}/scratch/x.txt -o /tmp/x.txt`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -266,6 +271,32 @@ describe("a call whose session sits in the data folder", () => {
       expect(await inData(command)).toBeUndefined()
     },
   )
+})
+
+// #3076: a temp folder mkdtemp names with a suffix that starts with rm holds no write word, so inline code reading the roster under it runs
+describe("a roster under a temp folder whose name holds rm", () => {
+  const home = "/tmp/test-sandbox-rMNlX1/home"
+  const roster = `${home}/.playground/roster.json`
+  const under = (command: string) => bash(command, { HOME: home })
+
+  test.each([
+    `python3 -I -c "import json; r = json.load(open('${roster}')); print(json.dumps(r)[:80])"`,
+    `python3 -c "print(open('${roster}').read())"`,
+    `node -e "console.log(require('fs').readFileSync('${roster}', 'utf8'))"`,
+    `python3 -c "print(open('/tmp/no-roster-write/x').read(), open('${roster}').read())"`,
+  ])("runs %s", async (command) => {
+    expect(await under(command)).toBeUndefined()
+  })
+
+  test.each([
+    `python3 -c "open('${roster}', 'w').write('{}')"`,
+    `perl -e 'unlink "${roster}"'`,
+    `node -e "require('fs').rmSync('${roster}')"`,
+    `python3 -c "import os; os.system('rm ${roster}')"`,
+    `awk '{print > "${roster}"}' /tmp/x`,
+  ])("refuses %s", async (command) => {
+    expect(await under(command)).toContain("scripts/roster.ts")
+  })
 })
 
 // It has no process of its own: no-raw-wa's, registered on the file tools, runs it there.
