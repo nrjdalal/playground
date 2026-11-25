@@ -1408,6 +1408,23 @@ test("10p each test whose imported source walks the repo is listed for any chang
   expect(WALKERS.every((w) => listed.includes(w))).toBe(true)
 })
 
+test("10s a test that reaches scanImports through its helper, as main.test.ts and hosted.test.ts do through import-graph.ts, is listed for a change the import graph carries (#3015)", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "api/hono/src/lib/x.ts": "export const x = 1\n",
+    "tests/api/hono/src/hosted.test.ts": 'import { importGraph } from "./import-graph"\n',
+    "tests/api/hono/src/import-graph.ts":
+      'export const importGraph = (text: string) => new Bun.Transpiler({ loader: "ts" }).scanImports(text)\n',
+    "tests/api/hono/src/main.test.ts": 'import { importGraph } from "./import-graph"\n',
+  })
+  writeFiles(repo, { "api/hono/src/lib/x.ts": "export const x = 2\n" })
+  git(repo, "commit", "-qam", "change x")
+  const out = touched(repo)
+  expect(out.code, out.stderr).toBe(0)
+  expect(out.listed).toContain("tests/api/hono/src/hosted.test.ts")
+  expect(out.listed).toContain("tests/api/hono/src/main.test.ts")
+})
+
 test("10i a Python repo lists each tests/test_*.py that scans a folder holding a changed file", () => {
   const repo = scratch()
   scratchRepo(repo, {
@@ -2062,6 +2079,21 @@ test("12d merge: a lockfile canary changed is named, with no test run, since the
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   const out = runMerge(repo, head)
   expect(out.lines).toEqual([`LOCK-CHANGED on ${canary}: bun.lock; no tests ran`])
+  expect(out.code).toBe(0)
+  expect(out.calls).toEqual([])
+})
+
+test("12x merge: a pnpm-lock.yaml canary changed is named as LOCK-CHANGED, with no test run, since the clone's install is the head's (#3078)", () => {
+  const [repo, head] = mergeRepo(
+    { "src/a.ts": "export const a = 2\n" },
+    {
+      "pkg/pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      "tests/src/a.test.ts": "RED since canary\n",
+    },
+  )
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`LOCK-CHANGED on ${canary}: pkg/pnpm-lock.yaml; no tests ran`])
   expect(out.code).toBe(0)
   expect(out.calls).toEqual([])
 })

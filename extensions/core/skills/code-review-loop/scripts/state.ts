@@ -810,6 +810,8 @@ const PY_TEST = /^tests\/(.+\/)?test_[^/]+\.py$/
 const WALKS_REPO = /ls-files|os\.walk\(|rglob\(/
 // Tests whose imported source scans the repo, so no grep of their own text finds them
 const SCANS_THROUGH_SOURCE = [
+  "tests/api/hono/src/hosted.test.ts",
+  "tests/api/hono/src/main.test.ts",
   "tests/packages/scripts/src/parity/record.test.ts",
   "tests/packages/scripts/src/trace-count/count.test.ts",
   "tests/packages/scripts/src/verify/dashboard-map.test.ts",
@@ -1020,7 +1022,7 @@ export const cmdTouchedTests = (clone: string, base: string, head: string): void
   for (const f of touchedTests(clone, base, head)) console.log(f)
 }
 
-const LOCKS = /(^|\/)(bun\.lock|package\.json)$/
+const LOCKS = /(^|\/)(bun\.lock|package\.json|pnpm-lock\.yaml)$/
 
 // Pure: a red run's junit report read for its files: failed, each with a failed testcase, and leftOut, each test file the report leaves out, as bun leaves out a file that throws as it loads and one that defines no test; a report that is missing names none.
 export const redIn = (
