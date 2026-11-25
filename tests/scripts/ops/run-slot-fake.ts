@@ -769,3 +769,55 @@ export const gated = (m: Machine, who: string, rc: number) => {
   )
   return { open: () => writeFileSync(gate, ""), p }
 }
+
+// A machine whose fake docker reports an 8 GiB VM (`info`, or the memory file's bytes), keeps its capped builder's cap in a marker (`buildx create` writes it, `buildx inspect` reports it, `buildx rm` removes it), lists api and web for `compose config --services`, logs each compose build's services as it starts and ends (a pause between, so two builds at once interleave), and touches its last word for any other call.
+export const dockerMachine = () => {
+  const m = machine()
+  const log = join(m.root, "docker.log")
+  // every docker call with the builder it runs under, and the marker holding the capped builder's memory cap
+  const calls = join(m.root, "docker-calls.log")
+  const made = join(m.root, "builder-made")
+  const memory = join(m.root, "vm-memory")
+  writeFileSync(
+    join(m.bin, "docker"),
+    `#!/bin/bash
+echo "BUILDX_BUILDER=\${BUILDX_BUILDER:-} $*" >> ${calls}
+case " $* " in
+  *" info "*) [ -f ${memory} ] && cat ${memory} || echo 8391860224; exit 0 ;;
+  *" buildx inspect "*) [ -f ${made} ] || exit 1; echo "Driver Options: default-load=\\"true\\" memory=\\"$(cat ${made})\\" memory-swap=\\"$(cat ${made})\\""; exit 0 ;;
+  *" buildx create "*) for a; do case "$a" in memory=*) echo "\${a#memory=}" > ${made} ;; esac; done; exit 0 ;;
+  *" buildx rm "*) rm -f ${made}; exit 0 ;;
+  *" buildx stop "*) exit 0 ;;
+  *" config "*"--services "*) printf 'api\\nweb\\n'; exit 0 ;;
+  *" compose "*"build "*) while [ "$1" != build ]; do shift; done; shift
+    echo "start $*" >> ${log}; sleep 0.3; echo "end $*" >> ${log}; exit 0 ;;
+esac
+touch "\${@: -1}"
+`,
+  )
+  chmodSync(join(m.bin, "docker"), 0o755)
+  const holdDocker = () => m.hold("run-slot-docker", 0, "docker")
+  const builds = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [])
+  // a docker command through run-slot, its stderr read as it comes, as start() reads a run's
+  const docker = (who: string, words: string[], flags: string[] = []) => {
+    const p = runSlot(["bash", SCRIPT, who, ...flags, "--", ...words], {
+      cwd: m.root,
+      env: m.env(),
+      stderr: "pipe",
+      ops: m.ops,
+    })
+    let err = ""
+    const read = (async () => {
+      for await (const chunk of p.stderr) err += new TextDecoder().decode(chunk)
+    })()
+    const done = async () => {
+      const code = await p.exited
+      await read
+      return { code, err }
+    }
+    return { done, p, stderr: () => err }
+  }
+  const dockerCalls = () =>
+    existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : []
+  return { ...m, builds, docker, dockerCalls, holdDocker, made, memory }
+}
