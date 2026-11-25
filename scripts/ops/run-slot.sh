@@ -123,6 +123,37 @@ stale() {
     [ $(( NOW - m )) -ge 7200 ]
   fi
 }
+# gives slot folder $1 back: one mv out of the slot path to a name of this run's own, then an rmdir there of the folder, any claim in it and a claim taken over inside that, so a reclaimer's claim that lands before the mv leaves with the folder and one after finds no folder or a new taker's (issues 3039 and 3052); it fails only when the mv does
+drop() { mv "$1" "$1.gone-$$" 2>/dev/null || return 1; rmdir "$1.gone-$$/reclaim/reclaim" "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null; return 0; }
+reclaim() {
+  # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale, returning 0 only when this call moved it out; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
+  [ -d "$1" ] || return 1
+  local line dir again c=
+  line=$(cat "$1.holder" 2>/dev/null)
+  stale "$1" "$line" || return 1
+  dir=$(stamp "$1")
+  # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
+  stale "$1" "$line" || return 1
+  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and a folder holding it leaves $1 only by a drop, which a run makes of its own live folder or a reclaimer under its claim, so the stale folder stays at $1 until this reclaimer moves it (issue 3039)
+  if ! mkdir "$1/reclaim" 2>/dev/null; then
+    # a claim left by a reclaimer killed holding it is taken over once it is 2 hours old, never removed, so a live claim made since its age was read stands: one mkdir of a claim inside it, then the outer claim must still be the one stamped before that read, by inode and birth time (issue 3052)
+    c=$(stamp "$1/reclaim")
+    stale "$1/reclaim" "" && mkdir "$1/reclaim/reclaim" 2>/dev/null || return 1
+    again=$(stamp "$1/reclaim")
+    [ -n "$c" ] && [ "${again% *}" = "${c% *}" ] || { rmdir "$1/reclaim/reclaim" 2>/dev/null; return 1; }
+  fi
+  # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free's drop takes a claim left there with the folder
+  again=$(stamp "$1")
+  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${again% *}" = "${dir% *}" ]; then
+    # the stale holder line goes first, as in free; drop then moves the folder out with this claim still in it, so no second claim lands between the claim's removal and the folder's
+    rm -f "$1.holder"
+    drop "$1"
+  else
+    [ -n "$c" ] && rmdir "$1/reclaim/reclaim" 2>/dev/null
+    rmdir "$1/reclaim" 2>/dev/null
+    return 1
+  fi
+}
 # a setting's value as JSON, as the settings reader in this script's checkout prints it, its default on a machine with no extensions; a reader that cannot answer says why on stderr
 setting() {
   "$BUN" "$(checkout_root)/packages/scripts/src/playground/setting.ts" "$1" </dev/null
@@ -236,22 +267,30 @@ if [ "${1:-}" = box-off ]; then
   exit 0
 fi
 # run-slot.sh clear-stale: remove each slot's leftover holder (and its directory) whose pid is dead, or whose directory is already gone,
-# and each slot directory with no holder line that is 2 hours old.
+# and each slot directory with no holder line that is 2 hours old, each only through reclaim's claim and drop, so a take between a check and a removal keeps its folder and holder line (issue 3052).
 # Sessions call this instead of a bare rm under ~/.claude, which raises Claude Code's delete prompt even in bypass mode (dispatcher, 12 Oct).
 if [ "${1:-}" = clear-stale ]; then
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\(\.holder\)\{0,1\}$/\1/p' | sort -u); do
-    h="$OPS/$s.holder"
-    if [ ! -e "$h" ]; then
-      [ -d "$OPS/$s" ] && stale "$OPS/$s" "" && rmdir "$OPS/$s" 2>/dev/null && echo "$s: cleared a slot directory with no holder line"
-      continue
+    p="$OPS/$s"
+    line=$(cat "$p.holder" 2>/dev/null)
+    if [ -d "$p" ]; then
+      if reclaim "$p"; then
+        if [ -n "$line" ]; then echo "$s: cleared a stale holder ($line)"; else echo "$s: cleared a slot directory with no holder line"; fi
+      else
+        pid=$(printf '%s' "$line" | cut -d' ' -f2)
+        printf '%s' "$pid" | grep -Eq '^[0-9]+$' && alive "$pid" && echo "$s: held by ${line%% *} (pid $pid, alive); left alone"
+      fi
+    # a holder line with no folder: the path is taken and claimed first, and the line goes only while it reads as before the take, since a reclaimer that freed the folder since removed it first
+    elif [ -n "$line" ] && mkdir "$p" 2>/dev/null; then
+      if mkdir "$p/reclaim" 2>/dev/null; then
+        if [ "$(cat "$p.holder" 2>/dev/null)" = "$line" ]; then
+          rm -f "$p.holder"
+          drop "$p" && echo "$s: cleared a stale holder ($line)"
+        else
+          rmdir "$p/reclaim" 2>/dev/null
+        fi
+      fi
     fi
-    pid=$(cut -d' ' -f2 "$h" 2>/dev/null)
-    if printf '%s' "$pid" | grep -Eq '^[0-9]+$' && alive "$pid"; then
-      [ -d "$OPS/$s" ] && { echo "$s: held by $(cut -d' ' -f1 "$h") (pid $pid, alive); left alone"; continue; }
-    fi
-    line=$(cat "$h" 2>/dev/null)
-    [ -d "$OPS/$s" ] && rmdir "$OPS/$s" 2>/dev/null
-    rm -f "$h" && echo "$s: cleared a stale holder ($line)"
   done
   exit 0
 fi
@@ -1800,8 +1839,6 @@ prio_first() {
 # true while the priority holder has a ticket whose waiter still runs
 prio_waiting() { [ -n "$(prio_first)" ]; }
 
-# gives slot folder $1 back: one mv out of the slot path to a name of this run's own, then an rmdir there of the folder and any claim in it, so a reclaimer's claim that lands before the mv leaves with the folder and one after finds no folder or a new taker's (issue 3039)
-drop() { mv "$1" "$1.gone-$$" 2>/dev/null && rmdir "$1.gone-$$/reclaim" "$1.gone-$$" 2>/dev/null; }
 free() {
   # give the slot back only while its holder line is still ours; giveBackSlot (packages/scripts/src/playground/give-back.ts) removes the same files, so a file added here goes there too
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
@@ -1951,29 +1988,6 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   CHILD=""
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
-}
-
-reclaim() {
-  # $1 is a slot directory that mkdir found taken: free it when its holder line ($2 of stale) has gone stale; the stamp is taken only for a stale slot, so a live one costs no stat (issue 2852)
-  [ -d "$1" ] || return 0
-  local line dir again
-  line=$(cat "$1.holder" 2>/dev/null)
-  stale "$1" "$line" || return 0
-  dir=$(stamp "$1")
-  # stale again on the folder just stamped, since a slot with no holder line is judged by its folder's age, and the next taker's new folder reads young
-  stale "$1" "$line" || return 0
-  # the claim is one mkdir of $1/reclaim: it succeeds for one reclaimer alone, and a folder holding it leaves $1 only by a drop, which a run makes of its own live folder or a reclaimer under its claim, so the stale folder stays at $1 until this reclaimer moves it (issue 3039)
-  # a claim left by a reclaimer killed holding it goes once it is 2 hours old, and a folder whose holder line that reclaimer had removed then ages 2 hours more, since the claim's removal moved its mtime
-  mkdir "$1/reclaim" 2>/dev/null || { stale "$1/reclaim" "" && rmdir "$1/reclaim" 2>/dev/null; return 0; }
-  # under the claim the folder must be the one stamped, by inode and birth time since the claim moved its mtime, and its holder line the stale one; else the claim landed in the next taker's folder, which keeps it, and free's drop takes a claim left there with the folder
-  again=$(stamp "$1")
-  if [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "${again% *}" = "${dir% *}" ]; then
-    # the stale holder line goes first, as in free; drop then moves the folder out with this claim still in it, so no second claim lands between the claim's removal and the folder's
-    rm -f "$1.holder"
-    drop "$1"
-  else
-    rmdir "$1/reclaim" 2>/dev/null
-  fi
 }
 
 # the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
