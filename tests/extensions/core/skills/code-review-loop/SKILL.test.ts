@@ -707,3 +707,13 @@ describe("code-review-loop's last 5/5 installs a pnpm repo's merge again after a
     )
   })
 })
+
+describe("code-review-loop's last 5/5 runs its bun install through run-slot (#3097)", () => {
+  test("the merge install's bun half carries the run-slot wrapper no-unslotted-run asks for", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "Then `~/.playground/ops/run-slot.sh <your session name> -- bun install --ignore-scripts --cwd <clone>` when the merge changed `package.json` or `bun.lock`",
+    )
+    expect(last).not.toContain("Then `bun install")
+  })
+})
