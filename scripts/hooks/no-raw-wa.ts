@@ -6,6 +6,7 @@ import { resolve } from "node:path"
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { eachInput } from "./codex"
 import { input } from "./input"
+import { check as rosterWrite } from "./no-roster-write"
 import { fromFactory } from "./role"
 import {
   knownVariables,
@@ -238,7 +239,10 @@ export async function check(
 
 if (import.meta.main) {
   const raw = await input("no-raw-wa", "guard")
-  const reason = (await fromFactory(raw)) ? await check(raw) : undefined
+  // a file tool's write to the live roster is refused here too (no-roster-write), since this hook's matcher already takes the file tools; guards.ts runs it on Bash
+  const reason = (await fromFactory(raw))
+    ? ((await rosterWrite(raw)) ?? (await check(raw)))
+    : undefined
   if (reason) {
     console.error(reason)
     process.exit(2)
