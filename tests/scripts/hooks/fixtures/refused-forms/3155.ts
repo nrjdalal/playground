@@ -1,6 +1,6 @@
 import { type Group } from "./_shared"
 
-// #3155: a kill of every process (`-1`), a process group (a negative pid) or the caller's own group (`0`), read as kill reads its words, and a pkill or killall given a user or an "all" target; rows are data, as refused-forms.ts says.
+// #3155 (a group no live pid can lead, above the 99999 pid ceiling, keeps each group row off the live table): a kill of every process (`-1`), a process group (a negative pid) or the caller's own group (`0`), read as kill reads its words, and a pkill or killall given a user or an "all" target; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["checkout"],
@@ -14,9 +14,9 @@ export const groups: Group[] = [
       ["a kill of every process after --", "kill -- -1"],
       ["a kill of every process after a signal and --", "kill -9 -- -1"],
       ["a kill of every process beside a pid", "kill -9 1234 -1"],
-      ["a kill of a process group after a signal", "kill -9 -1234"],
-      ["a kill of a process group after --", "kill -- -1234"],
-      ["a kill of a process group after -s", "kill -s TERM -1234"],
+      ["a kill of a process group after a signal", "kill -9 -99999999"],
+      ["a kill of a process group after --", "kill -- -99999999"],
+      ["a kill of a process group after -s", "kill -s TERM -99999999"],
       ["a kill of the caller's own group", "kill 0"],
       ["a kill of the caller's own group after a signal", "kill -9 0"],
       ["a kill of every process by its path", "/bin/kill -9 -1"],
@@ -33,6 +33,24 @@ export const groups: Group[] = [
       ["a kill of every process xargs fills in for -I", "echo -1 | xargs -I{} kill -9 {}"],
       ["a kill of the caller's own group beside a pid", "kill -9 1234 0"],
       ["a kill of a process group the hook cannot read", "kill -9 -$PGID"],
+      ["a kill of every process behind a leading blank", 'kill -9 " -1"'],
+      ["a kill of every process before a trailing blank", 'kill -9 "-1 "'],
+      ["a kill of every process behind a tab", "kill -9 $'\\t-1'"],
+      ["a kill of the caller's own group behind a plus sign", "kill -9 +0"],
+      ["a kill of the caller's own group behind a blank", 'kill " 0"'],
+      ["a kill of a process group behind a blank", 'kill -9 " -99999999"'],
+      ["a kill of every process behind a blank in bash -c", `bash -c 'kill -9 " -1"'`],
+      ["a kill of every process before a blank in bash -c", `bash -c 'kill -9 "-1 "'`],
+      ["a kill of every process behind a tab in bash -c", `bash -c "kill -9 \\$'\\t-1'"`],
+      ["a kill of the caller's own group behind a blank in bash -c", `bash -c 'kill " 0"'`],
+      ["a kill of every process behind a blank at kill's path", '/bin/kill -9 " -1"'],
+      ["a kill of the caller's own group behind a plus sign at kill's path", "/bin/kill -9 +0"],
+      ["a kill of a process group behind a blank at kill's path", '/bin/kill " -99999999"'],
+      ["a kill of a pid zsh cuts to -1", "kill -9 4294967295"],
+      ["a kill of a pid zsh cuts to 0", "kill -9 4294967296"],
+      ["a kill of a pid zsh cuts to a foreign group", "kill -9 4294962062"],
+      ["a kill of a pid past 64 bits", "kill -9 18446744073709551615"],
+      ["a kill of every process after a signal the hook cannot read", "kill -$SIG -1"],
       ["a pkill of a user's processes", "pkill -u nobody"],
       ["a pkill of a real user's processes", "pkill -U 501"],
       ["a pkill of a user's processes by name", "pkill --euid nobody node"],

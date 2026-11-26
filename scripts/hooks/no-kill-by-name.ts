@@ -86,15 +86,20 @@ const isSearch = (name: string, args: Word[]) =>
     name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value))
   )
 
-// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand. A group target is "all" for -1, 0 or a minus sign before a value the hook cannot read (`-$PGID`), else the process groups its negative operands name.
+// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -$SIG, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand, each read past the blanks and the plus sign kill's number parse skips. A group target is "all" for -1, 0, a pid past 32 bits, which zsh's kill cuts to one (4294967295 is -1), or a minus sign before a value the hook cannot read (`-$PGID`), else the process groups its negative operands name.
 const groupTarget = (words: string[]): "all" | number[] => {
   let i = 0
   if (words[0] === "-l" || words[0] === "-L") return []
   if (words[0] === "-s" || words[0] === "-n") i = 2
-  else if (words[0] !== "--" && /^-\w+$/.test(words[0] ?? "")) i = 1
+  else if (words[0] !== "--" && words[0]?.startsWith("-")) i = 1
   if (words[i] === "--") i++
-  const operands = words.slice(i)
-  if (operands.some((w) => /^(?:-0*1|0+)$/.test(w) || (w.startsWith("-") && w.includes(UNKNOWN))))
+  const operands = words.slice(i).map((w) => w.trim().replace(/^\+/, ""))
+  const wide = (w: string) => /^-?\d+$/.test(w) && Math.abs(Number(w)) > 2 ** 31 - 1
+  if (
+    operands.some(
+      (w) => /^(?:-0*1|0+)$/.test(w) || wide(w) || (w.startsWith("-") && w.includes(UNKNOWN)),
+    )
+  )
     return "all"
   return operands.filter((w) => /^-\d+$/.test(w)).map((w) => Number(w.slice(1)))
 }

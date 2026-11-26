@@ -16841,12 +16841,13 @@ var groupTarget = (words) => {
     return [];
   if (words[0] === "-s" || words[0] === "-n")
     i = 2;
-  else if (words[0] !== "--" && /^-\w+$/.test(words[0] ?? ""))
+  else if (words[0] !== "--" && words[0]?.startsWith("-"))
     i = 1;
   if (words[i] === "--")
     i++;
-  const operands = words.slice(i);
-  if (operands.some((w) => /^(?:-0*1|0+)$/.test(w) || w.startsWith("-") && w.includes(UNKNOWN)))
+  const operands = words.slice(i).map((w) => w.trim().replace(/^\+/, ""));
+  const wide = (w) => /^-?\d+$/.test(w) && Math.abs(Number(w)) > 2 ** 31 - 1;
+  if (operands.some((w) => /^(?:-0*1|0+)$/.test(w) || wide(w) || w.startsWith("-") && w.includes(UNKNOWN)))
     return "all";
   return operands.filter((w) => /^-\d+$/.test(w)).map((w) => Number(w.slice(1)));
 };
