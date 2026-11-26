@@ -65,6 +65,47 @@ const held = (): Row[] => [
   ["a function's write into a case-changed .git folder's hook", `${CAT}; f .GIT/hooks/pre-commit`],
 ]
 
+// a remover written through a parameter a line moves past its set, or through a replacement whose pattern the reader does not model, from #3143's round 1
+const ECHO = "echo 'rm -f x' >"
+const moved = (): Row[] => [
+  [
+    "a remover into $1 after zsh's argv[1] moves it",
+    `set -- out.log; argv[1]=${HOOK}; ${ECHO} "$1"`,
+  ],
+  ["a remover into $1 after zsh's 1= moves it", `set -- out.log; 1=${HOOK}; ${ECHO} "$1"`],
+  [
+    "a remover into $1 after zsh's argv array moves it",
+    `set -- out.log; argv=(${HOOK}); ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after a read into argv",
+    `set -- out.log; read -A argv <<< ${HOOK}; ${ECHO} "$1"`,
+  ],
+  ["a remover into $1 after an eval's set", `set -- out.log; eval 'set -- ${HOOK}'; ${ECHO} "$1"`],
+  ["a remover into $1 after a dot script", `set -- out.log; . ./x.sh; ${ECHO} "$1"`],
+  ["a remover into $1 after a sourced script", `set -- out.log; source ./x.sh; ${ECHO} "$1"`],
+  [
+    "a remover into $1 after a set through a variable",
+    `C=set; set -- out.log; $C -- ${HOOK}; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after a set through zsh's split read",
+    `X='set -- ${HOOK}'; set -- out.log; \${=X}; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover through a replacement with zsh's group",
+    `X=.git/hooksz/pre-commit; ${ECHO} "\${X/(z|q)/}"`,
+  ],
+  [
+    "a remover through a replacement with a POSIX class",
+    `X=.git/hooksA/pre-commit; ${ECHO} "\${X/[[:upper:]]/}"`,
+  ],
+  [
+    "a remover through a parameter's replacement with zsh's group",
+    `f() { ${ECHO} "\${1/(z|q)/}"; }; f .git/hooksz/pre-commit`,
+  ],
+]
+
 const root = (): Row[] => [
   [
     "a write through a variable cut by %, a file in the root",
@@ -89,6 +130,7 @@ export const allowed: string[] = [...controls(), ["a cat's output into a .GIT-na
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
+  { folders: ["process worktree"], guards: ["no-extensions-write"], rows: moved },
   {
     folders: ["data folder", "home", "process worktree"],
     guards: ["no-extensions-write"],

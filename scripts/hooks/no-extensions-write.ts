@@ -1805,7 +1805,7 @@ function blockRedirects(commands: Command[], bodies: WeakMap<Command, Command[]>
 // Every command of a list, each one's inner commands after it
 const commandsIn = (list: Command[]): Command[] =>
   list.flatMap((c) => [c, ...commandsIn(c.inner?.() ?? [])])
-// The positional parameters a line's set gives the shell at top level (`set -- a b`, `set a`): its words when one set gives them as written and nothing on the line moves them, null when the hook cannot read them, and undefined when no set gives any
+// The positional parameters a line's set gives the shell at top level (`set -- a b`, `set a`): its words when one set gives them as written and nothing on the line moves them (shift, getopts, zsh's `argv` or `N=`, a text it runs or a program it cannot read, as functionArgs reads a body), null when the hook cannot read them, and undefined when no set gives any
 function lineArgsOf(commands: Command[]): Record<string, string> | null | undefined {
   const parsed = commandsIn(commands).map((c) => parse(c))
   // a set's operands: every word after `--`, or from its first word that is no option, past -o's or +o's value
@@ -1821,8 +1821,11 @@ function lineArgsOf(commands: Command[]): Record<string, string> | null | undefi
     return words ? [words] : []
   })
   if (sets.length === 0) return undefined
-  if (sets.length > 1 || parsed.some(({ name }) => name === "shift" || name === "getopts"))
-    return null
+  const moves =
+    parsed.some(
+      ({ name }) => name === "shift" || name === "getopts" || RUNS_TEXT.has(name) || marked(name),
+    ) || commandsIn(commands).some((c) => c.words.some((w) => /^argv\b|^\d+=/.test(w.value)))
+  if (sets.length > 1 || moves) return null
   const [words] = sets
   if (words.some((w) => marked(w.value) || w.glob || w.unknown)) return null
   return Object.fromEntries(words.map((w, k) => [String(k + 1), w.value]))
@@ -2078,6 +2081,10 @@ function operatedRaws(
   let unread = false
   let at = 0
   for (const { 0: whole, 1: name, 2: op, 3: operand, index = 0 } of found) {
+    // a pattern holding what patternOf does not model (zsh's always-on `(a|b)`, a POSIX class, a numeric range, an extended glob) leaves the read unread, as canary read it
+    const pattern = op.startsWith("/") ? operand.split("/")[0] : operand
+    if (!/[-=+]$/.test(op) && /[()|<>^~#@!+]|\[[:=.]/.test(pattern.replace(/\[!/g, "[")))
+      return undefined
     const values = valuesOf(name)
     let gives: string[]
     if (values)

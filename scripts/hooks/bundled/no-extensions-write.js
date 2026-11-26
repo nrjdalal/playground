@@ -12238,7 +12238,8 @@ function lineArgsOf(commands) {
   });
   if (sets.length === 0)
     return;
-  if (sets.length > 1 || parsed.some(({ name }) => name === "shift" || name === "getopts"))
+  const moves = parsed.some(({ name }) => name === "shift" || name === "getopts" || RUNS_TEXT2.has(name) || marked(name)) || commandsIn(commands).some((c) => c.words.some((w) => /^argv\b|^\d+=/.test(w.value)));
+  if (sets.length > 1 || moves)
     return null;
   const [words] = sets;
   if (words.some((w) => marked(w.value) || w.glob || w.unknown))
@@ -12438,6 +12439,9 @@ function operatedRaws(raw, valuesOf) {
   let unread = false;
   let at = 0;
   for (const { 0: whole, 1: name, 2: op, 3: operand, index = 0 } of found) {
+    const pattern = op.startsWith("/") ? operand.split("/")[0] : operand;
+    if (!/[-=+]$/.test(op) && /[()|<>^~#@!+]|\[[:=.]/.test(pattern.replace(/\[!/g, "[")))
+      return;
     const values = valuesOf(name);
     let gives;
     if (values)
