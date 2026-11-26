@@ -955,6 +955,7 @@ ${block("reload_if")}
 ${block("finish_roll")}
 ${block("fall_back")}
 ${upto("build_head")}
+${fn("build_step") ?? ""}
 ${upto("keep_builds")}
 ${upto("start_dev")}
 ${fn("serving_web")}
@@ -1623,6 +1624,49 @@ describe("the supervisor's foreground forks in prebuild's log group keep bash's 
     expect(await slotRun(roll(join(kept, "absent.sh")), c1)).toEqual({ code: 0, out: c2 })
     expect(lines("cp")).toEqual(["cp /dev/null"])
     expect(readFileSync(log, "utf8")).toContain("the made-up cp's own stderr\n")
+  })
+})
+
+describe("the build before the stop runs its run-slot child outside the supervisor's process group (#3099)", () => {
+  const dir = join(scratch, "pgid")
+  const seen = join(dir, "seen")
+  const log = join(kept, "supervisor.log")
+  const made = async () => {
+    rmSync(dir, { force: true, recursive: true })
+    mkdirSync(dir, { recursive: true })
+    await Bun.write(
+      join(dir, "rs.sh"),
+      `#!/bin/bash\n[ "$3 $4 $5" != "bun run build" ] || echo "build $(ps -o pgid= -p $$ | tr -d ' ')" >> ${seen}\nexec ${kept}/run-slot.sh "$@"\n`,
+    )
+    chmodSync(join(dir, "rs.sh"), 0o755)
+  }
+  const roll = `set -m; echo "shell $(ps -o pgid= -p $$ | tr -d ' ')" >> ${seen}; RS=${join(dir, "rs.sh")}; running=${c1}; roll_to ${c2} canary; echo "$running"`
+  const pgid = (word: string) =>
+    readFileSync(seen, "utf8")
+      .split("\n")
+      .find((line) => line.startsWith(`${word} `))
+      ?.split(" ")[1]
+
+  test("the build's run-slot child sits in a process group apart from the shell's, and the roll prints nothing else", async () => {
+    fresh()
+    await slotted()
+    await made()
+    expect(await slotRun(roll, c1)).toEqual({ code: 0, out: c2 })
+    expect(pgid("build")).toBeDefined()
+    expect(pgid("build")).not.toBe(pgid("shell"))
+  })
+
+  test("a failed build still hands its error line to the result and its whole output to the log, with nothing on stdout", async () => {
+    fresh()
+    await slotted()
+    await made()
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    expect(await slotRun(roll, c1)).toEqual({ code: 0, out: c1 })
+    expect(pgid("build")).not.toBe(pgid("shell"))
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(readFileSync(log, "utf8")).toContain("Error: next build failed\n")
   })
 })
 

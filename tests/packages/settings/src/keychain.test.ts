@@ -16,6 +16,7 @@ import {
   hasSecret,
   removeSecret,
   settingsFor,
+  storeItem,
   storeSecret,
 } from "../../../../packages/settings/src"
 
@@ -61,6 +62,20 @@ test("storeSecret hands the secret to security -i on stdin, under each provider'
       'stdin add-generic-password -U -s "playground-glm" -a "zai" -w "made.up"',
       "",
     ].join("\n"),
+  )
+})
+
+test("storeItem hands the secret to security -i on stdin under the service it is given, as storeSecret does", () => {
+  storeItem("made-up-service", "made-up-account", "made-up-token")
+  expect(logged()).toBe(
+    [
+      "argv -i",
+      'stdin add-generic-password -U -s "made-up-service" -a "made-up-account" -w "made-up-token"',
+      "",
+    ].join("\n"),
+  )
+  expect(() => storeItem('made-up" -A "', "made-up-account", "made-up-token")).toThrow(
+    "not a service",
   )
 })
 
