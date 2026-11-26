@@ -141,7 +141,7 @@ describe("each start takes the memory trial's arm by its role (#1484)", () => {
       "reportsTo=builder",
       "surface=",
       "title=Plain test work",
-      "task=b.md",
+      "task=~/.playground/b.md",
       "memory=off",
     ])
   })

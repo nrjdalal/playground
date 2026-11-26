@@ -2573,8 +2573,8 @@ write_row() {
   elif [ "$ROLE" = runner ]; then
     TITLE=$NAME
   fi
-  # The dashboard drops an entry with no task, so a new one takes its brief's name, else its role and name; a respawned one keeps its own.
-  if [ -n "$BRIEF" ]; then TASK=$BRIEF; else TASK="$ROLE $NAME"; fi
+  # The dashboard drops an entry with no task, so a new one takes its brief's path in the data folder, as the first prompt names it, since a session rereads its task from the main checkout (issue 3083), else its role and name; a respawned one keeps its own.
+  if [ -n "$BRIEF" ]; then TASK="$SHOWN/$BRIEF"; else TASK="$ROLE $NAME"; fi
   held=$(python3 -I - "$NAME" "$ROSTER_JSON" <<'PY'
 import json, sys
 name, path = sys.argv[1], sys.argv[2]

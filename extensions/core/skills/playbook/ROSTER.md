@@ -6,7 +6,7 @@ and the backlog entries still waiting (from `backlogNext` on, less those `backlo
 `scripts/roster.ts` in the main checkout is its only writer: atomic writes, `updatedAt` and `lastReportAt` stamped from the UTC clock, titles cut to 40 characters with any trailing `(#N)` dropped, since the PR is linked on its own.
 
 The dispatcher or the lead that starts a session, dispatches to it, hears its report or ends it writes that change, at that moment; workers and runners report and leave the writing to their lead, except a worker's branch, which the worker writes itself at its first push (It pushes its branch, below), since no report carries it before its PR opens.
-`scripts/spawn.sh` writes what it knows as it starts a session, whoever runs it: its `kind`, a worker's or checker's `title`, a checker's `worker=` and, for an entry that holds neither a task nor a pr, a `task`: its brief's file name, else its role and name (`probe probe-api`).
+`scripts/spawn.sh` writes what it knows as it starts a session, whoever runs it: its `kind`, a worker's or checker's `title`, a checker's `worker=` and, for an entry that holds neither a task nor a pr, a `task`: its brief's path in the data folder (`~/.playground/<brief>`), else its role and name (`probe probe-api`).
 spawn.sh writes a checker start's `--pr <url>` ([SPAWN.md](SPAWN.md#modes)), the PR it serves now, to the row before the pane opens.
 On an ended or done row it sets the row back to starting with `prs` of that PR alone and `pr` of the first pull request named, since auto-end reads the PRs an ended row still lists as done.
 On any other row, a parked one included, or none, `--pr` joins `prs` and gives a row with no `pr` the first pull request named.
