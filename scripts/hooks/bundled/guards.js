@@ -19852,7 +19852,7 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\bch(?:mod|own)|(?:shutil\.copy\w*|copyFile(?:Sync)?|cpSync)\s*\((?:[^,()]|\([^()]*\))*,[^,)]*roster\.json|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\b[fl]?ch(?:mod|own|flags)|(?:shutil\.copy\w*|copyFile(?:Sync)?|\bcp(?:Sync)?)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {
@@ -19875,22 +19875,33 @@ var namesRoster = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
   return targets.some((t) => new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain);
 };
-var namesBare = (text) => /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase());
+var namesBare = (text) => /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase().replace(/(?<![\w.-])(?:\.\/)+/g, ""));
 var namesApart = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
   if (!namesBare(text))
     return false;
   return targets.some((t) => new RegExp(`${dirname11(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(plain)) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain);
 };
+var knownOf = (at) => {
+  const known = { ...at.known };
+  for (const [key, text] of at.vars) {
+    if (!marked(text.value))
+      known[key] = text.value;
+    else if (text.raw?.startsWith(`${key}=`)) {
+      const { commands } = lex(text.raw.slice(key.length + 1), known);
+      const again = commands.length === 1 && commands[0].words.length === 1 ? commands[0].words[0] : undefined;
+      if (again && !marked(again.value))
+        known[key] = again.value;
+    }
+  }
+  return known;
+};
 var readOf = (word, at) => {
   if (!marked(word.value))
     return word;
   if (!word.raw)
     return;
-  const known = { ...at.known };
-  for (const [key, text] of at.vars)
-    if (!marked(text.value))
-      known[key] = text.value;
+  const known = knownOf(at);
   const { commands } = lex(word.raw, known);
   const again = commands.length === 1 ? commands[0].words[0] : undefined;
   return again && !marked(again.value) ? again : undefined;
@@ -19898,11 +19909,7 @@ var readOf = (word, at) => {
 var sharpened = (word, at) => {
   if (!marked(word.value) || !word.raw || !at.vars.size)
     return word;
-  const known = { ...at.known };
-  for (const [key, text] of at.vars)
-    if (!marked(text.value))
-      known[key] = text.value;
-  const { commands } = lex(word.raw, known);
+  const { commands } = lex(word.raw, knownOf(at));
   const again = commands.length === 1 && commands[0].words.length === 1 ? commands[0].words[0] : undefined;
   return again && again.value !== word.value ? { ...word, glob: again.glob, value: again.value } : word;
 };
@@ -20110,7 +20117,7 @@ async function judgeBash(command, cwd, environment) {
     const { name, xargs } = parsed;
     const args = parsed.args.map((a) => sharpened(a, at));
     for (const r of cmd.redirects)
-      if (r.target && r.op.includes(">") && writes(r.target, at, true))
+      if (r.target && r.op.includes(">") && writes(sharpened(r.target, at), at, true))
         return refuse15(`a redirect onto ${shown4(r.target)}`);
     if (!program(name))
       return;
@@ -20192,7 +20199,7 @@ async function judgeBash(command, cwd, environment) {
     const flag = RECURSIVE.get(tool);
     if (flag && args.some((a) => flag.test(a.value) || a.value === "--recursive")) {
       for (const word of args)
-        if (!word.value.startsWith("-") && holdsWord(word, at))
+        if (!word.value.startsWith("-") && (holdsWord(word, at) || !pathsOf(word, at) && near))
           return refuse15(`${tool} recursing into ${shown4(word)}`);
     }
     for (const word of args)

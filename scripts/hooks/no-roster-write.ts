@@ -108,7 +108,7 @@ const RECURSIVE = new Map([
   ["zstd", /^-[A-Za-z0-9]*r/],
 ])
 
-// Programs that run inline code the hook does not parse: code naming the roster, or its folder and a bare roster.json apart, runs only when it holds no write word (WRITE_WORDS).
+// Programs that run inline code the hook does not parse: code naming the roster, its folder and a bare roster.json apart, or a bare roster.json run from the roster's own folder, runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -123,9 +123,9 @@ const CODE_RUNNERS = new Set([
   "ruby",
 ])
 
-// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace, a mode or owner change, a copy onto a roster.json, or a redirect's > (an arrow's => and a comparison's >= aside).
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace, a mode, owner or flags change (an l or f before it too), a copy onto a roster.json or onto a destination that is no string literal, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\bch(?:mod|own)|(?:shutil\.copy\w*|copyFile(?:Sync)?|cpSync)\s*\((?:[^,()]|\([^()]*\))*,[^,)]*roster\.json|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\b[fl]?ch(?:mod|own|flags)|(?:shutil\.copy\w*|copyFile(?:Sync)?|\bcp(?:Sync)?)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 const writesCode = (code: string) =>
@@ -162,9 +162,14 @@ const namesRoster = (text: string, targets: string[]) => {
   )
 }
 
-// Whether text names a bare roster.json, one no path segment comes before, which is the roster from its own folder.
+// Whether text names a bare roster.json, one no path segment comes before (a ./ aside), which is the roster from its own folder.
 const namesBare = (text: string) =>
-  /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase())
+  /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(
+    text
+      .replace(/["'\\]/g, "")
+      .toLowerCase()
+      .replace(/(?<![\w.-])(?:\.\/)+/g, ""),
+  )
 
 // Whether code names the roster's folder itself (not a deeper path in it) and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
 const namesApart = (text: string, targets: string[]) => {
@@ -180,11 +185,25 @@ const namesApart = (text: string, targets: string[]) => {
 }
 
 // A word as the shell runs it: one the lexer could not read is lexed again with the variables the call has set by then, else it stays unread.
+// The variables the call has set by then, each read as the shell gives it: one set from another (`E=$D`) is read again from its own text with the ones before it.
+const knownOf = (at: Env): Record<string, string> => {
+  const known = { ...at.known }
+  for (const [key, text] of at.vars) {
+    if (!marked(text.value)) known[key] = text.value
+    else if ((text as Word).raw?.startsWith(`${key}=`)) {
+      const { commands } = lex((text as Word).raw!.slice(key.length + 1), known)
+      const again =
+        commands.length === 1 && commands[0]!.words.length === 1 ? commands[0]!.words[0] : undefined
+      if (again && !marked(again.value)) known[key] = again.value
+    }
+  }
+  return known
+}
+
 const readOf = (word: Word, at: Env): { glob?: boolean; value: string } | undefined => {
   if (!marked(word.value)) return word
   if (!word.raw) return
-  const known = { ...at.known }
-  for (const [key, text] of at.vars) if (!marked(text.value)) known[key] = text.value
+  const known = knownOf(at)
   // a substitution lexes as commands of its own, whose first word is never the word itself
   const { commands } = lex(word.raw, known)
   const again = commands.length === 1 ? commands[0]!.words[0] : undefined
@@ -194,9 +213,7 @@ const readOf = (word: Word, at: Env): { glob?: boolean; value: string } | undefi
 // A word as the variables the call has set by then read it, a part they leave unread kept unread: `$D/$f` after `D=~/.playground` reads `~/.playground/` and then the unread `$f`.
 const sharpened = (word: Word, at: Env): Word => {
   if (!marked(word.value) || !word.raw || !at.vars.size) return word
-  const known = { ...at.known }
-  for (const [key, text] of at.vars) if (!marked(text.value)) known[key] = text.value
-  const { commands } = lex(word.raw, known)
+  const { commands } = lex(word.raw, knownOf(at))
   const again =
     commands.length === 1 && commands[0]!.words.length === 1 ? commands[0]!.words[0] : undefined
   return again && again.value !== word.value
@@ -469,7 +486,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     const { name, xargs } = parsed
     const args = parsed.args.map((a) => sharpened(a, at))
     for (const r of cmd.redirects)
-      if (r.target && r.op.includes(">") && writes(r.target, at, true))
+      if (r.target && r.op.includes(">") && writes(sharpened(r.target, at), at, true))
         return refuse(`a redirect onto ${shown(r.target)}`)
     if (!program(name)) return
     const tool = toolOf(name)
@@ -569,7 +586,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     const flag = RECURSIVE.get(tool)
     if (flag && args.some((a) => flag.test(a.value) || a.value === "--recursive"))
       for (const word of args)
-        if (!word.value.startsWith("-") && holdsWord(word, at))
+        if (!word.value.startsWith("-") && (holdsWord(word, at) || (!pathsOf(word, at) && near)))
           return refuse(`${tool} recursing into ${shown(word)}`)
     // the unseen roster reaches a writer, and a program the hook cannot name, which may be one
     for (const word of args)
