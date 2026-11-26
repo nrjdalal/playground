@@ -1721,14 +1721,17 @@ describe("the write lock (#2966)", () => {
     expect(losing).toBe(0)
   })
 
-  // A lock whose pid is gone is stale, so the next write takes it over and leaves none behind.
-  test("a lock left by a process that is gone is taken over", async () => {
+  // A lock whose pid is gone is stale, so the next write takes it over, says so on stderr and leaves none behind; the pid is a child's that has exited, so no runner's pid ceiling can make it live.
+  test("a lock left by a process that is gone is taken over, saying so on stderr", async () => {
     const config = configWith([WITH_PR])
-    writeFileSync(lockPathFor(config), `999999 ${isoNow()}`)
+    const child = Bun.spawn(["true"])
+    await child.exited
+    writeFileSync(lockPathFor(config), `${child.pid} ${isoNow()}`)
     expect(existsSync(lockPathFor(config))).toBe(true)
     const eta = inMinutes(60)
     const r = await run(config, ["set", "worker-greed", `eta=${eta}`])
     expect(r.code).toBe(0)
+    expect(r.err).toContain(`took over ${lockPathFor(config)}, held by gone pid ${child.pid}`)
     expect(agentOf(r.roster, "worker-greed")?.eta).toBe(eta)
     expect(existsSync(lockPathFor(config))).toBe(false)
   })
@@ -1743,19 +1746,22 @@ describe("the write lock (#2966)", () => {
     const elapsedMs = Date.now() - start
     expect(r.code).toBe(1)
     expect(r.err).toContain("roster.json.lock")
+    expect(r.err).toContain(`held by pid ${process.pid}`)
+    expect(elapsedMs).toBeGreaterThanOrEqual(5000)
     expect(elapsedMs).toBeLessThan(8000)
     expect(existsSync(lockPathFor(config))).toBe(true)
     expect(readFileSync(join(config, "playground", "roster.json"), "utf8")).toBe(before)
   })
 
-  // An empty lock from a write killed between open and writeFile, its mtime older than the wait, is still taken over, so the next write lands.
-  test("an empty lock older than the wait is taken over, so the next write lands", async () => {
+  // An empty lock from a write killed between open and writeFile, its mtime over 30 s old, is still taken over, says so on stderr, and the next write lands.
+  test("an empty lock over 30 s old is taken over, saying so on stderr, so the next write lands", async () => {
     const config = configWith([WITH_PR])
     writeFileSync(lockPathFor(config), "")
     await utimes(lockPathFor(config), new Date(Date.now()), new Date(Date.now() - 60_000))
     const eta = inMinutes(60)
     const r = await run(config, ["set", "worker-greed", `eta=${eta}`])
     expect(r.code).toBe(0)
+    expect(r.err).toContain(`took over ${lockPathFor(config)}, empty and over 30 s old`)
     expect(agentOf(r.roster, "worker-greed")?.eta).toBe(eta)
     expect(existsSync(lockPathFor(config))).toBe(false)
   })
