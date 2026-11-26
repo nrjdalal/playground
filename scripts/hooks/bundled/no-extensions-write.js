@@ -13215,19 +13215,24 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const reads = call ? readsPositional(raw) : [];
       const every = /\$(?:\{[@*]\}|[@*])/.test(raw);
       const readings = call ? positionals(call, here, steadyAt(call.call)) : [{ args: lineArgs ?? {}, from: Infinity }];
+      const globs = (value) => value.includes("[");
       return readings.some(({ args, from }) => {
         if (reads.some((n) => n >= from))
           return true;
+        if (every && Object.values(args).some(globs))
+          return !sure;
         if (every && Object.values(args).some((value) => hookFile(pathOf({ value }, here), sure)))
           return true;
         const known = { ...here, known: { ...here.known, ...args } };
         const held = heldReadings(word, known, steadyAt(cmd));
+        if (held?.some((each) => globs(each.value)))
+          return !sure;
         if (held)
           return held.some((each) => hookFile(pathOf(each, here), sure));
         const operated = operatedWords(word, known, steadyAt(cmd));
         if (operated?.words.some((each) => hookFile(pathOf(each, here), sure)))
           return true;
-        return operated && !operated.unread ? false : !sure;
+        return operated && !operated.unread && !operated.words.some((each) => globs(each.value)) ? false : !sure;
       });
     };
     const intoHook = async (targets, source) => {

@@ -69,6 +69,18 @@ const held = (): Row[] => [
 const ECHO = "echo 'rm -f x' >"
 const moved = (): Row[] => [
   [
+    "a remover into a bracket glob worked out by a cut",
+    `X='.gi[t]/hooks/pre-commit.bak'; ${ECHO} \${X%.bak}`,
+  ],
+  [
+    "a remover into a bracket glob worked out by a replacement",
+    `X='.gi[t]/hooks/pre-commit.bak'; ${ECHO} \${X/.bak/}`,
+  ],
+  [
+    "a remover into a bracket glob through $1 after set --",
+    `set -- '.gi[t]/hooks/pre-commit'; ${ECHO} $1`,
+  ],
+  [
     "a remover into $1 after zsh's argv[1] moves it",
     `set -- out.log; argv[1]=${HOOK}; ${ECHO} "$1"`,
   ],
