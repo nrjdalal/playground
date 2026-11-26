@@ -278,6 +278,14 @@ describe("roster.ts and every read run", () => {
     `chmod -R 755 ${DATA}/scratch/w`,
     "gzip -r /tmp/w",
     `chown -R x ${DATA}/scratch/w`,
+    "D=/tmp/w; echo x > $D/$f",
+    "D=/tmp/w; E=$D; rm $E/$f",
+    `cd ${DATA} && python3 -c "print(open('./roster.json').read())"`,
+    `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('./roster.json')"`,
+    `python3 -c "import shutil; p='/tmp/y'; shutil.copy('/tmp/x', p)"`,
+    `python3 -c "import os; print(os.lstat('${ROSTER}').st_mode)"`,
+    'rm -rf "$(mktemp -d)"',
+    'chmod -R 755 "$(echo /tmp/w)"',
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

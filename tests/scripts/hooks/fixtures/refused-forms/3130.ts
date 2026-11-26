@@ -75,6 +75,59 @@ export const groups: Group[] = [
         "zstd -r compressing everything in the data folder and removing each original",
         "zstd -r --rm ~/.playground",
       ],
+      [
+        "the data folder in a variable, a redirect onto an unread name in it",
+        "D=~/.playground; echo x > $D/$f",
+      ],
+      [
+        "the data folder in a variable, an append onto an unread quoted name in it",
+        'D=~/.playground; echo x >> "$D/$f"',
+      ],
+      [
+        "the data folder in a braced variable, a redirect onto an unread name in it",
+        "D=~/.playground; echo x > ${D}/$f",
+      ],
+      [
+        "the data folder in a variable copied to another, an unread name in it removed",
+        "D=~/.playground; E=$D; rm $E/$f",
+      ],
+      [
+        "python3 run from the data folder, its code removing ./roster.json",
+        `cd ~/.playground && python3 -c "import os; os.remove('./roster.json')"`,
+      ],
+      [
+        "node run from the data folder, its code writing ./roster.json",
+        `cd ~/.playground && node -e "require('fs').writeFileSync('./roster.json', '{}')"`,
+      ],
+      [
+        "python3 code copying a file onto the roster held in a variable",
+        `python3 -c "import shutil; p='$HOME/.playground/roster.json'; shutil.copy('/tmp/x', p)"`,
+      ],
+      [
+        "node code copying a file onto the roster built by a path join",
+        `node -e "require('fs').copyFileSync('/tmp/x', require('path').join(process.env.HOME, '.playground', 'roster.json'))"`,
+      ],
+      [
+        "python3 code changing the roster's mode through lchmod",
+        `python3 -c "import os; os.lchmod('$HOME/.playground/roster.json', 0)"`,
+      ],
+      [
+        "node code changing the roster's owner through lchownSync",
+        `node -e "require('fs').lchownSync('$HOME/.playground/roster.json', 1, 1)"`,
+      ],
+      [
+        "python3 code setting the roster's flags",
+        `python3 -c "import os; os.chflags('$HOME/.playground/roster.json', 2)"`,
+      ],
+      [
+        "node code copying a file onto the roster through fs.cp",
+        `node -e "require('fs').cp('/tmp/x', '$HOME/.playground/roster.json', () => {})"`,
+      ],
+      [
+        "chmod -R on the data folder printed by a substitution",
+        'chmod -R 000 "$(echo ~/.playground)"',
+      ],
+      ["rm -rf on the data folder printed by a substitution", 'rm -rf "$(echo ~/.playground)"'],
     ],
   },
 ]
