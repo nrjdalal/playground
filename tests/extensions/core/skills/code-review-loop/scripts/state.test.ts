@@ -1,5 +1,13 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -2627,7 +2635,7 @@ test("13n merge on a Python clone whose .venv points at the clone itself runs py
   expect([...new Set(out.runners)]).toEqual(["pytest"])
 })
 
-test("13o staleVenv reads each .pth file's absolute path lines alone: an import line, a relative line, the clone's own folder, a folder named .pth and no .venv name none (#3124)", () => {
+test("13o staleVenv reads each .pth file's absolute path lines alone: an import line, a relative line, the clone's own folder, a folder named .pth, a dangling .pth link and no .venv name none, and a linked .pth is read through (#3124)", () => {
   const clone = scratch()
   mkdirSync(join(clone, "src"))
   expect(state.staleVenv(clone)).toBeUndefined()
@@ -2640,6 +2648,15 @@ test("13o staleVenv reads each .pth file's absolute path lines alone: an import 
   expect(state.staleVenv(clone)).toBeUndefined()
   writeFiles(clone, { [pth]: "/nowhere/gone/src\n" })
   expect(state.staleVenv(clone)).toBe("/nowhere/gone/src")
+  // uv's symlink link mode writes the editable .pth as a link into its cache, so a link is read through, and a dangling one is skipped
+  writeFiles(clone, { [pth]: `${join(clone, "src")}\n` })
+  const site = join(clone, ".venv/lib/python3.13/site-packages")
+  symlinkSync(join(scratch(), "gone.pth"), join(site, "dangling.pth"))
+  expect(state.staleVenv(clone)).toBeUndefined()
+  const cached = join(scratch(), "cached.pth")
+  writeFileSync(cached, "/nowhere/linked/src\n")
+  symlinkSync(cached, join(site, "linked.pth"))
+  expect(state.staleVenv(clone)).toBe("/nowhere/linked/src")
 })
 
 test("12o redIn reads bun's own junit report: a failed testcase's file is failed, a test file left out is leftOut, a green file and a non-test file are neither (#2468)", () => {

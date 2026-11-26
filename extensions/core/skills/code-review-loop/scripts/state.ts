@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
@@ -97,10 +97,10 @@ export const staleVenv = (clone: string): string | undefined => {
       roots.some((root) => p === root || p.startsWith(`${root}/`)),
     )
   for (const site of sites.filter((s) => existsSync(s)))
-    for (const pth of readdirSync(site, { withFileTypes: true }).filter(
-      (f) => f.isFile() && f.name.endsWith(".pth"),
+    for (const pth of readdirSync(site).filter(
+      (f) => f.endsWith(".pth") && statSync(join(site, f), { throwIfNoEntry: false })?.isFile(),
     ))
-      for (const line of readFileSync(join(site, pth.name), "utf8").split("\n"))
+      for (const line of readFileSync(join(site, pth), "utf8").split("\n"))
         if (isAbsolute(line.trim()) && !inside(line.trim())) return line.trim()
 }
 
