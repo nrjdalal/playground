@@ -12265,7 +12265,6 @@ function functionArgs(commands, line, unbound) {
   const blind = all.some((c) => RUNS_TEXT2.has(name(c)) || marked(name(c)));
   const plain = (w) => !!w && !w.quoted && /^[A-Za-z_]\w*$/.test(w.value);
   const unquoted = (w, value) => !!w && !w.quoted && w.value === value;
-  const below = commandsIn;
   const definitions = [];
   const find = (list) => list.forEach((c, k) => {
     if (c.inner)
@@ -12282,7 +12281,11 @@ function functionArgs(commands, line, unbound) {
         if (unquoted(list[j].words[0], "}"))
           depth--;
         if (depth === 0)
-          return definitions.push({ at: c, body: below(list.slice(k, j + 1)), fn: second.value });
+          return definitions.push({
+            at: c,
+            body: commandsIn(list.slice(k, j + 1)),
+            fn: second.value
+          });
       }
       return;
     }
@@ -12300,7 +12303,7 @@ function functionArgs(commands, line, unbound) {
     if (closer)
       definitions.push({
         at: c,
-        body: below([...closer.inner?.() ?? [], closer]),
+        body: commandsIn([...closer.inner?.() ?? [], closer]),
         fn,
         group
       });
@@ -13260,9 +13263,8 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     if (name === "" && cmd.words.some((w) => w.value === "exec"))
       execFds = fdFiles(cmd.redirects, execFds);
     const sorted = ({ files, stdin }) => intoHook(files, stdin ? cmd.stdin ?? cmd : cmd);
-    const teeTool = program(name);
-    const sorter = GNU_NAMED.exec(teeTool)?.[1] ?? teeTool;
-    const hookWrite = await outOf(cmd, execFds) ?? ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined) ?? (sorter === "sort" || sorter === "uniq" ? await sorted(outputFiles(sorter, args)) : undefined);
+    const sorter = GNU_NAMED.exec(program(name))?.[1] ?? program(name);
+    const hookWrite = await outOf(cmd, execFds) ?? (sorter === "tee" ? await intoHook(args.filter((word) => !/^-./.test(word.value)), cmd.stdin ?? cmd) : undefined) ?? (sorter === "sort" || sorter === "uniq" ? await sorted(outputFiles(sorter, args)) : undefined);
     if (hookWrite)
       return refuse(hookWrite);
     const copier = GNU_NAMED.exec(program(name))?.[1] ?? program(name);

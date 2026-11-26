@@ -124,9 +124,9 @@ const controls = (): Row[] =>
     .filter(([what]) => !unread(what))
     .map(([what, call]): Row => [`${what}, a log`, call])
 
-export const allowed: string[] = [...controls(), ["a cat's output into a .GIT-named log", ""]].map(
-  ([what]) => what,
-)
+const dotGit: Row = ["a cat's output into a .GIT-named log", "cat payload > .GIT.log"]
+
+export const allowed: string[] = [...controls(), dotGit].map(([what]) => what)
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
@@ -139,6 +139,6 @@ export const groups: Group[] = [
   {
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...controls(), ["a cat's output into a .GIT-named log", "cat payload > GIT.log"]],
+    rows: () => [...controls(), dotGit],
   },
 ]

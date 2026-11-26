@@ -1852,7 +1852,6 @@ function functionArgs(commands: Command[], line: string, unbound: WeakSet<Comman
   const blind = all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))
   const plain = (w: Word | undefined) => !!w && !w.quoted && /^[A-Za-z_]\w*$/.test(w.value)
   const unquoted = (w: Word | undefined, value: string) => !!w && !w.quoted && w.value === value
-  const below = commandsIn
   const definitions: { at: Command; body: Command[]; fn: string; group?: Command }[] = []
   const find = (list: Command[]) =>
     list.forEach((c, k) => {
@@ -1870,7 +1869,11 @@ function functionArgs(commands: Command[], line: string, unbound: WeakSet<Comman
           depth += opens === -1 ? words.length : opens
           if (unquoted(list[j].words[0], "}")) depth--
           if (depth === 0)
-            return definitions.push({ at: c, body: below(list.slice(k, j + 1)), fn: second.value })
+            return definitions.push({
+              at: c,
+              body: commandsIn(list.slice(k, j + 1)),
+              fn: second.value,
+            })
         }
         return
       }
@@ -1895,7 +1898,7 @@ function functionArgs(commands: Command[], line: string, unbound: WeakSet<Comman
       if (closer)
         definitions.push({
           at: c,
-          body: below([...(closer.inner?.() ?? []), closer]),
+          body: commandsIn([...(closer.inner?.() ?? []), closer]),
           fn,
           group,
         })
@@ -3162,11 +3165,10 @@ async function inspect(
     // what sort or uniq prints into its output file: its stdin's text when it reads that alone, as tee's, else its input files', which the hook does not read
     const sorted = ({ files, stdin }: { files: Word[]; stdin: boolean }) =>
       intoHook(files, stdin ? (cmd.stdin ?? cmd) : cmd)
-    const teeTool = program(name)
-    const sorter = GNU_NAMED.exec(teeTool)?.[1] ?? teeTool
+    const sorter = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
     const hookWrite =
       (await outOf(cmd, execFds)) ??
-      ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee"
+      (sorter === "tee"
         ? await intoHook(
             args.filter((word) => !/^-./.test(word.value)),
             cmd.stdin ?? cmd,
