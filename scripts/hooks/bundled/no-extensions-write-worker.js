@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync as existsSync4, lstatSync as lstatSync2, readdirSync as readdirSync4, readFileSync as readFileSync5, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
+import { dirname as dirname4, isAbsolute as isAbsolute5, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -11618,6 +11618,11 @@ function awkPipe(program) {
   const rest = program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " ");
   return /[/#\\]/.test(rest) || /["|]/.test(rest.replace(/"[^"\n]*"/g, "S"));
 }
+function awkPrinted(program) {
+  const strings = [...program.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map(([, text]) => text.replace(/\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|(.))/g, (m, octal, hex, c) => octal ? coded(octal, 8, m) : hex ? coded(hex, 16, m) : c === "n" ? `
+` : c === "t" ? "\t" : c ?? m));
+  return [...strings, strings.join("")];
+}
 function awkPrograms(words) {
   const programs = [];
   for (let k = 0;k < words.length; k++) {
@@ -11989,6 +11994,8 @@ var perlReads = (parsed, env) => !!perlReadScripts(parsed, env);
 function escapedWrites(parsed, env) {
   const tool = program(parsed.name);
   const unescaped = (read) => parsed.args.map((word) => read(word.value));
+  if (AWKS.has(tool))
+    return (awkPrograms(parsed.args) ?? parsed.args).flatMap((w) => awkPrinted(w.value));
   if (SEDS.has(tool))
     return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEPS)) ?? unescaped(sedText);
   if (tool !== "perl")
@@ -12410,12 +12417,13 @@ function wholeLine(commands, env, readsOnly = false) {
       return true;
     if (!readsOnly && quietRun(cmd, parsed, env))
       return false;
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
+    const writes = writesFile(cmd);
     return writes || !(narrow(cmd, env) || !readsOnly && inPlaceScripts(cmd, parsed, env));
   });
 }
+var writesFile = (cmd) => cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
 function linkSafe(cmd, env) {
-  if (cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null"))
+  if (writesFile(cmd))
     return false;
   const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
   if (words.some((word) => word.procs && !word.procs.every((sub) => linkSafe(sub, env))))
@@ -12427,7 +12435,7 @@ function symlinkSource(cmd, parsed) {
   const { args, local, name } = parsed;
   if (program(name) !== "ln" || local.size > 0 || !ownProgram(cmd, parsed))
     return;
-  if (cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null"))
+  if (writesFile(cmd))
     return;
   const k = args.findIndex((word) => !word.value.startsWith("-"));
   const options = args.slice(0, k);
@@ -13196,11 +13204,11 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       if (escaped.some((text) => holds(text, here)))
         return refuse(`${verb} with a script that names ${root} in its text`);
       const literal = !whole && narrow(cmd, here);
-      const linked = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined;
+      const linkSource = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined;
       for (const [at, word] of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word)).entries()) {
         if (at === 0 && first?.value === "." && word.value === ".")
           continue;
-        if (linked && args[at - 1] === linked)
+        if (linkSource && args[at - 1] === linkSource && isAbsolute5(word.value) && existsSync4(word.value))
           continue;
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
@@ -13317,7 +13325,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   lineWrites = redirectsWrite(lexed.commands);
   lineTexts = lineTextsOf(lexed.commands);
   lineWritten = writtenWords(lexed.commands);
-  lineLinks = !rootLine && lexed.commands.every((cmd) => !!symlinkSource(cmd, parse3(cmd)) || linkSafe(cmd, env));
+  lineLinks = !rootLine && lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse3(cmd))).length === 1 && lexed.commands.every((cmd) => !!symlinkSource(cmd, parse3(cmd)) || linkSafe(cmd, env));
   lineFindings = new Map;
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);

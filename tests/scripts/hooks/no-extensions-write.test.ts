@@ -1189,26 +1189,6 @@ describe("a quoted argument is read as a command line only where a program runs 
       "gsed '1e rm -rf ~/.playground/extensions/.no-such-folder' /dev/null",
     ],
     [
-      "awk's output sorted into a git hook by sort -o",
-      "awk '$3 ~ \"runner\"' /dev/null | sort -o .git/hooks/pre-commit",
-    ],
-    [
-      "awk's output written into a git hook by uniq's second file",
-      "awk '$3 ~ \"runner\"' /dev/null | uniq - .git/hooks/pre-commit",
-    ],
-    [
-      "awk's output sorted through a compress program",
-      "awk '$3 ~ \"runner\"' /dev/null | sort --compress-program=sh",
-    ],
-    [
-      "awk's output sorted into a git hook by an abbreviated --out",
-      "awk '$3 ~ \"runner\"' /dev/null | sort --out=.git/hooks/pre-commit",
-    ],
-    [
-      "awk's output sorted through an abbreviated --comp",
-      "awk '$3 ~ \"runner\"' /dev/null | sort --comp=sh",
-    ],
-    [
       "a script named awk in the folder given a removal",
       "./awk 'rm -rf ~/.playground/extensions/.no-such-folder'",
     ],
@@ -1243,10 +1223,6 @@ describe("a quoted argument is read as a command line only where a program runs 
     [
       "uniq under exec, given watch and a removal",
       "exec uniq watch 'rm -rf ~/.playground/extensions/.no-such-folder'",
-    ],
-    [
-      "awk after a printf, which keeps canary's reading",
-      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ \"runner\"' /dev/null",
     ],
     [
       "sed -i '' inserting a removal into a git hook",
@@ -1658,14 +1634,24 @@ describe("a quoted argument is read as a command line only where a program runs 
       expect(await at(command, cwd)).toContain("no-extensions-write hook refuses")
   })
 
-  // PG-2173: an awk program with no string, no | and nothing awkRuns finds prints its input alone, as grep does, so its ~ is no path on a line read whole
+  // PG-2173 and #3070: an awk program awkRuns finds nothing in prints its input and its own strings alone, as grep and echo do, so its ~ is no path on a line read whole, a " string included
   test.each([
     ["sorted into a git hook by sort -o", "| sort -o .git/hooks/pre-commit"],
     ["written into a git hook by uniq's second file", "| uniq - .git/hooks/pre-commit"],
     ["sorted through a compress program", "| sort --compress-program=sh"],
+    ["sorted into a git hook by an abbreviated --out", "| sort --out=.git/hooks/pre-commit"],
+    ["sorted through an abbreviated --comp", "| sort --comp=sh"],
   ])("awk's input-only output %s runs", async (_, tail) => {
-    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
+    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")]) {
       expect(await at(`awk '$3 ~ /runner/' /dev/null ${tail}`, cwd)).toBeUndefined()
+      expect(await at(`awk '$3 ~ "runner"' /dev/null ${tail}`, cwd)).toBeUndefined()
+    }
+  })
+  test("awk after a printf runs, its string a pattern", async () => {
+    for (const cwd of [...homes, join(homedir(), "x", ".claude", "worktrees", "y")])
+      expect(
+        await at(`printf '%s\\n' '/sh -c/p'; awk '$3 ~ "runner"' /dev/null`, cwd),
+      ).toBeUndefined()
   })
   test("an awk program printing a string into a git hook stays refused", async () => {
     for (const cwd of homes)
@@ -1940,6 +1926,10 @@ describe("a listed program's single-quoted text stays text on a line read whole"
       "a jq filter beside a writing redirect",
       `jq -r '.a | select(.b > 1)' ${WORK}/x.json; echo x >> ${WORK}/log.md`,
     ],
+    [
+      "an awk regex holding a | beside a program the hook cannot read",
+      `bun x.ts; awk '/^## .*(a|b)/' ${WORK}/f`,
+    ],
   ])("%s runs", async (_, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -1949,7 +1939,6 @@ describe("a listed program's single-quoted text stays text on a line read whole"
     ["an awk print | to a command", `bun x.ts; awk '/^# .*a/{print | "cat > ${LIST}"}' ${WORK}/f`],
     ["an awk getline from a command", `bun x.ts; awk 'BEGIN{"rm ${LIST}" | getline}'`],
     ["an awk system()", `bun x.ts; awk '/^# .*a/{system("rm ${LIST}")}' ${WORK}/f`],
-    ["an awk regex holding a |, read as today", `bun x.ts; awk '/^## .*(a|b)/' ${WORK}/f`],
     [
       "an awk print > to a relative file, read as today",
       `bun x.ts; awk '/^# .*a/{print > "x"}' ${WORK}/f`,

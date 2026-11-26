@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { scopesIn } from "../../packages/settings/src/folder"
@@ -1182,6 +1182,26 @@ function awkPipe(program: string): boolean {
   return /[/#\\]/.test(rest) || /["|]/.test(rest.replace(/"[^"\n]*"/g, "S"))
 }
 
+// The text an awk program's strings print: each string with its escapes as awk reads them (\NNN in octal, \xHH, \n, \t, any other escaped character as itself), and every string joined in order, so a path split across strings ("…/exten" "sions") or spelled by a code is read whole
+function awkPrinted(program: string): string[] {
+  const strings = [...program.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map(([, text]) =>
+    text.replace(
+      /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|(.))/g,
+      (m, octal?: string, hex?: string, c?: string) =>
+        octal
+          ? coded(octal, 8, m)
+          : hex
+            ? coded(hex, 16, m)
+            : c === "n"
+              ? "\n"
+              : c === "t"
+                ? "\t"
+                : (c ?? m),
+    ),
+  )
+  return [...strings, strings.join("")]
+}
+
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
 function awkPrograms(words: Word[]): Word[] | undefined {
   const programs: Word[] = []
@@ -1623,6 +1643,8 @@ const perlReads = (parsed: Parsed, env: Env) => !!perlReadScripts(parsed, env)
 function escapedWrites(parsed: Parsed, env: Env): string[] {
   const tool = program(parsed.name)
   const unescaped = (read: (text: string) => string) => parsed.args.map((word) => read(word.value))
+  if (AWKS.has(tool))
+    return (awkPrograms(parsed.args) ?? parsed.args).flatMap((w) => awkPrinted(w.value))
   if (SEDS.has(tool))
     return (
       sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEPS)) ??
@@ -2173,14 +2195,18 @@ function wholeLine(commands: Command[], env: Env, readsOnly = false): boolean {
     if (base === "bash" && commands.length > 1) return true
     if (edited && base === "date") return true
     if (!readsOnly && quietRun(cmd, parsed, env)) return false
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
+    const writes = writesFile(cmd)
     return writes || !(narrow(cmd, env) || (!readsOnly && inPlaceScripts(cmd, parsed, env)))
   })
 }
 
+// Whether a command has a writing redirect to a file other than /dev/null
+const writesFile = (cmd: Command): boolean =>
+  cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
+
 // Whether a command writes nothing to a file but /dev/null: no writing redirect, a closed-list reader (narrow) or a reader as its own first word (reads), each substitution in it the same, so it writes nothing through a link an ln -s beside it makes
 function linkSafe(cmd: Command, env: Env): boolean {
-  if (cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")) return false
+  if (writesFile(cmd)) return false
   const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
   if (words.some((word) => word.procs && !word.procs.every((sub) => linkSafe(sub, env))))
     return false
@@ -2188,11 +2214,11 @@ function linkSafe(cmd: Command, env: Env): boolean {
   return narrow(cmd, env) || (ownFirst(cmd, parsed.first) && reads(parsed, env))
 }
 
-// The source of an ln -s, the text its link holds rather than a file it writes, or undefined: ln as its own program with no variable set in the call and no redirect but to /dev/null, its options before its operands, each a cluster of flags that take no value with s among them (`-s`, `-sfn`), and two literal operands, the source and the link, which is judged as any writer's target is
+// The source of an ln -s, the text its link holds rather than a file it writes, or undefined, for any literal source: the word loop skips it only when it exists by an absolute path, so the README's source in the root is a subset of what this returns: ln as its own program with no variable set in the call and no redirect but to /dev/null, its options before its operands, each a cluster of flags that take no value with s among them (`-s`, `-sfn`), and two literal operands, the source and the link, which is judged as any writer's target is
 function symlinkSource(cmd: Command, parsed: Parsed): Word | undefined {
   const { args, local, name } = parsed
   if (program(name) !== "ln" || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
-  if (cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")) return undefined
+  if (writesFile(cmd)) return undefined
   const k = args.findIndex((word) => !word.value.startsWith("-"))
   const options = args.slice(0, k)
   const operands = args.slice(k)
@@ -2652,7 +2678,7 @@ async function inspect(
   let lineWrites = false
   let lineTexts: string[] = []
   let lineWritten: Word[] = []
-  // whether every command on the typed line is an ln -s (symlinkSource) or one that writes nothing through a link it makes (linkSafe)
+  // whether the typed line holds one ln -s (symlinkSource), since a second writes through the first one's link, and every other command writes nothing through it (linkSafe)
   let lineLinks = false
   // the inline evaluator (bun or node) whose code the walk reads from a folder in or above the root, so a likely false positive in it names the form that runs
   let nearEval: string | undefined
@@ -3288,13 +3314,20 @@ async function inspect(
         return refuse(`${verb} with a script that names ${root} in its text`)
       const literal = !whole && narrow(cmd, here)
       // an ln -s's source, on a typed line where nothing else can write through its link, is the text the link holds, never a file it writes
-      const linked = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined
+      const linkSource = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined
       for (const [at, word] of [first, ...args]
         .map((word) => heldWord(own(word), here, steady) ?? own(word))
         .entries()) {
         // a `.` in the program word is the shell's source builtin, never the folder it spells, so `. /etc/os-release` from the home names its operand alone
         if (at === 0 && first?.value === "." && word.value === ".") continue
-        if (linked && args[at - 1] === linked) continue
+        // a source that exists by an absolute path, so the link it makes resolves and a later write through it is judged where it lands
+        if (
+          linkSource &&
+          args[at - 1] === linkSource &&
+          isAbsolute(word.value) &&
+          existsSync(word.value)
+        )
+          continue
         // a quiet commit's message, an in-place sed's or perl's script, a gh filter and a browser eval's script on a line read whole are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text =
           (quiet && /\s/.test(word.value)) ||
@@ -3537,6 +3570,7 @@ async function inspect(
   lineWritten = writtenWords(lexed.commands)
   lineLinks =
     !rootLine &&
+    lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse(cmd))).length === 1 &&
     lexed.commands.every((cmd) => !!symlinkSource(cmd, parse(cmd)) || linkSafe(cmd, env))
   lineFindings = new Map()
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change

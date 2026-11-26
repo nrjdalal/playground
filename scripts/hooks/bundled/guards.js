@@ -14018,7 +14018,7 @@ async function check7(raw, environment = process.env, budget = 8000) {
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
-import { dirname as dirname5, join as join12, resolve as resolve7, sep as sep2 } from "path";
+import { dirname as dirname5, isAbsolute as isAbsolute5, join as join12, resolve as resolve7, sep as sep2 } from "path";
 
 // scripts/hooks/codex.ts
 import { isAbsolute as isAbsolute3, resolve as resolve5 } from "path";
@@ -15149,7 +15149,7 @@ import {
   statSync as statSync4
 } from "fs";
 import { loadavg } from "os";
-import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute5, join as join14, relative as relative2, resolve as resolve8 } from "path";
+import { basename as basename5, dirname as dirname6, isAbsolute as isAbsolute6, join as join14, relative as relative2, resolve as resolve8 } from "path";
 
 // scripts/hooks/no-headless-login.ts
 import { join as join13 } from "path";
@@ -15984,7 +15984,7 @@ var isFolder2 = (path) => {
   }
 };
 function globRoot(pattern, base) {
-  const full = isAbsolute5(pattern) ? pattern : base && join14(base, pattern);
+  const full = isAbsolute6(pattern) ? pattern : base && join14(base, pattern);
   if (!full)
     return;
   const segments = full.split("/");
@@ -16153,7 +16153,7 @@ function globRegex(segment) {
 function globbed(value, cwd, deep = []) {
   const out = [];
   for (const pattern of braces(value)) {
-    const root = isAbsolute5(pattern) ? "/" : cwd;
+    const root = isAbsolute6(pattern) ? "/" : cwd;
     if (!root)
       continue;
     let candidates = [root];
@@ -16618,7 +16618,7 @@ async function inspect7(raw, environment, load5, limit) {
   const directory = typeof cwd === "string" ? cwd : undefined;
   if (typeof tool === "string" && tool in EDIT_TOOLS) {
     const given = toolInput?.[EDIT_TOOLS[tool]];
-    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute5(given) ? given : directory && resolve8(directory, given);
+    const file = typeof given !== "string" || given === "" ? undefined : isAbsolute6(given) ? given : directory && resolve8(directory, given);
     const path = file ? fromCheckout(file) : undefined;
     return path && heavy(path) ? refuse8(`${tool} call`, [path]) : undefined;
   }
@@ -16627,7 +16627,7 @@ async function inspect7(raw, environment, load5, limit) {
     if (!Array.isArray(orgs))
       return;
     const given = toolInput?.[READ_TOOLS[tool]];
-    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute5(given) ? given : directory && resolve8(directory, given);
+    const path = typeof given !== "string" || given === "" ? directory : given.startsWith("~/") && environment.HOME ? join14(environment.HOME, given.slice(2)) : isAbsolute6(given) ? given : directory && resolve8(directory, given);
     if (orgs.length === 0)
       return;
     const roots = new Map;
@@ -16842,7 +16842,7 @@ if (false) {}
 
 // scripts/hooks/no-linear-ticket.ts
 import { realpath } from "fs/promises";
-import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute6, join as join15, resolve as resolve9, sep as sep3 } from "path";
+import { basename as basename6, dirname as dirname7, isAbsolute as isAbsolute7, join as join15, resolve as resolve9, sep as sep3 } from "path";
 var CREATE = /\bissue(?:batch)?create\b/i;
 var LINEAR = /linear\.app/i;
 var GITHUB = /^https?:\/\/(?:[\w-]+\.)*github\.com(?:[/:?#]|$)/i;
@@ -17069,7 +17069,7 @@ async function readApproval(path) {
 async function fileTool(tool, path, cwd, environment) {
   if (isDispatcher(environment) || typeof path !== "string" || path === "")
     return;
-  const absolute = isAbsolute6(path) ? path : resolve9(typeof cwd === "string" ? cwd : "/", path);
+  const absolute = isAbsolute7(path) ? path : resolve9(typeof cwd === "string" ? cwd : "/", path);
   if (await inApprovals(absolute, environment))
     return refuseApprovals(tool, environment);
 }
@@ -17942,7 +17942,7 @@ if (false) {}
 
 // scripts/hooks/no-outside-pr-code.ts
 import { existsSync as existsSync10, lstatSync as lstatSync2, mkdirSync as mkdirSync4, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
-import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute7, join as join19, resolve as resolve10 } from "path";
+import { basename as basename8, dirname as dirname9, isAbsolute as isAbsolute8, join as join19, resolve as resolve10 } from "path";
 var CHECKERS = new Set(["reviewer", "tester"]);
 var TOOLS2 = new Set(["Bash", "Monitor"]);
 var FILE_TOOLS4 = new Map([
@@ -18111,7 +18111,7 @@ function gitAllows(words, folder, lookup, environment) {
     return false;
   const dashC = words[1] === "-C";
   const [sub, ...all] = words.slice(dashC ? 3 : 1);
-  const written = dashC && folder ? isAbsolute7(words[2]) ? words[2] : `${folder}/${words[2]}` : folder;
+  const written = dashC && folder ? isAbsolute8(words[2]) ? words[2] : `${folder}/${words[2]}` : folder;
   const at = written === undefined ? undefined : real3(written);
   if (at === undefined || bareAt(at, lookup) || all.some((w) => gitRuns(w, sub)))
     return false;
@@ -18338,7 +18338,7 @@ async function check19(raw, environment = process.env, lookup = live2(environmen
   const why = await readMode(sessionId, lookup);
   if (!why)
     return;
-  const directory = typeof cwd === "string" && isAbsolute7(cwd) ? cwd : undefined;
+  const directory = typeof cwd === "string" && isAbsolute8(cwd) ? cwd : undefined;
   if (key !== undefined || patch) {
     const named = patch ? typeof command === "string" ? patchPaths(command) : [] : [toolInput?.[key]];
     let git = named.length === 0;
@@ -18346,7 +18346,7 @@ async function check19(raw, environment = process.env, lookup = live2(environmen
       git ||= named.some((path) => {
         if (typeof path !== "string")
           return true;
-        const at = isAbsolute7(path) ? path : patch && directory ? resolve10(directory, path) : undefined;
+        const at = isAbsolute8(path) ? path : patch && directory ? resolve10(directory, path) : undefined;
         return gitFolder(at === undefined ? undefined : placed(at), lookup);
       });
     } catch {
@@ -19314,7 +19314,7 @@ async function check23(raw, environment = process.env) {
 if (false) {}
 
 // scripts/hooks/no-raw-vercel.ts
-import { basename as basename10, isAbsolute as isAbsolute8, resolve as resolve13 } from "path";
+import { basename as basename10, isAbsolute as isAbsolute9, resolve as resolve13 } from "path";
 var NAMES2 = ["vc", "vercel"];
 var words = (text) => new Set(text.split(" "));
 var GLOBAL = {
@@ -19553,7 +19553,7 @@ function yardStep(name, args, shell) {
   const file = words[0] === "run" ? words[1] : words[0];
   if (file === undefined)
     return false;
-  const path = isAbsolute8(file) ? file : chained ? resolve13(chained, file) : undefined;
+  const path = isAbsolute9(file) ? file : chained ? resolve13(chained, file) : undefined;
   const step = file === "ship:yard" || (path ? STEP_FILE.test(path) : basename10(file) === "yard.ts");
   const end = args.findIndex((a, k) => k > at && a.value === "--");
   return step && !args.slice(at + 1, end === -1 ? undefined : end).some((a) => STEP_HELP.has(a.value));
