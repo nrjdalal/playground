@@ -1994,13 +1994,14 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. `wrapped` marks a wrapper after an xargs with no replace string that is given no program word (`xargs nohup`), whose program is xargs' input words. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. `appends` marks a BSD -J string, after which xargs appends its input to the words when no word is that string, and `wrapped` a wrapper after an xargs with no replace string or a -J one that is given no program word (`xargs nohup`), whose program is xargs' input words. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
       delimiters?: (string | undefined)[]
       files?: { chdir?: Word; file: Word; moved?: boolean }[]
       filled?: [Word, string][]
       outer?: string[]
+      appends?: boolean
       replace?: string
       wrapped?: boolean
     }
@@ -2088,8 +2089,10 @@ function xargsOption(
   }
   if (name === "i" || name === "replace") xargs.replace = value?.value || "{}"
   else if (name === "null") split("\0")
-  else if (name === "I" || name === "J") xargs.replace = (value ?? next)?.value
-  else if (name === "a" || name === "arg-file")
+  else if (name === "I" || name === "J") {
+    xargs.replace = (value ?? next)?.value
+    xargs.appends = name === "J"
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...(xargs.files ?? []),
       ...[value ?? next]
@@ -2218,6 +2221,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         take()
         state.xargs ??= {}
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+        state.xargs.appends = v.startsWith("-J")
       } else if (wrapper === "env" && v === "-") {
         // a lone `-` is env's -i, and BSD env reads its options on after it
         take()
@@ -2273,7 +2277,13 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
   const typed = take()
-  if (!typed && state.xargs && !state.xargs.replace && last && last !== "xargs")
+  if (
+    !typed &&
+    state.xargs &&
+    (!state.xargs.replace || state.xargs.appends) &&
+    last &&
+    last !== "xargs"
+  )
     state.xargs = { ...state.xargs, wrapped: true }
   const first = spec && typed ? packageName(typed) : typed
   const parsed: Parsed = {

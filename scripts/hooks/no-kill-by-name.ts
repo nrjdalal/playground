@@ -13,6 +13,7 @@ import {
   SHELLS,
   slotWords,
   spelledText,
+  stdinOf,
   UNKNOWN,
   type Command,
   type Visit,
@@ -114,9 +115,28 @@ async function inspect(raw: string) {
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
   const visit: Visit = async (cmd, parsed, env) => {
     // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone
-    const slot =
+    const typed =
       slotWords(parsed) ??
       (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined)
+    // an xargs with no replace string (or BSD's -J) running run-slot.sh with no words after its -- hands its input words to the slot as the command
+    const input =
+      typed?.length === 0 &&
+      parsed.args.some((a, i) => i > 0 && a.value === "--") &&
+      parsed.xargs &&
+      (!parsed.xargs.replace || parsed.xargs.appends)
+        ? await stdinOf(cmd, env)
+        : undefined
+    if (input?.unknown || (input && parsed.xargs?.files?.length))
+      return refuse(
+        "a command xargs hands run-slot.sh from input it cannot read, in a call that names a kill",
+        " Write the slotted command out after run-slot.sh's --.",
+      )
+    const slot = input
+      ? input.value
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((value): Word => ({ quoted: false, value: value.replace(/["']/g, "") }))
+      : typed
     if (slot?.length) {
       const slotted = { ...cmd, words: slot }
       return examine(

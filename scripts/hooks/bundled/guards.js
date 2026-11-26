@@ -1922,9 +1922,10 @@ function xargsOption(xargs, w, next, state) {
     xargs.replace = value?.value || "{}";
   else if (name === "null")
     split("\x00");
-  else if (name === "I" || name === "J")
+  else if (name === "I" || name === "J") {
     xargs.replace = (value ?? next)?.value;
-  else if (name === "a" || name === "arg-file")
+    xargs.appends = name === "J";
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...xargs.files ?? [],
       ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
@@ -2039,6 +2040,7 @@ function unwrap(state, inside, budget) {
         take();
         state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+        state.xargs.appends = v.startsWith("-J");
       } else if (wrapper === "env" && v === "-") {
         take();
       } else if (folder !== undefined) {
@@ -2088,7 +2090,7 @@ function unwrap(state, inside, budget) {
       take();
   }
   const typed = take();
-  if (!typed && state.xargs && !state.xargs.replace && last && last !== "xargs")
+  if (!typed && state.xargs && (!state.xargs.replace || state.xargs.appends) && last && last !== "xargs")
     state.xargs = { ...state.xargs, wrapped: true };
   const first = spec && typed ? packageName(typed) : typed;
   const parsed = {
@@ -16820,7 +16822,11 @@ async function inspect9(raw) {
   await run2(lexed, fresh(), find);
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, parsed, env) => {
-    const slot = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
+    const typed = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
+    const input = typed?.length === 0 && parsed.args.some((a, i) => i > 0 && a.value === "--") && parsed.xargs && (!parsed.xargs.replace || parsed.xargs.appends) ? await stdinOf(cmd, env) : undefined;
+    if (input?.unknown || input && parsed.xargs?.files?.length)
+      return refuse9("a command xargs hands run-slot.sh from input it cannot read, in a call that names a kill", " Write the slotted command out after run-slot.sh's --.");
+    const slot = input ? input.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value: value.replace(/["']/g, "") })) : typed;
     if (slot?.length) {
       const slotted = { ...cmd, words: slot };
       return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);

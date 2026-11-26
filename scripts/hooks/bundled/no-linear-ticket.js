@@ -1923,9 +1923,10 @@ function xargsOption(xargs, w, next, state) {
     xargs.replace = value?.value || "{}";
   else if (name === "null")
     split("\x00");
-  else if (name === "I" || name === "J")
+  else if (name === "I" || name === "J") {
     xargs.replace = (value ?? next)?.value;
-  else if (name === "a" || name === "arg-file")
+    xargs.appends = name === "J";
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...xargs.files ?? [],
       ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
@@ -2040,6 +2041,7 @@ function unwrap(state, inside, budget) {
         take();
         state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+        state.xargs.appends = v.startsWith("-J");
       } else if (wrapper === "env" && v === "-") {
         take();
       } else if (folder !== undefined) {
@@ -2089,7 +2091,7 @@ function unwrap(state, inside, budget) {
       take();
   }
   const typed = take();
-  if (!typed && state.xargs && !state.xargs.replace && last && last !== "xargs")
+  if (!typed && state.xargs && (!state.xargs.replace || state.xargs.appends) && last && last !== "xargs")
     state.xargs = { ...state.xargs, wrapped: true };
   const first = spec && typed ? packageName(typed) : typed;
   const parsed = {
