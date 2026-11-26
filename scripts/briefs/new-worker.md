@@ -36,6 +36,7 @@ On GLM, a file under `OPUS_PATHS` is a Claude worker's: its first edit is refuse
 On the local model (`--backend local`), put each line of a long agent doc exactly where the brief's file:line says, as its own line, and ask your lead when the spot doesn't match.
 Your worktree's Python venv is its own, made with `uv sync --frozen` through run-slot; a run never borrows another worktree's, since cleanup can remove a borrowed one mid-run.
 
+A change to a gate that decides by several states (a reopen, a slot count, a claim) writes its state table as red-first test rows before round 1, one row for each state and each pair of states that can meet, since on one PR each of five review rounds found a state its rows had left out.
 Answer each review round by playbook's SESSIONS.md, Fix pushes and nits.
 When your reviewer asks for a ruling, send it to your lead and build on the lead's answer, since a checker confirms a relayed ruling with the lead before it bends a step, so a ruling of your own costs a round.
 A gap or finding beside your issue goes to your lead as a count and a one-line class, and the lead files it, but a batch-only red test, which you open by SESSIONS.md's Fix pushes and nits, so the PR keeps its scope; an over-allow the PR itself opens, or a bug that blocks it, is the PR's own and is fixed there.
