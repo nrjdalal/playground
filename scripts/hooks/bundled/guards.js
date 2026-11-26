@@ -19816,7 +19816,7 @@ var namesApart = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
   if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain))
     return false;
-  return targets.some((t) => new RegExp(`${dirname11(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /\.playground(?![\w.-])|playground_data_dir/.test(plain);
+  return targets.some((t) => new RegExp(`${dirname11(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(plain)) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain);
 };
 var readOf = (word, at) => {
   if (!marked(word.value))

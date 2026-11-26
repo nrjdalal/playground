@@ -150,14 +150,16 @@ const namesRoster = (text: string, targets: string[]) => {
   )
 }
 
-// Whether code names the roster's folder and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
+// Whether code names the roster's folder itself (not a deeper path in it) and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
 const namesApart = (text: string, targets: string[]) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase()
   if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain)) return false
   return (
     targets.some((t) =>
-      new RegExp(`${dirname(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain),
-    ) || /\.playground(?![\w.-])|playground_data_dir/.test(plain)
+      new RegExp(`${dirname(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(
+        plain,
+      ),
+    ) || /\.playground(?![\w.-]|\/[\w.-])|playground_data_dir/.test(plain)
   )
 }
 

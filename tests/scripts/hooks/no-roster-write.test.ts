@@ -248,6 +248,7 @@ describe("roster.ts and every read run", () => {
     `python3 -c "open('/tmp/x', 'w').write(open('${DATA}/brief.md').read())"`,
     `python3 -c "import os, json; print(json.load(open(os.path.join('${DATA}', 'roster.json'))))"`,
     `node -e "const r = require('${ROSTER}'); delete r.agents; console.log(r)"`,
+    `bun -e "await Bun.write('${DATA}/scratchpad/w/brief.md', 'refuse a write to the live roster (<data folder>/roster.json)')"`,
     "chflags uchg /tmp/x",
     "zstd --rm /tmp/x",
     "pigz /tmp/x",
