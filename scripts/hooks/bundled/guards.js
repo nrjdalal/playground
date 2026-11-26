@@ -2835,7 +2835,7 @@ async function examine(cmd, env, visit, builtins) {
     ...resolving,
     ...prior,
     ...vanished,
-    ...await xargsFilled(cmd, [primary, ...others], env)
+    ...await xargsFilled(cmd, [primary, ...others].map((p) => p.xargs), env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -2927,14 +2927,13 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, parsed, env) {
+async function xargsFilled(cmd, xargs, env) {
   const filled = new Map;
-  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
     filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  const wrapped = parsed.some((p) => p.xargs?.wrapped);
+  const wrapped = xargs.some((x) => x?.wrapped);
   if (filled.size === 0 && !wrapped)
     return [];
-  const xargs = parsed.map((p) => p.xargs);
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -2968,6 +2967,12 @@ async function xargsFilled(cmd, parsed, env) {
     ]
   });
   return [...texts].map(fill);
+}
+function slotFilled(slot, xargs, env) {
+  const held = [xargs.replace, ...xargs.outer ?? []].filter((r) => !!r);
+  const filled = slot.words.flatMap((w) => held.filter((r) => w.value.includes(r)).map((r) => [w, r]));
+  const wrapped = !xargs.replace || !!xargs.appends && !slot.words.some((w) => w.value === xargs.replace);
+  return xargsFilled(slot, [{ ...xargs, filled, wrapped }], env);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -16822,14 +16827,17 @@ async function inspect9(raw) {
   await run2(lexed, fresh(), find);
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, parsed, env) => {
-    const typed = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
-    const input = typed?.length === 0 && parsed.args.some((a, i) => i > 0 && a.value === "--") && parsed.xargs && (!parsed.xargs.replace || parsed.xargs.appends) ? await stdinOf(cmd, env) : undefined;
-    if (input?.unknown || input && parsed.xargs?.files?.length)
-      return refuse9("a command xargs hands run-slot.sh from input it cannot read, in a call that names a kill", " Write the slotted command out after run-slot.sh's --.");
-    const slot = input ? input.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value: value.replace(/["']/g, "") })) : typed;
-    if (slot?.length) {
-      const slotted = { ...cmd, words: slot };
-      return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
+    const slot = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
+    const typed = slot && { ...cmd, words: slot };
+    const handsSlot = parsed.name === "run-slot.sh" && parsed.args.some((a, i) => i > 0 && a.value === "--");
+    const slotted = !typed ? [] : [typed, ...handsSlot && parsed.xargs ? await slotFilled(typed, parsed.xargs, env) : []];
+    if (slotted.some((s) => s.words.length > 0)) {
+      for (const s of slotted.filter((s) => s.words.length > 0)) {
+        const verdict = await examine(s, env, (c, p, e) => visit(c, c === s ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
+        if (verdict)
+          return verdict;
+      }
+      return;
     }
     const { args, first, name, xargs } = parsed;
     if (parsed.unread && namesKill)

@@ -1997,11 +1997,11 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
 // xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. `appends` marks a BSD -J string, after which xargs appends its input to the words when no word is that string, and `wrapped` a wrapper after an xargs with no replace string or a -J one that is given no program word (`xargs nohup`), whose program is xargs' input words. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
+      appends?: boolean
       delimiters?: (string | undefined)[]
       files?: { chdir?: Word; file: Word; moved?: boolean }[]
       filled?: [Word, string][]
       outer?: string[]
-      appends?: boolean
       replace?: string
       wrapped?: boolean
     }
@@ -3169,7 +3169,11 @@ export async function examine(
     ...resolving,
     ...prior,
     ...vanished,
-    ...(await xargsFilled(cmd, [primary, ...others], env)),
+    ...(await xargsFilled(
+      cmd,
+      [primary, ...others].map((p) => p.xargs),
+      env,
+    )),
   ]
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
@@ -3282,13 +3286,12 @@ const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefi
 }
 
 // The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, or whose wrapper after xargs is given no program word (`xargs nohup`, its input words appended as that program), which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
-async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
+async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Command[]> {
   const filled = new Map<Word, string[]>()
-  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
-  const wrapped = parsed.some((p) => p.xargs?.wrapped)
+  const wrapped = xargs.some((x) => x?.wrapped)
   if (filled.size === 0 && !wrapped) return []
-  const xargs = parsed.map((p) => p.xargs)
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
   const inputs = [
@@ -3327,6 +3330,17 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
     ],
   })
   return [...texts].map(fill)
+}
+
+// The commands xargs hands run-slot.sh's slot, read as xargsFilled reads a wrapper's program: each slot word holding xargs' replace string or an outer one filled from its input, and with no replace string, or a -J one no word is, the input's words appended, so a guard judges each beside the typed slot.
+export function slotFilled(slot: Command, xargs: NonNullable<Xargs>, env: Env): Promise<Command[]> {
+  const held = [xargs.replace, ...(xargs.outer ?? [])].filter((r): r is string => !!r)
+  const filled = slot.words.flatMap((w) =>
+    held.filter((r) => w.value.includes(r)).map((r): [Word, string] => [w, r]),
+  )
+  const wrapped =
+    !xargs.replace || (!!xargs.appends && !slot.words.some((w) => w.value === xargs.replace))
+  return xargsFilled(slot, [{ ...xargs, filled, wrapped }], env)
 }
 
 const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"

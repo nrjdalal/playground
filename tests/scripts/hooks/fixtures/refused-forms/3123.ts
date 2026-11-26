@@ -1,6 +1,6 @@
 import { type Group } from "./_shared"
 
-// #3123: xargs with no -I string runs a wrapper given no program of its own with xargs' input words as that program, so the kill by name in the input is the command the wrapper runs; rows are data, as refused-forms.ts says.
+// #3123: xargs with no -I string runs a wrapper given no program of its own with xargs' input words as that program, and run-slot.sh's slot takes xargs' input as xargs splits and fills it, so the kill by name in the input is the command run; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["checkout"],
@@ -37,6 +37,34 @@ export const groups: Group[] = [
       [
         "a kill by name run-slot.sh runs from xargs' piped input after its --",
         "echo pkill node | xargs ~/.playground/ops/run-slot.sh w --",
+      ],
+      [
+        "a kill by name run-slot.sh runs from the second pair of words xargs -n2 hands it",
+        "xargs -n2 ~/.playground/ops/run-slot.sh w -- <<< 'x y pkill node'",
+      ],
+      [
+        "a kill by name run-slot.sh runs from the second line xargs -L1 hands it",
+        "printf 'x\\n pkill node\\n' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
+      ],
+      [
+        "a kill by name run-slot.sh runs from the second item xargs -d , hands it",
+        "xargs -d , ~/.playground/ops/run-slot.sh w -- <<< 'x,pkill node'",
+      ],
+      [
+        "a kill by name run-slot.sh runs from the second item xargs -0 hands it",
+        "xargs -0 ~/.playground/ops/run-slot.sh w -- < <(printf 'x\\0 pkill node')",
+      ],
+      [
+        "a kill by name run-slot.sh runs from xargs -I's string in its slot",
+        "xargs -I{} ~/.playground/ops/run-slot.sh w -- {} node <<< pkill",
+      ],
+      [
+        "a kill by name run-slot.sh runs from BSD xargs -J's string in its slot",
+        "xargs -J % ~/.playground/ops/run-slot.sh w -- % node <<< pkill",
+      ],
+      [
+        "a kill by name nohup in run-slot.sh's slot runs from xargs' appended input",
+        "xargs ~/.playground/ops/run-slot.sh w -- nohup <<< 'pkill node'",
       ],
     ],
   },
