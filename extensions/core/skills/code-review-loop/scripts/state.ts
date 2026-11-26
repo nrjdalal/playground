@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file
 import { spawnSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join, relative, dirname, basename, isAbsolute } from "node:path"
 
@@ -85,6 +85,23 @@ export const runnerOf = (clone: string): Runner | undefined => {
     existsSync(join(clone, ".venv", "bin", "python"))
     ? "pytest"
     : undefined
+}
+
+// A moved clone's stale .venv: the first absolute path a site-packages .pth names outside the clone, since uv sync's editable install writes the clone's own folder there and a git worktree move leaves the old one; an import line, a relative line and a clone with no .venv name none.
+export const staleVenv = (clone: string): string | undefined => {
+  const lib = join(clone, ".venv", "lib")
+  const sites = existsSync(lib) ? readdirSync(lib).map((py) => join(lib, py, "site-packages")) : []
+  const roots = [clone, realpathSync(clone)]
+  const inside = (path: string) =>
+    [path, existsSync(path) ? realpathSync(path) : path].some((p) =>
+      roots.some((root) => p === root || p.startsWith(`${root}/`)),
+    )
+  for (const site of sites.filter((s) => existsSync(s)))
+    for (const pth of readdirSync(site).filter(
+      (f) => f.endsWith(".pth") && statSync(join(site, f), { throwIfNoEntry: false })?.isFile(),
+    ))
+      for (const line of readFileSync(join(site, pth), "utf8").split("\n"))
+        if (isAbsolute(line.trim()) && !inside(line.trim())) return line.trim()
 }
 
 // The skill's whole-suite chunk: one call on more files misses the test sandbox's 1200 s deadline.
@@ -1167,6 +1184,14 @@ export const cmdMerge = (...args: string[]): void => {
     process.exitCode = 1
     return
   }
+  const stale = tests.length && runner === "pytest" ? staleVenv(clone) : undefined
+  if (stale) {
+    console.log(
+      `STALE-VENV on ${baseSha.slice(0, 7)}: ${join(clone, ".venv")} points at ${stale}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run uv sync in ${clone}, then the merge again`,
+    )
+    process.exitCode = 1
+    return
+  }
   // A run's red files, read from its report; a red one-file run is its file, and a file the report leaves out runs alone, red when that run is red or its report lists the file (it threw as it loaded beside the others), and not red when that green run wrote no report (it defines no test, or runs in the test sandbox's serial pass, which writes none); a red run whose report names none counts every file it ran as red, and says where.
   const report = join(tmpdir(), `merge-check-${process.pid}.xml`)
   const unnamed: string[] = []
@@ -1418,7 +1443,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline cut (exit 124) prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none; the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline cut (exit 124) prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none, and prints STALE-VENV (exit 1) and runs none when a .pth in that .venv names a folder outside the clone, as a moved clone's old .venv does, uv sync in the clone its fix; the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 
