@@ -74,9 +74,9 @@ build_head() {
 # A skip goes to $S/prebuild-skip as its reason: that stop, or an exit run-slot made itself (2, a refusal, or 143, a stopped wait) before its runs.log holds a start line for this pid; the step returns its exit either way
 slot_step() {
   local name=$1 dir=$2 p rc mark t0 line said= down=; shift 2
-  [ -x "$RS" ] || { (cd "$dir" && "$@"); return; }
+  # each fork but a $(...), foreground or background, starts with this shell's stderr on /dev/null and its own on fd 3, the shell's stderr until it gets it back: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", here into supervisor.log, which prebuild's log group hands this shell as its stderr; a $(...) child joins this shell's own group, so its setpgid prints no such note
+  [ -x "$RS" ] || { exec 3>&2 2>/dev/null; (cd "$dir" && "$@") 2>&3 3>&-; rc=$?; exec 2>&3 3>&-; return "$rc"; }
   mark=$(wc -l 2>/dev/null < "$RUNS" | tr -d ' '); t0=$(date +%s)
-  # each job starts with this shell's stderr on /dev/null and its own on fd 3, the shell's stderr until it gets it back: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", here into supervisor.log, which prebuild's clone hands this shell as its stderr
   exec 3>&2 2>/dev/null
   (cd "$dir" && exec "$RS" ops-dashboard -- "$@") 2>&3 3>&- & p=$!
   exec 2>&3 3>&-
@@ -88,7 +88,7 @@ slot_step() {
     [ -z "$said" ] && [ $(($(date +%s) - t0)) -ge "$PREBUILD_SLOW" ] && [ -z "$(step_started)" ] && { say "prebuild $name still queued after $(($(date +%s) - t0))s; it keeps waiting"; said=1; }
   done
   wait "$p"; rc=$?
-  rm -f "$S/prebuild.pid"
+  exec 3>&2 2>/dev/null; rm -f "$S/prebuild.pid" 2>&3 3>&-; exec 2>&3 3>&-
   line=$(step_started)
   [ -z "$line" ] || say "prebuild $name queued $(echo "$line" | sed -n 's/.* waited=\([0-9]*\)s.*/\1/p')s"
   if [ -n "$down" ]; then
@@ -117,8 +117,9 @@ prebuild() {
   rm -rf "$stage"; git worktree prune
   git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; drop_stage; return 0; }
   # node_modules as a copy-on-write clone of the checkout's (cp -c on macOS; --reflink=auto elsewhere, since GNU cp has no -c), then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
-  local clone=(-cR); [ "$(uname -s)" = Darwin ] || clone=(-R --reflink=auto)
-  if ! { { [ ! -d node_modules ] || slot_step clone . cp "${clone[@]}" node_modules "$stage/"; } && (unset NODE_ENV SKIP_ENV_VALIDATION && slot_step install "$stage" bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+  # the install's subshell forks with this shell's stderr on /dev/null, as slot_step's forks do; its run-slot child sits in the subshell's process group, apart from this shell's
+  local clone=(-cR) installed; [ "$(uname -s)" = Darwin ] || clone=(-R --reflink=auto)
+  if ! { { [ ! -d node_modules ] || slot_step clone . cp "${clone[@]}" node_modules "$stage/"; } && { exec 3>&2 2>/dev/null; (unset NODE_ENV SKIP_ENV_VALIDATION && slot_step install "$stage" bun install --frozen-lockfile --ignore-scripts) 2>&3 3>&-; installed=$?; exec 2>&3 3>&-; [ "$installed" -eq 0 ]; }; } >> "$LOG" 2>&1; then
     [ ! -s "$S/prebuild-skip" ] || { skip_roll "$target"; drop_stage; return 1; }
     say "the staging worktree's install for ${target:0:7} failed; building after the stop"
     drop_stage; return 0
