@@ -60,7 +60,7 @@ const lockPath = path + ".lock"
 // A lock holds `<pid> <ISO time>`; its pid and age let a call take over a stale one and wait on a live one.
 type Lock = { pid: number; ageSeconds: number; time: string }
 
-// Reads the pid and age in seconds a lock beside the roster names, and null when the lock is gone, so a live holder is waited on.
+// Reads the pid, time and age in seconds a lock beside the roster names, and null when the lock is gone or names no pid and time, so the caller judges it by its mtime.
 async function readLock(): Promise<Lock | null> {
   let text: string
   try {
@@ -131,7 +131,7 @@ async function lockRoster(): Promise<() => Promise<void>> {
             : `roster.ts: ${lockPath} is held and unreadable, so this write waits; try again`,
           1,
         )
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await Bun.sleep(50)
     }
   }
 }
@@ -731,7 +731,7 @@ async function main(argv: string[]): Promise<void> {
     // A prs-= cleared pr and prs in memory, so the row read back must show the clear; a still-present PR means the write-back left the row holding what the call just removed.
     await clearedOnRead(cmd, name, withdrawn)
   } finally {
-    // The lock is always released, so a crashed or refused write never leaves a lock behind.
+    // The lock is always freed, so a write that throws never leaves a lock behind; one killed outright leaves it for the stale takeover.
     await release()
   }
 }
