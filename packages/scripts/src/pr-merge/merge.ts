@@ -1,10 +1,12 @@
 import "@packages/env/aliases"
+import { existsSync } from "node:fs"
 import { mkdir, rename } from "node:fs/promises"
 import { join } from "node:path"
 
 import { envValue } from "@packages/config/org"
 import { dataDir } from "@packages/env/data-dir"
 import type { LockStore } from "@packages/redis"
+import { readPolicyOrDefaults, settingValue } from "@packages/settings"
 
 import { endMergedLive } from "../../../../scripts/ops/optimizer/auto_end"
 import { ghSkipped } from "../gh-read"
@@ -176,6 +178,19 @@ export async function gateCodeOf(git: Run, canary: string): Promise<string[]> {
   if (diff.code !== 0)
     throw new Error(`git diff of the gate code exited ${diff.code}: ${diff.stderr.trim()}`)
   return diff.stdout.split("\n").filter(Boolean)
+}
+
+// Whether merge-on-ready lands PRs on this machine: the merge train's job enabled in the data folder's store (jobs.opsMergeTrain, off by default) and no no-ready file pausing it (scripts/ops/merge-train/run.py); a store it cannot read reads false, so the code gate names the way on that always works
+export function mergeOnReadyRuns(
+  environment: Record<string, string | undefined> = process.env,
+): boolean {
+  const data = dataDir(environment)
+  const read = readPolicyOrDefaults(data)
+  if (read.refusal !== undefined) return false
+  const job = settingValue(read.settings, "jobs.opsMergeTrain")?.value as
+    | { enabled?: unknown }
+    | undefined
+  return job?.enabled === true && !existsSync(join(data, "ops", "merge-train", "no-ready"))
 }
 
 // The gate's own folders, whose code, docs and tests name sample tokens (SUITE_LINE), so the grep leaves them out and a sample stays unfound.
@@ -356,6 +371,7 @@ export async function factsOf(
     removed,
     state: view.state,
     title: view.title,
+    trainRuns: mergeOnReadyRuns(),
     unfound,
   }
 }
