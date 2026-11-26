@@ -1,6 +1,6 @@
 import type { Group } from "./_shared"
 
-// #3134: a kill name joined to a backslash escape, before or after it, that printf, echo -e or an ANSI-C string decodes into a word break, handed on by xargs; a watch xargs gives no program of its own; and an ANSI-C item a fill once read as a replacement pattern; rows are data, as refused-forms.ts says.
+// #3134: a kill name joined to a backslash escape, before or after it, that printf, echo -e or an ANSI-C string decodes into a word break or a letter of the name, handed on by xargs or a shell; a watch xargs gives no program of its own; and an ANSI-C item a fill once read as a replacement pattern; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["checkout"],
@@ -89,6 +89,62 @@ export const groups: Group[] = [
       [
         "a kill name an ANSI-C string spells, an item xargs -0 fills into sh -c's -I script",
         "xargs -0 -I{} sh -c {} < <(printf 'x\\0$'\"'\"'\\\\x70kill'\"'\"' node')",
+      ],
+      [
+        "a kill name an octal escape spells a letter of, printf's output read by xargs -0 into nohup",
+        "printf 'pki\\154l\\0node' | xargs -0 nohup",
+      ],
+      [
+        "a kill name a hex escape spells a letter of, printf's output read by xargs -0 into nohup",
+        "printf 'pki\\x6cl\\0node' | xargs -0 nohup",
+      ],
+      [
+        "a kill name a hex escape spells a letter of in an ANSI-C here-string, read by xargs into nohup",
+        "xargs nohup <<< $'pki\\x6cl\\nnode'",
+      ],
+      [
+        "a kill name a hex escape spells a letter of, printf's output read by xargs into nohup",
+        "printf 'pki\\x6cl node' | xargs nohup",
+      ],
+      [
+        "a kill name a hex escape spells a letter of, echo -e's output read by xargs into nohup",
+        "echo -e 'p\\x6bill node' | xargs nohup",
+      ],
+      [
+        "a kill name an octal escape spells a letter of and a tab escape ends, read by xargs into nohup",
+        "printf 'p\\153ill\\tnode' | xargs nohup",
+      ],
+      [
+        "a kill name a hex escape spells a letter of, filled into sh -c's -I script by xargs -0",
+        "printf 'x\\0pki\\x6cl node' | xargs -0 -I{} sh -c {}",
+      ],
+      [
+        "a kill name a unicode blank escape ends, printf's output read by xargs into nohup",
+        "printf 'pkill\\u0020node' | xargs nohup",
+      ],
+      [
+        "a kill name a vertical tab escape ends, echo -e's output read by xargs into nohup",
+        "echo -e 'pkill\\x0bnode' | xargs nohup",
+      ],
+      [
+        "a kill name a hex blank escape ends, printf %b's output read by xargs into nohup",
+        "printf '%b' 'pkill\\x20node' | xargs nohup",
+      ],
+      [
+        "a kill name a hex blank escape ends, printf's line filled into sh -c's -I script by xargs",
+        "printf 'pkill\\x20node\\n' | xargs -I{} sh -c {}",
+      ],
+      [
+        "a kill name a hex blank escape ends, printf's output piped into sh",
+        "printf 'pkill\\x20node' | sh",
+      ],
+      [
+        "a kill name a hex blank escape ends, printf's output piped into bash",
+        "printf 'pkill\\x20node' | bash",
+      ],
+      [
+        "a kill name a hex blank escape ends, an ANSI-C here-string bash runs",
+        "bash <<< $'pkill\\x20node'",
       ],
     ],
   },

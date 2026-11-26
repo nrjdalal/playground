@@ -235,6 +235,18 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "xargs nohup <<< $'date\\nnode'",
     "xargs -0 -I{} sh -c {} < <(printf 'x\\0$'\"'\"'\\\\x64ate'\"'\"'')",
     "xargs -I{} {} node <<< '$`pkill'",
+    // the twins of 3134.ts's rows whose escape spells a letter or ends a word in another pipe, kill-pid in place of the name
+    "printf 'ki\\x6cl\\x001234' | xargs -0 nohup",
+    "printf 'ki\\x6cl 1234' | xargs nohup",
+    "xargs nohup <<< $'ki\\x6cl\\n1234'",
+    "printf 'x\\0ki\\x6cl 1234' | xargs -0 -I{} sh -c {}",
+    "printf 'kill\\u00201234' | xargs nohup",
+    "echo -e 'kill\\x0b1234' | xargs nohup",
+    "printf '%b' 'kill\\x201234' | xargs nohup",
+    "printf 'kill\\x201234\\n' | xargs -I{} sh -c {}",
+    "printf 'kill\\x201234' | sh",
+    "printf 'kill\\x201234' | bash",
+    "bash <<< $'kill\\x201234'",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

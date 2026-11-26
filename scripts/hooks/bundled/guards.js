@@ -16856,7 +16856,11 @@ async function inspect9(raw) {
   const decoded = toolInput.command.includes("$'") ? lex(toolInput.command).commands.flatMap((c) => c.words.map((w) => w.value)).join(" ") : "";
   const spelled = spelledText(`${toolInput.command} ${decoded}`);
   const breaks = spelled.replace(/\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,4}|.)/g, " ");
-  const bare = `${spelled} ${breaks}`.replace(/["'\\]/g, "");
+  const letters = spelled.replace(/\\(?:x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{1,4})|U([0-9A-Fa-f]{1,8})|0?([0-7]{1,3})|.)/g, (_, x, u, U, octal) => {
+    const code = x || u || U ? parseInt(x ?? u ?? U, 16) : octal ? parseInt(octal, 8) : NaN;
+    return code > 32 && code <= 1114111 ? String.fromCodePoint(code) : " ";
+  });
+  const bare = `${spelled} ${breaks} ${letters}`.replace(/["'\\]/g, "");
   const namesKill = /(?:fuser|kill|killall|pkill)\b/.test(bare) || /(?:\$\{?\w+\}?){2,}/.test(bare) || /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) || globSpells(bare, KILLS);
   if (!namesKill && !/\bportless\b/.test(bare))
     return;
