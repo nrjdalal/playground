@@ -74,7 +74,7 @@ build_head() {
 # A skip goes to $S/prebuild-skip as its reason: that stop, or an exit run-slot made itself (2, a refusal, or 143, a stopped wait) before its runs.log holds a start line for this pid; the step returns its exit either way
 slot_step() {
   local name=$1 dir=$2 p rc mark t0 line said= down=; shift 2
-  # each fork, foreground or background, starts with this shell's stderr on /dev/null and its own on fd 3, the shell's stderr until it gets it back: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", here into supervisor.log, which prebuild's clone hands this shell as its stderr
+  # each fork but a $(...), foreground or background, starts with this shell's stderr on /dev/null and its own on fd 3, the shell's stderr until it gets it back: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", here into supervisor.log, which prebuild's log group hands this shell as its stderr; a $(...) child joins this shell's own group, so its setpgid prints no such note
   [ -x "$RS" ] || { exec 3>&2 2>/dev/null; (cd "$dir" && "$@") 2>&3 3>&-; rc=$?; exec 2>&3 3>&-; return "$rc"; }
   mark=$(wc -l 2>/dev/null < "$RUNS" | tr -d ' '); t0=$(date +%s)
   exec 3>&2 2>/dev/null
