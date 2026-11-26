@@ -16834,6 +16834,29 @@ var probingStop = (words) => {
   return flag < 0 || !/^\d+$/.test(args[flag + 1] ?? "");
 };
 var isSearch = (name, args) => SEARCHES.has(name) && !(name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value)));
+var groupTarget = (words) => {
+  let i = 0;
+  if (words[0] === "-l" || words[0] === "-L")
+    return false;
+  if (words[0] === "-s" || words[0] === "-n")
+    i = 2;
+  else if (words[0] !== "--" && /^-\w+$/.test(words[0] ?? ""))
+    i = 1;
+  if (words[i] === "--")
+    i++;
+  return words.slice(i).some((w) => /^(?:-\d+|0+)$/.test(w) || w.startsWith("-") && w.includes(UNKNOWN));
+};
+var xargsWords = async (cmd, args, xargs, env) => {
+  const words = args.map((a) => a.value);
+  if (!xargs)
+    return words;
+  const fed = await stdinOf(cmd, env);
+  if (fed.unknown)
+    return words;
+  const items = fed.value.split(/\s+/).filter(Boolean);
+  const replace = xargs.replace;
+  return replace && words.some((w) => w.includes(replace)) ? words.flatMap((w) => w.includes(replace) ? items.map((item) => w.replaceAll(replace, item)) : [w]) : [...words, ...items];
+};
 async function inspect9(raw) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
@@ -16878,6 +16901,8 @@ async function inspect9(raw) {
       return refuse9(name);
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse9("fuser -k");
+    if (name === "kill" && groupTarget(await xargsWords(cmd, args, xargs, env)))
+      return `no-kill-by-name hook refuses a kill of every process, a process group or its own group: a pid operand of -1, a negative number or 0 signals every process this user may signal, a whole group or the caller's own group, the live dashboard and every session among them. ${WAY_OUT}`;
     if (name !== "kill" || !search)
       return;
     const fed = xargs || args.some((a) => a.value.includes(UNKNOWN) || handed.some((h) => a.value.includes(h)));

@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
+// PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. It refuses a kill of every process, a process group or its own group too (a pid operand of -1, a negative number or 0, as kill reads its words, xargs' input included), since one such call ends every session this user runs. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
 
 import { input } from "./input"
 import { fromFactory } from "./role"
@@ -14,10 +14,13 @@ import {
   slotFilled,
   slotWords,
   spelledText,
+  stdinOf,
   UNKNOWN,
   type Command,
+  type Env,
   type Visit,
   type Word,
+  type Xargs,
 } from "./shell"
 
 const BY_NAME = new Set(["killall", "pkill"])
@@ -80,6 +83,33 @@ const isSearch = (name: string, args: Word[]) =>
   !(
     name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value))
   )
+
+// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand; true when an operand is -1, a negative number or 0, a whole group's target, or a minus sign before a value the hook cannot read (`-$PGID`)
+const groupTarget = (words: string[]) => {
+  let i = 0
+  if (words[0] === "-l" || words[0] === "-L") return false
+  if (words[0] === "-s" || words[0] === "-n") i = 2
+  else if (words[0] !== "--" && /^-\w+$/.test(words[0] ?? "")) i = 1
+  if (words[i] === "--") i++
+  return words
+    .slice(i)
+    .some((w) => /^(?:-\d+|0+)$/.test(w) || (w.startsWith("-") && w.includes(UNKNOWN)))
+}
+
+// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads, else that input appended; its own alone when the hook cannot read the input
+const xargsWords = async (cmd: Command, args: Word[], xargs: Xargs, env: Env) => {
+  const words = args.map((a) => a.value)
+  if (!xargs) return words
+  const fed = await stdinOf(cmd, env)
+  if (fed.unknown) return words
+  const items = fed.value.split(/\s+/).filter(Boolean)
+  const replace = xargs.replace
+  return replace && words.some((w) => w.includes(replace))
+    ? words.flatMap((w) =>
+        w.includes(replace) ? items.map((item) => w.replaceAll(replace, item)) : [w],
+      )
+    : [...words, ...items]
+}
 
 async function inspect(raw: string) {
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as {
@@ -152,6 +182,8 @@ async function inspect(raw: string) {
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")
+    if (name === "kill" && groupTarget(await xargsWords(cmd, args, xargs, env)))
+      return `no-kill-by-name hook refuses a kill of every process, a process group or its own group: a pid operand of -1, a negative number or 0 signals every process this user may signal, a whole group or the caller's own group, the live dashboard and every session among them. ${WAY_OUT}`
     if (name !== "kill" || !search) return
     const fed =
       xargs ||
