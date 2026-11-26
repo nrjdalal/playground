@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  RiArrowDownSLine,
   RiExpandDiagonalLine,
   RiForward10Line,
   RiHeartFill,
@@ -36,7 +37,15 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { BAR_ITEM, GLASS } from "@/lib/floating-bar"
-import { coverOf, DEMO_SONG, parseYouTube, type YouTubeLink } from "@/lib/youtube"
+import {
+  coverOf,
+  deal,
+  DEMO_SONG,
+  parseYouTube,
+  queueOf,
+  type Shelf,
+  type YouTubeLink,
+} from "@/lib/youtube"
 
 // The few calls of YouTube's IFrame Player API the player makes (developers.google.com/youtube/iframe_api_reference).
 type YTPlayer = {
@@ -96,7 +105,6 @@ const VOLUME_KEY = "playground:music:volume"
 // Recently played keeps the last fifty songs, its window scrolling past the first five
 const RECENT_MAX = 50
 
-type Shelf = "liked" | "recent" | "search"
 type Song = { detail?: string; title: string; url: string; videoId?: string }
 type Last = Song & { time: number; videoId: string }
 type Now = {
@@ -422,13 +430,12 @@ function play(player: YTPlayer, asked: YouTubeLink, from = 0) {
 
 // Shuffle play: the songs a list shows, as one playlist in a random order, Next and each song's end moving through it; dealt again, the song just heard never comes first
 function playShuffled(player: YTPlayer, ids: string[], last?: string) {
-  const order = [...ids]
-  for (let at = order.length - 1; at > 0; at--) {
-    const pick = Math.floor(Math.random() * (at + 1))
-    ;[order[at], order[pick]] = [order[pick] as string, order[at] as string]
-  }
-  if (order.length > 1 && order[0] === last) [order[0], order[1]] = [order[1] as string, last]
-  shuffled = ids
+  playQueue(player, deal(ids, last), ids)
+}
+
+// songs as one playlist in the order given, Next and each song's end moving through it; with the list to deal again, a new order follows the last song
+function playQueue(player: YTPlayer, order: string[], again: string[] | null) {
+  shuffled = again
   startAt = null
   queued = null
   alone = false
@@ -512,7 +519,7 @@ function Marquee({ className, text }: { className?: string; text: string }) {
 export function MusicPlayer() {
   const [now, setNow] = useState<Now | null>(null)
   const [open, setOpen] = useState(false)
-  // Shuffle play is on until a song or link plays, which lights its icon
+  // Shuffle play is on until a search result or link plays, which lights its icon; a Recent or Liked row keeps it on
   const [shuffling, setShuffling] = useState(false)
   const [recent, setRecent] = useState<Song[]>([DEMO_SONG])
   const [liked, setLiked] = useState<Song[]>([])
@@ -841,8 +848,25 @@ export function MusicPlayer() {
 
   const shown = shelf === "search" ? (results ?? []) : shelf === "liked" ? liked : recent
 
+  const ids = shown.flatMap((song) => (song.videoId ? [song.videoId] : []))
+
+  // a Recent or Liked row plays the rest of its list after it, shuffled while Shuffle play is lit; a search result plays on into its mix
+  const pick = (song: Song) => {
+    const order = song.videoId ? queueOf(shelf, ids, song.videoId, shuffling) : null
+    if (!order) return start(song.url)
+    setError(null)
+    pending.current = song.url
+    list.current = undefined
+    const again = shuffling ? ids : null
+    const go = (p: YTPlayer) => {
+      player.current = p
+      playQueue(p, order, again)
+    }
+    if (player.current) go(player.current)
+    else void ready().then(go)
+  }
+
   const shuffle = () => {
-    const ids = shown.flatMap((song) => (song.videoId ? [song.videoId] : []))
     if (ids.length === 0) return
     setShuffling(true)
     pending.current = null
@@ -882,7 +906,7 @@ export function MusicPlayer() {
       )}
     >
       {/* the field sits 6px over the toggle, as the box's padding sits over it */}
-      {/* the field and, at its right end over Shuffle play, Collapse as a music note, which shuts the box back to the player from where it is, with no trip back to the search icon */}
+      {/* the field and, at its right end over Shuffle play, Collapse as a down chevron, which shuts the box back to the player from where it is, with no trip back to the search icon */}
       <div className="mb-1 flex items-center gap-0.5">
         <form onSubmit={submit} className="relative min-w-0 flex-1">
           <Input
@@ -911,7 +935,7 @@ export function MusicPlayer() {
           variant="ghost"
           onClick={() => setOpen(false)}
         >
-          <RiMusic2Line />
+          <RiArrowDownSLine />
         </Button>
       </div>
       {/* Recent, Liked and Search as one three-way toggle, a row's height; Search stays disabled until something is searched, and a search turns to it */}
@@ -978,7 +1002,7 @@ export function MusicPlayer() {
                       >
                         <button
                           type="button"
-                          onClick={() => start(song.url)}
+                          onClick={() => pick(song)}
                           className="flex h-8 w-full min-w-0 items-center gap-2 px-1 pr-8 text-left text-xs outline-none"
                         >
                           {id ? (

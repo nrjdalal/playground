@@ -14,6 +14,7 @@ import {
   type Context,
   cycle,
   CYCLE_SECONDS,
+  lastRunPath,
   resultOf,
   runner,
   type Runner,
@@ -180,7 +181,7 @@ export function scheduled(
 ) {
   const path = join(ops, `${job}.json`)
   const startedAt = new Date()
-  const state = runner()
+  const state = runner({ path: lastRunPath(ops, job) })
   const send = sendAs(job)
   const data = dirname(ops)
   const revision = revisionOf(main, data)
