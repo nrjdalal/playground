@@ -223,6 +223,12 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "kill -l 9",
     "kill -L",
     "P=1234; kill -9 $P",
+    "kill %1",
+    "kill $(cat /tmp/x.pid)",
+    "echo 1234 | xargs kill",
+    "xargs kill -9 <<< 1234",
+    "echo 1234 | xargs -I{} kill -9 {}",
+    "cat /tmp/x.pid | xargs kill",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
