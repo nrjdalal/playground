@@ -8,7 +8,7 @@ import { writeAtomically } from "./folder"
 import { modelSettings } from "./models"
 import type { Settings } from "./settings"
 
-// The one writer of an account's secret: a Claude token under usage.keychainService by its email, a GLM key under models.glmKeychainService by its label; `security` comes from PATH, so a test puts a fake first.
+// The one writer of a Keychain secret (storeItem): a Claude token under usage.keychainService by its email, a GLM key under models.glmKeychainService by its label, an MCP server's token under the service and account its launcher reads (mcp-keychain); `security` comes from PATH, so a test puts a fake first.
 export const keychainServiceOf = (settings: Settings, provider: Provider): string =>
   provider === "glm"
     ? modelSettings.get(settings, "models.glmKeychainService")
@@ -35,23 +35,16 @@ const readRecord = (path: string): Record<string, string> => {
 const writeRecord = (path: string, record: Record<string, string>) =>
   writeAtomically(path, `${JSON.stringify(record, null, 2)}\n`)
 
-// Saves the secret, replacing one kept before: it goes to `security -i` on stdin, so no argv ever holds it.
-export const storeSecret = (
-  settings: Settings,
-  provider: Provider,
-  key: string,
-  secret: string,
-  keychain: Keychain = {},
-): void => {
+const checkItem = (key: string, secret: string) => {
   if (!KEY.test(key)) throw new Error(`${key} is not an email or a label`)
   if (!SECRET.test(secret))
     throw new Error("the secret holds a character no token or key holds, so it is not saved")
-  if (keychain.record) {
-    const record = readRecord(keychain.record)
-    record[`${provider}:${key}`] = createHash("sha256").update(secret).digest("hex")
-    return writeRecord(keychain.record, record)
-  }
-  const service = keychainServiceOf(settings, provider)
+}
+
+// Saves the secret under the service and key, replacing one kept before: it goes to `security -i` on stdin, so no argv ever holds it.
+export const storeItem = (service: string, key: string, secret: string): void => {
+  if (!KEY.test(service)) throw new Error(`${service} is not a service`)
+  checkItem(key, secret)
   const run = security(
     ["-i"],
     `add-generic-password -U -s "${service}" -a "${key}" -w "${secret}"\n`,
@@ -59,6 +52,21 @@ export const storeSecret = (
   // a failed command shows in its exit or its error output, whichever security -i gives
   if (run.status !== 0 || run.error || run.stderr.trim())
     throw new Error(`the secret store refused the ${service} item for ${key}`)
+}
+
+// Saves an account's secret under its provider's service, or as its sha256 in the record file of a stack that does not read this machine.
+export const storeSecret = (
+  settings: Settings,
+  provider: Provider,
+  key: string,
+  secret: string,
+  keychain: Keychain = {},
+): void => {
+  if (!keychain.record) return storeItem(keychainServiceOf(settings, provider), key, secret)
+  checkItem(key, secret)
+  const record = readRecord(keychain.record)
+  record[`${provider}:${key}`] = createHash("sha256").update(secret).digest("hex")
+  writeRecord(keychain.record, record)
 }
 
 // Whether the item was there to remove.

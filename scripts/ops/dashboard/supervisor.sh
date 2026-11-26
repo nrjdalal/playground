@@ -43,32 +43,35 @@ trash_build() { [ -e "$1" ] || return 0; bun --no-env-file "$D/../../../packages
 set_aside() { [ -e "$1" ] || return 0; local aside; aside="$1.aside-$(date +%s)"; mv "$1" "$aside" || return 1; trash_build "$aside" "$2" || :; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
-# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree, whose build ($2 set) goes through slot_step
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure sets build_err to its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree, whose build ($2 set) goes through slot_step
+# it runs in this shell, never a $(...), so slot_step's run-slot child leads its own process group under set -m, apart from this shell's
 build_head() {
   local src=${1:-.} sha dir was started out
+  build_err=
   sha=$(git -C "$src" rev-parse HEAD); dir=$S/builds/$sha
-  dashboard_urls || { echo "bunx portless get failed"; return 1; }
+  dashboard_urls || { build_err="bunx portless get failed"; return 1; }
   if [ -d "$dir" ]; then
     was=$(cat "$dir/urls" 2>/dev/null)
     [ "$was" = "$WEB $API" ] && return 0
     say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
   fi
   say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
-  local via=(); [ -z "${2:-}" ] || via=(slot_step build .)
-  if ! out=$(cd "$src" && HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true "${via[@]}" bun run build 2>&1); then
-    echo "$out" >> "$LOG"
-    echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
+  if ! HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true build_step "${2:-}" "$src" > "$S/build.out" 2>&1; then
+    out=$(< "$S/build.out"); echo "$out" >> "$LOG"
+    build_err=$(echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200); return 1
   fi
-  set_aside "$dir.tmp" "a build copy an earlier run left half made" || { echo "moving $dir.tmp aside failed"; return 1; }; mkdir -p "$dir.tmp"
+  set_aside "$dir.tmp" "a build copy an earlier run left half made" || { build_err="moving $dir.tmp aside failed"; return 1; }; mkdir -p "$dir.tmp"
   # next's standalone server leaves .next/static and public for its host to copy beside it
   cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
-    echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
+    echo "$WEB $API" > "$dir.tmp/urls" || { build_err="copying the build to $dir failed"; return 1; }
   # the head's own web launcher, bundled into one file, so the web a roll swaps in runs the target's launcher, not the checkout's older one
   (cd "$src" && bun build packages/scripts/src/portless.ts --target=bun --outfile="$dir.tmp/launcher.js") >> "$LOG" 2>&1 || say "bundling ${sha:0:7}'s web launcher failed; its web starts through the checkout's portless.ts"
-  set_aside "$dir" "rebuilt for the Dashboard's URLs" || { echo "moving $dir aside failed"; return 1; }; mv "$dir.tmp" "$dir"
+  set_aside "$dir" "rebuilt for the Dashboard's URLs" || { build_err="moving $dir aside failed"; return 1; }; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
+# bun run build in folder $2, through slot_step when $1 is set
+build_step() { if [ -n "$1" ]; then slot_step build "$2" bun run build; else (cd "$2" && bun run build); fi; }
 # One prebuild step, $1 its name, run in folder $2: through run-slot as ops-dashboard when $RS is executable, else bare. It logs how long the step queued, and once, past PREBUILD_SLOW s, that it still queues.
 # It waits as the supervisor's background child, checked every PREBUILD_POLL s, so a stack that goes down meanwhile stops the step by its pid and the loop restarts the stack that same tick, never after the queue's wait.
 # A skip goes to $S/prebuild-skip as its reason: that stop, or an exit run-slot made itself (2, a refusal, or 143, a stopped wait) before its runs.log holds a start line for this pid; the step returns its exit either way
@@ -108,7 +111,7 @@ skip_roll() {
 }
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; a step slot_step marks skipped skips the roll (skip_roll) and returns 1 with nothing stopped and no bad-builds entry; the staging worktree goes either way
 prebuild() {
-  local target=$1 tag=$2 stage=$S/staging built rc=0
+  local target=$1 tag=$2 stage=$S/staging rc=0
   prebuilt=; rm -f "$S/prebuild-skip"
   drop_stage() { git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune; }
   "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
@@ -126,12 +129,12 @@ prebuild() {
   fi
   [ ! -f .env ] || cp .env "$stage/.env"
   say "building ${target:0:7} before the stop, from $stage"
-  built=$(build_head "$stage" slot) || rc=1
+  build_head "$stage" slot || rc=1
   drop_stage
   [ ! -s "$S/prebuild-skip" ] || { skip_roll "$target"; return 1; }
   [ $rc -eq 0 ] && { prebuilt=1; return 0; }
   echo "$target" >> "$BAD"
-  result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
+  result "$tag ${target:0:7} FAIL build before the stop: ${build_err:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
   return 1
 }
@@ -323,11 +326,11 @@ move_database() { local out; if out=$(bun "$WT/api/hono/src/bin/dashboard-db.ts"
 # The follower's last line when it is the guard's refusal of the database's publish (a container published beyond loopback, or none publishing the port): the machine's, not the head's, so finish_roll keeps the head out of bad-builds
 guard_reason() { tail -2 "$INGLOG" | grep -m1 -oE 'refusing to write: .*(beyond loopback|no single running Docker container publishes port [0-9]+)'; }
 roll_up() {   # build the head when it has no build, start it and the follower, check both, and report one line; returns 0 on PASS
-  local tag=$1 sha dev fol t built moved_note=
+  local tag=$1 sha dev fol t moved_note=
   guard_refusal= move_failure=
   sha=$(git rev-parse --short HEAD)
   # a failed build leaves no dev log of its own, so finish_roll never reads the last stack's refusal as this head's
-  built=$(build_head) || { : > "$DEVLOG"; result "$tag $sha FAIL build: $built"; return 1; }
+  build_head || { : > "$DEVLOG"; result "$tag $sha FAIL build: $build_err"; return 1; }
   # a web the head broke fails the roll as a bad build; the machine's fault writes the refusal line finish_roll reads, so the head is tried again
   dashboard_urls; ensure_web "$(git rev-parse HEAD)"; local wrc=$?
   if [ $wrc -ne 0 ]; then

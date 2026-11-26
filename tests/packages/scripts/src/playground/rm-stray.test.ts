@@ -148,6 +148,15 @@ test.each([
       return join(main, "link")
     },
   ],
+  [
+    "a path whose parent folder is a symlink to a folder inside it",
+    (main: string) => {
+      mkdirSync(join(main, "real"))
+      writeFileSync(join(main, "real", "a"), "x\n")
+      symlinkSync(join(main, "real"), join(main, "via"))
+      return join(main, "via", "a")
+    },
+  ],
   ["the main checkout itself", (main: string) => main],
   ["its git folder", (main: string) => join(main, ".git")],
   [
@@ -181,6 +190,20 @@ test("rm --restore brings a path rm --stray moved back to its place", async () =
   expect(await runRm(["--restore", item!.id], m.deps)).toBe(0)
   expect(await Bun.file(file).text()).toBe("x\n")
   expect(m.trash()).toEqual([])
+})
+
+test("rm --restore of a path rm --stray moved refuses a parent folder swapped for a symlink", async () => {
+  const m = machine()
+  const sub = join(m.main, "sub")
+  mkdirSync(sub)
+  writeFileSync(join(sub, "a"), "x\n")
+  expect(await runRm(["--stray", join(sub, "a"), "--reason", "upkeep"], m.deps)).toBe(0)
+  const [item] = m.trash()
+  rmSync(sub, { recursive: true })
+  symlinkSync(join(m.main, ".git"), sub)
+  expect(await runRm(["--restore", item!.id], m.deps)).toBe(1)
+  expect(existsSync(join(m.main, ".git", "a"))).toBe(false)
+  expect(m.trash().map((entry) => entry.id)).toEqual([item!.id])
 })
 
 test("rm --restore of a path rm --stray moved refuses every caller but ops", async () => {
