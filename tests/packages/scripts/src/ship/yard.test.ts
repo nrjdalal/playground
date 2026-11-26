@@ -370,6 +370,16 @@ describe("ship:yard's schema source parsers", () => {
     })
   })
 
+  test.each(["open", "denied"])(
+    "decisionSource, an Inbox decision whose status reads %s, is not approved",
+    (status) => {
+      expect(decisionSource(JSON.stringify({ kind: "decision", status }))).toEqual({
+        approved: false,
+        kind: "decision",
+      })
+    },
+  )
+
   test("decisionSource, an approved item of another kind, returns null", () => {
     expect(decisionSource(JSON.stringify({ kind: "ticket", status: "approved" }))).toBeNull()
   })
