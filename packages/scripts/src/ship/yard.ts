@@ -69,10 +69,11 @@ const SCHEMA = /^packages\/db\/(?:drizzle|src\/schema)\//
 export const schemaChanges = (files: string[]): string[] =>
   files.filter((file) => SCHEMA.test(file))
 
-// A PR as `gh pr view --json state,comments,body` sends it, its fields read here.
+// A PR as `gh pr view --json author,state,comments,body` sends it, its fields read here.
 type PrJson = {
+  author?: { login?: string }
   body: string
-  comments?: { author: { login?: string }; body: string }[]
+  comments?: { author?: { login?: string }; body: string }[]
   state?: string
 }
 
@@ -88,14 +89,18 @@ const safeParse = (json: string): unknown => {
 // A dump's path, which `~/.playground` anchors: the leading `~` is a home path, never a packages/db migration, so a schema PR's migration .sql never clears a dump that carries one.
 const DUMP_RE = /~[\w./-]*\.(?:sql|dump)\b/
 
-// A shape review's banner, whose first line starts with these words, matched from any author, not just the ReviewBot login.
+// A shape review's banner, whose first line starts with these words, counted only from the PR's own author, the account every session posts as, since anyone can comment on a public repo's PR.
 const SHAPE_RE = /^## ReviewBot · shape review( · at [0-9a-f]+)?/
 
-// A PR's JSON from `gh pr view --json state,comments,body`, parsed into its source shape: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
+// A PR's JSON from `gh pr view --json author,state,comments,body`, parsed into its source shape: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
 export const prSource = (json: string): SchemaSource | null => {
   const read = safeParse(json) as PrJson | undefined
   if (!read || read.state !== "MERGED" || !Array.isArray(read.comments)) return null
-  if (!read.comments.some((comment) => SHAPE_RE.test(comment.body))) return null
+  const author = read.author?.login
+  const reviewed = read.comments.some(
+    (comment) => comment.author?.login === author && SHAPE_RE.test(comment.body),
+  )
+  if (!author || !reviewed) return null
   const dump = DUMP_RE.exec(read.body)
   if (!dump) return null
   return { dumpPath: dump[0], kind: "pr", merged: true, shapeReview: true }
@@ -307,10 +312,13 @@ if (import.meta.main) {
     schemaCleared: async (value) => {
       const pr = /^PR#(\d+)$/.exec(value)
       if (pr) {
-        const ran = Bun.spawnSync(["gh", "pr", "view", pr[1]!, "--json", "state,comments,body"], {
-          stderr: "pipe",
-          stdout: "pipe",
-        })
+        const ran = Bun.spawnSync(
+          ["gh", "pr", "view", pr[1]!, "--json", "author,state,comments,body"],
+          {
+            stderr: "pipe",
+            stdout: "pipe",
+          },
+        )
         if (ran.exitCode !== 0) return null
         return prSource(ran.stdout.toString())
       }
