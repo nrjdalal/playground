@@ -5,11 +5,15 @@ import { join } from "node:path"
 
 import {
   BOT_ROUTE,
+  decisionArg,
+  decisionSource,
   type Launch,
   launchAbove,
   opsLaunch,
   type Project,
+  prSource,
   schemaChanges,
+  type SchemaSource,
   shipYard,
   type YardArgs,
   type YardIo,
@@ -23,6 +27,7 @@ type Fake = {
   deploys?: Partial<Record<Project, boolean>>
   launch?: Launch
   record?: string
+  schemaCleared?: (value: string) => Promise<SchemaSource | null>
   statuses?: Record<string, number>
 }
 
@@ -51,6 +56,7 @@ const fake = (set: Fake = {}) => {
       set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
     readRecord: async () => record,
+    schemaCleared: async (value) => set.schemaCleared?.(value) ?? Promise.resolve(null),
     status: async (url) => {
       calls.push(`status ${url}`)
       return (
@@ -151,13 +157,90 @@ describe("ship:yard's schema stop", () => {
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
-  test("--schema-cleared naming the decision lets the step go on", async () => {
+  test("--schema-cleared #iN, the owner's approved decision, clears the schema", async () => {
     const { calls, code } = await run(
-      { schemaCleared: "i123" },
-      { changed: SCHEMA, record: "v0.0.110" },
+      { schemaCleared: "#i123" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123" ? { approved: true, kind: "decision" } : Promise.resolve(null),
+      },
     )
     expect(code).toBe(0)
     expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared #iN, an open or denied decision, refuses", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "#i123" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "#i123" ? { approved: false, kind: "decision" } : Promise.resolve(null),
+      },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is not an approved Inbox decision")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a merged PR with a shape review and a dump path clears the schema", async () => {
+    const { calls, code } = await run(
+      { schemaCleared: "PR#456" },
+      {
+        changed: SCHEMA,
+        record: "v0.0.110",
+        schemaCleared: async (value) =>
+          value === "PR#456"
+            ? { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: true }
+            : Promise.resolve(null),
+      },
+    )
+    expect(code).toBe(0)
+    expect(calls).toContain("record v0.0.111")
+  })
+
+  test("--schema-cleared a PR missing the merge, the review, or the dump refuses", async () => {
+    for (const source of [
+      { dumpPath: "db.dump", kind: "pr", merged: false, shapeReview: true },
+      { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: false },
+      { dumpPath: undefined, kind: "pr", merged: true, shapeReview: true },
+    ] as SchemaSource[]) {
+      const { calls, code, out } = await run(
+        { schemaCleared: "PR#456" },
+        {
+          changed: SCHEMA,
+          record: "v0.0.110",
+          schemaCleared: () => Promise.resolve(source),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+  })
+
+  test("--schema-cleared a free string refuses, naming both valid forms", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "i123" },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("one of two forms: '#iN'")
+    expect(out()).toContain("PR#N")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  test("--schema-cleared a valid form the source cannot read refuses, so the step fails closed", async () => {
+    const { calls, code, out } = await run(
+      { schemaCleared: "#i123" },
+      { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
+    )
+    expect(code).not.toBe(0)
+    expect(out()).toContain("#i123 is not readable")
+    expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
   test("only the schema and the migrations count", () => {
@@ -169,6 +252,140 @@ describe("ship:yard's schema stop", () => {
         ...SCHEMA,
       ]),
     ).toEqual(SCHEMA)
+  })
+})
+
+describe("ship:yard's schema source parsers", () => {
+  const DUMP = "~/.playground/scratchpad/ops/db-dump-2026-11-18/dashboard-db.dump"
+  // A made-up `gh pr view --json author,state,comments,body` read: a merged PR by "owner" whose body names DUMP, with the comments given.
+  const pr = (comments: { author: { login?: string }; body: string }[], over: object = {}) =>
+    JSON.stringify({
+      author: { login: "owner" },
+      body: `additive\n\npackages/db/drizzle/0017_x.sql, dump at ${DUMP}`,
+      comments,
+      state: "MERGED",
+      ...over,
+    })
+  const by = (login: string, body: string) => ({ author: { login }, body })
+  const cleared = { dumpPath: DUMP, kind: "pr" as const, merged: true, shapeReview: true }
+
+  test.each([
+    [
+      "a ReviewBot banner",
+      "## ReviewBot · shape review at 80cc2c2 · settle 2 findings, then generate",
+    ],
+    [
+      "a bold round 0 line",
+      "**Round 0: shape review of `a_table`** (db-migration step 0, at `a8b59ac`). Not a score.",
+    ],
+    [
+      "a plain step 0 line",
+      "Shape review (db-migration step 0) at e645f81a8: the shape is settled as additive.",
+    ],
+  ])(
+    "prSource, a merged PR whose author's shape review opens with %s, clears on the dump's path",
+    (_, first) => {
+      expect(prSource(pr([by("owner", `${first}\n\nadditive, shape settled`)]))).toEqual(cleared)
+    },
+  )
+
+  test("prSource, a merged PR naming only a packages/db migration, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive\n\npackages/db/drizzle/0017_x.sql",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a dump path written `~db.dump` with no slash, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, dump at ~db.dump",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR with its author's shape review and no dump path from ~/, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, the dump taken",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR whose shape review another login posted, holds no shape review", () => {
+    expect(prSource(pr([by("outsider", "## ReviewBot · shape review at 80cc2c2")]))).toEqual({
+      ...cleared,
+      shapeReview: false,
+    })
+  })
+
+  test("prSource, a merged PR whose author's only comment is a round verdict, holds no shape review", () => {
+    const read = pr([
+      by(
+        "owner",
+        "## ReviewBot · round 1: 5/5 at 80cc2c2 · 0 blocking\n\nthe shape review is settled",
+      ),
+    ])
+    expect(prSource(read)).toEqual({ ...cleared, shapeReview: false })
+  })
+
+  test("prSource, an open PR with its author's shape review and a dump, is not merged", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], { state: "OPEN" })
+    expect(prSource(read)).toEqual({ ...cleared, merged: false })
+  })
+
+  test("prSource, a read with no author's login, no state or no comments, returns null", () => {
+    const review = [by("owner", "## ReviewBot · shape review at 80cc2c2")]
+    expect(prSource(pr(review, { author: {} }))).toBeNull()
+    expect(prSource(pr(review, { state: undefined }))).toBeNull()
+    expect(prSource(pr(review, { comments: undefined }))).toBeNull()
+    expect(prSource("not json")).toBeNull()
+  })
+
+  test("--schema-cleared a readable PR missing a part refuses, naming that part", async () => {
+    for (const [over, part] of [
+      [{ state: "OPEN" }, "it is not merged"],
+      [{ comments: [] }, "no comment of its author's names a shape review"],
+      [{ body: "additive" }, "its body names no dump path from `~/`"],
+    ] as const) {
+      const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], over)
+      const { calls, code, out } = await run(
+        { schemaCleared: "PR#456" },
+        {
+          changed: ["packages/db/drizzle/0017_x.sql"],
+          record: "v0.0.110",
+          schemaCleared: async () => prSource(read),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(out()).toContain(part)
+      expect(out()).not.toContain("not readable")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+  })
+
+  test("decisionSource, an approved Inbox decision, is approved", () => {
+    expect(decisionSource(JSON.stringify({ kind: "decision", status: "approved" }))).toEqual({
+      approved: true,
+      kind: "decision",
+    })
+  })
+
+  test.each(["open", "denied"])(
+    "decisionSource, an Inbox decision whose status reads %s, is not approved",
+    (status) => {
+      expect(decisionSource(JSON.stringify({ kind: "decision", status }))).toEqual({
+        approved: false,
+        kind: "decision",
+      })
+    },
+  )
+
+  test("decisionSource, an approved item of another kind, returns null", () => {
+    expect(decisionSource(JSON.stringify({ kind: "ticket", status: "approved" }))).toBeNull()
+  })
+
+  test("decisionArg, for a #iN value, is the bare id `i123`", () => {
+    expect(decisionArg("#i123")).toBe("i123")
   })
 })
 
