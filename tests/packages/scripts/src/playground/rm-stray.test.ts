@@ -183,6 +183,20 @@ test("rm --restore brings a path rm --stray moved back to its place", async () =
   expect(m.trash()).toEqual([])
 })
 
+test("rm --restore of a path rm --stray moved refuses a parent folder swapped for a symlink", async () => {
+  const m = machine()
+  const sub = join(m.main, "sub")
+  mkdirSync(sub)
+  writeFileSync(join(sub, "a"), "x\n")
+  expect(await runRm(["--stray", join(sub, "a"), "--reason", "upkeep"], m.deps)).toBe(0)
+  const [item] = m.trash()
+  rmSync(sub, { recursive: true })
+  symlinkSync(join(m.main, ".git"), sub)
+  expect(await runRm(["--restore", item!.id], m.deps)).toBe(1)
+  expect(existsSync(join(m.main, ".git", "a"))).toBe(false)
+  expect(m.trash().map((entry) => entry.id)).toEqual([item!.id])
+})
+
 test("rm --restore of a path rm --stray moved refuses every caller but ops", async () => {
   const m = machine()
   const file = join(m.main, "a")
