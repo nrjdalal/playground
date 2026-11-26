@@ -12228,7 +12228,7 @@ function lineArgsOf(commands) {
         return args.slice(k + 1);
       if (!/^[-+]/.test(args[k].value))
         return args.slice(k);
-      if (/o$/.test(args[k].value))
+      if (args[k].value.endsWith("o"))
         k++;
     }
   };

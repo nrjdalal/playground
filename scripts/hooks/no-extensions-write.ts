@@ -1813,7 +1813,7 @@ function lineArgsOf(commands: Command[]): Record<string, string> | null | undefi
     for (let k = 0; k < args.length; k++) {
       if (args[k].value === "--") return args.slice(k + 1)
       if (!/^[-+]/.test(args[k].value)) return args.slice(k)
-      if (/o$/.test(args[k].value)) k++
+      if (args[k].value.endsWith("o")) k++
     }
   }
   const sets = parsed.flatMap(({ args, name }) => {
