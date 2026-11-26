@@ -93,7 +93,7 @@ export const groups: Group[] = [
         "a listing of the roster into an xargs -I string that sorts onto it with --output and a space",
         "ls ~/.playground/roster.json | xargs -I{} sort --output {} /dev/null",
       ],
-      ["a sort onto the roster with -o attached", "sort -o~/.playground/roster.json /dev/null"],
+      ["a sort onto the roster with -o attached", "sort -o$HOME/.playground/roster.json /dev/null"],
       [
         "a listing of the roster into an xargs -I string that sorts onto it",
         "ls ~/.playground/roster.json | xargs -I{} sort -o {} /dev/null",
