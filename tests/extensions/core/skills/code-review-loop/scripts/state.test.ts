@@ -2577,6 +2577,61 @@ test("13l merge reads a cut lone run of a file the report left out as TIMEOUT al
   expect(out.calls.map((c) => c.slice(1))).toEqual([[1, 2, 3, 4, 5, 6, 7, 8].map(t), [t(8)]])
 })
 
+// A Python clone at the head with a .venv whose editable install's .pth names `src`, as uv sync writes one; a clone moved by git worktree move keeps the old folder's path there, so every import of the project fails
+const PY_BASE = {
+  "b.txt": "b\n",
+  "pyproject.toml": "[project]\n",
+  "src/a.py": "A = 1\n",
+  "tests/test_a.py": "green\n",
+}
+const venvRepo = (src: (repo: string) => string): [string, string] => {
+  const [repo, head] = mergeRepo(
+    { "tests/test_a.py": "green, changed\n" },
+    { "b.txt": "b, from canary\n" },
+    PY_BASE,
+  )
+  writeFiles(repo, {
+    ".venv/bin/python": "",
+    ".venv/lib/python3.13/site-packages/_editable_impl_a.pth": `${src(repo)}\n`,
+  })
+  return [repo, head]
+}
+
+test("13m merge on a Python clone whose .venv points at another folder names it and the fix, and runs no test (#3124)", () => {
+  const old = join(scratch(), "old-clone", "src")
+  mkdirSync(old, { recursive: true })
+  const [repo, head] = venvRepo(() => old)
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([
+    `STALE-VENV on ${canary}: ${join(repo, ".venv")} points at ${old}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run uv sync in ${repo}, then the merge again`,
+  ])
+  expect(out.code).toBe(1)
+  expect(out.calls).toEqual([])
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("13n merge on a Python clone whose .venv points at the clone itself runs pytest as before (#3124)", () => {
+  const [repo, head] = venvRepo((repo) => join(repo, "src"))
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = runMerge(repo, head)
+  expect(out.lines).toEqual([`CLEAN on ${canary}: 1 touched tests`])
+  expect([...new Set(out.runners)]).toEqual(["pytest"])
+})
+
+test("13o staleVenv reads each .pth's absolute path lines alone: an import line, a relative line, the clone's own folder and no .venv name none (#3124)", () => {
+  const clone = scratch()
+  mkdirSync(join(clone, "src"))
+  expect(state.staleVenv(clone)).toBeUndefined()
+  const pth = ".venv/lib/python3.13/site-packages/x.pth"
+  writeFiles(clone, { [pth]: `import _virtualenv\nrelative/dir\n\n${join(clone, "src")}\n` })
+  expect(state.staleVenv(clone)).toBeUndefined()
+  writeFiles(clone, { [pth]: `${join(realpathSync(clone), "src")}\n` })
+  expect(state.staleVenv(clone)).toBeUndefined()
+  writeFiles(clone, { [pth]: "/nowhere/gone/src\n" })
+  expect(state.staleVenv(clone)).toBe("/nowhere/gone/src")
+})
+
 test("12o redIn reads bun's own junit report: a failed testcase's file is failed, a test file left out is leftOut, a green file and a non-test file are neither (#2468)", () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites name="bun test" tests="3" assertions="3" failures="1" skipped="0" time="0.01">
