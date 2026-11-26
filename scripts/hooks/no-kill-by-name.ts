@@ -1,5 +1,7 @@
 // PreToolUse hook, acting for a factory session alone (role.ts): refuses a Bash command that signals processes chosen by name, pattern or port (pkill, killall, fuser -k, or kill in a call that searches with pgrep, pidof, lsof, ps or fuser, the words after run-slot.sh's -- read as the command), since a pattern matches the live dashboard and every worker's stack (31 Oct: a session ran pkill -f on its own watcher). It refuses a portless proxy stop with no port and a portless clean too, run by any launcher and behind portless's global flags, since each stops whichever proxy answers on 443, 80 or 1355. It refuses a kill of every process, a process group or its own group too (a pid operand of -1, a negative number or 0, as kill reads its words, xargs' input included), since one such call ends every session this user runs. A kill given a literal pid, $! or a pid file's contents passes, as does every search alone, `ps -p <pid>` and a proxy stop given `-p <port>`.
 
+import { basename } from "node:path"
+
 import { input } from "./input"
 import { fromFactory } from "./role"
 import {
@@ -84,16 +86,49 @@ const isSearch = (name: string, args: Word[]) =>
     name === "ps" && args.some((a) => /^-[A-Za-z]*[pq]$|^-[pq]\d|^--(?:quick-)?pid\b/.test(a.value))
   )
 
-// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand; true when an operand is -1, a negative number or 0, a whole group's target, or a minus sign before a value the hook cannot read (`-$PGID`)
-const groupTarget = (words: string[]) => {
+// kill's words as kill reads them: a first word that is a signal option (-9, -KILL, -s X, -n X) or a list (-l, -L), then pid operands, every word after -- an operand. A group target is "all" for -1, 0 or a minus sign before a value the hook cannot read (`-$PGID`), else the process groups its negative operands name.
+const groupTarget = (words: string[]): "all" | number[] => {
   let i = 0
-  if (words[0] === "-l" || words[0] === "-L") return false
+  if (words[0] === "-l" || words[0] === "-L") return []
   if (words[0] === "-s" || words[0] === "-n") i = 2
   else if (words[0] !== "--" && /^-\w+$/.test(words[0] ?? "")) i = 1
   if (words[i] === "--") i++
-  return words
-    .slice(i)
-    .some((w) => /^(?:-\d+|0+)$/.test(w) || (w.startsWith("-") && w.includes(UNKNOWN)))
+  const operands = words.slice(i)
+  if (operands.some((w) => /^(?:-0*1|0+)$/.test(w) || (w.startsWith("-") && w.includes(UNKNOWN))))
+    return "all"
+  return operands.filter((w) => /^-\d+$/.test(w)).map((w) => Number(w.slice(1)))
+}
+
+export type Proc = { comm: string; pgid: number; ppid: number }
+// The process table and the pid whose parents lead to the session, the hook's own by default
+export type Table = { procs: Map<number, Proc>; self: number }
+
+// One read of the process table through ps; an empty one when ps cannot be read, so every group reads as foreign
+export function readTable(): Table {
+  const procs = new Map<number, Proc>()
+  try {
+    const out = Bun.spawnSync(["/bin/ps", "-axo", "pid=,ppid=,pgid=,comm="], { stderr: "ignore" })
+    for (const line of out.stdout.toString().split("\n")) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/)
+      if (m) procs.set(Number(m[1]), { comm: m[4]!, pgid: Number(m[3]), ppid: Number(m[2]) })
+    }
+  } catch {}
+  return { procs, self: process.pid }
+}
+
+// The pids from `pid` up through its parents, at most 64 hops
+const parents = (pid: number, procs: Map<number, Proc>) => {
+  const chain: number[] = []
+  for (let at = pid; at > 1 && chain.length < 64 && procs.has(at); at = procs.get(at)!.ppid)
+    chain.push(at)
+  return chain
+}
+
+// Whether a process group is the session's own: its leader (the pid the group is named for, still leading it) sits below the nearest claude above `self`, which a group the session started does and the pane's or another session's never does
+const ownGroup = (pgid: number, { procs, self }: Table) => {
+  const claude = parents(self, procs).find((pid) => basename(procs.get(pid)!.comm) === "claude")
+  if (!claude || procs.get(pgid)?.pgid !== pgid) return false
+  return parents(pgid, procs).slice(1).includes(claude)
 }
 
 // The words a kill xargs runs gets: its own, the -I string filled with what xargs reads, else that input appended; its own alone when the hook cannot read the input
@@ -111,7 +146,8 @@ const xargsWords = async (cmd: Command, args: Word[], xargs: Xargs, env: Env) =>
     : [...words, ...items]
 }
 
-async function inspect(raw: string) {
+async function inspect(raw: string, readProcs: () => Table) {
+  let table: Table | undefined
   const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as {
     tool_input?: { command?: unknown }
     tool_name?: unknown
@@ -182,7 +218,8 @@ async function inspect(raw: string) {
     if (BY_NAME.has(name) && !readsOnly(cmd, first, args)) return refuse(name)
     if (name === "fuser" && args.some((a) => /^-\w*k|^--kill\b/.test(a.value)))
       return refuse("fuser -k")
-    if (name === "kill" && groupTarget(await xargsWords(cmd, args, xargs, env)))
+    const target = name === "kill" ? groupTarget(await xargsWords(cmd, args, xargs, env)) : []
+    if (target === "all" || target.some((pgid) => !ownGroup(pgid, (table ??= readProcs()))))
       return `no-kill-by-name hook refuses a kill of every process, a process group or its own group: a pid operand of -1, a negative number or 0 signals every process this user may signal, a whole group or the caller's own group, the live dashboard and every session among them. ${WAY_OUT}`
     if (name !== "kill" || !search) return
     const fed =
@@ -198,9 +235,12 @@ async function inspect(raw: string) {
 }
 
 // Fails open: a call the hook cannot read runs, so a parser bug never blocks a Bash command.
-export async function check(raw: string): Promise<string | undefined> {
+export async function check(
+  raw: string,
+  readProcs: () => Table = readTable,
+): Promise<string | undefined> {
   try {
-    return await inspect(raw)
+    return await inspect(raw, readProcs)
   } catch {
     return undefined
   }
