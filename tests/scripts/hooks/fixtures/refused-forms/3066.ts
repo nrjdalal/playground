@@ -99,6 +99,10 @@ export const groups: Group[] = [
         "ls ~/.playground/roster.json | xargs -I{} sort -o {} /dev/null",
       ],
       [
+        "a listing of the roster into xargs sort -o, which takes it as its output",
+        "ls ~/.playground/roster.json | xargs sort -o",
+      ],
+      [
         "100 other paths and the roster, one a line, into an xargs -I string that sorts onto each",
         `printf '%s\\n' ${Array.from({ length: 100 }, (_, i) => `~/.playground/scratch/a${i}`).join(" ")} ~/.playground/roster.json | xargs -I{} sort -o {} /dev/null`,
       ],
