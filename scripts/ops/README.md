@@ -223,6 +223,18 @@ Core's `scheduled()` (`packages/scripts/src/ops-job/job.ts`) reads the revision 
 On a new revision it waits for its next 20-second tick with no beat running and none due, the due ones starting first, so a pass is never cut or skipped, beats `loop exited: revision <rev> accepted, restarting`, and runs `up.py --restarted <job>` in a process group of its own, which starts it again in its pane within seconds; the new copy logs `<job> runs revision <rev>`.
 A job of the checkout's own has no such revision and moves only through `ops-restart`, above.
 
+## A missed daily beat
+
+ops-tick and every `scheduled()` job start a beat when a 20-second tick lands in its cron minute, read in machine wall time, so a minute that passes while the job is down or the Mac sleeps is never seen.
+A daily beat, one whose cron names one minute and one hour and leaves the other three fields `*` (ext-sync, optimizer-daily, nightly-clean, machine-record), catches up instead: `cycle()` in `packages/scripts/src/ops-tick/tick.ts` keeps each one's last start as an ISO minute in `ops/last-run/<job>.json`, written at each start, and when that start is older than the beat's last due minute, the next tick runs it once and logs `<beat> catches up the run it missed at <minute>Z`.
+
+- A catch-up runs the beat's own `run`, so it meets every gate the due run meets, such as run-slot for nightly-clean's heavy steps and the outbox for a line, and its start is kept as the beat's last run, so it runs once.
+- A beat due more often than daily never catches up, since its next minute comes soon and a wake would start them all at once.
+- A job with no kept start, its first start after this landed included, runs nothing until a beat's own minute, so a first start never fires a nightly beat outside its minute.
+- The start is kept before the beat runs, so a beat that takes the job down with it is not run again at every start.
+
+Tests: `tests/packages/scripts/src/ops-tick/tick.test.ts`'s "a daily beat missed while the job was down or the Mac slept".
+
 ## runner-host
 
 The runner host is a peer machine that runs heavy runs for run-slot through `ci.sh`, so they leave this machine's run slots; GitHub's workflows run on hosted runners alone ([README's CI](../../README.md#ci)).

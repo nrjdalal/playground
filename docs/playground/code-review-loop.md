@@ -29,7 +29,7 @@ The review itself is core's `code-review`, loaded by name and never copied: a **
 A changed skill, agent guide or docs page is also held to core's `writing-for-agents`, which the reviewer loads first, so an agent doc that sprawls or leaves a step with no completion criterion costs the score as code would.
 The two stay apart in the verdict, so a well-built change that misses the ask cannot hide behind its quality.
 Its two sub-agents start with no memory of earlier rounds, which is what makes the read before the last 5/5 fresh.
-They leave the review clone as it stands, and the reviewer checks its HEAD still sits at the PR's head once they return, since a HEAD that moved under them shows `canary`'s files as the PR's.
+They read the PR through git's object reads pinned to the head's sha, never the clone's working files, so the read can run beside the merge check, since on one PR a HEAD that moved under them showed `canary`'s files as the PR's.
 The reviewer pastes the spec's text beside its path into the `code-review` call and on into its Spec sub-agent's prompt, and a Spec read that reports the spec missing runs again rather than passing.
 When the diff adds a schema refusal that a form reads, that prompt also traces each refusal the form can reach to the field that shows it on screen, since a refusal with no field shows as a whole line the person cannot place.
 
