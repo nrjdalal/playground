@@ -421,3 +421,43 @@ test("no-raw-wa's process refuses a factory session's Write of the roster, in th
   expect(await proc.exited).toBe(2)
   expect(await new Response(proc.stderr).text()).toContain("no-roster-write hook refuses")
 })
+
+// The unused-space approvals log is the second file it guards, whose one writer is playground rm --approve
+describe("the unused-space approvals log", () => {
+  const LOG = join(DATA, "ops", "tick", "unused-approvals.jsonl")
+  const LINE = `{"at":"2026-11-27T00:00:00.000Z","by":"ops","bytes":1,"choice":"remove","list":"x","machine":"m","path":"/x"}`
+
+  test.each([
+    `echo '${LINE}' >> ~/.playground/ops/tick/unused-approvals.jsonl`,
+    `printf '%s\\n' '${LINE}' >> ${LOG}`,
+    `echo '${LINE}' | tee -a ${LOG}`,
+    `cp /tmp/approvals.jsonl ${LOG}`,
+    `cp /tmp/unused-approvals.jsonl ~/.playground/ops/tick/`,
+    `sed -i '' 's/keep/remove/' ${LOG}`,
+    `rm ${LOG}`,
+    `bun -e "require('fs').appendFileSync('${LOG}', 'x')"`,
+    `cd ~/.playground && bun -e "require('fs').appendFileSync('ops/tick/unused-approvals.jsonl', 'x')"`,
+  ])("refuses %s, naming rm --approve", async (command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-roster-write hook refuses")
+    expect(reason).toContain("playground rm --approve")
+  })
+
+  test.each([
+    ["Edit", { file_path: LOG, new_string: "b", old_string: "a" }],
+    ["Write", { content: LINE, file_path: LOG }],
+  ] as const)("refuses a %s of it", async (tool, input) => {
+    expect(await call(tool, input)).toContain("playground rm --approve")
+  })
+
+  test.each([
+    "playground rm --approve 6f1c0e3a-1b2c-4d5e-8f90-a1b2c3d4e5f6 /Users/x/models/old --keep",
+    'bun "${PLAYGROUND_REPO:?}/packages/scripts/src/playground/rm.ts" --approve x /x',
+    `cat ${LOG}`,
+    "jq -c 'select(.choice == \"remove\")' ~/.playground/ops/tick/unused-approvals.jsonl",
+    `tail -5 ${LOG}`,
+    `wc -l ${LOG}`,
+  ])("runs %s", async (command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
