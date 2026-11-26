@@ -72,7 +72,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       `${OLD.dispatcher}-2`,
       "kind=dispatcher",
       "surface=",
-      `task=brief-${OLD.dispatcher}-2.md`,
+      `task=~/.playground/brief-${OLD.dispatcher}-2.md`,
       "memory=off",
     ])
   })
@@ -521,7 +521,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       "optimizer",
       "kind=optimizer",
       "surface=",
-      "task=brief-optimizer.md",
+      "task=~/.playground/brief-optimizer.md",
       "memory=off",
     ])
   })

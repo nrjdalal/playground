@@ -47,7 +47,8 @@ describe("under the gates it spawns", () => {
       "reportsTo=builder",
       "surface=",
       "title=Plain test work",
-      "task=brief-x.md",
+      // #3083: the roster's task names the brief by the data folder, since a session rereads it from the main checkout, where a bare relative path lands
+      "task=~/.playground/brief-x.md",
       "memory=off",
     ])
   })
@@ -304,7 +305,7 @@ describe("under the gates it spawns", () => {
       "pr=1",
       "worker=worker-brave-otter",
       "title=Plain test work",
-      "task=brief-reviewer.md",
+      "task=~/.playground/brief-reviewer.md",
       "memory=off",
     ])
   })
