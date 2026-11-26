@@ -740,7 +740,7 @@ export const starts = async (
   const execs = lines.length - before
   const forks = waiters.reduce((n, w, i) => n + subshells(w.err.slice(from[i])), 0)
   const rate = (execs + forks) / window
-  // what the window counted, so a rate over a row's bound names its starts: each command by name, the forks, and each waiter's looks (a queue waiter's) and clone verdicts (a clone waiter's)
+  // what the window counted, so a rate of 5 or more names its starts: each command by name, the forks, and each waiter's looks (a queue waiter's) and clone verdicts (a clone waiter's)
   if (rate >= 5) {
     const named: Record<string, number> = {}
     for (const name of lines.slice(before - 1).filter(Boolean)) named[name] = (named[name] ?? 0) + 1
