@@ -252,8 +252,8 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
 describe("code-review-loop's touched tests come from the diff (#1104, #1525)", () => {
   test("one definition runs state.ts touched-tests and names its four rules", async () => {
     const text = await skill()
-    expect(text.match(/\*\*The touched tests\*\*/g)?.length).toBe(1)
-    const rule = text.split("**The touched tests**")[1]?.split("**Done when** every test")[0] ?? ""
+    expect(text.match(/\*\*The touched tests\*\* /g)?.length).toBe(1)
+    const rule = text.split("**The touched tests** ")[1]?.split("**Done when** every test")[0] ?? ""
     expect(rule).toContain("come from the diff")
     expect(rule).toContain("state.ts touched-tests <clone> <merge base> <head>")
     expect(rule).toContain(
@@ -266,7 +266,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
     expect(rule).toContain("test:file < <scratch>/touched.txt")
     expect(rule).not.toContain("| xargs")
     expect(rule).toContain("the source's extension swapped for `.test.ts` or `.test.tsx`")
-    expect(rule).toContain("`readdirSync` or `readdir(`")
+    expect(rule).toContain("`readdirSync`, `readdir(` or `scanImports(`")
     expect(rule).toContain(
       "a `git grep` (in a shell line or as argv, wrapped across lines or after an option like `-C`: `GIT_GREP` in the script)",
     )
@@ -645,7 +645,8 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     const text = await last()
     const line = text.split("\n").find((l) => l.startsWith("**The whole suite**")) ?? ""
     expect(line).toContain("a change to the root `package.json` or `bun.lock`")
-    expect(line).toContain("chunks of 200 files per `bun run test:file` call")
+    expect(line).toContain("`state.ts merge` runs it in chunks of 200 files a call itself")
+    expect(line).toContain("200 files per `bun run test:file` call")
     expect(line).toContain("1200 s deadline")
     expect(line).toContain("CI's green run does not stand in for it")
   })
@@ -675,5 +676,44 @@ describe("code-review-loop runs the touched tests as the sandbox and the repo al
     )
     expect(text).toContain("`jq -r '.content.files[\"<path>\"]'`")
     expect(text).not.toContain("playground ext export")
+  })
+})
+
+// #3069: a round whose head brought in a dependency runs the clone's install again, else the merge check reads the missing package as the PR's red
+describe("code-review-loop installs its clone again after a dependency change (#3069)", () => {
+  test("step 1 runs the install again before step 2 when the head changed bun.lock, a package.json or a pnpm-lock.yaml, and its Done when checks it (#3078)", async () => {
+    const recover = (await skill()).match(/^1\. \*\*Recover\.\*\*.*$/m)?.[0] ?? ""
+    const [steps, done] = recover.split("**Done when**")
+    expect(steps).toContain(
+      "`git -C <clone> diff --name-only <the head of the clone's last install> <head> -- bun.lock '*package.json' '*pnpm-lock.yaml'`",
+    )
+    expect(steps).toContain(
+      "run the install line above again through run-slot and let it end before step 2",
+    )
+    expect(done ?? "").toContain(
+      "on a later round whose head changed `bun.lock`, a `package.json` or a `pnpm-lock.yaml` since the clone's last install, that install ran again and ended",
+    )
+    expect(await page()).toContain(
+      "A clone whose head changed `bun.lock`, a `package.json` or a `pnpm-lock.yaml` since its last install runs that install again before the check",
+    )
+  })
+})
+
+describe("code-review-loop's last 5/5 installs a pnpm repo's merge again after a lockfile change (#3091)", () => {
+  test("the merge install names the pnpm install line for a pnpm-lock.yaml or package.json change", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "or, in a pnpm repo, `~/.playground/ops/run-slot.sh <your session name> -- /usr/bin/env -C <clone>/<pkg> pnpm install --frozen-lockfile` when it changed `pnpm-lock.yaml` or a `package.json`",
+    )
+  })
+})
+
+describe("code-review-loop's last 5/5 runs its bun install through run-slot (#3097)", () => {
+  test("the merge install's bun half carries the run-slot wrapper no-unslotted-run asks for", async () => {
+    const last = (await skill()).split("## The last 5/5")[1]?.split("\n## ")[0] ?? ""
+    expect(last).toContain(
+      "Then `~/.playground/ops/run-slot.sh <your session name> -- bun install --ignore-scripts --cwd <clone>` when the merge changed `package.json` or `bun.lock`",
+    )
+    expect(last).not.toContain("Then `bun install")
   })
 })

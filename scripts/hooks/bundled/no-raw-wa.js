@@ -2,9 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-raw-wa.ts
-import { realpathSync as realpathSync2 } from "fs";
-import { homedir as homedir4 } from "os";
-import { resolve as resolve4 } from "path";
+import { realpathSync as realpathSync3 } from "fs";
+import { homedir as homedir5 } from "os";
+import { resolve as resolve5 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -127,165 +127,15 @@ async function input(name, kind, deadline = DEADLINE) {
   process.exit(2);
 }
 
-// scripts/hooks/role.ts
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join2(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function codexName(sessionId, environment = process.env) {
-  if (!environment.CODEX_HOME)
-    return;
-  let name;
-  try {
-    const index = await Bun.file(join2(environment.CODEX_HOME, "session_index.jsonl")).text();
-    for (const line of index.split(`
-`)) {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.id === sessionId && typeof entry.thread_name === "string")
-          name = entry.thread_name;
-      } catch {}
-    }
-  } catch {}
-  return name;
-}
-async function rosterKind(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? kind : undefined;
-  } catch {
-    return;
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const kind = await rosterKind(name, environment);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
+// scripts/hooks/no-roster-write.ts
+import { realpathSync as realpathSync2 } from "fs";
+import { homedir as homedir3 } from "os";
+import { basename as basename2, resolve as resolve4 } from "path";
 
 // scripts/hooks/shell.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
-import { homedir as homedir3 } from "os";
+import { homedir as homedir2 } from "os";
 import { basename, dirname, isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -314,7 +164,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT_OP = "(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)";
@@ -342,6 +192,7 @@ var FREES = new Set([`
 `, ";", ";;", "&", "||"]);
 var tokens = 0;
 var freshToken = () => ++tokens;
+var GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"]);
 var BODIES = new Set(["do", "elif", "else", "then"]);
 var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
@@ -1075,7 +926,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join2 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -1148,7 +999,8 @@ var G_WRAPPERS = new Map([
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
-  ["gtimeout", "timeout"]
+  ["gtimeout", "timeout"],
+  ["gxargs", "xargs"]
 ]);
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
@@ -1277,7 +1129,11 @@ function list(lx, scope, nested, inherit) {
 function walk(lx, scope, nested, inherit) {
   const { src } = lx;
   const pending = [];
-  const fresh = () => ({ redirects: [], scope, stdin: inherit, words: [] });
+  const fedOpens = [];
+  const fresh = () => {
+    const braceFed = fedOpens.at(-1);
+    return { ...braceFed && { braceFed }, redirects: [], scope, stdin: inherit, words: [] };
+  };
   let cmd = fresh();
   const twins = new Map;
   const past = (from) => {
@@ -1298,6 +1154,7 @@ function walk(lx, scope, nested, inherit) {
     const brace = (c, value) => c.words[0]?.value === value && !c.words[0].quoted;
     if (brace(done, "}")) {
       const open = opens.pop();
+      fedOpens.pop();
       if (open !== undefined) {
         const { commands } = lx;
         const close = commands.length;
@@ -1365,13 +1222,20 @@ function walk(lx, scope, nested, inherit) {
         lx.orRun = op === "||";
       }
       after = op;
-      if (counting)
+      if (counting) {
         opens.push(lx.commands.length);
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted)
-          break;
-        opens.push(lx.commands.length);
+        fedOpens.push(fedOpens.at(-1));
       }
+      const lead = done.words.findIndex((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{")
+          continue;
+        opens.push(lx.commands.length);
+        fedOpens.push(done.stdin ?? done.braceFed);
+      }
+      const called = lead < 0 ? undefined : done.words[lead];
+      if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
+        fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin;
@@ -1651,7 +1515,7 @@ function word(lx, opening = false) {
       if (marked(text.value))
         out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir3();
+      out.value += homedir2();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
@@ -1731,7 +1595,7 @@ function dollar(lx, plain = false) {
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain);
-    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
+    const name = /^\$\{([A-Za-z_]\w*|\d+)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1];
     readText(lx, src.slice(lx.i + 2, end - 1));
     lx.i = end;
     return variable(name);
@@ -1752,7 +1616,7 @@ function dollar(lx, plain = false) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return unknown("a shell variable");
+    return /\d/.test(next) ? variable(next) : unknown("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -2801,11 +2665,11 @@ function stdinScript({ args, name }) {
 }
 async function argFile({ chdir, file, moved }, cmd, env) {
   if (file.procs)
-    return held2(await outputs(file.procs, env));
+    return held(await outputs(file.procs, env));
   if (moved)
     return unknown(`${file.value}, which a privilege wrapper before xargs may read from another folder or root`);
   const cwd = chdir && pathOf(landsHeld(chdir, cmd, env) ?? chdir, env);
-  return held2(await readPath(file, chdir && !isAbsolute3(file.value) ? { ...env, cwd } : env));
+  return held(await readPath(file, chdir && !isAbsolute3(file.value) ? { ...env, cwd } : env));
 }
 var itemsOf = (fed, split) => {
   if (fed.unknown || split === undefined)
@@ -2915,7 +2779,7 @@ function relexedValue(raw, known) {
   const words = lex(raw.replace(/\$\{[=~^]+/g, "${"), known).commands.at(-1)?.words;
   return words?.length === 1 ? words[0].value : undefined;
 }
-var tildeHome = (value, quoted = false) => quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir3());
+var tildeHome = (value, quoted = false) => quoted || marked(value) ? value : value.replace(/^~(?=\/|$)/, homedir2());
 function heldKnown(env) {
   const known = { ...env.known };
   for (const [key, text] of env.vars) {
@@ -3176,7 +3040,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, cmd, args, env) {
   const typedDir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!typedDir)
-    return homedir3();
+    return homedir2();
   const dir = landsHeld(typedDir, cmd, env) ?? typedDir;
   const lexical = dir.value === "-" ? undefined : pathOf(dir, env);
   const typed = await folder(lexical && physicalCd(args) ? kernelPath(dir, env.cwd, lexical) : lexical);
@@ -3197,7 +3061,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
+    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -3423,7 +3287,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join2(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -3434,7 +3298,7 @@ async function record(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join2([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -3443,7 +3307,7 @@ async function record(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join2([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -3474,7 +3338,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join2(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -3516,13 +3380,13 @@ async function stdinOf(cmd, env) {
   tick();
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
-    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
-  return held2(await redirectText(input, env, false));
+    return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
+  return held(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
   const own = await stdinOf(cmd, env);
   tick();
-  const fed = held2(await stdinText(cmd, env));
+  const fed = held(await stdinText(cmd, env));
   return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
 }
 var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
@@ -3667,8 +3531,529 @@ function braceWords(word) {
   return done;
 }
 
+// scripts/hooks/no-roster-write.ts
+var refuse = (what) => `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`;
+var READERS = new Set([
+  "[",
+  "basename",
+  "bat",
+  "cat",
+  "cmp",
+  "column",
+  "cut",
+  "diff",
+  "dirname",
+  "du",
+  "echo",
+  "egrep",
+  "fgrep",
+  "file",
+  "grep",
+  "head",
+  "jq",
+  "less",
+  "ls",
+  "md5",
+  "md5sum",
+  "more",
+  "nl",
+  "od",
+  "printf",
+  "readlink",
+  "realpath",
+  "rg",
+  "sha1sum",
+  "sha256sum",
+  "shasum",
+  "stat",
+  "tail",
+  "test",
+  "wc"
+]);
+var PLACERS = new Set(["cp", "ditto", "install", "ln", "mv", "rsync"]);
+var COPIERS = new Set(["cp", "ditto", "rsync"]);
+var TARGET_FLAG = new Set(["cp", "install", "ln", "mv"]);
+var WRITERS = new Set([
+  "dd",
+  "install",
+  "ln",
+  "mv",
+  "rm",
+  "shred",
+  "tee",
+  "touch",
+  "truncate",
+  "unlink"
+]);
+var CODE_RUNNERS = new Set([
+  "awk",
+  "bun",
+  "deno",
+  "gawk",
+  "node",
+  "osascript",
+  "perl",
+  "php",
+  "python",
+  "python3",
+  "ruby"
+]);
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
+var targetsOf = (environment) => {
+  const data = dataDirOf(environment);
+  let real = data;
+  try {
+    real = realpathSync2(data);
+  } catch {}
+  return [...new Set([data, real].map((d) => resolve4(d, "roster.json").toLowerCase()))];
+};
+var segments = (path) => resolve4(path).toLowerCase().split("/").filter(Boolean);
+var isRoster = (path, targets, glob = false) => targets.some((target) => {
+  const p = segments(path);
+  const t = segments(target);
+  if (p.length !== t.length)
+    return glob && p.some((s) => s.includes("**"));
+  return p.every((s, i) => glob ? new Bun.Glob(s).match(t[i]) : s === t[i]);
+});
+var namesRoster = (text, targets) => {
+  const plain = text.replace(/["'\\]/g, "").toLowerCase();
+  return targets.some((t) => new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain);
+};
+var readOf = (word, at) => {
+  if (!marked(word.value))
+    return word;
+  if (!word.raw)
+    return;
+  const known = { ...at.known };
+  for (const [key, text] of at.vars)
+    if (!marked(text.value))
+      known[key] = text.value;
+  const { commands } = lex(word.raw, known);
+  const again = commands.length === 1 ? commands[0].words[0] : undefined;
+  return again && !marked(again.value) ? again : undefined;
+};
+var tailOf = (source) => {
+  const text = source.replace(/["']/g, "");
+  const at = text.lastIndexOf("$");
+  if (at < 0)
+    return text;
+  const rest = text.slice(at + 1);
+  if (rest[0] === "{")
+    return rest.slice(rest.indexOf("}") + 1);
+  if (rest[0] === "(")
+    return rest.slice(rest.lastIndexOf(")") + 1);
+  return rest.replace(/^(?:\w+|[-@*#?$!])/, "");
+};
+var SEDS = new Set(["sed"]);
+var FINDS = new Set(["find"]);
+var FIND_EXECS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
+var FIND_FILES = new Set(["-fls", "-fprint", "-fprint0", "-fprintf"]);
+var FIND_OR = new Set(["!", ",", "-not", "-o", "-or"]);
+var ITEMS = 100;
+var FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/;
+var KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS]);
+var shown = (word) => word.source ?? visible(word.value);
+var inPlace = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
+var destinationOf = (tool, args) => {
+  const t = TARGET_FLAG.has(tool) ? args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory")) : -1;
+  if (t >= 0)
+    return args[t].value.includes("=") ? args[t] : args[t + 1];
+  return args.filter((a) => !a.value.startsWith("-")).at(-1);
+};
+async function judgeBash(command, cwd, environment) {
+  const targets = targetsOf(environment);
+  const named = namesRoster(command, targets);
+  const env = {
+    cwd,
+    cwdSure: cwd,
+    files: new Map,
+    known: knownVariables(command, environment, cwd),
+    process: environment,
+    vars: new Map
+  };
+  const pathsOf = (typed, at) => {
+    const word = readOf(typed, at);
+    if (!word)
+      return;
+    const out = [];
+    for (const place of places(at))
+      for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
+        const value = /^~(?:\/|$)/.test(raw) ? `${environment.HOME || homedir3()}${raw.slice(1)}` : raw;
+        const path = value.startsWith("/") ? value : place.cwd && resolve4(place.cwd, value);
+        if (path)
+          out.push({ glob: !!word.glob, path });
+      }
+    return out;
+  };
+  const writes = (typed, at, position = false) => {
+    const paths = pathsOf(typed, at);
+    if (!paths) {
+      const tail = tailOf(typed.source ?? typed.raw ?? "").toLowerCase();
+      return position && named && targets.some((t) => t.endsWith(tail));
+    }
+    return paths.some(({ glob, path }) => isRoster(path, targets, glob));
+  };
+  const roster = { quoted: true, source: targets[0], value: targets[0] };
+  const unseen = new WeakSet;
+  const unseenRoster = { ...roster };
+  unseen.add(unseenRoster);
+  const toolOf = (name) => {
+    const prog = program(name);
+    return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
+  };
+  const holds = (path, glob) => targets.some((target) => {
+    const p = segments(path);
+    const t = segments(target);
+    if (glob && p.some((s) => s.includes("**")))
+      return true;
+    return p.length <= t.length && p.every((s, i) => glob ? new Bun.Glob(s).match(t[i]) : s === t[i]);
+  });
+  const holdsWord = (word, at) => pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false;
+  const lexed = lex(command, env.known);
+  const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)));
+  const unseenHolds = (at) => near || places(at).some(({ cwd }) => !!cwd && holds(cwd, false));
+  const startsOf = (args) => {
+    const starts = [];
+    let i = 0;
+    for (;i < args.length; i++) {
+      const v = args[i].value;
+      if (v === "--") {
+        i++;
+        break;
+      }
+      if (v === "-D" || v === "-f") {
+        if (v === "-f" && args[i + 1])
+          starts.push(args[i + 1]);
+        i++;
+      } else if (!FIND_FLAGS.test(v))
+        break;
+    }
+    for (;i < args.length && !/^[-(!,]/.test(args[i].value); i++)
+      starts.push(args[i]);
+    return starts.length ? starts : [{ quoted: false, value: "." }];
+  };
+  const reaches = (args, at) => {
+    const start = startsOf(args).some((w) => {
+      const paths = pathsOf(w, at);
+      return !paths || paths.some(({ glob, path }) => holds(path, glob));
+    });
+    if (!start)
+      return false;
+    const names = args.flatMap((a, i) => (a.value === "-name" || a.value === "-iname") && args[i + 1] ? [{ insensitive: a.value === "-iname", word: args[i + 1] }] : []);
+    if (!names.length || args.some((a) => FIND_OR.has(a.value)))
+      return true;
+    return names.some(({ insensitive, word }) => {
+      const read = readOf(word, at);
+      if (!read || read.value.includes("\\"))
+        return true;
+      return new Bun.Glob(insensitive ? read.value.toLowerCase() : read.value).match("roster.json");
+    });
+  };
+  const isFind = (cmd) => !!cmd && FINDS.has(toolOf(cmd.words[0]?.value ?? ""));
+  const itemsOf = (text, xargs) => {
+    const at = xargs?.delimiters?.length ? new RegExp(xargs.delimiters.map((d) => d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")) : xargs?.replace ? /\n/ : /\s+/;
+    return text.split(at).map((v) => xargs?.replace ? v.trim() : v.replace(/["']/g, "")).filter(Boolean).map((value) => ({ glob: /[*?[]/.test(value), quoted: false, value }));
+  };
+  const listsRoster = async (cmd, args, tool, at, viaXargs) => {
+    if (FINDS.has(tool))
+      return reaches(args, at);
+    const out = await outputOf(cmd, at);
+    if (marked(out.value))
+      return viaXargs && unseenHolds(at);
+    const items = itemsOf(out.value);
+    if (items.length > ITEMS)
+      return viaXargs && unseenHolds(at);
+    return namesRoster(out.value, targets) || items.some((w) => writes(w, at));
+  };
+  const xargsRuns = async (cmd, args, xargs, at) => {
+    const mark = xargs.replace;
+    const fill = (a, mark, item) => {
+      const word = {
+        ...a,
+        glob: a.glob || item.glob,
+        raw: undefined,
+        source: undefined,
+        value: a.value.replaceAll(mark, item.value)
+      };
+      if (unseen.has(item))
+        unseen.add(word);
+      return word;
+    };
+    const put = (items) => mark ? items.map((item) => args.map((a) => a.value.includes(mark) ? fill(a, mark, item) : a)) : [[...args, ...items]];
+    if (isFind(cmd.stdin))
+      return reaches(cmd.stdin.words.slice(1), at) ? put([roster]) : [];
+    const input = await stdinOf(cmd, at);
+    if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
+      return unseenHolds(at) ? put([unseenRoster]) : [];
+    const items = itemsOf(input.value, xargs);
+    if (items.length > ITEMS)
+      return unseenHolds(at) ? put([unseenRoster]) : [];
+    return items.length ? put(items) : [];
+  };
+  const visit = async (cmd, parsed, at) => {
+    const { args, name, xargs } = parsed;
+    for (const r of cmd.redirects)
+      if (r.target && r.op.includes(">") && writes(r.target, at, true))
+        return refuse(`a redirect onto ${shown(r.target)}`);
+    if (!program(name))
+      return;
+    const tool = toolOf(name);
+    if (cmd.feedsShell) {
+      const xargsFed = lexed.commands.some((c) => c.stdin === cmd && program(c.words[0]?.value ?? "") === "xargs");
+      if (await listsRoster(cmd, args, tool, at, xargsFed))
+        return refuse(`${tool} feeding the roster to a program that runs it as code`);
+    }
+    if (xargs) {
+      const runs = await xargsRuns(cmd, args, xargs, at);
+      for (const fed of runs) {
+        const found = await visit(cmd, { ...parsed, args: fed, xargs: undefined }, at);
+        if (found)
+          return found;
+      }
+      if (runs.length)
+        return;
+    }
+    if (FINDS.has(tool)) {
+      for (const [i, a] of args.entries())
+        if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1], at, true))
+          return refuse(`${tool} ${a.value} onto ${shown(args[i + 1])}`);
+      const reached = reaches(args, at);
+      if (reached && args.some((a) => a.value === "-delete"))
+        return refuse(`${tool} -delete reaching the roster`);
+      for (const [i, a] of args.entries()) {
+        if (!FIND_EXECS.has(a.value) || !args[i + 1])
+          continue;
+        const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"));
+        const line = args.slice(i + 1, end < 0 ? undefined : end).map((w) => {
+          const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`;
+          return reached ? typed.replaceAll("{}", roster.value) : typed;
+        }).join(" ");
+        const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true);
+        if (found)
+          return found;
+        const [first, ...rest] = args.slice(i + 1, end < 0 ? undefined : end);
+        const own = await visit(cmd, {
+          ...parsed,
+          args: rest.map((w) => reached && w.value.includes("{}") ? roster : w),
+          first,
+          name: first.value,
+          xargs: undefined
+        }, at);
+        if (own)
+          return own;
+      }
+      return;
+    }
+    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
+      return refuse(`${tool} code that names the roster and holds a write word`);
+    if (PLACERS.has(tool)) {
+      const dest = destinationOf(tool, args);
+      if (dest && writes(dest, at, true))
+        return refuse(`${tool} onto ${shown(dest)}`);
+      const into = dest ? pathsOf(dest, at) ?? [] : [];
+      const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"));
+      if (sources.some((s) => basename2(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve4(path, "roster.json"), targets)))
+        return refuse(`${tool} of a roster.json into ${dest && shown(dest)}`);
+      if (COPIERS.has(tool))
+        return;
+    }
+    if (SEDS.has(tool)) {
+      const script = (a) => namesRoster(a.source ?? a.value, targets) && !(pathsOf(a, at) ?? []).some(({ glob, path }) => isRoster(path, targets, glob));
+      if (args.some(script))
+        return refuse(`${tool} whose script names the roster`);
+      if (!inPlace(args))
+        return;
+    }
+    if (READERS.has(tool))
+      return;
+    const writer = WRITERS.has(tool) || SEDS.has(tool);
+    for (const word of args)
+      if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
+        return refuse(`${tool} on ${shown(word)}`);
+  };
+  return run(lexed, env, visit, true);
+}
+var FILE_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write"]);
+async function inspect(raw, environment) {
+  const {
+    cwd,
+    tool_input: input,
+    tool_name: tool
+  } = JSON.parse(raw);
+  const folder = typeof cwd === "string" ? cwd : undefined;
+  if (tool === "Bash" && typeof input?.command === "string")
+    return judgeBash(input.command, folder, environment);
+  if (typeof tool === "string" && FILE_TOOLS.has(tool)) {
+    const path = input?.file_path ?? input?.notebook_path;
+    if (typeof path === "string" && isRoster(resolve4(folder ?? "/", path), targetsOf(environment)))
+      return refuse(`a ${tool} of ${path}`);
+  }
+}
+async function check(raw, environment = process.env) {
+  try {
+    return await eachInput(raw, "no-roster-write", (one) => inspect(one, environment));
+  } catch {
+    return namesRoster(raw, targetsOf(environment)) ? refuse("a call naming the roster that it cannot read") : undefined;
+  }
+}
+
+// scripts/hooks/role.ts
+import { homedir as homedir4 } from "os";
+import { join as join3 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held2 = globalThis;
+var setSessionNames = (next) => {
+  held2[NAMES] = next;
+};
+var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir4(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function codexName(sessionId, environment = process.env) {
+  if (!environment.CODEX_HOME)
+    return;
+  let name;
+  try {
+    const index = await Bun.file(join3(environment.CODEX_HOME, "session_index.jsonl")).text();
+    for (const line of index.split(`
+`)) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.id === sessionId && typeof entry.thread_name === "string")
+          name = entry.thread_name;
+      } catch {}
+    }
+  } catch {}
+  return name;
+}
+async function rosterKind(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? kind : undefined;
+  } catch {
+    return;
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? await codexName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
 // scripts/hooks/no-raw-wa.ts
-var refuse = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
+var refuse2 = (what) => `no-raw-wa hook refuses ${what}: the data folder's whatsapp/ holds ops-wa's linked device, its auth state, its socket and the owner's messages, which no session reads or writes. To write to the owner on WhatsApp, run playground wa send <absolute file>; to see ops-wa's state, read its row on the System page.`;
 var refuseJob = (what) => `no-raw-wa hook refuses ${what}: the relay tags each line with its queue's job, and a line tagged [ops-wa] or [ops-dm-watch] reads as the owner's own words, so only ops-wa and ops-dm-watch queue under those jobs. Queue your line under your own job, notify.sh <your job> <text>, or tell your manager with SendMessage.`;
 var OWNER_JOBS = new Set(["dm-watch", "wa"]);
 var RECURSIVE = new Set(["ack", "ag", "ditto", "find", "rg", "rsync", "tar"]);
@@ -3680,11 +4065,11 @@ var RECURSIVE_WITH = {
   scp: /^-[A-Za-z]*r/,
   zip: /^-[A-Za-z]*r/
 };
-var targetsOf = (environment) => {
-  const typed = resolve4(dataDirOf(environment), "whatsapp");
+var targetsOf2 = (environment) => {
+  const typed = resolve5(dataDirOf(environment), "whatsapp");
   let real = typed;
   try {
-    real = resolve4(realpathSync2(dataDirOf(environment)), "whatsapp");
+    real = resolve5(realpathSync3(dataDirOf(environment)), "whatsapp");
   } catch {}
   return [...new Set([typed, real].map((p) => p.toLowerCase()))];
 };
@@ -3692,16 +4077,16 @@ var queuesOf = (environment) => {
   const data = dataDirOf(environment);
   let real = data;
   try {
-    real = realpathSync2(data);
+    real = realpathSync3(data);
   } catch {}
   return [
-    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve4(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
+    ...new Set([data, real].flatMap((d) => [...OWNER_JOBS].map((job) => resolve5(d, "ops", "outbox", `ops-${job}.jsonl`).toLowerCase())))
   ];
 };
-var segments = (path) => resolve4(path).toLowerCase().split("/").filter(Boolean);
+var segments2 = (path) => resolve5(path).toLowerCase().split("/").filter(Boolean);
 function reach(path, target, glob = false) {
-  const p = segments(path);
-  const t = segments(target);
+  const p = segments2(path);
+  const t = segments2(target);
   for (let i = 0;i < Math.min(p.length, t.length); i++) {
     if (glob && p[i].includes("**"))
       return "inside";
@@ -3722,7 +4107,7 @@ var namesOwnerJob = (command) => {
   const text = command.replace(/["'\\]/g, "").toLowerCase();
   return /notify\.sh\s+(?:dm-watch|wa)(?![\w.-])/.test(text) || /outbox\/+ops-(?:dm-watch|wa)\.jsonl/.test(text);
 };
-var readOf = (word, at) => {
+var readOf2 = (word, at) => {
   if (!marked(word.value))
     return word;
   if (!word.raw)
@@ -3746,16 +4131,16 @@ var ownerJob = (name, args, at) => {
     return;
   if (!rest[0])
     return;
-  const job = readOf(rest[0], at);
+  const job = readOf2(rest[0], at);
   if (!job)
     return refuseJob("a notify.sh call whose job it cannot read");
   if (OWNER_JOBS.has(job.value))
     return refuseJob(`a notify.sh call as ops-${job.value}`);
 };
-async function judgeBash(command, cwd, environment) {
-  const targets = targetsOf(environment);
+async function judgeBash2(command, cwd, environment) {
+  const targets = targetsOf2(environment);
   if (namesTarget(command, targets))
-    return refuse("a command naming whatsapp/ in the data folder");
+    return refuse2("a command naming whatsapp/ in the data folder");
   if (namesOwnerJob(command))
     return refuseJob("a command naming an owner-word job's queue");
   const queues = queuesOf(environment);
@@ -3778,44 +4163,44 @@ async function judgeBash(command, cwd, environment) {
     ];
     for (const place of places(at)) {
       if (place.cwd && worst(place.cwd, targets) === "inside")
-        return refuse(`a command run inside whatsapp/ in the data folder`);
+        return refuse2(`a command run inside whatsapp/ in the data folder`);
       for (const typed of words) {
-        const word = readOf(typed, at);
+        const word = readOf2(typed, at);
         if (!word?.value)
           continue;
         for (const raw of [word.value, word.value.slice(word.value.indexOf("=") + 1)]) {
-          const value = /^~(?:\/|$)/.test(raw) ? `${homedir4()}${raw.slice(1)}` : raw;
-          const path = value.startsWith("/") ? value : place.cwd && resolve4(place.cwd, value);
+          const value = /^~(?:\/|$)/.test(raw) ? `${homedir5()}${raw.slice(1)}` : raw;
+          const path = value.startsWith("/") ? value : place.cwd && resolve5(place.cwd, value);
           if (!path)
             continue;
           const stands = worst(path, targets, !!word.glob);
           if (stands === "inside")
-            return refuse(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
+            return refuse2(`${visible(word.value)}, which reaches whatsapp/ in the data folder`);
           if (worst(path, queues, !!word.glob) === "inside")
             return refuseJob(`${visible(word.value)}, an owner-word job's queue`);
           if (stands === "above" && recursive(program(name), args))
-            return refuse(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
+            return refuse2(`${name} through ${visible(word.value)}, which reads whatsapp/ in the data folder on its way down`);
         }
       }
     }
   };
   return run(lex(command, env.known), env, visit, true);
 }
-var FILE_TOOLS = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
-async function inspect(raw, environment) {
+var FILE_TOOLS2 = new Set(["Edit", "MultiEdit", "NotebookEdit", "Read", "Write"]);
+async function inspect2(raw, environment) {
   const {
     cwd,
     tool_input: input,
     tool_name: tool
   } = JSON.parse(raw);
   const folder = typeof cwd === "string" ? cwd : undefined;
-  const targets = targetsOf(environment);
+  const targets = targetsOf2(environment);
   if (tool === "Bash" && typeof input?.command === "string")
-    return judgeBash(input.command, folder, environment);
-  if (typeof tool === "string" && FILE_TOOLS.has(tool)) {
+    return judgeBash2(input.command, folder, environment);
+  if (typeof tool === "string" && FILE_TOOLS2.has(tool)) {
     const path = input?.file_path ?? input?.notebook_path;
     if (typeof path === "string" && worst(path, targets) === "inside")
-      return refuse(`a ${tool} of ${path}`);
+      return refuse2(`a ${tool} of ${path}`);
     if (typeof path === "string" && worst(path, queuesOf(environment)) === "inside")
       return refuseJob(`a ${tool} of ${path}, an owner-word job's queue`);
     return;
@@ -3826,28 +4211,28 @@ async function inspect(raw, environment) {
       return;
     const at = worst(path, targets);
     if (at === "inside" || tool === "Grep" && at === "above")
-      return refuse(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
+      return refuse2(`a ${tool} through ${path}, which reads whatsapp/ in the data folder`);
     const pattern = input?.pattern;
-    if (tool === "Glob" && typeof pattern === "string" && worst(resolve4(path, pattern), targets, true) === "inside")
-      return refuse(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
+    if (tool === "Glob" && typeof pattern === "string" && worst(resolve5(path, pattern), targets, true) === "inside")
+      return refuse2(`a Glob of ${pattern}, which reaches whatsapp/ in the data folder`);
   }
 }
-async function check(raw, environment = process.env) {
+async function check2(raw, environment = process.env) {
   try {
-    return await eachInput(raw, "no-raw-wa", (one) => inspect(one, environment));
+    return await eachInput(raw, "no-raw-wa", (one) => inspect2(one, environment));
   } catch {
     return;
   }
 }
 if (import.meta.main) {
   const raw = await input("no-raw-wa", "guard");
-  const reason = await fromFactory(raw) ? await check(raw) : undefined;
+  const reason = await fromFactory(raw) ? await check(raw) ?? await check2(raw) : undefined;
   if (reason) {
     console.error(reason);
     process.exit(2);
   }
 }
 export {
-  check,
+  check2 as check,
   reach
 };

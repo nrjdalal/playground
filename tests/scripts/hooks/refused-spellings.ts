@@ -1,0 +1,45 @@
+import fc from "fast-check"
+
+// Each rewrite puts an expansion in the program word, which no-hidden-program refuses by design, so today it alone keeps the property green and no row's own guard is judged; #3044 adds rewrites that keep the program word literal
+// Words the shell reads as syntax only when written plainly, so a variable or an empty word in front turns them into a program name and the call means something else; programWord's pattern already leaves out those of other characters (`!`, `[[`, an assignment)
+const SYNTAX = new Set([
+  "case",
+  "coproc",
+  "for",
+  "foreach",
+  "function",
+  "if",
+  "nocorrect",
+  "noglob",
+  "repeat",
+  "select",
+  "time",
+  "until",
+  "while",
+])
+
+// The call's first word when it is one plain program name, the one word a variable or an empty word can stand in for and keep the call's meaning
+export const programWord = (call: string) => {
+  const word = /^[\w./-]+(?=[ \t\n]|$)/.exec(call)?.[0]
+  return word && !SYNTAX.has(word) ? word : undefined
+}
+
+// Each rewrite of a call's program word that keeps what the call runs
+const REWRITES = {
+  "a quoted variable": (w: string) => `PF_P=${w}; "$PF_P"`,
+  "a variable": (w: string) => `PF_P=${w}; $PF_P`,
+  "an empty braced variable before it": (w: string) => `\${PF_NONE} ${w}`,
+  "an empty variable before it": (w: string) => `$PF_NONE ${w}`,
+} as const
+
+export type Spelling = keyof typeof REWRITES
+
+export const REWRITE_NAMES = Object.keys(REWRITES) as Spelling[]
+
+export const SPELLING: fc.Arbitrary<Spelling> = fc.constantFrom(...REWRITE_NAMES)
+
+// The call as the spelling writes it, for a call programWord reads a program word from
+export const spell = (call: string, spelling: Spelling) => {
+  const program = programWord(call)!
+  return REWRITES[spelling](program) + call.slice(program.length)
+}

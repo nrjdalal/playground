@@ -34,6 +34,8 @@ export type Command = {
   atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
+  // Set on every command of a brace group a pipe feeds (`echo x | { true; xargs touch; }`), past its first, which stdin holds: the command whose output the group reads, which a later command reads too once the ones before it leave it
+  braceFed?: Command
   // Set on a case statement's pattern (casePatterns), which the shell matches and never runs, so its words name no program
   casePattern?: boolean
   // Set on every command of a line that defines a function named cd or chpwd, or holds a word that, its quotes and backslashes removed, starts with chpwd (`chpwd_functions=(f)`, `chp""wd_functions`, `add-zsh-hook chpwd f`), so each cd there is unread
@@ -215,6 +217,8 @@ const FREES = new Set(["\n", ";", ";;", "&", "||"])
 // Tokens are handed out across every script the hook reads, so a script's own run never shares one with the line that read it.
 let tokens = 0
 const freshToken = () => ++tokens
+// The reserved words a brace group may follow in command position, so `! { …; }`, `then { …; }`, `do { …; }` and `coproc { …; }` open a group as a bare `{ …; }` does
+const GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"])
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
 // The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
@@ -1149,13 +1153,14 @@ const SHELL_OWN = new Set([
   "unalias",
   "unset",
 ])
-// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+// Homebrew's g-named copies of the wrappers (coreutils', and findutils' gxargs), each run with its plain name's options
 const G_WRAPPERS = new Map([
   ["genv", "env"],
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
   ["gtimeout", "timeout"],
+  ["gxargs", "xargs"],
 ])
 // A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
 export const program = (value: string): string => {
@@ -1332,7 +1337,12 @@ function list(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
 function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): void {
   const { src } = lx
   const pending: Pending[] = []
-  const fresh = (): Command => ({ redirects: [], scope, stdin: inherit, words: [] })
+  // the pipe into each brace group the walk is inside, beside opens, so every command of the body reads it (braceFed)
+  const fedOpens: (Command | undefined)[] = []
+  const fresh = (): Command => {
+    const braceFed = fedOpens.at(-1)
+    return { ...(braceFed && { braceFed }), redirects: [], scope, stdin: inherit, words: [] }
+  }
   let cmd = fresh()
   // each group command whose paren globOpens also reads as zsh's glob word, with that reading's command
   const twins = new Map<Command, Twin>()
@@ -1360,6 +1370,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
     const brace = (c: Command, value: string) => c.words[0]?.value === value && !c.words[0].quoted
     if (brace(done, "}")) {
       const open = opens.pop()
+      fedOpens.pop()
       if (open !== undefined) {
         const { commands } = lx
         const close = commands.length
@@ -1426,11 +1437,27 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         lx.orRun = op === "||"
       }
       after = op
-      if (counting) opens.push(lx.commands.length)
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted) break
+      if (counting) {
         opens.push(lx.commands.length)
+        fedOpens.push(fedOpens.at(-1))
       }
+      const lead = done.words.findIndex(
+        (w) => w.quoted || (w.value !== "{" && !GROUP_LEADS.has(w.value)),
+      )
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{") continue
+        opens.push(lx.commands.length)
+        fedOpens.push(done.stdin ?? done.braceFed)
+      }
+      // an exec with a redirect swaps the group's descriptors (`{ exec 0<&3; xargs …; }`), so the commands after it read the pipe no more
+      const called = lead < 0 ? undefined : done.words[lead]
+      if (
+        fedOpens.length > 0 &&
+        called?.value === "exec" &&
+        !called.quoted &&
+        done.redirects.length > 0
+      )
+        fedOpens[fedOpens.length - 1] = undefined
       lx.commands.push(done)
       if (twin && lx.i >= twin.from) {
         const { of, redirects, words } = twin
@@ -1805,7 +1832,7 @@ function dollar(lx: Lexer, plain = false): Text {
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}", plain)
     // ${NAME:?message} and ${NAME?message} expand to NAME's value whenever it is set and not empty, the only way a known one is
-    const name = /^\$\{([A-Za-z_]\w*)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1]
+    const name = /^\$\{([A-Za-z_]\w*|\d+)(?::?\?[^}]*)?\}$/.exec(src.slice(lx.i, end))?.[1]
     readText(lx, src.slice(lx.i + 2, end - 1))
     lx.i = end
     return variable(name)
@@ -1825,9 +1852,10 @@ function dollar(lx: Lexer, plain = false): Text {
     lx.i += 2
     return { value: "99999" }
   }
+  // a positional parameter is one digit unbraced (`$10` is `$1` then `0`), read only from a value a guard binds in `known`
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2
-    return unknown("a shell variable")
+    return /\d/.test(next) ? variable(next) : unknown("a shell variable")
   }
   lx.i++
   return { value: "$" }
@@ -2800,7 +2828,7 @@ const unquote = (part: string): string =>
     : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
 // A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text, and a zsh group in them globbed after (`/usr/bin/pk{(i|x),y}ll`), as zsh expands braces first; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees whose words do not lex as one command, code a guard reads as a line (`f({a, b})`), and for any other program word
-function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
+export function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
   if (first?.unknown !== BRACE) return
   const source = (first.source ?? "").replace(/\\\n/g, "")
   if (/[$`]/.test(source)) return null

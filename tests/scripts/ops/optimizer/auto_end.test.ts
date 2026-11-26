@@ -18,6 +18,7 @@ import {
   endOne,
   LEADS_WORKTREE,
   reportArgv,
+  finishedAt,
   finishedOf,
   leftoversOf,
   procHoldersOf,
@@ -234,7 +235,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect(closed).toEqual(["k8wjf3-reviewer"])
     expect(cleaned).toEqual([])
     const text =
-      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir> --force --pr <PR url>"
+      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push (no resume record, so fill in its folder and session id): scripts/spawn.sh resume k8wjf3-reviewer <dir> <session id> --force --pr <PR url>"
     expect(lines).toEqual([
       { text, to: "builder" },
       { text, to: "k8wjf3-worker" },
@@ -242,7 +243,8 @@ describe("sweep: ops-tick ends what the detector flags", () => {
   })
 
   // PG-2228: the hint keeps the account the session runs on, read from its resume record before the close, since a resume rewrites it.
-  describe("an idle reviewer's resume hint names the account its resume record holds", () => {
+  // #3020: and the folder and session id the record's exec line names, so the resume runs where the session ran.
+  describe("an idle reviewer's resume hint names the account, folder and session id its resume record holds", () => {
     const NAME = "m4tq7x-reviewer"
     const target: Target = {
       kind: "reviewer",
@@ -252,22 +254,27 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       worker: "m4tq7x-worker",
     }
     const head = "#!/bin/bash\n# server: playground\n"
-    const exec = `exec /m/scripts/spawn.sh resume ${NAME} /wt 1111`
-    const hint = (account: string) =>
-      `Ended ${NAME}: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume ${NAME} <dir> --force --pr ${URL}${account}`
+    const SID = "0b6f2c4e-1d3a-4f5b-8c7d-9e0a1b2c3d4e"
+    const exec = `exec /m/scripts/spawn.sh resume ${NAME} /m ${SID}`
+    const hint = (account: string, at = `/m ${SID}`, note = "") =>
+      `Ended ${NAME}: checker-nothing (head scored); resume it on the next push${note}: scripts/spawn.sh resume ${NAME} ${at} --force --pr ${URL}${account}`
     const end = async (record: string | null) => {
       const resumeDir = realpathSync(mkdtempSync(join(tmpdir(), "auto-end-resume-")))
       const path = join(resumeDir, `${NAME}.sh`)
       if (record !== null) writeFileSync(path, record)
       const { deps } = fakes({
-        close: async () => (writeFileSync(path, `${head}${exec}\n`), { ok: true, out: "" }),
+        close: async () => (
+          writeFileSync(path, `${head}exec /m/scripts/spawn.sh resume ${NAME} /wt 1111\n`),
+          { ok: true, out: "" }
+        ),
         resumeDir,
       })
-      return (await endOne(target, "checker-nothing (head scored)", deps)).map((l) => l.text)
+      const lines = (await endOne(target, "checker-nothing (head scored)", deps)).map((l) => l.text)
+      return { lines, path }
     }
 
     test("an account line, a gate's pick included, is read before the close rewrites the record", async () => {
-      const lines = await end(
+      const { lines } = await end(
         `${head}# account: seat-b@example.test\n${exec} --model claude-opus-5-5\n`,
       )
       expect(lines).toEqual([
@@ -277,16 +284,39 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     })
 
     test("with no account line, the exec line's --account, as an own login's record holds it", async () => {
-      const lines = await end(`${head}${exec} --account seat-c@example.test\n`)
+      const { lines } = await end(`${head}${exec} --account seat-c@example.test\n`)
       expect(lines).toEqual([
         hint(" --account seat-c@example.test"),
         hint(" --account seat-c@example.test"),
       ])
     })
 
-    test("a record naming no account, or none at all, keeps today's hint", async () => {
-      expect(await end(`${head}${exec}\n`)).toEqual([hint(""), hint("")])
-      expect(await end(null)).toEqual([hint(""), hint("")])
+    test("a record naming no account keeps its folder and session id, as spawn.sh quoted them", async () => {
+      expect((await end(`${head}${exec}\n`)).lines).toEqual([hint(""), hint("")])
+      const spaced = `/m/my\\ repo ${SID}`
+      expect(
+        (await end(`${head}exec /m/scripts/spawn.sh resume ${NAME} ${spaced} --pr ${URL}\n`)).lines,
+      ).toEqual([hint("", spaced), hint("", spaced)])
+    })
+
+    test("with no resume record, the hint keeps its placeholders and names the missing record", async () => {
+      const { lines, path } = await end(null)
+      const missing = hint(
+        "",
+        "<dir> <session id>",
+        ` (no resume record at ${path}, so fill in its folder and session id)`,
+      )
+      expect(lines).toEqual([missing, missing])
+    })
+
+    test("a record whose exec line names no folder keeps its placeholders and says so", async () => {
+      const { lines, path } = await end(`${head}# account: seat-b@example.test\n`)
+      const unnamed = hint(
+        " --account seat-b@example.test",
+        "<dir> <session id>",
+        ` (its resume record at ${path} names no folder, so fill in its folder and session id)`,
+      )
+      expect(lines).toEqual([unnamed, unnamed])
     })
   })
 
@@ -1568,7 +1598,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       `removed ${clone}`,
       ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
     ])
-    expect(asked).toEqual([target.pr!])
+    expect(asked).toEqual(rest.map(() => target.pr!))
     expect(calls).toEqual([`rm ${clone} (k3m9px-reviewer ended)`])
     expect(rest.filter((p) => existsSync(p))).toEqual(rest)
   })
@@ -1601,6 +1631,189 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(await cleanupLive(projects, async () => bare.deps)(tester)).toEqual(
       rest.map((p) => `removed ${p}`),
     )
+  })
+
+  // PG-2937: a checker holds PR n's clone while its pr is n, or n is in its prs and n is neither merged nor closed; a merged n drops the prs-listed checker, and a failed read holds
+  test("a merged #7 is no longer held by a checker whose pr is #8, only its own clones going", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => true,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `removed ${p}`),
+    ])
+  })
+
+  test("an open #7 is still held by a checker whose pr is #8, listed only in its prs", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => false,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
+  test("a #7 whose state fails to read is held, the failed read being neither merged nor closed", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [url],
+          status: "working",
+        },
+      ],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => finishedOf(null),
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
+  test("a merged #7 is still held by a checker whose own pr is #7, its pr counting on its own", async () => {
+    const { clone, main, projects, rest, target } = cloned(["review-7", "test-7", "test-7-before"])
+    const url = "https://github.com/o/r/pull/7"
+    const roster = JSON.stringify({
+      agents: [{ name: "q7wz2b-tester", pr: url, status: "working" }],
+    })
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async () => true,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual([
+      `removed ${clone}`,
+      ...rest.map((p) => `kept ${p}: q7wz2b-tester still checks #7`),
+    ])
+  })
+
+  // #3025: each kept clone's PR is read through that clone's own HEAD, so one clone's reading never holds or frees another
+  const URL7 = "https://github.com/o/r/pull/7"
+  const twoClones = () => {
+    const c = cloned(["review-7", "test-7", "test-7-before"])
+    const [first, second] = c.rest as [string, string]
+    const commit = (dir: string, file: string) => {
+      writeFileSync(join(dir, file), `${file}\n`)
+      run(dir, "git", "add", file)
+      run(dir, "git", "commit", "-qm", file)
+      return Bun.spawnSync(["git", "-C", dir, "rev-parse", "HEAD"]).stdout.toString().trim()
+    }
+    // the PR's merged head, on a remote ref as its pushed branch is
+    const merged = commit(second, "b.txt")
+    run(c.main, "git", "update-ref", "refs/remotes/origin/PG-7-thing", merged)
+    const roster = JSON.stringify({
+      agents: [
+        {
+          name: "q7wz2b-tester",
+          pr: "https://github.com/o/r/pull/8",
+          prs: [URL7],
+          status: "working",
+        },
+      ],
+    })
+    return { ...c, commit, first, merged, roster, second }
+  }
+
+  test("a kept clone at the merged head is freed though the first kept clone reads unfinished", async () => {
+    const { clone, commit, first, main, projects, roster, second, target } = twoClones()
+    commit(first, "c.txt")
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async (path, pr) => pr === URL7 && path === second,
+    })
+    const lines = await cleanupLive(projects, async () => deps)(target)
+    expect(lines).toContain(`removed ${second}`)
+    expect(lines[0]).toBe(`removed ${clone}`)
+  })
+
+  test("a kept clone holding a commit no remote holds stays held, named with the checker that holds it", async () => {
+    const { commit, first, main, projects, roster, second, target } = twoClones()
+    commit(first, "c.txt")
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: async (path, pr) => pr === URL7 && path === second,
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toContain(
+      `kept ${first}: q7wz2b-tester still checks #7`,
+    )
+    expect(existsSync(first)).toBe(true)
+  })
+
+  // rm's reader for one machine: MERGED only for the clone at the PR's head, as for a clone at or past it, and null for one behind it or another PR's worktree
+  const rmAt = (main: string, at: string, merged: string) => ({
+    main,
+    mergedHead: (_path: string, url: string) => (url === URL7 ? merged : null),
+    prState: async (path: string, pr?: string) =>
+      pr === URL7 && path === at ? ({ head: merged, number: 7, state: "MERGED" } as const) : null,
+  })
+
+  test("finishedAt frees a clone of the PR at its merged head or behind it, and holds one with a commit the merged head lacks", async () => {
+    const { clone, commit, first, main, merged, projects, roster, second, target } = twoClones()
+    const rm = rmAt(main, second, merged)
+    expect(await finishedAt(second, URL7, rm)).toBe(true)
+    expect(await finishedAt(first, URL7, rm)).toBe(true)
+    expect(await finishedAt(first, undefined, rm)).toBe(false)
+    const { deps } = fakes(main, [], undefined, {
+      checkers: async (pr, prsToo) => checkersOf(roster, pr, prsToo),
+      finished: (path, pr) => finishedAt(path, pr, rm),
+    })
+    expect(await cleanupLive(projects, async () => deps)(target)).toEqual(
+      [clone, first, second].map((p) => `removed ${p}`),
+    )
+    const past = twoClones()
+    commit(past.first, "c.txt")
+    expect(await finishedAt(past.first, URL7, rmAt(past.main, past.second, past.merged))).toBe(
+      false,
+    )
+  })
+
+  test("a worktree whose own PR is open, behind another PR's merged head with uncommitted work, stays held", async () => {
+    const { main, merged, second } = twoClones()
+    const wt = join(main, ".claude", "worktrees", "PG-9-other")
+    run(main, "git", "worktree", "add", "-q", "-b", "PG-9-other", wt, "HEAD")
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    const rm = rmAt(main, second, merged)
+    expect(await finishedAt(wt, URL7, rm)).toBe(false)
+    const { calls, deps } = fakes(main, [], undefined, {
+      finished: (path, pr) => finishedAt(path, pr, rm),
+    })
+    expect(await cleanWorktree(wt, "r ended", deps, { pr: URL7 })).toBe(
+      `kept ${wt}: uncommitted work`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(join(wt, "wip.txt"))).toBe(true)
   })
 
   // #2407: safe-delete's cap of 3 moves a minute for each charged name, as a count; each move's name and each carried move kept

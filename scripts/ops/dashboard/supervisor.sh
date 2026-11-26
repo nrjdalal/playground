@@ -76,11 +76,14 @@ slot_step() {
   local name=$1 dir=$2 p rc mark t0 line said= down=; shift 2
   [ -x "$RS" ] || { (cd "$dir" && "$@"); return; }
   mark=$(wc -l 2>/dev/null < "$RUNS" | tr -d ' '); t0=$(date +%s)
-  (cd "$dir" && exec "$RS" ops-dashboard -- "$@") & p=$!
+  # each job starts with this shell's stderr on /dev/null and its own on fd 3, the shell's stderr until it gets it back: under set -m bash's forked child can print "child setpgid (N to N): Operation not permitted", here into supervisor.log, which prebuild's clone hands this shell as its stderr
+  exec 3>&2 2>/dev/null
+  (cd "$dir" && exec "$RS" ops-dashboard -- "$@") 2>&3 3>&- & p=$!
+  exec 2>&3 3>&-
   echo "$p" > "$S/prebuild.pid"
   step_started() { tail -n +"$((${mark:-0} + 1))" "$RUNS" 2>/dev/null | awk -v p="$p" '$2 == "start" && $4 == p' | tail -1; }
   while kill -0 "$p" 2>/dev/null; do
-    sleep "$PREBUILD_POLL" & wait $!
+    exec 3>&2 2>/dev/null; sleep "$PREBUILD_POLL" 2>&3 3>&- & exec 2>&3 3>&-; wait $!
     if [ -z "$down" ] && ! { alive dashboard-dev && alive dashboard-web; }; then kill -TERM "$p" 2>/dev/null; down=1; fi
     [ -z "$said" ] && [ $(($(date +%s) - t0)) -ge "$PREBUILD_SLOW" ] && [ -z "$(step_started)" ] && { say "prebuild $name still queued after $(($(date +%s) - t0))s; it keeps waiting"; said=1; }
   done

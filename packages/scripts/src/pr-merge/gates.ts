@@ -73,6 +73,8 @@ export type PrFacts = {
   state: string
   // The PR's title, whose fix( opening ships a ship-now PR (shipNowLine); absent only in a test.
   title?: string
+  // Whether merge-on-ready lands PRs on this machine (mergeOnReadyRuns), which the code gate's ✗ names as its way on; absent reads as off.
+  trainRuns?: boolean
   // The body's bare all-caps tokens that no file at the head holds outside the gate's own folders (unfoundTokens), which the body gate refuses; left out in a test, which skips that check.
   unfound?: string[]
 }
@@ -371,12 +373,15 @@ export const GATE_CODE = [
   "packages/scripts/src/pr-merge",
 ]
 
-// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included.
-export function codeGate(differs: string[]): Gate {
+// Pure: the code gate, which passes only when the checkout pr:merge runs from holds canary's own gate code, uncommitted edits included; its ✗ names merge-on-ready only where it runs (way.trainRuns), else the commands for pr:merge from a detached worktree on origin/canary.
+export function codeGate(differs: string[], way: { n: number; trainRuns: boolean }): Gate {
+  const on = way.trainRuns
+    ? `run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`
+    : `run pr:merge from a detached worktree on origin/${BASE}: git fetch origin ${BASE} && git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/merge-${way.n}" origin/${BASE}, bun install there through run-slot, then bun run pr:merge ${way.n} there`
   return differs.length === 0
     ? { detail: `this checkout's gate code is ${BASE}'s`, name: "code", ok: true }
     : {
-        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); run pr:merge from a checkout on origin/${BASE}, or let merge-on-ready land it`,
+        detail: `this checkout's gate code differs from origin/${BASE}'s (${differs.join(", ")}); ${on}`,
         name: "code",
         ok: false,
       }
@@ -453,7 +458,8 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       ok: facts.base === BASE,
     },
   ]
-  if (facts.gateCode) gates.push(codeGate(facts.gateCode))
+  if (facts.gateCode)
+    gates.push(codeGate(facts.gateCode, { n: facts.n, trainRuns: facts.trainRuns ?? false }))
   const parent = parentGate(facts)
   if (parent) gates.push(parent)
   gates.push(upToDate(facts), keepsCanary(facts.lost))

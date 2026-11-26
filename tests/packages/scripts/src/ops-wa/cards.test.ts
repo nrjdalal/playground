@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   answerOf,
@@ -13,17 +16,24 @@ import {
   waitingLine,
   waits,
 } from "../../../../../packages/scripts/src/ops-wa/cards"
-import { UNSET_REPOS } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../../../../packages/scripts/src/trace-count/kinds"
+import { originCheckout } from "../../../../machine"
 
 // A made-up list for no-public-leak: none of its words is a real person, handle, company, channel or ticket key.
 const LIST = {
   companies: ["Acmeworks"],
   handles: ["zed-handle"],
-  linearKeys: ["ZZQ"],
+  linearKeys: ["ABC"],
   names: ["Quillon Barr"],
   slackIds: ["C0FAKE0001"],
 }
-const TERMS = termsOf(LIST, UNSET_REPOS)
+// A stub origin list, the same on every machine, so the terms row names a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
+
+const TERMS = termsOf(LIST, REPOS)
 
 const ask = (over: Partial<Card> = {}, preview: Partial<Card["preview"]> = {}): Card => ({
   answer: null,
@@ -117,7 +127,6 @@ describe("the redactor", () => {
     ["a handle", "ping zed-handle"],
     ["a company term", "the Acmeworks build"],
     ["a Slack id", "see C0FAKE0001"],
-    ["a Linear key", "filed ZZQ-42"],
     ["an email", "mail made.up@example.com"],
     ["a GitHub token", `token ghp_${"a".repeat(36)}`],
     ["a Slack token", "token xoxb-1234567890-fake"],
@@ -141,6 +150,16 @@ describe("the redactor", () => {
     expect(redact("#1828 merged; the suite is green", TERMS)).toBe(
       "#1828 merged; the suite is green",
     )
+  })
+
+  test("keeps a tracker id and hides an email in the same card", () => {
+    const { text } = cardOf(
+      ask({ title: "Claim ABC-123" }, { text: "Mail made.up@example.com about ABC-123?" }),
+      TERMS,
+    )
+    expect(text).toContain("*Claim ABC-123*")
+    expect(text).toContain(`Mail ${HIDDEN} about ABC-123?`)
+    expect(text).not.toContain("made.up@example.com")
   })
 })
 
@@ -280,4 +299,8 @@ describe("reading a reply", () => {
     expect(answerOf(letters, 1)).toEqual({ action: "approve", option: 1 })
     expect(answerOf(letters, 2)).toEqual({ action: "deny" })
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

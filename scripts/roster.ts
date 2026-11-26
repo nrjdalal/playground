@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 // The roster's one writer, ported from ~/.playground/roster.py: atomic writes, times from the UTC clock, titles cut to 40 characters.
-import { existsSync } from "node:fs"
-import { chmod, copyFile, open, rm, rename, stat } from "node:fs/promises"
+import { open, readFile, rename, rm, stat } from "node:fs/promises"
 import { join } from "node:path"
 
 import {
@@ -572,14 +571,9 @@ async function holders(pr: string | undefined, rest: string[]): Promise<void> {
 
 // The five versions beside the file, newest first: .1 takes the version about to be superseded, .5 drops when a rename lands on it. A rotation that fails never blocks the write, so each step is caught and skipped.
 async function keepVersions(path: string): Promise<void> {
-  for (let n = 4; n >= 1; n--) {
-    const from = `${path}.${n}`
-    if (existsSync(from)) await rename(from, `${path}.${n + 1}`).catch(() => {})
-  }
-  if (existsSync(path)) {
-    await copyFile(path, `${path}.1`).catch(() => {})
-    await chmod(`${path}.1`, 0o600).catch(() => {})
-  }
+  for (let n = 4; n >= 1; n--) await rename(`${path}.${n}`, `${path}.${n + 1}`).catch(() => {})
+  const text = await readFile(path, "utf8").catch(() => null)
+  if (text !== null) await writeAtomic(`${path}.1`, text).catch(() => {})
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -665,7 +659,7 @@ async function main(argv: string[]): Promise<void> {
       checkPairs(cmd, name!, pairs)
       const entry = agent(roster, name!, pairs, task)
       checkRetask(roster, entry, pairs, factoryRepo, true)
-      // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+      // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end keeps the checker while any is open.
       const checker = isChecker(entry)
       const served =
         checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []

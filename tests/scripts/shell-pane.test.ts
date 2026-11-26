@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { inboxInputSchema } from "../../api/hono/src/lib/dashboard/inbox"
 import { dataDir } from "../../packages/env/src/data-dir"
-import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
+import { reposOf } from "../../packages/scripts/src/trace-count/kinds"
 import { GUARDS } from "../../scripts/hooks/guards"
 import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
@@ -24,11 +24,17 @@ import {
   run,
   UNTYPED,
 } from "../../scripts/shell-pane"
+import { originCheckout } from "../machine"
 import { ALLOWED, type Paths, REFUSED_FORMS } from "./hooks/fixtures/refused-forms"
 import { storeWith } from "./hooks/render-set"
 import { git } from "./hooks/scratch-git"
 
 const CHECKOUT = join(import.meta.dir, "..", "..")
+// A stub origin list, the same on every machine, so the guard rows name a made-up repo, not the running checkout's, which a clone with none lacks.
+const REPOS = reposOf(
+  { schemaVersion: 1, values: {} },
+  originCheckout(mkdtempSync(join(tmpdir(), "pg-2616-origin")), "example-owner/example-repo"),
+)
 // The pane's folder: a worktree of the main checkout the guards read, as a session's pane opens in its own worktree, here or on CI's checkout.
 const MAIN = mainCheckout(CHECKOUT)
 const WORKTREE = join(MAIN, ".claude", "worktrees", "shell-pane-test")
@@ -77,10 +83,10 @@ const OWN_ROWS: Record<string, string[]> = {
   "no-outside-pr-code": ["bun test"],
   "no-prepare-write": ["gh pr create --fill"],
   "no-prompt-stop": ["rmdir $HOME/$s"],
-  "no-protected-push": [`git push https://github.com/${UNSET_REPOS.public[0]}.git main`],
-  "no-public-leak": [`gh pr comment 1 --repo ${UNSET_REPOS.public[0]} --body "$X"`],
+  "no-public-leak": [`gh pr comment 1 --repo ${REPOS.public[0]} --body "$X"`],
   "no-raw-vercel": ["vercel env pull"],
   "no-raw-wa": [`cat ${join(dataDir(), "whatsapp", "made-up.json")}`],
+  "no-roster-write": [`touch ${join(dataDir(), "roster.json")}`],
   "no-unslotted-run": ["bun run test"],
 }
 
@@ -91,6 +97,20 @@ const SYNCED = storeWith(
   { "ext.repos": { acme: "quillco/acme-skills" } },
 )
 mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
+// A store whose policy makes the stub repo public, since no-public-leak reads its target from factory.publicRepo; its term list is empty, since the row is refused for its unread body, not for a term.
+const PUBLIC = storeWith(
+  join(SCRATCH, "public"),
+  {
+    "no-public-leak.json": JSON.stringify({
+      companies: [],
+      handles: [],
+      linearKeys: [],
+      names: [],
+      slackIds: [],
+    }),
+  },
+  { "factory.publicRepo": "example-owner/example-repo" },
+)
 // A repo with a heavy path staged, as no-glm-heavy-path's own test stages one, for that guard's case to run in.
 const GLM_REPO = join(SCRATCH, "glm-repo")
 git(SCRATCH, "init", "-q", "-b", "canary", GLM_REPO)
@@ -125,6 +145,8 @@ const ENVS: Record<string, Record<string, string>> = {
     CLAUDE_CONFIG_DIR: PREPARE,
     PLAYGROUND_DATA_DIR: join(PREPARE, "playground"),
   },
+  // no-public-leak reads the PUBLIC store.
+  "no-public-leak": { PLAYGROUND_DATA_DIR: PUBLIC },
 }
 
 // Runs `body` with `vars` set on the process, an undefined one unset, then puts each back.
@@ -886,4 +908,8 @@ describe("open and close", () => {
       "herdr pane get: not_found",
     )
   })
+})
+
+test("the repo list its origin rows read names the stub repo, so a clone with no origin still checks them", () => {
+  expect(REPOS.public).toEqual(["example-owner/example-repo"])
 })

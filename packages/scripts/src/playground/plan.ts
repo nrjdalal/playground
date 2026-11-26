@@ -79,10 +79,10 @@ playground yard login | logout | channels | read <channel> | post <channel> <tex
 playground orgs resolve [--repo <dir>]
                       write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner, to the org whose own folder ~/<org> holds a <dir> with no GitHub origin, or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills), less each skill whose SKILL.md <dir>'s own .claude/skills already holds byte for byte; with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
-playground record add <path> --kind <container|file|folder|image|link> --why "<why>" --undo "<undo>" [--by <who>] | add --stdin | drop <path> | seed [--machine <name>] [--notes <folder>] | check
-                      the machine record, the data folder's machine-record.json, of every path the factory put on this machine: add records one (a path it holds already writes nothing; --stdin takes a JSON list, a peer's form over ssh, and is how an undo with a delete word, rm, rmdir or docker rm -fv, goes in, since the no-raw-delete hook reads a quoted --undo value as a command), drop takes one off, seed takes the data folder's bundles/footprint.md and the machine's undo note, bundles/<machine>-undo.md, for this machine and what the watched places hold now as its baseline, and check prints one line a finding: misplaced or unrecorded for a new path the record lacks (outside or inside paths.factoryHomes), gone for a recorded path that is not there, root-only for a watched place the user cannot list and the record holds a path in (known with its reason, never unreadable, and left out where the record holds none), unreadable for a place or path it cannot read; ops-tick's machine-record beat runs check daily here and on each peer
+playground record add <path> --kind <container|file|folder|image|link> --why "<why>" --undo "<undo>" [--by <who>] | add --stdin | known <path> --why "<who made it>" | drop <path> | seed [--machine <name>] [--notes <folder>] | check
+                      the machine record, the data folder's machine-record.json, of every path the factory put on this machine: add records one (a path it holds already writes nothing; --stdin takes a JSON list, a peer's form over ssh, and is how an undo with a delete word, rm, rmdir or docker rm -fv, goes in, since the no-raw-delete hook reads a quoted --undo value as a command), known keeps a path the OS made with its reason, so check skips it, drop takes one off, seed takes the data folder's bundles/footprint.md and the machine's undo note, bundles/<machine>-undo.md, for this machine and what the watched places hold now as its baseline, and check prints one line a finding: misplaced or unrecorded for a new path the record lacks (outside or inside paths.factoryHomes; Finder's .DS_Store aside), gone for a recorded path that is not there, root-only for a watched place the user cannot list and the record holds a path in (known with its reason, never unreadable, and left out where the record holds none), unreadable for a place or path it cannot read; ops-tick's machine-record beat runs check daily here and on each peer
 playground rm <path> [--card <id>] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/, its own loose regular file directly in scratch/ named <name>-* or <name>.*, its own factory-settings-400k-memory-<name>.json, an ended session's whole scratchpad/<folder>/ or scratch/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), and a retired data folder whole (safe-delete's RETIRED list, ci today), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ or scratch/<folder>/, a retired data folder, a folder inside the caller's own scratchpad/<name>/ and the caller's own /tmp/playground-<name>.* folder skip the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed, and a row whose one hold is the number of a PR gh reads as merged, by the row's PR URL, holds it no more while the worktree sits at or behind that PR's head; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit its base holds, origin/canary or another repo's default branch; the main checkout's worktree on the live.branch branch, the live Dashboard's checkout, is never taken, --discard included, nor any while that setting cannot be read), with no uncommitted change and its work landed on canary (another repo's on that repo's default branch, origin/HEAD's else gh's) or, for either, on a remote branch that git ls-remote still reads as holding HEAD, which it prints (every read of which commits a remote holds asks the remote live with git ls-remote, never a remote-tracking ref, and a remote it cannot read holds none), or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first, while every remote reads, since a remote it cannot read keeps the tree and names that remote (--discard lets those two go, with no decision, its commits no remote holds first written to a git bundle beside it in the trash (<name>.bundle and <name>.shas), which git -C <repo> fetch <bundle> HEAD brings back; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more, with --discard only once that PR reads MERGED or CLOSED), and prunes it from git; --worktree also takes a model test's replay worktree in a row of ~/models/kit/runs or in a recorded folder, detached at a commit origin/canary holds, with no process working in it, outside kit/runs with no tracked edit, and neither --discard nor --pr, writing its work to <name>.diff beside it, then removing it through the main checkout's own forced git worktree remove; --card <id> removes the path only as the owner's Remove on that nightly-clean card names it, on this machine at its size, or on a named peer over one ssh that runs playground rm --card <id> --peer <machine> <path>, which re-checks the path there before it deletes, while the card reads as nightly-clean last wrote it and was answered after that write, past the caps: weights (a .gguf or .safetensors under ~/models or a recorded folder, or a repo folder in ~/models/hf/hub) deleted outright and logged in trash/deleted.jsonl, anything else to the trash whole, a rehearsal in a session's scratchpad included, its machine record entry dropped; --list prints what the trash holds and --restore puts one item back
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free, its node_modules and web/next/.next stripped, which an install or a build rebuilds; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder but for the caller's own scratch/<name>/ and scratchpad/<name>/, its own loose regular file directly in scratch/ named <name>-* or <name>.*, its own factory-settings-400k-memory-<name>.json, a regular file directly in its own memory folder (the one that settings file names, when it is memory/<kind>/ for the dispatcher or a lead, or memory/worker-b/ for a worker) but MEMORY.md, an ended session's whole scratchpad/<folder>/ or scratch/<folder>/ (a real folder no live roster row names as itself or as <folder>-<role>), and a retired data folder whole (safe-delete's RETIRED list, ci today), the main checkout), a path over 5,000 files or 2 GB (an ended session's whole scratchpad/<folder>/ or scratch/<folder>/, a retired data folder, a folder inside the caller's own scratchpad/<name>/ and the caller's own /tmp/playground-<name>.* folder skip the file count), a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds (a roster row naming its branch or its PR's number holds it no more once that PR has merged or closed and the worktree sits at its head, which it prints as freed, and a row whose one hold is the number of a PR gh reads as merged, by the row's PR URL, holds it no more while the worktree sits at or behind that PR's head; commits past it keep the hold, named with them; a live row also holds no more a worktree sitting clean, detached, at a commit its base holds, origin/canary or another repo's default branch; the main checkout's worktree on the live.branch branch, the live Dashboard's checkout, is never taken, --discard included, nor any while that setting cannot be read), with no uncommitted change and its work landed on canary (another repo's on that repo's default branch, origin/HEAD's else gh's) or, for either, on a remote branch that git ls-remote still reads as holding HEAD, which it prints (every read of which commits a remote holds asks the remote live with git ls-remote, never a remote-tracking ref, and a remote it cannot read holds none), or, for another repo's worktree whose branch gh answers has no PR, its commits no remote holds archived by git format-patch into the data folder's scratchpad/archive/<repo>/<worktree>-<HEAD sha7>/ first, while every remote reads, since a remote it cannot read keeps the tree and names that remote (--discard lets those two go, with no decision, its commits no remote holds first written to a git bundle beside it in the trash (<name>.bundle and <name>.shas), which git -C <repo> fetch <bundle> HEAD brings back; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more, with --discard only once that PR reads MERGED or CLOSED), and prunes it from git; --worktree also takes a model test's replay worktree in a row of ~/models/kit/runs or in a recorded folder, detached at a commit origin/canary holds, with no process working in it, outside kit/runs with no tracked edit, and neither --discard nor --pr, writing its work to <name>.diff beside it, then removing it through the main checkout's own forced git worktree remove; --card <id> removes the path only as the owner's Remove on that nightly-clean card names it, on this machine at its size, or on a named peer over one ssh that runs playground rm --card <id> --peer <machine> <path>, which re-checks the path there before it deletes, while the card reads as nightly-clean last wrote it and was answered after that write, past the caps: weights (a .gguf or .safetensors under ~/models or a recorded folder, or a repo folder in ~/models/hf/hub) deleted outright and logged in trash/deleted.jsonl, anything else to the trash whole, a rehearsal in a session's scratchpad included, its machine record entry dropped; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -424,17 +424,30 @@ export const waitingLine = (why: string, load5: number) => {
   return why.startsWith("waiting for ") ? `W${why.slice(1)}` : `Waiting for a run slot: ${why}`
 }
 
-// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives and run-slot.runs.log holds no start line for it yet.
+// A pid's elapsed, as macOS and Linux print ([[dd-]hh:]mm:ss), in seconds, so its own start is now minus this; NaN for anything else, as when a sandbox refuses ps, so stepQueued skips its reuse guard.
+export const parseEtime = (elapsed: string): number => {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(elapsed.trim())
+  if (!m) return Number.NaN
+  return Number(m[1] ?? 0) * 86400 + Number(m[2] ?? 0) * 3600 + Number(m[3]) * 60 + Number(m[4])
+}
+
+// Whether the supervisor's prebuild step still queues in run-slot, as slot_step's step_started reads it: its run-slot pid (prebuild.pid) lives, run-slot.runs.log holds no start line back 5 s past the file's mtime, and the pid is not another that reused it, read as reused only once it clears the mtime by more than 2 s.
 export const stepQueued = (
   pid: string | undefined,
   alive: (pid: number) => boolean,
   runs: string[],
+  fileMtime = 0,
+  pidStart = 0,
 ) => {
   const n = Number(pid?.trim() || Number.NaN)
   if (!Number.isInteger(n) || n <= 1 || !alive(n)) return false
+  // the pid's elapsed prints to whole seconds, so its start reads up to a second late
+  if (pidStart > fileMtime + 2000) return false
+  // run-slot can log start before the echo writes the file, so a start line can come before the file exists
   return !runs.some((line) => {
     const words = line.split(" ")
-    return words[1] === "start" && words[3] === String(n)
+    if (words[1] !== "start" || words[3] !== String(n)) return false
+    return Date.parse(words[0]) >= fileMtime - 5000
   })
 }
 
@@ -444,21 +457,22 @@ export const rollTimedOut = (
   load5: number,
   queued = false,
 ): { done: string; ok: boolean } => {
+  const waitingWhy = "phase" in last && last.phase === "waiting" ? last.why : undefined
+  const stillQueuedLine =
+    waitingWhy !== undefined && /^prebuild \w+ still queued after /.test(waitingWhy)
   const why =
-    "phase" in last && last.phase === "waiting"
-      ? last.why
-      : queued
-        ? "the roll's next step is still queued in run-slot"
-        : undefined
-  return why !== undefined
-    ? {
-        done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
-        ok: true,
-      }
-    : {
-        done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
-        ok: false,
-      }
+    waitingWhy ?? (queued ? "the roll's next step is still queued in run-slot" : undefined)
+  // a still-queued prebuild line reads waiting only when the step is still queued, else the failure; any other still-queued line, and a load or run-slot line, wait
+  if (why === undefined || (stillQueuedLine && !queued)) {
+    return {
+      done: "Failed: no roll result within 30 minutes; see ops/dashboard/supervisor.log",
+      ok: false,
+    }
+  }
+  return {
+    done: `${waitingLine(why, load5)}: still waiting after 30 minutes, and the roll goes on by itself; see ops/dashboard/supervisor.log`,
+    ok: true,
+  }
 }
 
 // Where the dashboard's supervisor is in the roll `playground update` asked for, from the lines its log and results log gained since. A failed roll goes back to the build before, and is done once that FALLBACK lands, unless it ran a migration or its build failed before the stop.

@@ -7,6 +7,7 @@ import { verdictOf } from "@packages/config/verdicts"
 import { accountKey, accountSettings, accountsOf, readPolicy, RETIRED } from "@packages/settings"
 
 import STATUSES from "../../../../scripts/roster-statuses.json"
+import { askItemText } from "../ops-job/ask-item"
 import { leadName } from "../ops-session-resume/resume"
 import { factoryRepoOf } from "../playground/setting"
 import { writeAtomic } from "../write-atomic"
@@ -54,10 +55,6 @@ const PRUNES = [
 ]
 // The usage rule's least span of an account's week readings for a forecast, since each is a whole percent.
 const WEEK_SPAN = 10800
-const WINDOWS = [
-  ["5h", "f5", "r5", 3600, 1200],
-  ["7d", "s7", "r7", 10800, 3600],
-] as const
 
 const here = (ctx: Context) => join(ctx.ops, "sweep")
 const seconds = (ctx: Context) => ctx.now() / 1000
@@ -68,6 +65,15 @@ const notifyArgv = (ctx: Context, text: string) => [
   "sweep",
   text,
 ]
+// git ls-remote reads the branch tip on the remote, not the API, whose first word on its output line is the head's sha; null when it cannot read it, so a moved or unreadable head tells nothing
+const readTip = async (ctx: Context, name: string): Promise<string | null> => {
+  const r = await ctx.run(["git", "-C", ctx.repo, "ls-remote", "origin", `refs/heads/${name}`], {
+    timeoutMs: 30_000,
+  })
+  if (r.code !== 0) return null
+  const sha = r.out.trim().split(/\s+/)[0] ?? ""
+  return sha || null
+}
 const dashboardAsk = (ctx: Context, ...args: string[]) => [
   "bun",
   "run",
@@ -156,58 +162,95 @@ export async function sshLive(ctx: Context, names: string[]): Promise<string[]> 
   return out
 }
 
-// Records a usage sample, then projects each window to its reset from the recent rate (5h: the last hour, 7d: the last 3 hours).
-export async function forecast(ctx: Context): Promise<Record<string, number>> {
+// A forecast entry, by its label: one account's projected week, or "no forecast yet" beside a 5-hour figure, and, when usage.json logs it, the 5-hour window projected to its reset; else a state string ("no forecast yet", "parked until ...").
+type ForecastEntry = { week: number | "no forecast yet"; fiveHour?: number } | string
+
+// usage.accounts' Claude rows, each by its account key and the label pickable() names it, with the time it is parked until, when set.
+const usageAccounts = async (
+  ctx: Context,
+): Promise<{ account: string; label: string; parkedUntil?: string }[]> => {
+  const policy = await readPolicy(ctx.data)
+  const rows =
+    policy.refusal === undefined
+      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
+      : []
+  return rows.map((row, at) => ({
+    account: accountKey(row).toLowerCase(),
+    label: row.label ?? `account ${at + 1}`,
+    parkedUntil: "parkedUntil" in row ? row.parkedUntil : undefined,
+  }))
+}
+
+// The 5-hour window the account usage.json logs, projected to its reset from the first sample within the last hour sharing its reset, else undefined when the account has no 5-hour window, its readings do not yet span 20 minutes or its reset is under 10 minutes away, so it projects its week alone.
+const fiveHourOf = (account: string | undefined, s: Json, samples: Json[]): number | undefined => {
+  const used = s.f5 as number | undefined
+  const reset = s.r5 as number | undefined
+  // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+  if (typeof used !== "number" || typeof reset !== "number") return undefined
+  const t = s.t as number
+  const first = samples.find(
+    (x) => x.account === account && (x.r5 as number) === reset && (x.t as number) >= t - 3600,
+  )
+  if (!first || typeof first.f5 !== "number") return undefined
+  const span = t - (first.t as number)
+  // a sample set only now has no span to read a rate from
+  if (span < 1200 || reset - t < 600) return undefined
+  const rate = (used - (first.f5 as number)) / span
+  return Math.round((used + rate * (reset - t)) * 10) / 10
+}
+
+// One entry per usage.accounts Claude row, and for usage.json's account when no row lists it, by the label pickable() names it: the account's projected week at its reset from weekOf, plus, for the account usage.json logs, its 5-hour window from the recent rate, or a state string for an account with no figure, or parked in the future.
+export async function forecast(ctx: Context): Promise<Record<string, ForecastEntry>> {
   const samples = join(here(ctx), "usage-samples.jsonl")
-  let s: Json
-  let rows: Json[]
+  const t = Math.floor(seconds(ctx))
+  let login: string | undefined
+  let fiveHour: number | undefined
   try {
-    const rl = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text()).rate_limits
-    s = {
-      // an account with no 5-hour window (usage.json leaves it out) projects its week alone
+    const u = JSON.parse(await Bun.file(join(ctx.data, "usage.json")).text())
+    const rl = u.rate_limits
+    login = typeof u.account === "string" ? u.account.toLowerCase() : undefined
+    const s = {
+      account: login,
       f5: rl.five_hour?.used_percentage,
       r5: rl.five_hour?.resets_at,
-      r7: rl.seven_day.resets_at,
-      s7: rl.seven_day.used_percentage,
-      t: Math.floor(seconds(ctx)),
+      t,
     }
     await appendFile(samples, `${JSON.stringify(s)}\n`)
-    rows = (await Bun.file(samples).text())
+    const history = (await Bun.file(samples).text())
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l) as Json)
+    fiveHour = fiveHourOf(login, s, history)
   } catch {
-    return {}
+    // an unreadable usage.json leaves every account its week alone
   }
-  const t = s.t as number
-  const out: Record<string, number> = {}
-  for (const [key, u, r, look, need] of WINDOWS) {
-    const used = s[u]
-    const reset = s[r]
-    // a window with no reset time (Anthropic sends null once a 5-hour window has reset at 0%) has nothing to project to
-    if (typeof used !== "number" || typeof reset !== "number") continue
-    const first = rows.find((x) => x[r] === reset && (x.t as number) >= t - look)
-    if (!first || typeof first[u] !== "number") continue
-    const span = t - (first.t as number)
-    if (span < need || reset - t < 600) continue
-    const rate = (used - first[u]) / span
-    out[key] = Math.round((used + rate * (reset - t)) * 10) / 10
+  const [factory, others] = [
+    await samplesOf(ctx, "week-samples.jsonl"),
+    await samplesOf(ctx, "account-samples.jsonl"),
+  ]
+  const accounts = await usageAccounts(ctx)
+  if (login && !accounts.some((row) => row.account === login))
+    accounts.push({ account: login, label: (await pickable(ctx)).get(login) ?? "unlisted" })
+  const out: Record<string, ForecastEntry> = {}
+  for (const { account: key, label, parkedUntil } of accounts) {
+    if (parkedUntil && Date.parse(parkedUntil) > ctx.now()) {
+      out[label] = `parked until ${parkedUntil}`
+      continue
+    }
+    const week = weekOf(factory, others, key, t)?.week ?? "no forecast yet"
+    const five = key === login ? fiveHour : undefined
+    if (five === undefined) out[label] = typeof week === "number" ? { week } : week
+    else out[label] = { week, fiveHour: five }
   }
   return out
 }
 
 // The accounts login-flip.py's split gives a share of new sessions while it is under 30 minutes old, as spawn.sh reads it, else usage.json's account; each by its usage.accounts label, else `account <n>` by its row, else `unlisted <n>` in the order met, never its address.
 const pickable = async (ctx: Context): Promise<Map<string, string>> => {
-  const policy = await readPolicy(ctx.data)
-  const rows =
-    policy.refusal === undefined
-      ? accountsOf(accountSettings.get(policy.settings, "usage.accounts"), "claude")
-      : []
+  const rows = await usageAccounts(ctx)
   let unlisted = 0
-  const labelOf = (account: string) => {
-    const at = rows.findIndex((row) => accountKey(row).toLowerCase() === account)
-    return at === -1 ? `unlisted ${++unlisted}` : (rows[at]!.label ?? `account ${at + 1}`)
-  }
+  const labelOf = (account: string) =>
+    rows.find((row) => row.account === account)?.label ?? `unlisted ${++unlisted}`
   const split = (await readJson<Json>(join(ctx.ops, "usage", "login-flip.json"), {})).split as Json
   const shares =
     typeof split?.at === "number" && seconds(ctx) - split.at < 1800 ? split.shares : null
@@ -376,7 +419,7 @@ const pullOf = (pr: unknown, repo: string): number | undefined => {
 }
 
 // A worker's PR whose head has been ready (its checks green) REVIEWER_LATE seconds with no review round (a ReviewBot verdict at any head) and no live session for the reviewer the roster names on it, by its pr or any entry of its prs: one line to the worker's lead, once per head, since a reviewer started late or by hand left heads ready for over an hour. A draft PR and a parked row wait by design, so neither raises a line; the runner check below reads the parked one.
-// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead, once per head; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
+// The same read finds a worker's PR, a draft's too, that conflicts with its base (mergeable CONFLICTING or mergeStateStatus DIRTY) with no GitHub Actions run at its head, which GitHub never starts on it: CONFLICT_AFTER seconds after a sweep first sees it, one line to the worker and one to its lead once per head, read against the branch's live tip: a head the remote moved past sends nothing and the PR stays untold for the next pass, an unreadable tip sends nothing and is named, and a matching head tells as before; conflict-told.json keeps only the PRs conflicting now, a read of UNKNOWN at the same head keeping its entry, so a fixed conflict that comes back alerts again. A conflicting PR raises no late-reviewer line, since its head is not ready.
 export async function lateReviewers(
   ctx: Context,
   agents: Json[],
@@ -398,7 +441,7 @@ export async function lateReviewers(
   }
   if (!workers.size) return []
   const fields =
-    "state headRefOid isDraft mergeable mergeStateStatus comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { checkSuites(first: 1, filterBy: { appId: 15368 }) { totalCount } statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
+    "state headRefName headRefOid isDraft mergeable mergeStateStatus comments(last: 100) { nodes { body } } commits(last: 1) { nodes { commit { checkSuites(first: 1, filterBy: { appId: 15368 }) { totalCount } statusCheckRollup { state contexts(first: 100) { nodes { ... on CheckRun { completedAt } ... on StatusContext { createdAt } } } } } } }"
   const [owner, name] = repo.split("/")
   const query = `{ repository(owner: "${owner}", name: "${name}") { ${[...workers.keys()].map((n) => `p${n}: pullRequest(number: ${n}) { ${fields} }`).join(" ")} } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
@@ -415,6 +458,7 @@ export async function lateReviewers(
   const conflictPath = join(here(ctx), "conflict-told.json")
   const conflicts = (await readJson<Record<string, Conflict>>(conflictPath, {})) ?? {}
   const conflicting: Record<string, Conflict> = {}
+  const findings: string[] = []
   const now = seconds(ctx)
   for (const [n, worker] of workers) {
     const pr = pulls?.[`p${n}`] as {
@@ -431,6 +475,7 @@ export async function lateReviewers(
           }
         }[]
       }
+      headRefName?: string
       headRefOid?: string
       isDraft?: boolean
       mergeStateStatus?: string
@@ -446,13 +491,19 @@ export async function lateReviewers(
     if (conflicted && !commit?.checkSuites?.totalCount) {
       const conflict = (conflicting[n] = seen ?? { at: now, sha: pr.headRefOid, told: false })
       if (real && !conflict.told && now - conflict.at >= CONFLICT_AFTER) {
-        conflict.told = true
-        const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
-        for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
-          await ctx.run(notifyArgv(ctx, text), {
-            env: { ...process.env, NOTIFY_TO: to },
-            timeoutMs: 60_000,
-          })
+        // the branch tip on the remote moves first, so read it before telling: a head the remote moved past is gone, and an unreadable tip is a finding, not a line
+        const tip = await readTip(ctx, pr.headRefName ?? "")
+        if (tip === null) {
+          findings.push(`conflict-tip-unreadable #${n}`)
+        } else if (tip === pr.headRefOid) {
+          conflict.told = true
+          const text = `PR #${n} (${worker}): it conflicts with its base at head ${pr.headRefOid.slice(0, 7)}, so GitHub runs no CI on it. Merge canary into it and push.`
+          for (const to of new Set([worker, await leadName(ctx.ops, worker)]))
+            await ctx.run(notifyArgv(ctx, text), {
+              env: { ...process.env, NOTIFY_TO: to },
+              timeoutMs: 60_000,
+            })
+        }
       }
     }
     // a conflicting head is not ready, even while other apps' checks read SUCCESS with no Actions run
@@ -487,7 +538,7 @@ export async function lateReviewers(
   }
   await writeAtomic(path, JSON.stringify(keep))
   await writeAtomic(conflictPath, JSON.stringify(conflicting))
-  return []
+  return findings
 }
 
 // A live worker's PG branch whose head is NO_PR_AFTER seconds old with no PR in any state: one line to the worker's lead, once per head, since CI runs only on a PR into canary, so a lead can plan around a run that never started. The branch is the one its row records at first push (playbook's ROSTER.md); a row holding a pr, or one whose status is not live, is not read, and one GraphQL read covers every branch.
@@ -788,10 +839,9 @@ export async function check(ctx: Context): Promise<string[]> {
       const r = await ctx.run(dashboardAsk(ctx, "get", /^\d+$/.test(ask) ? `#i${ask}` : ask), {
         timeoutMs: 60_000,
       })
-      const brace = r.out.indexOf("{")
       let d: Json | null = null
       try {
-        if (r.code === 0 && brace !== -1) d = JSON.parse(r.out.slice(brace)) as Json
+        if (r.code === 0) d = JSON.parse(askItemText(r.out)) as Json
       } catch {}
       if (!d || typeof d !== "object") found.push(`ask-unreadable:${ask}`)
       else if (d.status !== "open") found.push(`ask-answered:${ask}`)
@@ -813,8 +863,15 @@ export async function check(ctx: Context): Promise<string[]> {
   found.push(...(await lateReviewers(ctx, agents, live)))
   found.push(...(await prlessBranches(ctx, agents)))
   found.push(...(await stalledPrs(ctx, agents)))
-  const projected = Object.values(await forecast(ctx))
-  if (projected.length) found.push(projected.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
+  const picked = new Set((await pickable(ctx)).values())
+  const figures: number[] = []
+  for (const [label, entry] of Object.entries(await forecast(ctx))) {
+    // only the accounts the split can pick, each by the figures it has, never a parked one
+    if (!picked.has(label) || typeof entry === "string") continue
+    if (typeof entry.week === "number") figures.push(entry.week)
+    if (typeof entry.fiveHour === "number") figures.push(entry.fiveHour)
+  }
+  if (figures.length) found.push(figures.some((v) => v > HEADROOM) ? "no-headroom" : "headroom")
   try {
     await paceOff(ctx)
   } catch (err) {

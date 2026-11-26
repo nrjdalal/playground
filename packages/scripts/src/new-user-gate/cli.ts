@@ -21,12 +21,12 @@ import { boxEnv } from "../box-env"
 import { procSource, type SysctlName, sysctlOf } from "../ops-machine/readings"
 import { gateLine } from "../pr-merge/ship-lines"
 import { BOX_LABEL } from "./docker"
-import { GATE_LABEL, stubs, usageReading } from "./stubs"
+import { stubs, usageReading } from "./stubs"
 
 const REPO = resolve(import.meta.dir, "../../../..")
 const PROXY_PORT = "14155"
 const PORTLESS = join(REPO, "node_modules", ".bin", "portless")
-const INSTALL_LIMIT_S = 1200
+export const INSTALL_LIMIT_S = 1200
 const ROUTE_WAIT_MS = 180_000
 const SCRIPTS_WAIT_MS = 150_000
 const USAGE_WAIT_MS = 60_000
@@ -50,8 +50,10 @@ export const STEP_COUNT = 7
 export const resultLine = (sha: string, steps: Step[]): string =>
   gateLine(sha, steps.length < STEP_COUNT || steps.some((s) => !s.ok && !s.inconclusive))
 
-// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count and each step that did not pass.
-export const verdictLine = (sha: string, steps: Step[]): string => {
+// Pure: the verdict --pr posts on a PR, which pr-merge's new-user gate reads at the head: FAIL as resultLine reads it, else INCONCLUSIVE when a step was, else PASS, then the count, each step that did not pass, and each step that passed with a `no shot:` shot named by its reason.
+// A run whose spawn could not start (spawnOrFault) reads INCONCLUSIVE with that fault, since it reads this machine, not the build.
+export const verdictLine = (sha: string, steps: Step[], fault?: string): string => {
+  if (fault) return `## NewUserGate · INCONCLUSIVE at ${sha.slice(0, 7)} · ${fault}`
   const short = steps.length < STEP_COUNT
   const unsure = steps.filter((s) => s.inconclusive).length
   const word =
@@ -60,6 +62,13 @@ export const verdictLine = (sha: string, steps: Step[]): string => {
     `${steps.filter((s) => s.ok).length} of ${STEP_COUNT} passed${unsure ? `, ${unsure} inconclusive` : ""}`,
     ...steps.flatMap((s, i) =>
       s.ok ? [] : [`${i + 1}. ${s.name}${s.detail ? `: ${s.detail.replace(/\s+/g, " ")}` : ""}`],
+    ),
+    ...steps.flatMap((s, i) =>
+      s.ok && s.shot && s.shot.startsWith("no shot: ")
+        ? [
+            `${i + 1}. ${s.name}: no shot (${s.shot.replace(/^no shot: /, "").replace(/\s+/g, " ")})`,
+          ]
+        : [],
     ),
     ...(short ? [`stopped after ${steps.length} of ${STEP_COUNT} steps`] : []),
   ]
@@ -287,22 +296,72 @@ export const installEnv = (box: string, home: string, path: string): Record<stri
   USER: process.env.USER ?? "",
 })
 
-// install.sh piped to bash as `curl | bash` runs it, with installEnv's clean environment.
-const install = async (box: string, home: string, path: string): Promise<string> => {
-  const child = Bun.spawn(["timeout", String(INSTALL_LIMIT_S), "bash"], {
-    cwd: home,
-    env: installEnv(box, home, path),
-    stderr: "pipe",
-    stdin: Bun.file(join(home, "playground", "install.sh")),
-    stdout: "pipe",
-  })
+// A spawn that cannot start is a gate environment fault naming the program and the folder it ran in, never a throw: Bun's posix_spawn fails with ENOENT for a missing folder once the lookup found the program, as one gate run met it.
+export const spawnOrFault = <T>(
+  program: string,
+  cwd: string,
+  start: () => T,
+): { child: T } | { fault: string } => {
+  try {
+    return { child: start() }
+  } catch (error) {
+    const missing = existsSync(cwd) ? "" : ", which is missing"
+    return {
+      fault: `gate environment fault: could not start ${program} in ${cwd}${missing}: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+}
+
+// Pure: install's spawn, bash alone in a process group of its own (detached), which groupLimit stops whole at the limit, so no program outside the clean PATH holds it.
+export const installSpawn = () => ({
+  argv: ["bash"],
+  detached: true as const,
+  limitMs: INSTALL_LIMIT_S * 1000,
+})
+
+// Sends SIGTERM to child's whole process group once limitMs passes, as coreutils' timeout does, so a hung grandchild holding the pipes ends with it; a child that exits first is never signalled.
+export const groupLimit = (
+  child: { exited: Promise<unknown>; pid: number },
+  limitMs: number,
+  kill: (pid: number, signal: NodeJS.Signals) => void = process.kill,
+) => {
+  const timer = setTimeout(() => {
+    try {
+      kill(-child.pid, "SIGTERM")
+    } catch {
+      return
+    }
+  }, limitMs)
+  void child.exited.finally(() => clearTimeout(timer))
+}
+
+// install.sh piped to bash as `curl | bash` runs it, with installEnv's clean environment; a fault when bash cannot start.
+const install = async (
+  box: string,
+  home: string,
+  path: string,
+): Promise<{ fault: string } | { out: string }> => {
+  const { argv, detached, limitMs } = installSpawn()
+  const started = spawnOrFault(argv[0], home, () =>
+    Bun.spawn(argv, {
+      cwd: home,
+      detached,
+      env: installEnv(box, home, path),
+      stderr: "pipe",
+      stdin: Bun.file(join(home, "playground", "install.sh")),
+      stdout: "pipe",
+    }),
+  )
+  if ("fault" in started) return started
+  const { child } = started
+  groupLimit(child, limitMs)
   const [out, err, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
     child.exited,
   ])
   writeFileSync(join(box, "install.log"), `${out}\n${err}\ninstall.sh exit ${code}\n`)
-  return `${out}\n${err}\ninstall.sh exit ${code}`
+  return { out: `${out}\n${err}\ninstall.sh exit ${code}` }
 }
 
 // The made-up account the gate adds through the Dashboard's Add a Claude account.
@@ -649,11 +708,17 @@ export const clean = (box: string, home: string, portless = PORTLESS, docker = "
   for (const job of ["dashboard-dev", "dashboard-ingest", "dashboard-web", "dashboard-web-next"])
     if (existsSync(procs)) run(["bash", procs, "stop", job], { env })
   run([portless, "proxy", "stop", "-p", PROXY_PORT], { env })
-  const names = [GATE_LABEL, `${BOX_LABEL}=${basename(box)}`].flatMap((label) =>
-    run([docker, "ps", "-a", "--filter", `label=${label}`, "--format", "{{.Names}}"])
-      .out.split("\n")
-      .filter(Boolean),
-  )
+  const names = run([
+    docker,
+    "ps",
+    "-a",
+    "--filter",
+    `label=${BOX_LABEL}=${basename(box)}`,
+    "--format",
+    "{{.Names}}",
+  ])
+    .out.split("\n")
+    .filter(Boolean)
   const own = boxContainers(
     run([docker, "ps", "-a", "--format", "{{.Names}}"]).out,
     boxContainer(box),
@@ -727,8 +792,15 @@ const main = async (args: string[]) => {
     capacity.since = isoNow()
   }
   let postFailed = false
+  let fault: string | undefined
   try {
-    const out = await install(box, home, path)
+    const installed = await install(box, home, path)
+    if ("fault" in installed) {
+      fault = installed.fault
+      console.error(`gate: ${fault}`)
+      return 1
+    }
+    const { out } = installed
     // the bare name the live checkout aliases, as a new user opens it, on the box's own proxy
     const web = `http://playground.localhost:${PROXY_PORT}`
     await check("curl | bash exits 0 with no Left for you", async () => {
@@ -934,7 +1006,7 @@ const main = async (args: string[]) => {
     }
     console.log(resultLine(full, steps))
     if (pr !== null) {
-      const posted = run(verdictPost(Number(pr), verdictLine(full, steps), dirname(box)), {
+      const posted = run(verdictPost(Number(pr), verdictLine(full, steps, fault), dirname(box)), {
         cwd: REPO,
       })
       postFailed = posted.code !== 0

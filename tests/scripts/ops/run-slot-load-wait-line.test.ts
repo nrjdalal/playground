@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { machine, stop, waiter } from "./run-slot-fake"
@@ -17,9 +17,11 @@ describe("the units hold's line", () => {
     })
     const q = join(m.ops, "run-slot.waiters")
     let ticket = ""
+    // bash's echo makes the ticket before it writes its line, so the test waits for that line, else the echo lands over the small one below and the ticket reads medium again
     while (!ticket) {
-      ticket = existsSync(q) ? (readdirSync(q).find((f) => f.endsWith("-worker-m")) ?? "") : ""
-      if (!ticket) await Bun.sleep(20)
+      const name = existsSync(q) ? (readdirSync(q).find((f) => f.endsWith("-worker-m")) ?? "") : ""
+      if (name && readFileSync(join(q, name), "utf8").endsWith("\n")) ticket = name
+      else await Bun.sleep(20)
     }
     writeFileSync(join(q, ticket), "s2 21 1 small\n")
     const at = Date.now()

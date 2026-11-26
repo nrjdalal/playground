@@ -241,10 +241,12 @@ def beat(job, pid, started, cycle, result, extra=None):
 const cycle = async (
   name: string,
   opts: {
+    accounts?: string[]
     added: string[]
     ended?: boolean
     expired?: boolean
     factory?: string
+    failing?: string
     login: boolean
     loginExit?: number
     noSeat?: boolean
@@ -288,10 +290,11 @@ const cycle = async (
     writeFileSync(mark, "")
     return statSync(mark).mtimeMs / 1000 - opts.seat!.age * 60
   }
-  if (opts.factory || opts.seat)
+  if (opts.accounts || opts.factory || opts.seat)
     writeFileSync(
       join(ops, "usage", "login-flip.json"),
       JSON.stringify({
+        ...(opts.accounts && { accounts: opts.accounts }),
         ...(opts.factory && { factory: opts.factory }),
         ...(opts.seat && {
           seen: {
@@ -321,7 +324,7 @@ const cycle = async (
   })
   writeFileSync(
     join(stubs, "security"),
-    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n${opts.noSeat ? "  *made-up-service*stored@example.org*) exit 44 ;;\n" : ""}  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
+    `#!/bin/sh\ncase "$*" in\n  *Claude\\ Code-credentials*) ${opts.login ? `echo '${login}'` : `exit ${opts.loginExit ?? 44}`} ;;\n${opts.noSeat ? "  *made-up-service*stored@example.org*) exit 44 ;;\n" : ""}${opts.failing ? `  *made-up-service*${opts.failing}*) exit 44 ;;\n` : ""}  *made-up-service*) echo made-up-token ;;\n  *) exit 44 ;;\nesac\n`,
     { mode: 0o755 },
   )
   const env = scratchEnv(home, {
@@ -652,6 +655,39 @@ test("the 5-hour alert names its account (#170)", async () => {
   expect(alerts.alerts.map((a: { kind: string; name: string }) => `${a.kind} ${a.name}`)).toEqual([
     "usage-5h added@example.org",
   ])
+})
+
+// #2981: a seat whose probe answers nothing for longer than FRESH_FOR is named in the beat's detail by its position and its last reading's time, and raised as an alert
+const READ_AT = "\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ"
+const failingSeat = (name: string, age: number) =>
+  cycle(name, {
+    accounts: ["added@example.org", "spare@example.org"],
+    added: ["added@example.org"],
+    failing: "spare@example.org",
+    login: false,
+    seat: { account: "spare@example.org", age },
+  })
+
+test("a seat probe that answers nothing past FRESH_FOR puts the seat and its last reading in the beat's detail, and raises an alert (#2981)", async () => {
+  const { alerts, beat } = await failingSeat("seat-probe-failing", 40)
+  expect(beat.result).toBe("ok")
+  expect(beat.detail).toMatch(new RegExp(`seat 2: probe failing, last reading ${READ_AT}`))
+  const probe = alerts.alerts.filter((a: { kind: string }) => a.kind === "usage-probe")
+  expect(probe).toHaveLength(1)
+  expect(probe[0].name).toBe("spare@example.org")
+  expect(probe[0].line).toMatch(
+    new RegExp(
+      `^seat 2 has read nothing for 30 minutes or more, its probe failing, last reading ${READ_AT}$`,
+    ),
+  )
+  expect(probe[0].since).toBe(probe[0].line.split(" ").at(-1))
+})
+
+test("a seat probe that has answered nothing for under FRESH_FOR raises nothing yet (#2981)", async () => {
+  const { alerts, beat } = await failingSeat("seat-probe-recent", 20)
+  expect(beat.result).toBe("ok")
+  expect(beat.detail).not.toContain("seat 2")
+  expect(alerts.alerts.filter((a: { kind: string }) => a.kind === "usage-probe")).toEqual([])
 })
 
 test("a cycle writes the status line's two $ figures from Claude Code's transcripts, at mode 600", async () => {

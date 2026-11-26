@@ -15,6 +15,8 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path"
 
+import fc from "fast-check"
+
 import { check as dispatch, GUARDS as DISPATCHED } from "../../../scripts/hooks/guards"
 import { check as desktopOwnerApp } from "../../../scripts/hooks/no-desktop-owner-app"
 import { check as envDump } from "../../../scripts/hooks/no-env-dump"
@@ -33,6 +35,7 @@ import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
+import { check as rosterWrite } from "../../../scripts/hooks/no-roster-write"
 import { check as stash } from "../../../scripts/hooks/no-stash"
 import { check as unslottedRun } from "../../../scripts/hooks/no-unslotted-run"
 import {
@@ -45,6 +48,7 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { pinPlatform } from "./platform"
+import { programWord, REWRITE_NAMES, spell, SPELLING, type Spelling } from "./refused-spellings"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -116,6 +120,19 @@ writeFileSync(PATHS.WORDS, "y ".repeat(400_000))
 // a script ssh feeds a remote shell: a listing of the data folder, and its twin writing under the root
 writeFileSync(join(HOME, "peer-check.sh"), `ls ${DATA}\n`)
 writeFileSync(join(HOME, "peer-write.sh"), `touch ${ROOT}/x\n`)
+// a runner's scripts ssh feeds a remote shell, for #2579's rows: an awk program whose * multiplies, a loop whose variable names a folder outside the root, and one that writes a script with sed and runs it
+writeFileSync(
+  join(HOME, "stats.sh"),
+  `awk '\n/accept/ { acc[++n] = $2 }\n/draft/ { dr[++m] = $2 }\nEND { if (dr[2] - dr[1] > 0) printf " mtp_accept=%.1f%%", 100 * (acc[2] - acc[1]) / (dr[2] - dr[1]) }\n' /var/log/serve.log\n`,
+)
+writeFileSync(
+  join(HOME, "dl.sh"),
+  "for r in a b; do\n  d=/srv/models/hf/hub/models--$r\n  find $d/blobs -name '*.incomplete'\ndone\n",
+)
+writeFileSync(
+  join(HOME, "serve.sh"),
+  "sed 's/PORT/8080/' serve.tmpl > serve-mb.sh\nbash serve-mb.sh\n",
+)
 symlinkSync(ROOT, PATHS.LINK)
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
@@ -260,6 +277,7 @@ const CHECK_NAMES = [
   "rawDelete",
   "rawSpawn",
   "releaseComment",
+  "rosterWrite",
   "stash",
   "unslottedRun",
 ] as const
@@ -281,6 +299,7 @@ const SOURCE: Checks = {
   rawDelete,
   rawSpawn,
   releaseComment,
+  rosterWrite,
   stash,
   unslottedRun,
 }
@@ -302,6 +321,7 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
+  rosterWrite: "no-roster-write",
   stash: "no-stash",
   unslottedRun: "no-unslotted-run",
 }
@@ -557,6 +577,10 @@ const guardsOf = (
   "no-release-comment": {
     folders: { checkout: [OTHER, HOME] },
     run: (raw) => c.releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
+  },
+  "no-roster-write": {
+    folders: { "process home": [homedir(), homedir()] },
+    run: (raw, home) => c.rosterWrite(raw, { HOME: home }),
   },
   "no-stash": {
     folders: {
@@ -831,6 +855,53 @@ describe("every refused form stays refused in its Codex shape", () => {
         "apply_patch in the shell",
       ])
   })
+})
+
+// Each case's seed is its own, so a seeded draw is the same on every run, CI's included; REFUSED_FORMS_SEED=<n> sets every case's seed, which draws once a rewrite with a random part raises numRuns past the examples
+const SEED = process.env.REFUSED_FORMS_SEED ? Number(process.env.REFUSED_FORMS_SEED) : undefined
+if (SEED !== undefined && !Number.isInteger(SEED))
+  throw new Error(`REFUSED_FORMS_SEED=${process.env.REFUSED_FORMS_SEED} is not a whole number`)
+
+// A spelling stays refused when the row's own guard refuses it, or when its program word is no plain name, which no-hidden-program refuses beside every guard guards.ts gates to a factory session, the one gate it runs behind
+const speltRefused = async (c: (typeof CASES)[number], text: string, [cwd, home]: string[]) => {
+  if ((await verdict({ ...c, call: text }, cwd!, home!))?.includes(`${c.guard} hook `)) return true
+  const hidden = await GUARDS["no-hidden-program"].run(input(text, cwd!), home!)
+  return !!hidden?.includes("no-hidden-program hook ")
+}
+
+// the cases whose guard runs behind the factory gate, where no-hidden-program backs it
+const SPELT = CASES.filter(
+  (c) =>
+    typeof c.call === "string" &&
+    !!programWord(c.call) &&
+    !!dispatched(c.guard)?.factory &&
+    !allowed(c),
+)
+
+describe("every generated spelling of a refused form stays refused", () => {
+  test.each(SPELT.map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const call = c.call as string
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      await fc.assert(
+        fc.asyncProperty(SPELLING, async (s) => {
+          const text = spell(call, s)
+          expect({ refused: await speltRefused(c, text, at), text }).toEqual({
+            refused: true,
+            text,
+          })
+        }),
+        // fast-check counts the examples inside numRuns, so each case runs every rewrite once and draws nothing, since a draw from the fixed rewrites only repeats one
+        {
+          examples: REWRITE_NAMES.map((s) => [s] as [Spelling]),
+          numRuns: REWRITE_NAMES.length,
+          seed: SEED ?? Bun.hash.crc32(c.key) | 0,
+        },
+      )
+    },
+    60_000,
+  )
 })
 
 // Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
