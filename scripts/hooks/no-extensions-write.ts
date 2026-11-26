@@ -1089,7 +1089,7 @@ function cliCalls(parsed: Parsed, env: Env): Word[][] {
   if (!first) return []
   const words = [first, ...args]
   const dirs = [env.cwd, ...runnerDirs(name, args, env)]
-  // a runner behind a wrapper the reader does not parse (find -exec, arch, watch) reads its folders from each one found before it (the shell's, an outer runner's), all unread past 16, and find's -execdir runs it in a folder the hook cannot read
+  // a runner behind a wrapper the reader does not parse (find -exec, arch) reads its folders from each one found before it (the shell's, an outer runner's), all unread past 16, and find's -execdir runs it in a folder the hook cannot read
   for (const [at, word] of words.entries()) {
     const tool = toolName(word.value)
     const bases = [...new Set(dirs)]

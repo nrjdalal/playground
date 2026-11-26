@@ -2949,7 +2949,7 @@ describe("the hook's run", () => {
 
   // the timer fires at 1 s; a slow step left to the worker answers only at the walk's 10 s deadline or later, past this test's time
   test("a single step the deadline cannot interrupt is refused when the main thread's timer fires", async () => {
-    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ watch '@ a'; playground ext import x`
+    const command = `printf '%s${",".repeat(60)}' '{' ${"x ".repeat(6_000)}| xargs -I @ frob '@ a'; playground ext import x`
     const raw = JSON.stringify({ cwd: "/tmp", tool_input: { command }, tool_name: "Bash" })
     expect(await guarded(raw, ENV, 1_000)).toContain("split it into shorter calls")
   }, 5_000)

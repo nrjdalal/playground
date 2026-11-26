@@ -1270,6 +1270,8 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#3070 an ln -s with a variable set in the call | -s",
       "#3070 an ln -sf from the root and a listing | -sf",
       "#3070 an ln -sfn from the root and a cat through its link | -sfn",
+      // cd's -L takes no value: the folder after it is the cd's own operand, which a logical cd folds
+      "#3111 bash reading a relative stdin path after cd -L up to the root | -L",
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",
       "#356 many variables ahead of a write | -rf",

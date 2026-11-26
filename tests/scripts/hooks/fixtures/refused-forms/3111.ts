@@ -30,6 +30,13 @@ export const groups: Group[] = [
       ["a kill by name watch reruns after its quoted interval option", "watch '-n' 1 pkill node"],
       ["a kill by name watch reruns after its interval option", "watch -n 1 pkill node"],
       ["a kill by name watch reruns", "watch pkill node"],
+      [
+        "a kill by name watch's shell line runs after -d takes the x as its value",
+        "watch -dx 'pkill node'",
+      ],
+      ["a kill by name watch's shell line runs after a flag and -d's x", "watch -bdx 'pkill node'"],
+      ["a kill by name watch's shell line runs after -e and -d's x", "watch -edx 'pkill node'"],
+      ["killall in watch's shell line after a flag and -d's x", "watch -bdx 'killall node'"],
     ],
   },
   {
@@ -43,6 +50,30 @@ export const groups: Group[] = [
       [
         "bash reading a relative stdin path after a cd to the root folder",
         `cd / && bash dev/stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading a relative stdin path after a logical cd up to the root",
+        `cd /tmp/.. && bash dev/stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading a relative stdin path after cd -L up to the root",
+        `cd -L /tmp/.. && bash dev/stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading a relative stdin path after a logical cd up from /etc",
+        `cd /etc/.. && bash dev/stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading a relative stdin path after a pushd up to the root",
+        `pushd /tmp/.. && bash dev/stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading stdin by its name after a logical cd into /dev",
+        `cd /tmp/../dev && bash stdin <<< 'touch ${LIST}'`,
+      ],
+      [
+        "bash reading stdin by its name after a logical cd from /var into /dev",
+        `cd /var/../dev && bash stdin <<< 'touch ${LIST}'`,
       ],
     ],
   },

@@ -362,13 +362,14 @@ const MISE = runner(
   "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets",
   { script: "-c --command", tools: true },
 )
-// watch, from procps-ng's watch(1), reruns its words past its options joined into one `sh -c` line, or as its program's own words after -x (WATCH_EXEC)
+// watch, from procps-ng's watch(1) and watch.c's getopt string (`+bCcefd::ghq:n:prs:twvx`), reruns its words past its options joined into one `sh -c` line, or as its program's own words after -x (WATCH_EXEC)
 const WATCH = runner(
-  "-b -C -c -d -e -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --help --no-color --no-rerun --no-title --no-wrap --precise --version",
+  "-b -C -c -d -e -f -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --follow --help --no-color --no-rerun --no-title --no-wrap --precise --version",
   "-n -q -s --equexit --interval --shotsdir",
   { always: true },
 )
-const WATCH_EXEC = /^(?:--exec|-[bCcdeghprtvw]*x[bCcdeghprtvwx]*)$/
+// in a cluster, -d takes the rest as its optional value, so an x counts only before any d (`-xd` execs, `-dx` diffs)
+const WATCH_EXEC = /^(?:--exec|-[bCcefghprtvw]*x[bCcefghprtvwx]*(?:d.*)?)$/
 const BUN_FLAGS =
   "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
 const BUN_VALUES =
@@ -986,13 +987,15 @@ const plainPath = (value: string) =>
         .filter((s) => s && s !== ".")
         .join("/")}`
     : value
-// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from the real path of each folder the command may run in (a link or a hop to the root is the root), or from the root where the reader can place none
+// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, both as a logical cd folds its `..` and by its real path (a link or a hop to the root is the root), or from the root where the reader can place none
 const stdinPath = (value: string, env?: Env): boolean => {
   if (STDIN_PATHS.has(plainPath(value))) return true
   if (!env || value.startsWith("/") || marked(value)) return false
   const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
   return (folders.length > 0 ? folders : ["/"]).some((dir) =>
-    STDIN_PATHS.has(plainPath(`${realFolder(dir)}/${value}`)),
+    [realFolder(dir), realFolder(resolve(dir))].some((at) =>
+      STDIN_PATHS.has(plainPath(`${at}/${value}`)),
+    ),
   )
 }
 const realFolder = (dir: string): string => {
