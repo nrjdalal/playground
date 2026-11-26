@@ -1,7 +1,7 @@
 // A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets its readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, where the call may build it toward the file (builtToward), is refused, failing closed.
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, resolve } from "node:path"
+import { basename, dirname, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { eachInput } from "./codex"
@@ -16,6 +16,7 @@ import {
   run,
   stdinOf,
   type Env,
+  UNKNOWN,
   type Visit,
   visible,
   type Word,
@@ -72,9 +73,10 @@ const COPIERS = new Set(["cp", "ditto", "rsync"])
 // The placers whose -t or --target-directory names the folder they place into; rsync's -t keeps times.
 const TARGET_FLAG = new Set(["cp", "install", "ln", "mv"])
 
-// Programs that write or change every file operand they name (a mode, an owner, a compressed copy in its place), so an operand the hook cannot read is a write position.
+// Programs that write or change every file operand they name (a mode, an owner, a flag, a compressed copy in its place), so an operand the hook cannot read is a write position.
 const WRITERS = new Set([
   "bzip2",
+  "chflags",
   "chgrp",
   "chmod",
   "chown",
@@ -83,6 +85,7 @@ const WRITERS = new Set([
   "install",
   "ln",
   "mv",
+  "pigz",
   "rm",
   "shred",
   "tee",
@@ -90,6 +93,7 @@ const WRITERS = new Set([
   "truncate",
   "unlink",
   "xz",
+  "zstd",
 ])
 
 // Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
@@ -107,9 +111,9 @@ const CODE_RUNNERS = new Set([
   "ruby",
 ])
 
-// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 const writesCode = (code: string) =>
@@ -146,6 +150,17 @@ const namesRoster = (text: string, targets: string[]) => {
   )
 }
 
+// Whether code names the roster's folder and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
+const namesApart = (text: string, targets: string[]) => {
+  const plain = text.replace(/["'\\]/g, "").toLowerCase()
+  if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain)) return false
+  return (
+    targets.some((t) =>
+      new RegExp(`${dirname(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain),
+    ) || /\.playground(?![\w.-])|playground_data_dir/.test(plain)
+  )
+}
+
 // A word as the shell runs it: one the lexer could not read is lexed again with the variables the call has set by then, else it stays unread.
 const readOf = (word: Word, at: Env): { glob?: boolean; value: string } | undefined => {
   if (!marked(word.value)) return word
@@ -158,10 +173,12 @@ const readOf = (word: Word, at: Env): { glob?: boolean; value: string } | undefi
   return again && !marked(again.value) ? again : undefined
 }
 
-// The literal text after a word's last expansion as written, quotes removed: `.md` for `brief-$name.md`, empty for `$F` or `"$(cmd)"`.
+// The literal text after a word's last expansion as written, quotes removed: `.md` for `brief-$name.md`, empty for `$F`, `"$(cmd)"` or an xargs -I item a shell's script was filled with unread (UNKNOWN).
 const tailOf = (source: string): string => {
   const text = source.replace(/["']/g, "")
   const at = text.lastIndexOf("$")
+  const filled = text.lastIndexOf(UNKNOWN)
+  if (filled > at) return text.slice(filled + 1)
   if (at < 0) return text
   const rest = text.slice(at + 1)
   if (rest[0] === "{") return rest.slice(rest.indexOf("}") + 1)
@@ -198,7 +215,7 @@ const sortOutputs = (args: Word[]): Word[] =>
     if (a.value === "--output") return next
     if (a.value.startsWith("--output=")) return own(a.value.slice("--output=".length))
     const short = /^-[A-Za-z]*o(.*)$/.exec(a.value)
-    if (!short || a.value.startsWith("--")) return []
+    if (!short) return []
     return short[1] ? own(short[1]) : next
   })
 
@@ -371,12 +388,25 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       mark
         ? items.map((item) => args.map((a) => (a.value.includes(mark) ? fill(a, mark, item) : a)))
         : [[...args, ...items]]
+    // an -I string placing an item right after a folder holding the roster (`<data folder>/{}`) reaches toward it, whatever feeds the input
+    const intoFolder =
+      !!mark &&
+      args.some((a) =>
+        a.value
+          .split(mark)
+          .slice(0, -1)
+          .some((before) => {
+            const folder = before.slice(before.search(/[^\s"'=]*$/))
+            return folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at)
+          }),
+      )
+    const unseenReach = () => intoFolder || unseenHolds(at)
     if (isFind(cmd.stdin)) return reaches(cmd.stdin!.words.slice(1), at) ? put([roster]) : []
     const input = await stdinOf(cmd, at)
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
-      return unseenHolds(at) ? put([unseenRoster]) : []
+      return unseenReach() ? put([unseenRoster]) : []
     const items = itemsOf(input.value, xargs)
-    if (items.length > ITEMS) return unseenHolds(at) ? put([unseenRoster]) : []
+    if (items.length > ITEMS) return unseenReach() ? put([unseenRoster]) : []
     return items.length ? put(items) : []
   }
   const visit: Visit = async (cmd, parsed, at) => {
@@ -442,7 +472,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     }
     if (
       CODE_RUNNERS.has(tool) &&
-      args.some((a) => namesRoster(a.value, targets) && writesCode(a.value))
+      args.some(
+        (a) =>
+          (namesRoster(a.value, targets) || namesApart(a.value, targets)) && writesCode(a.value),
+      )
     )
       return refuse(`${tool} code that names the roster and holds a write word`)
     if (PLACERS.has(tool)) {

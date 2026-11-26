@@ -19713,7 +19713,7 @@ import { resolve as resolve15 } from "path";
 // scripts/hooks/no-roster-write.ts
 import { realpathSync as realpathSync7 } from "fs";
 import { homedir as homedir5 } from "os";
-import { basename as basename11, resolve as resolve14 } from "path";
+import { basename as basename11, dirname as dirname11, resolve as resolve14 } from "path";
 var refuse15 = (what) => `no-roster-write hook refuses ${what}: the live roster changes only through scripts/roster.ts (the roster rule), so every reader sees it whole. Write it with bun scripts/roster.ts set <name> <key>=<value>, and read it with cat, jq or grep.`;
 var READERS4 = new Set([
   "[",
@@ -19757,6 +19757,7 @@ var COPIERS2 = new Set(["cp", "ditto", "rsync"]);
 var TARGET_FLAG = new Set(["cp", "install", "ln", "mv"]);
 var WRITERS2 = new Set([
   "bzip2",
+  "chflags",
   "chgrp",
   "chmod",
   "chown",
@@ -19765,13 +19766,15 @@ var WRITERS2 = new Set([
   "install",
   "ln",
   "mv",
+  "pigz",
   "rm",
   "shred",
   "tee",
   "touch",
   "truncate",
   "unlink",
-  "xz"
+  "xz",
+  "zstd"
 ]);
 var CODE_RUNNERS = new Set([
   "awk",
@@ -19786,7 +19789,7 @@ var CODE_RUNNERS = new Set([
   "python3",
   "ruby"
 ]);
-var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
+var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {
@@ -19809,6 +19812,12 @@ var namesRoster = (text, targets) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase();
   return targets.some((t) => new RegExp(`${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /(?:\.playground|playground_data_dir\}?)\/+roster\.json(?![\w.-])/.test(plain);
 };
+var namesApart = (text, targets) => {
+  const plain = text.replace(/["'\\]/g, "").toLowerCase();
+  if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain))
+    return false;
+  return targets.some((t) => new RegExp(`${dirname11(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`).test(plain)) || /\.playground(?![\w.-])|playground_data_dir/.test(plain);
+};
 var readOf = (word, at) => {
   if (!marked(word.value))
     return word;
@@ -19825,6 +19834,9 @@ var readOf = (word, at) => {
 var tailOf = (source) => {
   const text = source.replace(/["']/g, "");
   const at = text.lastIndexOf("$");
+  const filled = text.lastIndexOf(UNKNOWN);
+  if (filled > at)
+    return text.slice(filled + 1);
   if (at < 0)
     return text;
   const rest = text.slice(at + 1);
@@ -19852,7 +19864,7 @@ var sortOutputs = (args) => args.flatMap((a, i) => {
   if (a.value.startsWith("--output="))
     return own(a.value.slice("--output=".length));
   const short = /^-[A-Za-z]*o(.*)$/.exec(a.value);
-  if (!short || a.value.startsWith("--"))
+  if (!short)
     return [];
   return short[1] ? own(short[1]) : next;
 });
@@ -19993,14 +20005,19 @@ async function judgeBash(command, cwd, environment) {
       return word;
     };
     const put = (items) => mark ? items.map((item) => args.map((a) => a.value.includes(mark) ? fill(a, mark, item) : a)) : [[...args, ...items]];
+    const intoFolder = !!mark && args.some((a) => a.value.split(mark).slice(0, -1).some((before) => {
+      const folder = before.slice(before.search(/[^\s"'=]*$/));
+      return folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at);
+    }));
+    const unseenReach = () => intoFolder || unseenHolds(at);
     if (isFind(cmd.stdin))
       return reaches(cmd.stdin.words.slice(1), at) ? put([roster]) : [];
     const input = await stdinOf(cmd, at);
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
-      return unseenHolds(at) ? put([unseenRoster]) : [];
+      return unseenReach() ? put([unseenRoster]) : [];
     const items = itemsOf(input.value, xargs);
     if (items.length > ITEMS)
-      return unseenHolds(at) ? put([unseenRoster]) : [];
+      return unseenReach() ? put([unseenRoster]) : [];
     return items.length ? put(items) : [];
   };
   const visit = async (cmd, parsed, at) => {
@@ -20057,7 +20074,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && writesCode(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets)) && writesCode(a.value)))
       return refuse15(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
