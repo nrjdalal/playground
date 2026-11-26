@@ -259,6 +259,25 @@ describe("roster.ts and every read run", () => {
     "chflags uchg /tmp/x",
     "zstd --rm /tmp/x",
     "pigz /tmp/x",
+    // #3130: twins of its refused forms on a scratch folder or another file, and reads beside them
+    `D=${DATA}/scratch/w; ls $D | xargs -I{} rm $D/{}`,
+    `D=${DATA}/scratch/w; rm $D/$f`,
+    `D=${DATA}; ls $D | xargs -I{} cat $D/{}`,
+    `export D=/tmp/w; cat /tmp/no-such-names.txt | xargs -I{} rm "$D/{}"`,
+    `cat /tmp/no-such-names.txt | xargs sh -c 'cd ${DATA}/scratch/w && rm "$@"' _`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'cd ${DATA}/scratch/w && rm {}'`,
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'cd ${DATA} && cat {}'`,
+    `cd ${DATA}/scratch/w && python3 -c "import os; os.remove('roster.json')"`,
+    `cd ${DATA} && python3 -c "print(open('roster.json').read())"`,
+    `cd ${DATA} && node -e "console.log(require('fs').statSync('roster.json').mode)"`,
+    `cd ${DATA} && python3 -c "import os; print(os.stat('roster.json').st_mode)"`,
+    `python3 -c "import os; os.replace('/tmp/x', '/tmp/y')"`,
+    `node -e "const r = require('${ROSTER}'); console.log(JSON.stringify(r).replace('a', 'b'))"`,
+    `python3 -c "import shutil; shutil.copy('${ROSTER}', '/tmp/r')"`,
+    `node -e "require('fs').copyFileSync('${ROSTER}', '/tmp/r')"`,
+    `chmod -R 755 ${DATA}/scratch/w`,
+    "gzip -r /tmp/w",
+    `chown -R x ${DATA}/scratch/w`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
