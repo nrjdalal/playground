@@ -534,6 +534,34 @@ describe("ship:yard's schema source parsers", () => {
     })
   })
 
+  test("decisionSource carries a schema decision's shape, the preview step 0 posts", () => {
+    const read = {
+      kind: "decision",
+      preview: { shape: "drop yard_bot.token, in 0020_alpha.sql", type: "schema" },
+      status: "approved",
+      title: "Yard bot tokens",
+    }
+    expect(decisionSource(JSON.stringify(read))).toEqual({
+      approved: true,
+      kind: "decision",
+      text: "Yard bot tokens\ndrop yard_bot.token, in 0020_alpha.sql",
+    })
+  })
+
+  test("decisionSource carries an ask decision's text", () => {
+    const read = {
+      kind: "decision",
+      preview: { text: "rename in 0021_beta.sql", type: "ask" },
+      status: "approved",
+      title: "A rename",
+    }
+    expect(decisionSource(JSON.stringify(read))).toEqual({
+      approved: true,
+      kind: "decision",
+      text: "A rename\nrename in 0021_beta.sql",
+    })
+  })
+
   test("prSource carries the merge commit's sha", () => {
     const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
       mergeCommit: { oid: "aaa111" },

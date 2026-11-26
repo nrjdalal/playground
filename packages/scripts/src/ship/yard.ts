@@ -120,14 +120,19 @@ export const prSource = (json: string): SchemaSource | null => {
   return { dumpPath, kind: "pr", merged: read.state === "MERGED", mergeSha, shapeReview }
 }
 
-// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it and its title and preview text, the words approved: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
+// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it and the words approved, its title and its preview's text or a schema decision's shape: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
 export const decisionSource = (json: string): SchemaSource | null => {
   const read = safeParse(json)
   if (!read || typeof read !== "object" || (read as { kind?: string }).kind !== "decision")
     return null
-  const item = read as { preview?: { text?: unknown } | string; status?: string; title?: unknown }
-  const preview = typeof item.preview === "string" ? item.preview : item.preview?.text
-  const text = [item.title, preview].filter((part) => typeof part === "string").join("\n")
+  const item = read as {
+    preview?: { shape?: unknown; text?: unknown }
+    status?: string
+    title?: unknown
+  }
+  const text = [item.title, item.preview?.text, item.preview?.shape]
+    .filter((part) => typeof part === "string")
+    .join("\n")
   return { approved: item.status === "approved", kind: "decision", text }
 }
 
