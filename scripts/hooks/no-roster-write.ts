@@ -96,7 +96,7 @@ const WRITERS = new Set([
   "zstd",
 ])
 
-// Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
+// Programs that run inline code the hook does not parse: code naming the roster, or its folder and a bare roster.json apart, runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
   "awk",
   "bun",
@@ -281,6 +281,8 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   const unseen = new WeakSet<Word>()
   const unseenRoster: Word = { ...roster }
   unseen.add(unseenRoster)
+  // the words an xargs -I filled with an unseen item right after the roster's folder, which code may name the roster by
+  const intoRoster = new WeakSet<Word>()
   const toolOf = (name: string) => {
     const prog = program(name)
     // GNU coreutils, find and sed under their g-prefixed names (gmv, gtee, gfind, gsed) run as the plain ones
@@ -370,9 +372,24 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     if (items.length > ITEMS) return viaXargs && unseenHolds(at)
     return namesRoster(out.value, targets) || items.some((w) => writes(w, at))
   }
-  // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see (unread, or past ITEMS items) where unseenHolds.
+  // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see (unread, or past ITEMS items) where unseenHolds, and for unseen input, a find's included, that the -I string places right after the roster's folder.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
+    // an -I string placing an item right after a folder holding the roster (`<data folder>/{}`, or the folder spelled in code as `$ENV{HOME}/.playground/{}`) reaches toward it, whatever feeds the input
+    const intoFolderOf = (a: Word) =>
+      !!mark &&
+      a.value
+        .split(mark)
+        .slice(0, -1)
+        .some((before) => {
+          const folder = before.slice(before.search(/[^\s"'=]*$/))
+          if (folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at))
+            return true
+          return /(?:\.playground|playground_data_dir\W*)\/$/.test(
+            before.replace(/["']/g, "").toLowerCase(),
+          )
+        })
+    const intoFolder = args.some(intoFolderOf)
     const fill = (a: Word, mark: string, item: Word): Word => {
       // an unseen item right after a folder in the -I string may be any name in it (`xargs -I{} rm <data folder>/{}`)
       const anyName = unseen.has(item) && a.value.slice(0, a.value.indexOf(mark)).endsWith("/")
@@ -384,26 +401,19 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         value: a.value.replaceAll(mark, anyName ? "*" : item.value),
       }
       if (unseen.has(item)) unseen.add(word)
+      if (unseen.has(item) && intoFolderOf(a)) intoRoster.add(word)
       return word
     }
     const put = (items: Word[]): Word[][] =>
       mark
         ? items.map((item) => args.map((a) => (a.value.includes(mark) ? fill(a, mark, item) : a)))
         : [[...args, ...items]]
-    // an -I string placing an item right after a folder holding the roster (`<data folder>/{}`) reaches toward it, whatever feeds the input
-    const intoFolder =
-      !!mark &&
-      args.some((a) =>
-        a.value
-          .split(mark)
-          .slice(0, -1)
-          .some((before) => {
-            const folder = before.slice(before.search(/[^\s"'=]*$/))
-            return folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at)
-          }),
-      )
     const unseenReach = () => intoFolder || unseenHolds(at)
-    if (isFind(cmd.stdin)) return reaches(cmd.stdin!.words.slice(1), at) ? put([roster]) : []
+    if (isFind(cmd.stdin))
+      return [
+        ...(reaches(cmd.stdin!.words.slice(1), at) ? put([roster]) : []),
+        ...(intoFolder ? put([unseenRoster]) : []),
+      ]
     const input = await stdinOf(cmd, at)
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
       return unseenReach() ? put([unseenRoster]) : []
@@ -476,7 +486,8 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       CODE_RUNNERS.has(tool) &&
       args.some(
         (a) =>
-          (namesRoster(a.value, targets) || namesApart(a.value, targets)) && writesCode(a.value),
+          (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a)) &&
+          writesCode(a.value),
       )
     )
       return refuse(`${tool} code that names the roster and holds a write word`)

@@ -36,6 +36,38 @@ export const groups: Group[] = [
         "cat /tmp/no-such-names.txt | xargs -I{} sh -c 'rm ~/.playground/{}'",
       ],
       [
+        "a find's printed names into an xargs -I string that removes each name in the data folder",
+        "find /tmp/no-such-dir -name roster.json -printf '%f\\n' | xargs -I{} rm ~/.playground/{}",
+      ],
+      [
+        "a find's basenames into an xargs -I string that removes each name in the data folder",
+        "find /tmp/no-such-dir -type f -exec basename {} \\; | xargs -I{} rm ~/.playground/{}",
+      ],
+      [
+        "a find's paths into an xargs -I string that removes each one under the data folder",
+        "find /tmp/no-such-dir -type f | xargs -I{} rm ~/.playground/{}",
+      ],
+      [
+        "a names file into an xargs -I python3 whose code removes each name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('$HOME/.playground/{}')"`,
+      ],
+      [
+        "a names file into an xargs -I node whose code unlinks each name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} node -e "require('fs').unlinkSync('$HOME/.playground/{}')"`,
+      ],
+      [
+        "a names file into an xargs -I perl whose code unlinks each name in the data folder by its HOME",
+        `cat /tmp/no-such-names.txt | xargs -I{} perl -e 'unlink "$ENV{HOME}/.playground/{}"'`,
+      ],
+      [
+        "a names file into an xargs -I ruby whose code deletes each name in the data folder by its HOME",
+        `cat /tmp/no-such-names.txt | xargs -I{} ruby -e 'File.delete(ENV["HOME"] + "/.playground/{}")'`,
+      ],
+      [
+        "a names file into an xargs -I bun whose code writes over each name in the data folder",
+        `cat /tmp/no-such-names.txt | xargs -I{} bun -e "await Bun.write('$HOME/.playground/{}', '')"`,
+      ],
+      [
         "a names file into a while read loop that removes each name in the data folder",
         "cat /tmp/no-such-names.txt | while read f; do rm ~/.playground/$f; done",
       ],

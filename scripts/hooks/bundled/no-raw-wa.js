@@ -3741,6 +3741,7 @@ async function judgeBash(command, cwd, environment) {
   const unseen = new WeakSet;
   const unseenRoster = { ...roster };
   unseen.add(unseenRoster);
+  const intoRoster = new WeakSet;
   const toolOf = (name) => {
     const prog = program(name);
     return /^g./.test(prog) && KNOWN.has(prog.slice(1)) ? prog.slice(1) : prog;
@@ -3811,6 +3812,13 @@ async function judgeBash(command, cwd, environment) {
   };
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
+    const intoFolderOf = (a) => !!mark && a.value.split(mark).slice(0, -1).some((before) => {
+      const folder = before.slice(before.search(/[^\s"'=]*$/));
+      if (folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at))
+        return true;
+      return /(?:\.playground|playground_data_dir\W*)\/$/.test(before.replace(/["']/g, "").toLowerCase());
+    });
+    const intoFolder = args.some(intoFolderOf);
     const fill = (a, mark, item) => {
       const anyName = unseen.has(item) && a.value.slice(0, a.value.indexOf(mark)).endsWith("/");
       const word = {
@@ -3822,16 +3830,17 @@ async function judgeBash(command, cwd, environment) {
       };
       if (unseen.has(item))
         unseen.add(word);
+      if (unseen.has(item) && intoFolderOf(a))
+        intoRoster.add(word);
       return word;
     };
     const put = (items) => mark ? items.map((item) => args.map((a) => a.value.includes(mark) ? fill(a, mark, item) : a)) : [[...args, ...items]];
-    const intoFolder = !!mark && args.some((a) => a.value.split(mark).slice(0, -1).some((before) => {
-      const folder = before.slice(before.search(/[^\s"'=]*$/));
-      return folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at);
-    }));
     const unseenReach = () => intoFolder || unseenHolds(at);
     if (isFind(cmd.stdin))
-      return reaches(cmd.stdin.words.slice(1), at) ? put([roster]) : [];
+      return [
+        ...reaches(cmd.stdin.words.slice(1), at) ? put([roster]) : [],
+        ...intoFolder ? put([unseenRoster]) : []
+      ];
     const input = await stdinOf(cmd, at);
     if (xargs.files?.length || xargs.delimiters?.includes(undefined) || marked(input.value))
       return unseenReach() ? put([unseenRoster]) : [];
@@ -3894,7 +3903,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets)) && writesCode(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a)) && writesCode(a.value)))
       return refuse(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
