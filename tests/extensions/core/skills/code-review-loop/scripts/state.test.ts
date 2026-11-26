@@ -1473,9 +1473,11 @@ test("10t a Python repo lists each test importing a changed module by its dotted
     "src/pkg/a.py": "def f():\n    pass\n",
     "src/pkg/b.py": "def g():\n    pass\n",
     "src/pkg/sub/__init__.py": "def h():\n    pass\n",
+    "tests/test_continued.py": "from pkg import b, \\\n    a\n",
     "tests/test_from.py": "from pkg.a import f\n",
     "tests/test_import.py": "import pkg.a\n",
     "tests/test_inside.py": "def test_f():\n    from pkg.a import f\n    f()\n",
+    "tests/test_noqa.py": "from pkg import (\n    b,  # noqa\n    a,\n)\n",
     "tests/test_other.py":
       "from pkg.b import g\nimport pkg.b\nfrom pkg import b\nfrom pkg.ab import x\n# from pkg.a import f\n",
     "tests/test_parent.py": "from pkg import (\n    a,\n)\n",
@@ -1486,9 +1488,11 @@ test("10t a Python repo lists each test importing a changed module by its dotted
   const out = touched(repo)
   expect(out.code, out.stderr).toBe(0)
   expect(out.listed).toEqual([
+    "tests/test_continued.py",
     "tests/test_from.py",
     "tests/test_import.py",
     "tests/test_inside.py",
+    "tests/test_noqa.py",
     "tests/test_parent.py",
   ])
   writeFiles(repo, { "src/pkg/sub/__init__.py": "def h():\n    return 1\n" })

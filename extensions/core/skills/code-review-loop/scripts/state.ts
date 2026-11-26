@@ -902,8 +902,9 @@ export const dottedName = (path: string): string | undefined => {
   return parts.length && parts.every((p) => /^[A-Za-z_]\w*$/.test(p)) ? parts.join(".") : undefined
 }
 
-// A Python text imports mod by `from mod import f`, `import mod` or `from parent import leaf`, at any indent; a submodule's import counts for its package, since it runs the package's __init__.py
-export const importsModule = (text: string, mod: string): boolean => {
+// A Python text imports mod by `from mod import f`, `import mod` or `from parent import leaf`, at any indent, its comments and backslash continuations read out first; a submodule's import counts for its package, since it runs the package's __init__.py
+export const importsModule = (source: string, mod: string): boolean => {
+  const text = source.replace(/#[^\n]*/g, "").replace(/\\\n/g, " ")
   const name = mod.replaceAll(".", "\\.")
   const direct = new RegExp(
     `^[ \\t]*(?:from[ \\t]+|import[ \\t]+(?:[\\w.]+(?:[ \\t]+as[ \\t]+\\w+)?[ \\t]*,[ \\t]*)*)${name}(?!\\w)`,
