@@ -18,7 +18,13 @@ describe("under the gates it spawns", () => {
       `You are ${OLD.dispatcher}, the Playground factory's dispatcher; ${OLD.ops} briefs you`,
     )
     expect(command).not.toContain("Report to")
-    expect(r.roster).toEqual(["set", OLD.dispatcher, "kind=dispatcher", "task=h.md", "memory=on"])
+    expect(r.roster).toEqual([
+      "set",
+      OLD.dispatcher,
+      "kind=dispatcher",
+      "task=~/.playground/h.md",
+      "memory=on",
+    ])
   })
 
   test("a manager's column names it once: a lead reports to the dispatcher", async () => {
@@ -163,7 +169,7 @@ describe("under the gates it spawns", () => {
       "prs+=1",
       "pr=1",
       "title=Plain test work",
-      "task=b.md",
+      "task=~/.playground/b.md",
       "memory=off",
     ])
   })
@@ -174,16 +180,16 @@ describe("under the gates it spawns", () => {
   })
   test.each([
     [
-      "a worker takes its brief's file name",
+      "a worker takes its brief's path in the data folder",
       ["worker", "worker-brave-otter", "b-op-x.md"],
       {},
-      ["task=b-op-x.md"],
+      ["task=~/.playground/b-op-x.md"],
     ],
     [
-      "a probe takes its brief's file name",
+      "a probe takes its brief's path in the data folder",
       ["column", "probe", "probe-api", OLD.ops, "w1:p2", "p.md"],
       {},
-      ["task=p.md"],
+      ["task=~/.playground/p.md"],
     ],
     [
       "a resumed lead takes its role and name",
@@ -302,8 +308,13 @@ describe("under the gates it spawns", () => {
     ["resume", { prs: [PR_A], status: "working" }, [`prs+=${PR_B}`, `pr=${PR_B}`]],
     ["column", { pr: PR_A, prs: [PR_A], status: "working" }, [`prs+=${PR_B}`]],
     ["resume", { pr: PR_A, prs: [PR_A], status: "working" }, [`prs+=${PR_B}`]],
+    [
+      "column",
+      { prs: [PR_A], status: "parked" },
+      ["status=starting", `prs+=${PR_B}`, `pr=${PR_B}`],
+    ],
   ] as [string, object | null, string[]][])(
-    "a checker's %s on a live row, or none, naming PR B adds it to prs, as assign does, and gives a row with no pr PR B as its pr: %p (#1135)",
+    "a checker's %s on any other row, a parked one included, or none, naming PR B adds it to prs, as assign does, and gives a row with no pr PR B as its pr: %p (#1135)",
     async (mode, row, sets) => {
       const r = await checkerStart(mode, row, ["--pr", PR_B])
       expect(r.code).toBe(0)

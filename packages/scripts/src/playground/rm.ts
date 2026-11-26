@@ -1,6 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir, hostname } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path"
 
 import { managerOf } from "@packages/config/kinds"
 import { cloneOf } from "@packages/config/org"
@@ -40,7 +47,7 @@ import { liveBranch } from "./probe"
 import { removeSet, shardSet } from "./shards"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--card <id> [--peer <machine>]] [--reason "<why>"] | --worktree <path> [--discard] [--pr <url>] [--reason "<why>"] | --stray <path> [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
@@ -52,11 +59,26 @@ export type RmArgs =
       peer?: string
       pr?: string
       reason: string
+      stray?: true
       worktree: boolean
     }
 
-// playground rm's words: one path with an optional --card, or --worktree's with an optional --discard and an optional --pr, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path with an optional --card, --worktree's with an optional --discard and an optional --pr, or --stray's, each with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
+  const stray = words[0] === "--stray"
+  if (stray) {
+    const rest = words.slice(2)
+    const reasoned = rest.length === 2 && rest[0] === "--reason"
+    return words.length >= 2 && !words[1]!.startsWith("--") && (rest.length === 0 || reasoned)
+      ? {
+          discard: false,
+          path: words[1]!,
+          reason: reasoned ? rest[1]! : "playground rm",
+          stray: true,
+          worktree: false,
+        }
+      : { error: RM_USAGE }
+  }
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
@@ -451,6 +473,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("restore" in args) {
+    const caller = kept?.stray ? await strayCaller(deps, "restored") : null
+    if (caller && "refused" in caller) {
+      console.error(`playground: ${caller.refused}`)
+      return 1
+    }
     const done = restore(args.restore, roots)
     if ("refused" in done) {
       if (done.kind !== "refused") deps.notify(`restore: ${done.refused}`)
@@ -470,6 +497,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const folders = (await readRecord(deps.data).catch(() => ({ entries: [] }))).entries
     .filter((e) => e.kind === "folder")
     .map((e) => e.path)
+  if (args.stray) return removeStray(args, roots, deps)
   if (args.card !== undefined) {
     if (!CARD_ID.test(args.card)) {
       console.error(`playground: ${args.card} is not an Inbox card id`)
@@ -613,6 +641,85 @@ async function removeApproved(
     ? `its machine record ${drop.length > 1 ? "entries are" : "entry is"} dropped`
     : ""
   console.log(suffix ? `${line}; ${suffix}` : line)
+  return 0
+}
+
+// Why an untracked stray in the main checkout may not go by --stray, or null: a path written relative or as a symlink, outside the main checkout, the checkout itself, its .git, its worktrees folder or a folder holding it, whatever the ignore rules say, or one git tracks or ignores, a file in it included (issue 3083).
+export const strayRefusal = (path: string, main: string): string | null => {
+  if (!isAbsolute(path)) return `${path} is not an absolute path`
+  const info = lstatSync(path, { throwIfNoEntry: false })
+  if (!info) return `no such path ${path}`
+  if (info.isSymbolicLink()) return `${path} is a symlink`
+  const rel = relative(realpathSync(main), join(realpathSync(dirname(path)), basename(path)))
+  if (!rel || rel.startsWith("..") || isAbsolute(rel))
+    return `${path} is not inside the main checkout ${main}`
+  const worktrees = join(".claude", "worktrees")
+  const under = (folder: string) => rel === folder || rel.startsWith(folder + sep)
+  if (under(".git") || under(worktrees) || worktrees.startsWith(rel + sep))
+    return `${path} is git's own folder, the worktrees folder or a folder holding it, never a stray`
+  if (gitIn(main, "ls-files", "--", rel).out) return `${path} holds a file git tracks`
+  if (gitIn(main, "check-ignore", "-q", "--", rel).ok) return `${path} is one git ignores`
+  const ignored = gitIn(
+    main,
+    "status",
+    "--porcelain",
+    "--ignored",
+    "--untracked-files=all",
+    "--",
+    rel,
+  )
+  if (!ignored.ok || ignored.out.split("\n").some((line) => line.startsWith("!!")))
+    return `${path} holds a file git ignores`
+  return null
+}
+
+// The session, when it holds the roster's ops seat, which --stray and a stray's restore take (issue 3083); else the refusal, done naming what no stray is.
+const strayCaller = async (
+  deps: RmDeps,
+  done: string,
+): Promise<{ session: string } | { refused: string }> => {
+  const session = await deps.session()
+  let ops: string
+  try {
+    ops = managerOf(
+      (JSON.parse(readFileSync(join(deps.data, "roster.json"), "utf8")) as { agents?: unknown })
+        .agents,
+      "ops",
+    )
+  } catch (error) {
+    return {
+      refused: `the roster cannot be read (${(error as Error).message}), so no stray is ${done}`,
+    }
+  }
+  return session === ops
+    ? { session }
+    : {
+        refused: `--stray and a stray's restore are for ${ops}, the Ops lead, alone, and this session is ${session}`,
+      }
+}
+
+// playground rm --stray: Ops' one way to move an untracked stray in the main checkout to the trash, a file or a folder git neither tracks nor ignores, through quarantine's checks and caps; every other caller, and plain playground rm for Ops too, keeps the main checkout's refusal (issue 3083).
+async function removeStray(
+  args: { path: string; reason: string },
+  roots: Roots,
+  deps: RmDeps,
+): Promise<number> {
+  const caller = await strayCaller(deps, "removed")
+  const why = "refused" in caller ? caller.refused : strayRefusal(args.path, deps.main)
+  if (why || "refused" in caller) {
+    console.error(`playground: ${why}`)
+    return 1
+  }
+  const { session } = caller
+  const done = quarantine(args.path, { reason: args.reason, session, stray: true }, roots)
+  if ("refused" in done) {
+    if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
+    console.error(`playground: ${done.refused}`)
+    return 1
+  }
+  console.log(
+    `Moved to the trash as ${done.id} (${done.files} files); playground rm --restore ${done.id} brings it back`,
+  )
   return 0
 }
 

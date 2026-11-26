@@ -85,6 +85,7 @@ export type TrashEntry = {
   reason: string
   session: string
   size: number
+  stray?: true
   stripped?: number
 }
 
@@ -379,7 +380,12 @@ const approvedRefusal = (path: string, approved: Approved): string | null => {
     : `${path} holds ${now} bytes, and card ${approved.card} approved it at ${approved.bytes}: its size changed, so it stays; the next card names it at its new size`
 }
 
-const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string | null => {
+const whyProtected = (
+  path: string,
+  roots: Roots,
+  ownScratch: string[],
+  strayPath?: string,
+): string | null => {
   const held = whyHolds(path, roots)
   if (held) return held
   const main = real(roots.main)
@@ -389,17 +395,22 @@ const whyProtected = (path: string, roots: Roots, ownScratch: string[]): string 
       if (ownScratch.some((own) => inside(path, own))) return null
       return `${path} is inside the protected ${root}`
     }
-  if (inside(path, main) && !path.startsWith(worktreesOf(roots) + sep))
+  if (
+    inside(path, main) &&
+    !path.startsWith(worktreesOf(roots) + sep) &&
+    !(strayPath && path !== main && inside(path, strayPath))
+  )
     return `${path} is inside the main checkout ${main}`
   return null
 }
 
-// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file, its own memory settings file and a note directly in its own memory folder, MEMORY.md aside (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else.
+// Why a path may not be deleted, or null: checked at the path's own place and at its symlink's target. A session's name exempts its own two scratch folders, its own loose scratch file, its own memory settings file and a note directly in its own memory folder, MEMORY.md aside (ownScratchOf), and the paths in `ended`, ended sessions' scratch and scratchpad folders (endedPadOf), gone sessions' entries directly in scratch/ (goneScratchOf) and the retired data folders (retiredOf), and nothing else; with stray, the path itself is exempt from the main checkout's refusal alone, as playground rm --stray checked it untracked (issue 3083).
 export function isProtected(
   path: string,
   roots: Roots,
   session?: string,
   ended: string[] = [],
+  stray?: true,
 ): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
@@ -407,7 +418,10 @@ export function isProtected(
     ...(session === undefined ? [] : ownScratchOf(real(roots.home), session, own)),
     ...ended,
   ]
-  return whyProtected(own, roots, scratch) ?? whyProtected(real(abs), roots, scratch)
+  const exempt = stray ? own : undefined
+  return (
+    whyProtected(own, roots, scratch, exempt) ?? whyProtected(real(abs), roots, scratch, exempt)
+  )
 }
 
 // The first symlink on the way from base down a carve-out's folder, a path relative to base.
@@ -453,8 +467,9 @@ const carveOutOf = (
   table: Record<string, CarveOut>,
   session?: string,
   ended: string[] = [],
+  stray?: true,
 ): CarveOut | Refusal | null => {
-  const why = isProtected(path, roots, session, ended)
+  const why = isProtected(path, roots, session, ended, stray)
   if (!why) return null
   const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
   return typeof found === "string"
@@ -592,6 +607,8 @@ export function quarantine(
     git?: WorktreeGit
     reason: string
     session: string
+    // playground rm --stray's path, checked untracked and unignored there: exempt from the main checkout's refusal alone (issue 3083)
+    stray?: true
     worktree?: Holders
   },
   roots: Roots,
@@ -614,10 +631,15 @@ export function quarantine(
     (live && SCRATCH_DIRS.map((dir) => endedPadOf(abs, roots.home, live, dir)).find(Boolean)) ||
     (opts.gone && goneScratchOf(abs, roots.home)) ||
     retiredOf(abs, roots.home)
-  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS, opts.session, [
-    ...(ended ? [ended] : []),
-    ...(rehearsal ? [rehearsal] : []),
-  ])
+  const carve = carveOutOf(
+    abs,
+    opts.carveOut,
+    roots,
+    io.carveOuts ?? CARVE_OUTS,
+    opts.session,
+    [...(ended ? [ended] : []), ...(rehearsal ? [rehearsal] : [])],
+    opts.stray,
+  )
   if (carve && "refused" in carve) return carve
   const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
@@ -720,6 +742,7 @@ export function quarantine(
     reason: opts.reason,
     session: opts.session,
     size,
+    ...(opts.stray ? { stray: true as const } : {}),
     ...(stripped.length ? { stripped: stripped.length } : {}),
   }
   appendFileSync(join(trash, batch, "manifest.jsonl"), `${JSON.stringify(entry)}\n`)
@@ -741,7 +764,7 @@ export function listTrash(trash: string): TrashEntry[] {
     .filter((entry) => existsSync(join(trash, entry.id)))
 }
 
-// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder), one anything stands at, and one whose folder is gone.
+// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder, and a --stray item back to its own place in the main checkout), one anything stands at, and one whose folder is gone.
 export function restore(
   id: string,
   roots: Roots,
@@ -783,7 +806,15 @@ export function restore(
       )
     back = [entry.path]
   }
-  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts, entry.session, back)
+  const carve = carveOutOf(
+    entry.path,
+    entry.carveOut,
+    roots,
+    carveOuts,
+    entry.session,
+    back,
+    entry.stray,
+  )
   if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))

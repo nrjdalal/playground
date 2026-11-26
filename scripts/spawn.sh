@@ -40,7 +40,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore, close or read, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM or the local model, which map every model themselves, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore, close or read, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on a live row, or none, it joins them and gives a row with no pr the first pull request named
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PRs the checker serves, each by its URL or its number alone, with an issue's URL beside a pull request for a PR not yet opened, or an extension item it scores as <scope>/<kind>/<key>; a reviewer's or tester's start is refused unless it names a pull request or an extension item, and its roster row records it before the pane opens; on an ended roster row it replaces the row's prs, and its pr with the first pull request named; on any other row, a parked one included, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --memory <dir>     with any mode but restore, close or read, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial; --memory off launches with memory off on the shared file, whatever arm the role or the row would take
@@ -2537,7 +2537,7 @@ write_row() {
   set -- set "$NAME" "kind=$KIND"
   # A resume, or a start that reuses an ended name, runs the session again, so a row close or auto-end ended, one marked done, or one parked while its start waited, reads starting once more (roster.ts drops a parked row's hold as it leaves parked); a live row keeps its status, and so does restore's resume, whose row a close can end mid-launch.
   [[ $(roster_field "$NAME" status) =~ ^(done|ended|parked)$ ]] && [ -z "${SPAWN_RESTORING:-}" ] && set -- "$@" "status=starting"
-  # A checker's --pr replaces an ended or done row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+  # A checker's --pr replaces an ended or done row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named; on any other row, a parked one included, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
   if [ -n "$PR_ARG" ]; then
     first_pull=
     IFS=, read -ra prs_named <<<"$PR_ARG"
@@ -2573,8 +2573,8 @@ write_row() {
   elif [ "$ROLE" = runner ]; then
     TITLE=$NAME
   fi
-  # The dashboard drops an entry with no task, so a new one takes its brief's name, else its role and name; a respawned one keeps its own.
-  if [ -n "$BRIEF" ]; then TASK=$BRIEF; else TASK="$ROLE $NAME"; fi
+  # The dashboard drops an entry with no task, so a new one takes its brief's path in the data folder, as the first prompt names it, since a session rereads its task from the main checkout (issue 3083), else its role and name; a respawned one keeps its own.
+  if [ -n "$BRIEF" ]; then TASK="$SHOWN/$BRIEF"; else TASK="$ROLE $NAME"; fi
   held=$(python3 -I - "$NAME" "$ROSTER_JSON" <<'PY'
 import json, sys
 name, path = sys.argv[1], sys.argv[2]

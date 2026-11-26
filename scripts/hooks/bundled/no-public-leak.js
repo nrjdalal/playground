@@ -7181,6 +7181,7 @@ var FREES = new Set([`
 `, ";", ";;", "&", "||"]);
 var tokens = 0;
 var freshToken = () => ++tokens;
+var GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"]);
 var BODIES = new Set(["do", "elif", "else", "then"]);
 var REPEAT_BODY = new Set(["do", "{"]);
 var MARKERS = new Set([...RESERVED, ...OPENS, ...CLOSES, ...BODIES]);
@@ -7601,7 +7602,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       return call && (fed || stdinFed(cmd)) ? sshStdin(cmd, call) : undefined;
     }
     if (name === "." || name === "source" || name === "eval")
-      return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
+      return fed || name !== "eval" && stdinPath(args[0]?.value ?? "") ? "shell" : undefined;
     const family = familyOf(name);
     if (family)
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
@@ -7612,7 +7613,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
     if (fed)
       return "shell";
     const { inline, operand } = shellOperand(args, name);
-    return inline || operand && !STDIN_PATHS.has(operand.value) ? undefined : "shell";
+    return inline || operand && !stdinPath(operand.value) ? undefined : "shell";
   }
   let at = 0;
   for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
@@ -7710,7 +7711,7 @@ var familyOf = (name) => {
 };
 function interpreted(family, args, xargs) {
   const filled = (word) => marked(word.value) || !!xargs?.replace && word.value.includes(xargs.replace);
-  const own = (word) => !!word && !filled(word) && !STDIN_PATHS.has(word.value);
+  const own = (word) => !!word && !filled(word) && !stdinPath(word.value);
   const runner = family === FAMILIES.bun || family === FAMILIES.deno;
   const script = (word) => own(word) && (!runner || /\.[cm]?[jt]sx?$/.test(word?.value ?? ""));
   let sub = false;
@@ -7803,6 +7804,8 @@ var REPEATS = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
+var plainPath = (value) => value.startsWith("/") ? `/${value.split("/").filter((s) => s && s !== ".").join("/")}` : value;
+var stdinPath = (value) => STDIN_PATHS.has(plainPath(value));
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -7987,7 +7990,8 @@ var G_WRAPPERS = new Map([
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
-  ["gtimeout", "timeout"]
+  ["gtimeout", "timeout"],
+  ["gxargs", "xargs"]
 ]);
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
@@ -8213,13 +8217,14 @@ function walk(lx, scope, nested, inherit) {
         opens.push(lx.commands.length);
         fedOpens.push(fedOpens.at(-1));
       }
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted)
-          break;
+      const lead = done.words.findIndex((w) => w.quoted || w.value !== "{" && !GROUP_LEADS.has(w.value));
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{")
+          continue;
         opens.push(lx.commands.length);
         fedOpens.push(done.stdin ?? done.braceFed);
       }
-      const called = done.words.find((w) => w.value !== "{" || w.quoted);
+      const called = lead < 0 ? undefined : done.words[lead];
       if (fedOpens.length > 0 && called?.value === "exec" && !called.quoted && done.redirects.length > 0)
         fedOpens[fedOpens.length - 1] = undefined;
       lx.commands.push(done);
@@ -8900,7 +8905,7 @@ function unwrap(state, inside, budget) {
           fork(wrapper, 3);
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1));
-      } else if (runs?.tools && rest.some((r) => !r.quoted && r.value === "--"))
+      } else if (runs?.tools && rest.some((r) => r.value === "--"))
         take();
       else
         break;
@@ -8914,7 +8919,7 @@ function unwrap(state, inside, budget) {
       take();
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? ""))
       take();
-    if (wrapper === "flock" && !peek()?.quoted && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
+    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
       take();
       const text = take();
       if (text)
@@ -9643,11 +9648,11 @@ function unreadCommand(cmd, parsed, resolving) {
 }
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
-    return STDIN_PATHS.has(args[0]?.value ?? "");
+    return stdinPath(args[0]?.value ?? "");
   if (!SHELLS.has(name))
     return false;
   const { inline, operand } = shellOperand(args, name);
-  return !operand || !inline && STDIN_PATHS.has(operand.value);
+  return !operand || !inline && stdinPath(operand.value);
 }
 async function argFile({ chdir, file, moved }, cmd, env) {
   if (file.procs)
@@ -9672,7 +9677,7 @@ async function xargsFilled(cmd, parsed, env) {
   if (filled.size === 0)
     return [];
   const xargs = parsed.map((p) => p.xargs);
-  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value));
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
     await stdinOf(cmd, env),
@@ -9938,7 +9943,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
@@ -10250,7 +10255,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  const scripts = !operand || stdinPath(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;

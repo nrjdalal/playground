@@ -1549,6 +1549,83 @@ roll_to ${c2} canary; echo "$running"`,
   })
 })
 
+// bash's setpgid note is a race, so set -x's trace stands in for it: the poll's sleep traces its start to the stderr it forked with, before its own redirections, where bash prints the note, and the shell traces the run-slot start's `p=$!` to its stderr of that moment, /dev/null while the start holds it off the log
+describe("the supervisor's background starts keep bash's setpgid note out of supervisor.log (#3059)", () => {
+  test("a prebuild step started while the shell's stderr is supervisor.log forks with that stderr on /dev/null, and its own stderr still reaches the log", async () => {
+    const dir = join(scratch, "setpgid")
+    mkdirSync(dir, { recursive: true })
+    const log = join(dir, "supervisor.log")
+    await Bun.write(
+      join(dir, "run-slot.sh"),
+      `#!/bin/bash\necho "the made-up child's own stderr" >&2\necho "$$ $(ps -o pgid= -p $$)" > ${dir}/group\nsleep 0.5\n`,
+    )
+    chmodSync(join(dir, "run-slot.sh"), 0o755)
+    const proc = Bun.spawn([
+      "bash",
+      "-c",
+      `set -m\nS=${dir} RUNS=${dir}/runs.log RS=${dir}/run-slot.sh LOG=${log} PREBUILD_SLOW=1200 PREBUILD_POLL=0.1\nsay() { echo "say $*" >> "$LOG"; }; alive() { :; }\n${block("slot_step")}\n{ set -x; slot_step clone . made-up; set +x; } >> "$LOG" 2>&1`,
+    ])
+    expect(await proc.exited).toBe(0)
+    const text = readFileSync(log, "utf8")
+    expect(text).toContain("the made-up child's own stderr\n")
+    expect(text.match(/^\++ sleep .*$/gm)).toBeNull()
+    expect(text.match(/^\++ p=.*$/gm)).toBeNull()
+    const [pid, pgid] = readFileSync(join(dir, "group"), "utf8").trim().split(/\s+/)
+    expect(pgid).toBe(pid)
+  })
+})
+
+// bash prints its setpgid note to the stderr a forked child starts with, which for a foreground fork is the shell's own for as long as the child runs, so each made-up child reads the roll's shell's fd 2 while it runs (/proc on Linux, else lsof on that shell's pid alone, the bash this test starts)
+describe("the supervisor's foreground forks in prebuild's log group keep bash's setpgid note out of supervisor.log (#3082)", () => {
+  const dir = join(scratch, "fd2")
+  const seen = join(dir, "seen")
+  const log = join(kept, "supervisor.log")
+  const made = async () => {
+    rmSync(dir, { force: true, recursive: true })
+    mkdirSync(join(dir, "bin"), { recursive: true })
+    const files: Record<string, string> = {
+      "bin/cp": `#!/bin/bash\ncase " $* " in *" node_modules "*) echo "cp $(${dir}/fd2.sh)" >> ${seen}; echo "the made-up cp's own stderr" >&2 ;; esac\nexec /bin/cp "$@"\n`,
+      "bin/rm": `#!/bin/bash\n[ "$*" != "-f ${kept}/prebuild.pid" ] || { echo "rm $(${dir}/fd2.sh)" >> ${seen}; echo "the made-up rm's own stderr" >&2; }\nexec /bin/rm "$@"\n`,
+      "fd2.sh": `#!/bin/bash\nif [ -e /proc/$FD2_OF/fd/2 ]; then readlink /proc/$FD2_OF/fd/2; else lsof -a -p "$FD2_OF" -d 2 -Fn | sed -n 's/^n//p'; fi\n`,
+      "rs.sh": `#!/bin/bash\n[ "$3 $4" != "bun install" ] || { echo "install $(${dir}/fd2.sh) $(ps -o pgid= -p $$ | tr -d ' ')" >> ${seen}; echo "the made-up run-slot's own stderr" >&2; }\nexec ${kept}/run-slot.sh "$@"\n`,
+    }
+    for (const [name, text] of Object.entries(files)) {
+      await Bun.write(join(dir, name), text)
+      chmodSync(join(dir, name), 0o755)
+    }
+  }
+  const roll = (rs: string) =>
+    `set -m; export FD2_OF=$$; echo "shell $(ps -o pgid= -p $$ | tr -d ' ')" >> ${seen}; PATH=${dir}/bin:$PATH RS=${rs}; running=${c1}; roll_to ${c2} canary; echo "$running"`
+  const lines = (word: string) =>
+    readFileSync(seen, "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith(`${word} `))
+
+  test("slot_step's rm of prebuild.pid and the install's subshell fork while the shell's stderr is /dev/null, each child's own stderr still reaches the log, and the install's run-slot child sits outside the shell's process group", async () => {
+    fresh()
+    await slotted()
+    await made()
+    expect(await slotRun(roll(join(dir, "rs.sh")), c1)).toEqual({ code: 0, out: c2 })
+    expect(lines("rm").slice(0, 2)).toEqual(["rm /dev/null", "rm /dev/null"])
+    expect(lines("rm").filter((line) => line.includes(log))).toEqual([])
+    const [install] = lines("install")
+    expect(install).toStartWith("install /dev/null ")
+    expect(install!.split(" ")[2]).not.toBe(lines("shell")[0]!.split(" ")[1])
+    const text = readFileSync(log, "utf8")
+    expect(text).toContain("the made-up rm's own stderr\n")
+    expect(text).toContain("the made-up run-slot's own stderr\n")
+  })
+
+  test("with no executable run-slot.sh, the clone's bare subshell forks while the shell's stderr is /dev/null, and the child's own stderr still reaches the log", async () => {
+    fresh()
+    await slotted()
+    await made()
+    expect(await slotRun(roll(join(kept, "absent.sh")), c1)).toEqual({ code: 0, out: c2 })
+    expect(lines("cp")).toEqual(["cp /dev/null"])
+    expect(readFileSync(log, "utf8")).toContain("the made-up cp's own stderr\n")
+  })
+})
+
 // A roll with no migration swaps the web with no gap: the target's web starts beside the serving one from the kept build, the route moves to it, and the old one stops before the API restarts alone
 describe("the supervisor's web swap (#122)", () => {
   const WEBS = /^(build|web|route|stop|serve)/

@@ -217,6 +217,8 @@ const FREES = new Set(["\n", ";", ";;", "&", "||"])
 // Tokens are handed out across every script the hook reads, so a script's own run never shares one with the line that read it.
 let tokens = 0
 const freshToken = () => ++tokens
+// The reserved words a brace group may follow in command position, so `! { …; }`, `then { …; }`, `do { …; }` and `coproc { …; }` open a group as a bare `{ …; }` does
+const GROUP_LEADS = new Set(["!", "coproc", "do", "elif", "else", "if", "then", "until", "while"])
 // The reserved words a body's own commands carry, which the shell may not run
 const BODIES = new Set(["do", "elif", "else", "then"])
 // The words that open zsh's `repeat N` body: a `do` up to its `done`, or a brace up to its own
@@ -756,7 +758,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
       return call && (fed || stdinFed(cmd)) ? sshStdin(cmd, call) : undefined
     }
     if (name === "." || name === "source" || name === "eval")
-      return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
+      return fed || (name !== "eval" && stdinPath(args[0]?.value ?? "")) ? "shell" : undefined
     const family = familyOf(name)
     if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
     // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
@@ -764,7 +766,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
     if (!SHELLS.has(name) || noExec(args, name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
-    return inline || (operand && !STDIN_PATHS.has(operand.value)) ? undefined : "shell"
+    return inline || (operand && !stdinPath(operand.value)) ? undefined : "shell"
   }
   let at = 0
   for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
@@ -868,7 +870,7 @@ const familyOf = (name: string): Family | undefined => {
 function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
   const filled = (word: Word) =>
     marked(word.value) || (!!xargs?.replace && word.value.includes(xargs.replace))
-  const own = (word: Word | undefined) => !!word && !filled(word) && !STDIN_PATHS.has(word.value)
+  const own = (word: Word | undefined) => !!word && !filled(word) && !stdinPath(word.value)
   // bun and deno run a bare name as a package script, a subcommand or a program on PATH (`bun run sh`, `bun x sh`, `bun repl`, `deno task x`), so there only a JavaScript or TypeScript file's name is a script of its own
   const runner = family === FAMILIES.bun || family === FAMILIES.deno
   const script = (word: Word | undefined) =>
@@ -968,6 +970,16 @@ const QUOTED_ONE_WORD =
   /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
+// An absolute path with its `.` segments and doubled slashes read past, as the kernel reads them; a `..` stays, since it climbs from wherever a link leads
+export const plainPath = (value: string) =>
+  value.startsWith("/")
+    ? `/${value
+        .split("/")
+        .filter((s) => s && s !== ".")
+        .join("/")}`
+    : value
+// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes
+const stdinPath = (value: string) => STDIN_PATHS.has(plainPath(value))
 export const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -1151,13 +1163,14 @@ const SHELL_OWN = new Set([
   "unalias",
   "unset",
 ])
-// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+// Homebrew's g-named copies of the wrappers (coreutils', and findutils' gxargs), each run with its plain name's options
 const G_WRAPPERS = new Map([
   ["genv", "env"],
   ["gnice", "nice"],
   ["gnohup", "nohup"],
   ["gstdbuf", "stdbuf"],
   ["gtimeout", "timeout"],
+  ["gxargs", "xargs"],
 ])
 // A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
 export const program = (value: string): string => {
@@ -1438,13 +1451,16 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         opens.push(lx.commands.length)
         fedOpens.push(fedOpens.at(-1))
       }
-      for (const w of done.words) {
-        if (w.value !== "{" || w.quoted) break
+      const lead = done.words.findIndex(
+        (w) => w.quoted || (w.value !== "{" && !GROUP_LEADS.has(w.value)),
+      )
+      for (const w of done.words.slice(0, lead < 0 ? undefined : lead)) {
+        if (w.value !== "{") continue
         opens.push(lx.commands.length)
         fedOpens.push(done.stdin ?? done.braceFed)
       }
       // an exec with a redirect swaps the group's descriptors (`{ exec 0<&3; xargs …; }`), so the commands after it read the pipe no more
-      const called = done.words.find((w) => w.value !== "{" || w.quoted)
+      const called = lead < 0 ? undefined : done.words[lead]
       if (
         fedOpens.length > 0 &&
         called?.value === "exec" &&
@@ -2230,7 +2246,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
           fork(wrapper, 3)
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
-      } else if (runs?.tools && rest.some((r) => !r.quoted && r.value === "--")) take()
+      } else if (runs?.tools && rest.some((r) => r.value === "--")) take()
       else break
     }
     // pnpm's shell mode and yarn exec run the words left joined by spaces as one shell script
@@ -2245,7 +2261,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     if (COUNTED.has(wrapper)) take()
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? "")) take()
     // flock's -c or --command after its file runs the next word in a shell
-    if (wrapper === "flock" && !peek()?.quoted && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
+    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
       take()
       const text = take()
       if (text) rest.push(text, ...SH_C)
@@ -2822,7 +2838,7 @@ const unquote = (part: string): string =>
     : part.slice(1, part.endsWith(part[0]) && part.length > 1 ? -1 : undefined)
 
 // A program word holding a brace list the shell sees (`/usr/bin/pk{i,x}ll`) runs as the words its expansion makes (braceWords), each lexed again, the first the program and the rest its first arguments, a brace or comma inside quotes or after a backslash kept as text, and a zsh group in them globbed after (`/usr/bin/pk{(i|x),y}ll`), as zsh expands braces first; null when the reader cannot expand it (a sequence, a list past braceWords' cap, an expansion in the word), so the command reads as unread; undefined for a word that also holds a paren the shell sees whose words do not lex as one command, code a guard reads as a line (`f({a, b})`), and for any other program word
-function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
+export function braceRun(cmd: Command, first: Word | undefined): Command | null | undefined {
   if (first?.unknown !== BRACE) return
   const source = (first.source ?? "").replace(/\\\n/g, "")
   if (/[$`]/.test(source)) return null
@@ -3222,10 +3238,10 @@ export const unreadRun = ({ first, unread }: Parsed): boolean =>
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
 function stdinScript({ args, name }: Parsed): boolean {
-  if (name === "." || name === "source") return STDIN_PATHS.has(args[0]?.value ?? "")
+  if (name === "." || name === "source") return stdinPath(args[0]?.value ?? "")
   if (!SHELLS.has(name)) return false
   const { inline, operand } = shellOperand(args, name)
-  return !operand || (!inline && STDIN_PATHS.has(operand.value))
+  return !operand || (!inline && stdinPath(operand.value))
 }
 
 // The text GNU xargs' -a reads in place of stdin: a process substitution's output, else the file, which readPath reads only when it is a regular file within MAX_BYTES, so any other reads as unread; a relative path from env -C's folder before xargs, as examineReading's `here` reads it, and any file as unread after a privilege wrapper, which may move the folder or the root
@@ -3257,7 +3273,7 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
   if (filled.size === 0) return []
   const xargs = parsed.map((p) => p.xargs)
-  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !STDIN_PATHS.has(f.file.value))
+  const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
   const inputs = [
     await stdinOf(cmd, env),
@@ -3589,7 +3605,7 @@ async function examineReading(
       (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))
+    (args[0]?.procs || stdinPath(args[0]?.value ?? ""))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
@@ -3669,7 +3685,7 @@ const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
 // Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it; each counts only as its bare lower-case word, since `COMMAND` runs macOS's /usr/bin/command in a child and `BUILTIN` is not found.
-const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
+export const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
   if (!first) return false
   const before = cmd.words.slice(0, cmd.words.indexOf(first))
   return (
@@ -4057,7 +4073,7 @@ export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, 
 // A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
   const scripts =
-    !operand || STDIN_PATHS.has(operand.value)
+    !operand || stdinPath(operand.value)
       ? await scriptStdin(cmd, env)
       : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))

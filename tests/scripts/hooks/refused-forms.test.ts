@@ -48,7 +48,18 @@ import {
   REFUSED_FORMS,
 } from "./fixtures/refused-forms"
 import { pinPlatform } from "./platform"
-import { programWord, REWRITE_NAMES, spell, SPELLING, type Spelling } from "./refused-spellings"
+import {
+  OWN_NAMES,
+  OWN_SPELLING,
+  type OwnSpelling,
+  plainArgs,
+  programWord,
+  REWRITE_NAMES,
+  spell,
+  spellOwn,
+  SPELLING,
+  type Spelling,
+} from "./refused-spellings"
 import { storeWith } from "./render-set"
 import { git } from "./scratch-git"
 
@@ -904,6 +915,49 @@ describe("every generated spelling of a refused form stays refused", () => {
   )
 })
 
+// the spellings each row's own guard refused, keyed by guard, printed once the file's tests end so a run shows which guard held
+const OWN_COUNTS = new Map<Guard, { judged: number; refused: number }>()
+afterAll(() => {
+  const line = [...OWN_COUNTS]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([g, n]) => `${g} ${n.refused}/${n.judged}`)
+  console.log(`own-guard spellings refused by their row's guard: ${line.join(", ")}`)
+})
+
+// the cases whose call has a plain argument a rewrite can respell, judged by their own guard alone, with no no-hidden-program behind it; the known limits #2615 measured, #3028 and #3030, are fixed and hold no row here
+const OWN_SPELT = CASES.filter(
+  (c) => typeof c.call === "string" && !!plainArgs(c.call)?.words.length && !allowed(c),
+)
+
+describe("every spelling of a refused form's arguments stays refused by its own guard", () => {
+  test.each(OWN_SPELT.map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      const counts = OWN_COUNTS.get(c.guard) ?? { judged: 0, refused: 0 }
+      OWN_COUNTS.set(c.guard, counts)
+      await fc.assert(
+        fc.asyncProperty(OWN_SPELLING, async (s) => {
+          const text = spellOwn(c.call as string, s)
+          if (!text) return
+          const refused = !!(await verdict({ ...c, call: text }, at[0], at[1]))?.includes(
+            `${c.guard} hook `,
+          )
+          counts.judged++
+          if (refused) counts.refused++
+          expect({ refused, text }).toEqual({ refused: true, text })
+        }),
+        {
+          examples: OWN_NAMES.map((s) => [s] as [OwnSpelling]),
+          numRuns: OWN_NAMES.length,
+          seed: SEED ?? Bun.hash.crc32(c.key) | 0,
+        },
+      )
+    },
+    60_000,
+  )
+})
+
 // Each path flag a row names, listed once, with the joins its program reads between the flag and its folder: "=" joined, " " spaced, "" attached; git reads -C spaced alone.
 const PATH_FLAGS = [
   { flag: "--cwd", joins: ["=", " "], program: "bun" },
@@ -1199,6 +1253,23 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       "#2320 a disk check of another machine's homes over ssh | -h",
       "#2320 a disk check of the folder that holds the homes | -h",
       "#2320 a disk check over ssh after its own options | -h",
+      // an ln -s whose source the hook reads on disk names the scratch root by its path, and -s takes no value
+      "#3070 an ln -s from the root after another ln -s on its line | -s",
+      "#3070 an ln -s from the root and a copy through its link | -s",
+      "#3070 an ln -s from the root and a second ln -s inside its link | -s",
+      "#3070 an ln -s from the root and a second ln -sf over a file through its link | -s",
+      "#3070 an ln -s from the root and a shell that writes through its link | -s",
+      "#3070 an ln -s from the root and a tee through its link | -s",
+      "#3070 an ln -s from the root and a write through its link | -s",
+      "#3070 an ln -s from the root beside a program the hook cannot read | -s",
+      "#3070 an ln -s from the root beside a substitution that writes | -s",
+      "#3070 an ln -s from the root to a link the hook does not hold | -s",
+      "#3070 an ln -s from the root with a redirect | -s",
+      "#3070 an ln -s from the root with one operand, which links into the shell's folder | -s",
+      "#3070 an ln -s of the root itself and a second ln -s below its link | -s",
+      "#3070 an ln -s with a variable set in the call | -s",
+      "#3070 an ln -sf from the root and a listing | -sf",
+      "#3070 an ln -sfn from the root and a cat through its link | -sfn",
       "#356 a link to the data folder made in the same call | -s",
       "#356 a write after a word with an unbalanced quote | -rf",
       "#356 many variables ahead of a write | -rf",

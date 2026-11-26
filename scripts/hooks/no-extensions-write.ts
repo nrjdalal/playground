@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve, sep } from "node:path"
+import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { scopesIn } from "../../packages/settings/src/folder"
@@ -33,6 +33,7 @@ import {
 import { fromFactory, opsLead } from "./role"
 import {
   BRACE,
+  braceRun,
   braceWords,
   casePatterns,
   codeFed,
@@ -67,6 +68,7 @@ import {
   stdinOf,
   stdinShell,
   type Text,
+  throughBuiltin,
   tick,
   UNKNOWN,
   unreadWord,
@@ -1173,10 +1175,31 @@ function awkRedirects(program: string): boolean {
 const AWK_LEAD = /^\s*\/(?:[^\\/"[\n]|\\.)*\/(?=\s*(?:\{|$))/
 const AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g
 
-// Whether a program holding a | may pipe: once the allowed literals are cut out, any |, quote, /, # or backslash left counts as one, as canary counted every |
+// Whether a program holding a | may pipe: once the allowed literals are cut out, any /, # or backslash left counts as one, as canary counted every |, and else a | outside its whole strings does (`print "x" | "sh"`), so one inside a string (`print "a|b"`) prints
 function awkPipe(program: string): boolean {
   if (!program.includes("|")) return false
-  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "))
+  const rest = program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " ")
+  return /[/#\\]/.test(rest) || /["|]/.test(rest.replace(/"[^"\n]*"/g, "S"))
+}
+
+// The text an awk program's strings print: each string with its escapes as awk reads them (\NNN in octal, \xHH, \n, \t, any other escaped character as itself), and every string joined in order, so a path split across strings ("…/exten" "sions") or spelled by a code is read whole
+function awkPrinted(program: string): string[] {
+  const strings = [...program.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map(([, text]) =>
+    text.replace(
+      /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|(.))/g,
+      (m, octal?: string, hex?: string, c?: string) =>
+        octal
+          ? coded(octal, 8, m)
+          : hex
+            ? coded(hex, 16, m)
+            : c === "n"
+              ? "\n"
+              : c === "t"
+                ? "\t"
+                : (c ?? m),
+    ),
+  )
+  return [...strings, strings.join("")]
 }
 
 // awk's program words, or undefined when a program comes from a file or an option the hook does not know: -F and -v take a value, gawk's -e and --source a program, and the first other word is the program
@@ -1195,12 +1218,10 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-// awk's program words as text, or none: every program a literal word holding no | (a pipe, which awkPipe would weigh against a regex's alternation), no " (a string, so it prints only what it reads, never a command line of its own into a file that runs) and nothing awkRuns finds
+// awk's program words as text, or none: every program a literal word in which awkRuns finds no command, write or pipe, its strings included, since it then prints what it reads and its own strings, as an echo does
 function awkTexts(args: Word[]): Word[] {
   const programs = awkPrograms(args) ?? []
-  return programs.every((w) => literal(w) && !/[|"]/.test(w.value) && !awkRuns(w.value))
-    ? programs
-    : []
+  return programs.every((w) => literal(w) && !awkRuns(w.value)) ? programs : []
 }
 
 const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
@@ -1301,18 +1322,23 @@ const literal = (w: Word) => !w.glob && !marked(w.value)
 // sed's options that write nothing and read no script from elsewhere: -E, -n, -r, -s, -u and -z, alone or clustered, and their long names
 const SED_FLAG =
   /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/
-// a bracket expression holding no / and no [, which BSD sed reads whole and GNU sed reads to the same end, so both end its regex at one /
-const SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`
-// a regex's body up to its closing /, a / inside a bracket expression held by SED_BRACKET alone
-const SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`
-// a replacement's text up to its closing /
-const SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`
-const SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
-const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}(${SED_TEXT})[giImMp0-9]*)[ \t]*`
+// an s command's delimiters as a regex spells them: / and |, which a script whose text holds a path takes so its own / need no escape; one script keeps one, and an address's regex keeps its /
+const SED_DELIMITERS = ["/", "\\|"]
+// a bracket expression holding no delimiter and no [, which BSD sed reads whole and GNU sed reads to the same end, so both end its regex at one delimiter
+const sedBracket = (d: string) => String.raw`\[\^?\]?[^\]${d}[\n]*\]`
+// a regex's body up to its closing delimiter, one inside a bracket expression held by sedBracket alone
+const sedBody = (d: string) => String.raw`(?:[^${d}\\\n[]|\\.|${sedBracket(d)})*${d}`
+// an s command up to its replacement's closing delimiter, the replacement captured
+const sedSub = (d: string) => String.raw`s${d}${sedBody(d)}((?:[^${d}\\\n]|\\.)*${d})`
+const SED_ADDRESS = String.raw`(?:\d+|\$|/${sedBody("/")})`
+const sedItem = (d: string) =>
+  String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|${sedSub(d)}[giImMp0-9]*)[ \t]*`
 // a sed script read whole by a closed grammar: addresses, then =, d, l, n, N, p, P, q, Q or s/// with flags from g, i, I, m, M, p and digits, so it holds no w or W write, no e run and no r read of another file
-const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
+const SED_SCRIPT = SED_DELIMITERS.map(
+  (d) => new RegExp(String.raw`^${sedItem(d)}(?:[;\n]${sedItem(d)})*;?$`),
+)
 // one item of a read-only sed's script and its separator, its s/// replacement captured, read in turn from where the last ended
-const SED_STEP = new RegExp(String.raw`${SED_ITEM}(?:[;\n]|$)`, "y")
+const SED_STEPS = SED_DELIMITERS.map((d) => new RegExp(String.raw`${sedItem(d)}(?:[;\n]|$)`, "y"))
 
 // The scripts of a sed call that only reads and prints, or undefined: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
 function sedReadScripts(args: Word[]): Word[] | undefined {
@@ -1333,7 +1359,8 @@ function sedReadScripts(args: Word[]): Word[] | undefined {
     } else operands.push(args[k])
   }
   const read = scripts.length ? scripts : operands.slice(0, 1)
-  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
+  return read.length > 0 &&
+    read.every((w) => literal(w) && SED_SCRIPT.some((re) => re.test(w.value)))
     ? read
     : undefined
 }
@@ -1355,11 +1382,14 @@ function textFlagValues({ args, name }: Parsed): Word[] {
 const SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/
 // a bare -i's suffix word: empty or a dot and letters, so a GNU sed, which reads that word as its script, reads it as no command or none it knows
 const SED_SUFFIX = /^(?:\.[\w.~-]*)?$/
-const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${sedBody("/")})`
 // one item of an in-place sed's script, its s/// replacement captured
-const SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`
+const sedEditItem = (d: string) =>
+  String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|${sedSub(d)}[gpI0-9]*)[ \t]*`
 // an in-place sed's script read whole by its allowlist: line, $ or /regex/ addresses and their ranges, then d, p, or s/// with flags from g, p, I and digits; every other command and flag (w, W, r, R, e, s///w, s///e) is off it
-const SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`)
+const SED_EDIT = SED_DELIMITERS.map(
+  (d) => new RegExp(String.raw`^${sedEditItem(d)}(?:[;\n]${sedEditItem(d)})*;?$`),
+)
 // Whether a path's parts can match each of `want`'s in turn, the parts after them free: each a glob of its own, a ** matching the rest, a zsh (a|b) read as {a,b}, and a lone ( or ), a subshell's, dropped
 function follows(have: string[], want: string[]): boolean {
   for (let k = 0; k < want.length; k++) {
@@ -1389,7 +1419,9 @@ const removerWord = (word: string) => {
   return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name)
 }
 // one item of an in-place sed's script and its separator, read in turn from where the last ended
-const SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y")
+const SED_EDIT_STEPS = SED_DELIMITERS.map(
+  (d) => new RegExp(String.raw`${sedEditItem(d)}(?:[;\n]|$)`, "y"),
+)
 // the character a code spells in its base, its blanks and underscores dropped as perl drops them, a * for a code that is no number in that base, or the escape as written when no character has that code
 const coded = (digits: string, base: number, escape: string) => {
   const clean = digits.replace(/[\s_]/g, "")
@@ -1414,16 +1446,25 @@ const sedText = (text: string) =>
                 ? "\n"
                 : (c ?? m),
   )
-// The text each s/// of a sed script writes (or a perl one's, by its step and its read, its print's text too), its items read in turn by `step`, which captures each replacement and a print's values, and spelled as `read` writes it; the whole script read so when its items do not read in turn
-function sedWrites(script: string, step = SED_EDIT_STEP, read = sedText): string[] {
+// The text each s/// of a sed script writes (or a perl one's, by its steps and its read, its print's text too), its items read in turn by the first of `steps` that reads them all, each capturing a replacement and a print's values, and spelled as `read` writes it; the whole script read so when no step reads its items in turn
+function sedWrites(script: string, steps = SED_EDIT_STEPS, read = sedText): string[] {
+  for (const step of steps) {
+    const writes = stepWrites(script, step, read)
+    if (writes) return writes
+  }
+  return [read(script)]
+}
+// The text each item of a script writes, read in turn by one step, or undefined when its items do not read in turn
+function stepWrites(script: string, step: RegExp, read: (text: string) => string) {
   const writes: string[] = []
   step.lastIndex = 0
   while (step.lastIndex < script.length) {
     const at = step.lastIndex
     const item = step.exec(script)
-    if (!item || step.lastIndex === at) return [read(script)]
+    if (!item || step.lastIndex === at) return undefined
     if (item[1]) writes.push(read(item[1].slice(0, -1)))
-    if (item[2]) writes.push(read(printText(item[2])))
+    const printed = item[2] ?? item[3]
+    if (printed) writes.push(read(printText(printed)))
   }
   return writes
 }
@@ -1460,7 +1501,7 @@ function sedEdits(args: Word[]): Set<Word> | undefined {
   }
   const read = scripts.length ? scripts : operands.slice(0, 1)
   if (!inPlace || read.length === 0) return undefined
-  if (!read.every((w) => literal(w) && SED_EDIT.test(w.value))) return undefined
+  if (!read.every((w) => literal(w) && SED_EDIT.some((re) => re.test(w.value)))) return undefined
   return new Set(read)
 }
 
@@ -1521,9 +1562,11 @@ const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-
 // a print's values are captured, the text it writes
 const PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*))?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
 const PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`
-// s/// first, so its replacement is the first capture and a print's values the second, as sedWrites reads them
-const PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`
-// a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
+// one print in a block that for, if, unless or while a regex opens (`while (/(a+)/g) {print "$1\n"}`), the same print as a modifier's
+const PERL_BLOCK = String.raw`(?:for|if|unless|while)[ \t]*\([ \t]*${PERL_RE}[gimsx]*[ \t]*\)[ \t]*\{[ \t]*${PERL_PRINT}[ \t]*;?[ \t]*\}`
+// s/// first, so its replacement is the first capture, a print's values the second and a block's print's the third, as sedWrites reads them
+const PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT}|${PERL_BLOCK})[ \t]*`
+// a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex or in a block one of them opens, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
 const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
 // the text a print of its values writes: perl joins them with nothing ($, is empty), each string as its text and each variable as $1, which perlText reads as a *
 const PRINT_VALUE = new RegExp(PERL_VALUE, "g")
@@ -1600,14 +1643,16 @@ const perlReads = (parsed: Parsed, env: Env) => !!perlReadScripts(parsed, env)
 function escapedWrites(parsed: Parsed, env: Env): string[] {
   const tool = program(parsed.name)
   const unescaped = (read: (text: string) => string) => parsed.args.map((word) => read(word.value))
+  if (AWKS.has(tool))
+    return (awkPrograms(parsed.args) ?? parsed.args).flatMap((w) => awkPrinted(w.value))
   if (SEDS.has(tool))
     return (
-      sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ??
+      sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEPS)) ??
       unescaped(sedText)
     )
   if (tool !== "perl") return []
   return (
-    perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ??
+    perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, [PERL_STEP], perlText)) ??
     unescaped(perlText)
   )
 }
@@ -1728,22 +1773,40 @@ function fdFiles(redirects: Command["redirects"], inherited: Map<string, Word[]>
 const LEADS = new Set(["!", "(", "do", "elif", "else", "then", "{"])
 const OPENERS = new Set(["case", "for", "if", "select", "until", "while"])
 const CLOSERS = new Set(["done", "esac", "fi"])
-// The commands each compound's closer (fi, done, esac) holds, its opener's included, in every scope of a line, so a redirect on the closer writes what they print
+// The commands each compound's closer (fi, done, esac) holds, its opener's included, in every scope of a line, so a redirect on the closer writes what they print; a closer whose opener the hook cannot see (`time while …`, `coproc w while …`, `nocorrect while …`) holds every command before it in its scope, failing closed on any prefix spelling
 function compoundBodies(commands: Command[], bodies = new WeakMap<Command, Command[]>()) {
   const open: number[] = []
   commands.forEach((cmd, k) => {
     const lead = cmd.words.find((w) => w.quoted || !LEADS.has(w.value))
     if (lead && !lead.quoted && OPENERS.has(lead.value)) open.push(k)
-    else if (lead && !lead.quoted && CLOSERS.has(lead.value) && open.length > 0)
-      bodies.set(cmd, commands.slice(open.pop(), k))
+    else if (lead && !lead.quoted && CLOSERS.has(lead.value))
+      bodies.set(cmd, commands.slice(open.pop() ?? 0, k))
     if (cmd.inner) compoundBodies(cmd.inner(), bodies)
   })
   return bodies
 }
+// The redirects of each group, subshell or compound's closer around each command inside it, the outermost first, so its descriptors fold from the exec'd ones it meets (fdFiles); a compound's closer comes after the commands it holds, so its walk sets them last
+function blockRedirects(commands: Command[], bodies: WeakMap<Command, Command[]>) {
+  const out = new WeakMap<Command, Command["redirects"][]>()
+  const assign = (c: Command, around: Command["redirects"][]) => {
+    const inner = c.inner?.()
+    const held = inner && inner.length > 0 ? inner : bodies.get(c)
+    if (!held) return
+    const chain = [...around, c.redirects]
+    for (const k of held) {
+      out.set(k, chain)
+      assign(k, chain)
+    }
+  }
+  for (const c of commands) assign(c, [])
+  return out
+}
 // the programs that run a text which may call a function, and those that move its positional parameters from inside its body
 const RUNS_TEXT = new Set([".", "eval", "source"])
 const MOVES_ARGS = new Set(["getopts", "set", "shift"])
-// Each function body command's positional parameters, as `known`'s digit keys: the literal words of the line's one call of the function, up to the first word the hook cannot read, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+// Each function body command's positional parameters, from the words of the line's one call of the function as the shell gives them (positionals), up to the first word the hook cannot read, from which every parameter is unread and a write through it refuses, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
+// A function's one call, whose words bind its body's positional parameters (positionals), `cut` when a word the hook cannot expand ends them
+type FunctionCall = { call: Command; cut: boolean; words: Word[] }
 function functionArgs(commands: Command[], line: string) {
   const seen = new Set<Command>()
   const walk = (list: Command[]) => {
@@ -1754,7 +1817,7 @@ function functionArgs(commands: Command[], line: string) {
   }
   walk(commands)
   const all = [...seen]
-  const out = new WeakMap<Command, Record<string, string>>()
+  const out = new WeakMap<Command, FunctionCall>()
   const names = new Map(all.map((c) => [c, parse(c).name]))
   const name = (c: Command) => names.get(c) ?? parse(c).name
   if (all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))) return out
@@ -1823,7 +1886,9 @@ function functionArgs(commands: Command[], line: string) {
     const moves = body.some(
       (c) => MOVES_ARGS.has(name(c)) || c.words.some((w) => /^argv\b|^\d+=/.test(w.value)),
     )
-    const bound: Record<string, string> = {}
+    // the call's words as the shell gives them, a brace list expanded into its parts (braceRun), up to the first the hook cannot expand (a sequence, `{a..b}`)
+    const words: Word[] = []
+    let cut = false
     if (
       calls.length === 1 &&
       named === 2 &&
@@ -1832,16 +1897,85 @@ function functionArgs(commands: Command[], line: string) {
       !body.includes(call) &&
       all.indexOf(call) > all.indexOf(at)
     )
-      for (const [k, w] of parse(call).args.entries()) {
-        if (marked(w.value) || w.glob) break
-        bound[String(k + 1)] = w.value
+      for (const w of parse(call).args) {
+        if (w.unknown !== BRACE) {
+          words.push(w)
+          continue
+        }
+        const expanded = braceRun({ ...call, words: [w] }, w)
+        if (!expanded) {
+          cut = true
+          break
+        }
+        words.push(...expanded.words)
       }
     for (const c of body)
-      if (Object.keys(bound).length > 0) out.set(c, bound)
+      if (words.length > 0 || cut) out.set(c, { call, cut, words })
       else out.delete(c)
   }
   return out
 }
+const CALL_READINGS = 64
+// How the shell gives a raw word's reads: "quoted" when each sits in quotes (`"$X"/name`), "split" when one sits outside them, whose value it splits again (`$X/name`), and "mixed" when one does beside a quoted or escaped part, whose blanks and empty text it keeps (`"a b"$X`, `$X""`, `$X\ y`), so the hook cannot split the whole value
+function readSplit(raw: string): "mixed" | "quoted" | "split" {
+  let quote = ""
+  let bare = false
+  let held = false
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i]
+    if (c === "\\" && quote !== "'") {
+      held = true
+      i++
+    } else if (quote) quote = c === quote ? "" : quote
+    else if (c === "'" || c === '"') {
+      held = true
+      quote = c
+    } else if (c === "$") bare = true
+  }
+  return !bare ? "quoted" : held ? "mixed" : "split"
+}
+// A function's positional parameters in one reading, as `known`'s digit keys, and the first one a word the hook cannot read gives (`from`, Infinity when it read every word)
+type Positionals = { args: Record<string, string>; from: number }
+// Each reading of a function call's positional parameters: a literal word as written, and a word holding a read in each value the call's steady variables give it (heldReadings), whole when the read is quoted, and when not both split on blanks, as bash gives it, and whole, as zsh does; it stops at the first word the hook cannot read (an unread value, which every read is on a line that names IFS, since it holds no steady variable, a glob, an unquoted read beside a quoted or escaped part (readSplit), an unquoted value holding a glob or a brace, which the shell expands again, a brace sequence, or past CALL_READINGS), so every parameter from there is unread and a write through it refuses
+function positionals({ cut, words }: FunctionCall, env: Env, steady: Steady): Positionals[] {
+  let sets: string[][] = [[]]
+  let unread = cut
+  for (const w of words) {
+    if (!marked(w.value) && !w.glob) {
+      sets = sets.map((set) => [...set, w.value])
+      continue
+    }
+    const shape = readSplit(w.raw ?? "")
+    const readings = w.glob || shape === "mixed" ? undefined : heldReadings(w, env, steady)
+    const splits = shape === "split"
+    const ways = (value: string) => {
+      const split = value.split(/[ \t\n]+/).filter(Boolean)
+      const whole = value ? [value] : []
+      return !splits ? [[value]] : split.join("\n") === whole.join("\n") ? [whole] : [split, whole]
+    }
+    const unreadable = (value: string) => marked(value) || (splits && /[*?[\]{}]/.test(value))
+    const next =
+      readings && !readings.some((r) => unreadable(r.value))
+        ? sets.flatMap((set) =>
+            readings.flatMap((r) => ways(r.value).map((parts) => [...set, ...parts])),
+          )
+        : undefined
+    if (!next || next.length > CALL_READINGS) {
+      unread = true
+      break
+    }
+    sets = next
+  }
+  return sets.map((set) => ({
+    args: Object.fromEntries(set.map((value, k) => [String(k + 1), value])),
+    from: unread ? set.length + 1 : Infinity,
+  }))
+}
+// The positional parameters a word reads: `$1`, `${12}`, `${1:-x}`, and `$@` or `$*` as the first
+const readsPositional = (raw: string) =>
+  [...raw.matchAll(/\$(?:\{(\d+)|(\d)|\{?[@*])/g)].map(([, braced, bare]) =>
+    Number(braced ?? bare ?? 1),
+  )
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
 // the commands a group, a subshell or a compound's closer holds, none for any other command
@@ -2061,9 +2195,40 @@ function wholeLine(commands: Command[], env: Env, readsOnly = false): boolean {
     if (base === "bash" && commands.length > 1) return true
     if (edited && base === "date") return true
     if (!readsOnly && quietRun(cmd, parsed, env)) return false
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
+    const writes = writesFile(cmd)
     return writes || !(narrow(cmd, env) || (!readsOnly && inPlaceScripts(cmd, parsed, env)))
   })
+}
+
+// Whether a command has a writing redirect to a file other than /dev/null
+const writesFile = (cmd: Command): boolean =>
+  cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
+
+// Whether a command writes nothing to a file but /dev/null: no writing redirect, a closed-list reader (narrow) or a reader as its own first word (reads), each substitution in it the same, so it writes nothing through a link an ln -s beside it makes
+function linkSafe(cmd: Command, env: Env): boolean {
+  if (writesFile(cmd)) return false
+  const words = [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))]
+  if (words.some((word) => word.procs && !word.procs.every((sub) => linkSafe(sub, env))))
+    return false
+  const parsed = parse(cmd)
+  return narrow(cmd, env) || (ownFirst(cmd, parsed.first) && reads(parsed, env))
+}
+
+// The source of an ln -s, the text its link holds rather than a file it writes, or undefined, for any literal source: the word loop skips it only when it exists by an absolute path, so the README's source in the root is a subset of what this returns: ln as its own program with no variable set in the call and no redirect but to /dev/null, its options before its operands, each a cluster of flags that take no value with s among them (`-s`, `-sfn`), and two literal operands, the source and the link, which is judged as any writer's target is
+function symlinkSource(cmd: Command, parsed: Parsed): Word | undefined {
+  const { args, local, name } = parsed
+  if (program(name) !== "ln" || local.size > 0 || !ownProgram(cmd, parsed)) return undefined
+  if (writesFile(cmd)) return undefined
+  const k = args.findIndex((word) => !word.value.startsWith("-"))
+  const options = args.slice(0, k)
+  const operands = args.slice(k)
+  return k > 0 &&
+    options.every((word) => !word.quoted && /^-[fFhinsvw]+$/.test(word.value)) &&
+    options.some((word) => word.value.includes("s")) &&
+    operands.length === 2 &&
+    operands.every((word) => literal(word) && !word.value.startsWith("-"))
+    ? operands[0]
+    : undefined
 }
 
 // a quiet commit run-slot runs is read as the commit (slotWords), and its own redirect takes what git prints, never its message, judged by where it writes as every redirect is
@@ -2505,12 +2670,16 @@ async function inspect(
   let patterns = new Set<Command>()
   // each compound closer's commands (compoundBodies), and the files an exec with no command has opened on each descriptor for the rest of the line
   let bodies = new WeakMap<Command, Command[]>()
+  // the redirects of the blocks around each command inside one (blockRedirects)
+  let blocksAround = new WeakMap<Command, Command["redirects"][]>()
   // each function body command's positional parameters, bound from the line's one call (functionArgs)
-  let fnArgs = new WeakMap<Command, Record<string, string>>()
+  let fnArgs = new WeakMap<Command, FunctionCall>()
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
   let lineTexts: string[] = []
   let lineWritten: Word[] = []
+  // whether the typed line holds one ln -s (symlinkSource), since a second writes through the first one's link, and every other command writes nothing through it (linkSafe)
+  let lineLinks = false
   // the inline evaluator (bun or node) whose code the walk reads from a folder in or above the root, so a likely false positive in it names the form that runs
   let nearEval: string | undefined
   // how deep the walk is in a line read out of a quoted text (runsOf), whose commands no one typed
@@ -2705,13 +2874,23 @@ async function inspect(
       const inner = c.inner?.()
       return inner && (inner.length > 0 || c.words.length === 0) ? inner : bodies.get(c)
     }
-    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's word (functionArgs), and one whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
+    // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
       if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
-      const args = fnArgs.get(slotOf.get(cmd) ?? cmd)
-      const known = args ? { ...here, known: { ...here.known, ...args } } : here
-      const held = heldReadings(word, known, steadyAt(cmd))
-      return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+      const call = fnArgs.get(slotOf.get(cmd) ?? cmd)
+      const reads = call ? readsPositional(word.raw ?? "") : []
+      const readings = call
+        ? positionals(call, here, steadyAt(call.call))
+        : [{ args: {}, from: Infinity }]
+      return readings.some(({ args, from }) => {
+        if (reads.some((n) => n >= from)) return true
+        const held = heldReadings(
+          word,
+          { ...here, known: { ...here.known, ...args } },
+          steadyAt(cmd),
+        )
+        return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+      })
     }
     const intoHook = async (targets: Word[], source: Command) => {
       if (targets.length === 0) return
@@ -2756,13 +2935,14 @@ async function inspect(
           )
         : undefined)
     if (hookWrite) return refuse(hookWrite)
-    // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
+    // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, its own or one of a group, subshell or compound around it (blockRedirects, from the exec'd descriptors), tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
     const copier = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
     const copies = ["cp", "dd", "install", "ln", "mv"].includes(copier)
     const into = copies ? writeTargets(copier, args, copier !== program(name) || onLinux()) : []
     const hookEdits = copier === "sed" || copier === "perl" ? inPlace(copier, args) : []
+    const around = (blocksAround.get(cmd) ?? []).reduce((fds, r) => fdFiles(r, fds), execFds)
     const hookTargets = [
-      ...(fdFiles(cmd.redirects, execFds).get("1") ?? []),
+      ...(fdFiles(cmd.redirects, around).get("1") ?? []),
       ...(copier === "tee" ? args.filter((word) => !/^-./.test(word.value)) : []),
       ...into,
       ...hookEdits,
@@ -2876,10 +3056,10 @@ async function inspect(
           if (hook) return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`)
         }
     }
-    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, or grep that xargs starts as its own first word (xargsGrep)
-    const reader =
-      !rootLine && ((ownFirst(cmd, first) && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
-    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program holding no ", no | and nothing awkRuns finds, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
+    // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one, an echo or printf behind builtin or command alone (throughBuiltin), which runs the same printer, or grep that xargs starts as its own first word (xargsGrep)
+    const printing = ownFirst(cmd, first) || (PRINTERS.has(name) && throughBuiltin(cmd, parsed))
+    const reader = !rootLine && ((printing && reads(parsed, env)) || xargsGrep(cmd, parsed, env))
+    // on a line read whole with no root shell and no variable set that makes a program run another (TEXT_RUNS), a read-only gh call's jq filter, agent-browser's eval script or wait --fn expression, an awk program in which awkRuns finds nothing, a read-only sed's script, an in-place sed's script whose every other word the hook holds (no substitution, no variable it cannot read) and a playground text flag's value stay text, as on a line read call by call, since no program runs them as a shell line; each is still refused when it names the root, and the awk's and sed's files are judged as any word is
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined
     const editsHeld =
@@ -3029,7 +3209,7 @@ async function inspect(
     ]
     const written = [
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
-      ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText)),
+      ...perlEdit.flatMap((script) => sedWrites(script.value, [PERL_STEP], perlText)),
     ]
     // a sed's script from a file (-f after any of GNU's and macOS's no-value flags, -l counted as one so GNU's -l value fails closed, or --file by any prefix getopt_long reads) and its in-place edit by any spelling (-i, or a prefix of --in-place), which inPlace reads by their full names alone
     const sedLong = (word: Word) => longOf(word.value.split("=")[0], SED_LONG)
@@ -3133,11 +3313,21 @@ async function inspect(
       if (escaped.some((text) => holds(text, here)))
         return refuse(`${verb} with a script that names ${root} in its text`)
       const literal = !whole && narrow(cmd, here)
+      // an ln -s's source, on a typed line where nothing else can write through its link, is the text the link holds, never a file it writes
+      const linkSource = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined
       for (const [at, word] of [first, ...args]
         .map((word) => heldWord(own(word), here, steady) ?? own(word))
         .entries()) {
         // a `.` in the program word is the shell's source builtin, never the folder it spells, so `. /etc/os-release` from the home names its operand alone
         if (at === 0 && first?.value === "." && word.value === ".") continue
+        // a source that exists by an absolute path, so the link it makes resolves and a later write through it is judged where it lands
+        if (
+          linkSource &&
+          args[at - 1] === linkSource &&
+          isAbsolute(word.value) &&
+          existsSync(word.value)
+        )
+          continue
         // a quiet commit's message, an in-place sed's or perl's script, a gh filter and a browser eval's script on a line read whole are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text =
           (quiet && /\s/.test(word.value)) ||
@@ -3372,11 +3562,16 @@ async function inspect(
   whole = rootLine || wholeLine(lexed.commands, env)
   patterns = casePatterns(lexed.commands)
   bodies = compoundBodies(lexed.commands)
+  blocksAround = blockRedirects(lexed.commands, bodies)
   fnArgs = functionArgs(lexed.commands, command)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
   lineTexts = lineTextsOf(lexed.commands)
   lineWritten = writtenWords(lexed.commands)
+  lineLinks =
+    !rootLine &&
+    lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse(cmd))).length === 1 &&
+    lexed.commands.every((cmd) => !!symlinkSource(cmd, parse(cmd)) || linkSafe(cmd, env))
   lineFindings = new Map()
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
