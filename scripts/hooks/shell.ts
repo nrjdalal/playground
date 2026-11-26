@@ -986,14 +986,21 @@ const plainPath = (value: string) =>
         .filter((s) => s && s !== ".")
         .join("/")}`
     : value
-// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, or from the root where the reader can place none
+// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from the real path of each folder the command may run in (a link or a hop to the root is the root), or from the root where the reader can place none
 const stdinPath = (value: string, env?: Env): boolean => {
   if (STDIN_PATHS.has(plainPath(value))) return true
   if (!env || value.startsWith("/") || marked(value)) return false
   const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
   return (folders.length > 0 ? folders : ["/"]).some((dir) =>
-    STDIN_PATHS.has(plainPath(`${dir}/${value}`)),
+    STDIN_PATHS.has(plainPath(`${realFolder(dir)}/${value}`)),
   )
+}
+const realFolder = (dir: string): string => {
+  try {
+    return realpathSync.native(dir)
+  } catch {
+    return dir
+  }
 }
 export const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])

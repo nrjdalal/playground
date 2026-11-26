@@ -11,7 +11,7 @@ It also generates spellings of the Bash rows with fast-check, and holds each to 
 `no-raw-spawn` guards `scripts/spawn.sh` and refuses hc, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 Every hook reads a wrapper (`doas`, `env`, `nice`, `nohup`, `stdbuf`, `sudo`, `time`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
-`flock`'s file, `taskset`'s mask, `repeat`'s count and `timeout`'s duration (`COUNTED`), and `chrt`'s priority when it is digits, sit between a wrapper's options and its program, and `flock`'s `-c` or `--command` after its file reads as `sh -c`.
+`flock`'s file, `taskset`'s mask, `repeat`'s count and `timeout`'s duration (`COUNTED`), and `chrt`'s priority when it is digits, sit between a wrapper's options and its program, `flock`'s `-c` or `--command` after its file reads as `sh -c` with its text apart or attached, and `watch`'s words past its options read as the one `sh -c` line it runs, or as its program's own words after `-x`.
 A package runner's program is read as one more reading beside the runner's own (`viaRunner`, by `RUNNERS` in `scripts/hooks/shell.ts`): `npx`, `npm exec` and `npm x`, `pnpm exec` and `pnpm dlx`, `pnpx`, `bunx`, `bun x`, `bun run`, `bun exec`, `yarn dlx` and `yarn exec`, the `npm:` package of `deno run`, `deno x` or a bare `deno`, `corepack`, `mise exec` and `mise x`, and `volta run`,
 each by its own option lists,
 measured from its `--help` or, for one not installed here, its docs.

@@ -5955,7 +5955,14 @@ var stdinPath = (value, env) => {
   if (!env || value.startsWith("/") || marked(value))
     return false;
   const folders = places(env).flatMap((e) => e.cwd === undefined ? [] : [e.cwd]);
-  return (folders.length > 0 ? folders : ["/"]).some((dir) => STDIN_PATHS.has(plainPath(`${dir}/${value}`)));
+  return (folders.length > 0 ? folders : ["/"]).some((dir) => STDIN_PATHS.has(plainPath(`${realFolder(dir)}/${value}`)));
+};
+var realFolder = (dir) => {
+  try {
+    return realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
 };
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
