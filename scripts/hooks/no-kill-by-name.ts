@@ -93,8 +93,9 @@ async function inspect(raw: string) {
         .join(" ")
     : ""
   const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
+  // a kill's name may sit glued to an option it is the value of (`flock /tmp/l -cpkill`), so the first look takes it at a word's end too
   const namesKill =
-    /\b(?:fuser|kill|killall|pkill)\b/.test(bare) ||
+    /(?:fuser|kill|killall|pkill)\b/.test(bare) ||
     /(?:\$\{?\w+\}?){2,}/.test(bare) ||
     /\w\{[^{}\s]*\.\.[^{}\s]*\}|\{[^{}\s]*\.\.[^{}\s]*\}\w/.test(bare) ||
     globSpells(bare, KILLS)
