@@ -736,16 +736,20 @@ export const starts = async (
   const from = waiters.map((w) => w.err.length)
   const before = readFileSync(count, "utf8").split("\n").length
   await Promise.all([Bun.sleep(window * 1000), during()])
-  const execs = readFileSync(count, "utf8").split("\n").length - before
+  const lines = readFileSync(count, "utf8").split("\n")
+  const execs = lines.length - before
   const forks = waiters.reduce((n, w, i) => n + subshells(w.err.slice(from[i])), 0)
   const rate = (execs + forks) / window
-  if (rate >= 5)
+  // what the window counted, so a rate of 5 or more names its starts: each command by name, the forks, and each waiter's looks (a queue waiter's) and clone verdicts (a clone waiter's)
+  if (rate >= 5) {
+    const named: Record<string, number> = {}
+    for (const name of lines.slice(before - 1).filter(Boolean)) named[name] = (named[name] ?? 0) + 1
+    const each = (marks: RegExp) =>
+      waiters.map((w, i) => (w.err.slice(from[i]).match(marks) ?? []).length).join(",")
     console.error(
-      "looks in the window:",
-      waiters
-        .map((w, i) => (w.err.slice(from[i]).match(/^\++\d+ look_mark$/gm) ?? []).length)
-        .join(","),
+      `the window's ${execs} commands ${JSON.stringify(named)} and ${forks} forks; looks ${each(/^\++\d+ look_mark$/gm)}; clone verdicts ${each(/^\++\d+ clone_spaced$/gm)}`,
     )
+  }
   await Promise.all(waiters.map((w) => stop(w.p)))
   expect(waiters.every((w) => !existsSync(w.marker))).toBe(true)
   return rate
