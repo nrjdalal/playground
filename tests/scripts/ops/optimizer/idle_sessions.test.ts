@@ -508,6 +508,41 @@ describe("collect: live sessions with nothing to do", () => {
     expect(rows).toEqual([])
   })
 
+  test("checker-nothing reads each checker's own verdict alone: a tester's PASS keeps the reviewer (#3156)", async () => {
+    const HEAD = "100e4d8a3332d2bb"
+    const live = (lines: string[]) => {
+      const cache = join(emptyDir(), "prs.json")
+      const api = async (path: string) =>
+        path.includes("/comments")
+          ? lines.map((body) => ({ body }))
+          : { comments: lines.length, head: { ref: "pg-3146-x", sha: HEAD }, state: "open" }
+      return (url: string) => prStateLive(url, NOW, cache, api)
+    }
+    const ended = async (lines: string[]) =>
+      (
+        await collect(
+          deps({
+            prState: live(lines),
+            sessions: {
+              "c2bjhz-reviewer": entry({ name: "c2bjhz-reviewer", sessionId: "sess-r" }),
+              "5289bs-tester": entry({ name: "5289bs-tester", sessionId: "sess-t" }),
+            },
+            workerPrs: async () => ["https://github.com/o/r/pull/3148"],
+          }),
+        )
+      )
+        .filter((r) => r.why.includes("checker-nothing (head scored)"))
+        .map((r) => r.name)
+        .sort()
+    const review = "## ReviewBot · round 1: 5/5 at 100e4d8 · 0 blocking, 0 should-fix, 0 nits"
+    const tester = "## TesterBot · PASS at 100e4d8 · drove the login"
+    const newUser = "## NewUserGate · PASS at 100e4d8 · 7 of 7 passed"
+    expect(await ended([tester])).toEqual(["5289bs-tester"])
+    expect(await ended([review])).toEqual(["c2bjhz-reviewer"])
+    expect(await ended([review, tester])).toEqual(["5289bs-tester", "c2bjhz-reviewer"])
+    expect(await ended([newUser])).toEqual([])
+  })
+
   test("roster-says-<status> fires for paused and ended", async () => {
     for (const status of ["paused", "ended"]) {
       const rows = await collect(
