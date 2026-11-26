@@ -162,7 +162,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -2742,7 +2742,7 @@ async function xargsFilled(cmd, xargs, env) {
           return [w];
         if (text === undefined)
           return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
       }),
       ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }] : wordsOf(text)
     ]
@@ -3873,7 +3873,7 @@ async function judgeBash(command, cwd, environment) {
         glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, anyName ? "*" : item.value)
+        value: a.value.replaceAll(mark, () => anyName ? "*" : item.value)
       };
       if (unseen.has(item))
         unseen.add(word);
@@ -3932,7 +3932,7 @@ async function judgeBash(command, cwd, environment) {
         const end = args.findIndex((w, j) => j > i && (w.value === ";" || w.value === "+"));
         const line = args.slice(i + 1, end < 0 ? undefined : end).map((w) => {
           const typed = w.raw ?? w.source ?? `'${w.value.replaceAll("'", `'\\''`)}'`;
-          return reached ? typed.replaceAll("{}", roster.value) : typed;
+          return reached ? typed.replaceAll("{}", () => roster.value) : typed;
         }).join(" ");
         const found = await run(lex(line, at.known), { ...at, vars: new Map(at.vars) }, visit, true);
         if (found)

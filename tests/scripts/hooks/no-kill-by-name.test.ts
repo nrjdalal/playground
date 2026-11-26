@@ -222,6 +222,19 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "xargs -L1 ~/.playground/ops/run-slot.sh w -- <<< $'x\\nkill 1234'",
     "echo -e 'x\\nkill 1234' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
     "xargs watch <<< 'kill 1234'",
+    // the twins of 3134.ts's rows whose escape ends a word, a pid, date or kill-pid in place of the name; an ANSI-C item spelling date; and a program word whose item holds a dollar and a backtick, which xargs runs as written
+    "printf 'kill\\x001234' | xargs -0 nohup",
+    "printf 'kill\\n1234\\n' | xargs nohup",
+    "echo -e 'kill\\t1234' | xargs nohup",
+    "printf 'kill\\x201234' | xargs nohup",
+    "printf 'kill\\0401234' | xargs sh -c",
+    "xargs nohup <<< $'kill\\n1234'",
+    "printf 'x\\0kill\\0' | xargs -0 -I{} sh -c '{} 1234'",
+    "xargs -0 nohup < <(printf 'kill\\x001234')",
+    "printf 'date\\nnode\\n' | xargs nohup",
+    "xargs nohup <<< $'date\\nnode'",
+    "xargs -0 -I{} sh -c {} < <(printf 'x\\0$'\"'\"'\\\\x64ate'\"'\"'')",
+    "xargs -I{} {} node <<< '$`pkill'",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

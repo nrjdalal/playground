@@ -93,7 +93,10 @@ async function inspect(raw: string) {
         .commands.flatMap((c) => c.words.map((w) => w.value))
         .join(" ")
     : ""
-  const bare = spelledText(`${toolInput.command} ${decoded}`).replace(/["'\\]/g, "")
+  const spelled = spelledText(`${toolInput.command} ${decoded}`)
+  // a second spelling reads each backslash escape as the word break printf, echo -e or $'…' may decode it to, so a name an escape ends (`pkill\0node`, a here-string's `$'pkill\nnode'`) passes too
+  const breaks = spelled.replace(/\\(?:x[0-9A-Fa-f]{1,2}|[0-7]{1,4}|.)/g, " ")
+  const bare = `${spelled} ${breaks}`.replace(/["'\\]/g, "")
   // a kill's name may sit glued to an option it is the value of (`flock /tmp/l -cpkill`), so the first look takes it at a word's end too
   const namesKill =
     /(?:fuser|kill|killall|pkill)\b/.test(bare) ||

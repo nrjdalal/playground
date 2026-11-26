@@ -6364,7 +6364,7 @@ function filled(script, mark, value) {
   const count = script.split(mark).length - 1;
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read");
-  return script.replaceAll(mark, value);
+  return script.replaceAll(mark, () => value);
 }
 var held2 = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
@@ -8944,7 +8944,7 @@ async function xargsFilled(cmd, xargs, env) {
           return [w];
         if (text === undefined)
           return [{ ...w, ...unknown2(`the program xargs puts in place of ${held.join(" or ")}`) }];
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value));
       }),
       ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown2("the program xargs hands its wrapper") }] : wordsOf(text)
     ]

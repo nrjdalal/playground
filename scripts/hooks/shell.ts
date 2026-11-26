@@ -181,7 +181,8 @@ export function filled(script: string, mark: string, value: string): string {
   const count = script.split(mark).length - 1
   if (deadlines.getStore() !== undefined && script.length + count * value.length > MAX_SCRIPT)
     throw new RangeError("a script too large to read")
-  return script.replaceAll(mark, value)
+  // a function replacement, so a value holding `$'` or `$&` is inserted as written, never as a replacement pattern
+  return script.replaceAll(mark, () => value)
 }
 
 // A text a command writes or reads from stdin, unknown past the size of a file the hook reads, so a text that doubles stops growing.
@@ -3355,7 +3356,9 @@ async function xargsFilled(cmd: Command, xargs: Xargs[], env: Env): Promise<Comm
         if (!held) return [w]
         if (text === undefined)
           return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
-        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value))
+        return wordsOf(
+          held.reduce((value, replace) => value.replaceAll(replace, () => text), w.value),
+        )
       }),
       ...(!wrapped
         ? []
