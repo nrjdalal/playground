@@ -136,6 +136,38 @@ export const groups: Group[] = [
         `node -e "const fs = require('fs'); fs.fchmodSync(fs.openSync('$HOME/.playground/roster.json', 'r'), 0)"`,
       ],
       [
+        "python3 code moving a file onto the roster through pathlib's replace",
+        `python3 -c "import pathlib; pathlib.Path('/tmp/x').replace('$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "python3 code copying a file onto the roster through shutil's bare copy",
+        `python3 -c "from shutil import copy; copy('/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "perl code copying a file onto the roster through File::Copy",
+        `perl -e "use File::Copy; copy('/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "ruby code moving a file onto the roster through FileUtils.mv",
+        `ruby -e "require 'fileutils'; FileUtils.mv('/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "ruby code installing a file onto the roster through FileUtils.install",
+        `ruby -e "require 'fileutils'; FileUtils.install('/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "python3 code running mv onto the roster as a subprocess",
+        `python3 -c "import subprocess; subprocess.run(['mv', '/tmp/x', '$HOME/.playground/roster.json'])"`,
+      ],
+      [
+        "python3 code running cp onto the roster as a subprocess",
+        `python3 -c "import subprocess; subprocess.run(['cp', '/tmp/x', '$HOME/.playground/roster.json'])"`,
+      ],
+      [
+        "node code running cp onto the roster through a command string",
+        `node -e "require('child_process').execSync('cp /tmp/x $HOME/.playground/roster.json')"`,
+      ],
+      [
         "chmod -R on the data folder printed by a substitution",
         'chmod -R 000 "$(echo ~/.playground)"',
       ],

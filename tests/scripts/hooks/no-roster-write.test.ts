@@ -286,6 +286,16 @@ describe("roster.ts and every read run", () => {
     `python3 -c "import os; print(os.lstat('${ROSTER}').st_mode)"`,
     'rm -rf "$(mktemp -d)"',
     'chmod -R 755 "$(echo /tmp/w)"',
+    `python3 -c "from shutil import copy; copy('${ROSTER}', '/tmp/x')"`,
+    `perl -e "use File::Copy; copy('${ROSTER}', '/tmp/x')"`,
+    `ruby -e "require 'fileutils'; FileUtils.cp('${ROSTER}', '/tmp/x')"`,
+    `python3 -c "print(open('${ROSTER}').read().replace('a', 'b'))"`,
+    `node -e "console.log(require('fs').readFileSync('${ROSTER}', 'utf8').replace(/a/g, 'b'))"`,
+    `python3 -c "import subprocess; subprocess.run(['cat', '${ROSTER}'])"`,
+    `python3 -c "import copy, json; d = json.load(open('${ROSTER}')); print(copy.deepcopy(d))"`,
+    `python3 -c "import pathlib; print(pathlib.Path('${ROSTER}').read_text())"`,
+    `python3 -c "import pathlib; pathlib.Path('/tmp/x').replace('/tmp/y')"`,
+    `ruby -e "require 'fileutils'; FileUtils.mv('/tmp/x', '/tmp/y')"`,
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
