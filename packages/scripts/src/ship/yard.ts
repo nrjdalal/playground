@@ -10,7 +10,8 @@ export type YardIo = {
   drop: (dir: string) => Promise<void>
   err: (line: string) => void
   fetch: (tags: string[]) => Promise<void>
-  files: (sha: string) => Promise<string[]>
+  // a squash's files, or null for a commit with more than one parent or a read that fails
+  files: (sha: string) => Promise<string[] | null>
   inRange: (sha: string, since: string, tag: string) => Promise<boolean>
   launch: () => Promise<Launch>
   out: (line: string) => void
@@ -87,9 +88,9 @@ export const subjectPr = (subject: string): number | undefined => {
   return pr ? Number(pr[1]) : undefined
 }
 
-// Whether a PR's body names an Inbox id, `#i12` never matching `#i123`.
+// Whether a PR's body names an Inbox id whole, `#i12` never matching `#i123` nor `#i9` matching `x#i9`.
 export const namesDecision = (body: string, value: string): boolean =>
-  new RegExp(`${value}(?![0-9])`).test(body)
+  new RegExp(`(?<![\\w#])${value}(?![0-9])`).test(body)
 
 // A PR as `gh pr view --json author,body,comments,mergeCommit,state` sends it, its fields read here.
 type PrJson = {
@@ -241,8 +242,14 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
         )
         return 1
       }
-      const files = new Set(await io.files(source.mergeSha))
-      for (const file of cover) if (files.has(file)) covered.add(file)
+      const files = await io.files(source.mergeSha)
+      if (!files) {
+        io.err(
+          `ship:yard: ${value}'s merge commit is not a squash with one parent, as pr:merge lands a PR, or could not be read, so it does not cover the migrations ${args.tag} ships: a ship PR's merge holds the whole ship, so name the PR that carried them`,
+        )
+        return 1
+      }
+      for (const file of cover) if (files.includes(file)) covered.add(file)
     }
     const uncovered = cover.filter((file) => !covered.has(file))
     if (uncovered.length) {
@@ -369,14 +376,15 @@ if (import.meta.main) {
     fetch: async (tags) => {
       git(["fetch", "--quiet", "origin", ...tags.flatMap((tag) => ["tag", tag])])
     },
-    // a merge's own diff, pr:merge's squash commit against its one parent; a read that fails covers nothing
     files: async (sha) => {
       try {
+        const [, ...parents] = git(["rev-list", "--parents", "-n", "1", sha]).trim().split(" ")
+        if (parents.length !== 1) return null
         return git(["diff", "--name-only", `${sha}^`, sha])
           .split("\n")
           .filter(Boolean)
       } catch {
-        return []
+        return null
       }
     },
     // a merge in since..tag: the tag holds it and since does not; a read that fails reads as outside

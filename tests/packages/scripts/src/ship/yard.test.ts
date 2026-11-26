@@ -28,7 +28,7 @@ type Fake = {
   bodies?: Record<number, string>
   changed?: string[]
   deploys?: Partial<Record<Project, boolean>>
-  files?: Record<string, string[]>
+  files?: Record<string, string[] | null>
   inRange?: (sha: string) => boolean
   launch?: Launch
   record?: string
@@ -58,7 +58,7 @@ const fake = (set: Fake = {}) => {
     fetch: async (tags) => {
       calls.push(`fetch ${tags.join(" ")}`)
     },
-    files: async (sha) => set.files?.[sha] ?? [],
+    files: async (sha) => set.files?.[sha] ?? null,
     inRange: async (sha) => set.inRange?.(sha) ?? true,
     launch: async () =>
       set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
@@ -332,6 +332,20 @@ describe("ship:yard's schema stop", () => {
       expect(line).not.toContain(MIGRATIONS[0])
     })
 
+    test("a PR#N whose merge commit is no one-parent squash, as a ship PR's merge holds the whole ship, refuses", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: null },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("PR#7's merge commit is not a squash with one parent")
+    })
+
     test("two PR#N sources that each cover one of two migrations clear it together", async () => {
       const { calls, code } = await run(
         { schemaCleared: ["PR#7", "PR#8"] },
@@ -384,6 +398,21 @@ describe("ship:yard's schema stop", () => {
         .find((l) => l.includes("does not cover"))
       expect(line).toContain(MIGRATIONS[1])
       expect(line).not.toContain(MIGRATIONS[0])
+    })
+
+    test("an '#iN' covers no migration whose PR's body cannot be read", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          bodies: { 41: "#i9" },
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => schemaDecision,
+          touching: carried,
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain(`still uncovered: ${MIGRATIONS[1]}`)
     })
 
     test("an '#iN' covers no migration a commit outside any PR added", async () => {
@@ -605,9 +634,12 @@ describe("ship:yard's schema source parsers", () => {
     expect(subjectPr("feat(PG-1): see #2819 for the column")).toBeUndefined()
   })
 
-  test("namesDecision matches an Inbox id whole, so #i12 never reads as #i123", () => {
+  test("namesDecision matches an Inbox id whole, so #i12 never reads as #i123 nor #i9 as x#i9", () => {
     expect(namesDecision("the owner's go, #i123.", "#i123")).toBe(true)
+    expect(namesDecision("(#i123)", "#i123")).toBe(true)
     expect(namesDecision("the owner's go, #i1234", "#i123")).toBe(false)
+    expect(namesDecision("see foo#i123", "#i123")).toBe(false)
+    expect(namesDecision("see ##i123", "#i123")).toBe(false)
   })
 
   test("prSource carries the merge commit's sha", () => {
