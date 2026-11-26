@@ -2907,6 +2907,69 @@ export function braceRun(cmd: Command, first: Word | undefined): Command | null 
   return { ...cmd, words: cmd.words.flatMap((w) => (w === first ? words : [w])) }
 }
 
+// The values a word holding a brace list or sequence the shell sees expands to (`hook{s,x}`, `pre-commi{t..t}`), its quotes removed, as a write target reads them; null when the reader cannot expand it (an expansion in the word, past BRACE_WORDS), and undefined for a word with none
+export function braceValues(word: Word): string[] | null | undefined {
+  if (word.unknown !== BRACE) return
+  const source = (word.source ?? "").replace(/\\\n/g, "")
+  if (/[$`]/.test(source)) return null
+  const masked = source.replace(QUOTED, (part) => part.replace(/[{,}()]/g, hide))
+  const expanded = braceSequences(masked)
+  if (!expanded) return null
+  const values: string[] = []
+  for (const each of expanded) {
+    const { commands } = lex(unhide(each))
+    const words = commands[0]?.words ?? []
+    if (commands.length > 1 || words.length !== 1 || marked(words[0].value)) return null
+    values.push(words[0].value)
+  }
+  return values.length > 0 ? values : null
+}
+
+// A brace sequence bash and zsh expand: two integers or two single letters, and an optional step
+const BRACE_SEQUENCE = /\{(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.(-?\d+))?\}/
+
+// The words a word's brace lists and sequences expand to (braceWords, then each sequence's terms, an integer one padded to its widest zero-led end), or undefined past BRACE_WORDS
+function braceSequences(word: string): string[] | undefined {
+  const done: string[] = []
+  const todo = [word]
+  while (todo.length > 0) {
+    const lists = braceWords(todo.pop()!)
+    if (!lists || done.length + todo.length + lists.length > BRACE_WORDS) return undefined
+    for (const each of lists) {
+      const found = BRACE_SEQUENCE.exec(each)
+      if (!found) {
+        done.push(each)
+        continue
+      }
+      const [whole, from, to, by] = found
+      const numeric = /\d/.test(from) && /\d/.test(to)
+      if (!numeric && (/\d/.test(from) || /\d/.test(to))) {
+        done.push(each)
+        continue
+      }
+      const start = numeric ? Number(from) : from.charCodeAt(0)
+      const end = numeric ? Number(to) : to.charCodeAt(0)
+      const step = Math.abs(Number(by ?? 1)) || 1
+      if (Math.abs(end - start) / step + 1 > BRACE_WORDS) return undefined
+      const width =
+        numeric && [from, to].some((end) => /^-?0\d/.test(end))
+          ? Math.max(from.length, to.length)
+          : 0
+      const padded = (n: number) =>
+        width
+          ? `${n < 0 ? "-" : ""}${String(Math.abs(n)).padStart(width - (n < 0 ? 1 : 0), "0")}`
+          : String(n)
+      for (let n = start; start <= end ? n <= end : n >= end; n += start <= end ? step : -step)
+        todo.push(
+          each.slice(0, found.index) +
+            (numeric ? padded(n) : String.fromCharCode(n)) +
+            each.slice(found.index + whole.length),
+        )
+    }
+  }
+  return done
+}
+
 // A quoted part of a word, or a character after a backslash, whose braces and commas the shell's brace expansion leaves as text
 const QUOTED = /'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]/g
 
