@@ -14,16 +14,20 @@ export type YardIo = {
   inRange: (sha: string, since: string, tag: string) => Promise<boolean>
   launch: () => Promise<Launch>
   out: (line: string) => void
+  // a PR's body, or null when the read fails
+  prBody: (pr: number) => Promise<string | null>
   readRecord: () => Promise<string | undefined>
   schemaCleared: (value: string) => Promise<SchemaSource | null>
   status: (url: string) => Promise<number>
+  // the subject of each commit in since..tag that touches the file, or null when the read fails
+  touching: (file: string, since: string, tag: string) => Promise<string[] | null>
   worktree: (tag: string) => Promise<string>
   writeRecord: (tag: string) => Promise<void>
 }
 
-// A --schema-cleared value's source: #iN an Inbox decision the owner approved, with the text that names what it covers, PR#N a merged PR with its author's shape review, a dump path and its merge commit. A null read, one that failed or that no source shape fits, fails the step closed.
+// A --schema-cleared value's source: #iN an Inbox decision the owner approved and whether it is a schema one, PR#N a merged PR with its author's shape review, a dump path and its merge commit. A null read, one that failed or that no source shape fits, fails the step closed.
 export type SchemaSource =
-  | { approved: boolean; kind: "decision"; text: string }
+  | { approved: boolean; kind: "decision"; schema: boolean }
   | { dumpPath?: string; kind: "pr"; merged: boolean; mergeSha?: string; shapeReview: boolean }
 
 // The call's launch, as the claude process it runs under was started: that process's PLAYGROUND_ROLE, the roster's kind for its session's registry name, and what the walk found.
@@ -77,9 +81,15 @@ export const coverSet = (schema: string[]): string[] => {
   return migrations.length ? migrations : schema
 }
 
-// Whether a decision's text names a file: a migration by its file name, any other schema file by its whole path.
-export const namesFile = (text: string, file: string): boolean =>
-  text.includes(file.endsWith(".sql") ? file.slice(file.lastIndexOf("/") + 1) : file)
+// The PR a commit's subject names, the number in parentheses pr:merge's squash ends it with; none for a commit no PR merged.
+export const subjectPr = (subject: string): number | undefined => {
+  const pr = /\(#(\d+)\)$/.exec(subject.trim())
+  return pr ? Number(pr[1]) : undefined
+}
+
+// Whether a PR's body names an Inbox id, `#i12` never matching `#i123`.
+export const namesDecision = (body: string, value: string): boolean =>
+  new RegExp(`${value}(?![0-9])`).test(body)
 
 // A PR as `gh pr view --json author,body,comments,mergeCommit,state` sends it, its fields read here.
 type PrJson = {
@@ -120,20 +130,17 @@ export const prSource = (json: string): SchemaSource | null => {
   return { dumpPath, kind: "pr", merged: read.state === "MERGED", mergeSha, shapeReview }
 }
 
-// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it and the words approved, its title and its preview's text or a schema decision's shape: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
+// An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it and whether its preview is a schema one, step 0's breaking path: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
 export const decisionSource = (json: string): SchemaSource | null => {
   const read = safeParse(json)
   if (!read || typeof read !== "object" || (read as { kind?: string }).kind !== "decision")
     return null
-  const item = read as {
-    preview?: { shape?: unknown; text?: unknown }
-    status?: string
-    title?: unknown
+  const item = read as { preview?: { type?: unknown }; status?: string }
+  return {
+    approved: item.status === "approved",
+    kind: "decision",
+    schema: item.preview?.type === "schema",
   }
-  const text = [item.title, item.preview?.text, item.preview?.shape]
-    .filter((part) => typeof part === "string")
-    .join("\n")
-  return { approved: item.status === "approved", kind: "decision", text }
 }
 
 // The Inbox `ask get` argv for a #iN value: its id, so the reader the live dashboard checkout runs gets `i123` for `#i123`.
@@ -172,14 +179,14 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
     const values = args.schemaCleared ?? []
     if (!values.length) {
       io.err(
-        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, once per source, naming sources that together cover each migration this ship carries: '#iN' (quoted, since a bare # starts a shell comment), the owner's approved step 0 decision, whose text names each migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path)`,
+        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, once per source, naming sources that together cover each migration this ship carries: '#iN' (quoted, since a bare # starts a shell comment), the owner's approved step 0 schema decision, named in the body of each PR that carries a migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path)`,
       )
       return 1
     }
     const bad = values.find((value) => !/^#i\d+$/.test(value) && !/^PR#\d+$/.test(value))
     if (bad) {
       io.err(
-        `ship:yard: --schema-cleared <${bad}> takes one of two forms: '#iN', the owner's approved step 0 decision, whose text names each migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path); run it again naming one`,
+        `ship:yard: --schema-cleared <${bad}> takes one of two forms: '#iN', the owner's approved step 0 schema decision, named in the body of each PR that carries a migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path); run it again naming one`,
       )
       return 1
     }
@@ -201,7 +208,20 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
           )
           return 1
         }
-        for (const file of cover) if (namesFile(source.text, file)) covered.add(file)
+        if (!source.schema) {
+          io.err(
+            `ship:yard: ${value} is not a schema decision, the kind step 0's breaking path posts, so it does not clear the schema ${args.tag} changes`,
+          )
+          return 1
+        }
+        // a file is covered when each commit of the range that touches it is a PR whose body names the decision (issue 3125)
+        for (const file of cover) {
+          const subjects = await io.touching(file, since, args.tag)
+          const prs = (subjects ?? []).map(subjectPr)
+          if (!prs.length || prs.some((pr) => pr === undefined)) continue
+          const bodies = await Promise.all(prs.map((pr) => io.prBody(pr!)))
+          if (bodies.every((body) => body !== null && namesDecision(body, value))) covered.add(file)
+        }
         continue
       }
       const missing = [
@@ -227,7 +247,7 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
     const uncovered = cover.filter((file) => !covered.has(file))
     if (uncovered.length) {
       io.err(
-        `ship:yard: --schema-cleared ${values.join(" ")} does not cover the migrations ${args.tag} ships, still uncovered: ${uncovered.join(", ")}; add a source for each, once per --schema-cleared: '#iN', the owner's approved step 0 decision, whose text names each migration it covers, or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers`,
+        `ship:yard: --schema-cleared ${values.join(" ")} does not cover the migrations ${args.tag} ships, still uncovered: ${uncovered.join(", ")}; add a source for each, once per --schema-cleared: '#iN', the owner's approved step 0 schema decision, named in the body of each PR that carries a migration it covers, or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers`,
       )
       return 1
     }
@@ -272,7 +292,7 @@ token), then records the tag in the data folder's ops/yard-tag and removes the w
 It runs under the Ops lead's claude process alone (its PLAYGROUND_ROLE lead, the roster's
 ops kind), read from that process and never this call's environment. It stops
 when the tag changes packages/db's schema or migrations since the recorded tag, until
---schema-cleared, once per source, names sources that together cover each migration the ship carries (each schema file when it carries none): '#iN' (quoted), the owner's approved step 0 decision, whose text names each migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path), and with no record until --since names the tag live now.
+--schema-cleared, once per source, names sources that together cover each migration the ship carries (each schema file when it carries none): '#iN' (quoted), the owner's approved step 0 schema decision, named in the body of each PR that carries a migration it covers (the breaking path), or PR#N, a PR merged between the recorded tag and this one, whose author posted a shape review (a comment whose first line names one), whose body names a dump path from \x60~/\x60, and whose diff holds the migrations it covers (the additive path), and with no record until --since names the tag live now.
 The ids and hosts come from the environment, else the live dashboard checkout's .env:
 ${KEYS.join(", ")}.`
 
@@ -367,6 +387,17 @@ if (import.meta.main) {
     },
     launch: () => launchAbove(),
     out: console.log,
+    prBody: async (pr) => {
+      const ran = Bun.spawnSync(
+        ["gh", "pr", "view", String(pr), "--json", "body", "--jq", ".body"],
+        {
+          cwd: repo,
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      )
+      return ran.exitCode === 0 ? ran.stdout.toString() : null
+    },
     readRecord: async () => {
       const file = Bun.file(record)
       return (await file.exists()) ? (await file.text()).trim() || undefined : undefined
@@ -395,6 +426,15 @@ if (import.meta.main) {
       })
       if (ran.exitCode !== 0) return null
       return decisionSource(ran.stdout.toString())
+    },
+    touching: async (file, since, at) => {
+      try {
+        return git(["log", "--format=%s", `${since}..${at}`, "--", file])
+          .split("\n")
+          .filter(Boolean)
+      } catch {
+        return null
+      }
     },
     worktree: async (at) => {
       const dir = join(worktrees, `yard-ship-${at}`)
