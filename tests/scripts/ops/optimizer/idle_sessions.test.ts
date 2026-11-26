@@ -465,7 +465,11 @@ describe("collect: live sessions with nothing to do", () => {
 
   test("checker-nothing: the head scored lists at 30+ quiet minutes, not at 15", async () => {
     const base = {
-      prState: async () => ({ head: "abc1234567890", state: "open", verdicts: ["abc1234"] }),
+      prState: async (): Promise<PrState> => ({
+        head: "abc1234567890",
+        state: "open",
+        verdicts: [{ at: "abc1234", gate: "review" }],
+      }),
       sessions: {
         "reviewer-held-gate": entry({ name: "reviewer-held-gate", sessionId: "sess-h" }),
         "worker-held-gate": entry({ name: "worker-held-gate" }),
@@ -496,7 +500,11 @@ describe("collect: live sessions with nothing to do", () => {
       deps({
         prState: async (url) =>
           url.endsWith("/1")
-            ? { head: "abc1234567890", state: "open", verdicts: ["abc1234"] }
+            ? {
+                head: "abc1234567890",
+                state: "open",
+                verdicts: [{ at: "abc1234", gate: "review" }],
+              }
             : { head: "bbb2222999", state: "open", verdicts: [] },
         sessions: {
           "reviewer-sure-note": entry({ name: "reviewer-sure-note", sessionId: "sess-sn" }),
@@ -719,7 +727,7 @@ describe("collect: a checker's prs list (#706)", () => {
   const ISSUE = "https://github.com/o/r/issues/2112"
   const states: Record<string, PrState> = {
     [ISSUE]: { head: "", state: "open", verdicts: [] },
-    [SCORED]: { head: "abc1234567", state: "open", verdicts: ["abc1234"] },
+    [SCORED]: { head: "abc1234567", state: "open", verdicts: [{ at: "abc1234", gate: "review" }] },
     [UNSCORED]: { head: "bbb2222", state: "open", verdicts: [] },
   }
   const reviewer = (prs?: string[]) =>
