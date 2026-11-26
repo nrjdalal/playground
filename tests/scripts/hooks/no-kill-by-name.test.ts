@@ -209,6 +209,20 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     // -d takes the n as its value, so the 2 is the program, which names no kill
     "watch -dn 2 date",
     "echo skill",
+    // #3155's twins: a kill of one pid after each signal form, a lone -1 kill reads as signal 1 with no pid, and -1 before a pid read as that signal
+    "kill 1234",
+    "kill -TERM 1234",
+    "kill -0 1234",
+    "kill -9 1234",
+    "kill -s TERM 1234",
+    "kill -n 9 1234",
+    "kill -- 1234",
+    "kill -1",
+    "kill -1 1234",
+    "kill -l",
+    "kill -l 9",
+    "kill -L",
+    "P=1234; kill -9 $P",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

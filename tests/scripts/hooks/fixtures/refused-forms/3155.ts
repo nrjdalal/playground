@@ -1,0 +1,40 @@
+import { type Group } from "./_shared"
+
+// #3155: a kill of every process (`-1`), a process group (a negative pid) or the caller's own group (`0`), read as kill reads its words, and a pkill or killall given a user or an "all" target; rows are data, as refused-forms.ts says.
+export const groups: Group[] = [
+  {
+    folders: ["checkout"],
+    guards: ["no-kill-by-name"],
+    rows: () => [
+      ["a kill of every process after a signal number", "kill -9 -1"],
+      ["a kill of every process after a signal name", "kill -KILL -1"],
+      ["a kill of every process after a SIG signal name", "kill -SIGKILL -1"],
+      ["a kill of every process after -s", "kill -s KILL -1"],
+      ["a kill of every process after -n", "kill -n 9 -1"],
+      ["a kill of every process after --", "kill -- -1"],
+      ["a kill of every process after a signal and --", "kill -9 -- -1"],
+      ["a kill of every process beside a pid", "kill -9 1234 -1"],
+      ["a kill of a process group after a signal", "kill -9 -1234"],
+      ["a kill of a process group after --", "kill -- -1234"],
+      ["a kill of a process group after -s", "kill -s TERM -1234"],
+      ["a kill of the caller's own group", "kill 0"],
+      ["a kill of the caller's own group after a signal", "kill -9 0"],
+      ["a kill of every process by its path", "/bin/kill -9 -1"],
+      ["a kill of every process behind a backslash", "\\kill -9 -1"],
+      ["a kill of every process behind command", "command kill -9 -1"],
+      ["a kill of every process behind builtin", "builtin kill -9 -1"],
+      ["a kill of every process in sh -c", "sh -c 'kill -9 -1'"],
+      ["a kill of every process in bash -c", 'bash -c "kill -- -1"'],
+      ["a kill of every process from a variable", "P=-1; kill -9 $P"],
+      ["a kill of every process behind timeout", "timeout 5 kill -9 -1"],
+      ["a kill of every process through run-slot", "~/.playground/ops/run-slot.sh w -- kill -9 -1"],
+      ["a kill of every process xargs reads from a here-string", "xargs kill -9 <<< -1"],
+      ["a pkill of a user's processes", "pkill -u nobody"],
+      ["a pkill of a real user's processes", "pkill -U 501"],
+      ["a pkill of a user's processes by name", "pkill --euid nobody node"],
+      ["a killall of a user's processes", "killall -u nobody"],
+      ["a killall of a user's processes by its long option", "killall --user nobody"],
+      ["a killall of every process name", "killall -a"],
+    ],
+  },
+]
