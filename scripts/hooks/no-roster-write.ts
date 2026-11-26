@@ -301,6 +301,13 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     })
   const holdsWord = (word: Word, at: Env) =>
     pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false
+  // Whether a word is the roster's own folder, one level above it, as a name filled in after it may be the roster
+  const ownFolder = (word: Word, at: Env) =>
+    pathsOf(word, at)?.some(({ path }) =>
+      targets.some(
+        (target) => segments(path).length === segments(target).length - 1 && holds(path, false),
+      ),
+    ) ?? false
   const lexed = lex(command, env.known)
   // Whether the call reaches toward the roster: it names it, or a word of it is the roster or a folder holding it.
   const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)))
@@ -375,7 +382,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   // The words an xargs hands its program, one list per run: each fed item in its -I string's place, else after the program's own words; the roster for a find that reaches it, or for input the hook cannot see (unread, or past ITEMS items) where unseenHolds, and for unseen input, a find's included, that the -I string places right after the roster's folder.
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
-    // an -I string placing an item right after a folder holding the roster (`<data folder>/{}`, or the folder spelled in code as `$ENV{HOME}/.playground/{}`) reaches toward it, whatever feeds the input
+    // an -I string placing an item right after the roster's own folder (`<data folder>/{}`, or the folder spelled in code as `$ENV{HOME}/.playground/{}`) reaches toward it, whatever feeds the input
     const intoFolderOf = (a: Word) =>
       !!mark &&
       a.value
@@ -383,7 +390,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         .slice(0, -1)
         .some((before) => {
           const folder = before.slice(before.search(/[^\s"'=]*$/))
-          if (folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at))
+          if (folder.endsWith("/") && ownFolder({ ...a, glob: false, value: folder }, at))
             return true
           return /(?:\.playground|playground_data_dir\W*)\/$/.test(
             before.replace(/["']/g, "").toLowerCase(),

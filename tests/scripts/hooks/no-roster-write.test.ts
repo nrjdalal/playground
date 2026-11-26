@@ -254,6 +254,7 @@ describe("roster.ts and every read run", () => {
     `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "print(open('${DATA}/{}').read())"`,
     `cat /tmp/no-such-names.txt | xargs -I{} node -e "console.log(require('fs').readFileSync('${DATA}/{}', 'utf8'))"`,
     `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('/tmp/{}')"`,
+    `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('${HOME}/{}')"`,
     `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('${DATA}/scratch/{}')"`,
     "chflags uchg /tmp/x",
     "zstd --rm /tmp/x",

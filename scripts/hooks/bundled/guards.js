@@ -19934,6 +19934,7 @@ async function judgeBash(command, cwd, environment) {
     return p.length <= t.length && p.every((s, i) => glob ? new Bun.Glob(s).match(t[i]) : s === t[i]);
   });
   const holdsWord = (word, at) => pathsOf(word, at)?.some(({ glob, path }) => holds(path, glob)) ?? false;
+  const ownFolder = (word, at) => pathsOf(word, at)?.some(({ path }) => targets.some((target) => segments(path).length === segments(target).length - 1 && holds(path, false))) ?? false;
   const lexed = lex(command, env.known);
   const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)));
   const unseenHolds = (at) => near || places(at).some(({ cwd }) => !!cwd && holds(cwd, false));
@@ -19994,7 +19995,7 @@ async function judgeBash(command, cwd, environment) {
     const mark = xargs.replace;
     const intoFolderOf = (a) => !!mark && a.value.split(mark).slice(0, -1).some((before) => {
       const folder = before.slice(before.search(/[^\s"'=]*$/));
-      if (folder.endsWith("/") && holdsWord({ ...a, glob: false, value: folder }, at))
+      if (folder.endsWith("/") && ownFolder({ ...a, glob: false, value: folder }, at))
         return true;
       return /(?:\.playground|playground_data_dir\W*)\/$/.test(before.replace(/["']/g, "").toLowerCase());
     });
