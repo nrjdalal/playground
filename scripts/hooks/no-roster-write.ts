@@ -1,4 +1,4 @@
-// A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets its readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, in a call that names the file, is refused, failing closed.
+// A check for a factory session: refuses an Edit, a Write or a shell write to the live roster, the data folder's roster.json, whose one writer is scripts/roster.ts (the roster rule), and lets its readers (READERS) run. guards.ts runs it on Bash and no-raw-wa's process on the file tools, so it has no main block of its own. A write position it cannot read, where the call may build it toward the file (builtToward), is refused, failing closed.
 import { realpathSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, resolve } from "node:path"
@@ -72,9 +72,14 @@ const COPIERS = new Set(["cp", "ditto", "rsync"])
 // The placers whose -t or --target-directory names the folder they place into; rsync's -t keeps times.
 const TARGET_FLAG = new Set(["cp", "install", "ln", "mv"])
 
-// Programs that write every file operand they name, so an operand the hook cannot read is a write position.
+// Programs that write or change every file operand they name (a mode, an owner, a compressed copy in its place), so an operand the hook cannot read is a write position.
 const WRITERS = new Set([
+  "bzip2",
+  "chgrp",
+  "chmod",
+  "chown",
   "dd",
+  "gzip",
   "install",
   "ln",
   "mv",
@@ -84,6 +89,7 @@ const WRITERS = new Set([
   "touch",
   "truncate",
   "unlink",
+  "xz",
 ])
 
 // Programs that run inline code the hook does not parse: code naming the roster runs only when it holds no write word (WRITE_WORDS).
@@ -104,6 +110,10 @@ const CODE_RUNNERS = new Set([
 // A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
   /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i
+// A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
+const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
+const writesCode = (code: string) =>
+  WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)))
 
 // The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
 const targetsOf = (environment: Environment): string[] => {
@@ -180,6 +190,18 @@ const shown = (word: Word) => word.source ?? visible(word.value)
 // sed writes the files it names in place given -i or --in-place, and only reads them otherwise.
 const inPlace = (args: Word[]) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value))
 
+// sort's output files: -o's value attached (-o<v>, -uo<v>) or the next word, and --output's after = or the next word.
+const sortOutputs = (args: Word[]): Word[] =>
+  args.flatMap((a, i) => {
+    const own = (value: string) => [{ ...a, raw: undefined, source: undefined, value }]
+    const next = args[i + 1] ? [args[i + 1]!] : []
+    if (a.value === "--output") return next
+    if (a.value.startsWith("--output=")) return own(a.value.slice("--output=".length))
+    const short = /^-[A-Za-z]*o(.*)$/.exec(a.value)
+    if (!short || a.value.startsWith("--")) return []
+    return short[1] ? own(short[1]) : next
+  })
+
 // A placer's destination: its -t folder where it takes one, else its last operand.
 const destinationOf = (tool: string, args: Word[]): Word | undefined => {
   const t = TARGET_FLAG.has(tool)
@@ -215,12 +237,22 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand) may write the roster when the call names it and the text after its last expansion may end its path; an unread operand of any other program runs.
+  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word starts with an expansion, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
+  const builtToward = (typed: Word, at: Env) => {
+    if (named) return true
+    const prefix = typed.value.slice(0, typed.value.search(/[\u0000\u0001]/))
+    if (prefix) {
+      const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1)
+      return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at)
+    }
+    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at)
+  }
+  // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand, sort's -o) may write the roster when it may be built toward it (builtToward) and the text after its last expansion may end its path; an unread operand of any other program runs.
   const writes = (typed: Word, at: Env, position = false) => {
     const paths = pathsOf(typed, at)
     if (!paths) {
       const tail = tailOf(typed.source ?? typed.raw ?? "").toLowerCase()
-      return position && named && targets.some((t) => t.endsWith(tail))
+      return position && targets.some((t) => t.endsWith(tail)) && builtToward(typed, at)
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob))
   }
@@ -323,12 +355,14 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
   const xargsRuns = async (cmd: Command, args: Word[], xargs: NonNullable<Xargs>, at: Env) => {
     const mark = xargs.replace
     const fill = (a: Word, mark: string, item: Word): Word => {
+      // an unseen item right after a folder in the -I string may be any name in it (`xargs -I{} rm <data folder>/{}`)
+      const anyName = unseen.has(item) && a.value.slice(0, a.value.indexOf(mark)).endsWith("/")
       const word = {
         ...a,
-        glob: a.glob || item.glob,
+        glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, item.value),
+        value: a.value.replaceAll(mark, anyName ? "*" : item.value),
       }
       if (unseen.has(item)) unseen.add(word)
       return word
@@ -408,7 +442,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     }
     if (
       CODE_RUNNERS.has(tool) &&
-      args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value))
+      args.some((a) => namesRoster(a.value, targets) && writesCode(a.value))
     )
       return refuse(`${tool} code that names the roster and holds a write word`)
     if (PLACERS.has(tool)) {
@@ -432,6 +466,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       if (args.some(script)) return refuse(`${tool} whose script names the roster`)
       if (!inPlace(args)) return
     }
+    // sort writes the file its -o names, attached or next, in a cluster (-uo) too, or its --output
+    if (tool === "sort")
+      for (const out of sortOutputs(args))
+        if (writes(out, at, true)) return refuse(`sort -o onto ${shown(out)}`)
     if (READERS.has(tool)) return
     const writer = WRITERS.has(tool) || SEDS.has(tool)
     // the unseen roster reaches a writer, and a program the hook cannot name, which may be one
