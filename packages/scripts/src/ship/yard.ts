@@ -19,7 +19,7 @@ export type YardIo = {
   writeRecord: (tag: string) => Promise<void>
 }
 
-// A --schema-cleared value's source: #iN an Inbox decision the owner approved, PR#N a merged PR with a shape review and a dump path. A null read fails the step closed.
+// A --schema-cleared value's source: #iN an Inbox decision the owner approved, PR#N a merged PR with its author's shape review and a dump path. A null read, one that failed or that no source shape fits, fails the step closed.
 export type SchemaSource =
   | { approved: boolean; kind: "decision" }
   | { dumpPath?: string; kind: "pr"; merged: boolean; shapeReview: boolean }
@@ -86,24 +86,24 @@ const safeParse = (json: string): unknown => {
   }
 }
 
-// A dump's path, which `~/.playground` anchors: the leading `~` is a home path, never a packages/db migration, so a schema PR's migration .sql never clears a dump that carries one.
-const DUMP_RE = /~[\w./-]*\.(?:sql|dump)\b/
+// A dump's path from `~/`: a home path, never a packages/db migration, so a schema PR's migration .sql never clears as its dump.
+const DUMP_RE = /~\/[\w./-]+\.(?:sql|dump)\b/
 
-// A shape review's banner, whose first line starts with these words, counted only from the PR's own author, the account every session posts as, since anyone can comment on a public repo's PR.
-const SHAPE_RE = /^## ReviewBot · shape review( · at [0-9a-f]+)?/
+// A shape review, a comment whose first line names it in any case (db-migration's step 0), counted only from the PR's own author, the account every session posts as, since anyone can comment on a public repo's PR.
+const SHAPE_RE = /shape review/i
 
-// A PR's JSON from `gh pr view --json author,state,comments,body`, parsed into its source shape: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
+// A PR's JSON from `gh pr view --json author,state,comments,body`, parsed into what it holds: null when the JSON is not that shape, so the step fails closed on a read it cannot trust.
 export const prSource = (json: string): SchemaSource | null => {
   const read = safeParse(json) as PrJson | undefined
-  if (!read || read.state !== "MERGED" || !Array.isArray(read.comments)) return null
-  const author = read.author?.login
-  const reviewed = read.comments.some(
-    (comment) => comment.author?.login === author && SHAPE_RE.test(comment.body),
+  const author = read?.author?.login
+  if (!read || typeof read.state !== "string" || !Array.isArray(read.comments) || !author)
+    return null
+  const shapeReview = read.comments.some(
+    (comment) =>
+      comment.author?.login === author && SHAPE_RE.test(String(comment.body).split("\n")[0]!),
   )
-  if (!author || !reviewed) return null
-  const dump = DUMP_RE.exec(read.body)
-  if (!dump) return null
-  return { dumpPath: dump[0], kind: "pr", merged: true, shapeReview: true }
+  const dumpPath = DUMP_RE.exec(String(read.body))?.[0]
+  return { dumpPath, kind: "pr", merged: read.state === "MERGED", shapeReview }
 }
 
 // An Inbox decision's JSON from `playground ask get`, parsed into whether the owner approved it: null when the JSON is not an Inbox decision's shape, so a step fails closed on a read it cannot trust.
@@ -149,12 +149,12 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
   if (schema.length) {
     if (!args.schemaCleared) {
       io.err(
-        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either #iN, the owner's approved decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path)`,
+        `ship:yard: ${args.tag} changes the schema since ${since} (${schema.join(", ")}), which the API's build migrates: take it through the db-migration skill's step 0, then run again with --schema-cleared, naming either '#iN' (quoted, since a bare # starts a shell comment), the owner's approved decision (the breaking path), or PR#N, a merged PR whose author posted a shape review, a comment whose first line names one, and whose body names a dump path from \x60~/\x60 in its body (the additive path)`,
       )
       return 1
     } else if (!/^#i\d+$/.test(args.schemaCleared) && !/^PR#\d+$/.test(args.schemaCleared)) {
       io.err(
-        `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path); run it again naming one`,
+        `ship:yard: --schema-cleared <${args.schemaCleared}> takes one of two forms: '#iN', the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR whose author posted a shape review, a comment whose first line names one, and whose body names a dump path from \x60~/\x60 in its body (the additive path); run it again naming one`,
       )
       return 1
     } else {
@@ -162,22 +162,30 @@ export async function shipYard(args: YardArgs, hosts: YardHosts, io: YardIo): Pr
       if (!source) {
         const decision = /^#i\d+$/.test(args.schemaCleared)
         io.err(
-          `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable, so the schema ${args.tag} changes is not cleared: run it again with the decision's id, once the owner approved it, or a merged PR carrying a ReviewBot shape review and a dump path from \x60~/\x60 in its body`,
+          `ship:yard: the ${decision ? "Inbox decision " + args.schemaCleared : "PR " + args.schemaCleared} is not readable (its ${decision ? "playground ask get" : "gh pr view"} read failed, or answered in a shape the step does not know), so the schema ${args.tag} changes is not cleared: run it again once that read answers`,
         )
         return 1
       }
       if (source.kind === "decision") {
         if (!source.approved) {
           io.err(
-            `ship:yard: ${args.schemaCleared} is an open or denied Inbox decision, so it does not clear the schema ${args.tag} changes; take it through step 0, then run again once the owner has approved it`,
+            `ship:yard: ${args.schemaCleared} is not an approved Inbox decision, so it does not clear the schema ${args.tag} changes; take it through step 0, then run again once the owner has approved it`,
           )
           return 1
         }
-      } else if (!source.merged || !source.shapeReview || !source.dumpPath) {
-        io.err(
-          `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: it must be a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body`,
-        )
-        return 1
+      } else {
+        const missing = [
+          !source.merged && "it is not merged",
+          !source.shapeReview &&
+            "no comment of its author's names a shape review in its first line",
+          !source.dumpPath && "its body names no dump path from \x60~/\x60",
+        ].filter(Boolean)
+        if (missing.length) {
+          io.err(
+            `ship:yard: ${args.schemaCleared} does not clear the schema ${args.tag} changes: ${missing.join("; ")}; it must be a merged PR whose author posted a shape review, a comment whose first line names one, and whose body names a dump path from \x60~/\x60 in its body`,
+          )
+          return 1
+        }
       }
     }
   }
@@ -212,7 +220,7 @@ const KEYS = [
   "YARD_WEB_URL",
 ] as const
 
-const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <#iN | PR#N>]
+const USAGE = `usage: bun run ship:yard <tag> [--since <tag>] [--schema-cleared <'#iN' | PR#N>]
 
 Deploys the hosted Yard from <tag>, the ship's tag: its API, then its web, each with
 vercel deploy --prod from a detached worktree at the tag, fetched from origin, checking
@@ -221,7 +229,7 @@ token), then records the tag in the data folder's ops/yard-tag and removes the w
 It runs under the Ops lead's claude process alone (its PLAYGROUND_ROLE lead, the roster's
 ops kind), read from that process and never this call's environment. It stops
 when the tag changes packages/db's schema or migrations since the recorded tag, until
---schema-cleared names a good source, either #iN, the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR with a ReviewBot shape review and a dump path from \x60~/\x60 in its body (the additive path), and with no record until --since names the tag live now.
+--schema-cleared names a good source, either '#iN' (quoted), the owner's approved step 0 decision (the breaking path), or PR#N, a merged PR whose author posted a shape review, a comment whose first line names one, and whose body names a dump path from \x60~/\x60 in its body (the additive path), and with no record until --since names the tag live now.
 The ids and hosts come from the environment, else the live dashboard checkout's .env:
 ${KEYS.join(", ")}.`
 
@@ -314,10 +322,7 @@ if (import.meta.main) {
       if (pr) {
         const ran = Bun.spawnSync(
           ["gh", "pr", "view", pr[1]!, "--json", "author,state,comments,body"],
-          {
-            stderr: "pipe",
-            stdout: "pipe",
-          },
+          { cwd: repo, stderr: "pipe", stdout: "pipe" },
         )
         if (ran.exitCode !== 0) return null
         return prSource(ran.stdout.toString())

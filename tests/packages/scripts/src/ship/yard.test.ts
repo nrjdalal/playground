@@ -182,7 +182,7 @@ describe("ship:yard's schema stop", () => {
       },
     )
     expect(code).not.toBe(0)
-    expect(out()).toContain("#i123 is an open or denied Inbox decision")
+    expect(out()).toContain("#i123 is not an approved Inbox decision")
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
 
@@ -228,7 +228,7 @@ describe("ship:yard's schema stop", () => {
       { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
     )
     expect(code).not.toBe(0)
-    expect(out()).toContain("one of two forms: #iN")
+    expect(out()).toContain("one of two forms: '#iN'")
     expect(out()).toContain("PR#N")
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
   })
@@ -256,80 +256,111 @@ describe("ship:yard's schema stop", () => {
 })
 
 describe("ship:yard's schema source parsers", () => {
-  test("prSource, a merged PR naming a migration and a dump, clears on the dump's path", () => {
-    const source = prSource(
-      JSON.stringify({
-        author: { login: "owner" },
-        body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql, dump at ~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump`,
-        comments: [
-          {
-            author: { login: "owner" },
-            body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
-          },
-        ],
-        state: "MERGED",
-      }),
-    )
-    expect(source).toEqual({
-      dumpPath: "~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump",
-      kind: "pr",
-      merged: true,
-      shapeReview: true,
+  const DUMP = "~/.playground/scratchpad/ops/db-dump-2026-11-18/dashboard-db.dump"
+  // A made-up `gh pr view --json author,state,comments,body` read: a merged PR by "owner" whose body names DUMP, with the comments given.
+  const pr = (comments: { author: { login?: string }; body: string }[], over: object = {}) =>
+    JSON.stringify({
+      author: { login: "owner" },
+      body: `additive\n\npackages/db/drizzle/0017_x.sql, dump at ${DUMP}`,
+      comments,
+      state: "MERGED",
+      ...over,
+    })
+  const by = (login: string, body: string) => ({ author: { login }, body })
+  const cleared = { dumpPath: DUMP, kind: "pr" as const, merged: true, shapeReview: true }
+
+  test.each([
+    [
+      "a ReviewBot banner",
+      "## ReviewBot · shape review at 80cc2c2 · settle 2 findings, then generate",
+    ],
+    [
+      "a bold round 0 line",
+      "**Round 0: shape review of `a_table`** (db-migration step 0, at `a8b59ac`). Not a score.",
+    ],
+    [
+      "a plain step 0 line",
+      "Shape review (db-migration step 0) at e645f81a8: the shape is settled as additive.",
+    ],
+  ])(
+    "prSource, a merged PR whose author's shape review opens with %s, clears on the dump's path",
+    (_, first) => {
+      expect(prSource(pr([by("owner", `${first}\n\nadditive, shape settled`)]))).toEqual(cleared)
+    },
+  )
+
+  test("prSource, a merged PR naming only a packages/db migration, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive\n\npackages/db/drizzle/0017_x.sql",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a dump path written `~db.dump` with no slash, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, dump at ~db.dump",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR with its author's shape review and no dump path from ~/, names no dump", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      body: "additive, the dump taken",
+    })
+    expect(prSource(read)).toEqual({ ...cleared, dumpPath: undefined })
+  })
+
+  test("prSource, a merged PR whose shape review another login posted, holds no shape review", () => {
+    expect(prSource(pr([by("outsider", "## ReviewBot · shape review at 80cc2c2")]))).toEqual({
+      ...cleared,
+      shapeReview: false,
     })
   })
 
-  test("prSource, a merged PR naming only a packages/db migration, returns null", () => {
-    const source = prSource(
-      JSON.stringify({
-        author: { login: "owner" },
-        body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql`,
-        comments: [
-          {
-            author: { login: "owner" },
-            body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
-          },
-        ],
-        state: "MERGED",
-      }),
-    )
-    expect(source).toBeNull()
+  test("prSource, a merged PR whose author's only comment is a round verdict, holds no shape review", () => {
+    const read = pr([
+      by(
+        "owner",
+        "## ReviewBot · round 1: 5/5 at 80cc2c2 · 0 blocking\n\nthe shape review is settled",
+      ),
+    ])
+    expect(prSource(read)).toEqual({ ...cleared, shapeReview: false })
   })
 
-  test("prSource, a merged PR whose shape review another login posted, returns null", () => {
-    const source = prSource(
-      JSON.stringify({
-        author: { login: "owner" },
-        body: "additive, dump at ~/.playground/scratchpad/ops/db-dump/dashboard-db.dump",
-        comments: [
-          { author: { login: "outsider" }, body: "## ReviewBot · shape review at 80cc2c2" },
-        ],
-        state: "MERGED",
-      }),
-    )
-    expect(source).toBeNull()
+  test("prSource, an open PR with its author's shape review and a dump, is not merged", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], { state: "OPEN" })
+    expect(prSource(read)).toEqual({ ...cleared, merged: false })
   })
 
-  test("prSource, a merged PR with its author's shape review and no dump path from ~/, returns null", () => {
-    const source = prSource(
-      JSON.stringify({
-        author: { login: "owner" },
-        body: "additive, the dump taken",
-        comments: [{ author: { login: "owner" }, body: "## ReviewBot · shape review at 80cc2c2" }],
-        state: "MERGED",
-      }),
-    )
-    expect(source).toBeNull()
+  test("prSource, a read with no author's login, no state or no comments, returns null", () => {
+    const review = [by("owner", "## ReviewBot · shape review at 80cc2c2")]
+    expect(prSource(pr(review, { author: {} }))).toBeNull()
+    expect(prSource(pr(review, { state: undefined }))).toBeNull()
+    expect(prSource(pr(review, { comments: undefined }))).toBeNull()
+    expect(prSource("not json")).toBeNull()
   })
 
-  test("prSource, a merged PR whose author's login is missing, returns null", () => {
-    const source = prSource(
-      JSON.stringify({
-        body: "additive, dump at ~/.playground/scratchpad/ops/db-dump/dashboard-db.dump",
-        comments: [{ author: {}, body: "## ReviewBot · shape review at 80cc2c2" }],
-        state: "MERGED",
-      }),
-    )
-    expect(source).toBeNull()
+  test("--schema-cleared a readable PR missing a part refuses, naming that part", async () => {
+    for (const [over, part] of [
+      [{ state: "OPEN" }, "it is not merged"],
+      [{ comments: [] }, "no comment of its author's names a shape review"],
+      [{ body: "additive" }, "its body names no dump path from `~/`"],
+    ] as const) {
+      const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], over)
+      const { calls, code, out } = await run(
+        { schemaCleared: "PR#456" },
+        {
+          changed: ["packages/db/drizzle/0017_x.sql"],
+          record: "v0.0.110",
+          schemaCleared: async () => prSource(read),
+        },
+      )
+      expect(code).not.toBe(0)
+      expect(out()).toContain("PR#456 does not clear the schema")
+      expect(out()).toContain(part)
+      expect(out()).not.toContain("not readable")
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
   })
 
   test("decisionSource, an approved Inbox decision, is approved", () => {
