@@ -34,6 +34,7 @@ import { fromFactory, opsLead } from "./role"
 import {
   BRACE,
   braceRun,
+  braceValues,
   braceWords,
   casePatterns,
   codeFed,
@@ -1801,13 +1802,41 @@ function blockRedirects(commands: Command[], bodies: WeakMap<Command, Command[]>
   for (const c of commands) assign(c, [])
   return out
 }
+// Every command of a list, each one's inner commands after it
+const commandsIn = (list: Command[]): Command[] =>
+  list.flatMap((c) => [c, ...commandsIn(c.inner?.() ?? [])])
+// The positional parameters a line's set gives the shell at top level (`set -- a b`, `set a`): its words when one set gives them as written and nothing on the line moves them (shift, getopts, zsh's `argv` or `N=`, a text it runs or a program it cannot read, as functionArgs reads a body), null when the hook cannot read them, and undefined when no set gives any
+function lineArgsOf(commands: Command[]): Record<string, string> | null | undefined {
+  const parsed = commandsIn(commands).map((c) => parse(c))
+  // a set's operands: every word after `--`, or from its first word that is no option, past -o's or +o's value
+  const operands = (args: Word[]): Word[] | undefined => {
+    for (let k = 0; k < args.length; k++) {
+      if (args[k].value === "--") return args.slice(k + 1)
+      if (!/^[-+]/.test(args[k].value)) return args.slice(k)
+      if (args[k].value.endsWith("o")) k++
+    }
+  }
+  const sets = parsed.flatMap(({ args, name }) => {
+    const words = name === "set" ? operands(args) : undefined
+    return words ? [words] : []
+  })
+  if (sets.length === 0) return undefined
+  const moves =
+    parsed.some(
+      ({ name }) => name === "shift" || name === "getopts" || RUNS_TEXT.has(name) || marked(name),
+    ) || commandsIn(commands).some((c) => c.words.some((w) => /^argv\b|^\d+=/.test(w.value)))
+  if (sets.length > 1 || moves) return null
+  const [words] = sets
+  if (words.some((w) => marked(w.value) || w.glob || w.unknown)) return null
+  return Object.fromEntries(words.map((w, k) => [String(k + 1), w.value]))
+}
 // the programs that run a text which may call a function, and those that move its positional parameters from inside its body
 const RUNS_TEXT = new Set([".", "eval", "source"])
 const MOVES_ARGS = new Set(["getopts", "set", "shift"])
 // Each function body command's positional parameters, from the words of the line's one call of the function as the shell gives them (positionals), up to the first word the hook cannot read, from which every parameter is unread and a write through it refuses, so `f() { cat p > "$1"; }; f .git/hooks/pre-commit` is judged as `cat p > .git/hooks/pre-commit`. A definition is `f() …`, `function f() …` or `function f { … }`, its name after any reserved word that opens a body around it (`{ g() …`), its body a brace group, a subshell or one command; none is bound when the body holds another definition, whose parameters are its own, when the line names the function anywhere but its definition and that call, the call comes before the definition or inside its body, the line runs a text or a program the hook cannot read (RUNS_TEXT), or the body moves its parameters (MOVES_ARGS, zsh's `argv` or `N=`)
 // A function's one call, whose words bind its body's positional parameters (positionals), `cut` when a word the hook cannot expand ends them
 type FunctionCall = { call: Command; cut: boolean; words: Word[] }
-function functionArgs(commands: Command[], line: string) {
+function functionArgs(commands: Command[], line: string, unbound: WeakSet<Command>) {
   const seen = new Set<Command>()
   const walk = (list: Command[]) => {
     for (const c of list) {
@@ -1820,11 +1849,9 @@ function functionArgs(commands: Command[], line: string) {
   const out = new WeakMap<Command, FunctionCall>()
   const names = new Map(all.map((c) => [c, parse(c).name]))
   const name = (c: Command) => names.get(c) ?? parse(c).name
-  if (all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))) return out
+  const blind = all.some((c) => RUNS_TEXT.has(name(c)) || marked(name(c)))
   const plain = (w: Word | undefined) => !!w && !w.quoted && /^[A-Za-z_]\w*$/.test(w.value)
   const unquoted = (w: Word | undefined, value: string) => !!w && !w.quoted && w.value === value
-  const below = (list: Command[]): Command[] =>
-    list.flatMap((c) => [c, ...below(c.inner?.() ?? [])])
   const definitions: { at: Command; body: Command[]; fn: string; group?: Command }[] = []
   const find = (list: Command[]) =>
     list.forEach((c, k) => {
@@ -1842,7 +1869,11 @@ function functionArgs(commands: Command[], line: string) {
           depth += opens === -1 ? words.length : opens
           if (unquoted(list[j].words[0], "}")) depth--
           if (depth === 0)
-            return definitions.push({ at: c, body: below(list.slice(k, j + 1)), fn: second.value })
+            return definitions.push({
+              at: c,
+              body: commandsIn(list.slice(k, j + 1)),
+              fn: second.value,
+            })
         }
         return
       }
@@ -1867,7 +1898,7 @@ function functionArgs(commands: Command[], line: string) {
       if (closer)
         definitions.push({
           at: c,
-          body: below([...(closer.inner?.() ?? []), closer]),
+          body: commandsIn([...(closer.inner?.() ?? []), closer]),
           fn,
           group,
         })
@@ -1889,14 +1920,15 @@ function functionArgs(commands: Command[], line: string) {
     // the call's words as the shell gives them, a brace list expanded into its parts (braceRun), up to the first the hook cannot expand (a sequence, `{a..b}`)
     const words: Word[] = []
     let cut = false
-    if (
+    const bound =
+      !blind &&
       calls.length === 1 &&
       named === 2 &&
       !moves &&
       !nests &&
       !body.includes(call) &&
       all.indexOf(call) > all.indexOf(at)
-    )
+    if (bound)
       for (const w of parse(call).args) {
         if (w.unknown !== BRACE) {
           words.push(w)
@@ -1910,8 +1942,11 @@ function functionArgs(commands: Command[], line: string) {
         words.push(...expanded.words)
       }
     for (const c of body)
-      if (words.length > 0 || cut) out.set(c, { call, cut, words })
-      else out.delete(c)
+      if (bound) out.set(c, { call, cut, words })
+      else {
+        out.delete(c)
+        unbound.add(c)
+      }
   }
   return out
 }
@@ -1976,6 +2011,120 @@ const readsPositional = (raw: string) =>
   [...raw.matchAll(/\$(?:\{(\d+)|(\d)|\{?[@*])/g)].map(([, braced, bare]) =>
     Number(braced ?? bare ?? 1),
   )
+// A parameter read with an operator the lexer leaves unread, its operand plain text: a default (`-`, `:-`, `=`, `:=`), an alternate (`+`, `:+`), a cut (`#`, `##`, `%`, `%%`) or a replacement (`/`, `//`, `/#`, `/%`)
+const OPERATED = /\$\{([A-Za-z_]\w*|\d+)(:?[-=+]|##?|%%?|\/[/#%]?)([^}$`'"\\]*)\}/g
+const OPERATED_READINGS = 64
+// A shell pattern as a regex matching it whole: `*`, `?` and a bracket expression, every other character as itself
+const patternOf = (pattern: string): RegExp =>
+  new RegExp(
+    `^${pattern
+      .split(/(\[!?\]?[^\]]*\]|[*?])/)
+      .map((part) =>
+        part === "*"
+          ? "[\\s\\S]*"
+          : part === "?"
+            ? "[\\s\\S]"
+            : part.startsWith("[") && part.length > 1
+              ? `[${part.slice(1, -1).replace(/^!/, "^").replace(/\\/g, "\\\\")}]`
+              : part.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"),
+      )
+      .join("")}$`,
+  )
+// What one operated read gives on a value: a cut takes the shortest (`#`, `%`) or longest (`##`, `%%`) match off its end, and a replacement swaps the first (`/`), every (`//`), a leading (`/#`) or a trailing (`/%`) longest match
+function operate(value: string, op: string, operand: string): string {
+  if (op === "+" || op === ":+") return value === "" && op === ":+" ? "" : operand
+  if (op.startsWith("#") || op.startsWith("%")) {
+    const re = patternOf(operand)
+    const ends = [...Array(value.length + 1).keys()]
+    const order = op.length === 2 ? ends.reverse() : ends
+    for (const n of order) {
+      const cut = op[0] === "#" ? value.slice(0, n) : value.slice(value.length - n)
+      if (re.test(cut)) return op[0] === "#" ? value.slice(n) : value.slice(0, value.length - n)
+    }
+    return value
+  }
+  const slash = operand.indexOf("/")
+  const re = patternOf(slash === -1 ? operand : operand.slice(0, slash))
+  const swap = slash === -1 ? "" : operand.slice(slash + 1)
+  let out = ""
+  let at = 0
+  while (at <= value.length) {
+    const starts =
+      op === "/#"
+        ? at === 0
+          ? [0]
+          : []
+        : [...Array(value.length - at + 1).keys()].map((k) => at + k)
+    let hit: [number, number] | undefined
+    for (const start of starts) {
+      for (let end = value.length; end >= start && !hit; end--)
+        if (
+          (op !== "/%" || end === value.length) &&
+          end > start &&
+          re.test(value.slice(start, end))
+        )
+          hit = [start, end]
+      if (hit) break
+    }
+    if (!hit) break
+    out += value.slice(at, hit[0]) + swap
+    at = hit[1]
+    if (op !== "//") break
+  }
+  return out + value.slice(at)
+}
+// Each reading of a raw word with its operated reads (OPERATED) worked out on the values the hook holds for each name (valuesOf), a default also read as its operand where the name's value is unread; undefined when the word holds none, or one the reader cannot work out
+function operatedRaws(
+  raw: string,
+  valuesOf: (name: string) => string[] | undefined,
+): string[] | undefined {
+  const found = [...raw.matchAll(OPERATED)]
+  if (found.length === 0) return undefined
+  let raws = [""]
+  let at = 0
+  for (const { 0: whole, 1: name, 2: op, 3: operand, index = 0 } of found) {
+    const values = valuesOf(name)
+    let gives: string[]
+    if (values)
+      gives = values.map((v) =>
+        op.endsWith("-") || op.endsWith("=")
+          ? v === "" && op.startsWith(":")
+            ? operand
+            : v
+          : operate(v, op, operand),
+      )
+    else if (op.endsWith("-") || op.endsWith("=") || op.endsWith("+"))
+      gives = op.endsWith("+") ? [operand, ""] : [operand]
+    else return undefined
+    if (gives.some((g) => /[$`'"\\]/.test(g))) return undefined
+    const before = raw.slice(at, index)
+    raws = raws.flatMap((r) => gives.map((g) => r + before + g))
+    if (raws.length > OPERATED_READINGS) return undefined
+    at = index + whole.length
+  }
+  return raws.map((r) => r + raw.slice(at))
+}
+// The words an operated raw word gives (operatedRaws) that the hook can read, each name's value as the line's steady variables and a call's bound parameters hold it (heldReadings); a caller adds a refusal from them alone, since a reading it cannot make leaves the word unread
+function operatedWords(word: Word, env: Env, steady: Steady): Word[] | undefined {
+  const valuesOf = (name: string) => {
+    const read = lex(`"\${${name}}"`).commands[0]?.words[0]
+    return read ? heldReadings(read, env, steady)?.map((each) => each.value) : undefined
+  }
+  const raws = operatedRaws(word.raw ?? "", valuesOf)
+  if (!raws) return undefined
+  const words: Word[] = []
+  for (const raw of raws) {
+    const lexed = lex(raw).commands.at(-1)?.words ?? []
+    const held =
+      lexed.length !== 1
+        ? undefined
+        : marked(lexed[0].value)
+          ? heldReadings(lexed[0], env, steady)
+          : lexed
+    if (held) words.push(...held)
+  }
+  return words
+}
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
 // the commands a group, a subshell or a compound's closer holds, none for any other command
@@ -2022,10 +2171,62 @@ function readHookFolder(dir: string): string | boolean {
 }
 // each folder's hook folder (readHookFolder), read once a folder
 const hookFolders = new Map<string, string | boolean>()
-// Whether a path is a hook file: one in a .git/hooks folder, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
+// sort's and uniq's options that take a value, short and long, GNU's and macOS's, so the word after one is never an operand
+const SORT_VALUES = {
+  long: [
+    "batch-size",
+    "buffer-size",
+    "compress-program",
+    "field-separator",
+    "files0-from",
+    "key",
+    "parallel",
+    "random-source",
+    "sort",
+    "temporary-directory",
+  ],
+  short: "kSTt",
+}
+const UNIQ_VALUES = { long: ["check-chars", "skip-chars", "skip-fields"], short: "fsw" }
+// The file sort writes what it prints to (-o, its value attached, or after flags in a cluster, or --output by any prefix GNU takes) and uniq's second operand, and whether it reads its stdin alone (no input file, or `-`), whose text it prints
+function outputFiles(tool: "sort" | "uniq", args: Word[]): { files: Word[]; stdin: boolean } {
+  const takes = tool === "sort" ? SORT_VALUES : UNIQ_VALUES
+  const out: Word[] = []
+  const operands: Word[] = []
+  for (let k = 0, options = true; k < args.length; k++) {
+    const word = args[k]
+    const { value } = word
+    if (!options || value === "-" || !value.startsWith("-")) operands.push(word)
+    else if (value === "--") options = false
+    else if (value.startsWith("--")) {
+      const [, long, attached] = /^--([^=]*)(=?)/.exec(value) ?? []
+      if (tool === "sort" && long && "output".startsWith(long))
+        out.push(...(attached ? [after(word, long.length + 3)] : args.slice(++k, k + 1)))
+      else if (!attached && long && takes.long.some((each) => each.startsWith(long))) k++
+    } else
+      for (let i = 1; i < value.length; i++) {
+        const letter = value[i]
+        const rest = i + 1 < value.length
+        if (tool === "sort" && letter === "o") {
+          out.push(...(rest ? [after(word, i + 1)] : args.slice(++k, k + 1)))
+          break
+        }
+        if (takes.short.includes(letter)) {
+          if (!rest) k++
+          break
+        }
+      }
+  }
+  const inputs = tool === "uniq" ? operands.slice(0, 1) : operands
+  return {
+    files: tool === "uniq" ? operands.slice(1, 2) : out,
+    stdin: inputs.every((word) => word.value === "-"),
+  }
+}
+// Whether a path is a hook file: one in a .git/hooks folder in any case, since macOS's filesystem reads a path in any case, or in the folder its repo's hooks run from, or, unless `sure`, any file in a folder git could not answer for; never a device under /dev
 function hookFile(path: string | undefined, sure = false): boolean {
   if (!path) return false
-  if (/(?:^|\/)\.git\/hooks\//.test(path)) return true
+  if (/(?:^|\/)\.git\/hooks\//i.test(path)) return true
   if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
@@ -2674,6 +2875,9 @@ async function inspect(
   let blocksAround = new WeakMap<Command, Command["redirects"][]>()
   // each function body command's positional parameters, bound from the line's one call (functionArgs)
   let fnArgs = new WeakMap<Command, FunctionCall>()
+  // the function body commands no one call of the function binds (functionArgs), and the positional parameters the line's set gives the shell (lineArgsOf)
+  let fnUnbound = new WeakSet<Command>()
+  let lineArgs: Record<string, string> | null | undefined
   let execFds = new Map<string, Word[]>()
   let lineWrites = false
   let lineTexts: string[] = []
@@ -2847,7 +3051,10 @@ async function inspect(
       // a writing redirect's target through a variable is judged by what the value the hook holds names, a for loop's literal words each in turn; one it holds no value for runs, as it did before
       for (const r of cmd.redirects) {
         if (!r.target || !writer(r) || !marked(r.target.value)) continue
-        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? []
+        const words =
+          heldReadings(r.target, here, steadyAt(cmd)) ??
+          operatedWords(r.target, here, steadyAt(cmd)) ??
+          []
         const named = words.map((word) => names(word, here, false)).find(Boolean)
         if (named) return refuse(`a write to ${named}`)
       }
@@ -2876,20 +3083,41 @@ async function inspect(
     }
     // whether a target is a hook file (hookFile): a word through a variable by each value the line's steady variables give it (heldReadings), a function body's positional parameter by its call's words as the shell gives them (positionals), one a call word the hook cannot read gives refused even when the check must be sure, and any other whose value the hook cannot read counts unless the check must be sure, failing closed as an unanswered git folder does
     const hookWord = (word: Word, here: Env, sure = false): boolean => {
+      // a brace list or sequence counts by each value it expands to, and one the reader cannot expand as any other unread target does
+      const braced = braceValues(word)
+      if (braced !== undefined)
+        return braced === null
+          ? !sure
+          : braced.some((value) => hookFile(pathOf({ value }, here), sure)) ||
+              hookFile(pathOf(word, here), sure)
       if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
-      const call = fnArgs.get(slotOf.get(cmd) ?? cmd)
-      const reads = call ? readsPositional(word.raw ?? "") : []
+      const raw = word.raw ?? ""
+      const slot = slotOf.get(cmd) ?? cmd
+      const call = fnArgs.get(slot)
+      // an indirect read (`${!1}`), and a positional read no call binds: in a function body no one call of it binds, or at top level on a line whose set gives the shell parameters the hook cannot read
+      if (
+        /\$\{![\w]/.test(raw) ||
+        (!call && readsPositional(raw).length > 0 && (fnUnbound.has(slot) || lineArgs === null))
+      )
+        return true
+      const reads = call ? readsPositional(raw) : []
+      // `$@` and `$*` give each parameter, which zsh writes to each one
+      const every = /\$(?:\{[@*]\}|[@*])/.test(raw)
       const readings = call
         ? positionals(call, here, steadyAt(call.call))
-        : [{ args: {}, from: Infinity }]
+        : [{ args: lineArgs ?? {}, from: Infinity }]
+      // a top-level set's words and an operator worked out only add a refusal: one that finds no hook leaves the target unread, as it was before, since the shell may move or glob what they give
+      const top = !call && readsPositional(raw).length > 0
+      const hook = (each: { value: string }) => hookFile(pathOf(each, here), sure)
       return readings.some(({ args, from }) => {
         if (reads.some((n) => n >= from)) return true
-        const held = heldReadings(
-          word,
-          { ...here, known: { ...here.known, ...args } },
-          steadyAt(cmd),
-        )
-        return held ? held.some((each) => hookFile(pathOf(each, here), sure)) : !sure
+        if (every && Object.values(args).some((value) => hook({ value }))) return true
+        const known = { ...here, known: { ...here.known, ...args } }
+        const held = heldReadings(word, known, steadyAt(cmd))
+        if (held?.some(hook)) return true
+        if (held && !top) return false
+        if (operatedWords(word, known, steadyAt(cmd))?.some(hook)) return true
+        return !sure
       })
     }
     const intoHook = async (targets: Word[], source: Command) => {
@@ -2925,15 +3153,19 @@ async function inspect(
     // an exec that runs no program in a reading parse gives (past reserved words, assignments, its own options and the wrappers before it, an option it cannot place read every way) opens its descriptors for the rest of the line
     if (name === "" && cmd.words.some((w) => w.value === "exec"))
       execFds = fdFiles(cmd.redirects, execFds)
-    const teeTool = program(name)
+    // what sort or uniq prints into its output file: its stdin's text when it reads that alone, as tee's, else its input files', which the hook does not read
+    const sorted = ({ files, stdin }: { files: Word[]; stdin: boolean }) =>
+      intoHook(files, stdin ? (cmd.stdin ?? cmd) : cmd)
+    const sorter = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
     const hookWrite =
       (await outOf(cmd, execFds)) ??
-      ((GNU_NAMED.exec(teeTool)?.[1] ?? teeTool) === "tee"
+      (sorter === "tee"
         ? await intoHook(
             args.filter((word) => !/^-./.test(word.value)),
             cmd.stdin ?? cmd,
           )
-        : undefined)
+        : undefined) ??
+      (sorter === "sort" || sorter === "uniq" ? await sorted(outputFiles(sorter, args)) : undefined)
     if (hookWrite) return refuse(hookWrite)
     // a command that writes, moves or copies into a hook file by a path printed does not follow (any program's stdout by a redirect, its own or one of a group, subshell or compound around it (blockRedirects, from the exec'd descriptors), tee, dd's of=, the target of cp, install, ln or mv, an in-place sed's or perl's file) takes every text on the typed line (lineTexts) as the hook's text, and the text of each file or stdin a copy reads from (cp, install, ln, mv, dd, a sed's or perl's input) as well, each in every spelling a hook may run (hookSpellings), so text that reaches a hook through another program, a function, a file or a case-changed spelling is judged as printed text is; a command read out of a quoted text (textDepth), which no one typed, writes no hook
     const copier = GNU_NAMED.exec(program(name))?.[1] ?? program(name)
@@ -3563,7 +3795,9 @@ async function inspect(
   patterns = casePatterns(lexed.commands)
   bodies = compoundBodies(lexed.commands)
   blocksAround = blockRedirects(lexed.commands, bodies)
-  fnArgs = functionArgs(lexed.commands, command)
+  fnUnbound = new WeakSet()
+  fnArgs = functionArgs(lexed.commands, command, fnUnbound)
+  lineArgs = lineArgsOf(lexed.commands)
   execFds = new Map()
   lineWrites = redirectsWrite(lexed.commands)
   lineTexts = lineTextsOf(lexed.commands)
