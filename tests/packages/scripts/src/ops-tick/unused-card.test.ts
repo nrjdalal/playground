@@ -296,6 +296,23 @@ const inbox = (answer?: {
   return { calls, deps, removed, setPosted: (p: Record<string, unknown>) => (posted = p) }
 }
 
+test("a night with unused items posts no Inbox item: no ask new, its list saved for the factory (#3157)", async () => {
+  const asked: string[][] = []
+  const deps = {
+    approvals: async () => [],
+    ask: async (args: string[]) => (asked.push(args), { code: 0, out: `${ID}\n` }),
+    from: "ops",
+    here: "here",
+    id: () => ID,
+    now: () => WROTE,
+    out,
+    remove: async () => ({ code: 0, out: "" }),
+  } as unknown as CardDeps
+  const night = await cardNight([here(weights, image)], HOME, {}, deps)
+  expect(asked.filter((args) => args[0] === "new")).toEqual([])
+  expect(night.card?.items.map((i) => i.path)).toEqual([weights.path, image.path])
+})
+
 test("a night with no card posts one from the ops manager's name and keeps its id", async () => {
   const { calls, deps } = inbox()
   const night = await cardNight([here(weights, image)], HOME, {}, deps)
