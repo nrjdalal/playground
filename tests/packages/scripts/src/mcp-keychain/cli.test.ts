@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { scratchEnv } from "../../../../scratch-env"
+
 const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/mcp-keychain/cli.ts")
 const TOKEN = "made-up-token-0123456789"
 
@@ -12,6 +14,7 @@ writeFileSync(
   join(dir, "security"),
   `#!/bin/sh
 [ "$*" = "find-generic-password -s made-up-service -a made-up-account -w" ] && { echo "${TOKEN}"; exit 0; }
+[ "$*" = "find-generic-password -s made-up-service -a empty-account -w" ] && { echo; exit 0; }
 exit 44
 `,
 )
@@ -45,7 +48,7 @@ const launch = (account: string, report: string) =>
       "7",
     ],
     {
-      env: { HOME: dir, PATH: `${dir}:${process.env.PATH}`, REPORT: report },
+      env: scratchEnv(dir, { PATH: `${dir}:${process.env.PATH}`, REPORT: report }),
       stdin: new Blob(["a request"]),
     },
   )
@@ -69,11 +72,19 @@ test("a missing item exits 1 naming its service and account, and starts no child
   expect(existsSync(report)).toBe(false)
 })
 
+test("an empty item exits 1 naming its account, and starts no child", () => {
+  const report = join(dir, "empty.json")
+  const run = launch("empty-account", report)
+  expect(run.exitCode).toBe(1)
+  expect(run.stderr.toString()).toContain("empty-account")
+  expect(existsSync(report)).toBe(false)
+})
+
 test("a call with no command after -- exits 2 with its usage, reading no item", () => {
   const run = Bun.spawnSync(
     ["bun", "--no-env-file", CLI, "made-up-service", "made-up-account", "MADE_UP_KEY"],
     {
-      env: { HOME: dir, PATH: `${dir}:${process.env.PATH}` },
+      env: scratchEnv(dir, { PATH: `${dir}:${process.env.PATH}` }),
     },
   )
   expect(run.exitCode).toBe(2)
