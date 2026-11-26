@@ -182,6 +182,13 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "/usr/bin/pg(r|^x)ep -f watcher",
     // a bare * names no program, so a case arm the reader takes for a program word passes
     'cd x && for f in *.ts; do case "$f" in *" a "*) ;; esac; done',
+    // a wrapper's command option with harmless text attached, mise's after a tool, watch rerunning a harmless program, and a word that only ends in kill's name (#3111)
+    "flock /tmp/l -c'echo hi'",
+    "flock /tmp/l '--command=echo hi'",
+    "mise x node@20 -c 'node -v'",
+    "watch -n 1 date",
+    "watch -x ls",
+    "echo skill",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

@@ -6575,6 +6575,8 @@ var PNPM_FLAGS = "-c -r -w -y --aggregate-output --color --fail-if-no-match --ig
 var PNPM_VALUES = "-C -F --changed-files-ignore-pattern --dir --env-file --filter --filter-prod --http-proxy --https-proxy --loglevel --no-proxy --npmrc-auth-file --registry --reporter --state-dir --store-dir --test-pattern --userconfig --workspace-concurrency --workspace-packages";
 var PNPM_DLX = runner(`${PNPM_FLAGS} -v --version`, `${PNPM_VALUES} --allow-build --cpu --libc --os --package`, { folder: "-C --dir", joined: "-c --shell-mode", spec: true });
 var MISE = runner("--deny-all --deny-env --deny-net --deny-read --deny-unix --deny-write --fresh-env --no-deps --raw --secrets-all", "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets", { script: "-c --command", tools: true });
+var WATCH = runner("-b -C -c -d -e -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --help --no-color --no-rerun --no-title --no-wrap --precise --version", "-n -q -s --equexit --interval --shotsdir", { always: true });
+var WATCH_EXEC = /^(?:--exec|-[bCcdeghprtvw]*x[bCcdeghprtvwx]*)$/;
 var BUN_FLAGS = "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces";
 var BUN_VALUES = "-e -F -p -r --cwd --elide-lines --env-file --eval --filter --import --preload --print --require --shell";
 var DENO = runner("-A -q -r --allow-all --allow-env --allow-ffi --allow-import --allow-net --allow-read --allow-run --allow-scripts --allow-sys --allow-write --cached-only --check --coverage --deny-env --deny-ffi --deny-import --deny-net --deny-read --deny-run --deny-sys --deny-write --env-file --frozen --hmr --inspect --inspect-brk --inspect-wait --lock --no-check --no-clear-screen --no-code-cache --no-config --no-lock --no-npm --no-remote --node-modules-dir --quiet --reload --unsafely-ignore-certificate-errors --unstable --use-env-proxy --v8-flags --vendor --watch", "-c --cert --conditions --config --ext --import-map --location --min-dep-age --node-modules-linker --preload --require --seed --watch-exclude", { spec: true });
@@ -6595,6 +6597,7 @@ var RUNNERS = new Map([
   ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
+  ["watch", WATCH],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
   ["yarn exec", runner("", "", { always: true })]
 ]);
@@ -7111,7 +7114,14 @@ var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var plainPath = (value) => value.startsWith("/") ? `/${value.split("/").filter((s) => s && s !== ".").join("/")}` : value;
-var stdinPath = (value) => STDIN_PATHS.has(plainPath(value));
+var stdinPath = (value, env) => {
+  if (STDIN_PATHS.has(plainPath(value)))
+    return true;
+  if (!env || value.startsWith("/") || marked(value))
+    return false;
+  const folders = places(env).flatMap((e) => e.cwd === undefined ? [] : [e.cwd]);
+  return (folders.length > 0 ? folders : ["/"]).some((dir) => STDIN_PATHS.has(plainPath(`${dir}/${value}`)));
+};
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -8166,6 +8176,8 @@ function unwrap(state, inside, budget) {
         xargsOption(state.xargs ??= {}, w, next(), state);
       if (runs && runs.joined !== true && joinsWords(v, runs.joined))
         joined = true;
+      if (wrapper === "watch" && WATCH_EXEC.test(v))
+        joined = false;
       if (ASSIGN.test(v))
         assign(local, take());
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -8215,7 +8227,7 @@ function unwrap(state, inside, budget) {
           fork(wrapper, 3);
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1));
-      } else if (runs?.tools && rest.some((r) => r.value === "--"))
+      } else if (runs?.tools && rest.some((r) => r.value === "--" || namedOption(r.value, runs, runs.script) !== undefined))
         take();
       else
         break;
@@ -8229,9 +8241,10 @@ function unwrap(state, inside, budget) {
       take();
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? ""))
       take();
-    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
-      take();
-      const text = take();
+    const lock = wrapper === "flock" ? FLOCK_ATTACHED.exec(peek()?.value ?? "") : null;
+    if (lock) {
+      const w = take();
+      const text = lock[1] ? slice(w, w.value.length - lock[1].length) : take();
       if (text)
         rest.push(text, ...SH_C);
     }
@@ -8258,7 +8271,7 @@ var SH_C = [
   { quoted: false, value: "-c" },
   { quoted: false, value: "sh" }
 ];
-var FLOCK_SCRIPT = new Set(["-c", "--command"]);
+var FLOCK_ATTACHED = /^(?:-c|--command(?:=|$))([\s\S]*)$/;
 function namedOption(v, { values }, names) {
   if (!v.startsWith("-") || v === "-" || v === "--")
     return;
@@ -9259,7 +9272,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? ""))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
@@ -9588,7 +9601,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || stdinPath(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;

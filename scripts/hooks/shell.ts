@@ -362,6 +362,13 @@ const MISE = runner(
   "-c -j --allow-env --allow-net --allow-read --allow-unix --allow-write --command --jobs --secrets",
   { script: "-c --command", tools: true },
 )
+// watch, from procps-ng's watch(1), reruns its words past its options joined into one `sh -c` line, or as its program's own words after -x (WATCH_EXEC)
+const WATCH = runner(
+  "-b -C -c -d -e -g -h -p -r -t -v -w -x --beep --chgexit --color --differences --errexit --exec --help --no-color --no-rerun --no-title --no-wrap --precise --version",
+  "-n -q -s --equexit --interval --shotsdir",
+  { always: true },
+)
+const WATCH_EXEC = /^(?:--exec|-[bCcdeghprtvw]*x[bCcdeghprtvwx]*)$/
 const BUN_FLAGS =
   "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
 const BUN_VALUES =
@@ -388,6 +395,7 @@ export const RUNNERS = new Map<string, Runner>([
   ["pnpm exec", runner(PNPM_FLAGS, PNPM_VALUES, { folder: "-C --dir", joined: "-c --shell-mode" })],
   ["pnpx", PNPM_DLX],
   ["volta run", runner("--bundled-npm --no-yarn --quiet --verbose", "--env --node --npm --yarn")],
+  ["watch", WATCH],
   ["yarn dlx", runner("-q --quiet", "-p --package", { spec: true })],
   ["yarn exec", runner("", "", { always: true })],
 ])
@@ -970,16 +978,23 @@ const QUOTED_ONE_WORD =
   /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
-// An absolute path with its `.` segments and doubled slashes read past, as the kernel reads them; a `..` stays, since it climbs from wherever a link leads
-export const plainPath = (value: string) =>
+// An absolute path with its `.` segments, doubled slashes and a trailing slash read past; a `..` stays, since it climbs from wherever a link leads
+const plainPath = (value: string) =>
   value.startsWith("/")
     ? `/${value
         .split("/")
         .filter((s) => s && s !== ".")
         .join("/")}`
     : value
-// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes
-const stdinPath = (value: string) => STDIN_PATHS.has(plainPath(value))
+// Whether a word names stdin, spelled plainly or through ./ hops and doubled slashes, a relative path read from each folder the command may run in, or from the root where the reader can place none
+const stdinPath = (value: string, env?: Env): boolean => {
+  if (STDIN_PATHS.has(plainPath(value))) return true
+  if (!env || value.startsWith("/") || marked(value)) return false
+  const folders = places(env).flatMap((e) => (e.cwd === undefined ? [] : [e.cwd]))
+  return (folders.length > 0 ? folders : ["/"]).some((dir) =>
+    STDIN_PATHS.has(plainPath(`${dir}/${value}`)),
+  )
+}
 export const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -2192,6 +2207,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
       const folder = runs && namedOption(v, runs, runs.folder)
       if (wrapper === "xargs") xargsOption((state.xargs ??= {}), w, next(), state)
       if (runs && runs.joined !== true && joinsWords(v, runs.joined)) joined = true
+      if (wrapper === "watch" && WATCH_EXEC.test(v)) joined = false
       if (ASSIGN.test(v)) assign(local, take() as Word)
       // env -S splits its one string into the words it runs
       else if (wrapper === "env" && SPLIT.test(v)) {
@@ -2246,7 +2262,12 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
           fork(wrapper, 3)
         }
         rest.length = Math.max(0, rest.length - (end === "next" ? 2 : 1))
-      } else if (runs?.tools && rest.some((r) => r.value === "--")) take()
+      } else if (
+        runs?.tools &&
+        rest.some((r) => r.value === "--" || namedOption(r.value, runs, runs.script) !== undefined)
+      )
+        // a tool name sits before mise's -- or its command option, wherever that option falls
+        take()
       else break
     }
     // pnpm's shell mode and yarn exec run the words left joined by spaces as one shell script
@@ -2260,10 +2281,11 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     }
     if (COUNTED.has(wrapper)) take()
     if (wrapper === "chrt" && /^\d+$/.test(peek()?.value ?? "")) take()
-    // flock's -c or --command after its file runs the next word in a shell
-    if (wrapper === "flock" && FLOCK_SCRIPT.has(peek()?.value ?? "")) {
-      take()
-      const text = take()
+    // flock's -c or --command after its file runs the next word in a shell, or its text attached (`-cX`, `--command=X`), read the same though util-linux takes only the bare word
+    const lock = wrapper === "flock" ? FLOCK_ATTACHED.exec(peek()?.value ?? "") : null
+    if (lock) {
+      const w = take() as Word
+      const text = lock[1] ? slice(w, w.value.length - lock[1].length) : take()
       if (text) rest.push(text, ...SH_C)
     }
     // zsh's `repeat N do … done` and `repeat N { … }` run their body's first command after the do or the brace
@@ -2290,7 +2312,7 @@ const SH_C: Word[] = [
   { quoted: false, value: "-c" },
   { quoted: false, value: "sh" },
 ]
-const FLOCK_SCRIPT = new Set(["-c", "--command"])
+const FLOCK_ATTACHED = /^(?:-c|--command(?:=|$))([\s\S]*)$/
 
 // Where a runner's option word names one of `names`, an option that takes a value: the offset of its value attached (`--call=x`, `-cx`), -1 for a value in the next word, or undefined for an option word naming none of them
 function namedOption(v: string, { values }: Options, names: Set<string>): number | undefined {
@@ -3605,7 +3627,7 @@ async function examineReading(
       (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || stdinPath(args[0]?.value ?? ""))
+    (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
@@ -4073,7 +4095,7 @@ export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, 
 // A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
   const scripts =
-    !operand || stdinPath(operand.value)
+    !operand || stdinPath(operand.value, env)
       ? await scriptStdin(cmd, env)
       : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
