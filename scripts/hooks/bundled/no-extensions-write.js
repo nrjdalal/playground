@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-extensions-write.ts
 import { existsSync as existsSync4, lstatSync as lstatSync2, readdirSync as readdirSync4, readFileSync as readFileSync5, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname4, join as join7, resolve as resolve5, sep as sep2 } from "path";
+import { dirname as dirname4, isAbsolute as isAbsolute5, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -11636,7 +11636,13 @@ var AWK_MATCH = /~\s*(?:\/(?:[^\\/"[\n]|\\.)*\/|"[^"\\\n]*")/g;
 function awkPipe(program) {
   if (!program.includes("|"))
     return false;
-  return /["/#\\|]/.test(program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " "));
+  const rest = program.replace(AWK_LEAD, " ").replace(AWK_MATCH, " ");
+  return /[/#\\]/.test(rest) || /["|]/.test(rest.replace(/"[^"\n]*"/g, "S"));
+}
+function awkPrinted(program) {
+  const strings = [...program.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map(([, text]) => text.replace(/\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|(.))/g, (m, octal, hex, c) => octal ? coded(octal, 8, m) : hex ? coded(hex, 16, m) : c === "n" ? `
+` : c === "t" ? "\t" : c ?? m));
+  return [...strings, strings.join("")];
 }
 function awkPrograms(words) {
   const programs = [];
@@ -11661,7 +11667,7 @@ function awkPrograms(words) {
 }
 function awkTexts(args) {
   const programs = awkPrograms(args) ?? [];
-  return programs.every((w) => literal2(w) && !/[|"]/.test(w.value) && !awkRuns(w.value)) ? programs : [];
+  return programs.every((w) => literal2(w) && !awkRuns(w.value)) ? programs : [];
 }
 var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
 function evalProgram({ args, name }) {
@@ -11755,13 +11761,14 @@ function programLines({ args, first }, rooted) {
 var SEDS = new Set(["gsed", "sed"]);
 var literal2 = (w) => !w.glob && !marked(w.value);
 var SED_FLAG = /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/;
-var SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`;
-var SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`;
-var SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`;
-var SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}(${SED_TEXT})[giImMp0-9]*)[ \t]*`;
-var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
-var SED_STEP = new RegExp(String.raw`${SED_ITEM}(?:[;\n]|$)`, "y");
+var SED_DELIMITERS = ["/", "\\|"];
+var sedBracket = (d) => String.raw`\[\^?\]?[^\]${d}[\n]*\]`;
+var sedBody = (d) => String.raw`(?:[^${d}\\\n[]|\\.|${sedBracket(d)})*${d}`;
+var sedSub = (d) => String.raw`s${d}${sedBody(d)}((?:[^${d}\\\n]|\\.)*${d})`;
+var SED_ADDRESS = String.raw`(?:\d+|\$|/${sedBody("/")})`;
+var sedItem = (d) => String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|${sedSub(d)}[giImMp0-9]*)[ \t]*`;
+var SED_SCRIPT = SED_DELIMITERS.map((d) => new RegExp(String.raw`^${sedItem(d)}(?:[;\n]${sedItem(d)})*;?$`));
+var SED_STEPS = SED_DELIMITERS.map((d) => new RegExp(String.raw`${sedItem(d)}(?:[;\n]|$)`, "y"));
 function sedReadScripts(args) {
   const scripts = [];
   const operands = [];
@@ -11783,7 +11790,7 @@ function sedReadScripts(args) {
       operands.push(args[k]);
   }
   const read = scripts.length ? scripts : operands.slice(0, 1);
-  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.test(w.value)) ? read : undefined;
+  return read.length > 0 && read.every((w) => literal2(w) && SED_SCRIPT.some((re) => re.test(w.value))) ? read : undefined;
 }
 var TEXT_FLAGS = new Set(["--body", "--reason", "--title"]);
 function textFlagValues({ args, name }) {
@@ -11793,9 +11800,9 @@ function textFlagValues({ args, name }) {
 }
 var SED_IN_PLACE = /^-[Enrsuz]*i([\w.~-]*)$/;
 var SED_SUFFIX = /^(?:\.[\w.~-]*)?$/;
-var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
-var SED_EDIT_ITEM = String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|s/${SED_BODY}(${SED_TEXT})[gpI0-9]*)[ \t]*`;
-var SED_EDIT = new RegExp(String.raw`^${SED_EDIT_ITEM}(?:[;\n]${SED_EDIT_ITEM})*;?$`);
+var SED_EDIT_ADDRESS = String.raw`(?:\d+|\$|/${sedBody("/")})`;
+var sedEditItem = (d) => String.raw`[ \t]*(?:${SED_EDIT_ADDRESS}(?:[ \t]*,[ \t]*${SED_EDIT_ADDRESS})?[ \t]*)?(?:[dp]|${sedSub(d)}[gpI0-9]*)[ \t]*`;
+var SED_EDIT = SED_DELIMITERS.map((d) => new RegExp(String.raw`^${sedEditItem(d)}(?:[;\n]${sedEditItem(d)})*;?$`));
 function follows(have, want) {
   for (let k = 0;k < want.length; k++) {
     const part = have[k];
@@ -11817,7 +11824,7 @@ var removerWord = (word) => {
   const name = word.split(sep2).at(-1) ?? "";
   return REMOVERS.has(GNU_NAMED.exec(name)?.[1] ?? name);
 };
-var SED_EDIT_STEP = new RegExp(String.raw`${SED_EDIT_ITEM}(?:[;\n]|$)`, "y");
+var SED_EDIT_STEPS = SED_DELIMITERS.map((d) => new RegExp(String.raw`${sedEditItem(d)}(?:[;\n]|$)`, "y"));
 var coded = (digits, base, escape) => {
   const clean = digits.replace(/[\s_]/g, "");
   if (!(base === 16 ? /^[\da-f]+$/i : base === 8 ? /^[0-7]+$/ : /^\d+$/).test(clean))
@@ -11827,18 +11834,27 @@ var coded = (digits, base, escape) => {
 };
 var sedText = (text) => text.replace(/\\(?:x([\da-fA-F]{1,2})|o([0-7]{1,3})|d(\d{1,3})|(.))|&/gs, (m, hex, octal, decimal, c) => hex ? coded(hex, 16, m) : octal ? coded(octal, 8, m) : decimal ? coded(decimal, 10, m) : m === "&" || /[1-9]/.test(c ?? "") ? "*" : c === "n" ? `
 ` : c ?? m);
-function sedWrites(script, step = SED_EDIT_STEP, read = sedText) {
+function sedWrites(script, steps = SED_EDIT_STEPS, read = sedText) {
+  for (const step of steps) {
+    const writes = stepWrites(script, step, read);
+    if (writes)
+      return writes;
+  }
+  return [read(script)];
+}
+function stepWrites(script, step, read) {
   const writes = [];
   step.lastIndex = 0;
   while (step.lastIndex < script.length) {
     const at = step.lastIndex;
     const item = step.exec(script);
     if (!item || step.lastIndex === at)
-      return [read(script)];
+      return;
     if (item[1])
       writes.push(read(item[1].slice(0, -1)));
-    if (item[2])
-      writes.push(read(printText(item[2])));
+    const printed = item[2] ?? item[3];
+    if (printed)
+      writes.push(read(printText(printed)));
   }
   return writes;
 }
@@ -11878,7 +11894,7 @@ function sedEdits(args) {
   const read = scripts.length ? scripts : operands.slice(0, 1);
   if (!inPlace || read.length === 0)
     return;
-  if (!read.every((w) => literal2(w) && SED_EDIT.test(w.value)))
+  if (!read.every((w) => literal2(w) && SED_EDIT.some((re) => re.test(w.value))))
     return;
   return new Set(read);
 }
@@ -11932,7 +11948,8 @@ var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
 var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
 var PERL_PRINT = String.raw`print(?:[ \t]+(${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*))?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
 var PERL_SUB = String.raw`s/${PERL_BODY}((?:[^/\\\n@$]|\\.|${PERL_MATCH})*/)[gimsx]*`;
-var PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT})[ \t]*`;
+var PERL_BLOCK = String.raw`(?:for|if|unless|while)[ \t]*\([ \t]*${PERL_RE}[gimsx]*[ \t]*\)[ \t]*\{[ \t]*${PERL_PRINT}[ \t]*;?[ \t]*\}`;
+var PERL_ITEM = String.raw`[ \t]*(?:${PERL_SUB}|${PERL_PRINT}|${PERL_BLOCK})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
 var PRINT_VALUE = new RegExp(PERL_VALUE, "g");
 var printText = (values) => [...values.matchAll(PRINT_VALUE)].map(([v]) => v.startsWith('"') ? v.slice(1, -1) : "$1").join("");
@@ -11998,11 +12015,13 @@ var perlReads = (parsed, env) => !!perlReadScripts(parsed, env);
 function escapedWrites(parsed, env) {
   const tool = program(parsed.name);
   const unescaped = (read) => parsed.args.map((word) => read(word.value));
+  if (AWKS.has(tool))
+    return (awkPrograms(parsed.args) ?? parsed.args).flatMap((w) => awkPrinted(w.value));
   if (SEDS.has(tool))
-    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEP)) ?? unescaped(sedText);
+    return sedReadScripts(parsed.args)?.flatMap((w) => sedWrites(w.value, SED_STEPS)) ?? unescaped(sedText);
   if (tool !== "perl")
     return [];
-  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, PERL_STEP, perlText)) ?? unescaped(perlText);
+  return perlReadScripts(parsed, env)?.flatMap((w) => sedWrites(w.value, [PERL_STEP], perlText)) ?? unescaped(perlText);
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
@@ -12419,9 +12438,30 @@ function wholeLine(commands, env, readsOnly = false) {
       return true;
     if (!readsOnly && quietRun(cmd, parsed, env))
       return false;
-    const writes = cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
+    const writes = writesFile(cmd);
     return writes || !(narrow(cmd, env) || !readsOnly && inPlaceScripts(cmd, parsed, env));
   });
+}
+var writesFile = (cmd) => cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
+function linkSafe(cmd, env) {
+  if (writesFile(cmd))
+    return false;
+  const words = [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])];
+  if (words.some((word) => word.procs && !word.procs.every((sub) => linkSafe(sub, env))))
+    return false;
+  const parsed = parse3(cmd);
+  return narrow(cmd, env) || ownFirst(cmd, parsed.first) && reads(parsed, env);
+}
+function symlinkSource(cmd, parsed) {
+  const { args, local, name } = parsed;
+  if (program(name) !== "ln" || local.size > 0 || !ownProgram(cmd, parsed))
+    return;
+  if (writesFile(cmd))
+    return;
+  const k = args.findIndex((word) => !word.value.startsWith("-"));
+  const options = args.slice(0, k);
+  const operands = args.slice(k);
+  return k > 0 && options.every((word) => !word.quoted && /^-[fFhinsvw]+$/.test(word.value)) && options.some((word) => word.value.includes("s")) && operands.length === 2 && operands.every((word) => literal2(word) && !word.value.startsWith("-")) ? operands[0] : undefined;
 }
 function quietRun(cmd, parsed, env) {
   const slot = slotWords(parsed);
@@ -12768,6 +12808,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   let lineWrites = false;
   let lineTexts = [];
   let lineWritten = [];
+  let lineLinks = false;
   let nearEval;
   let textDepth = 0;
   const varsRead = new WeakMap;
@@ -13039,7 +13080,8 @@ async function inspect(raw, environment, rootNames, unknown = false) {
             return refuse(`${shown(hook)}, a hook file, ${how} names ${named}`);
         }
     }
-    const reader = !rootLine && (ownFirst(cmd, first) && reads(parsed, env) || xargsGrep(cmd, parsed, env));
+    const printing = ownFirst(cmd, first) || PRINTERS.has(name) && throughBuiltin(cmd, parsed);
+    const reader = !rootLine && (printing && reads(parsed, env) || xargsGrep(cmd, parsed, env));
     const browserCode = name === "agent-browser" ? evalProgram(parsed) : undefined;
     const edits = SEDS.has(program(name)) ? sedInPlace(cmd, parsed) : undefined;
     const editsHeld = !!edits && parsed.args.every((word) => edits.has(word) || !word.procs && held3(word, env, steadyAt(cmd)));
@@ -13125,7 +13167,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     ];
     const written = [
       ...[...sedEdit].flatMap((script) => sedWrites(script.value)),
-      ...perlEdit.flatMap((script) => sedWrites(script.value, PERL_STEP, perlText))
+      ...perlEdit.flatMap((script) => sedWrites(script.value, [PERL_STEP], perlText))
     ];
     const sedLong = (word) => longOf(word.value.split("=")[0], SED_LONG);
     const sedFile = tool === "sed" && args.some((w) => /^-[Eablnrsuz]*f/.test(w.value) || sedLong(w) === "--file");
@@ -13183,8 +13225,11 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       if (escaped.some((text) => holds(text, here)))
         return refuse(`${verb} with a script that names ${root} in its text`);
       const literal = !whole && narrow(cmd, here);
+      const linkSource = textDepth === 0 && lineLinks ? symlinkSource(cmd, parsed) : undefined;
       for (const [at, word] of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word)).entries()) {
         if (at === 0 && first?.value === "." && word.value === ".")
+          continue;
+        if (linkSource && args[at - 1] === linkSource && isAbsolute5(word.value) && existsSync4(word.value))
           continue;
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
@@ -13301,6 +13346,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   lineWrites = redirectsWrite(lexed.commands);
   lineTexts = lineTextsOf(lexed.commands);
   lineWritten = writtenWords(lexed.commands);
+  lineLinks = !rootLine && lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse3(cmd))).length === 1 && lexed.commands.every((cmd) => !!symlinkSource(cmd, parse3(cmd)) || linkSafe(cmd, env));
   lineFindings = new Map;
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
