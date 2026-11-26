@@ -183,6 +183,18 @@ test("rm --restore brings a path rm --stray moved back to its place", async () =
   expect(m.trash()).toEqual([])
 })
 
+test("rm --restore of a path rm --stray moved refuses every caller but ops", async () => {
+  const m = machine()
+  const file = join(m.main, "a")
+  writeFileSync(file, "x\n")
+  expect(await runRm(["--stray", file, "--reason", "upkeep"], m.deps)).toBe(0)
+  const [item] = m.trash()
+  const worker = { ...m.deps, session: async () => "j6rjgy-worker" }
+  expect(await runRm(["--restore", item!.id], worker)).toBe(1)
+  expect(existsSync(file)).toBe(false)
+  expect(m.trash().map((entry) => entry.id)).toEqual([item!.id])
+})
+
 test("rm --stray refuses every caller but ops", async () => {
   const m = machine("j6rjgy-worker")
   const file = join(m.main, "a")

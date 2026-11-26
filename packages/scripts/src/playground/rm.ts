@@ -473,6 +473,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("restore" in args) {
+    const caller = kept?.stray ? await strayCaller(deps, "restored") : null
+    if (caller && "refused" in caller) {
+      console.error(`playground: ${caller.refused}`)
+      return 1
+    }
     const done = restore(args.restore, roots)
     if ("refused" in done) {
       if (done.kind !== "refused") deps.notify(`restore: ${done.refused}`)
@@ -668,12 +673,11 @@ export const strayRefusal = (path: string, main: string): string | null => {
   return null
 }
 
-// playground rm --stray: Ops' one way to move an untracked stray in the main checkout to the trash, a file or a folder git neither tracks nor ignores, through quarantine's checks and caps; every other caller, and plain playground rm for Ops too, keeps the main checkout's refusal (issue 3083).
-async function removeStray(
-  args: { path: string; reason: string },
-  roots: Roots,
+// The session, when it holds the roster's ops seat, which --stray and a stray's restore take (issue 3083); else the refusal, done naming what no stray is.
+const strayCaller = async (
   deps: RmDeps,
-): Promise<number> {
+  done: string,
+): Promise<{ session: string } | { refused: string }> => {
   const session = await deps.session()
   let ops: string
   try {
@@ -683,19 +687,30 @@ async function removeStray(
       "ops",
     )
   } catch (error) {
-    console.error(
-      `playground: the roster cannot be read (${(error as Error).message}), so no stray is removed`,
-    )
-    return 1
+    return {
+      refused: `the roster cannot be read (${(error as Error).message}), so no stray is ${done}`,
+    }
   }
-  const why =
-    session === ops
-      ? strayRefusal(args.path, deps.main)
-      : `--stray is for ${ops}, the Ops lead, alone, and this session is ${session}`
-  if (why) {
+  return session === ops
+    ? { session }
+    : {
+        refused: `--stray and a stray's restore are for ${ops}, the Ops lead, alone, and this session is ${session}`,
+      }
+}
+
+// playground rm --stray: Ops' one way to move an untracked stray in the main checkout to the trash, a file or a folder git neither tracks nor ignores, through quarantine's checks and caps; every other caller, and plain playground rm for Ops too, keeps the main checkout's refusal (issue 3083).
+async function removeStray(
+  args: { path: string; reason: string },
+  roots: Roots,
+  deps: RmDeps,
+): Promise<number> {
+  const caller = await strayCaller(deps, "removed")
+  const why = "refused" in caller ? caller.refused : strayRefusal(args.path, deps.main)
+  if (why || "refused" in caller) {
     console.error(`playground: ${why}`)
     return 1
   }
+  const { session } = caller
   const done = quarantine(args.path, { reason: args.reason, session, stray: true }, roots)
   if ("refused" in done) {
     if (done.kind !== "refused") deps.notify(`${session}: ${done.refused}`)
