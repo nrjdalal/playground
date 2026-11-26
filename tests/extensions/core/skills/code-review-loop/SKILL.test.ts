@@ -445,7 +445,9 @@ describe("code-review-loop keeps its clone at the head and asks the lead on a tr
     expect(step).toContain("never the clone's working files")
     expect(step).toContain("17 of `canary`'s files")
     expect(done ?? "").toContain("every sub-agent prompt pinned its reads to the head's sha")
-    expect(await page()).toContain("They leave the review clone as it stands")
+    expect(await page()).toContain(
+      "They read the PR through git's object reads pinned to the head's sha, never the clone's working files",
+    )
   })
 
   test("step 6 sends a trust-widening nit to the lead before the 5/5, and The last 5/5 points to it (#1613)", async () => {
