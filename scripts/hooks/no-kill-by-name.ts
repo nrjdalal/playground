@@ -11,6 +11,7 @@ import {
   run,
   shellSlot,
   SHELLS,
+  slotFilled,
   slotWords,
   spelledText,
   UNKNOWN,
@@ -114,18 +115,27 @@ async function inspect(raw: string) {
   // a pid xargs hands a shell it starts arrives as the -I string (`xargs -I{} sh -c 'kill {}'`)
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || [])
   const visit: Visit = async (cmd, parsed, env) => {
-    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone
+    // run-slot.sh, typed bare or as a shell's script, runs the words after its -- as the command, with the input an xargs running run-slot hands that command alone, read as xargs fills it (slotFilled)
     const slot =
       slotWords(parsed) ??
       (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined)
-    if (slot?.length) {
-      const slotted = { ...cmd, words: slot }
-      return examine(
-        slotted,
-        env,
-        (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
-        false,
-      )
+    const typed = slot && { ...cmd, words: slot }
+    const handsSlot =
+      parsed.name === "run-slot.sh" && parsed.args.some((a, i) => i > 0 && a.value === "--")
+    const slotted = !typed
+      ? []
+      : [typed, ...(handsSlot && parsed.xargs ? await slotFilled(typed, parsed.xargs, env) : [])]
+    if (slotted.some((s) => s.words.length > 0)) {
+      for (const s of slotted.filter((s) => s.words.length > 0)) {
+        const verdict = await examine(
+          s,
+          env,
+          (c, p, e) => visit(c, c === s ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e),
+          false,
+        )
+        if (verdict) return verdict
+      }
+      return
     }
     const { args, first, name, xargs } = parsed
     // a command the shell builds from a value the reader cannot read may be any kill, in a call whose text names one

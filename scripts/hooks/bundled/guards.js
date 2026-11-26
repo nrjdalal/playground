@@ -1940,9 +1940,10 @@ function xargsOption(xargs, w, next, state) {
     xargs.replace = value?.value || "{}";
   else if (name === "null")
     split("\x00");
-  else if (name === "I" || name === "J")
+  else if (name === "I" || name === "J") {
     xargs.replace = (value ?? next)?.value;
-  else if (name === "a" || name === "arg-file")
+    xargs.appends = name === "J";
+  } else if (name === "a" || name === "arg-file")
     xargs.files = [
       ...xargs.files ?? [],
       ...[value ?? next].filter((file) => file !== undefined).map((file) => ({ chdir: state.chdir, file, moved: state.moved }))
@@ -1996,6 +1997,7 @@ function unwrap(state, inside, budget) {
     }, wrapper, budget));
   };
   let spec = false;
+  let last = inside;
   for (let wrapper = inside;; wrapper = undefined) {
     if (!wrapper) {
       const word = peek();
@@ -2018,6 +2020,7 @@ function unwrap(state, inside, budget) {
       if (wrapper === "xargs")
         state.xargs ??= {};
       take();
+      last = wrapper;
     }
     const runs = RUNNERS.get(wrapper);
     const options = WRAPPERS.get(wrapper) ?? runs;
@@ -2057,6 +2060,7 @@ function unwrap(state, inside, budget) {
         take();
         state.xargs ??= {};
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+        state.xargs.appends = v.startsWith("-J");
       } else if (wrapper === "env" && v === "-") {
         take();
       } else if (folder !== undefined) {
@@ -2107,6 +2111,8 @@ function unwrap(state, inside, budget) {
       take();
   }
   const typed = take();
+  if (!typed && state.xargs && (!state.xargs.replace || state.xargs.appends) && last && last !== "xargs")
+    state.xargs = { ...state.xargs, wrapped: true };
   const first = spec && typed ? packageName(typed) : typed;
   const parsed = {
     also,
@@ -2850,7 +2856,7 @@ async function examine(cmd, env, visit, builtins) {
     ...resolving,
     ...prior,
     ...vanished,
-    ...await xargsFilled(cmd, [primary, ...others], env)
+    ...await xargsFilled(cmd, [primary, ...others].map((p) => p.xargs), env)
   ];
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
@@ -2942,13 +2948,13 @@ var itemsOf = (fed, split) => {
 `), ...fed.value.split(/\s+/)];
   return [fed.value, ...fed.value.split(split)];
 };
-async function xargsFilled(cmd, parsed, env) {
+async function xargsFilled(cmd, xargs, env) {
   const filled = new Map;
-  for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
+  for (const [word, replace] of xargs.flatMap((x) => x?.filled ?? []))
     filled.set(word, [...new Set([...filled.get(word) ?? [], replace])]);
-  if (filled.size === 0)
+  const wrapped = xargs.some((x) => x?.wrapped);
+  if (filled.size === 0 && !wrapped)
     return [];
-  const xargs = parsed.map((p) => p.xargs);
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value));
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))];
   const inputs = [
@@ -2966,18 +2972,28 @@ async function xargsFilled(cmd, parsed, env) {
     if (raw?.some((text) => /["'\\]/.test(text)))
       texts.add(undefined);
   }
+  const wordsOf = (value) => value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
   const fill = (text) => ({
     ...cmd,
-    words: cmd.words.flatMap((w) => {
-      const held = filled.get(w);
-      if (!held)
-        return [w];
-      if (text === undefined)
-        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
-      return held.reduce((value, replace) => value.replaceAll(replace, text), w.value).split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
-    })
+    words: [
+      ...cmd.words.flatMap((w) => {
+        const held = filled.get(w);
+        if (!held)
+          return [w];
+        if (text === undefined)
+          return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }];
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value));
+      }),
+      ...!wrapped ? [] : text === undefined ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }] : wordsOf(text)
+    ]
   });
   return [...texts].map(fill);
+}
+function slotFilled(slot, xargs, env) {
+  const held = [xargs.replace, ...xargs.outer ?? []].filter((r) => !!r);
+  const filled = slot.words.flatMap((w) => held.filter((r) => w.value.includes(r)).map((r) => [w, r]));
+  const wrapped = !xargs.replace || !!xargs.appends && !slot.words.some((w) => w.value === xargs.replace);
+  return xargsFilled(slot, [{ ...xargs, filled, wrapped }], env);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -16842,9 +16858,16 @@ async function inspect9(raw) {
   const handed = lexed.commands.flatMap((c) => parse(c).xargs?.replace || []);
   const visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed) ?? (SHELLS.has(parsed.name) ? shellSlot(parsed.args, parsed.name) : undefined);
-    if (slot?.length) {
-      const slotted = { ...cmd, words: slot };
-      return examine(slotted, env, (c, p, e) => visit(c, c === slotted ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
+    const typed = slot && { ...cmd, words: slot };
+    const handsSlot = parsed.name === "run-slot.sh" && parsed.args.some((a, i) => i > 0 && a.value === "--");
+    const slotted = !typed ? [] : [typed, ...handsSlot && parsed.xargs ? await slotFilled(typed, parsed.xargs, env) : []];
+    if (slotted.some((s) => s.words.length > 0)) {
+      for (const s of slotted.filter((s) => s.words.length > 0)) {
+        const verdict = await examine(s, env, (c, p, e) => visit(c, c === s ? { ...p, xargs: p.xargs ?? parsed.xargs } : p, e), false);
+        if (verdict)
+          return verdict;
+      }
+      return;
     }
     const { args, first, name, xargs } = parsed;
     if (parsed.unread && namesKill)
