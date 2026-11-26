@@ -1465,6 +1465,37 @@ test("10l a changed prompt template lists each test pinning a prompt's digest", 
   expect(out.listed).toEqual(["tests/test_digests.py", "tests/test_exit_goodbye.py"])
 })
 
+test("10t a Python repo lists each test importing a changed module by its dotted name, in all three forms (#2989)", () => {
+  const repo = scratch()
+  scratchRepo(repo, {
+    "pyproject.toml": "[project]\n",
+    "src/pkg/__init__.py": "",
+    "src/pkg/a.py": "def f():\n    pass\n",
+    "src/pkg/b.py": "def g():\n    pass\n",
+    "src/pkg/sub/__init__.py": "def h():\n    pass\n",
+    "tests/test_from.py": "from pkg.a import f\n",
+    "tests/test_import.py": "import pkg.a\n",
+    "tests/test_inside.py": "def test_f():\n    from pkg.a import f\n    f()\n",
+    "tests/test_other.py":
+      "from pkg.b import g\nimport pkg.b\nfrom pkg import b\nfrom pkg.ab import x\n# from pkg.a import f\n",
+    "tests/test_parent.py": "from pkg import (\n    a,\n)\n",
+    "tests/test_sub.py": "from pkg.sub import h\n",
+  })
+  writeFiles(repo, { "src/pkg/a.py": "def f():\n    return 1\n" })
+  git(repo, "commit", "-qam", "change a module")
+  const out = touched(repo)
+  expect(out.code, out.stderr).toBe(0)
+  expect(out.listed).toEqual([
+    "tests/test_from.py",
+    "tests/test_import.py",
+    "tests/test_inside.py",
+    "tests/test_parent.py",
+  ])
+  writeFiles(repo, { "src/pkg/sub/__init__.py": "def h():\n    return 1\n" })
+  git(repo, "commit", "-qam", "change a package")
+  expect(touched(repo).listed).toContain("tests/test_sub.py")
+})
+
 test("10m a test importing a changed file relatively, and one in its mirrored folder naming it", () => {
   const repo = scratch()
   scratchRepo(repo, {

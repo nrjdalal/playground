@@ -891,6 +891,44 @@ export const scannedPaths = (text: string, paths: Set<string>): Set<string> => {
   return out
 }
 
+// A Python file's dotted module name: a src/ layout's leading src dropped and a package's __init__.py read as the package, so src/pkg/a.py is pkg.a and src/pkg/__init__.py is pkg
+export const dottedName = (path: string): string | undefined => {
+  if (!path.endsWith(".py")) return undefined
+  const parts = path
+    .replace(/^src\//, "")
+    .slice(0, -3)
+    .split("/")
+  if (parts.at(-1) === "__init__") parts.pop()
+  return parts.length && parts.every((p) => /^[A-Za-z_]\w*$/.test(p)) ? parts.join(".") : undefined
+}
+
+// A Python text imports mod by `from mod import f`, `import mod` or `from parent import leaf`, at any indent; a submodule's import counts for its package, since it runs the package's __init__.py
+export const importsModule = (text: string, mod: string): boolean => {
+  const name = mod.replaceAll(".", "\\.")
+  const direct = new RegExp(
+    `^[ \\t]*(?:from[ \\t]+|import[ \\t]+(?:[\\w.]+(?:[ \\t]+as[ \\t]+\\w+)?[ \\t]*,[ \\t]*)*)${name}(?!\\w)`,
+    "m",
+  )
+  if (direct.test(text)) return true
+  const dot = mod.lastIndexOf(".")
+  if (dot < 0) return false
+  const parent = mod.slice(0, dot).replaceAll(".", "\\.")
+  const leaf = mod.slice(dot + 1)
+  const from = new RegExp(
+    `^[ \\t]*from[ \\t]+${parent}[ \\t]+import[ \\t]+(\\([^)]*\\)|[^\\n]*)`,
+    "gm",
+  )
+  for (const m of text.matchAll(from))
+    if (
+      m[1]!
+        .replace(/[()]/g, "")
+        .split(",")
+        .some((n) => n.trim().split(/\s+/)[0] === leaf)
+    )
+      return true
+  return false
+}
+
 export const covers = (scanned: Set<string>, changed: string[]): boolean =>
   [...scanned].some((p) => changed.some((f) => f === p || f.startsWith(`${p}/`)))
 
@@ -1000,6 +1038,13 @@ export const touchedTests = (clone: string, base: string, head: string): string[
       if (covers(scannedPaths(text, paths), changed)) picked.add(f)
     if (changed.some((f) => TEMPLATE.test(f)))
       for (const f of grep(clone, head, "-E", [DIGEST_PIN])) picked.add(f)
+    const modules = changed.flatMap((f) => dottedName(f) ?? [])
+    const leaves = [...new Set(modules.map((m) => m.split(".").at(-1)!))]
+    const importers = [...grep(clone, head, "-F", leaves)].filter(
+      (f) => tests.has(f) && f.endsWith(".py"),
+    )
+    for (const [f, text] of Object.entries(readBlobs(clone, head, importers)))
+      if (modules.some((m) => importsModule(text, m))) picked.add(f)
   }
   const listed = new Set([...picked].filter((f) => tests.has(f)))
   const addsText = io
