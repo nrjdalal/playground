@@ -1238,6 +1238,28 @@ describe("a daily beat missed while the job was down or the Mac slept (#3119)", 
     expect(logged).toEqual([])
   })
 
+  test("three daily beats starting in one tick are all kept, so a restart runs none of them again", async () => {
+    const names = ["first", "second", "third"]
+    for (let round = 0; round < 20; round++) {
+      const path = join(scratch(), "last-run", "ops-tick.json")
+      const ran: string[] = []
+      const beats = names.map((name) => ({
+        cron: "0 3 * * *",
+        name,
+        run: async () => void ran.push(name),
+        to: "x",
+      }))
+      const { ctx } = fake(dirname(dirname(path)), at(3, 0))
+      await Promise.all(cycle(ctx, runner({ log: () => {}, path }), beats))
+      const again = fake(dirname(dirname(path)), at(9, 31))
+      await Promise.all(cycle(again.ctx, runner({ log: () => {}, path }), beats))
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(
+        Object.fromEntries(names.map((name) => [name, minuteIso(at(3, 0))])),
+      )
+      expect(ran).toEqual(names)
+    }
+  })
+
   test("a beat due more often than daily never catches up, however old its kept run", async () => {
     const { fresh, ran, tick } = setup({ often: minuteIso(yesterday(3, 0)) })
     await tick(fresh(), at(9, 31))

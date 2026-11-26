@@ -1235,9 +1235,10 @@ const readLast = (path?: string): Map<string, string> => {
   }
 }
 
-// last holds each daily beat's last start as an ISO minute, read from path at the start and written there at each start, so a daily beat whose minute passed while the job was down or the Mac slept runs once at the next tick; with no path it lives in memory alone.
+// last holds each daily beat's last start as an ISO minute, read from path at the start and written there once a cycle that starts one, each write chained after the last on kept, so a daily beat whose minute passed while the job was down or the Mac slept runs once at the next tick; with no path it lives in memory alone.
 export type Runner = {
   failures: Map<string, string>
+  kept: Promise<void>
   last: Map<string, string>
   log: (line: string) => void
   path?: string
@@ -1250,6 +1251,7 @@ export const runner = ({
   path,
 }: { log?: (line: string) => void; path?: string } = {}): Runner => ({
   failures: new Map(),
+  kept: Promise.resolve(),
   last: readLast(path),
   log,
   path,
@@ -1296,41 +1298,48 @@ export const guard = (ctx: Context, failed: string[], unsent: Unsent[] = []): Co
 // Starts every beat due this minute, and each daily beat whose minute passed unseen (missedOf), each on its own so a slow one holds no other; a beat that throws or fails a send is kept by name until it next runs clean.
 export function cycle(ctx: Context, state: Runner, beats: Beat[] = BEATS): Promise<void>[] {
   const minute = minuteOf(ctx.now)
-  return beats
-    .filter(
-      (b) =>
-        (cronMatches(b.cron, ctx.now) || missedOf(b, state, ctx.now)) &&
-        state.started.get(b.name) !== minute &&
-        !state.running.has(b.name),
-    )
-    .map(async (b) => {
-      const missed = missedOf(b, state, ctx.now)
-      state.started.set(b.name, minute)
-      state.running.add(b.name)
-      if (lastDue(b.cron, ctx.now)) {
-        state.last.set(b.name, isoMinute(ctx.now))
-        if (state.path)
-          await writeAtomic(state.path, JSON.stringify(Object.fromEntries(state.last))).catch(
-            (err) => state.log(`last-run not kept: ${err instanceof Error ? err.message : err}`),
-          )
-      }
-      if (missed)
-        state.log(`${b.name} catches up the run it missed at ${missed.toISOString().slice(0, 16)}Z`)
-      const failed: string[] = []
-      const unsent: Unsent[] = []
-      const guarded = guard(ctx, failed, unsent)
-      try {
-        for (const line of state.unsent.get(b.name) ?? []) await guarded.send(line.to, line.text)
-        await b.run(guarded)
-        if (failed.length) state.failures.set(b.name, failed.join("; "))
-        else state.failures.delete(b.name)
-      } catch (err) {
-        state.failures.set(b.name, err instanceof Error ? err.message : String(err))
-      } finally {
-        state.unsent.set(b.name, unsent)
-        state.running.delete(b.name)
-      }
-    })
+  const starting = beats.flatMap((b) => {
+    const missed = missedOf(b, state, ctx.now)
+    const due = cronMatches(b.cron, ctx.now) || missed
+    return due && state.started.get(b.name) !== minute && !state.running.has(b.name)
+      ? [{ b, missed }]
+      : []
+  })
+  // every starting beat's minute is set before the one write, and each write waits for the last and reads last as it then stands, so a later write never loses to an earlier one
+  let keeps = false
+  for (const { b } of starting) {
+    state.started.set(b.name, minute)
+    state.running.add(b.name)
+    if (lastDue(b.cron, ctx.now)) {
+      state.last.set(b.name, isoMinute(ctx.now))
+      keeps = true
+    }
+  }
+  const path = state.path
+  if (keeps && path)
+    state.kept = state.kept
+      .then(() => writeAtomic(path, JSON.stringify(Object.fromEntries(state.last))))
+      .catch((err) => state.log(`last-run not kept: ${err instanceof Error ? err.message : err}`))
+  const kept = state.kept
+  return starting.map(async ({ b, missed }) => {
+    await kept
+    if (missed)
+      state.log(`${b.name} catches up the run it missed at ${missed.toISOString().slice(0, 16)}Z`)
+    const failed: string[] = []
+    const unsent: Unsent[] = []
+    const guarded = guard(ctx, failed, unsent)
+    try {
+      for (const line of state.unsent.get(b.name) ?? []) await guarded.send(line.to, line.text)
+      await b.run(guarded)
+      if (failed.length) state.failures.set(b.name, failed.join("; "))
+      else state.failures.delete(b.name)
+    } catch (err) {
+      state.failures.set(b.name, err instanceof Error ? err.message : String(err))
+    } finally {
+      state.unsent.set(b.name, unsent)
+      state.running.delete(b.name)
+    }
+  })
 }
 
 // The beat's result: ok, or each beat that failed and why.
