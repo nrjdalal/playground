@@ -74,7 +74,7 @@ async function readLock(): Promise<Lock | null> {
   return { pid: Number(pid), ageSeconds, time }
 }
 
-// Asks whether a pid exists, `process.kill(pid, 0)` doing that without a signal, ESRCH meaning it is gone.
+// Asks whether a pid exists, `process.kill(pid, 0)` doing that without a signal; any error, ESRCH or EPERM, reads as gone.
 const pidAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
@@ -84,7 +84,7 @@ const pidAlive = (pid: number): boolean => {
   }
 }
 
-// The roster's one writer, held from before its load to after its write, so two overlapping writes never read the same version.
+// The write lock, held from before the load to after the write, so two overlapping writes never read the same version.
 async function lockRoster(): Promise<() => Promise<void>> {
   const started = Date.now()
   const body = `${process.pid} ${now()}`
@@ -100,8 +100,12 @@ async function lockRoster(): Promise<() => Promise<void>> {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
       const held = await readLock()
       if (held) {
-        // A gone pid, or one over the wait, is stale, so the write takes the lock and retries.
-        if (!pidAlive(held.pid) || held.ageSeconds > 30) {
+        // A gone pid, or a lock over 30 s old, is stale, so the write takes the lock, says so, and retries.
+        const gone = !pidAlive(held.pid)
+        if (gone || held.ageSeconds > 30) {
+          console.error(
+            `roster.ts: took over ${lockPath}, held by ${gone ? "gone " : ""}pid ${held.pid} since ${held.time}${gone ? "" : ", over 30 s old"}`,
+          )
           await rm(lockPath, { force: true })
           continue
         }
@@ -115,6 +119,7 @@ async function lockRoster(): Promise<() => Promise<void>> {
           throw err
         }
         if ((Date.now() - st.mtimeMs) / 1000 > 30) {
+          console.error(`roster.ts: took over ${lockPath}, empty and over 30 s old`)
           await rm(lockPath, { force: true })
           continue
         }
