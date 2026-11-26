@@ -211,7 +211,11 @@ describe("sweep: ops-tick ends what the detector flags", () => {
   })
 
   test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
-    const scored: PrState = { head: "abc1234567", state: "open", verdicts: ["abc1234"] }
+    const scored: PrState = {
+      head: "abc1234567",
+      state: "open",
+      verdicts: [{ at: "abc1234", gate: "review" }],
+    }
     const cleaned: string[] = []
     const { closed, deps } = fakes({
       cleanup: async (target) => (cleaned.push(target.name), [`removed /wt/${target.name}`]),
