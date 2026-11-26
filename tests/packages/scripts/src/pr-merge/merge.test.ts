@@ -19,6 +19,7 @@ import {
   gateOptions,
   isServerError,
   lockRootOf,
+  mergeOnReadyRuns,
   realLockRoot,
   prMerge,
   runGh,
@@ -377,7 +378,7 @@ describe("prMerge", () => {
     expect(outcome.kind).toBe("refused")
     expect(outcome.gates.filter((gate) => !gate.ok)).toEqual([
       {
-        detail: `this checkout's gate code differs from origin/canary's (${differs.join(", ")}); run pr:merge from a checkout on origin/canary, or let merge-on-ready land it`,
+        detail: codeGate(differs, { n: 112, trainRuns: false }).detail,
         name: "code",
         ok: false,
       },
@@ -1230,7 +1231,7 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     at("commit", "-q", "-m", "a new gate")
     const differs = await gateCodeOf(git, canary)
     expect(differs).toEqual(["packages/scripts/src/pr-merge/new-gate.ts"])
-    expect(codeGate(differs).ok).toBe(false)
+    expect(codeGate(differs, { n: 1, trainRuns: false }).ok).toBe(false)
     at("checkout", "-q", "canary")
   })
 
@@ -1238,5 +1239,37 @@ describe("the code gate's diff, in a real scratch checkout", () => {
     await expect(gateCodeOf(git, "0".repeat(40))).rejects.toThrow(
       /git diff of the gate code exited/,
     )
+  })
+})
+
+// The code gate's ✗ names the way on that lands the PR on this machine: merge-on-ready where its job runs, else pr:merge from a detached worktree on origin/canary
+describe("the code gate's way on (#3086)", () => {
+  const differs = ["packages/scripts/src/pr-merge/new-gate.ts"]
+
+  test("with merge-on-ready off, the detail names the detached origin/canary worktree's commands and not merge-on-ready", () => {
+    const gate = codeGate(differs, { n: 42, trainRuns: false })
+    expect(gate.ok).toBe(false)
+    expect(gate.detail).toContain(
+      'git fetch origin canary && git worktree add --detach "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.claude/worktrees/merge-42" origin/canary',
+    )
+    expect(gate.detail).toContain("then bun run pr:merge 42 there")
+    expect(gate.detail).not.toContain("merge-on-ready")
+  })
+
+  test("with merge-on-ready on, the detail names it", () => {
+    const gate = codeGate(differs, { n: 42, trainRuns: true })
+    expect(gate.ok).toBe(false)
+    expect(gate.detail).toContain("let merge-on-ready land it")
+  })
+
+  test("merge-on-ready runs only while jobs.opsMergeTrain is enabled and no no-ready file pauses it, on a made-up data folder", () => {
+    const at = (name: string, values: Record<string, unknown>) =>
+      mergeOnReadyRuns({ PLAYGROUND_DATA_DIR: storeWith(join(scratch, name), {}, values) })
+    expect(mergeOnReadyRuns({ PLAYGROUND_DATA_DIR: join(scratch, "no-store") })).toBe(false)
+    expect(at("train-off", { "jobs.opsMergeTrain": { enabled: false } })).toBe(false)
+    expect(at("train-on", { "jobs.opsMergeTrain": { enabled: true } })).toBe(true)
+    mkdirSync(join(scratch, "train-on", "ops", "merge-train"), { recursive: true })
+    writeFileSync(join(scratch, "train-on", "ops", "merge-train", "no-ready"), "")
+    expect(mergeOnReadyRuns({ PLAYGROUND_DATA_DIR: join(scratch, "train-on") })).toBe(false)
   })
 })
