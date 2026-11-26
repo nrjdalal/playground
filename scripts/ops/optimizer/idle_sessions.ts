@@ -18,12 +18,14 @@ import { dirname, join } from "node:path"
 
 import { costOf } from "../../../api/hono/src/lib/usage/prices"
 import { kindOf } from "../../../packages/config/src/kinds"
-import { verdictsOf } from "../../../packages/config/src/verdicts"
+import { type GateName, verdictsOf } from "../../../packages/config/src/verdicts"
 import { dataDirOf, herdrDir } from "../../../packages/env/src/data-dir"
 import { GH_TIMEOUT_MS, ghDown } from "../../../packages/scripts/src/gh-read"
 import STATUSES from "../../roster-statuses.json"
 
 const CACHE_TTL_S = 300
+// The verdict that scores a checker's head: its own kind's alone, so a tester's PASS never ends the reviewer mid-round.
+const GATE_OF: Record<"reviewer" | "tester", GateName> = { reviewer: "review", tester: "tester" }
 // A PR still active under the last day keeps its checker, so a reaper beat between the lead's hand-off and the next review never ends the queue reviewer.
 const RECENT_S = 24 * 3600
 
@@ -61,7 +63,7 @@ export type PrState = {
   ref?: string
   state: string
   updatedAt?: string
-  verdicts: string[]
+  verdicts: { at: string; gate: GateName }[]
 }
 
 export type Row = {
@@ -294,7 +296,9 @@ export async function collect(input: CollectInput): Promise<Row[]> {
         states.length > 0 &&
         states.every(
           (s) =>
-            s !== null && (s.state === "closed" || s.verdicts.some((v) => s.head.startsWith(v))),
+            s !== null &&
+            (s.state === "closed" ||
+              s.verdicts.some((v) => v.gate === GATE_OF[kind] && s.head.startsWith(v.at))),
         )
       )
         why.push("checker-nothing (head scored)")
@@ -456,14 +460,15 @@ export async function prStateLive(
   if (!pr?.state || !pr.head?.sha) return null
   const state = pr.merged_at ? "merged" : pr.state
   // A merged or closed PR needs no verdicts, so it costs one read; a merged one stays cached.
-  const verdicts: string[] = []
+  const verdicts: PrState["verdicts"] = []
   if (state === "open") {
     const page = Math.max(1, Math.ceil((pr.comments ?? 0) / 100))
     const comments = (await api(
       `repos/${m[1]}/issues/${m[2]}/comments?per_page=100&page=${page}`,
     )) as { body?: string }[] | null
     // a checker's verdict: the reviewer's score, or the tester's word
-    for (const c of comments ?? []) for (const v of verdictsOf(c.body ?? "")) verdicts.push(v.at)
+    for (const c of comments ?? [])
+      for (const v of verdictsOf(c.body ?? "")) verdicts.push({ at: v.at, gate: v.gate })
   }
   return remember({
     at: now,
