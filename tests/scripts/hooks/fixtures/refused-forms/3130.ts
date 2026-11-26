@@ -124,6 +124,18 @@ export const groups: Group[] = [
         `node -e "require('fs').cp('/tmp/x', '$HOME/.playground/roster.json', () => {})"`,
       ],
       [
+        "python3 code changing the roster's owner",
+        `python3 -c "import os; os.chown('$HOME/.playground/roster.json', 1, 1)"`,
+      ],
+      [
+        "node code copying a file onto the roster through cpSync",
+        `node -e "require('fs').cpSync('/tmp/x', '$HOME/.playground/roster.json')"`,
+      ],
+      [
+        "node code changing the roster's mode through fchmodSync",
+        `node -e "const fs = require('fs'); fs.fchmodSync(fs.openSync('$HOME/.playground/roster.json', 'r'), 0)"`,
+      ],
+      [
         "chmod -R on the data folder printed by a substitution",
         'chmod -R 000 "$(echo ~/.playground)"',
       ],
