@@ -37,6 +37,13 @@ export const groups: Group[] = [
       ["a kill by name watch's shell line runs after a flag and -d's x", "watch -bdx 'pkill node'"],
       ["a kill by name watch's shell line runs after -e and -d's x", "watch -edx 'pkill node'"],
       ["killall in watch's shell line after a flag and -d's x", "watch -bdx 'killall node'"],
+      ["a kill by name watch reruns after -d takes the n as its value", "watch -dn pkill node"],
+      ["a kill by name watch reruns after -d takes the q as its value", "watch -dq pkill node"],
+      ["a kill by name watch reruns after -d takes the s as its value", "watch -ds pkill node"],
+      ["a kill by name watch reruns after a flag and -d's n", "watch -bdn pkill node"],
+      ["a kill by name in watch's shell line after -d's n", "watch -dn 'pkill node'"],
+      ["a kill by name watch reruns after -d takes x and n as its value", "watch -dxn pkill node"],
+      ["a kill by name watch reruns after -d with a digit attached", "watch -d1 pkill node"],
     ],
   },
   {

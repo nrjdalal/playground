@@ -191,6 +191,9 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     // an x before -d turns exec on, so watch runs the one word as a program's name, which names none
     "watch -xd 'pkill node'",
     "watch -d -x 'pkill node'",
+    "watch -xdn 'pkill node'",
+    // -d takes the n as its value, so the 2 is the program, which names no kill
+    "watch -dn 2 date",
     "echo skill",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()

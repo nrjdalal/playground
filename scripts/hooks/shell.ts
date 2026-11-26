@@ -370,6 +370,8 @@ const WATCH = runner(
 )
 // in a cluster, -d takes the rest as its optional value, so an x counts only before any d (`-xd` execs, `-dx` diffs)
 const WATCH_EXEC = /^(?:--exec|-[bCcefghprtvw]*x[bCcefghprtvwx]*(?:d.*)?)$/
+// a cluster whose flags reach a d, which ends it: no letter after the d takes the next word
+const WATCH_DIFF = /^-[bCcefghprtvwx]*d/
 const BUN_FLAGS =
   "-b -i --bun --check --hot --if-present --no-clear-screen --no-exit-on-error --no-install --no-orphans --parallel --sequential --silent --smol --watch --workspaces"
 const BUN_VALUES =
@@ -2259,9 +2261,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
         break
       } else if (v.startsWith("-") && v !== "-") {
-        // nice's own -<number> is its adjustment
+        // nice's own -<number> is its adjustment, and watch's -d takes the rest of its cluster as its value
         const end =
-          wrapper === "nice" && /^-\d+$/.test(v)
+          (wrapper === "nice" && /^-\d+$/.test(v)) || (wrapper === "watch" && WATCH_DIFF.test(v))
             ? "own"
             : marked(v)
               ? undefined
