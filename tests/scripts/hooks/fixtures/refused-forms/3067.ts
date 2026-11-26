@@ -27,6 +27,14 @@ const targets = (to: string): Row[] => [
     `cp /dev/stdin ${to.slice(0, -1)}{${to.at(-1)},z} <<< 'rm -f x'`,
   ],
   ["a cat's output into a brace list", `cat payload > ${to.slice(0, -1)}{${to.at(-1)},z}`],
+  [
+    "a cat's output through $1 after a shift moves a set's words",
+    `set -- a ${to}; shift; cat payload > "$1"`,
+  ],
+  [
+    "a cat's output through $1 after a set the hook cannot read",
+    `set -- $(printf %s ${to}); cat payload > "$1"`,
+  ],
   ["a function called through zsh's split read", `X='f ${to}'; ${CAT}; \${=X}`],
   ["a function called through a quoted array", `A=(f ${to}); ${CAT}; "\${A[@]}"`],
   ["a function called through zsh's unquoted array", `A=(f ${to}); ${CAT}; $A`],
@@ -156,7 +164,7 @@ const root = (): Row[] => [
 ]
 
 // a call word the hook cannot read (an array, zsh's split read) or an indirection may give any parameter, so a write through one is refused into a log too
-const unread = (what: string) => /indirect|array|split read/.test(what)
+const unread = (what: string) => /indirect|array|split read|shift|set the hook/.test(what)
 const closed = (): Row[] =>
   targets("out.log")
     .filter(([what]) => unread(what))
