@@ -209,6 +209,19 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     // -d takes the n as its value, so the 2 is the program, which names no kill
     "watch -dn 2 date",
     "echo skill",
+    // #3134's controls: refused-forms/3134.ts's pipes and escapes, each handing on a kill by pid
+    "printf 'x\\nkill 1234\\n' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
+    "xargs -0 ~/.playground/ops/run-slot.sh w -- < <(printf 'x\\0kill 1234')",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 nohup",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 sh -c",
+    "printf 'x\\nkill 1234\\n' | xargs -L1 -I{} sh -c {}",
+    "xargs -0 nohup < <(printf 'x\\0kill 1234')",
+    "xargs -0 sh -c < <(printf 'x\\0kill 1234')",
+    "xargs -0 -I{} sh -c {} < <(printf 'x\\0kill 1234')",
+    "xargs nohup <<< $'x\\nkill 1234'",
+    "xargs -L1 ~/.playground/ops/run-slot.sh w -- <<< $'x\\nkill 1234'",
+    "echo -e 'x\\nkill 1234' | xargs -L1 ~/.playground/ops/run-slot.sh w --",
+    "xargs watch <<< 'kill 1234'",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })

@@ -2431,7 +2431,8 @@ function viaRunner(parsed: Parsed, state: State, budget: Budget): Parsed | undef
     key,
     budget,
   )
-  if (!reading.first) return
+  // a runner xargs gives no program word (`xargs watch`) runs xargs' input words, which xargsFilled reads from the wrapped mark this reading carries
+  if (!reading.first) return reading.xargs?.wrapped ? { ...reading, via: key } : undefined
   const file = reading.first.value
   if (key === "bun run" && (file.includes("/") || SCRIPT_FILE.test(file))) return
   if (key === "deno run" && words.includes(reading.first)) return
@@ -4125,12 +4126,23 @@ async function shell(
   if (noExec(args, name)) return
   const { inline, operand } = shellOperand(args, name)
   if (operand && inline) {
-    let script = operand.value
-    if (xargs?.replace && script.includes(xargs.replace)) {
-      const fed = await stdinOf(cmd, env)
-      script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
+    const script = operand.value
+    if (!xargs?.replace || !script.includes(xargs.replace))
+      return run(lexScript(script, env), subshell(env), visit, builtins)
+    // the script is filled with each text itemsOf reads from stdin, so an item -0 or -d splits off runs as xargs runs it (`printf 'x\0pkill node'`)
+    const fed = await stdinOf(cmd, env)
+    const texts = new Set<string>()
+    for (const split of [null, ...(xargs.delimiters ?? [])]) {
+      const items = itemsOf(fed, split)
+      if (!items || items.length > READINGS) texts.add(UNKNOWN)
+      else for (const text of items) if (text.trim()) texts.add(text.trim())
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins)
+    for (const text of texts.size > 0 ? texts : [""]) {
+      const lexed = lexScript(filled(script, xargs.replace, text), env)
+      const verdict = await run(lexed, subshell(env), visit, builtins)
+      if (verdict) return verdict
+    }
+    return
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script)
