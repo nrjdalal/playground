@@ -3574,7 +3574,12 @@ var PLACERS = new Set(["cp", "ditto", "install", "ln", "mv", "rsync"]);
 var COPIERS = new Set(["cp", "ditto", "rsync"]);
 var TARGET_FLAG = new Set(["cp", "install", "ln", "mv"]);
 var WRITERS = new Set([
+  "bzip2",
+  "chgrp",
+  "chmod",
+  "chown",
   "dd",
+  "gzip",
   "install",
   "ln",
   "mv",
@@ -3583,7 +3588,8 @@ var WRITERS = new Set([
   "tee",
   "touch",
   "truncate",
-  "unlink"
+  "unlink",
+  "xz"
 ]);
 var CODE_RUNNERS = new Set([
   "awk",
@@ -3599,6 +3605,8 @@ var CODE_RUNNERS = new Set([
   "ruby"
 ]);
 var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
+var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
+var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);
   let real = data;
@@ -3654,6 +3662,18 @@ var FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/;
 var KNOWN = new Set([...FINDS, ...PLACERS, ...READERS, ...SEDS, ...WRITERS]);
 var shown = (word) => word.source ?? visible(word.value);
 var inPlace = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
+var sortOutputs = (args) => args.flatMap((a, i) => {
+  const own = (value) => [{ ...a, raw: undefined, source: undefined, value }];
+  const next = args[i + 1] ? [args[i + 1]] : [];
+  if (a.value === "--output")
+    return next;
+  if (a.value.startsWith("--output="))
+    return own(a.value.slice("--output=".length));
+  const short = /^-[A-Za-z]*o(.*)$/.exec(a.value);
+  if (!short || a.value.startsWith("--"))
+    return [];
+  return short[1] ? own(short[1]) : next;
+});
 var destinationOf = (tool, args) => {
   const t = TARGET_FLAG.has(tool) ? args.findIndex((a) => a.value === "-t" || a.value.startsWith("--target-directory")) : -1;
   if (t >= 0)
@@ -3685,11 +3705,21 @@ async function judgeBash(command, cwd, environment) {
       }
     return out;
   };
+  const builtToward = (typed, at) => {
+    if (named)
+      return true;
+    const prefix = typed.value.slice(0, typed.value.search(/[\u0000\u0001]/));
+    if (prefix) {
+      const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1);
+      return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at);
+    }
+    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at);
+  };
   const writes = (typed, at, position = false) => {
     const paths = pathsOf(typed, at);
     if (!paths) {
       const tail = tailOf(typed.source ?? typed.raw ?? "").toLowerCase();
-      return position && named && targets.some((t) => t.endsWith(tail));
+      return position && targets.some((t) => t.endsWith(tail)) && builtToward(typed, at);
     }
     return paths.some(({ glob, path }) => isRoster(path, targets, glob));
   };
@@ -3768,12 +3798,13 @@ async function judgeBash(command, cwd, environment) {
   const xargsRuns = async (cmd, args, xargs, at) => {
     const mark = xargs.replace;
     const fill = (a, mark, item) => {
+      const anyName = unseen.has(item) && a.value.slice(0, a.value.indexOf(mark)).endsWith("/");
       const word = {
         ...a,
-        glob: a.glob || item.glob,
+        glob: a.glob || item.glob || anyName,
         raw: undefined,
         source: undefined,
-        value: a.value.replaceAll(mark, item.value)
+        value: a.value.replaceAll(mark, anyName ? "*" : item.value)
       };
       if (unseen.has(item))
         unseen.add(word);
@@ -3844,7 +3875,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && WRITE_WORDS.test(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => namesRoster(a.value, targets) && writesCode(a.value)))
       return refuse(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
@@ -3863,6 +3894,11 @@ async function judgeBash(command, cwd, environment) {
         return refuse(`${tool} whose script names the roster`);
       if (!inPlace(args))
         return;
+    }
+    if (tool === "sort") {
+      for (const out of sortOutputs(args))
+        if (writes(out, at, true))
+          return refuse(`sort -o onto ${shown(out)}`);
     }
     if (READERS.has(tool))
       return;
