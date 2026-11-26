@@ -124,9 +124,19 @@ const controls = (): Row[] =>
     .filter(([what]) => !unread(what))
     .map(([what, call]): Row => [`${what}, a log`, call])
 
+// a remover's text into a log canary refused, since it held the target unread, and the head works out to the log, the loosening this part makes
+const loosened = (): Row[] => [
+  ["a remover's text into a log through a variable's cut", `X=out.log.bak; ${ECHO} "\${X%.bak}"`],
+  [
+    "a remover's text into a log through a variable's replacement",
+    `X=out.bak; ${ECHO} "\${X/bak/log}"`,
+  ],
+  ["a remover's text into a log through a variable's alternate", `X=1; ${ECHO} "\${X:+out.log}"`],
+  ["a remover's text into a log through $1 after set --", `set -- out.log; ${ECHO} "$1"`],
+]
 const dotGit: Row = ["a cat's output into a .GIT-named log", "cat payload > .GIT.log"]
 
-export const allowed: string[] = [...controls(), dotGit].map(([what]) => what)
+export const allowed: string[] = [...controls(), ...loosened(), dotGit].map(([what]) => what)
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
@@ -139,6 +149,6 @@ export const groups: Group[] = [
   {
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...controls(), dotGit],
+    rows: () => [...controls(), ...loosened(), dotGit],
   },
 ]
