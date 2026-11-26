@@ -148,6 +148,15 @@ test.each([
       return join(main, "link")
     },
   ],
+  [
+    "a path whose parent folder is a symlink to a folder inside it",
+    (main: string) => {
+      mkdirSync(join(main, "real"))
+      writeFileSync(join(main, "real", "a"), "x\n")
+      symlinkSync(join(main, "real"), join(main, "via"))
+      return join(main, "via", "a")
+    },
+  ],
   ["the main checkout itself", (main: string) => main],
   ["its git folder", (main: string) => join(main, ".git")],
   [
