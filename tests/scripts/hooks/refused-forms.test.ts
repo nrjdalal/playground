@@ -590,7 +590,7 @@ const guardsOf = (
     run: (raw) => c.releaseComment(raw, { PLAYGROUND_DATA_DIR: OWNED }),
   },
   "no-roster-write": {
-    folders: { "process home": [homedir(), homedir()] },
+    folders: { "process home": [homedir(), homedir()], "process tmp": [tmpdir(), homedir()] },
     run: (raw, home) => c.rosterWrite(raw, { HOME: home }),
   },
   "no-stash": {
