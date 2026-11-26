@@ -261,7 +261,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
     )
     expect(rule).toContain("in a TypeScript repo, the file holds at least one path")
     expect(rule).toContain("A Python repo's list can be empty with nothing wrong")
-    expect(rule).toContain("grep -l <dotted name> -- tests")
+    expect(rule).toContain("it holds each test that imports a changed module by its dotted name")
     expect(rule).toContain("xargs ~/.playground/ops/run-slot.sh")
     expect(rule).toContain("test:file < <scratch>/touched.txt")
     expect(rule).not.toContain("| xargs")
@@ -439,14 +439,15 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 })
 
 describe("code-review-loop keeps its clone at the head and asks the lead on a trust-widening nit", () => {
-  test("step 4's sub-agents leave the clone as it stands, and its Done when checks HEAD after they return (#1624)", async () => {
+  test("step 4's sub-agents read the PR pinned to the head's sha, never the clone's working files, and its Done when checks each prompt pinned them (#1624, #i1069)", async () => {
     const [step, done] = await part("Fresh read")
-    expect(step).toContain("with no merge, checkout or reset there")
+    expect(step).toContain("git's object reads pinned to the head's sha alone")
+    expect(step).toContain("never the clone's working files")
     expect(step).toContain("17 of `canary`'s files")
-    expect(done ?? "").toContain(
-      "`git -C <clone> rev-parse HEAD` printed the head after every `code-review` call",
+    expect(done ?? "").toContain("every sub-agent prompt pinned its reads to the head's sha")
+    expect(await page()).toContain(
+      "They read the PR through git's object reads pinned to the head's sha, never the clone's working files",
     )
-    expect(await page()).toContain("They leave the review clone as it stands")
   })
 
   test("step 6 sends a trust-widening nit to the lead before the 5/5, and The last 5/5 points to it (#1613)", async () => {
