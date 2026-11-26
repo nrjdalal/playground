@@ -764,7 +764,7 @@ export function listTrash(trash: string): TrashEntry[] {
     .filter((entry) => existsSync(join(trash, entry.id)))
 }
 
-// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder, and a --stray item back to its own place in the main checkout), one anything stands at, and one whose folder is gone.
+// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder, and a --stray item back to its own place in the main checkout while its folder is real), one anything stands at, and one whose folder is gone.
 export function restore(
   id: string,
   roots: Roots,
@@ -805,6 +805,12 @@ export function restore(
         `${entry.path} came from a rehearsal folder card ${entry.approved} approved, which no longer reaches it as a real folder`,
       )
     back = [entry.path]
+  } else if (entry.stray) {
+    // a --stray item comes back only to its own place in the main checkout, reached through no symlink (issue 3104)
+    if (!existsSync(dirname(entry.path)) || real(dirname(entry.path)) !== dirname(entry.path))
+      return refused(
+        `${entry.path} came from the main checkout by --stray, which no longer reaches it as a real folder`,
+      )
   }
   const carve = carveOutOf(
     entry.path,

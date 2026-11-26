@@ -261,7 +261,7 @@ describe("code-review-loop's touched tests come from the diff (#1104, #1525)", (
     )
     expect(rule).toContain("in a TypeScript repo, the file holds at least one path")
     expect(rule).toContain("A Python repo's list can be empty with nothing wrong")
-    expect(rule).toContain("grep -l <dotted name> -- tests")
+    expect(rule).toContain("it holds each test that imports a changed module by its dotted name")
     expect(rule).toContain("xargs ~/.playground/ops/run-slot.sh")
     expect(rule).toContain("test:file < <scratch>/touched.txt")
     expect(rule).not.toContain("| xargs")

@@ -226,6 +226,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   The folder stays in place, and a merge now stops on each conflict for its author to resolve.
   Tests: `bun run test:file tests/scripts/link-skills-settings.test.ts tests/scripts/link-skills-unlinked.test.ts`.
 
+## An MCP server's token
+
+- A stdio MCP server whose token sat in `~/.mcp.json`'s `env` starts through `packages/scripts/src/mcp-keychain/cli.ts` instead: its entry's command is `bun` and its args `--no-env-file <checkout>/packages/scripts/src/mcp-keychain/cli.ts <service> <account> <ENV_NAME> -- <the server's command...>`, with no `env`, so the file holds no secret.
+- The launcher reads the item with `security find-generic-password -s <service> -a <account> -w`, starts the server with the token under `<ENV_NAME>` in its env alone, its stdio passed through for the MCP pipe, and exits with the server's code; a missing or empty item exits 1 naming the service and account, with no server started.
+  The item is the service `playground-mcp` under the server's own name as its account, saved by the one writer, `storeItem` in `packages/settings/src/keychain.ts`.
+- Claude Code starts a local MCP server outside its sandbox, so a `--sandbox` session's server reads the Keychain its shell cannot.
+  Tests: `bun run test:file tests/packages/scripts/src/mcp-keychain/cli.test.ts tests/packages/settings/src/keychain.test.ts`.
+
 ## The secret store on Linux
 
 - Linux has no Keychain, so there `packages/scripts/src/security/cli.ts` answers as `security`, linked to `~/.bun/bin/security` by link-skills.sh, and every factory caller of `security` runs unchanged.

@@ -644,12 +644,14 @@ async function removeApproved(
   return 0
 }
 
-// Why an untracked stray in the main checkout may not go by --stray, or null: a path written relative or as a symlink, outside the main checkout, the checkout itself, its .git, its worktrees folder or a folder holding it, whatever the ignore rules say, or one git tracks or ignores, a file in it included (issue 3083).
+// Why an untracked stray in the main checkout may not go by --stray, or null: a path written relative, as a symlink or through one (issue 3104), outside the main checkout, the checkout itself, its .git, its worktrees folder or a folder holding it, whatever the ignore rules say, or one git tracks or ignores, a file in it included (issue 3083).
 export const strayRefusal = (path: string, main: string): string | null => {
   if (!isAbsolute(path)) return `${path} is not an absolute path`
   const info = lstatSync(path, { throwIfNoEntry: false })
   if (!info) return `no such path ${path}`
   if (info.isSymbolicLink()) return `${path} is a symlink`
+  if (realpathSync(dirname(path)) !== dirname(path))
+    return `${path} is reached through a symlink, which its restore would refuse`
   const rel = relative(realpathSync(main), join(realpathSync(dirname(path)), basename(path)))
   if (!rel || rel.startsWith("..") || isAbsolute(rel))
     return `${path} is not inside the main checkout ${main}`
