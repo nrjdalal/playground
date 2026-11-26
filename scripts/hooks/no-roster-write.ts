@@ -237,7 +237,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word is all expansion, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
+  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word starts with an expansion, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
   const builtToward = (typed: Word, at: Env) => {
     if (named) return true
     const prefix = typed.value.slice(0, typed.value.search(/[\u0000\u0001]/))
