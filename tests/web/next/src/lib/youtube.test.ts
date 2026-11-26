@@ -62,11 +62,14 @@ describe("queueOf, what Next plays after a row of the music box", () => {
   })
 
   test("with shuffle on, the song plays first, then the rest of its list dealt at random", () => {
+    const orders = new Set<string>()
     for (let pass = 0; pass < 20; pass++) {
       const queue = queueOf("recent", list, "bbbbbbbbbbb", true)
       expect(queue?.[0]).toBe("bbbbbbbbbbb")
       expect(queue?.slice(1).toSorted()).toEqual(["aaaaaaaaaaa", "ccccccccccc", "ddddddddddd"])
+      orders.add(String(queue))
     }
+    expect(orders.size).toBeGreaterThan(1)
   })
 
   test("a search result, or a list of one song, plays on into YouTube's mix", () => {
