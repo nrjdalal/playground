@@ -19783,7 +19783,7 @@ var CODE_RUNNERS = new Set([
   "ruby"
 ]);
 var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|truncate|(?<![=-])>(?!=)/i;
-var PATHS = /[^\s"'`/()<>|&;=,]*(?:\/[^\s"'`/()<>|&;=,]*)+/g;
+var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var writesCode = (code) => WRITE_WORDS.test(code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1)));
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);

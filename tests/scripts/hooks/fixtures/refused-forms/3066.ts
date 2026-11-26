@@ -74,6 +74,10 @@ export const groups: Group[] = [
         "ls ~/.playground/roster.json | xargs chgrp staff",
       ],
       [
+        "a listing of the roster into xargs chmod",
+        "ls ~/.playground/roster.json | xargs chmod 000",
+      ],
+      [
         "a listing of the roster into an xargs -I string that sorts onto it with -o attached",
         "ls ~/.playground/roster.json | xargs -I{} sort -o{} /dev/null",
       ],
@@ -90,10 +94,6 @@ export const groups: Group[] = [
         "ls ~/.playground/roster.json | xargs -I{} sort --output {} /dev/null",
       ],
       ["a sort onto the roster with -o attached", "sort -o~/.playground/roster.json /dev/null"],
-      [
-        "a listing of the roster into xargs chmod",
-        "ls ~/.playground/roster.json | xargs chmod 000",
-      ],
       [
         "a listing of the roster into an xargs -I string that sorts onto it",
         "ls ~/.playground/roster.json | xargs -I{} sort -o {} /dev/null",

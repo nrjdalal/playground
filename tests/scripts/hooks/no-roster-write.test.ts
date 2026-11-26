@@ -309,6 +309,13 @@ describe("a roster under a temp folder whose name holds rm", () => {
     `python3 -c "import os; os.system('/usr/bin/truncate -s0 ${roster}')"`,
     `perl -e '$x=1/unlink("${roster}")'`,
     `node -e "require('fs')/**/.writeFileSync('${roster}', '{}')"`,
+    // the word before a path's first slash is kept, so a write call followed by a comment or a division still counts
+    `node -e "require('fs').writeFileSync/**/('${roster}', '{}')"`,
+    `node -e "const fs=require('fs');fs.writeFileSync/**/('${roster}','{}')"`,
+    `node -e "require('fs').rmSync/**/('${roster}')"`,
+    `perl -e 'unlink/**/("${roster}")'`,
+    `perl -e 'unlink/1/("${roster}")'`,
+    `bun -e "await Bun.write/**/('${roster}', '{}')"`,
   ])("refuses %s", async (command) => {
     expect(await under(command)).toContain("scripts/roster.ts")
   })
