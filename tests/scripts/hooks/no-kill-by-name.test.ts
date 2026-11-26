@@ -139,13 +139,16 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "sleep 60 & pid=$!; ps --pid $pid && kill $pid",
     "sleep 60 & pid=$!; ps --quick-pid $pid && kill $pid",
     "echo 1234 | xargs kill",
-    // #3123's twins: a kill by pid a wrapper runs from xargs' input words, and bare xargs, which only echoes its input
+    // #3123's twins: a kill by pid a wrapper, BSD -J or run-slot.sh runs from xargs' input words, bare xargs, which only echoes its input, and GNU -I with no word its string, which drops its input
     "xargs nohup <<< 'kill 1234'",
     "xargs timeout 5 <<< 'kill 1234'",
     "xargs env <<< 'kill 1234'",
     "echo kill 1234 | xargs nohup",
     "xargs -I{} nohup {} 1234 <<< kill",
     "xargs <<< 'pkill node'",
+    "xargs -J % nohup <<< 'kill 1234'",
+    "xargs -I % nohup <<< 'pkill node'",
+    "xargs ~/.playground/ops/run-slot.sh w -- <<< 'kill 1234'",
     "~/.playground/ops/run-slot.sh w -- kill 1234",
     "~/.playground/ops/run-slot.sh w -- kill $!",
     "~/.playground/ops/run-slot.sh w -- pkill --help",
