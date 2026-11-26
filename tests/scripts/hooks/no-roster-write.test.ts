@@ -238,6 +238,27 @@ describe("roster.ts and every read run", () => {
     `du -sh ${DATA}; rm -f "$out"`,
     // a sibling of the data folder, never a folder holding it, wherever the sandbox puts HOME (CI's sits under /tmp)
     `ls ${DATA} | while read f; do rm ${DATA}-other/$f; done`,
+    // #3093: reads beside its refused forms, an xargs -I string fed a names file the hook never sees, code naming the data folder alone, and its writers on other files
+    `cat /tmp/no-such-names.txt | xargs -I{} cat ${DATA}/{}`,
+    "cat /tmp/no-such-names.txt | xargs -I{} rm /tmp/{}",
+    `cat /tmp/no-such-names.txt | xargs -I{} rm ${DATA}/scratch/{}`,
+    "cat /tmp/no-such-names.txt | xargs -I{} bun scripts/roster.ts get {}",
+    `cat /tmp/no-such-names.txt | xargs -I{} sh -c 'cat ${DATA}/{}'`,
+    `python3 -c "import os; os.system('cd ${DATA}; ls')"`,
+    `python3 -c "open('/tmp/x', 'w').write(open('${DATA}/brief.md').read())"`,
+    `python3 -c "import os, json; print(json.load(open(os.path.join('${DATA}', 'roster.json'))))"`,
+    `node -e "const r = require('${ROSTER}'); delete r.agents; console.log(r)"`,
+    `bun -e "await Bun.write('${DATA}/scratchpad/w/brief.md', 'refuse a write to the live roster (<data folder>/roster.json)')"`,
+    `find /tmp/no-such-dir -name '*.txt' | xargs -I{} cat ${DATA}/{}`,
+    "find . -name '*.ts' | xargs -I{} rm /tmp/{}",
+    `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "print(open('${DATA}/{}').read())"`,
+    `cat /tmp/no-such-names.txt | xargs -I{} node -e "console.log(require('fs').readFileSync('${DATA}/{}', 'utf8'))"`,
+    `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('/tmp/{}')"`,
+    `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('${HOME}/{}')"`,
+    `cat /tmp/no-such-names.txt | xargs -I{} python3 -c "import os; os.remove('${DATA}/scratch/{}')"`,
+    "chflags uchg /tmp/x",
+    "zstd --rm /tmp/x",
+    "pigz /tmp/x",
   ])("%s", async (command) => {
     expect(await bash(command)).toBeUndefined()
   })
