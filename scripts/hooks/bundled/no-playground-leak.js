@@ -11031,8 +11031,17 @@ async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value);
   if (squash && pinned && !namesRole(command) && await builder())
     return;
-  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
+  const place = factory || "the factory's repository";
+  const repoWord = url ? undefined : given.at(-1);
+  const unread = [
+    ...repoWord && unreadable(repoWord) ? [`the repository ${shown(repoWord)}`] : [],
+    ...target && unreadable(target) ? [`the pull request ${shown(target)}`] : []
+  ];
+  if (unread.length > 0 && !mayBe(candidates.filter(Boolean), factory))
+    return `no-protected-push hook refuses this gh pr merge: ${unread.join(" and ")} ${unread.length > 1 ? "are values" : "is a value"} the hook cannot read, so it cannot tell this merge from one of ${place}, whose base is main or canary (gh takes a pull request URL in the number's place over -R). Write the repository and the pull request number literally, one gh pr merge per pull request, as gh pr merge 5 -R <owner>/<repo>. For a pull request of ${place}: ${MERGE_FIX}`;
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
 }
+var shown = (word) => word.source ? `\`${word.source}\`` : "a value built at run time";
 function fieldOf(request, key) {
   const field = request.fields.findLast((f) => f.key === key);
   if (field)

@@ -414,8 +414,21 @@ async function judgeMerge(
   const squash = flags.some((f) => f.name === "--squash" || f.name === "-s")
   const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value)
   if (squash && pinned && !namesRole(command) && (await builder())) return
-  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`
+  const place = factory || "the factory's repository"
+  // a variable, a loop's word or a substitution in the number or -R/--repo leaves the repository open, so the refusal names it and the literal form
+  const repoWord = url ? undefined : given.at(-1)
+  const unread = [
+    ...(repoWord && unreadable(repoWord) ? [`the repository ${shown(repoWord)}`] : []),
+    ...(target && unreadable(target) ? [`the pull request ${shown(target)}`] : []),
+  ]
+  if (unread.length > 0 && !mayBe(candidates.filter(Boolean), factory))
+    return `no-protected-push hook refuses this gh pr merge: ${unread.join(" and ")} ${unread.length > 1 ? "are values" : "is a value"} the hook cannot read, so it cannot tell this merge from one of ${place}, whose base is main or canary (gh takes a pull request URL in the number's place over -R). Write the repository and the pull request number literally, one gh pr merge per pull request, as gh pr merge 5 -R <owner>/<repo>. For a pull request of ${place}: ${MERGE_FIX}`
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`
 }
+
+// A word as the call typed it, for a refusal to name.
+const shown = (word: Text & { source?: string }): string =>
+  word.source ? `\`${word.source}\`` : "a value built at run time"
 
 // A field a gh api call sends, from its -f/-F fields, else its --input's JSON; unknown when the input does not read, undefined when it sends none.
 function fieldOf(request: ApiRequest, key: string): Text | undefined {

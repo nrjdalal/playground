@@ -11690,8 +11690,17 @@ async function judgeMerge(rest, repos, parsed, env, factory, builder, command) {
   const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value);
   if (squash && pinned && !namesRole(command) && await builder())
     return;
-  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${factory || "the factory's repository"}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
+  const place = factory || "the factory's repository";
+  const repoWord = url ? undefined : given.at(-1);
+  const unread = [
+    ...repoWord && unreadable(repoWord) ? [`the repository ${shown(repoWord)}`] : [],
+    ...target && unreadable(target) ? [`the pull request ${shown(target)}`] : []
+  ];
+  if (unread.length > 0 && !mayBe(candidates.filter(Boolean), factory))
+    return `no-protected-push hook refuses this gh pr merge: ${unread.join(" and ")} ${unread.length > 1 ? "are values" : "is a value"} the hook cannot read, so it cannot tell this merge from one of ${place}, whose base is main or canary (gh takes a pull request URL in the number's place over -R). Write the repository and the pull request number literally, one gh pr merge per pull request, as gh pr merge 5 -R <owner>/<repo>. For a pull request of ${place}: ${MERGE_FIX}`;
+  return `no-protected-push hook refuses this gh pr merge: it merges a pull request of ${place}, whose base is main or canary. ${ROUTE} ${MERGE_FIX} ${BUILDER_FORM}`;
 }
+var shown = (word) => word.source ? `\`${word.source}\`` : "a value built at run time";
 function fieldOf(request, key) {
   const field = request.fields.findLast((f) => f.key === key);
   if (field)
@@ -18501,12 +18510,12 @@ var GUARDED = /\$\{[A-Za-z_][A-Za-z0-9_]*:\?[^}]*\}/g;
 var GUARD3 = "__guarded__";
 var VARIABLES_TO_STOP = 2;
 var variables = (path) => path.split("/").filter((part) => part.startsWith(UNKNOWN)).length;
-var shown = (path) => path.replaceAll(UNKNOWN, "$\u2026").replaceAll(GUARD3, "${\u2026:?}");
+var shown2 = (path) => path.replaceAll(UNKNOWN, "$\u2026").replaceAll(GUARD3, "${\u2026:?}");
 var FIX2 = {
   rm: "Name each path literally: a file in your worktree or scratchpad with rm, anything else with playground rm <literal path> (in a script, removeScratch for a folder makeScratch made), and run it again.",
   rmdir: 'Guard each one as ${VAR:?} ("${S:?}/${m:?}"), or name a literal path, and run it again.'
 };
-var refuse12 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX2[name]}`;
+var refuse12 = (name, path) => `no-prompt-stop hook refuses ${name} ${shown2(path)}: Claude Code stops on a removal whose target has two or more parts that start with a variable and waits for a person, who is not there. ${FIX2[name]}`;
 var AT_ROOT = /^\/[^/\u0000]+\/?$/;
 var AT_ROOT_FIX = {
   rm: "Write and remove in the session's scratchpad, a folder there with playground rm <literal path>, and run it again.",
@@ -18719,7 +18728,7 @@ import { basename as basename9, dirname as dirname10, resolve as resolve11, sep 
 var INSTEAD4 = "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs.";
 var WORKTREE = "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it (a clean worktree, detached at a commit canary already has, counts as held by none), it holds no uncommitted change and its work has landed on canary or on a branch origin still holds.";
 var refuse13 = (what, why = "a recursive delete is final, and one aimed wrong takes a whole tree", instead = INSTEAD4) => `no-raw-delete hook refuses ${what}: ${why}. ${instead}`;
-var shown2 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
+var shown3 = (word) => word.variable ? `$${word.variable}` : visible(word.value);
 var DATA = new Set([
   ...PRINTERS,
   "awk",
@@ -18840,7 +18849,7 @@ function judgeRm(args, xargs, env, roots, { nested }) {
       return refuse13(`a recursive rm (${a.value})`);
     const spread = marked(a.value) && (!nested || !a.quoted);
     if (spread || options && spellsRecursive(a.value) || option && hidden(a))
-      return refuse13(`an rm with a word the hook cannot read (${shown2(a)})`, "it may be -r or any path");
+      return refuse13(`an rm with a word the hook cannot read (${shown3(a)})`, "it may be -r or any path");
     if (!option)
       targets.push(a);
   }
@@ -18908,7 +18917,7 @@ async function inspect16(raw, environment) {
       for (const [k, a] of args.entries()) {
         if (hidden(a)) {
           if (!isData(name) && args.slice(k).some((w) => spellsRecursive(w.value)))
-            return refuse13(`a program the hook cannot read (${shown2(a)}) given -r`, "it may be rm");
+            return refuse13(`a program the hook cannot read (${shown3(a)}) given -r`, "it may be rm");
           continue;
         }
         const named = unversioned(program(a.value));
@@ -18938,7 +18947,7 @@ async function inspect16(raw, environment) {
     const end = args.findIndex((a) => !a.value.startsWith("-") && !hidden(a));
     const lead = end < 0 ? args : args.slice(0, end);
     if (first && hidden(first) && (spellsRecursive(first.value) || args.some((a) => spellsRecursive(a.value)) || lead.some((a) => hidden(a) && !a.quoted)))
-      return refuse13(`a program the hook cannot read (${shown2(first)}) given -r`, "it may be rm");
+      return refuse13(`a program the hook cannot read (${shown3(first)}) given -r`, "it may be rm");
     const slot = slotWords(parsed);
     if (slot)
       return examine({ ...cmd, words: slot }, at, visitAs(reach), false);
@@ -19842,7 +19851,7 @@ var FIND_OR = new Set(["!", ",", "-not", "-o", "-or"]);
 var ITEMS = 100;
 var FIND_FLAGS = /^-(?:[EHLPXdsx]+|O\d*|D\S+)$/;
 var KNOWN = new Set([...FINDS, ...PLACERS, ...READERS4, ...SEDS3, ...WRITERS2]);
-var shown3 = (word) => word.source ?? visible(word.value);
+var shown4 = (word) => word.source ?? visible(word.value);
 var inPlace2 = (args) => args.some((a) => /^-[A-Za-z]*i|^--in-place/.test(a.value));
 var sortOutputs = (args) => args.flatMap((a, i) => {
   const own = (value) => [{ ...a, raw: undefined, source: undefined, value }];
@@ -20007,7 +20016,7 @@ async function judgeBash(command, cwd, environment) {
     const { args, name, xargs } = parsed;
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
-        return refuse15(`a redirect onto ${shown3(r.target)}`);
+        return refuse15(`a redirect onto ${shown4(r.target)}`);
     if (!program(name))
       return;
     const tool = toolOf(name);
@@ -20029,7 +20038,7 @@ async function judgeBash(command, cwd, environment) {
     if (FINDS.has(tool)) {
       for (const [i, a] of args.entries())
         if (FIND_FILES.has(a.value) && args[i + 1] && writes(args[i + 1], at, true))
-          return refuse15(`${tool} ${a.value} onto ${shown3(args[i + 1])}`);
+          return refuse15(`${tool} ${a.value} onto ${shown4(args[i + 1])}`);
       const reached = reaches(args, at);
       if (reached && args.some((a) => a.value === "-delete"))
         return refuse15(`${tool} -delete reaching the roster`);
@@ -20062,11 +20071,11 @@ async function judgeBash(command, cwd, environment) {
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
       if (dest && writes(dest, at, true))
-        return refuse15(`${tool} onto ${shown3(dest)}`);
+        return refuse15(`${tool} onto ${shown4(dest)}`);
       const into = dest ? pathsOf(dest, at) ?? [] : [];
       const sources = args.filter((a) => a !== dest && !a.value.startsWith("-"));
       if (sources.some((s) => basename11(s.value).toLowerCase() === "roster.json") && into.some(({ path }) => isRoster(resolve14(path, "roster.json"), targets)))
-        return refuse15(`${tool} of a roster.json into ${dest && shown3(dest)}`);
+        return refuse15(`${tool} of a roster.json into ${dest && shown4(dest)}`);
       if (COPIERS2.has(tool))
         return;
     }
@@ -20080,14 +20089,14 @@ async function judgeBash(command, cwd, environment) {
     if (tool === "sort") {
       for (const out of sortOutputs(args))
         if (writes(out, at, true))
-          return refuse15(`sort -o onto ${shown3(out)}`);
+          return refuse15(`sort -o onto ${shown4(out)}`);
     }
     if (READERS4.has(tool))
       return;
     const writer = WRITERS2.has(tool) || SEDS3.has(tool);
     for (const word of args)
       if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
-        return refuse15(`${tool} on ${shown3(word)}`);
+        return refuse15(`${tool} on ${shown4(word)}`);
   };
   return run2(lexed, env, visit, true);
 }
@@ -20837,7 +20846,7 @@ function heavy2(name, args, env) {
   if (target && BUN_SCRIPTS2.has(target) && (words[0] === "run" || filtered || target !== "build"))
     return { dir: cwd, what: `bun ${words.join(" ")}` };
 }
-var shown4 = (word) => {
+var shown5 = (word) => {
   const value = visible(word.value);
   return word.quoted ? `'${value.replaceAll("'", "'\\''")}'` : value;
 };
@@ -20885,8 +20894,8 @@ function inspect21(raw, environment, main) {
         return;
       const assigns = cmd.words.slice(0, at).filter((w) => ASSIGN.test(w.value));
       return [
-        ...assigns.length ? ["env", ...assigns.map(shown4)] : [],
-        ...cmd.words.slice(at).map(shown4)
+        ...assigns.length ? ["env", ...assigns.map(shown5)] : [],
+        ...cmd.words.slice(at).map(shown5)
       ].join(" ");
     };
     if (env.cwdAnywhere) {

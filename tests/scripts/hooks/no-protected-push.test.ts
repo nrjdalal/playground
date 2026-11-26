@@ -406,6 +406,41 @@ describe("a hand-run gh pr merge on the factory's repository", () => {
     )
   })
 
+  test.each([
+    [
+      "a loop's number",
+      "for n in 5 6; do gh pr merge $n -R made-up/other --merge; done",
+      "the pull request `$n` is a value",
+    ],
+    [
+      "a variable's repository",
+      'gh pr merge 5 --repo "$R" --merge',
+      'the repository `"$R"` is a value',
+    ],
+    [
+      "a repository set on a test",
+      'r=made-up/app; [ -n "$x" ] && r=made-up/other; gh pr merge 5 --repo "$r"',
+      'the repository `"$r"` is a value',
+    ],
+    [
+      "both",
+      'gh pr merge "$N" -R "$R"',
+      'the repository `"$R"` and the pull request `"$N"` are values',
+    ],
+  ])("names the word it cannot read and the literal form: %s", async (_, command, word) => {
+    const reason = await as("worker", command, dirs.other)
+    expect(reason).toContain(
+      `no-protected-push hook refuses this gh pr merge: ${word} the hook cannot read`,
+    )
+    expect(reason).toContain("gh pr merge 5 -R <owner>/<repo>")
+  })
+
+  test("names the factory's repository when the call spells it beside a word it cannot read", async () => {
+    expect(
+      await as("worker", "for n in 5 6; do gh pr merge $n -R made-up/app; done", dirs.other),
+    ).toContain("it merges a pull request of made-up/app")
+  })
+
   test("is refused past a cd the hook cannot name", async () => {
     expect(await as("worker", `cd "$D" && gh pr merge 5`)).toContain(
       "no-protected-push hook refuses",
