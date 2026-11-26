@@ -1182,6 +1182,88 @@ describe("cycle", () => {
   })
 })
 
+describe("a daily beat missed while the job was down or the Mac slept (#3119)", () => {
+  const minuteIso = (at: Date) => `${at.toISOString().slice(0, 16)}:00Z`
+  const yesterday = (hour: number, minute: number) => new Date(2026, 9, 18, hour, minute, 0)
+  const setup = (kept?: Record<string, string>) => {
+    const path = join(scratch(), "last-run", "ops-tick.json")
+    if (kept) {
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, JSON.stringify(kept))
+    }
+    const ran: string[] = []
+    const logged: string[] = []
+    const beats = [
+      { cron: "0 3 * * *", name: "daily", run: async () => void ran.push("daily"), to: "x" },
+      { cron: "4-59/10 * * * *", name: "often", run: async () => void ran.push("often"), to: "x" },
+    ]
+    const tick = async (state: ReturnType<typeof runner>, now: Date) => {
+      const { ctx } = fake(dirname(dirname(path)), now)
+      await Promise.all(cycle(ctx, state, beats))
+    }
+    const fresh = () => runner({ log: (line: string) => void logged.push(line), path })
+    return { fresh, logged, path, ran, tick }
+  }
+
+  test("a beat whose last run is older than its last due minute runs on the first tick, once, with one line naming the minute it missed", async () => {
+    const { fresh, logged, path, ran, tick } = setup({ daily: minuteIso(yesterday(3, 0)) })
+    const state = fresh()
+    await tick(state, at(9, 31))
+    await tick(state, new Date(at(9, 31).getTime() + 20_000))
+    await tick(state, at(9, 32))
+    expect(ran).toEqual(["daily"])
+    expect(logged).toEqual([
+      `daily catches up the run it missed at ${minuteIso(at(3, 0)).slice(0, 16)}Z`,
+    ])
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ daily: minuteIso(at(9, 31)) })
+  })
+
+  test("a beat that ran in its own minute does not run again", async () => {
+    const { fresh, logged, ran, tick } = setup()
+    const state = fresh()
+    await tick(state, at(3, 0))
+    await tick(state, new Date(at(3, 0).getTime() + 20_000))
+    await tick(state, at(3, 1))
+    await tick(state, at(9, 31))
+    expect(ran).toEqual(["daily"])
+    expect(logged).toEqual([])
+  })
+
+  test("the kept last run survives a new Runner, so a restart after a clean run catches nothing up", async () => {
+    const { fresh, logged, path, ran, tick } = setup()
+    await tick(fresh(), at(3, 0))
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ daily: minuteIso(at(3, 0)) })
+    await tick(fresh(), at(9, 31))
+    expect(ran).toEqual(["daily"])
+    expect(logged).toEqual([])
+  })
+
+  test("a beat due more often than daily never catches up, however old its kept run", async () => {
+    const { fresh, ran, tick } = setup({ often: minuteIso(yesterday(3, 0)) })
+    await tick(fresh(), at(9, 31))
+    expect(ran).toEqual([])
+  })
+
+  test("with no kept run, a start runs nothing and writes nothing", async () => {
+    const { fresh, path, ran, tick } = setup()
+    await tick(fresh(), at(9, 31))
+    expect(ran).toEqual([])
+    expect(existsSync(path)).toBe(false)
+  })
+
+  test("a caught-up optimizer-daily runs the beat's own run, so it sends the due run's line to the same place, through the same outbox", async () => {
+    const path = join(scratch(), "last-run", "ops-tick.json")
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(
+      path,
+      JSON.stringify({ "optimizer-daily": minuteIso(new Date(2026, 9, 17, 21, 13, 0)) }),
+    )
+    const { ctx, sent } = fake(dirname(dirname(path)), at(9, 31))
+    await Promise.all(cycle(ctx, runner({ log: () => {}, path }), [beat("optimizer-daily")]))
+    expect(sent).toEqual([{ text: "optimizer daily", to: "optimizer" }])
+  })
+})
+
 describe("canary pull", () => {
   // A real git: an origin, a clone on main with two canary-side worktrees (one clean, one with an open change) and one on another branch, then a commit on origin's canary.
   const git = (cwd: string, ...args: string[]) => {

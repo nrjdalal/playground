@@ -1,4 +1,4 @@
-import { realpathSync, statfsSync } from "node:fs"
+import { readFileSync, realpathSync, statfsSync } from "node:fs"
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises"
 import { userInfo } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -1211,18 +1211,60 @@ export const BEATS: Beat[] = [
 // The minute a beat last started, so a cycle that lands twice in one minute starts it once, and a beat still running is not started again.
 const minuteOf = (at: Date): string => `${at.toDateString()} ${at.getHours()}:${at.getMinutes()}`
 
+const isoMinute = (at: Date): string => `${at.toISOString().slice(0, 16)}:00Z`
+
+// Where a job keeps each daily beat's last start, beside its heartbeat but in a folder of its own, since `<ops>/<job>.json` is the heartbeat every reader looks up.
+export const lastRunPath = (ops: string, job: string) => join(ops, "last-run", `${job}.json`)
+
+// The minute a daily cron (one minute and one hour, every day) last named at or before now, in machine wall time as cronMatches reads it; null for every other cron, which never catches up.
+export const lastDue = (cron: string, now: Date): Date | null => {
+  const m = /^(\d+) (\d+) \* \* \*$/.exec(cron.trim())
+  if (!m) return null
+  const due = new Date(now)
+  due.setHours(Number(m[2]), Number(m[1]), 0, 0)
+  if (due > now) due.setDate(due.getDate() - 1)
+  return due
+}
+
+const readLast = (path?: string): Map<string, string> => {
+  if (!path) return new Map()
+  try {
+    return new Map(Object.entries(JSON.parse(readFileSync(path, "utf8")) as Record<string, string>))
+  } catch {
+    return new Map()
+  }
+}
+
+// last holds each daily beat's last start as an ISO minute, read from path at the start and written there at each start, so a daily beat whose minute passed while the job was down or the Mac slept runs once at the next tick; with no path it lives in memory alone.
 export type Runner = {
   failures: Map<string, string>
+  last: Map<string, string>
+  log: (line: string) => void
+  path?: string
   running: Set<string>
   started: Map<string, string>
   unsent: Map<string, Unsent[]>
 }
-export const runner = (): Runner => ({
+export const runner = ({
+  log = console.log,
+  path,
+}: { log?: (line: string) => void; path?: string } = {}): Runner => ({
   failures: new Map(),
+  last: readLast(path),
+  log,
+  path,
   running: new Set(),
   started: new Map(),
   unsent: new Map(),
 })
+
+// A daily beat's missed minute: its last due minute, when its kept last start is older and that minute is not now; never for a beat with no kept start, so a first start runs nothing.
+const missedOf = (b: Beat, state: Runner, now: Date): Date | null => {
+  const kept = state.last.get(b.name)
+  const due = lastDue(b.cron, now)
+  if (!kept || !due || cronMatches(b.cron, now)) return null
+  return Date.parse(kept) < due.getTime() ? due : null
+}
 
 export type Unsent = { text: string; to: string }
 
@@ -1251,19 +1293,29 @@ export const guard = (ctx: Context, failed: string[], unsent: Unsent[] = []): Co
   }
 }
 
-// Starts every beat due this minute, each on its own so a slow one holds no other; a beat that throws or fails a send is kept by name until it next runs clean.
+// Starts every beat due this minute, and each daily beat whose minute passed unseen (missedOf), each on its own so a slow one holds no other; a beat that throws or fails a send is kept by name until it next runs clean.
 export function cycle(ctx: Context, state: Runner, beats: Beat[] = BEATS): Promise<void>[] {
   const minute = minuteOf(ctx.now)
   return beats
     .filter(
       (b) =>
-        cronMatches(b.cron, ctx.now) &&
+        (cronMatches(b.cron, ctx.now) || missedOf(b, state, ctx.now)) &&
         state.started.get(b.name) !== minute &&
         !state.running.has(b.name),
     )
     .map(async (b) => {
+      const missed = missedOf(b, state, ctx.now)
       state.started.set(b.name, minute)
       state.running.add(b.name)
+      if (lastDue(b.cron, ctx.now)) {
+        state.last.set(b.name, isoMinute(ctx.now))
+        if (state.path)
+          await writeAtomic(state.path, JSON.stringify(Object.fromEntries(state.last))).catch(
+            (err) => state.log(`last-run not kept: ${err instanceof Error ? err.message : err}`),
+          )
+      }
+      if (missed)
+        state.log(`${b.name} catches up the run it missed at ${missed.toISOString().slice(0, 16)}Z`)
       const failed: string[] = []
       const unsent: Unsent[] = []
       const guarded = guard(ctx, failed, unsent)
