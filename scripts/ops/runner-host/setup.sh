@@ -8,7 +8,7 @@ set -euo pipefail
 [[ "${1:-}" =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "setup.sh: give the repository as owner/name" >&2; exit 2; }
 REPO_URL=https://github.com/$1
 LABELS=playground
-BUN_VERSION=1.4.4
+BUN_VERSION=1.4.5
 UV_VERSION=0.13.8
 RUNNER_VERSION=2.338.2
 HOME_DIR=/home/runner
@@ -34,13 +34,13 @@ fetch() {
 case "$(uname -m)" in
   x86_64)
     ARCH=x64 BUN_ASSET=bun-linux-x64 UV_ASSET=uv-x86_64-unknown-linux-gnu
-    BUN_SHA256=bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+    BUN_SHA256=94559b3b528995a49452f9f2404cec74f2efd7d06e0a000a8cd214b02c3666eb
     UV_SHA256=5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91
     RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
     ;;
   aarch64 | arm64)
     ARCH=arm64 BUN_ASSET=bun-linux-aarch64 UV_ASSET=uv-aarch64-unknown-linux-gnu
-    BUN_SHA256=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e
+    BUN_SHA256=18656a3bf0ea5641f5796ae4213b75255579a70a0fded2f337933785568cdf84
     UV_SHA256=74f2f5c6024d397481db228db8fc25eed420db192243f88438c118e7e013e585
     RUNNER_SHA256=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
     ;;
