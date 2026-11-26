@@ -25,6 +25,8 @@ const HOSTS = { api: "https://api.yard.example.com", web: "https://yard.example.
 type Fake = {
   changed?: string[]
   deploys?: Partial<Record<Project, boolean>>
+  files?: Record<string, string[]>
+  inRange?: (sha: string) => boolean
   launch?: Launch
   record?: string
   schemaCleared?: (value: string) => Promise<SchemaSource | null>
@@ -52,6 +54,8 @@ const fake = (set: Fake = {}) => {
     fetch: async (tags) => {
       calls.push(`fetch ${tags.join(" ")}`)
     },
+    files: async (sha) => set.files?.[sha] ?? [],
+    inRange: async (sha) => set.inRange?.(sha) ?? true,
     launch: async () =>
       set.launch ?? { found: "the Ops lead's claude process", kind: "ops", role: "lead" },
     out: (line) => lines.push(line),
@@ -159,12 +163,14 @@ describe("ship:yard's schema stop", () => {
 
   test("--schema-cleared #iN, the owner's approved decision, clears the schema", async () => {
     const { calls, code } = await run(
-      { schemaCleared: "#i123" },
+      { schemaCleared: ["#i123"] },
       {
         changed: SCHEMA,
         record: "v0.0.110",
         schemaCleared: async (value) =>
-          value === "#i123" ? { approved: true, kind: "decision" } : Promise.resolve(null),
+          value === "#i123"
+            ? { approved: true, kind: "decision", text: "adds 0017_yard_more.sql" }
+            : Promise.resolve(null),
       },
     )
     expect(code).toBe(0)
@@ -173,12 +179,14 @@ describe("ship:yard's schema stop", () => {
 
   test("--schema-cleared #iN, an open or denied decision, refuses", async () => {
     const { calls, code, out } = await run(
-      { schemaCleared: "#i123" },
+      { schemaCleared: ["#i123"] },
       {
         changed: SCHEMA,
         record: "v0.0.110",
         schemaCleared: async (value) =>
-          value === "#i123" ? { approved: false, kind: "decision" } : Promise.resolve(null),
+          value === "#i123"
+            ? { approved: false, kind: "decision", text: "adds 0017_yard_more.sql" }
+            : Promise.resolve(null),
       },
     )
     expect(code).not.toBe(0)
@@ -188,14 +196,21 @@ describe("ship:yard's schema stop", () => {
 
   test("--schema-cleared a merged PR with a shape review and a dump path clears the schema", async () => {
     const { calls, code } = await run(
-      { schemaCleared: "PR#456" },
+      { schemaCleared: ["PR#456"] },
       {
         changed: SCHEMA,
         record: "v0.0.110",
         schemaCleared: async (value) =>
           value === "PR#456"
-            ? { dumpPath: "db.dump", kind: "pr", merged: true, shapeReview: true }
+            ? {
+                dumpPath: "db.dump",
+                kind: "pr",
+                merged: true,
+                mergeSha: "aaa111",
+                shapeReview: true,
+              }
             : Promise.resolve(null),
+        files: { aaa111: SCHEMA },
       },
     )
     expect(code).toBe(0)
@@ -209,7 +224,7 @@ describe("ship:yard's schema stop", () => {
       { dumpPath: undefined, kind: "pr", merged: true, shapeReview: true },
     ] as SchemaSource[]) {
       const { calls, code, out } = await run(
-        { schemaCleared: "PR#456" },
+        { schemaCleared: ["PR#456"] },
         {
           changed: SCHEMA,
           record: "v0.0.110",
@@ -224,7 +239,7 @@ describe("ship:yard's schema stop", () => {
 
   test("--schema-cleared a free string refuses, naming both valid forms", async () => {
     const { calls, code, out } = await run(
-      { schemaCleared: "i123" },
+      { schemaCleared: ["i123"] },
       { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
     )
     expect(code).not.toBe(0)
@@ -235,12 +250,135 @@ describe("ship:yard's schema stop", () => {
 
   test("--schema-cleared a valid form the source cannot read refuses, so the step fails closed", async () => {
     const { calls, code, out } = await run(
-      { schemaCleared: "#i123" },
+      { schemaCleared: ["#i123"] },
       { changed: SCHEMA, record: "v0.0.110", schemaCleared: () => Promise.resolve(null) },
     )
     expect(code).not.toBe(0)
     expect(out()).toContain("#i123 is not readable")
     expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+  })
+
+  describe("its source covers the migrations the ship carries", () => {
+    const MIGRATIONS = ["packages/db/drizzle/0020_alpha.sql", "packages/db/drizzle/0021_beta.sql"]
+    const CHANGED = [
+      "packages/db/src/schema/yard.ts",
+      ...MIGRATIONS,
+      "packages/db/drizzle/meta/_journal.json",
+    ]
+    const merged = (mergeSha: string): SchemaSource => ({
+      dumpPath: "~/d.dump",
+      kind: "pr",
+      merged: true,
+      mergeSha,
+      shapeReview: true,
+    })
+    const approved = (text: string): SchemaSource => ({ approved: true, kind: "decision", text })
+    const refused = (calls: string[], code: number) => {
+      expect(code).not.toBe(0)
+      expect(calls.some((c) => c.startsWith("deploy"))).toBe(false)
+    }
+
+    test("a PR#N merged in the tag's range whose diff holds every migration clears it", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [...MIGRATIONS, "packages/db/drizzle/meta/_journal.json"] },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    test("a PR#N merged outside the tag's range refuses, though its diff holds every migration", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: MIGRATIONS },
+          inRange: () => false,
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("PR#7 merged outside v0.0.110..v0.0.111")
+    })
+
+    test("a PR#N whose diff misses one migration refuses, naming that one alone", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["PR#7"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [MIGRATIONS[0]!] },
+          record: "v0.0.110",
+          schemaCleared: async () => merged("aaa111"),
+        },
+      )
+      refused(calls, code)
+      const line = out()
+        .split("\n")
+        .find((l) => l.includes("does not cover"))
+      expect(line).toContain(MIGRATIONS[1])
+      expect(line).not.toContain(MIGRATIONS[0])
+    })
+
+    test("two PR#N sources that each cover one of two migrations clear it together", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["PR#7", "PR#8"] },
+        {
+          changed: CHANGED,
+          files: { aaa111: [MIGRATIONS[0]!], bbb222: [MIGRATIONS[1]!] },
+          record: "v0.0.110",
+          schemaCleared: async (value) => merged(value === "PR#7" ? "aaa111" : "bbb222"),
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    test("an '#iN' whose text names every migration, by its file name or its path, clears it", async () => {
+      const { calls, code } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () =>
+            approved("adds 0020_alpha.sql, then packages/db/drizzle/0021_beta.sql"),
+        },
+      )
+      expect(code).toBe(0)
+      expect(calls).toContain("record v0.0.111")
+    })
+
+    test("an '#iN' whose text names no migration refuses, naming each one", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          changed: CHANGED,
+          record: "v0.0.110",
+          schemaCleared: async () => approved("adds a nullable column"),
+        },
+      )
+      refused(calls, code)
+      for (const file of MIGRATIONS) expect(out()).toContain(file)
+      expect(out()).toContain("#i9 does not cover")
+    })
+
+    test("a ship whose schema diff holds no migration needs each schema file covered", async () => {
+      const { calls, code, out } = await run(
+        { schemaCleared: ["#i9"] },
+        {
+          changed: ["packages/db/src/schema/yard.ts"],
+          record: "v0.0.110",
+          schemaCleared: async () => approved("adds a nullable column"),
+        },
+      )
+      refused(calls, code)
+      expect(out()).toContain("packages/db/src/schema/yard.ts")
+    })
   })
 
   test("only the schema and the migrations count", () => {
@@ -348,7 +486,7 @@ describe("ship:yard's schema source parsers", () => {
     ] as const) {
       const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], over)
       const { calls, code, out } = await run(
-        { schemaCleared: "PR#456" },
+        { schemaCleared: ["PR#456"] },
         {
           changed: ["packages/db/drizzle/0017_x.sql"],
           record: "v0.0.110",
@@ -367,6 +505,7 @@ describe("ship:yard's schema source parsers", () => {
     expect(decisionSource(JSON.stringify({ kind: "decision", status: "approved" }))).toEqual({
       approved: true,
       kind: "decision",
+      text: "",
     })
   })
 
@@ -376,9 +515,31 @@ describe("ship:yard's schema source parsers", () => {
       expect(decisionSource(JSON.stringify({ kind: "decision", status }))).toEqual({
         approved: false,
         kind: "decision",
+        text: "",
       })
     },
   )
+
+  test("decisionSource carries the decision's title and preview text, the words the owner approved", () => {
+    const read = {
+      kind: "decision",
+      preview: { text: "adds 0020_alpha.sql" },
+      status: "approved",
+      title: "Yard bots",
+    }
+    expect(decisionSource(JSON.stringify(read))).toEqual({
+      approved: true,
+      kind: "decision",
+      text: "Yard bots\nadds 0020_alpha.sql",
+    })
+  })
+
+  test("prSource carries the merge commit's sha", () => {
+    const read = pr([by("owner", "## ReviewBot · shape review at 80cc2c2")], {
+      mergeCommit: { oid: "aaa111" },
+    })
+    expect(prSource(read)).toEqual({ ...cleared, mergeSha: "aaa111" })
+  })
 
   test("decisionSource, an approved item of another kind, returns null", () => {
     expect(decisionSource(JSON.stringify({ kind: "ticket", status: "approved" }))).toBeNull()
