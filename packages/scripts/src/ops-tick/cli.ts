@@ -9,6 +9,7 @@ import {
   cycle,
   CYCLE_SECONDS,
   guard,
+  lastRunPath,
   nextDue,
   resultOf,
   runner,
@@ -48,7 +49,7 @@ if (once !== -1) {
 }
 
 const startedAt = new Date()
-const state = runner()
+const state = runner({ path: lastRunPath(ops, "ops-tick") })
 
 const pulse = () =>
   beat(beatPath, startedAt, new Date(), resultOf(state)).catch((err) => console.error(err))
