@@ -955,6 +955,7 @@ ${block("reload_if")}
 ${block("finish_roll")}
 ${block("fall_back")}
 ${upto("build_head")}
+${fn("build_step") ?? ""}
 ${upto("keep_builds")}
 ${upto("start_dev")}
 ${fn("serving_web")}
