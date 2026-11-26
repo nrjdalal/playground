@@ -96,6 +96,18 @@ const WRITERS = new Set([
   "zstd",
 ])
 
+// The writers that recurse into a folder operand under their recursive flag (or --recursive), so a folder holding the roster is a write of it
+const RECURSIVE = new Map([
+  ["chflags", /^-[A-Za-z]*R/],
+  ["chgrp", /^-[A-Za-z]*R/],
+  ["chmod", /^-[A-Za-z]*R/],
+  ["chown", /^-[A-Za-z]*R/],
+  ["gzip", /^-[A-Za-z0-9]*r/],
+  ["pigz", /^-[A-Za-z0-9]*r/],
+  ["rm", /^-[A-Za-z]*[Rr]/],
+  ["zstd", /^-[A-Za-z0-9]*r/],
+])
+
 // Programs that run inline code the hook does not parse: code naming the roster, or its folder and a bare roster.json apart, runs only when it holds no write word (WRITE_WORDS).
 const CODE_RUNNERS = new Set([
   "awk",
@@ -111,9 +123,9 @@ const CODE_RUNNERS = new Set([
   "ruby",
 ])
 
-// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, or a redirect's > (an arrow's => and a comparison's >= aside).
+// A write in inline code: a write call, an open() for writing or appending, a rename, an unlink, a removal, a remove, delete or move call, a truncate, an append, a replace, a mode or owner change, a copy onto a roster.json, or a redirect's > (an arrow's => and a comparison's >= aside).
 const WRITE_WORDS =
-  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|(?<![=-])>(?!=)/i
+  /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\bch(?:mod|own)|(?:shutil\.copy\w*|copyFile(?:Sync)?|cpSync)\s*\((?:[^,()]|\([^()]*\))*,[^,)]*roster\.json|(?<![=-])>(?!=)/i
 // A path in the code, from its first slash, its segments up to a quote, a blank, a bracket or a shell operator: its folders (a temp folder's -rMNlX1, a no-roster-write folder) hold no write, and its last segment (/bin/rm) and the word before its first slash (writeFileSync/**/) are kept.
 const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 const writesCode = (code: string) =>
@@ -150,10 +162,14 @@ const namesRoster = (text: string, targets: string[]) => {
   )
 }
 
+// Whether text names a bare roster.json, one no path segment comes before, which is the roster from its own folder.
+const namesBare = (text: string) =>
+  /(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(text.replace(/["'\\]/g, "").toLowerCase())
+
 // Whether code names the roster's folder itself (not a deeper path in it) and a bare roster.json apart (a cd into the folder, a path join), which the code may join into the roster.
 const namesApart = (text: string, targets: string[]) => {
   const plain = text.replace(/["'\\]/g, "").toLowerCase()
-  if (!/(?<![\w.-]\/)(?<![\w.-])roster\.json(?![\w.-])/.test(plain)) return false
+  if (!namesBare(text)) return false
   return (
     targets.some((t) =>
       new RegExp(`${dirname(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-]|/[\\w.-])`).test(
@@ -173,6 +189,19 @@ const readOf = (word: Word, at: Env): { glob?: boolean; value: string } | undefi
   const { commands } = lex(word.raw, known)
   const again = commands.length === 1 ? commands[0]!.words[0] : undefined
   return again && !marked(again.value) ? again : undefined
+}
+
+// A word as the variables the call has set by then read it, a part they leave unread kept unread: `$D/$f` after `D=~/.playground` reads `~/.playground/` and then the unread `$f`.
+const sharpened = (word: Word, at: Env): Word => {
+  if (!marked(word.value) || !word.raw || !at.vars.size) return word
+  const known = { ...at.known }
+  for (const [key, text] of at.vars) if (!marked(text.value)) known[key] = text.value
+  const { commands } = lex(word.raw, known)
+  const again =
+    commands.length === 1 && commands[0]!.words.length === 1 ? commands[0]!.words[0] : undefined
+  return again && again.value !== word.value
+    ? { ...word, glob: again.glob, value: again.value }
+    : word
 }
 
 // The literal text after a word's last expansion as written, quotes removed: `.md` for `brief-$name.md`, empty for `$F`, `"$(cmd)"` or an xargs -I item a shell's script was filled with unread (UNKNOWN).
@@ -256,7 +285,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       }
     return out
   }
-  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word starts with an expansion, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
+  // Whether an unread word may be built toward the roster: the call names it, the word's text before its first expansion is in a folder holding it (`<data folder>/$f`), or the word starts with an expansion and the shell may be in the roster's own folder (inOwnFolder), or it starts with one, the line holds a read, and the roster is near or the shell's folder holds it (unseenHolds), as for input the hook cannot see.
   const builtToward = (typed: Word, at: Env) => {
     if (named) return true
     const prefix = typed.value.slice(0, typed.value.search(/[\u0000\u0001]/))
@@ -264,7 +293,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       const folder = prefix.slice(0, prefix.lastIndexOf("/") + 1)
       return !!folder && holdsWord({ ...typed, glob: false, value: folder }, at)
     }
-    return lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at)
+    return (
+      (lexed.commands.some((c) => c.words.some((w) => w.value === "read")) && unseenHolds(at)) ||
+      inOwnFolder(at)
+    )
   }
   // A word unread in a write position (a redirect's target, a placer's destination, a writer's operand, sort's -o) may write the roster when it may be built toward it (builtToward) and the text after its last expansion may end its path; an unread operand of any other program runs.
   const writes = (typed: Word, at: Env, position = false) => {
@@ -309,6 +341,11 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       ),
     ) ?? false
   const lexed = lex(command, env.known)
+  // Whether the shell may be in the roster's own folder, where a bare name may be the roster.
+  const inOwnFolder = (at: Env) =>
+    places(at).some(
+      ({ cwd }) => !!cwd && targets.some((t) => resolve(cwd).toLowerCase() === dirname(t)),
+    )
   // Whether the call reaches toward the roster: it names it, or a word of it is the roster or a folder holding it.
   const near = named || lexed.commands.some((c) => c.words.some((w) => holdsWord(w, env)))
   // Whether output the hook cannot see may list the roster: the call reaches toward it, or the shell's folder holds it.
@@ -429,7 +466,8 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
     return items.length ? put(items) : []
   }
   const visit: Visit = async (cmd, parsed, at) => {
-    const { args, name, xargs } = parsed
+    const { name, xargs } = parsed
+    const args = parsed.args.map((a) => sharpened(a, at))
     for (const r of cmd.redirects)
       if (r.target && r.op.includes(">") && writes(r.target, at, true))
         return refuse(`a redirect onto ${shown(r.target)}`)
@@ -493,7 +531,10 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
       CODE_RUNNERS.has(tool) &&
       args.some(
         (a) =>
-          (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a)) &&
+          (namesRoster(a.value, targets) ||
+            namesApart(a.value, targets) ||
+            intoRoster.has(a) ||
+            (namesBare(a.value) && inOwnFolder(at))) &&
           writesCode(a.value),
       )
     )
@@ -525,6 +566,11 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
         if (writes(out, at, true)) return refuse(`sort -o onto ${shown(out)}`)
     if (READERS.has(tool)) return
     const writer = WRITERS.has(tool) || SEDS.has(tool)
+    const flag = RECURSIVE.get(tool)
+    if (flag && args.some((a) => flag.test(a.value) || a.value === "--recursive"))
+      for (const word of args)
+        if (!word.value.startsWith("-") && holdsWord(word, at))
+          return refuse(`${tool} recursing into ${shown(word)}`)
     // the unseen roster reaches a writer, and a program the hook cannot name, which may be one
     for (const word of args)
       if ((writer || marked(name) || !unseen.has(word)) && writes(word, at, writer))
