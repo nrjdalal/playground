@@ -1994,7 +1994,7 @@ function mktempPath(cmd: Command, known: Record<string, string>): string | undef
   return template ? template.value : `${known.TMPDIR.replace(/\/$/, "")}/tmp.mktemp`
 }
 
-// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
+// xargs in front of a command: `replace` is its -I (or BSD -J) string, which marks where stdin goes; without one, stdin is appended as arguments. `filled` holds each word in a program position after it (a wrapper's name or the program) that holds that string or an outer xargs' one in `outer`, which an inner xargs' own leaves in force, each with the string it holds, which xargs fills from its input. `wrapped` marks a wrapper after an xargs with no replace string that is given no program word (`xargs nohup`), whose program is xargs' input words. GNU's input options: `files` holds each file -a or --arg-file reads in place of stdin, with env -C's folder word before xargs (`chdir`) and whether a privilege wrapper before it may move the folder or the root (`moved`), and `delimiters` each string -d, --delimiter, -0 or --null splits the input at, undefined for an escape the reader cannot decode.
 export type Xargs =
   | {
       delimiters?: (string | undefined)[]
@@ -2002,6 +2002,7 @@ export type Xargs =
       filled?: [Word, string][]
       outer?: string[]
       replace?: string
+      wrapped?: boolean
     }
   | undefined
 
@@ -2162,6 +2163,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
   }
   // a spec runner's program word is a package name, read as the program it names
   let spec = false
+  let last = inside
   for (let wrapper = inside; ; wrapper = undefined) {
     if (!wrapper) {
       const word = peek()
@@ -2181,6 +2183,7 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         state.xargs = { ...state.xargs, outer: [...(state.xargs.outer ?? []), state.xargs.replace] }
       if (wrapper === "xargs") state.xargs ??= {}
       take()
+      last = wrapper
     }
     const runs = RUNNERS.get(wrapper)
     const options = (WRAPPERS.get(wrapper) ?? runs) as Options
@@ -2270,6 +2273,8 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
     if (wrapper === "repeat" && REPEAT_BODY.has(peek()?.value ?? "") && !peek()?.quoted) take()
   }
   const typed = take()
+  if (!typed && state.xargs && !state.xargs.replace && last && last !== "xargs")
+    state.xargs = { ...state.xargs, wrapped: true }
   const first = spec && typed ? packageName(typed) : typed
   const parsed: Parsed = {
     also,
@@ -3266,12 +3271,13 @@ const itemsOf = (fed: Text, split: string | null | undefined): string[] | undefi
   return [fed.value, ...fed.value.split(split)]
 }
 
-// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
+// The readings of a command whose program word, or a wrapper's name after xargs, holds xargs' replace string (GNU -I, -i, --replace, BSD -J) or an outer xargs' one, or whose wrapper after xargs is given no program word (`xargs nohup`, its input words appended as that program), which xargs fills from its input, so it runs a program no typed word names: each such word filled with each text itemsOf reads from stdin and from each file GNU's -a names (stdin's name aside, which stdin's reading covers), split by default and at each -d or -0 delimiter, a text holding a quote or a backslash with them stripped, as xargs strips them, and split at blanks into the words xargs runs; or unread when the hook cannot read an input or decode a delimiter, one input's split holds more texts than READINGS, or a text holds a quote or a backslash, so each guard's rule for an unread program applies. Each is judged beside the typed reading, so a verdict only moves to refused.
 async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Command[]> {
   const filled = new Map<Word, string[]>()
   for (const [word, replace] of parsed.flatMap((p) => p.xargs?.filled ?? []))
     filled.set(word, [...new Set([...(filled.get(word) ?? []), replace])])
-  if (filled.size === 0) return []
+  const wrapped = parsed.some((p) => p.xargs?.wrapped)
+  if (filled.size === 0 && !wrapped) return []
   const xargs = parsed.map((p) => p.xargs)
   const files = xargs.flatMap((x) => x?.files ?? []).filter((f) => !stdinPath(f.file.value))
   const splits = [null, ...new Set(xargs.flatMap((x) => x?.delimiters ?? []))]
@@ -3288,19 +3294,27 @@ async function xargsFilled(cmd: Command, parsed: Parsed[], env: Env): Promise<Co
     else for (const text of items) texts.add(text)
     if (raw?.some((text) => /["'\\]/.test(text))) texts.add(undefined)
   }
+  const wordsOf = (value: string): Word[] =>
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((value) => ({ quoted: false, value }))
   const fill = (text: string | undefined) => ({
     ...cmd,
-    words: cmd.words.flatMap((w): Word[] => {
-      const held = filled.get(w)
-      if (!held) return [w]
-      if (text === undefined)
-        return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
-      return held
-        .reduce((value, replace) => value.replaceAll(replace, text), w.value)
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((value) => ({ quoted: false, value }))
-    }),
+    words: [
+      ...cmd.words.flatMap((w): Word[] => {
+        const held = filled.get(w)
+        if (!held) return [w]
+        if (text === undefined)
+          return [{ ...w, ...unknown(`the program xargs puts in place of ${held.join(" or ")}`) }]
+        return wordsOf(held.reduce((value, replace) => value.replaceAll(replace, text), w.value))
+      }),
+      ...(!wrapped
+        ? []
+        : text === undefined
+          ? [{ quoted: false, ...unknown("the program xargs hands its wrapper") }]
+          : wordsOf(text)),
+    ],
   })
   return [...texts].map(fill)
 }
