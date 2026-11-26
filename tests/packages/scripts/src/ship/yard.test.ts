@@ -259,10 +259,11 @@ describe("ship:yard's schema source parsers", () => {
   test("prSource, a merged PR naming a migration and a dump, clears on the dump's path", () => {
     const source = prSource(
       JSON.stringify({
+        author: { login: "owner" },
         body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql, dump at ~/.playground/scratchpad/ops/db-dump-2026-11-18-pre2819/dashboard-db.dump`,
         comments: [
           {
-            author: { login: "nrjdalal" },
+            author: { login: "owner" },
             body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
           },
         ],
@@ -280,13 +281,51 @@ describe("ship:yard's schema source parsers", () => {
   test("prSource, a merged PR naming only a packages/db migration, returns null", () => {
     const source = prSource(
       JSON.stringify({
+        author: { login: "owner" },
         body: `## shape review\n\nadditive\n\npackages/db/drizzle/0017_marvelous_stark_industries.sql`,
         comments: [
           {
-            author: { login: "nrjdalal" },
+            author: { login: "owner" },
             body: "## ReviewBot · shape review at 80cc2c2\n\nadditive, shape settled",
           },
         ],
+        state: "MERGED",
+      }),
+    )
+    expect(source).toBeNull()
+  })
+
+  test("prSource, a merged PR whose shape review another login posted, returns null", () => {
+    const source = prSource(
+      JSON.stringify({
+        author: { login: "owner" },
+        body: "additive, dump at ~/.playground/scratchpad/ops/db-dump/dashboard-db.dump",
+        comments: [
+          { author: { login: "outsider" }, body: "## ReviewBot · shape review at 80cc2c2" },
+        ],
+        state: "MERGED",
+      }),
+    )
+    expect(source).toBeNull()
+  })
+
+  test("prSource, a merged PR with its author's shape review and no dump path from ~/, returns null", () => {
+    const source = prSource(
+      JSON.stringify({
+        author: { login: "owner" },
+        body: "additive, the dump taken",
+        comments: [{ author: { login: "owner" }, body: "## ReviewBot · shape review at 80cc2c2" }],
+        state: "MERGED",
+      }),
+    )
+    expect(source).toBeNull()
+  })
+
+  test("prSource, a merged PR whose author's login is missing, returns null", () => {
+    const source = prSource(
+      JSON.stringify({
+        body: "additive, dump at ~/.playground/scratchpad/ops/db-dump/dashboard-db.dump",
+        comments: [{ author: {}, body: "## ReviewBot · shape review at 80cc2c2" }],
         state: "MERGED",
       }),
     )
