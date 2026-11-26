@@ -2602,7 +2602,8 @@ test("13m merge on a Python clone whose .venv points at another folder names it 
   mkdirSync(old, { recursive: true })
   const [repo, head] = venvRepo(() => old)
   const canary = git(repo, "rev-parse", "--short=7", "canary")
-  const out = runMerge(repo, head)
+  // every run is red, as each test's import of the project fails through the old folder's .pth
+  const out = runMerge(repo, head, (_clone, files) => files)
   expect(out.lines).toEqual([
     `STALE-VENV on ${canary}: ${join(repo, ".venv")} points at ${old}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run uv sync in ${repo}, then the merge again`,
   ])
