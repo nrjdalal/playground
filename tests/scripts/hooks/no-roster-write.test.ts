@@ -436,7 +436,9 @@ describe("the unused-space approvals log", () => {
     `sed -i '' 's/keep/remove/' ${LOG}`,
     `rm ${LOG}`,
     `bun -e "require('fs').appendFileSync('${LOG}', 'x')"`,
-    `cd ~/.playground && bun -e "require('fs').appendFileSync('ops/tick/unused-approvals.jsonl', 'x')"`,
+    // code joining the data folder and the rest of the path apart
+    `bun -e "require('fs').appendFileSync(require('path').join(process.env.HOME, '.playground', 'ops/tick/unused-approvals.jsonl'), 'x')"`,
+    `node -e "const p = require('path'); require('fs').appendFileSync(p.join(process.env.HOME, '.playground', 'ops', 'tick', 'unused-approvals.jsonl'), 'x')"`,
   ])("refuses %s, naming rm --approve", async (command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-roster-write hook refuses")

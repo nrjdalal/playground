@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import { MIN_LIST_BYTES, type Machine, SHARD, type Unused } from "./unused"
 
 // The factory's list of each machine's unused space: nightly-clean saves a new one each night and sends it to Ops as one outbox line, never to the owner's Inbox; Ops or a dispatcher approves an item with `playground rm --approve`, which appends one line to the approvals file, and the next night removes each approved Remove by its own handle; `playground rm --card` reads the same list and lines to check its approval itself.
+// Trust: a line counts whatever its `by` says, since `rm --approve` checks the seat when it writes and no-roster-write refuses every other write to the approvals file, so that command stays its one writer.
 
 // The Planner's trial record: a model test's replay worktrees and logs stay off the list, listed only.
 export const KIT_RECORD = ["models/kit/logs", "models/kit/runs"]
