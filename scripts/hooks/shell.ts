@@ -3740,7 +3740,9 @@ async function examineReading(
       (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))
+    (args[0]?.procs ||
+      stdinPath(args[0]?.value ?? "", here) ||
+      (args[0] && writtenScript(args[0], here)))
   ) {
     const scripts = await scriptOf(args[0], cmd, here)
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
@@ -3757,7 +3759,15 @@ async function examineReading(
       (await nested(cmd, env, () =>
         run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins),
       ))
-  } else verdict = await visit(cmd, parsed, here)
+  } else {
+    verdict = await visit(cmd, parsed, here)
+    // a file the line wrote, run by its own path (`./run.sh`), runs as a script, so its text is walked as a shell's is
+    const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined
+    if (!verdict && own)
+      verdict = await nested(cmd, env, () =>
+        run(lexScript(known(own), env), subshell(here), visit, builtins),
+      )
+  }
   await record(cmd, name, args, here)
   return verdict
 }
@@ -4205,15 +4215,25 @@ async function shell(
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
-// A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+// A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, the text this line wrote to the file it names (writtenScript), else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
   const scripts =
     !operand || stdinPath(operand.value, env)
       ? await scriptStdin(cmd, env)
-      : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
+      : [
+          operand.procs
+            ? await outputs(operand.procs, env)
+            : (writtenScript(operand, env) ?? unknown("a script file")),
+        ]
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE)
   return scripts
+}
+
+// The text a redirect or a tee earlier on the line wrote to the file a word names (`echo … > run.sh; sh run.sh`), so the script a shell, a source or a ./ runs is walked as it was written; undefined for a file the line did not write
+const writtenScript = (word: Word, env: Env): Text | undefined => {
+  const path = pathOf(word, env)
+  return path === undefined ? undefined : env.files.get(path)
 }
 
 // The output of a list of commands run in order, unknown when any part is.

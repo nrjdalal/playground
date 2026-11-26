@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync4, lstatSync as lstatSync2, readdirSync as readdirSync4, readFileSync as readFileSync5, statSync as statSync3 } from "fs";
+import { existsSync as existsSync4, lstatSync as lstatSync2, readdirSync as readdirSync4, readFileSync as readFileSync5, readlinkSync, statSync as statSync3 } from "fs";
 import { homedir as homedir4 } from "os";
 import { dirname as dirname4, isAbsolute as isAbsolute5, join as join7, resolve as resolve5, sep as sep2 } from "path";
 
@@ -9343,7 +9343,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here) || args[0] && writtenScript(args[0], here))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
@@ -9353,8 +9353,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     }
   } else if (name === "eval") {
     verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
-  } else
+  } else {
     verdict = await visit(cmd, parsed, here);
+    const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined;
+    if (!verdict && own)
+      verdict = await nested(cmd, env, () => run(lexScript(known(own), env), subshell(here), visit, builtins));
+  }
   await record2(cmd, name, args, here);
   return verdict;
 }
@@ -9672,11 +9676,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [
+    operand.procs ? await outputs(operand.procs, env) : writtenScript(operand, env) ?? unknown2("a script file")
+  ];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
+var writtenScript = (word, env) => {
+  const path = pathOf(word, env);
+  return path === undefined ? undefined : env.files.get(path);
+};
 async function outputs(cmds, env) {
   return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
@@ -12576,6 +12586,13 @@ function hookFile(path, sure = false) {
     return false;
   if (/(?:^|\/)\.git\/hooks\//i.test(path))
     return true;
+  if (/[*?[]/.test(path) && isAbsolute5(path)) {
+    const matches = hookGlobFiles(path);
+    return matches === undefined ? !sure : matches.some((each) => hookFile(each, sure));
+  }
+  const end = linkEnd(path);
+  if (end && hookFile(end, sure))
+    return true;
   if (resolve5(path).startsWith("/dev/"))
     return false;
   const dir = dirname4(path);
@@ -12583,6 +12600,38 @@ function hookFile(path, sure = false) {
     hookFolders.set(dir, readHookFolder(dir));
   const folder = hookFolders.get(dir);
   return !sure && folder === true || folder === real(dir);
+}
+var LINK_HOPS = 40;
+function linkEnd(path) {
+  let at = resolve5(path);
+  for (let hop = 0;hop <= LINK_HOPS; hop++) {
+    try {
+      if (!lstatSync2(at).isSymbolicLink())
+        return hop > 0 ? at : undefined;
+      at = resolve5(dirname4(at), readlinkSync(at));
+    } catch {
+      return hop > 0 ? at : undefined;
+    }
+  }
+}
+var GLOB_MATCHES = 256;
+function hookGlobFiles(path) {
+  const parts = path.split(sep2);
+  const at = parts.findIndex((part) => /[*?[]/.test(part));
+  const base = parts.slice(0, at).join(sep2) || sep2;
+  const found = [];
+  try {
+    for (const each of new Bun.Glob(parts.slice(at).join(sep2)).scanSync({
+      absolute: true,
+      cwd: base,
+      dot: true,
+      onlyFiles: false
+    })) {
+      if (found.push(each) > GLOB_MATCHES)
+        return;
+    }
+  } catch {}
+  return found;
 }
 function hookSpellings(text) {
   const joined = text.replace(/\\\n/g, "");
@@ -12885,8 +12934,12 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   const inRoot = (path) => {
     if (path === undefined)
       return false;
-    const at = real(path);
-    return at === root || at.startsWith(root + sep2);
+    return [path, linkEnd(path)].some((each) => {
+      if (each === undefined)
+        return false;
+      const at = real(each);
+      return at === root || at.startsWith(root + sep2);
+    });
   };
   const above = (path, remover) => {
     if (path === undefined)

@@ -3132,7 +3132,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here))) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || stdinPath(args[0]?.value ?? "", here) || args[0] && writtenScript(args[0], here))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
     for (const script of verdict ? [] : scripts) {
@@ -3142,8 +3142,12 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     }
   } else if (name === "eval") {
     verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(evalText(args), env), cmd, parsed), here, visit, builtins));
-  } else
+  } else {
     verdict = await visit(cmd, parsed, here);
+    const own = parsed.first?.value.includes("/") ? writtenScript(parsed.first, here) : undefined;
+    if (!verdict && own)
+      verdict = await nested(cmd, env, () => run(lexScript(known(own), env), subshell(here), visit, builtins));
+  }
   await record(cmd, name, args, here);
   return verdict;
 }
@@ -3461,11 +3465,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
+  const scripts = !operand || stdinPath(operand.value, env) ? await scriptStdin(cmd, env) : [
+    operand.procs ? await outputs(operand.procs, env) : writtenScript(operand, env) ?? unknown("a script file")
+  ];
   if (deadlines.getStore() !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
   return scripts;
 }
+var writtenScript = (word, env) => {
+  const path = pathOf(word, env);
+  return path === undefined ? undefined : env.files.get(path);
+};
 async function outputs(cmds, env) {
   return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }

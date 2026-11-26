@@ -1,4 +1,4 @@
-import type { Group, Row } from "./_shared"
+import type { Group, Paths, Row } from "./_shared"
 
 // #3067 part 1: a write target read as the shell expands it: a brace sequence or list, a call word that is an array or zsh's split read, which fails closed, a parameter operator, "$@", "$*", a set's words and an indirection, a case-changed hooks folder, and sort's output file and uniq's second operand, each refused into the git hook while its twin into a log runs; rows are data, as refused-forms.ts says.
 const HOOK = ".git/hooks/pre-commit"
@@ -176,7 +176,107 @@ const controls = (): Row[] =>
 
 const dotGit: Row = ["a cat's output into a .GIT-named log", "cat payload > .GIT.log"]
 
-export const allowed: string[] = [...controls(), dotGit].map(([what]) => what)
+// #3067 part 2: a script the line writes and then runs (a shell, source, . or its own path) is walked as it was written, so its writes into the root or a hook are judged, globs and escapes as piped text is; a glob into a hooks folder counts by the files it matches; a dangling link counts by where its chain lands; rows are data, as refused-forms.ts says
+const SCRIPT = "~/.playground/extensions/login/x"
+const runsRoot = (): Row[] => [
+  [
+    "a script written then run by bash, touching the root",
+    `echo 'touch ${SCRIPT}' > run.sh; bash run.sh`,
+  ],
+  ["a script written then run by sh after &&", `echo 'touch ${SCRIPT}' > run.sh && sh run.sh`],
+  ["a script written then sourced", `echo 'touch ${SCRIPT}' > run.sh; source run.sh`],
+  ["a script written then run by .", `echo 'touch ${SCRIPT}' > run.sh; . ./run.sh`],
+  [
+    "a script written then run by its own path",
+    `echo 'touch ${SCRIPT}' > run.sh; chmod +x run.sh; ./run.sh`,
+  ],
+  ["a script written by tee then run", `echo 'touch ${SCRIPT}' | tee run.sh; sh run.sh`],
+  [
+    "a script naming the root by a glob, then run",
+    "echo 'touch ~/.playground/ext*/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script printf builds from parts, then run",
+    "printf '%s/%s\\n' 'touch ~/.playground' 'extensions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script printf spells with a \\x escape, then run",
+    "printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
+  ],
+  [
+    "a script echo -e spells with a \\x escape, then run",
+    "echo -e 'touch ~/.playground/ext\\x65nsions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script builtin printf builds from parts, then run",
+    "builtin printf '%s%s\\n' 'touch ~/.playground/exten' 'sions/login/x' > run.sh; sh run.sh",
+  ],
+  [
+    "a script command printf spells with a \\x escape, then run",
+    "command printf 'touch ~/.playground/ext\\x65nsions/login/x\\n' > run.sh; sh run.sh",
+  ],
+]
+const runsHook = (): Row[] => [
+  [
+    "a script written then run, writing the git hook",
+    `echo 'cat payload > ${HOOK}' > run.sh; bash run.sh`,
+  ],
+  [
+    "a script printf builds from parts, writing the git hook, then run",
+    "printf '%s/%s\\n' 'cat payload > .git' 'hooks/pre-commit' > run.sh; sh run.sh",
+  ],
+]
+// a clone's hooks folder holding a hook, and a dangling link into the root, that refused-forms.test.ts makes in the scratch home
+const linked = ({ HOME }: Paths): Row[] => [
+  ["a cat's output into a hook by a ? glob", `cat payload > ${HOME}/hooked/.git/hook?/pre-commit`],
+  [
+    "a script written then run, writing a hook by a * glob",
+    `echo 'cat payload > ${HOME}/hooked/.git/hook*/pre-commit' > run.sh; sh run.sh`,
+  ],
+  ["a touch through a dangling link into the root", `touch ${HOME}/dangling`],
+  ["a redirect through a dangling link into the root", `cat payload > ${HOME}/dangling`],
+  ["a cp through a dangling link into the root", `cp payload ${HOME}/dangling`],
+  ["a tee through a dangling link into the root", `cat payload | tee ${HOME}/dangling`],
+]
+// what part 2 leaves running: a script written and not run is data, a plain script runs, a glob that matches no hook, a dangling link to a plain place, and sed's scripts that run nothing
+const runControls = (): Row[] => [
+  ["a script naming the root, written and not run", `echo 'touch ${SCRIPT}' > run.sh`],
+  [
+    "a script naming the root by a glob, written and not run",
+    "echo 'touch ~/.playground/ext*/login/x' > run.sh",
+  ],
+  [
+    "a script printf builds from parts, written and not run",
+    "printf '%s/%s\\n' 'touch ~/.playground' 'extensions/login/x' > run.sh",
+  ],
+  ["a plain script written then run by bash", "echo 'touch out.log' > run.sh; bash run.sh"],
+  [
+    "a plain script written then run by its own path",
+    "echo 'touch out.log' > run.sh; chmod +x run.sh; ./run.sh",
+  ],
+  [
+    "a plain script printf builds from parts, then run",
+    "printf '%s/%s\\n' 'touch out' 'x.log' > run.sh; sh run.sh",
+  ],
+  ["a sed s between slashes", "sed 's/one/two/' notes.md"],
+  ["a sed print of lines matching e", "sed '/e/p' notes.md"],
+  ["a sed s whose replacement is e, with g", "sed 's/x/e/g' notes.md"],
+]
+const worktreeControls = (): Row[] => [
+  ["a cat's output into a log by a ? glob", "cat payload > out?.log"],
+  ["a plain script with a glob, written then run", "echo 'touch out*.log' > run.sh; sh run.sh"],
+]
+const linkControls = ({ HOME }: Paths): Row[] => [
+  ["a touch through a dangling link to a plain place", `touch ${HOME}/dangling-plain`],
+]
+
+export const allowed: string[] = [
+  ...controls(),
+  dotGit,
+  ...runControls(),
+  ...worktreeControls(),
+  ...linkControls({ HOME: "" } as Paths),
+].map(([what]) => what)
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
@@ -190,5 +290,20 @@ export const groups: Group[] = [
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
     rows: () => [...controls(), dotGit],
+  },
+  {
+    folders: ["data folder", "home", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [...runsRoot(), ...runControls()],
+  },
+  {
+    folders: ["process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [...runsHook(), ...worktreeControls()],
+  },
+  {
+    folders: ["data folder", "home"],
+    guards: ["no-extensions-write"],
+    rows: (paths) => [...linked(paths), ...linkControls(paths)],
   },
 ]

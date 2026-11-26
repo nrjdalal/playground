@@ -1,5 +1,5 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 
@@ -2227,11 +2227,52 @@ function outputFiles(tool: "sort" | "uniq", args: Word[]): { files: Word[]; stdi
 function hookFile(path: string | undefined, sure = false): boolean {
   if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//i.test(path)) return true
+  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), and as a file the hook cannot read past GLOB_MATCHES of them
+  if (/[*?[]/.test(path) && isAbsolute(path)) {
+    const matches = hookGlobFiles(path)
+    return matches === undefined ? !sure : matches.some((each) => hookFile(each, sure))
+  }
+  const end = linkEnd(path)
+  if (end && hookFile(end, sure)) return true
   if (resolve(path).startsWith("/dev/")) return false
   const dir = dirname(path)
   if (!hookFolders.has(dir)) hookFolders.set(dir, readHookFolder(dir))
   const folder = hookFolders.get(dir)
   return (!sure && folder === true) || folder === real(dir)
+}
+const LINK_HOPS = 40
+// Where a link whose target does not exist yet lands, by its readlink chain, which realpath cannot follow; undefined for a path that is no link, or a chain past LINK_HOPS
+function linkEnd(path: string): string | undefined {
+  let at = resolve(path)
+  for (let hop = 0; hop <= LINK_HOPS; hop++) {
+    try {
+      if (!lstatSync(at).isSymbolicLink()) return hop > 0 ? at : undefined
+      at = resolve(dirname(at), readlinkSync(at))
+    } catch {
+      return hop > 0 ? at : undefined
+    }
+  }
+}
+const GLOB_MATCHES = 256
+// The files an absolute glob matches, scanned from its last folder with no glob character, dotfiles included; undefined past GLOB_MATCHES entries
+function hookGlobFiles(path: string): string[] | undefined {
+  const parts = path.split(sep)
+  const at = parts.findIndex((part) => /[*?[]/.test(part))
+  const base = parts.slice(0, at).join(sep) || sep
+  const found: string[] = []
+  try {
+    for (const each of new Bun.Glob(parts.slice(at).join(sep)).scanSync({
+      absolute: true,
+      cwd: base,
+      dot: true,
+      onlyFiles: false,
+    })) {
+      if (found.push(each) > GLOB_MATCHES) return undefined
+    }
+  } catch {
+    // a folder it cannot read matches nothing there
+  }
+  return found
 }
 // Each spelling of a text that a hook may run: as typed, with its backslash-newlines joined as the shell joins a word across one, with its escapes read as a sed's or perl's replacement reads them (\U, \L, \E and their kin dropped, \n a newline, any other escaped character itself) and then joined, and each of those in lower case outside its variables, since macOS's filesystem reads a path in any case
 function hookSpellings(text: string): string[] {
@@ -2627,10 +2668,14 @@ async function inspect(
   const root = real(extensionsDir(dataDir(environment)))
   const home = environment.HOME || homedir()
   const needle = root.startsWith(real(home) + sep) ? root.slice(real(home).length) : root
+  // a dangling link counts by where its chain lands too (linkEnd), since a write through it makes the file there
   const inRoot = (path: string | undefined) => {
     if (path === undefined) return false
-    const at = real(path)
-    return at === root || at.startsWith(root + sep)
+    return [path, linkEnd(path)].some((each) => {
+      if (each === undefined) return false
+      const at = real(each)
+      return at === root || at.startsWith(root + sep)
+    })
   }
   // a folder that holds the root, but the filesystem's own root, which only a remover names to harm
   const above = (path: string | undefined, remover: boolean) => {
