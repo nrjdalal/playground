@@ -2627,9 +2627,11 @@ test("13n merge on a Python clone whose .venv points at the clone itself runs py
   expect([...new Set(out.runners)]).toEqual(["pytest"])
 })
 
-test("13o staleVenv reads each .pth's absolute path lines alone: an import line, a relative line, the clone's own folder and no .venv name none (#3124)", () => {
+test("13o staleVenv reads each .pth file's absolute path lines alone: an import line, a relative line, the clone's own folder, a folder named .pth and no .venv name none (#3124)", () => {
   const clone = scratch()
   mkdirSync(join(clone, "src"))
+  expect(state.staleVenv(clone)).toBeUndefined()
+  mkdirSync(join(clone, ".venv/lib/python3.13/site-packages/folder.pth"), { recursive: true })
   expect(state.staleVenv(clone)).toBeUndefined()
   const pth = ".venv/lib/python3.13/site-packages/x.pth"
   writeFiles(clone, { [pth]: `import _virtualenv\nrelative/dir\n\n${join(clone, "src")}\n` })
