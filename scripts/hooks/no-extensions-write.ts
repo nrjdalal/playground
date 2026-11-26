@@ -2073,21 +2073,16 @@ function operate(value: string, op: string, operand: string): string {
   }
   return out + value.slice(at)
 }
-// Each reading of a raw word with its operated reads (OPERATED) worked out on the values the hook holds for each name (valuesOf), a default also read as its operand where the name's value is unread, and `unread` when one may be a value the hook cannot read; undefined when the word holds none, or one the reader cannot work out
+// Each reading of a raw word with its operated reads (OPERATED) worked out on the values the hook holds for each name (valuesOf), a default also read as its operand where the name's value is unread; undefined when the word holds none, or one the reader cannot work out
 function operatedRaws(
   raw: string,
   valuesOf: (name: string) => string[] | undefined,
-): { raws: string[]; unread: boolean } | undefined {
+): string[] | undefined {
   const found = [...raw.matchAll(OPERATED)]
   if (found.length === 0) return undefined
   let raws = [""]
-  let unread = false
   let at = 0
   for (const { 0: whole, 1: name, 2: op, 3: operand, index = 0 } of found) {
-    // a pattern holding what patternOf does not model (zsh's always-on `(a|b)`, a POSIX class, a numeric range, an extended glob) leaves the read unread, as canary read it
-    const pattern = op.startsWith("/") ? operand.split("/")[0] : operand
-    if (!/[-=+]$/.test(op) && /[()|<>^~#@!+]|\[[:=.]/.test(pattern.replace(/\[!/g, "[")))
-      return undefined
     const values = valuesOf(name)
     let gives: string[]
     if (values)
@@ -2098,33 +2093,27 @@ function operatedRaws(
             : v
           : operate(v, op, operand),
       )
-    else if (op.endsWith("-") || op.endsWith("=") || op.endsWith("+")) {
+    else if (op.endsWith("-") || op.endsWith("=") || op.endsWith("+"))
       gives = op.endsWith("+") ? [operand, ""] : [operand]
-      unread ||= !op.endsWith("+")
-    } else return undefined
+    else return undefined
     if (gives.some((g) => /[$`'"\\]/.test(g))) return undefined
     const before = raw.slice(at, index)
     raws = raws.flatMap((r) => gives.map((g) => r + before + g))
     if (raws.length > OPERATED_READINGS) return undefined
     at = index + whole.length
   }
-  return { raws: raws.map((r) => r + raw.slice(at)), unread }
+  return raws.map((r) => r + raw.slice(at))
 }
-// The words an operated raw word gives (operatedRaws), each name's value as the line's steady variables and a call's bound parameters hold it (heldReadings), and `unread` when one may be a value the hook cannot read
-function operatedWords(
-  word: Word,
-  env: Env,
-  steady: Steady,
-): { unread: boolean; words: Word[] } | undefined {
+// The words an operated raw word gives (operatedRaws) that the hook can read, each name's value as the line's steady variables and a call's bound parameters hold it (heldReadings); a caller adds a refusal from them alone, since a reading it cannot make leaves the word unread
+function operatedWords(word: Word, env: Env, steady: Steady): Word[] | undefined {
   const valuesOf = (name: string) => {
     const read = lex(`"\${${name}}"`).commands[0]?.words[0]
     return read ? heldReadings(read, env, steady)?.map((each) => each.value) : undefined
   }
-  const got = operatedRaws(word.raw ?? "", valuesOf)
-  if (!got) return undefined
+  const raws = operatedRaws(word.raw ?? "", valuesOf)
+  if (!raws) return undefined
   const words: Word[] = []
-  let { unread } = got
-  for (const raw of got.raws) {
+  for (const raw of raws) {
     const lexed = lex(raw).commands.at(-1)?.words ?? []
     const held =
       lexed.length !== 1
@@ -2133,9 +2122,8 @@ function operatedWords(
           ? heldReadings(lexed[0], env, steady)
           : lexed
     if (held) words.push(...held)
-    else unread = true
   }
-  return { unread, words }
+  return words
 }
 // Programs that print nothing to their stdout, so a hook file takes no text from them
 const SILENT = new Set([":", "[", "cd", "false", "test", "true"])
@@ -3065,7 +3053,7 @@ async function inspect(
         if (!r.target || !writer(r) || !marked(r.target.value)) continue
         const words =
           heldReadings(r.target, here, steadyAt(cmd)) ??
-          operatedWords(r.target, here, steadyAt(cmd))?.words ??
+          operatedWords(r.target, here, steadyAt(cmd)) ??
           []
         const named = words.map((word) => names(word, here, false)).find(Boolean)
         if (named) return refuse(`a write to ${named}`)
@@ -3100,7 +3088,8 @@ async function inspect(
       if (braced !== undefined)
         return braced === null
           ? !sure
-          : braced.some((value) => hookFile(pathOf({ value }, here), sure))
+          : braced.some((value) => hookFile(pathOf({ value }, here), sure)) ||
+              hookFile(pathOf(word, here), sure)
       if (word.procs || !marked(word.value)) return hookFile(pathOf(word, here), sure)
       const raw = word.raw ?? ""
       const slot = slotOf.get(cmd) ?? cmd
@@ -3117,22 +3106,18 @@ async function inspect(
       const readings = call
         ? positionals(call, here, steadyAt(call.call))
         : [{ args: lineArgs ?? {}, from: Infinity }]
-      // a value holding a bracket expression, which the shell may glob in an unquoted target and hookFile does not match, stays unread
-      const globs = (value: string) => value.includes("[")
+      // a top-level set's words and an operator worked out only add a refusal: one that finds no hook leaves the target unread, as it was before, since the shell may move or glob what they give
+      const top = !call && readsPositional(raw).length > 0
+      const hook = (each: { value: string }) => hookFile(pathOf(each, here), sure)
       return readings.some(({ args, from }) => {
         if (reads.some((n) => n >= from)) return true
-        if (every && Object.values(args).some(globs)) return !sure
-        if (every && Object.values(args).some((value) => hookFile(pathOf({ value }, here), sure)))
-          return true
+        if (every && Object.values(args).some((value) => hook({ value }))) return true
         const known = { ...here, known: { ...here.known, ...args } }
         const held = heldReadings(word, known, steadyAt(cmd))
-        if (held?.some((each) => globs(each.value))) return !sure
-        if (held) return held.some((each) => hookFile(pathOf(each, here), sure))
-        const operated = operatedWords(word, known, steadyAt(cmd))
-        if (operated?.words.some((each) => hookFile(pathOf(each, here), sure))) return true
-        return operated && !operated.unread && !operated.words.some((each) => globs(each.value))
-          ? false
-          : !sure
+        if (held?.some(hook)) return true
+        if (held && !top) return false
+        if (operatedWords(word, known, steadyAt(cmd))?.some(hook)) return true
+        return !sure
       })
     }
     const intoHook = async (targets: Word[], source: Command) => {

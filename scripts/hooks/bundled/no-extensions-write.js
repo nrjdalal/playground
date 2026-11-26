@@ -12439,20 +12439,15 @@ function operatedRaws(raw, valuesOf) {
   if (found.length === 0)
     return;
   let raws = [""];
-  let unread = false;
   let at = 0;
   for (const { 0: whole, 1: name, 2: op, 3: operand, index = 0 } of found) {
-    const pattern = op.startsWith("/") ? operand.split("/")[0] : operand;
-    if (!/[-=+]$/.test(op) && /[()|<>^~#@!+]|\[[:=.]/.test(pattern.replace(/\[!/g, "[")))
-      return;
     const values = valuesOf(name);
     let gives;
     if (values)
       gives = values.map((v) => op.endsWith("-") || op.endsWith("=") ? v === "" && op.startsWith(":") ? operand : v : operate(v, op, operand));
-    else if (op.endsWith("-") || op.endsWith("=") || op.endsWith("+")) {
+    else if (op.endsWith("-") || op.endsWith("=") || op.endsWith("+"))
       gives = op.endsWith("+") ? [operand, ""] : [operand];
-      unread ||= !op.endsWith("+");
-    } else
+    else
       return;
     if (gives.some((g) => /[$`'"\\]/.test(g)))
       return;
@@ -12462,27 +12457,24 @@ function operatedRaws(raw, valuesOf) {
       return;
     at = index + whole.length;
   }
-  return { raws: raws.map((r) => r + raw.slice(at)), unread };
+  return raws.map((r) => r + raw.slice(at));
 }
 function operatedWords(word, env, steady) {
   const valuesOf = (name) => {
     const read = lex(`"\${${name}}"`).commands[0]?.words[0];
     return read ? heldReadings(read, env, steady)?.map((each) => each.value) : undefined;
   };
-  const got = operatedRaws(word.raw ?? "", valuesOf);
-  if (!got)
+  const raws = operatedRaws(word.raw ?? "", valuesOf);
+  if (!raws)
     return;
   const words = [];
-  let { unread } = got;
-  for (const raw of got.raws) {
+  for (const raw of raws) {
     const lexed = lex(raw).commands.at(-1)?.words ?? [];
     const held = lexed.length !== 1 ? undefined : marked(lexed[0].value) ? heldReadings(lexed[0], env, steady) : lexed;
     if (held)
       words.push(...held);
-    else
-      unread = true;
   }
-  return { unread, words };
+  return words;
 }
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 async function printed(cmd, env, kids) {
@@ -13185,7 +13177,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       for (const r of cmd.redirects) {
         if (!r.target || !writer(r) || !marked(r.target.value))
           continue;
-        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? operatedWords(r.target, here, steadyAt(cmd))?.words ?? [];
+        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? operatedWords(r.target, here, steadyAt(cmd)) ?? [];
         const named = words.map((word) => names(word, here, false)).find(Boolean);
         if (named)
           return refuse(`a write to ${named}`);
@@ -13204,7 +13196,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     const hookWord = (word, here, sure = false) => {
       const braced = braceValues(word);
       if (braced !== undefined)
-        return braced === null ? !sure : braced.some((value) => hookFile(pathOf({ value }, here), sure));
+        return braced === null ? !sure : braced.some((value) => hookFile(pathOf({ value }, here), sure)) || hookFile(pathOf(word, here), sure);
       if (word.procs || !marked(word.value))
         return hookFile(pathOf(word, here), sure);
       const raw = word.raw ?? "";
@@ -13215,24 +13207,22 @@ async function inspect(raw, environment, rootNames, unknown = false) {
       const reads = call ? readsPositional(raw) : [];
       const every = /\$(?:\{[@*]\}|[@*])/.test(raw);
       const readings = call ? positionals(call, here, steadyAt(call.call)) : [{ args: lineArgs ?? {}, from: Infinity }];
-      const globs = (value) => value.includes("[");
+      const top = !call && readsPositional(raw).length > 0;
+      const hook = (each) => hookFile(pathOf(each, here), sure);
       return readings.some(({ args, from }) => {
         if (reads.some((n) => n >= from))
           return true;
-        if (every && Object.values(args).some(globs))
-          return !sure;
-        if (every && Object.values(args).some((value) => hookFile(pathOf({ value }, here), sure)))
+        if (every && Object.values(args).some((value) => hook({ value })))
           return true;
         const known = { ...here, known: { ...here.known, ...args } };
         const held = heldReadings(word, known, steadyAt(cmd));
-        if (held?.some((each) => globs(each.value)))
-          return !sure;
-        if (held)
-          return held.some((each) => hookFile(pathOf(each, here), sure));
-        const operated = operatedWords(word, known, steadyAt(cmd));
-        if (operated?.words.some((each) => hookFile(pathOf(each, here), sure)))
+        if (held?.some(hook))
           return true;
-        return operated && !operated.unread && !operated.words.some((each) => globs(each.value)) ? false : !sure;
+        if (held && !top)
+          return false;
+        if (operatedWords(word, known, steadyAt(cmd))?.some(hook))
+          return true;
+        return !sure;
       });
     };
     const intoHook = async (targets, source) => {

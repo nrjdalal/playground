@@ -65,9 +65,39 @@ const held = (): Row[] => [
   ["a function's write into a case-changed .git folder's hook", `${CAT}; f .GIT/hooks/pre-commit`],
 ]
 
-// a remover written through a parameter a line moves past its set, or through a replacement whose pattern the reader does not model, from #3143's round 1
+// a remover written through a parameter a line moves past its set, or through a value the shell may glob or a pattern the reader does not model, from #3143's review: a worked-out reading only adds a refusal
 const ECHO = "echo 'rm -f x' >"
 const moved = (): Row[] => [
+  [
+    "a remover into $1 after zsh's ::= assigns it",
+    `set -- out.log; : \${1::=.git/hooks/pre-commit}; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after zsh's ::= assigns argv[1]",
+    `set -- out.log; : \${argv[1]::=.git/hooks/pre-commit}; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after zparseopts -D drops an option",
+    `set -- -x .git/hooks/pre-commit; zparseopts -D x=flag; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after a read into 1",
+    `set -- out.log; read 1 <<< .git/hooks/pre-commit; ${ECHO} "$1"`,
+  ],
+  [
+    "a remover into $1 after printf -v 1",
+    `set -- out.log; printf -v 1 .git/hooks/pre-commit; ${ECHO} "$1"`,
+  ],
+  ["a remover into a ? glob through $1 after set --", `set -- '.gi?/hooks/pre-commit'; ${ECHO} $1`],
+  ["a remover into a * glob through $1 after set --", `set -- '.gi*/hooks/pre-commit'; ${ECHO} $1`],
+  [
+    "a remover into a ? glob worked out by a cut",
+    `X='.gi?/hooks/pre-commit.bak'; ${ECHO} \${X%.bak}`,
+  ],
+  [
+    "a remover into a * glob worked out by a replacement",
+    `X='.gi*/hooks/pre-commit.bak'; ${ECHO} \${X/.bak/}`,
+  ],
   [
     "a remover into a bracket glob worked out by a cut",
     `X='.gi[t]/hooks/pre-commit.bak'; ${ECHO} \${X%.bak}`,
@@ -136,19 +166,9 @@ const controls = (): Row[] =>
     .filter(([what]) => !unread(what))
     .map(([what, call]): Row => [`${what}, a log`, call])
 
-// a remover's text into a log canary refused, since it held the target unread, and the head works out to the log, the loosening this part makes
-const loosened = (): Row[] => [
-  ["a remover's text into a log through a variable's cut", `X=out.log.bak; ${ECHO} "\${X%.bak}"`],
-  [
-    "a remover's text into a log through a variable's replacement",
-    `X=out.bak; ${ECHO} "\${X/bak/log}"`,
-  ],
-  ["a remover's text into a log through a variable's alternate", `X=1; ${ECHO} "\${X:+out.log}"`],
-  ["a remover's text into a log through $1 after set --", `set -- out.log; ${ECHO} "$1"`],
-]
 const dotGit: Row = ["a cat's output into a .GIT-named log", "cat payload > .GIT.log"]
 
-export const allowed: string[] = [...controls(), ...loosened(), dotGit].map(([what]) => what)
+export const allowed: string[] = [...controls(), dotGit].map(([what]) => what)
 export const groups: Group[] = [
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: held },
   { folders: ["process worktree"], guards: ["no-extensions-write"], rows: closed },
@@ -161,6 +181,6 @@ export const groups: Group[] = [
   {
     folders: ["process worktree"],
     guards: ["no-extensions-write"],
-    rows: () => [...controls(), ...loosened(), dotGit],
+    rows: () => [...controls(), dotGit],
   },
 ]
