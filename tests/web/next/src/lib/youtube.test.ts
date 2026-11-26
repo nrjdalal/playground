@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { DEMO_SONG, parseYouTube } from "../../../../../web/next/src/lib/youtube"
+import { DEMO_SONG, parseYouTube, queueOf } from "../../../../../web/next/src/lib/youtube"
 
 describe("parseYouTube", () => {
   test("reads a song from a watch link, a short link, a short and an embed", () => {
@@ -42,5 +42,36 @@ describe("parseYouTube", () => {
 
   test("the demo song parses", () => {
     expect(parseYouTube(DEMO_SONG.url)).toEqual({ videoId: "dQw4w9WgXcQ" })
+  })
+})
+
+describe("queueOf, what Next plays after a row of the music box", () => {
+  const list = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"]
+
+  test("a Recent song plays first, then the rest of Recent in order, round from the top", () => {
+    expect(queueOf("recent", list, "ccccccccccc", false)).toEqual([
+      "ccccccccccc",
+      "ddddddddddd",
+      "aaaaaaaaaaa",
+      "bbbbbbbbbbb",
+    ])
+  })
+
+  test("a Liked song plays first, then the rest of Liked in order", () => {
+    expect(queueOf("liked", list, "aaaaaaaaaaa", false)).toEqual(list)
+  })
+
+  test("with shuffle on, the song plays first, then the rest of its list dealt at random", () => {
+    for (let pass = 0; pass < 20; pass++) {
+      const queue = queueOf("recent", list, "bbbbbbbbbbb", true)
+      expect(queue?.[0]).toBe("bbbbbbbbbbb")
+      expect(queue?.slice(1).toSorted()).toEqual(["aaaaaaaaaaa", "ccccccccccc", "ddddddddddd"])
+    }
+  })
+
+  test("a search result, or a list of one song, plays on into YouTube's mix", () => {
+    expect(queueOf("search", list, "bbbbbbbbbbb", false)).toBeNull()
+    expect(queueOf("search", list, "bbbbbbbbbbb", true)).toBeNull()
+    expect(queueOf("recent", ["aaaaaaaaaaa"], "aaaaaaaaaaa", false)).toBeNull()
   })
 })

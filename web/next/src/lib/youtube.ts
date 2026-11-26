@@ -43,3 +43,15 @@ export function parseYouTube(text: string): YouTubeLink | null {
 }
 
 export const coverOf = (videoId: string) => `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
+
+export type Shelf = "liked" | "recent" | "search"
+
+// What a row of the music box plays, the row's song first; null plays the song on into YouTube's mix.
+export function queueOf(
+  _shelf: Shelf,
+  _ids: string[],
+  _id: string,
+  _shuffle: boolean,
+): string[] | null {
+  return null
+}
