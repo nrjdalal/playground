@@ -208,10 +208,10 @@ session_name() { local n k; while read -r n k; do [ "$k" != "$1" ] || { echo "$n
 second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = dispatcher ]; }
 # The first dispatcher, a dispatcher (its caller reads KIND) that holds slot 1 or is sessions.names' own and not the second, starts past every gate, by manager and by resume alike, so a restore brings the owner's dispatcher back at once.
 first_dispatcher() { [ "$1" = "$(dispatcher_of 1)" ] || { [ "$(session_kind "$1")" = dispatcher ] && ! second_dispatcher "$1"; }; }
-# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends.
+# A resume's refusal that a later restore clears with no change: a gate holding it over a reading that falls, or focus standing for another session. A gate that cannot read its input or reads a bad setting is a fault, which waiting never ends. Focus's refusal ends in its free-text reason, so both patterns read the line before it.
 restore_waits() {
-  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no'
-  [[ $1 =~ $wait_re ]] && ! [[ $1 =~ $fault_re ]]
+  local wait_re='the [a-z]+ gate holds it:|focus stands for' fault_re='cannot read|PLAYGROUND_LOAD_MULT is|holds no' line=${1%%, its reason \"*}
+  [[ $line =~ $wait_re ]] && ! [[ $line =~ $fault_re ]]
 }
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, in the form it records it, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
