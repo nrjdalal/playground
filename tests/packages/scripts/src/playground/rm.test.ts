@@ -19,7 +19,7 @@ import { basename, dirname, join } from "node:path"
 
 import { CARVE_OUTS, listTrash } from "../../../../../packages/safe-delete/src"
 import { GH_HANGS } from "../../../../../packages/scripts/src/gh-read"
-import { cardOf, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
+import { APPROVALS, type CardItem } from "../../../../../packages/scripts/src/ops-tick/unused-card"
 import {
   clonesOf,
   processesOf,
@@ -78,6 +78,28 @@ test("rm takes a path with --card <id>, the card that approved its removal, and 
     reason: "playground rm",
     worktree: false,
   })
+})
+
+test("rm takes --approve <id> <path> with an optional --peer <machine> and --keep", () => {
+  expect(rmArgs(["--approve", "c1", "/m/x.gguf"])).toEqual({
+    approve: "c1",
+    keep: false,
+    path: "/m/x.gguf",
+  })
+  expect(rmArgs(["--approve", "c1", "/m/x.gguf", "--peer", "spark-b", "--keep"])).toEqual({
+    approve: "c1",
+    keep: true,
+    path: "/m/x.gguf",
+    peer: "spark-b",
+  })
+  for (const words of [
+    ["--approve", "c1"],
+    ["--approve", "c1", "--keep"],
+    ["--approve", "c1", "/m/x.gguf", "--keep", "--keep"],
+    ["--approve", "c1", "/m/x.gguf", "--peer"],
+    ["--approve", "c1", "/m/x.gguf", "--reason", "x"],
+  ])
+    expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
 
 test("rm takes --list or --restore <id> alone", () => {
@@ -161,8 +183,8 @@ const machine = () => {
   return { deps, home, main, root, told }
 }
 
-// A mkdtemp machine for a card: a main whose ask prints one approved card to stdout, a data folder with the ops manager's roster and the saved card, and the card id with its one pick.
-const cardMachine = () => {
+// A mkdtemp machine for a list: a data folder with the ops manager's roster, the saved list holding one image, and the approvals file; the list id with its one item.
+const listMachine = (session = "ops") => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "rm-card-")))
   dirs.push(root)
   const home = join(root, "home")
@@ -187,48 +209,82 @@ const cardMachine = () => {
     join(data, "ops", "tick", "nightly-clean.json"),
     JSON.stringify({ card: { at: "2026-11-18T00:00:00.000Z", id: cardId, items: [item] } }),
   )
-  const card = {
-    answer: { at: "2026-11-18T01:00:00.000Z", choice: "approve", options: [0] },
-    from: "ops",
-    kind: "decision",
-    preview: cardOf([item]).preview,
-    status: "approved",
-    updatedAt: "2026-11-18T00:00:00.000Z",
+  const told: string[] = []
+  const deps: RmDeps = {
+    clones: () => [],
+    data,
+    defaultBranch: () => null,
+    home,
+    liveBranch: () => "live/dashboard",
+    machine: "here",
+    main,
+    merged: () => false,
+    mergedHead: () => null,
+    notify: (text) => void told.push(text),
+    places: () => [],
+    prState: async () => null,
+    procs: () => [],
+    session: async () => session,
   }
-  writeFileSync(join(main, "card.json"), `${JSON.stringify(card)}\n`)
-  writeFileSync(
-    join(main, "ask.sh"),
-    `#!/bin/sh\nif [ "$1" = "get" ] && [ "$#" -eq 2 ]; then cat card.json; printf '%s\\n' 'ask: picked A: Remove' >&2; exit 0; fi\nexit 1\n`,
-  )
-  writeFileSync(
-    join(main, "package.json"),
-    JSON.stringify({ name: "fake", private: true, scripts: { ask: "sh ask.sh" } }),
-  )
+  const approvals = () =>
+    readFileSync(join(data, "ops", "tick", APPROVALS), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+  return { cardId, data, deps, item, main, pick, approvals }
+}
+
+test("rm --approve writes one approval line naming who approved, at the list's size, and rm --card then reads it from the approvals file", async () => {
+  const { approvals, cardId, data, deps, item, main, pick } = listMachine()
+  const { code, out } = await rmTold(["--approve", cardId, pick.path], deps)
+  expect(code).toBe(0)
+  expect(out.join("\n")).toContain(`on list ${cardId}, as ops`)
+  const [line] = approvals()
+  expect(line).toMatchObject({ ...pick, by: "ops", choice: "remove", list: cardId })
+  expect(Date.parse(line.at)).toBeGreaterThan(Date.parse("2026-11-18T00:00:00.000Z"))
   const repo0 = process.env.PLAYGROUND_REPO
   const data0 = process.env.PLAYGROUND_DATA_DIR
   process.env.PLAYGROUND_REPO = main
   process.env.PLAYGROUND_DATA_DIR = data
-  return {
-    cardId,
-    deps: rmDeps(main),
-    pick,
-    restore: () => {
-      if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
-      else process.env.PLAYGROUND_REPO = repo0
-      if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
-      else process.env.PLAYGROUND_DATA_DIR = data0
-    },
-  }
-}
-
-test("rm --card reads ask's card from its stdout alone, so a picked line on stderr no longer breaks it", async () => {
-  const { cardId, deps, pick, restore } = cardMachine()
   try {
-    const picks = await deps.approvals!(cardId)
-    expect(picks).toEqual([pick])
+    expect(await rmDeps(main).approvals!(cardId)).toEqual([item])
   } finally {
-    restore()
+    if (repo0 === undefined) delete process.env.PLAYGROUND_REPO
+    else process.env.PLAYGROUND_REPO = repo0
+    if (data0 === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = data0
   }
+  expect(await rmTold(["--approve", cardId, pick.path, "--keep"], deps)).toMatchObject({ code: 0 })
+  expect(approvals().map((a) => a.choice)).toEqual(["remove", "keep"])
+})
+
+test.each<[string, string, string[], string]>([
+  ["a worker", "j6rjgy-worker", [], "--approve is for ops, "],
+  [
+    "another list's id",
+    "ops",
+    ["66666666-7777-8888-9999-000000000000"],
+    "is not the list nightly-clean saved",
+  ],
+  [
+    "a path the list does not name",
+    "ops",
+    ["", "docker image other:1"],
+    "names no docker image other:1 on here",
+  ],
+  [
+    "the item on another machine",
+    "ops",
+    ["", "", "--peer", "spark-b"],
+    "names no docker image img:1 on spark-b",
+  ],
+])("rm --approve refuses %s and writes no line", async (_, session, words, said) => {
+  const { cardId, data, deps, pick } = listMachine(session)
+  const [id = "", path = "", ...rest] = words
+  const { code, err } = await rmTold(["--approve", id || cardId, path || pick.path, ...rest], deps)
+  expect(code).toBe(1)
+  expect(err.join("\n")).toContain(said)
+  expect(existsSync(join(data, "ops", "tick", APPROVALS))).toBe(false)
 })
 
 test("runRm moves a path, lists it and restores it, telling no one", async () => {
@@ -2173,11 +2229,11 @@ test("rmDeps' gh reads make no gh call while the gh-auth beat's fresh result rea
 
 const CARD = "11111111-2222-3333-4444-555555555555"
 
-test("runRm --card takes only an Inbox card id, so no flag reaches ask get", async () => {
+test("runRm --card takes only a nightly-clean card id, so no flag reads as one", async () => {
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
   const { code, err } = await rmTold([repo, "--card", "--ack"], deps)
   expect(code).toBe(2)
-  expect(err.join("\n")).toContain("--ack is not an Inbox card id")
+  expect(err.join("\n")).toContain("--ack is not a nightly-clean card id")
   expect(existsSync(repo)).toBe(true)
 })
 
@@ -2204,7 +2260,7 @@ const approvedMachine = (picks: Picks | null) => {
   return { ...m, deps, repo }
 }
 
-test("runRm --card deletes weights the owner approved on this machine at their size, and drops their record entry", async () => {
+test("runRm --card deletes weights approved on this machine at their size, and drops their record entry", async () => {
   const { deps, repo } = approvedMachine((path) => [{ bytes: 7, machine: "spark-a", path }])
   const { code, out } = await rmTold([repo, "--card", CARD, "--reason", "nightly-clean"], deps)
   expect(code).toBe(0)
@@ -2217,11 +2273,11 @@ test("runRm --card deletes weights the owner approved on this machine at their s
 })
 
 test.each<[string, Picks | null, string]>([
-  ["no Remove answer on the card", () => [], "holds no Remove answer from the owner"],
+  ["no approved Remove on the list", () => [], "holds no approved Remove"],
   [
     "a Remove for another machine",
     (path) => [{ bytes: 7, machine: "spark-b", path }],
-    "holds no Remove answer",
+    "holds no approved Remove",
   ],
   [
     "a size other than the card's",
@@ -2229,7 +2285,7 @@ test.each<[string, Picks | null, string]>([
     "its size changed",
   ],
   ["a card that does not read", () => "ERR_POSTGRES_CONNECTION_REFUSED", "did not read"],
-  ["no Inbox here", null, "no Inbox is read here"],
+  ["no approvals read here", null, "no approvals are read here"],
 ])("runRm --card refuses with %s, and the path stays", async (_, picks, said) => {
   const { deps, repo } = approvedMachine(picks)
   const { code, err } = await rmTold([repo, "--card", CARD], deps)
@@ -2449,7 +2505,7 @@ test("runRm --peer refuses a pick the card does not name on that peer, and sends
     peer,
   })
   expect(code).toBe(1)
-  expect(err.join("\n")).toContain("holds no Remove answer")
+  expect(err.join("\n")).toContain("holds no approved Remove")
   expect(seen).toEqual([])
   expect(existsSync(repo)).toBe(true)
 })

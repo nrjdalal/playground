@@ -18,6 +18,7 @@ import {
   RiAppsLine,
   RiArchive2Line,
   RiArrowDownSLine,
+  RiArrowGoBackLine,
   RiArrowUpLine,
   RiChat3Line,
   RiCheckDoubleLine,
@@ -135,7 +136,7 @@ import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
-import { cardDraftKey, draftSaver, readDrafts, saveDraft } from "@/lib/drafts"
+import { cardDraftKey, cardKept, draftSaver, posterEdit, readDrafts, saveDraft } from "@/lib/drafts"
 import {
   answerItem,
   canDraft,
@@ -1117,21 +1118,31 @@ export function InboxCard({
   const keeps = item.kind === "draft" && schedulable(item)
   const keptKey = cardDraftKey(item.id)
   const [kept] = useState(() => (keeps ? readDrafts()[keptKey] : undefined))
-  const [draft, setDraft] = useState(kept?.text ?? posted)
+  // kept words typed over an earlier text of the poster's give way to his newer one, as a live edit does below (PG-3176)
+  const [start] = useState(() =>
+    kept?.base !== undefined && kept.base !== posted
+      ? posterEdit(kept.text, kept.base, posted)
+      : { draft: kept?.text ?? posted, waiting: null },
+  )
+  const [draft, setDraft] = useState(start.draft)
+  // his words a poster's edit replaced, one click from coming back until the next edit or the card closes
+  const [restorable, setRestorable] = useState(start.waiting)
   const [saveKept] = useState(() => draftSaver(keptKey, kept))
-  const editDraft = (text: string) => {
-    setDraft(text)
-    saveKept({ attachments: [], text: text === posted ? "" : text })
-  }
+  // his words are kept with the poster's text they were typed over, waiting ones included, so a remount shows the poster's newer text and gives back Restore my edit
+  useEffect(() => {
+    if (keeps) saveKept(cardKept(draft, posted, restorable))
+  }, [draft, keeps, posted, restorable, saveKept])
   // once it is answered, settled or archived, its kept words go
   useEffect(() => {
     if (item.kind === "draft" && !keeps) saveDraft(keptKey, { attachments: [], text: "" })
   }, [item.kind, keeps, keptKey])
-  // the poster's bun run ask edit replaces the words in place, unless he has changed them
+  // the poster's bun run ask edit always replaces the words in place, his own kept to restore (PG-3176)
   const [synced, setSynced] = useState(posted)
   if (posted !== synced) {
     setSynced(posted)
-    if (draft === synced) setDraft(posted)
+    const next = posterEdit(draft, synced, posted)
+    setDraft(next.draft)
+    setRestorable(next.waiting)
   }
   // a multi-question ask's picks, one option index per question, and the question in sight, held below as the single pick is so the card steps through them before its Submit sends them all at once
   const questions = item.kind === "decision" ? questionsOf(item.preview) : []
@@ -1351,12 +1362,30 @@ export function InboxCard({
         {!answers ? (
           <p className="whitespace-pre-wrap">{draft}</p>
         ) : (
-          <Textarea
-            aria-label={`Message to ${item.preview.to}`}
-            className={BOX}
-            value={draft}
-            onChange={(event) => editDraft(event.target.value)}
-          />
+          <>
+            <Textarea
+              aria-label={`Message to ${item.preview.to}`}
+              className={BOX}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            {restorable && (
+              <Hint content="Its poster changed the message: put back the words you typed">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="text-muted-foreground self-start"
+                  onClick={() => {
+                    setDraft(restorable.text)
+                    setRestorable(null)
+                  }}
+                >
+                  <RiArrowGoBackLine data-icon="inline-start" />
+                  Restore my edit
+                </Button>
+              </Hint>
+            )}
+          </>
         )}
       </div>
       {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
