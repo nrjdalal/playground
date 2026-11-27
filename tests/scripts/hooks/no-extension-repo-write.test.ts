@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { utimesSync } from "node:fs"
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -883,6 +884,28 @@ describe("the repositories it guards", () => {
     expect(
       await run(bash("git push https://github.com/quillco/playground-acme main")),
     ).toBeUndefined()
+  })
+
+  test("a clone whose origin moves is guarded under its new name in the same process, and the old one passes", async () => {
+    const moved = await store("moved", {}, "quillco")
+    const clone = join(moved, "extensions", "notes")
+    git(clone, "remote", "add", "origin", "https://github.com/quillco/notes-first.git")
+    await refused(bash("git push https://github.com/quillco/notes-first main"), moved)
+    git(clone, "remote", "set-url", "origin", "https://github.com/quillco/notes-second.git")
+    const config = join(clone, ".git", "config")
+    utimesSync(config, new Date(), new Date(Date.now() + 1000))
+    await refused(bash("git push https://github.com/quillco/notes-second main"), moved)
+    expect(
+      await run(bash("git push https://github.com/quillco/notes-first main"), moved),
+    ).toBeUndefined()
+  })
+
+  test("a live call, a process of its own, reads the clone's git config", () => {
+    const hook = join(import.meta.dir, "../../../scripts/hooks/no-extension-repo-write.ts")
+    const raw = bash(`git push ${EXT}-renamed main`)
+    const script = `const { check } = await import(${JSON.stringify(hook)}); console.log((await check(${JSON.stringify(raw)}, ${JSON.stringify(env(stored))})) ? "refused" : "ran")`
+    const proc = Bun.spawnSync(["bun", "-e", script], { stderr: "pipe", stdout: "pipe" })
+    expect(proc.stdout.toString().trim()).toBe("refused")
   })
 
   test("with no extensions root every call passes", async () => {
