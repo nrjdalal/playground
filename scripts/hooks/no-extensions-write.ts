@@ -450,6 +450,8 @@ function reads(parsed: Parsed, env: Env): boolean {
   const { args, local, name } = parsed
   if ([...local.keys()].some((key) => RUNS.test(key)) || runsVariable(env.vars)) return false
   if (READERS.has(name) || PRINTERS.has(name)) return true
+  // a for loop's head runs no program, and its literal words are the values its body's reads of the variable take (heldReadings), each judged where the body writes or removes through it
+  if (name === "for") return forHead(args)
   if (name === "rg") return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value))
   if (name === "find") return !args.some((a) => FIND_ACTS.test(a.value))
   if (name !== "git") return false
@@ -462,6 +464,16 @@ function reads(parsed: Parsed, env: Env): boolean {
     !rest.some((w) => /^(?:--out|-O|--op|--ext(?:-|$)|--textc)/.test(w))
   )
 }
+
+// Whether a for loop's head lists literal words alone after its variable and `in`: no expansion, glob or brace, which a write through the variable could not be judged under
+const forHead = ([key, word, ...values]: Word[]) =>
+  !!key &&
+  !key.quoted &&
+  /^[A-Za-z_]\w*$/.test(key.value) &&
+  word?.value === "in" &&
+  !word.quoted &&
+  values.length > 0 &&
+  values.every((w) => !marked(w.value) && !/[*?[\]{}]/.test(w.value))
 
 // gh's calls that only read, a closed list, whose -q or --jq filter and -t or --template template are text that no shell runs
 const GH_READS = new Set([
@@ -3477,6 +3489,8 @@ async function inspect(
         `${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
     const steady = steadyAt(cmd)
+    // the steady values and a for loop's literal words, but no bare export, which only a redirect holds
+    const looped: Steady = { ...steady, exported: undefined }
     // a read-only gh call's jq filter is text, never a path, and on a line read whole so is each word wholeText keeps as text
     const filters = whole ? shownText : ghFilters(parsed)
     // each folder the shell may be in, so a program a cd the reader cannot be sure of would run inside the root, or a path of its own that lands there, is judged in every one
@@ -3484,9 +3498,9 @@ async function inspect(
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it
+      // a value the hook cannot read under a remover, as a writer's target, as a file an in-place sed or perl edit edits, or in git's -c, could name the root, so it is refused unless the call holds it, a for loop's literal words each in turn (heldReadings)
       const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find(
-        (word) => !held(word, here, steady),
+        (word) => !held(word, here, steady) && !heldReadings(word, here, looped),
       )
       if (unheld)
         return refuse(
@@ -3566,7 +3580,10 @@ async function inspect(
           !!sedScripts?.has(word) ||
           (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
-        const named = names(word, here, remover, literal)
+        // a word through a for loop's variable is judged under each value the loop gives it
+        const named = (marked(word.value) ? (heldReadings(word, here, looped) ?? [word]) : [word])
+          .map((each) => names(each, here, remover, literal))
+          .find(Boolean)
         if (named)
           return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`)
       }

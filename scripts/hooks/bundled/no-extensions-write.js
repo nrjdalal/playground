@@ -11093,6 +11093,8 @@ function reads(parsed, env) {
     return false;
   if (READERS.has(name) || PRINTERS.has(name))
     return true;
+  if (name === "for")
+    return forHead(args);
   if (name === "rg")
     return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value));
   if (name === "find")
@@ -11103,6 +11105,7 @@ function reads(parsed, env) {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
   return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--out|-O|--op|--ext(?:-|$)|--textc)/.test(w));
 }
+var forHead = ([key, word, ...values]) => !!key && !key.quoted && /^[A-Za-z_]\w*$/.test(key.value) && word?.value === "in" && !word.quoted && values.length > 0 && values.every((w) => !marked(w.value) && !/[*?[\]{}]/.test(w.value));
 var GH_READS = new Set([
   "api",
   "issue list",
@@ -13467,13 +13470,14 @@ async function inspect(raw, environment, rootNames, unknown = false) {
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
+    const looped = { ...steady, exported: undefined };
     const filters = whole ? shownText : ghFilters(parsed);
     for (const here of places(env)) {
       if (inRoot(here.cwd))
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writes(args) : inPlace(tool, args)).find((word) => !held3(word, here, steady) && !heldReadings(word, here, looped));
       if (unheld)
         return refuse(unheld.splits ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -13520,7 +13524,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
         const text = quiet && /\s/.test(word.value) || !!sedScripts?.has(word) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
-        const named = names(word, here, remover, literal);
+        const named = (marked(word.value) ? heldReadings(word, here, looped) ?? [word] : [word]).map((each) => names(each, here, remover, literal)).find(Boolean);
         if (named)
           return (unwritten(named, cmd, here) ? unwrittenRefusal : refuse)(`${verb} on ${named}`);
       }

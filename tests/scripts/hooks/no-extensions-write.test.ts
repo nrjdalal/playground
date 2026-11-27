@@ -3075,7 +3075,11 @@ describe("a job's setting is the owner's alone (PG-1196)", () => {
 describe("a refusal for a value the hook does not hold names it in readable text", () => {
   test.each([
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
-    ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
+    [
+      "a loop variable over a list that expands",
+      'for d in $(ls); do rm -f "$d/x"; done',
+      'rm on "$d/x",',
+    ],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
     [
       "a held variable after a command named by a variable from the environment",
@@ -4265,5 +4269,53 @@ describe("a write target is read as the shell expands it", () => {
     "uniq -s 2 payload out.log",
   ])("%s runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+})
+
+// PG-3186: a for loop's literal words give its variable each value in turn, so a writer's target through it is judged under each, as a redirect's is, and a loop head names no path it writes
+describe("a for loop's literal words are read as the values its variable takes", () => {
+  const A = join(WORK, "a")
+  const B = join(WORK, "b")
+  test.each([
+    ["a cp into two worktrees' .env", `for d in ${A} ${B}; do cp /dev/null "$d/.env"; done`],
+    ["a tee into two worktrees' .env", `for d in ${A} ${B}; do echo x | tee "$d/.env"; done`],
+    ["a redirect into two worktrees' .env", `for d in ${A} ${B}; do echo x > "$d/.env"; done`],
+    [
+      "a read-only loop over the data folder",
+      `for d in ${A} ${DATA}; do ls -a "$d" | grep env; done`,
+    ],
+    ["a read-only loop over the root", `for d in ${DATA} ${ROOT}; do ls -a "$d" | grep -c x; done`],
+  ])("%s runs", async (_, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a cp with the root among its words",
+      `for d in ${A} ${ROOT}; do cp /dev/null "$d/.env"; done`,
+    ],
+    [
+      "a tee with the root among its words",
+      `for d in ${A} ${ROOT}; do echo x | tee "$d/.env"; done`,
+    ],
+    [
+      "a redirect with the root among its words",
+      `for d in ${A} ${ROOT}; do echo x > "$d/.env"; done`,
+    ],
+    ["a remover with the root among its words", `for d in ${A} ${ROOT}; do rm -f "$d/.env"; done`],
+    [
+      "a remover with the data folder among its words",
+      `for d in ${A} ${DATA}; do rm -f "$d"; done`,
+    ],
+    ["a cp over a substitution", `for d in $(printf %s ${A}); do cp /dev/null "$d/.env"; done`],
+    ["a cp through a bare export", `export X=${ROOT}; cp /dev/null "$X/.env"`],
+    ["a cp through a bare export of a worktree", `export X=${A}; cp /dev/null "$X/.env"`],
+    ["a cp over a glob", `for d in ${WORK}/*; do cp /dev/null "$d/.env"; done`],
+    [
+      "a cp whose variable the line sets again",
+      `for d in ${A}; do d=${ROOT}; cp /dev/null "$d/.env"; done`,
+    ],
+  ])("%s is refused", async (_, command) => {
+    expect(await bash(command)).toContain("no-extensions-write hook refuses")
   })
 })
