@@ -146,7 +146,7 @@
   a look at the Inbox marks it seen with the rest, since the list shows it, while Needs you and a session row's waiting light, which read the list's items, still show it;
   an `alert` update stays loud, a failed ship's among them.
   Once focus ends, by `playground focus off` or at its end, ops-tick's focus card beat posts one update naming the runs that queued while it stood and their wait, and each held item counts again;
-  the beat resolves that card once `bun run ask open --since <focus start> --until <focus end>` lists no ask, since everything it pointed at is answered.
+  the beat resolves that card once `bun run ask open --awake --since <focus start> --until <focus end>` lists no ask, since everything it pointed at is answered or put away with Archive or Later.
   An update is an outcome, bold with a dot until a click on its title, its tick, its Done or its Dismiss marks it read; Done and Dismiss also move it to Done, and Mark all as read on the open row marks every update read.
   An update whose `approve` holds a web link, a Yard post Yard holds for the owner (`pendingCard` in `api/hono/src/lib/yard/inbound.ts`), shows Approve first, a link button that opens that page in a new tab, since only the owner's signed-in browser approves on Yard; the card records no answer of its own.
   A bot's message in its DM with the owner makes no card: it reaches the dispatcher as one line through notify.sh's relay (stack.md's Yard poll), since the owner reads the DM in the sidebar.
