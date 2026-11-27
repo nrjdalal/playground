@@ -1,6 +1,6 @@
 // PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session resumed without its settings, the project settings, acting only for a factory session (role.ts): refuses a write that changes an extension repository's git data or name (a git push, a gh or gh api write, a curl, a GitHub MCP write), since the sync pushes each scope's clone to that repository and renders it into every session's store; issue and pull request conversation there passes, as does a git push of branches other than the default, which ext:merge then lands.
 import "../../packages/env/src/aliases"
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { join } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
@@ -24,6 +24,19 @@ const decoded = (text: string) =>
     String.fromCharCode(Number.parseInt(hex, 16)),
   )
 
+// Each clone config's origin URL, read once per process and again when the file changes: a live call is a process of its own and reads it, while the hooks differential judges thousands of calls in one (issue 3165)
+const origins = new Map<string, { mtime: number; url: string }>()
+export function originUrl(config: string): string {
+  const mtime = existsSync(config) ? statSync(config).mtimeMs : -1
+  const known = origins.get(config)
+  if (known?.mtime === mtime) return known.url
+  const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
+    stderr: "ignore",
+  }).stdout.toString()
+  origins.set(config, { mtime, url })
+  return url
+}
+
 // The repositories the sync pushes to, lowercase: each ext.repos value, and <login>/playground-<scope> for each scope clone it does not name, under the environment's login and the login file's.
 export function guardedRepos(
   data: string,
@@ -39,11 +52,7 @@ export function guardedRepos(
   const scopes = scopesIn(data)
   // A clone's origin, which follows a rename or transfer, since the sync pushes to the URL gh resolves.
   for (const scope of scopes) {
-    const config = join(extensionsDir(data), scope, ".git", "config")
-    const url = Bun.spawnSync(["git", "config", "--file", config, "--get", "remote.origin.url"], {
-      stderr: "ignore",
-    })
-    const repo = remoteRepo(url.stdout.toString())
+    const repo = remoteRepo(originUrl(join(extensionsDir(data), scope, ".git", "config")))
     if (repo) repos.add(`${repo.owner}/${repo.repo}`.toLowerCase())
   }
   const unnamed = scopes.filter((scope) => !named.has(scope))
