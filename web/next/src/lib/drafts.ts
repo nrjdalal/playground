@@ -31,7 +31,7 @@ export function parseDrafts(raw: string | null): Drafts {
   const drafts: Drafts = {}
   for (const [to, entry] of Object.entries(value)) {
     if (!entry || typeof entry !== "object") continue
-    const { attachments, text } = entry as Record<string, unknown>
+    const { attachments, base, text } = entry as Record<string, unknown>
     const files = (Array.isArray(attachments) ? attachments : []).flatMap((file) => {
       const { id, kind, name, size } = (file ?? {}) as Record<string, unknown>
       if (typeof id !== "string" || !isAttachmentId(id)) return []
@@ -46,7 +46,11 @@ export function parseDrafts(raw: string | null): Drafts {
       }
       return [ref]
     })
-    const draft = { attachments: files, text: typeof text === "string" ? text : "" }
+    const draft: Draft = {
+      attachments: files,
+      ...(typeof base === "string" && { base }),
+      text: typeof text === "string" ? text : "",
+    }
     if (!isEmpty(draft)) drafts[to] = draft
   }
   return drafts
@@ -158,9 +162,12 @@ export function takeHanded<Handed extends { ref?: number; text: string; to: stri
       : handed.text
 }
 
-// Pure: a draft card's box once its poster's words change from base to posted. Stub for the red-first commit (PG-3176).
+// Pure: a draft card's box once its poster's words change from base to posted: the poster's words always, and the owner's own, typed over base, kept to restore (PG-3176).
 export const posterEdit = (
   owner: string,
-  _base: string,
-  _posted: string,
-): { draft: string; replaced: string | null } => ({ draft: owner, replaced: null })
+  base: string,
+  posted: string,
+): { draft: string; replaced: string | null } => ({
+  draft: posted,
+  replaced: owner !== base && owner !== posted ? owner : null,
+})
