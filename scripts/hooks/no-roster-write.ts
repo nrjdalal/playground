@@ -131,12 +131,16 @@ const PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g
 // cp, mv or install as a shell word: a quoted list item, or a string (a quote, a backtick, perl's qx or ruby's %x) it opens with two operands, or one and a string joined on with +, % or the dot.
 const SHELL_WORDS =
   /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i
-// A call that runs a command: a system, exec, spawn, popen, subprocess, check_output, check_call, call or run call, Open3, qx, %x, Bun's $`, or a backtick that opens a cp, mv or install.
+// A call that runs a command: a system, exec, spawn, popen, check_output, check_call, call, run or capture call (a name followed by its parenthesis, so a variable or function named run, call or exec is no run), a system or exec before a quoted string, Open3, qx, %x, or Bun's $`.
 const RUNS =
-  /\b(?:system|exec\w*|spawn\w*|popen\w*|subprocess|check_output|check_call|call|run|Open3|qx)\b|%x|\$`|`(?:cp|mv|install)\s/i
-const writesCode = (code: string) => {
+  /\b(?:system|exec\w*|spawn\w*|popen\w*|check_output|check_call|call|run|capture\w*)\s*\(|\b(?:system|exec)\s+["']|\bOpen3\b|\bqx\s*[{(\[<|/!]|%x[{(\[<|!]|\$`/i
+// A backtick that opens a cp, mv or install runs it in perl, php and ruby, where it is a command, and nowhere else, where it is a template string.
+const BACKTICK_RUNNERS = new Set(["perl", "php", "ruby"])
+const BACKTICK_RUN = /`(?:cp|mv|install)\s/i
+const writesCode = (code: string, tool: string) => {
   const cut = code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1))
-  return WRITE_WORDS.test(cut) || (RUNS.test(cut) && SHELL_WORDS.test(cut))
+  const runs = RUNS.test(cut) || (BACKTICK_RUNNERS.has(tool) && BACKTICK_RUN.test(cut))
+  return WRITE_WORDS.test(cut) || (runs && SHELL_WORDS.test(cut))
 }
 
 // The live roster, as typed and as the data folder's links resolve, each in lower case, since macOS opens a path in any case.
@@ -560,7 +564,7 @@ async function judgeBash(command: string, cwd: string | undefined, environment: 
             namesApart(a.value, targets) ||
             intoRoster.has(a) ||
             (namesBare(a.value) && inOwnFolder(at))) &&
-          writesCode(a.value),
+          writesCode(a.value, tool),
       )
     )
       return refuse(`${tool} code that names the roster and holds a write word`)

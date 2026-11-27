@@ -185,7 +185,7 @@ export const groups: Group[] = [
       ],
       [
         "node code running cp onto the roster through a template string",
-        "node -e \"const p = process.env.HOME + '/.playground/roster.json'; require('child_process').execSync(`cp /tmp/x ${p}`)\"",
+        'node -e \'const p = process.env.HOME + "/.playground/roster.json"; require("child_process").execSync(`cp /tmp/x ${p}`)\'',
       ],
       [
         "python3 code running mv onto the roster through a shell=True command string",
@@ -236,10 +236,25 @@ export const groups: Group[] = [
         `ruby -e "%x(cp /tmp/x $HOME/.playground/roster.json)"`,
       ],
       [
+        "php code running cp onto the roster through a backtick",
+        `php -r '$h = getenv("HOME"); \`cp /tmp/x $h/.playground/roster.json\`;'`,
+      ],
+      [
+        "perl code running cp onto the roster through exec with a command string",
+        `perl -e "exec 'cp /tmp/x $HOME/.playground/roster.json'"`,
+      ],
+      [
+        "ruby code running cp onto the roster through system with a command string",
+        `ruby -e "system 'cp /tmp/x $HOME/.playground/roster.json'"`,
+      ],
+      [
         "chmod -R on the data folder printed by a substitution",
         'chmod -R 000 "$(echo ~/.playground)"',
       ],
-      ["rm -rf on the data folder printed by a substitution", 'rm -rf "$(echo ~/.playground)"'],
+      [
+        "rm -rf on a folder under the data folder printed by a substitution",
+        'rm -rf "$(echo ~/.playground)/extensions/.no-such-folder"',
+      ],
     ],
   },
 ]

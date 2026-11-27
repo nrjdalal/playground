@@ -310,6 +310,12 @@ describe("roster.ts and every read run", () => {
     `python3 -c "import json; r = json.load(open('${ROSTER}')); print([x for x in r if 'mv x y' in str(x)])"`,
     `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log('install deps ' + r.length)"`,
     `bun -e "const r = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log(['cp', 'a'].join(' '), r.length)"`,
+    `node -e 'const fs = require("fs"); console.log(fs.readFileSync("${ROSTER}", "utf8").length); console.log(\`install the roster now\`)'`,
+    `bun -e 'const r = require("fs").readFileSync("${ROSTER}", "utf8"); console.log(\`cp done for \${r.length}\`)'`,
+    `bun -e 'const r = require("fs").readFileSync("${ROSTER}", "utf8"); console.log(\`mv the rows \${r.length}\`)'`,
+    `python3 -c "import json; run = json.load(open('${ROSTER}')); print('cp a b', len(run))"`,
+    `bun -e "const call = require('fs').readFileSync('${ROSTER}', 'utf8'); console.log('mv x y', call.length)"`,
+    `python3 -c "import json; exec_rows = json.load(open('${ROSTER}')); print('install a b', len(exec_rows))"`,
     // 3134.ts's twin: an ANSI-C item naming another file of the data folder
     "xargs -I{} sh -c 'echo x >> {}' <<< '$'\"'\"'\\x7e/.playground/notes.json'\"'\"''",
   ])("%s", async (command) => {

@@ -19876,10 +19876,13 @@ var CODE_RUNNERS = new Set([
 var WRITE_WORDS = /write|open\s*\((?:[^()]|\([^()]*\))*,\s*["'][^"']*[wa]|rename|unlink|\brm|(?:remove|delete|move)\s*\(|truncate|appendFile|os\.replace\s*\(|\.replace\s*\((?:[^,()=]|\([^()]*\))*\)|\b[fl]?ch(?:mod|own|flags)|(?:\bcopy\w*|\bcp(?:Sync)?|\bmv|\binstall)\s*\((?:[^,()]|\([^()]*\))*,(?:[^,)]*roster\.json|\s*(?![\s"'`]))|(?<![=-])>(?!=)/i;
 var PATHS = /(?:\/[^\s"'`/()<>|&;=,]*)+/g;
 var SHELL_WORDS = /(?<![\w.$-])(?:cp|mv|install)["']\s*,|(?:["'`]|\bqx\s*[{(\[<|/!]|%x[{(\[<|!])(?:cp|mv|install)\s+[^\s"'`)]+\s+(?:[^\s"'`)]|["'`]\s*[+%.])/i;
-var RUNS3 = /\b(?:system|exec\w*|spawn\w*|popen\w*|subprocess|check_output|check_call|call|run|Open3|qx)\b|%x|\$`|`(?:cp|mv|install)\s/i;
-var writesCode = (code) => {
+var RUNS3 = /\b(?:system|exec\w*|spawn\w*|popen\w*|check_output|check_call|call|run|capture\w*)\s*\(|\b(?:system|exec)\s+["']|\bOpen3\b|\bqx\s*[{(\[<|/!]|%x[{(\[<|!]|\$`/i;
+var BACKTICK_RUNNERS = new Set(["perl", "php", "ruby"]);
+var BACKTICK_RUN = /`(?:cp|mv|install)\s/i;
+var writesCode = (code, tool) => {
   const cut = code.replace(PATHS, (path) => path.slice(path.lastIndexOf("/") + 1));
-  return WRITE_WORDS.test(cut) || RUNS3.test(cut) && SHELL_WORDS.test(cut);
+  const runs = RUNS3.test(cut) || BACKTICK_RUNNERS.has(tool) && BACKTICK_RUN.test(cut);
+  return WRITE_WORDS.test(cut) || runs && SHELL_WORDS.test(cut);
 };
 var targetsOf = (environment) => {
   const data = dataDirOf(environment);
@@ -20194,7 +20197,7 @@ async function judgeBash(command, cwd, environment) {
       }
       return;
     }
-    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a) || namesBare(a.value) && inOwnFolder(at)) && writesCode(a.value)))
+    if (CODE_RUNNERS.has(tool) && args.some((a) => (namesRoster(a.value, targets) || namesApart(a.value, targets) || intoRoster.has(a) || namesBare(a.value) && inOwnFolder(at)) && writesCode(a.value, tool)))
       return refuse15(`${tool} code that names the roster and holds a write word`);
     if (PLACERS.has(tool)) {
       const dest = destinationOf(tool, args);
