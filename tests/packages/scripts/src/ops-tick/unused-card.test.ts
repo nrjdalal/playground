@@ -77,7 +77,6 @@ test("a night with unused items posts no Inbox item: no ask new, its list saved 
   const deps = {
     approvals: async () => [],
     ask: async (args: string[]) => (asked.push(args), { code: 0, out: `${ID}\n` }),
-    from: "ops",
     here: "here",
     id: () => ID,
     now: () => WROTE,
