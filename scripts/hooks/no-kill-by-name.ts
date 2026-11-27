@@ -5,6 +5,7 @@ import { basename } from "node:path"
 import { input } from "./input"
 import { fromFactory } from "./role"
 import {
+  argFile,
   examine,
   globSpells,
   lex,
@@ -17,6 +18,7 @@ import {
   slotWords,
   spelledText,
   stdinOf,
+  stdinPath,
   UNKNOWN,
   type Command,
   type Env,
@@ -136,16 +138,23 @@ const ownGroup = (pgid: number, { procs, self }: Table) => {
   return parents(pgid, procs).slice(1).includes(claude)
 }
 
-// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads, else that input appended; its own alone when the hook cannot read the input. The input splits at blanks and at each -0 or -d delimiter too, so no item hides a pid behind a NUL or a comma, and a delimiter the reader cannot decode reads as an unread pid
+// The words a kill xargs runs gets: its own, the -I string filled with what xargs reads from stdin and from each file GNU's -a names, else that input appended; its own alone when the hook cannot read stdin and no -a names a file. The input splits at blanks and at each -0 or -d delimiter too, so no item hides a pid behind a NUL or a comma, and an -a file or a delimiter the reader cannot read reads as an unread pid
 const xargsWords = async (cmd: Command, args: Word[], xargs: Xargs, env: Env) => {
   const words = args.map((a) => a.value)
   if (!xargs) return words
+  const files = (xargs.files ?? []).filter((f) => !stdinPath(f.file.value))
+  const read = await Promise.all(files.map((f) => argFile(f, cmd, env)))
   const fed = await stdinOf(cmd, env)
-  if (fed.unknown) return words
+  if (fed.unknown && files.length === 0) return words
   const delimiters = xargs.delimiters ?? []
-  if (delimiters.includes(undefined)) return [...words, `-${UNKNOWN}`]
+  if (read.some((t) => t.unknown) || delimiters.includes(undefined))
+    return [...words, `-${UNKNOWN}`]
+  const texts = [...(fed.unknown ? [] : [fed.value]), ...read.map((t) => t.value)]
   const items = delimiters
-    .reduce((parts, d) => parts.flatMap((p) => p.split(d!)), fed.value.split(/\s+/))
+    .reduce(
+      (parts, d) => parts.flatMap((p) => p.split(d!)),
+      texts.flatMap((t) => t.split(/\s+/)),
+    )
     .filter(Boolean)
   const replace = xargs.replace
   return replace && words.some((w) => w.includes(replace))

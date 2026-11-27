@@ -16895,13 +16895,16 @@ var xargsWords = async (cmd, args, xargs, env) => {
   const words = args.map((a) => a.value);
   if (!xargs)
     return words;
+  const files = (xargs.files ?? []).filter((f) => !stdinPath(f.file.value));
+  const read = await Promise.all(files.map((f) => argFile(f, cmd, env)));
   const fed = await stdinOf(cmd, env);
-  if (fed.unknown)
+  if (fed.unknown && files.length === 0)
     return words;
   const delimiters = xargs.delimiters ?? [];
-  if (delimiters.includes(undefined))
+  if (read.some((t) => t.unknown) || delimiters.includes(undefined))
     return [...words, `-${UNKNOWN}`];
-  const items = delimiters.reduce((parts, d) => parts.flatMap((p) => p.split(d)), fed.value.split(/\s+/)).filter(Boolean);
+  const texts = [...fed.unknown ? [] : [fed.value], ...read.map((t) => t.value)];
+  const items = delimiters.reduce((parts, d) => parts.flatMap((p) => p.split(d)), texts.flatMap((t) => t.split(/\s+/))).filter(Boolean);
   const replace = xargs.replace;
   return replace && words.some((w) => w.includes(replace)) ? words.flatMap((w) => w.includes(replace) ? items.map((item) => w.replaceAll(replace, () => item)) : [w]) : [...words, ...items];
 };

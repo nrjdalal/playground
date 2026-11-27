@@ -282,6 +282,8 @@ describe("a signal to a pid you hold, and a read, pass", () => {
     "echo 1234 > /tmp/f; xargs -a /tmp/f kill -9",
     "xargs -a <(echo 1234) kill -9",
     "echo 1234 | xargs -a - kill -9",
+    "echo $$ > /tmp/f; xargs -a /tmp/f kill -9",
+    "echo hi > /tmp/f; xargs -a /tmp/f echo",
     "kill -$SIG 1234",
     "kill -${SIG} 1234",
     "kill -$SIG $PID",

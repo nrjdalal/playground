@@ -104,7 +104,7 @@ export const groups: Group[] = [
       ],
       [
         "a kill of a process group xargs reads from a file by -a",
-        "echo -99999999 > /tmp/f; xargs -a /tmp/f kill",
+        "echo -99999999 > /tmp/f; xargs -a /tmp/f kill -9",
       ],
       [
         "a kill of the caller's own group xargs fills in for -I from a file",
