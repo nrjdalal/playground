@@ -8,6 +8,7 @@ export const groups: Group[] = [
     rows: () => [
       ["an unread input to gh api with no endpoint", "cat list | xargs gh api"],
       ["an unread input to api past gh's own -R", "cat list | xargs gh -R acme-blue/app api"],
+      ["an unread input to gh api through mise exec", "cat list | xargs mise exec -- gh api"],
       ["an unread input to gh api past a GET alone", "cat list | xargs gh api --method GET"],
       [
         "an unread input past a GET to this repository's merge endpoint",
