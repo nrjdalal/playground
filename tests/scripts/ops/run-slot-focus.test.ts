@@ -131,6 +131,7 @@ describe("run-slot.focus", () => {
         agents: [
           { kind: "reviewer", name: "k3m9px-reviewer", worker: "abc-worker" },
           { kind: "tester", name: "b7c8dq-tester", worker: "worker-x" },
+          { name: "abc-worker", status: "working" },
         ],
       },
     })
