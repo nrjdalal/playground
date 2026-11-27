@@ -1202,6 +1202,20 @@ describe("the optimizer's beats", () => {
     expect(again.sent).toEqual([downLine("optimizer", at(20, 7), 1)])
   })
 
+  test("a roster that does not read mid-outage sends the line as before and keeps the outage, so the dispatcher is not told again", async () => {
+    const ops = scratch()
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    await run(fake(ops, at(14, 7)).ctx)
+    writeFileSync(join(ops, "..", "roster.json"), "{ not json")
+    const unread = fake(ops, at(16, 7))
+    await run(unread.ctx)
+    expect(unread.sent).toEqual([{ text: "optimizer tick", to: "optimizer" }])
+    rosterAt(ops, [{ ...OPTIMIZER, status: "ended" }])
+    const after = fake(ops, at(18, 7))
+    await run(after.ctx)
+    expect(after.sent).toEqual([])
+  })
+
   test("a dispatcher line that fails goes at the next beat, counting each beat missed", async () => {
     const ops = scratch()
     rosterAt(ops, [])
@@ -1277,6 +1291,21 @@ describe("a lead's stale sweep, in the tick", () => {
     const fourth = fake(ops, gap, quiet)
     await beat("tick").run(fourth.ctx)
     expect(fourth.sent).toEqual([{ text: line(fresh), to: BUILDER.name }])
+  })
+
+  test("Ops' stale sweep says nothing while its sweep hold stands, since Ops paused it on purpose", async () => {
+    const ops = scratch()
+    const OPS = { kind: "ops", name: "k3v9q2-ops", status: "working" }
+    rosterAt(ops, [OPS])
+    const now = at(13, 18)
+    writeFileSync(join(ops, "sweep-hold-until"), isoAt(new Date(now.getTime() + 3 * 3_600_000)))
+    sweptAt(ops, OPS.name, now, 46)
+    const first = fake(ops, now, quiet)
+    await beat("tick").run(first.ctx)
+    expect(first.sent).toEqual([])
+    const later = fake(ops, new Date(now.getTime() + 30 * 60_000), quiet)
+    await beat("tick").run(later.ctx)
+    expect(later.sent).toEqual([])
   })
 
   test("a lead whose file is fresh, or whose row is not live, hears nothing", async () => {

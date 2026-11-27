@@ -842,7 +842,7 @@ export const liveSeat = (agents: unknown, kind: ManagerKind): string | undefined
   return row && STATUSES.live.includes(String(row.status)) ? name : undefined
 }
 
-// A beat's send with every line to a manager seat (builder, ops, optimizer, planner) checked first: while the seat has no live session the line goes nowhere, and the dispatcher hears once per outage; tick/seat-down.json keeps each down seat's first beat and its count of beats missed, a beat run counting once a seat, until the seat reads live again (a roster that does not read sends every line as before), each read and write chained after the last so beats running at once never lose a count.
+// A beat's send with every line to a manager seat (builder, ops, optimizer, planner) checked first: while the seat has no live session the line goes nowhere, and the dispatcher hears once per outage; tick/seat-down.json keeps each down seat's first beat and its count of beats missed, a beat run counting once a seat, until the seat reads live again (a roster that does not read sends every line as before and leaves the outage as it stands), each read and write chained after the last so beats running at once never lose a count.
 let seatChain: Promise<unknown> = Promise.resolve()
 export const seated = (ctx: Context): Context => {
   const counted = new Set<string>()
@@ -853,7 +853,8 @@ export const seated = (ctx: Context): Context => {
       { missed: number; since: string; told?: boolean }
     >
     const agents = await agentsOf(ctx)
-    if (agents === undefined || liveSeat(agents, kind)) {
+    if (agents === undefined) return true
+    if (liveSeat(agents, kind)) {
       if (down[kind]) {
         delete down[kind]
         await writeAtomic(path, JSON.stringify(down))
@@ -885,7 +886,7 @@ export const seated = (ctx: Context): Context => {
   }
 }
 
-// A live lead's sweep cursor (sweep/<lead>.json in the data folder) untouched past 45 minutes tells that lead, and 30 minutes after that line, with the file still unwritten, the dispatcher, once each per outage; tick/sweep-stale.json keeps each told lead's file time and when the lead heard, dropped once the file is written again.
+// A live lead's sweep cursor (sweep/<lead>.json in the data folder) untouched past 45 minutes tells that lead, but Ops while its sweep hold stands (sweepHold), and 30 minutes after that line, with the file still unwritten, the dispatcher, once each per outage; tick/sweep-stale.json keeps each told lead's file time and when the lead heard, dropped once the file is written again.
 const SWEEP_STALE_MS = 45 * 60_000
 const SWEEP_ESCALATE_MS = 30 * 60_000
 const staleSweeps = async (ctx: Context) => {
@@ -896,9 +897,14 @@ const staleSweeps = async (ctx: Context) => {
     string,
     { dispatcher?: boolean; leadAt?: string; mtime: number }
   >
+  const held = await sweepHold(ctx)
   for (const kind of ["builder", "ops"] as const) {
     const lead = liveSeat(agents, kind)
     if (!lead) continue
+    if (kind === "ops" && held) {
+      delete told[lead]
+      continue
+    }
     const file = await stat(join(ctx.ops, "..", "sweep", `${lead}.json`)).catch(() => null)
     if (!file || told[lead]?.mtime !== file.mtimeMs) delete told[lead]
     if (!file || ctx.now.getTime() - file.mtimeMs <= SWEEP_STALE_MS) continue
