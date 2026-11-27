@@ -10562,6 +10562,11 @@ var slotSettings = defineSettings({
     default: [],
     description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  },
+  "slots.windowJob": {
+    default: "",
+    description: "The jobs.json row whose config.hours and daysOff hold an org's window, empty for none: while it stands, run-slot keeps an org's runs a free lane and spawn.sh gives a start in an org's checkout the priority path, though not focus.",
+    schema: string2().regex(/^(?:[a-z0-9][a-z0-9-]*)?$/, "a job's name, or empty")
   }
 });
 // packages/settings/src/whatsapp.ts
