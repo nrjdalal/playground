@@ -121,12 +121,12 @@ for pid in \${pids//,/ }; do
 done
 exit 0`,
 )
-// A fake Keychain: it holds an item unless FAKE_NO_ITEM, and gives TOKEN for -w (nothing when FAKE_EMPTY_TOKEN is set), so a leak would show.
+// A fake Keychain: it holds an item unless FAKE_NO_ITEM (every item, or the one account it names), and gives TOKEN for -w (nothing when FAKE_EMPTY_TOKEN is set), so a leak would show.
 export const TOKEN = "sk-ant-oat-fake-token"
 fake(
   "security",
   `printf '%s\\n' "$*" >> "$HOME/security.args"
-[ -n "$FAKE_NO_ITEM" ] && exit 44
+case "$FAKE_NO_ITEM" in "") ;; 1) exit 44 ;; *) case " $* " in *" -a $FAKE_NO_ITEM "*) exit 44 ;; esac ;; esac
 case " $* " in *" -w "*) [ -n "$FAKE_EMPTY_TOKEN" ] || echo "${TOKEN}" ;; *) echo 'keychain: "/fake.keychain-db"' ;; esac
 exit 0`,
 )

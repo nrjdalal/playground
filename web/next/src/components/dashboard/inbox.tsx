@@ -1612,8 +1612,30 @@ export function InboxCard({
   ) : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
-        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked (every question of a multi-question ask) and saying why on hover and focus, then a multi-question ask's Previous and Next between its questions, then the card's own buttons
+        // shadcn's questionnaire actions in a row that wraps on a narrow card: a multi-question ask's Previous first on every question (off on the first), then Next, which the primitive shows on all but the last question, and Send, which it shows on the last alone, so the two share the second place (PG-3178); Send is off until an option is picked (every question of a multi-question ask) and says why on hover and focus; then the card's own buttons
         <QuestionnaireActions className="flex flex-wrap">
+          {multi && (
+            <>
+              <QuestionnairePrevious
+                // the primitive hides Previous on the first question, which would move Next into its place
+                aria-hidden={false}
+                disabled={busy || step === 0}
+                hidden={false}
+                inert={false}
+                size="sm"
+                variant="outline"
+              />
+              <QuestionnaireNext
+                disabled={busy || step >= questions.length - 1 || picks[step] == null}
+                size="sm"
+                variant="outline"
+                onClick={(event) => {
+                  event.preventDefault()
+                  setStep((s) => Math.min(s + 1, questions.length - 1))
+                }}
+              />
+            </>
+          )}
           <Hint
             content={
               held ??
@@ -1633,20 +1655,6 @@ export function InboxCard({
               Send
             </QuestionnaireSubmit>
           </Hint>
-          {multi && (
-            <>
-              <QuestionnairePrevious disabled={busy || step === 0} size="sm" variant="outline" />
-              <QuestionnaireNext
-                disabled={busy || step >= questions.length - 1 || picks[step] == null}
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault()
-                  setStep((s) => Math.min(s + 1, questions.length - 1))
-                }}
-              />
-            </>
-          )}
           {left}
           {right}
         </QuestionnaireActions>

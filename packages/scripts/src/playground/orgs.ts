@@ -341,6 +341,35 @@ export const whichSkill = async (
     : { refusal: noScopeHolds(name) }
 }
 
+// The folder `ext which <skill>` prints: whichSkill's, and with neither repo nor org, when the home set holds no copy, the one org scope's that ext.links names, or a refusal naming each such scope with its --org when two or more hold it.
+export const skillFolder = async (
+  io: OrgsIo,
+  name: string,
+  repo?: string,
+  org?: string,
+): ReturnType<typeof whichSkill> => {
+  const found = await whichSkill(io, name, repo, org)
+  if (repo !== undefined || org !== undefined || found.refusal !== noScopeHolds(name)) return found
+  const links =
+    extLinksSchema.safeParse(readPolicyOrDefaults(io.data).settings?.values["ext.links"]).data ?? {}
+  const holders = new Map<
+    string,
+    { dir: string; from: string; owner: string; shadowed: string[] }
+  >()
+  for (const owner of new Set(Object.values(links).flat()))
+    if (owner !== "*") {
+      const held = await whichSkill(io, name, undefined, owner)
+      if (held.refusal === undefined && !holders.has(held.from))
+        holders.set(held.from, { ...held, owner })
+    }
+  const [only, ...more] = [...holders.values()]
+  if (!only) return found
+  if (!more.length) return { dir: only.dir, from: only.from, shadowed: only.shadowed }
+  return {
+    refusal: `${[...holders.values()].map(({ from, owner }) => `${from} (--org ${owner})`).join(", ")} each hold the skill ${name}; add --org to name one`,
+  }
+}
+
 // playground orgs resolve prints the plugin's folder for spawn.sh; playground orgs home installs the home set; exit 2 on a wrong word or a refusal.
 export async function orgsCommand(words: string[], io: OrgsIo): Promise<number> {
   const [verb, ...rest] = words

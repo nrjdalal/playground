@@ -702,6 +702,36 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect((await cli(["open", "--until", "later"])).stderr).toContain("--until takes an ISO time")
   })
 
+  // PG-3174: ops-tick's focus card reads open --awake with its window, so both filters hold at once
+  test("open --awake with --since and --until keeps only an awake item posted in the window", async () => {
+    const postedAt = async (id: string) =>
+      Date.parse(JSON.parse((await cli(["get", id])).stdout).createdAt)
+    const before = await post({ ...DECISION, from: "worker-open-u", title: "Ship the one before?" })
+    const since = new Date((await postedAt(before.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const awake = await post({ ...DECISION, from: "worker-open-u", title: "Ship the awake one?" })
+    const archived = await post({
+      ...DECISION,
+      from: "worker-open-u",
+      title: "Ship the archived one?",
+    })
+    const later = await post({ ...DECISION, from: "worker-open-u", title: "Ship the later one?" })
+    const until = new Date((await postedAt(later.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const after = await post({ ...DECISION, from: "worker-open-u", title: "Ship the one after?" })
+    await archive(archived.id)
+    await snooze(later.id)
+    const window = ["--from", "worker-open-u", "--since", since, "--until", until]
+    const all = await cli(["open", ...window])
+    expect(all.code).toBe(0)
+    for (const item of [awake, archived, later]) expect(all.stdout).toContain(`${item.tag} `)
+    const listed = await cli(["open", "--awake", ...window])
+    expect(listed.code).toBe(0)
+    expect(listed.stdout).toContain(`${awake.tag} decision from worker-open-u`)
+    for (const item of [before, archived, later, after])
+      expect(listed.stdout).not.toContain(`${item.tag} `)
+  })
+
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
   test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({

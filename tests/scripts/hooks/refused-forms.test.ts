@@ -1168,6 +1168,11 @@ describe("every spelling of a row's path flag keeps the row's verdict", () => {
       // each row's --cwd names a folder the scratch checkout lacks, so no spelling of it finds one
       "#2397 a kill by name in bun exec's script after bun's folder | bun --cwd, no folder",
       "#2397 bun run running a script in a folder | bun --cwd, no folder",
+      // each row's folder is named gh, spelt as the program is, and the scratch checkout lacks it
+      "#3135 a grep for gh through run-slot's bunx --cwd gh | bunx --cwd, no folder",
+      "#3135 a grep for gh through run-slot's env -C gh | env -C, no folder",
+      "#3135 an unread input after pr alone through run-slot's bunx --cwd gh | bunx --cwd, no folder",
+      "#3135 an unread input after pr alone through run-slot's env -C gh | env -C, no folder",
       "#466 git --work-tree with a subcommand for its value | git --work-tree, no folder",
       "#466 git -C with a subcommand for its value | git -C, no folder",
     ])
