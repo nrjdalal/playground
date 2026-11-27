@@ -3553,7 +3553,7 @@ export async function settleItem(
   return { item: toItem(row), ok: true }
 }
 
-// The poster clears its own update (`bun run ask resolve`) once it has settled: an alert whose cause cleared, a progress card whose last step is done, the focus card once what it pointed at is answered. It marks the update read, records the resolution inside its answer and leaves it closed, so the owner never presses Done on it by hand. Another session's update, a decision or draft and an unknown id are refused.
+// The poster clears its own update (`bun run ask resolve`) once it has settled: an alert whose cause cleared, a progress card whose last step is done, the focus card once what it pointed at is answered or put away. It marks the update read, records the resolution inside its answer and leaves it closed, so the owner never presses Done on it by hand. Another session's update, a decision or draft and an unknown id are refused.
 export async function resolveItem(
   db: Database,
   key: string,

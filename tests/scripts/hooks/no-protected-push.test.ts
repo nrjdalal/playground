@@ -377,6 +377,8 @@ describe("a hand-run gh pr merge on the factory's repository", () => {
     ["with --admin", "gh pr merge 5 --squash --admin"],
     ["by -R", "gh pr merge 5 -R made-up/app"],
     ["through run-slot", `~/.playground/ops/run-slot.sh w -- ${MERGE}`],
+    ["through a run-slot whose who is gh", `run-slot.sh gh -- ${MERGE}`],
+    ["through run-slot's env -u gh", `run-slot.sh w -- env -u gh ${MERGE}`],
     ["with the role set before it", `PLAYGROUND_ROLE=lead ${MERGE}`],
     ["with an unreadable repository", 'gh pr merge 5 -R "$R"'],
   ])("is refused for a worker: %s", async (_, command) => {
@@ -439,6 +441,139 @@ describe("a hand-run gh pr merge on the factory's repository", () => {
     expect(
       await as("worker", "for n in 5 6; do gh pr merge $n -R made-up/app; done", dirs.other),
     ).toContain("it merges a pull request of made-up/app")
+  })
+
+  test.each([
+    [
+      "appended past -R",
+      "echo https://github.com/made-up/app/pull/5 | xargs gh pr merge -R made-up/other",
+    ],
+    [
+      "appended in another checkout",
+      "echo https://github.com/made-up/app/pull/5 | xargs gh pr merge",
+    ],
+    ["by an appended -R", "echo -R made-up/app 5 | xargs gh pr merge -R made-up/other"],
+    [
+      "in place of -I's string",
+      "echo https://github.com/made-up/app/pull/5 | xargs -I{} gh pr merge {} -R made-up/other",
+    ],
+  ])("is refused for a worker when xargs gives it the pull request %s", async (_, command) => {
+    expect(await as("worker", command, dirs.other)).toContain(
+      "it merges a pull request of made-up/app",
+    )
+  })
+
+  test.each([
+    ["appended", "xargs gh pr merge -R made-up/other < list", "what xargs appends from its input"],
+    [
+      "in place of -I's string",
+      "cat list | xargs -I{} gh pr merge {} -R made-up/other",
+      "what xargs puts in place of {}",
+    ],
+  ])("names xargs' input it cannot read, %s", async (_, command, word) => {
+    expect(await as("worker", command, dirs.other)).toContain(
+      `no-protected-push hook refuses this gh pr merge: ${word} is a value the hook cannot read`,
+    )
+  })
+
+  test.each([
+    [
+      "appended",
+      "echo https://github.com/made-up/other/pull/5 | xargs gh pr merge -R made-up/other",
+    ],
+    ["a number", "echo 5 | xargs gh pr merge -R made-up/other"],
+    [
+      "in place of -I's string",
+      "echo https://github.com/made-up/other/pull/5 | xargs -I{} gh pr merge {} -R made-up/other",
+    ],
+    ["a view", "echo https://github.com/made-up/app/pull/5 | xargs gh pr view"],
+  ])(
+    "passes for another repository's pull request from xargs, and a view: %s",
+    async (_, command) => {
+      expect(await as("worker", command, dirs.other)).toBeUndefined()
+    },
+  )
+
+  test.each([
+    ["after pr alone", "cat list | xargs gh pr -R made-up/other", "other"],
+    ["through run-slot", "cat list | xargs run-slot.sh who -- gh pr -R made-up/other", "other"],
+    [
+      "through run-slot's env",
+      "cat list | xargs run-slot.sh who -- env gh pr -R made-up/other",
+      "other",
+    ],
+    [
+      "through run-slot's timeout",
+      "cat list | xargs run-slot.sh who -- timeout 5 gh pr -R made-up/other",
+      "other",
+    ],
+    [
+      "through run-slot's env -u gh",
+      "cat list | xargs run-slot.sh who -- env -u gh gh pr -R made-up/other",
+      "other",
+    ],
+    [
+      "through a run-slot whose who is gh",
+      "cat list | xargs run-slot.sh gh -- gh pr -R made-up/other",
+      "other",
+    ],
+    ["with no subcommand", "cat list | xargs gh -R made-up/other", "other"],
+    ["after pr alone in its checkout", "cat list | xargs gh pr", "app"],
+    ["as pr's subcommand", "cat list | xargs -I{} gh pr {} -R made-up/other", "other"],
+  ])(
+    "is refused when xargs may give the subcommand from an unread input, %s",
+    async (_, command, dir) => {
+      expect(await as("worker", command, dirs[dir])).toContain(
+        "no-protected-push hook refuses this gh pr merge",
+      )
+    },
+  )
+
+  test.each([["a typed view", "cat list | xargs gh pr view -R made-up/app"]])(
+    "keeps a typed subcommand's verdict under an unread input: %s",
+    async (_, command) => {
+      expect(await as("worker", command, dirs.other)).toBeUndefined()
+    },
+  )
+
+  test.each([
+    ["-R", `echo "-R made-up/app 5 -R made-up/other 6" | xargs -n3 gh pr merge -R made-up/other`],
+    ["--repo=", `echo "--repo=made-up/app 5 --repo=made-up/other 6" | xargs -n2 gh pr merge`],
+    ["a URL", `echo "5 https://github.com/made-up/app/pull/5 6" | xargs -s 60 gh pr merge`],
+  ])(
+    "is refused when the input names the factory's repository by %s, whatever batch xargs cuts",
+    async (_, command) => {
+      expect(await as("worker", command, dirs.other)).toContain(
+        "it merges a pull request of made-up/app",
+      )
+    },
+  )
+
+  test.each([
+    [
+      "an org's -R in a batch",
+      `echo "-R made-up/other 5 -R made-up/other 6" | xargs -n3 gh pr merge`,
+    ],
+    ["a grep naming gh", "cat list | xargs grep -l gh"],
+    ["an rg naming gh", "cat list | xargs rg gh"],
+    ["a grep naming gh after its --", "cat list | xargs grep -- gh"],
+    [
+      "a grep naming gh through run-slot's env",
+      "cat list | xargs run-slot.sh who -- env grep -l gh",
+    ],
+    [
+      "a grep naming gh through run-slot's env -u gh",
+      "cat list | xargs run-slot.sh who -- env -u gh grep -l gh",
+    ],
+    [
+      "a grep naming gh through a run-slot whose who is gh",
+      "cat list | xargs run-slot.sh gh -- grep -l gh",
+    ],
+    ["a grep naming gh in place of -I's string", "cat list | xargs -I{} grep gh {}"],
+    ["gh's help", "cat list | xargs gh --help"],
+    ["gh's version", "cat list | xargs gh --version"],
+  ])("passes under xargs: %s", async (_, command) => {
+    expect(await as("worker", command, dirs.other)).toBeUndefined()
   })
 
   test("is refused past a cd the hook cannot name", async () => {
