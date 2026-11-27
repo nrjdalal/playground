@@ -157,6 +157,10 @@ symlinkSync("../extensions/login/new", join(DATA, "sub", "rel"))
 mkdirSync(join(HOME, "starred"))
 writeFileSync(join(HOME, "starred", "a*"), "")
 writeFileSync(join(HOME, "hooked", ".git", "hooks", "pre-commit"), "#!/bin/sh\n")
+// a repo whose hooks run from an empty hk by core.hooksPath, beside a plain logs folder, so a glob there matches nothing
+git(SCRATCH, "init", "-q", join(HOME, "hookspath"))
+git(join(HOME, "hookspath"), "config", "core.hooksPath", "hk")
+for (const dir of ["hk", "logs"]) mkdirSync(join(HOME, "hookspath", dir))
 // the main checkout's worktree a, by its .git file, holding a link into the main checkout, and a plain folder beside it that no worktree holds, for #1663's rows
 writeFileSync(join(PATHS.MAIN, ".claude", "worktrees", "a", ".git"), "gitdir: x\n")
 symlinkSync(join(PATHS.MAIN, ".claude"), PATHS.TREE_LINK)

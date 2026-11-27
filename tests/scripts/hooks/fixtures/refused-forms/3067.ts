@@ -278,6 +278,22 @@ const writesRun = (): Row[] => [
     "a script in a folder copied by -r to a new name with a /, then run",
     `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; cp -r d e/; sh e/run.sh`,
   ],
+  [
+    "a script moved onto its own path by ./, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh ./a.sh; sh a.sh`,
+  ],
+  [
+    "a script moved onto its own name, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a script moved onto its own name by -f, then run",
+    `echo 'touch ${SCRIPT}' > a.sh; mv -f a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a script in a folder moved onto its own path by ./, then run",
+    `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d ./d; sh d/run.sh`,
+  ],
 ]
 const writeControls = (): Row[] => [
   ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
@@ -328,6 +344,22 @@ const writeControls = (): Row[] => [
     "a plain script in a folder copied by -r to a new name with a /, then run",
     `mkdir d; echo 'touch out.log' > d/run.sh; cp -r d e/; sh e/run.sh`,
   ],
+  [
+    "a plain script moved onto its own path by ./, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh ./a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script moved onto its own name, then run",
+    `echo 'touch out.log' > a.sh; mv a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script moved onto its own name by -f, then run",
+    `echo 'touch out.log' > a.sh; mv -f a.sh a.sh; sh a.sh`,
+  ],
+  [
+    "a plain script in a folder moved onto its own path by ./, then run",
+    `mkdir d; echo 'touch out.log' > d/run.sh; mv d ./d; sh d/run.sh`,
+  ],
 ]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [
@@ -368,6 +400,22 @@ const linked = ({ DATA, HOME }: Paths): Row[] => [
     "an echo naming the root through a dangling link onto a hook",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-hook`,
   ],
+  [
+    "a cat's output into a core.hooksPath folder by a * glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/hk/pre-commit*`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a quoted ?",
+    `cat payload > '${HOME}/hookspath/hk/pre-commi?'`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a [ ] glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/hk/pre-commi[t]`,
+  ],
+  [
+    "a cat's output into a core.hooksPath folder by a * glob in a name",
+    `cat payload > ${HOME}/hookspath/hk/lib*.sh`,
+  ],
 ]
 // what part 2 leaves running: a script written and not run is data, a plain script runs, a glob that matches no hook, a dangling link to a plain place, and sed's scripts that run nothing
 const runControls = (): Row[] => [
@@ -406,6 +454,18 @@ const linkControls = ({ HOME }: Paths): Row[] => [
   [
     "an echo naming the root through a dangling link to a plain place",
     `echo 'touch ${SCRIPT}' > ${HOME}/dangling-plain`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a * glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/logs/out*.log`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a quoted ?",
+    `cat payload > '${HOME}/hookspath/logs/out?.log'`,
+  ],
+  [
+    "a cat's output into a plain folder of a core.hooksPath repo by a [ ] glob that matches nothing",
+    `cat payload > ${HOME}/hookspath/logs/ou[t].log`,
   ],
 ]
 

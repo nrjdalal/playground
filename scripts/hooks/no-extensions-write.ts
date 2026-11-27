@@ -2228,10 +2228,12 @@ function outputFiles(tool: "sort" | "uniq", args: Word[]): { files: Word[]; stdi
 function hookFile(path: string | undefined, sure = false, literal = false): boolean {
   if (!path) return false
   if (/(?:^|\/)\.git\/hooks\//i.test(path)) return true
-  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), each a literal path, since a file's own name may hold a glob character, and as a file the hook cannot read past GLOB_MATCHES of them
+  // a glob the shell expands on the filesystem (`.git/hook?/pre-commit`) counts by each file it matches (hookGlobFiles), each a literal path, and by its own text as one, since a glob that matches nothing writes its own name and a file's own name may hold a glob character, and as a file the hook cannot read past GLOB_MATCHES of them
   if (!literal && /[*?[]/.test(path) && isAbsolute(path)) {
     const matches = hookGlobFiles(path)
-    return matches === undefined ? !sure : matches.some((each) => hookFile(each, sure, true))
+    if (matches === undefined ? !sure : matches.some((each) => hookFile(each, sure, true)))
+      return true
+    return hookFile(path, sure, true)
   }
   const end = linkEnd(path)
   if (end && hookFile(end, sure, true)) return true
