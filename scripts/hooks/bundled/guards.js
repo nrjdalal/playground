@@ -3601,11 +3601,12 @@ async function record(cmd, name, args, env) {
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
-  for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
-    env.files.set(path, held(text));
-    if (moved)
-      env.files.delete(moved);
-  }
+  if (TOOL_WRITERS.test(name))
+    for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
+      env.files.set(path, held(text));
+      if (moved)
+        env.files.delete(moved);
+    }
   if (name !== "tee")
     return;
   const input = await stdinOf(cmd, env);
@@ -15114,6 +15115,7 @@ var RUNS_TEXT2 = new Set([".", "eval", "source"]);
 var MOVES_ARGS = new Set(["getopts", "set", "shift"]);
 var SILENT = new Set([":", "[", "cd", "false", "test", "true"]);
 var hookFolders = new Map;
+var linkEnds = new Map;
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 async function guarded(raw, environment = process.env, wait = 12000, url = new URL(`./no-extensions-write-worker.${import.meta.path.endsWith(".js") ? "js" : "ts"}`, import.meta.url).href) {
   const worker = new Worker(url);

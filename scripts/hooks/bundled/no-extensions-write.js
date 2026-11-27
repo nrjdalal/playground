@@ -9713,11 +9713,12 @@ async function record2(cmd, name, args, env) {
     const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
-  for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
-    env.files.set(path, held2(text));
-    if (moved)
-      env.files.delete(moved);
-  }
+  if (TOOL_WRITERS.test(name))
+    for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
+      env.files.set(path, held2(text));
+      if (moved)
+        env.files.delete(moved);
+    }
   if (name !== "tee")
     return;
   const input = await stdinOf(cmd, env);
@@ -12709,7 +12710,14 @@ function hookFile(path, sure = false, literal = false) {
 }
 var LINK_HOPS = 40;
 function linkEnd(path) {
-  let at = resolve5(path);
+  const start = resolve5(path);
+  if (!linkEnds.has(start))
+    linkEnds.set(start, followLink(start));
+  return linkEnds.get(start);
+}
+var linkEnds = new Map;
+function followLink(start) {
+  let at = start;
   for (let hop = 0;hop <= LINK_HOPS; hop++) {
     try {
       if (!lstatSync2(at).isSymbolicLink())
@@ -13790,6 +13798,7 @@ async function inspect(raw, environment, rootNames, unknown = false) {
   lineWritten = writtenWords(lexed.commands);
   lineLinks = !rootLine && lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse3(cmd))).length === 1 && lexed.commands.every((cmd) => !!symlinkSource(cmd, parse3(cmd)) || linkSafe(cmd, env));
   lineFindings = new Map;
+  linkEnds = new Map;
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER);
   const verdict = await run(lexed, env, visit, true);

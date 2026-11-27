@@ -2244,7 +2244,14 @@ function hookFile(path: string | undefined, sure = false, literal = false): bool
 const LINK_HOPS = 40
 // Where a link's readlink chain lands, which realpath cannot follow once the target is missing, each hop read from the real folder the link sits in, as the kernel reads it; undefined for a path that is no link, or a chain past LINK_HOPS
 function linkEnd(path: string): string | undefined {
-  let at = resolve(path)
+  const start = resolve(path)
+  if (!linkEnds.has(start)) linkEnds.set(start, followLink(start))
+  return linkEnds.get(start)
+}
+// each path's linkEnd for one call, reset by inspect, since a long line asks again for the same path and each ask costs an lstat
+let linkEnds = new Map<string, string | undefined>()
+function followLink(start: string): string | undefined {
+  let at = start
   for (let hop = 0; hop <= LINK_HOPS; hop++) {
     try {
       if (!lstatSync(at).isSymbolicLink()) return hop > 0 ? at : undefined
@@ -3860,6 +3867,7 @@ async function inspect(
     lexed.commands.filter((cmd) => !!symlinkSource(cmd, parse(cmd))).length === 1 &&
     lexed.commands.every((cmd) => !!symlinkSource(cmd, parse(cmd)) || linkSafe(cmd, env))
   lineFindings = new Map()
+  linkEnds = new Map()
   // a line holding an ext score is refused whole once any command on it changes who the session reads as, so a shell it runs or pipes into carries the change
   if (SCORE.test(unquoted(command)) && changesIdentity(lexed.commands))
     return refuse(SCORE_AS_OTHER)

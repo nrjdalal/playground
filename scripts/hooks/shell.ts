@@ -4265,10 +4265,11 @@ async function record(cmd: Command, name: string, args: Word[], env: Env): Promi
     env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out))
   }
   // a throw here would end the walk past its verdict, and a guard's check lets a call it throws on run, so a writer the hook cannot read leaves its file unrecorded, as before
-  for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
-    env.files.set(path, held(text))
-    if (moved) env.files.delete(moved)
-  }
+  if (TOOL_WRITERS.test(name))
+    for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
+      env.files.set(path, held(text))
+      if (moved) env.files.delete(moved)
+    }
   if (name !== "tee") return
   const input = await stdinOf(cmd, env)
   const append = args.some((a) => a.value === "-a" || a.value === "--append")

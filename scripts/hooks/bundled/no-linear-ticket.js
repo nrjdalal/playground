@@ -3502,11 +3502,12 @@ async function record(cmd, name, args, env) {
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
   }
-  for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
-    env.files.set(path, held2(text));
-    if (moved)
-      env.files.delete(moved);
-  }
+  if (TOOL_WRITERS.test(name))
+    for (const [path, text, moved] of await toolWrites(cmd, name, args, env).catch(() => [])) {
+      env.files.set(path, held2(text));
+      if (moved)
+        env.files.delete(moved);
+    }
   if (name !== "tee")
     return;
   const input = await stdinOf(cmd, env);
