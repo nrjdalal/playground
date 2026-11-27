@@ -312,15 +312,15 @@ describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
   )
 
   test("its card says several numbers pick more than one, and its poll takes several answers", () => {
-    const { multi, poll, text } = cardOf(several, TERMS)
-    expect(multi).toBe(true)
+    const { poll, text, ticking } = cardOf(several, TERMS)
+    expect(ticking).toBe(true)
     expect(text).toEndWith(
       "Reply 1 #i12 to Nudge Ana\nReply 2 #i12 to Nudge Bo\nReply 3 #i12 to None of these\nReply several numbers, as 1 2 #i12, to pick more than one.",
     )
     expect(poll?.values).toEqual(["1. Nudge Ana", "2. Nudge Bo", "3. None of these"])
     expect(
       cardOf(ask({}, { options: [{ label: "A" }, { label: "B" }] }), TERMS),
-    ).not.toHaveProperty("multi")
+    ).not.toHaveProperty("ticking")
   })
 
   test.each([

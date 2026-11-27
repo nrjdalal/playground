@@ -196,6 +196,8 @@ type Cards = { held?: string; sent?: Record<string, Sent> }
 const draftsFile = (dir: string) => join(dir, "drafts.json")
 type Drafts = { sent?: Record<string, DraftSent> }
 const CARD_KEEP_MS = 30 * 24 * HOUR
+// A multiSelect poll has no Send, so each tap sends a vote: the newest answers its card once none newer comes for this long (ADR 0043).
+export const VOTE_SETTLE_MS = 60_000
 // Each open decision's pin in the owner's chat: its message id, its card and when it was pinned, so it comes off once the card settles.
 const pinsFile = (dir: string) => join(dir, "pins.json")
 type Pin = { at: number; id: string; ref: number }
@@ -608,9 +610,16 @@ async function vote(io: Io & Mode, inbox: Inbox, m: Incoming, me?: Sock["user"])
     pollOf(Number(ref), "", card.rows)?.values ?? [],
   )
   if (picked === undefined) return io.log(`ops-wa: a vote on #i${ref}'s poll could not be read`)
-  if (picked.length === 0 || (picked.length > 1 && !card.multi))
+  // a multiSelect poll's vote is kept as its ticks, the newest standing, and a vote taken back clears them; the card pass answers them once they settle
+  if (card.ticking) {
+    const cards = await readOwn<Cards>(cardsFile(io.dir), {})
+    const { ticked: _, ...rest } = cards.sent![ref]!
+    cards.sent![ref] = picked.length ? { ...rest, ticked: { at: io.now(), rows: picked } } : rest
+    return writeOwn(cardsFile(io.dir), cards)
+  }
+  if (picked.length !== 1)
     return io.log(`ops-wa: a vote on #i${ref}'s poll picks no row, so it answers nothing`)
-  return answerCard(io, inbox, { numbers: picked.map((at) => at + 1), ref: Number(ref) })
+  return answerCard(io, inbox, { number: picked[0]! + 1, ref: Number(ref) })
 }
 
 // An owner's reply naming a card: it answers the card only when the card went out here and the number is one of its rows, else one line back says why it answers nothing.
@@ -624,9 +633,9 @@ async function answerCard(io: Io & Mode, inbox: Inbox, reply: Reply) {
   const at = [...new Set(reply.numbers ?? [reply.number ?? 0])]
     .sort((a, b) => a - b)
     .map((n) => n - 1)
-  if (at.length > 1 && !card.multi) return say(oneRow(reply.ref))
+  if (at.length > 1 && !card.ticking) return say(oneRow(reply.ref))
   if (at.some((i) => i < 0 || i >= card.rows.length)) return say(noRow(reply.ref, card.rows.length))
-  const answer = card.multi ? ticksAnswer(card.rows, at) : answerOf(card.rows, at[0]!)
+  const answer = card.ticking ? ticksAnswer(card.rows, at) : answerOf(card.rows, at[0]!)
   if (!answer) return say(noneAlone(reply.ref, card.rows.find((row) => !row.go)!.label))
   const why = await inbox.answer(card.id, answer).catch((error: Error) => error.message)
   const label = at.map((i) => card.rows[i]!.label).join(" · ")
@@ -697,6 +706,13 @@ async function cards(io: Io & Mode, inbox: Inbox) {
   let held = state.held
   let pins = await pinsOf(io.dir, now)
   try {
+    // a multiSelect poll's ticks with no newer vote for VOTE_SETTLE_MS answer its card, as a reply of those numbers would
+    for (const [ref, card] of Object.entries(sent)) {
+      if (!card.ticked || now - card.ticked.at < VOTE_SETTLE_MS) continue
+      const numbers = card.ticked.rows.map((at) => at + 1)
+      delete card.ticked
+      await answerCard(io, inbox, { numbers, ref: Number(ref) })
+    }
     const [open, terms] = await Promise.all([inbox.open(), inbox.terms()])
     // the one place a settle shows, by any route: an answer on WhatsApp or in the Inbox, a settle, an ack or a resolve each takes the card off the open list or out of open
     if (io.pin) pins = await unpinSettled(io.pin, pins, open, io.log)
@@ -711,7 +727,7 @@ async function cards(io: Io & Mode, inbox: Inbox) {
       if (!terms || !goesOut(card, terms)) {
         if (waits(card, now)) kept.push(card)
       } else if (!sent[card.ref]) {
-        const { multi, poll, rows, text } = cardOf(card, terms)
+        const { poll, rows, text, ticking } = cardOf(card, terms)
         let textId: string | undefined
         try {
           textId = io.card ? await io.card(text) : void (await io.reply(text))
@@ -720,11 +736,11 @@ async function cards(io: Io & Mode, inbox: Inbox) {
           if ((error as Error).message === QUIET_WAITS) continue
           throw error
         }
-        sent[card.ref] = { at: io.now(), id: card.id, ...(multi && { multi }), rows }
+        sent[card.ref] = { at: io.now(), id: card.id, rows, ...(ticking && { ticking }) }
         // the poll goes beside the text, and a poll that fails leaves the text's numbered lines to answer by
         if (poll && io.poll)
           try {
-            sent[card.ref]!.poll = await io.poll(poll.name, poll.values, multi ? 0 : 1)
+            sent[card.ref]!.poll = await io.poll(poll.name, poll.values, ticking ? 0 : 1)
           } catch (error) {
             io.log(`ops-wa: a card's poll: ${(error as Error).message}`)
           }

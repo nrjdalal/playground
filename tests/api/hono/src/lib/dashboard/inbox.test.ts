@@ -7549,6 +7549,8 @@ describe("a multiSelect ask takes several ticked options (PG-3177)", () => {
       { action: "approve", option: 0 },
       { action: "approve", options: [0, 0] },
       { action: "approve", options: [3] },
+      // a stray single option beside the ticks is refused, not dropped
+      { action: "approve", option: 0, options: [0, 2] },
     ]
     for (const input of refused) {
       expect(checkAnswer(ticked, input), JSON.stringify(input)).toEqual({

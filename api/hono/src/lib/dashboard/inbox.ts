@@ -1167,7 +1167,8 @@ function answerOf(
       if (action === "clear") return { answer: { choice: "clear" }, status: "cleared" }
       if (action === "deny") return { answer: { choice: "deny" }, status: "denied" }
       const go = choicesOf(item.preview)?.rows.filter((row) => row.go) ?? []
-      const ticks = action === "approve" && options ? ticksAnswer(go, options) : null
+      const ticks =
+        action === "approve" && options && option === undefined ? ticksAnswer(go, options) : null
       return ticks?.action === "approve"
         ? { answer: { choice: "approve", options: ticks.options }, status: "approved" }
         : {

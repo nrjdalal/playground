@@ -48,7 +48,9 @@ export type Sent = {
   at: number
   id: string
   // a multiSelect ask's card, whose poll takes several answers and whose reply takes several numbers
-  multi?: true
+  ticking?: true
+  // a multiSelect poll's newest vote, by its rows and when it came, which answers the card once no newer vote comes for VOTE_SETTLE_MS
+  ticked?: { at: number; rows: number[] }
   // the card's poll, when one went: its message id and its secret in base64, so the owner's vote reads back as a row
   poll?: { id: string; secret: string }
   rows: { go: boolean; label: string }[]
@@ -136,8 +138,8 @@ const tag = (ref: number) => `#i${ref}`
 export function cardOf(
   card: Card,
   terms: Terms,
-): { multi?: true; poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string } {
-  const multi = card.kind === "decision" && multiSelect(card.preview as ChoicePreview)
+): { poll: ReturnType<typeof pollOf>; rows: Sent["rows"]; text: string; ticking?: true } {
+  const ticking = card.kind === "decision" && multiSelect(card.preview as ChoicePreview)
   const files = card.preview.attachments?.length ?? 0
   const lines = [`*${card.title}*`, card.preview.text ?? ""]
   if (files > 0)
@@ -154,9 +156,9 @@ export function cardOf(
       ? rows.map((row, i) => `Reply ${i + 1} ${tag(card.ref)} to ${row.label}`)
       : [`${tag(card.ref)} is an update: it asks nothing.`]),
   )
-  if (multi) lines.push(`Reply several numbers, as 1 2 ${tag(card.ref)}, to pick more than one.`)
+  if (ticking) lines.push(`Reply several numbers, as 1 2 ${tag(card.ref)}, to pick more than one.`)
   return {
-    ...(multi && { multi: true as const }),
+    ...(ticking && { ticking: true as const }),
     poll: pollOf(card.ref, redact(card.title, terms), rows),
     rows,
     text: redact(lines.filter(Boolean).join("\n"), terms),

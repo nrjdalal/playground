@@ -1322,8 +1322,10 @@ export function InboxCard({
   const ticked = ticking ? ticksAnswer(choices.rows, ticks) : null
   // every question of a multi-question ask answered, so its Submit may send them all at once
   const allPicked = multi && picks.every((p) => p !== null)
-  // whether Send has an answer to send: every question picked, a tick answer, or a single pick
+  // whether Send has an answer to send (every question picked, a tick answer, or a single pick), why not while it has none, and whether it sends a deny
   const ready = multi ? allPicked : ticking ? ticked !== null : pick !== null
+  const sendOff = ready ? null : multi ? "Answer every question first" : sendWhy(picked)
+  const sendsDeny = ticking ? ticked?.action === "deny" : !multi && picked !== null && !picked.go
   const footerInForm = (choices !== null || multi) && outcome === null && !folded
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
   const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
@@ -1690,34 +1692,10 @@ export function InboxCard({
               />
             </>
           )}
-          <Hint
-            content={
-              held ??
-              (multi
-                ? allPicked
-                  ? undefined
-                  : "Answer every question first"
-                : ticking
-                  ? ticked
-                    ? undefined
-                    : sendWhy(null)
-                  : sendWhy(picked)) ??
-              undefined
-            }
-          >
+          <Hint content={held ?? sendOff ?? undefined}>
             <QuestionnaireSubmit
               // green as a go row, or red once the no-go row is the pick it sends
-              className={
-                SIDE_TONES[
-                  ticking
-                    ? ticked?.action === "deny"
-                      ? "deny"
-                      : "approve"
-                    : !multi && picked && !picked.go
-                      ? "deny"
-                      : "approve"
-                ]
-              }
+              className={SIDE_TONES[sendsDeny ? "deny" : "approve"]}
               disabled={busy || !ready}
               render={<Button size="sm" variant="outline" {...OFF_FOCUSABLE} />}
               size="sm"

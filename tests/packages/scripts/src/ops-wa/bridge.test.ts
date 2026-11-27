@@ -23,6 +23,7 @@ import {
   UPDATE,
   UPDATE_MS,
   statusOf,
+  VOTE_SETTLE_MS,
 } from "../../../../../packages/scripts/src/ops-wa/bridge"
 import {
   type Card,
@@ -1197,12 +1198,32 @@ describe("a multiSelect ask on WhatsApp (PG-3177)", () => {
     })
   })
 
-  test("a vote for several rows approves it with every one", async () => {
+  test("each tap's vote waits, and the newest answers the card once, after VOTE_SETTLE_MS with no newer vote", async () => {
     const h = await withCards([ticks()])
-    expect(await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])).toEqual([
-      "Answered #i7: Nudge Ana · Nudge Cy.",
-    ])
+    // a poll has no Send: each tap sends the selection as it stands then
+    expect(await vote(h, ["1. Nudge Ana"])).toEqual([])
+    expect(await vote(h, ["1. Nudge Ana", "3. Nudge Cy"])).toEqual([])
+    await h.pass()
+    expect(h.answers).toEqual([])
+    h.advance(VOTE_SETTLE_MS)
+    const before = h.fake.sent.length
+    await h.pass()
     expect(h.answers).toEqual([{ answer: { action: "approve", options: [0, 2] }, id: "id-7" }])
+    expect(h.fake.sent.slice(before).flatMap((s) => s.content.text ?? [])).toContain(
+      "Answered #i7: Nudge Ana · Nudge Cy.",
+    )
+    h.advance(VOTE_SETTLE_MS)
+    await h.pass()
+    expect(h.answers).toHaveLength(1)
+  })
+
+  test("a vote taken back before it settles answers nothing", async () => {
+    const h = await withCards([ticks()])
+    await vote(h, ["2. Nudge Bo"])
+    await vote(h, [])
+    h.advance(VOTE_SETTLE_MS)
+    await h.pass()
+    expect(h.answers).toEqual([])
   })
 
   test("a reply of several numbers counts as the same picks, and None of these beside a pick answers nothing", async () => {
