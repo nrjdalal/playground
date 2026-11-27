@@ -351,6 +351,18 @@ const BUILDER_FORM =
 // The words a refusal of a call the hook cannot read gives: the form that runs, which a thread reply, a resolve or a read takes.
 const UNREAD_FIX =
   "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs."
+const XARGS_API_FIX =
+  "Type the endpoint, and -X GET for a read, with no xargs input past them, as gh api -X GET repos/<owner>/<repo>/pulls/5, and a read runs; merge through bun run pr:merge <n>, and move a branch with git push."
+// The flags of the Builder's one hand merge form, pr:merge's README's `gh pr merge <n> --squash --body-file <file> --match-head-commit <head>`, with -R or --repo naming its repository.
+const PINNED_FLAGS = new Set([
+  "--body-file",
+  "--match-head-commit",
+  "--repo",
+  "--squash",
+  "-F",
+  "-R",
+  "-s",
+])
 
 const named = (repo: Repo | undefined, factory: string): boolean =>
   !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory
@@ -417,7 +429,10 @@ async function judgeMerge(
   const head = flags.findLast((f) => f.name === "--match-head-commit")?.value
   const squash = flags.some((f) => f.name === "--squash" || f.name === "-s")
   const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value)
-  if (squash && pinned && !namesRole(command) && (await builder())) return
+  // the one form alone: one pull request, its own flags, and no xargs, whose input may add a word to it (`--admin`) or give the number
+  const own =
+    positionals.length === 1 && flags.every((f) => PINNED_FLAGS.has(f.name)) && !parsed.xargs
+  if (squash && pinned && own && !namesRole(command) && (await builder())) return
   const place = factory || "the factory's repository"
   // a variable, a loop's word or a substitution in the number or -R/--repo leaves the repository open, so the refusal names it and the literal form
   const repoWord = url ? undefined : given.at(-1)
@@ -549,16 +564,26 @@ function restWrite(tail: string, request: ApiRequest): string | undefined {
   if (tail === "merges") return protectedBy("base")
 }
 
-// A gh api write that moves main or canary of the factory's repository, or a GraphQL mutation that merges or moves a ref anywhere, since a node id names no repository.
+// A gh api write that moves main or canary of the factory's repository, or a GraphQL mutation that merges or moves a ref anywhere, since a node id names no repository; under xargs `fed` is a reading of its input (xargsFed): a text it reads is judged as the words it fills, and one it cannot read may give the endpoint, or, appended past a typed -X, the method, since gh takes the last.
 async function judgeApi(
   rest: Word[],
   cmd: Command,
   parsed: Parsed,
   env: Env,
   factory: string,
+  fed?: Fed,
 ): Promise<string | undefined> {
-  const request = await ghApi(rest, cmd, env, parsed.xargs)
-  if (!request) return
+  const { xargs } = parsed
+  const request = await ghApi(rest, cmd, env, fed && !fed.unread ? undefined : xargs)
+  const place = factory || "the factory's repository"
+  if (!request) {
+    if (!fed?.unread) return
+    return `no-protected-push hook refuses this gh api call: ${fed.unread} may give it its endpoint and its method, so it may write main or canary of ${place}. ${XARGS_API_FIX}`
+  }
+  const appended =
+    !!fed?.unread &&
+    !!xargs &&
+    (!xargs.replace || (!!xargs.appends && !rest.some((w) => w.value === xargs.replace)))
   const { endpoint, method } = request
   const path = decodeURIComponent(
     endpoint.value
@@ -580,10 +605,13 @@ async function judgeApi(
     if (!blind) return
     return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`
   }
-  if (method === "GET" || method === "HEAD") return
-  const place = factory || "the factory's repository"
+  const read = method === "GET" || method === "HEAD"
+  if (read && !appended) return
+  const call = read
+    ? "call, whose method what xargs appends may set past its -X,"
+    : `${method} call`
   if (unreadable(endpoint))
-    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`
+    return `no-protected-push hook refuses this gh api ${call}: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`
   const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path)
   if (!m) return
   const repos =
@@ -594,7 +622,7 @@ async function judgeApi(
   const what = restWrite(m[3]!, request)
   if (!what) return
   const fix = /^pulls\/[^/]+\/merge$/.test(m[3]!) ? MERGE_FIX : FIX
-  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`
+  return `no-protected-push hook refuses this gh api ${call}: ${what} of ${place}. ${ROUTE} ${fix}`
 }
 
 const isPush = (args: Word[]) => gitCommand(args).sub?.value === "push"
@@ -657,7 +685,9 @@ async function inspect(
       for (const [k, reading] of readings.entries()) {
         const { head, repos, rest } = ghCommand(reading.args)
         const merge = head[0] === "pr" && head[1] === "merge"
-        if (k > 0 && !merge && !reading.open) continue
+        // a gh api reading of xargs' input is judged where gh runs, never where another program only names it (`xargs grep -l gh api`)
+        const api = head[0] === "api" && (k === 0 || runs)
+        if (k > 0 && !merge && !api && !reading.open) continue
         for (const place of folders) {
           const verdict =
             merge || reading.open
@@ -671,8 +701,8 @@ async function inspect(
                   command,
                   reading.unread,
                 )
-              : head[0] === "api"
-                ? await judgeApi(rest, cmd, parsed, place, factory)
+              : api
+                ? await judgeApi(rest, cmd, parsed, place, factory, k > 0 ? reading : undefined)
                 : undefined
           if (verdict) return verdict
         }

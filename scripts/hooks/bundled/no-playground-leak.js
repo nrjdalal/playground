@@ -11036,6 +11036,16 @@ var MERGE_TAKES = new Set([
 var MERGE_FIX = "Land it with bun run pr:merge <n>, or let merge-on-ready land it.";
 var BUILDER_FORM = "The Builder alone merges by hand, as gh pr merge <n> --squash --body-file <file> --match-head-commit <head> in a call that names no role variable and sources no file, the body passed by file since its text counts as the call's.";
 var UNREAD_FIX = "Spell the query file's path or the endpoint out literally, with no shell variable or substitution, or put the query inline in single quotes, and a read, a thread reply or a resolve runs.";
+var XARGS_API_FIX = "Type the endpoint, and -X GET for a read, with no xargs input past them, as gh api -X GET repos/<owner>/<repo>/pulls/5, and a read runs; merge through bun run pr:merge <n>, and move a branch with git push.";
+var PINNED_FLAGS = new Set([
+  "--body-file",
+  "--match-head-commit",
+  "--repo",
+  "--squash",
+  "-F",
+  "-R",
+  "-s"
+]);
 var named = (repo, factory) => !!repo && `${repo.owner}/${repo.repo}`.toLowerCase() === factory;
 var mayBe = (repos, factory) => !factory || repos.some((repo) => repo === undefined || named(repo, factory));
 var GH_DEFAULT = (env, local) => env.cwd || local.has("GH_REPO") || env.vars.has("GH_REPO") || env.process.GH_REPO ? implicitRepos(env, local) : [undefined];
@@ -11080,7 +11090,8 @@ async function judgeMerge(rest, repos, parsed, env, factory, builder, command, x
   const head = flags.findLast((f) => f.name === "--match-head-commit")?.value;
   const squash = flags.some((f) => f.name === "--squash" || f.name === "-s");
   const pinned = !!head && !unreadable(head) && /^[0-9a-f]{7,40}$/i.test(head.value);
-  if (squash && pinned && !namesRole(command) && await builder())
+  const own = positionals.length === 1 && flags.every((f) => PINNED_FLAGS.has(f.name)) && !parsed.xargs;
+  if (squash && pinned && own && !namesRole(command) && await builder())
     return;
   const place = factory || "the factory's repository";
   const repoWord = url ? undefined : given.at(-1);
@@ -11184,10 +11195,16 @@ function restWrite(tail, request) {
   if (tail === "merges")
     return protectedBy("base");
 }
-async function judgeApi(rest, cmd, parsed, env, factory) {
-  const request = await ghApi(rest, cmd, env, parsed.xargs);
-  if (!request)
-    return;
+async function judgeApi(rest, cmd, parsed, env, factory, fed) {
+  const { xargs } = parsed;
+  const request = await ghApi(rest, cmd, env, fed && !fed.unread ? undefined : xargs);
+  const place = factory || "the factory's repository";
+  if (!request) {
+    if (!fed?.unread)
+      return;
+    return `no-protected-push hook refuses this gh api call: ${fed.unread} may give it its endpoint and its method, so it may write main or canary of ${place}. ${XARGS_API_FIX}`;
+  }
+  const appended = !!fed?.unread && !!xargs && (!xargs.replace || !!xargs.appends && !rest.some((w) => w.value === xargs.replace));
   const { endpoint, method } = request;
   const path = decodeURIComponent(endpoint.value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").replace(/^api\/v3\//, "").split("?")[0]).replace(/\/+$/, "");
   if (path === "graphql" || path === "api/graphql") {
@@ -11203,11 +11220,12 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
       return;
     return `no-protected-push hook refuses this gh api graphql call: it sends a query the hook cannot read, which may merge a pull request or move a branch. ${UNREAD_FIX}`;
   }
-  if (method === "GET" || method === "HEAD")
+  const read = method === "GET" || method === "HEAD";
+  if (read && !appended)
     return;
-  const place = factory || "the factory's repository";
+  const call = read ? "call, whose method what xargs appends may set past its -X," : `${method} call`;
   if (unreadable(endpoint))
-    return `no-protected-push hook refuses this gh api ${method} call: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`;
+    return `no-protected-push hook refuses this gh api ${call}: its endpoint is built at run time, so it may write main or canary of ${place}. ${UNREAD_FIX}`;
   const m = /^repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(path);
   if (!m)
     return;
@@ -11218,7 +11236,7 @@ async function judgeApi(rest, cmd, parsed, env, factory) {
   if (!what)
     return;
   const fix = /^pulls\/[^/]+\/merge$/.test(m[3]) ? MERGE_FIX : FIX;
-  return `no-protected-push hook refuses this gh api ${method} call: ${what} of ${place}. ${ROUTE} ${fix}`;
+  return `no-protected-push hook refuses this gh api ${call}: ${what} of ${place}. ${ROUTE} ${fix}`;
 }
 var isPush = (args) => gitCommand(args).sub?.value === "push";
 async function inspect(raw, environment, checkout) {
@@ -11276,10 +11294,11 @@ async function inspect(raw, environment, checkout) {
       for (const [k, reading] of readings.entries()) {
         const { head, repos, rest } = ghCommand(reading.args);
         const merge = head[0] === "pr" && head[1] === "merge";
-        if (k > 0 && !merge && !reading.open)
+        const api = head[0] === "api" && (k === 0 || runs);
+        if (k > 0 && !merge && !api && !reading.open)
           continue;
         for (const place of folders) {
-          const verdict = merge || reading.open ? await judgeMerge(rest, repos, parsed, place, factory, builder, command, reading.unread) : head[0] === "api" ? await judgeApi(rest, cmd, parsed, place, factory) : undefined;
+          const verdict = merge || reading.open ? await judgeMerge(rest, repos, parsed, place, factory, builder, command, reading.unread) : api ? await judgeApi(rest, cmd, parsed, place, factory, k > 0 ? reading : undefined) : undefined;
           if (verdict)
             return verdict;
         }

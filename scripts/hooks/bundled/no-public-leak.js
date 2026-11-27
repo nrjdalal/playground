@@ -10786,6 +10786,15 @@ var MERGE_TAKES = new Set([
   "-t",
   "--subject"
 ]);
+var PINNED_FLAGS = new Set([
+  "--body-file",
+  "--match-head-commit",
+  "--repo",
+  "--squash",
+  "-F",
+  "-R",
+  "-s"
+]);
 
 // scripts/hooks/read-only.ts
 var READ_FILE = { count: true, operands: true, values: ["-c", "-n"] };
