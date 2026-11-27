@@ -8526,7 +8526,9 @@ async function toolWrites(cmd, name, args, env) {
       return [];
     const input = args.find((a) => a.value.startsWith("if="));
     const from = input && at(input.value.slice(3));
-    return [[path, input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env)]];
+    const text = input ? from ? await existing(from, env) : unread : await stdinOf(cmd, env);
+    const keeps = args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value));
+    return [[path, keeps ? join4([await existing(path, env), text]) : text]];
   }
   if (tool === "sort") {
     const paths = [];
@@ -8543,16 +8545,24 @@ async function toolWrites(cmd, name, args, env) {
   const operands = [];
   let ended = false;
   if (tool === "uniq") {
-    for (const a of args)
-      if (ended || !a.value.startsWith("-") || a.value === "-")
-        operands.push(a);
-      else if (a.value === "--")
+    for (let i = 0;i < args.length; i++) {
+      const v = args[i].value;
+      if (ended || !v.startsWith("-") || v === "-")
+        operands.push(args[i]);
+      else if (v === "--")
         ended = true;
+      else if (/^--(?:skip-fields|skip-chars|check-chars)$/.test(v))
+        i++;
+      else if (/^-[^-]*[fsw]$/.test(v))
+        i++;
+    }
     const path = operands[1] && at(operands[1].value);
     return path ? [[path, unread]] : [];
   }
   let target;
   let symbolic = false;
+  let forced = false;
+  let keeps = false;
   for (let i = 0;i < args.length; i++) {
     const v = args[i].value;
     if (ended || !v.startsWith("-") || v === "-") {
@@ -8567,10 +8577,18 @@ async function toolWrites(cmd, name, args, env) {
       target = args[++i]?.value;
     else if (v === "--symbolic")
       symbolic = true;
+    else if (v === "--force")
+      forced = true;
+    else if (/^--(?:no-clobber|interactive|update|directory)/.test(v))
+      keeps = true;
     else if (!v.startsWith("--"))
       for (let k = 1;k < v.length; k++) {
         if (v[k] === "s")
           symbolic = true;
+        if (v[k] === "f")
+          forced = true;
+        if ((tool === "install" ? "d" : "inu").includes(v[k]))
+          keeps = true;
         if (!COPY_VALUES[tool].includes(v[k]))
           continue;
         const value = v.slice(k + 1) || args[++i]?.value;
@@ -8597,8 +8615,14 @@ async function toolWrites(cmd, name, args, env) {
     const stdin = /^\/dev\/(?:stdin|fd\/0)$/.test(source.value);
     for (const dest of dests) {
       const from = stdin ? undefined : tool === "ln" && symbolic && !isAbsolute2(source.value) && !marked(source.value) ? resolve2(dirname(dest), source.value) : at(source.value);
-      const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
-      const moved = tool === "mv" && from ? from : undefined;
+      const written = from === undefined ? undefined : writtenFile(from, env);
+      const disk = from === undefined || written ? undefined : await readFile(from);
+      if (from !== undefined && !written && disk && (disk.unknown || marked(disk.value)))
+        continue;
+      const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread;
+      const mayKeep = keeps || tool === "ln" && !forced || from !== undefined && !written && !disk;
+      const text = mayKeep ? join4([await existing(dest, env), copied]) : copied;
+      const moved = tool === "mv" && from && !mayKeep ? from : undefined;
       writes.push([dest, text, moved]);
       if (from) {
         for (const [path, written] of env.files)

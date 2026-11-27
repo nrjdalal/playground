@@ -4303,7 +4303,7 @@ const TOOL_WRITERS = /^g?(cp|dd|install|ln|mv|sort|uniq)$/
 // A copy's option letters that take a value (install's group, mode, owner, suffix and target folder; the others' suffix and target folder)
 const COPY_VALUES: Record<string, string> = { cp: "St", install: "gmoSt", ln: "St", mv: "St" }
 
-// The files a writer program other than a redirect or tee writes, each with the text it holds after and, for a move, the path it moved from: a copy's, move's or link's its source's (stdin's for /dev/stdin, a symbolic link's read from the link's folder), dd's its input's, and sort's output file and uniq's output operand text the hook cannot read
+// The files a writer program other than a redirect or tee writes, each with the text it holds after and, for a move, the path it moved from: a copy's, move's or link's its source's (stdin's for /dev/stdin, a symbolic link's read from the link's folder), beside the target's old text when the write may not land, dd's its input's, beside the old text when dd keeps it, and sort's output file and uniq's output operand, past -f, -s and -w's values, text the hook cannot read
 async function toolWrites(
   cmd: Command,
   name: string,
@@ -4321,7 +4321,9 @@ async function toolWrites(
     if (!path) return []
     const input = args.find((a) => a.value.startsWith("if="))
     const from = input && at(input.value.slice(3))
-    return [[path, input ? (from ? await existing(from, env) : unread) : await stdinOf(cmd, env)]]
+    const text = input ? (from ? await existing(from, env) : unread) : await stdinOf(cmd, env)
+    const keeps = args.some((a) => /^(?:conv=.*notrunc|o?seek=|oflag=.*append)/.test(a.value))
+    return [[path, keeps ? join([await existing(path, env), text]) : text]]
   }
   if (tool === "sort") {
     const paths: string[] = []
@@ -4343,14 +4345,20 @@ async function toolWrites(
   const operands: Word[] = []
   let ended = false
   if (tool === "uniq") {
-    for (const a of args)
-      if (ended || !a.value.startsWith("-") || a.value === "-") operands.push(a)
-      else if (a.value === "--") ended = true
+    for (let i = 0; i < args.length; i++) {
+      const v = args[i].value
+      if (ended || !v.startsWith("-") || v === "-") operands.push(args[i])
+      else if (v === "--") ended = true
+      else if (/^--(?:skip-fields|skip-chars|check-chars)$/.test(v)) i++
+      else if (/^-[^-]*[fsw]$/.test(v)) i++
+    }
     const path = operands[1] && at(operands[1].value)
     return path ? [[path, unread]] : []
   }
   let target: string | undefined
   let symbolic = false
+  let forced = false
+  let keeps = false
   for (let i = 0; i < args.length; i++) {
     const v = args[i].value
     if (ended || !v.startsWith("-") || v === "-") {
@@ -4361,9 +4369,13 @@ async function toolWrites(
     else if (v.startsWith("--target-directory=")) target = v.slice(19)
     else if (v === "--target-directory") target = args[++i]?.value
     else if (v === "--symbolic") symbolic = true
+    else if (v === "--force") forced = true
+    else if (/^--(?:no-clobber|interactive|update|directory)/.test(v)) keeps = true
     else if (!v.startsWith("--"))
       for (let k = 1; k < v.length; k++) {
         if (v[k] === "s") symbolic = true
+        if (v[k] === "f") forced = true
+        if ((tool === "install" ? "d" : "inu").includes(v[k])) keeps = true
         if (!COPY_VALUES[tool].includes(v[k])) continue
         const value = v.slice(k + 1) || args[++i]?.value
         if (v[k] === "t") target = value
@@ -4392,8 +4404,17 @@ async function toolWrites(
         : tool === "ln" && symbolic && !isAbsolute(source.value) && !marked(source.value)
           ? resolve(dirname(dest), source.value)
           : at(source.value)
-      const text = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
-      const moved = tool === "mv" && from ? from : undefined
+      const written = from === undefined ? undefined : writtenFile(from, env)
+      const disk = from === undefined || written ? undefined : await readFile(from)
+      // a source the line did not write and the hook cannot read from disk (a binary) leaves its target as canary read it
+      if (from !== undefined && !written && disk && (disk.unknown || marked(disk.value))) continue
+      const copied = stdin ? await stdinOf(cmd, env) : from ? await existing(from, env) : unread
+      // a write that may not land (no clobber, a link not forced, a source not there) keeps the target's old text beside the new
+      const mayKeep =
+        keeps || (tool === "ln" && !forced) || (from !== undefined && !written && !disk)
+      const text = mayKeep ? join([await existing(dest, env), copied]) : copied
+      // a move that may not land leaves its source in place too
+      const moved = tool === "mv" && from && !mayKeep ? from : undefined
       writes.push([dest, text, moved])
       // a folder copied or moved carries each file the line wrote under it
       if (from)

@@ -294,6 +294,46 @@ const writesRun = (): Row[] => [
     "a script in a folder moved onto its own path by ./, then run",
     `mkdir d; echo 'touch ${SCRIPT}' > d/run.sh; mv d ./d; sh d/run.sh`,
   ],
+  [
+    "a script kept by a cp -n of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; cp -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script kept by a cp -i of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; cp -i a.sh run.sh < /dev/null; sh run.sh`,
+  ],
+  [
+    "a script kept by a mv -n of a plain one onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script a mv -n leaves at its source, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch ${SCRIPT}' > a.sh; mv -n a.sh run.sh; sh a.sh`,
+  ],
+  [
+    "a script kept by an ln -s with no -f onto it, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script kept by a cp from a source not there, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; cp no-such-3067.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a script whose tail a dd conv=notrunc keeps, then run",
+    `echo 'touch ${SCRIPT}' > run.sh; echo ':' | dd of=run.sh conv=notrunc; sh run.sh`,
+  ],
+  [
+    "a script uniq -f 1 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -f 1 in.txt run.sh; sh run.sh`,
+  ],
+  [
+    "a script uniq -s 1 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -s 1 in.txt run.sh; sh run.sh`,
+  ],
+  [
+    "a script uniq -w 9 writes, then run",
+    `echo 'touch ${SCRIPT}' > in.txt; uniq -w 9 in.txt run.sh; sh run.sh`,
+  ],
 ]
 const writeControls = (): Row[] => [
   ["a plain script written in another case, then run", `echo 'touch out.log' > Run.sh; sh run.sh`],
@@ -360,6 +400,32 @@ const writeControls = (): Row[] => [
     "a plain script in a folder moved onto its own path by ./, then run",
     `mkdir d; echo 'touch out.log' > d/run.sh; mv d ./d; sh d/run.sh`,
   ],
+  [
+    "a plain script kept by a cp -n of a plain one onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; cp -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a mv -n of a plain one onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script a mv -n leaves at its source, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; mv -n a.sh run.sh; sh a.sh`,
+  ],
+  [
+    "a plain script kept by an ln -s with no -f onto it, then run",
+    `echo 'touch out.log' > run.sh; echo 'touch out.log' > a.sh; ln -s a.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script kept by a cp from a source not there, then run",
+    `echo 'touch out.log' > run.sh; cp no-such-3067.sh run.sh; sh run.sh`,
+  ],
+  [
+    "a plain script whose tail a dd conv=notrunc keeps, then run",
+    `echo 'touch out.log' > run.sh; echo ':' | dd of=run.sh conv=notrunc; sh run.sh`,
+  ],
+  ["a program copied from the system, then run by its path", "cp /bin/ls t; ./t"],
+  ["a program copied from the system, then run by sh", "cp /bin/ls t; sh t"],
 ]
 // shell.ts reads a script's ~ as the process's homedir() while this test sets the root's home by env HOME, so the ~ glob row is judged in the process worktree alone, where the two are one home
 const worktreeRuns = (): Row[] => [
