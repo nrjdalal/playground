@@ -684,22 +684,42 @@ test(
   within(2),
 )
 
-test("slotted puts the build behind run-slot.sh under the worktree's name, and leaves it bare under a held slot or with no run-slot.sh (PG-3212)", () => {
+test("slotted puts the build behind run-slot.sh under the name given, and leaves it bare under a held slot or with no run-slot.sh (PG-3212)", () => {
   const argv = ["turbo", "run", "build"]
   const slot = "/data/ops/run-slot.sh"
-  expect(prebuild.slotted(argv, "/w/PG-1 my tree", {}, slot)).toEqual([
+  expect(prebuild.slotted(argv, "abc1de-worker", {}, slot)).toEqual([
     slot,
-    "prebuild-PG-1-my-tree",
+    "abc1de-worker",
     "--",
     ...argv,
   ])
-  expect(prebuild.slotted(argv, "/w/tree", { RUN_SLOT_HELD: "full-1 42" }, slot)).toEqual(argv)
-  expect(prebuild.slotted(argv, "/w/tree", { RUN_SLOT_NICE: "10" }, slot)).toEqual(argv)
-  expect(prebuild.slotted(argv, "/w/tree", {}, null)).toEqual(argv)
+  expect(prebuild.slotted(argv, "abc1de-worker", { RUN_SLOT_HELD: "full-1 42" }, slot)).toEqual(
+    argv,
+  )
+  expect(prebuild.slotted(argv, "abc1de-worker", { RUN_SLOT_NICE: "10" }, slot)).toEqual(argv)
+  expect(prebuild.slotted(argv, "abc1de-worker", {}, null)).toEqual(argv)
+})
+
+// run-slot ranks a run, picks it for a priority and spares it under focus by its session's name, and records the name of each named run from a worktree as that worktree's owner, which a prebuild-<worktree> name would overwrite with a name it knows no session by
+test("slotWho names the session run-slot records as the worktree's owner, and prebuild-<worktree> with no record, an empty one, or one that names no session (PG-3212)", () => {
+  const ops = mkdtempSync(join(tmpdir(), "prebuild-ops-"))
+  try {
+    expect(prebuild.slotWho("/w/PG-1 my tree", ops)).toBe("prebuild-PG-1-my-tree")
+    mkdirSync(join(ops, "run-slot.owner"))
+    const record = join(ops, "run-slot.owner", "PG-1-my-tree")
+    writeFileSync(record, "abc1de-worker\n")
+    expect(prebuild.slotWho("/w/PG-1 my tree", ops)).toBe("abc1de-worker")
+    for (const owner of ["", "prebuild-PG-1-my-tree\n", "commit-PG-1-my-tree\n", "a b\n"]) {
+      writeFileSync(record, owner)
+      expect(prebuild.slotWho("/w/PG-1 my tree", ops)).toBe("prebuild-PG-1-my-tree")
+    }
+  } finally {
+    rmSync(ops, { force: true, recursive: true })
+  }
 })
 
 test(
-  "test:file's due build goes through the data folder's run-slot.sh, in place under a held slot, and with nothing due takes no slot (PG-3212)",
+  "test:file's due build goes through the data folder's run-slot.sh under the worktree's owner once run-slot records one, in place under a held slot, and with nothing due takes no slot (PG-3212)",
   () => {
     const { dir, log, run } = clone()
     try {
@@ -723,11 +743,19 @@ test(
       expect(log().split("\n").filter(Boolean).slice(2)).toEqual([
         "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
       ])
+      rmSync(join(dir, "packages/one/dist"), { force: true, recursive: true })
+      mkdirSync(join(dir, "data/ops/run-slot.owner"))
+      writeFileSync(join(dir, "data/ops/run-slot.owner", basename(dir)), "abc1de-worker\n")
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean).slice(3)).toEqual([
+        "slot abc1de-worker --",
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
   },
-  within(3),
+  within(4),
 )
 
 // issue 1964: a test's child process may import a package no reached source names, so test:file builds every shared package whose dist is missing, whatever its files import
