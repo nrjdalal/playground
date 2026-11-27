@@ -342,7 +342,7 @@ const retiredOf = (path: string, home: string): string | undefined => {
   return retiredPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
 }
 
-// The owner's Remove on an Inbox card for one exact path: the card's id and the bytes it showed, which the path must still hold.
+// An approved Remove on the nightly-clean list for one exact path: the list's id (its card) and the bytes it listed, which the path must still hold.
 export type Approved = { bytes: number; card: string }
 
 // The bytes a tree holds as the unused list shows them and an approved removal checks them: each real file once, a hard link counted once, a symlink and a folder adding nothing; 0 for a path that is gone.
@@ -366,7 +366,7 @@ const rehearsalOf = (path: string, home: string): string | undefined => {
   return own === abs && rehearsalPlace(own, home) && lstat(own)?.isDirectory() ? own : undefined
 }
 
-// Why an approved path is not the one its card names as the owner saw it, or null: a path written relative or with a `..`, a symlink at it or on its way, or a size other than the card's.
+// Why an approved path is not the one its card names as the list showed it, or null: a path written relative or with a `..`, a symlink at it or on its way, or a size other than the card's.
 const approvedRefusal = (path: string, approved: Approved): string | null => {
   if (!isAbsolute(path) || path.split(sep).includes(".."))
     return `${path} is not written as one absolute path with no ..; card ${approved.card} names its path whole`

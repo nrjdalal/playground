@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-extension-repo-write"
+import { remoteDefault } from "../../../scripts/hooks/no-playground-leak"
 import { NOT_RUN as ENGINE_NOT_RUN } from "../../../scripts/hooks/shell"
 import { storeWith } from "./render-set"
 
@@ -15,6 +16,10 @@ const OTHER = "https://github.com/acme/tools.git"
 const A = "repos/quillco/acme-skills"
 const NOT_RUN = "none of its commands ran"
 const dirs: Record<string, string> = {}
+// A remote name git would read as an option of ls-remote, which runs the program it names
+const DASHED = "--upload-pack=touch"
+const HUNG = ["r1", "r2", "r3"]
+const allowed = process.env.GIT_ALLOW_PROTOCOL
 let scratch = ""
 let stored = ""
 
@@ -42,6 +47,8 @@ async function store(name: string, values: Record<string, unknown>, login?: stri
 }
 
 beforeAll(async () => {
+  // the fixtures' GitHub URLs are made up, so the hook's ls-remote of one fails at once rather than over the network, as a remote it cannot read does; afterAll puts it back
+  process.env.GIT_ALLOW_PROTOCOL = "file"
   scratch = await mkdtemp(join(tmpdir(), "no-extension-repo-write-"))
   stored = await store("stored", { "ext.repos": { acme: "quillco/acme-skills" } }, "quillco")
   git(join(stored, "extensions", "acme"), "remote", "add", "origin", `${EXT}-renamed.git`)
@@ -122,9 +129,45 @@ beforeAll(async () => {
     "x",
   )
   git(dirs.detached, "checkout", "-q", "--detach")
+  // PG-3185: a clone of a local copy takes the copy's checked-out branch, feature, as its origin/HEAD; restored fetches from a bare stand-in for the guarded repository, whose HEAD is main, and restoredoff from the guarded URL, which the hook cannot read here, and both push to the guarded one
+  const upstream = join(scratch, "work", "upstream.git")
+  git(scratch, "init", "-q", "--bare", "-b", "main", upstream)
+  git(dirs.tagged, "push", "-q", upstream, "HEAD:main", "HEAD:feature")
+  git(scratch, "clone", "-q", "-b", "feature", upstream, join(scratch, "work", "copy"))
+  for (const [name, fetch] of [
+    ["restored", upstream],
+    ["restoredoff", `${EXT}.git`],
+  ]) {
+    dirs[name] = join(scratch, "work", name)
+    git(scratch, "clone", "-q", join(scratch, "work", "copy"), dirs[name])
+    git(dirs[name], "remote", "set-url", "origin", fetch)
+    git(dirs[name], "remote", "set-url", "--push", "origin", `${EXT}.git`)
+  }
+  // dashed, on feature, configures a remote named DASHED and a local HEAD of it naming feature, and holds a bare repository at ./loose, whose HEAD is main, that no remote names; hung has three ssh remotes whose local HEAD names feature
+  for (const name of ["dashed", "hung"]) {
+    dirs[name] = join(scratch, "work", name)
+    git(scratch, "clone", "-q", join(scratch, "work", "copy"), dirs[name])
+    git(dirs[name], "remote", "set-url", "origin", `${EXT}.git`)
+  }
+  const remotes: [string, string][] = [
+    ["dashed", DASHED],
+    ["dashed", "loose"],
+    ...HUNG.map((r): [string, string] => ["hung", r]),
+  ]
+  for (const [name, remote] of remotes) {
+    if (name === "hung")
+      git(dirs.hung, "remote", "add", remote, `ssh://git@made-up.invalid/${remote}.git`)
+    else if (remote === DASHED) git(dirs.dashed, "config", `remote.${remote}.url`, `${EXT}.git`)
+    git(dirs[name], "update-ref", `refs/remotes/${remote}/feature`, "HEAD")
+    git(dirs[name], "symbolic-ref", `refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/feature`)
+  }
+  git(scratch, "init", "-q", "--bare", "-b", "main", join(dirs.dashed, "loose"))
+  git(dirs.dashed, "push", "-q", join(dirs.dashed, "loose"), "HEAD:main")
 })
 
 afterAll(async () => {
+  if (allowed === undefined) delete process.env.GIT_ALLOW_PROTOCOL
+  else process.env.GIT_ALLOW_PROTOCOL = allowed
   await rm(scratch, { force: true, recursive: true })
 })
 
@@ -637,6 +680,11 @@ describe("a push of branches other than the default passes, and every other push
       ["a force-push to a branch", "git push --force-with-lease origin HEAD:feature", "ext"],
       ["a force-push to a branch by +", "git push origin +HEAD:feature", "ext"],
       ["main when the remote's HEAD names another branch", "git push origin HEAD:main2", "trunk"],
+      [
+        "a branch a clone of a local copy's origin/HEAD names",
+        "git push origin feature",
+        "restored",
+      ],
       ["the merge gate", "bun run ext:merge quillco/acme-skills 3"],
       ["a draft marked ready", "gh pr ready 3 -R quillco/acme-skills"],
     ]),
@@ -653,6 +701,16 @@ describe("a push of branches other than the default passes, and every other push
       ["the default in another case", "git push origin HEAD:Main", "ext"],
       ["master", `git push ${EXT} HEAD:master`],
       ["the remote's HEAD branch", "git push origin HEAD:trunk", "trunk"],
+      [
+        "the remote's own default from a clone of a local copy",
+        "git push origin HEAD:main",
+        "restored",
+      ],
+      [
+        "the local origin/HEAD's branch while the remote cannot be read",
+        "git push origin feature",
+        "restoredoff",
+      ],
       ["a force-push to the default", `git push -f ${EXT} HEAD:main`],
       ["one of two refspecs the default", "git push origin HEAD:feature HEAD:main", "ext"],
       ["HEAD with no destination", "git push origin HEAD", "ext"],
@@ -703,6 +761,11 @@ describe("a commit on a branch other than the default passes, and every other co
     rows([
       ["a commit on the default", "git commit -m x", "ext"],
       ["a commit on the remote's HEAD branch", "git commit -m x", "trunkhead"],
+      [
+        "a commit on the local origin/HEAD's branch while the remote cannot be read",
+        "git commit -m x",
+        "restoredoff",
+      ],
       ["a commit on a detached HEAD", "git commit -m x", "detached"],
       ["a commit with -c on a branch", "git -c user.name=x commit -m x", "feature"],
       ["a commit with --git-dir on a branch", "git --git-dir=.git commit -m x", "feature"],
@@ -955,4 +1018,42 @@ describe("it fails closed", () => {
     expect(reason).toContain("playground ext init")
     for (const read of ["ls", "cat x.md"]) expect(await run(bash(read), nameless)).toBeUndefined()
   })
+})
+
+// PG-3185: the default a commit's branchHead and a push's branchOnly both read, here through a clone whose fetch URL is a local path, which the commit rule does not place
+describe("remoteDefault reads the remote's own HEAD past the local origin/HEAD", () => {
+  test.each([
+    ["the remote's own HEAD when the local one names another branch", "restored", "main"],
+    ["the local origin/HEAD when the remote cannot be read", "restoredoff", "feature"],
+    ["the local origin/HEAD of a GitHub remote the test cannot read", "trunk", "trunk"],
+    ["none when the local origin/HEAD is unset", "tagged", undefined],
+  ])("%s", (_, dir, want) => {
+    expect(remoteDefault(dirs[dir], "origin")).toBe(want)
+  })
+
+  test("the local HEAD of a name no remote configures, which git would read as a path", () => {
+    expect(remoteDefault(dirs.dashed, "loose")).toBe("feature")
+  })
+
+  test("a remote named as an option keeps its local default, its commit and push stay refused, and the program it names never runs", async () => {
+    expect(remoteDefault(dirs.dashed, DASHED)).toBe("feature")
+    await refused(bash("git commit -m x", dirs.dashed))
+    await refused(bash(`git push -- ${DASHED} feature`, dirs.dashed))
+    expect(await Bun.file(join(dirs.dashed, "HEAD")).exists()).toBe(false)
+  })
+
+  test("a commit's reads of three hung remotes share one 5 s budget and keep each local default", async () => {
+    const before = [process.env.GIT_ALLOW_PROTOCOL, process.env.GIT_SSH_COMMAND]
+    process.env.GIT_ALLOW_PROTOCOL = "file:ssh"
+    process.env.GIT_SSH_COMMAND = "sh -c 'sleep 7' x"
+    try {
+      const start = performance.now()
+      await refused(bash("git commit -m x", dirs.hung))
+      expect(performance.now() - start).toBeLessThan(7_000)
+    } finally {
+      process.env.GIT_ALLOW_PROTOCOL = before[0]
+      if (before[1] === undefined) delete process.env.GIT_SSH_COMMAND
+      else process.env.GIT_SSH_COMMAND = before[1]
+    }
+  }, 30_000)
 })
