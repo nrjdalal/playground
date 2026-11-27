@@ -114,6 +114,14 @@ export const chunksOf = (files: string[]): string[][] =>
 // The test sandbox's exit on its deadline (timeout(1)'s code).
 const DEADLINE = 124
 
+// Pure: what cut a run short, or undefined for a run that ended on its own: the sandbox's deadline by its exit, or a pytest run's session timeout by the line pytest-timeout prints, since that run stops between tests and exits 1 with every case it ran passed.
+export const cutOf = (run: { code: number; out: string }, runner: Runner): string | undefined => {
+  if (run.code === DEADLINE) return "the sandbox's deadline"
+  const secs =
+    runner === "pytest" ? /session-timeout: ([\d.]+) sec exceeded/.exec(run.out)?.[1] : undefined
+  return secs === undefined ? undefined : `pytest's session timeout (${secs} s)`
+}
+
 // GH_STALE_MS in packages/scripts/src/gh-read.ts, in seconds, which a test holds equal; a skill's script imports nothing outside its folder, so ghDown's rule is kept here too.
 export const GH_STALE_SECONDS = 120
 
@@ -143,18 +151,25 @@ export const io = {
     return stdout
   },
   sleep: (s: number): Promise<void> => Bun.sleep(s * 1000),
-  // One run of test files in the clone through run-slot, its exit code (0 green), its junit report written to <report>.
+  // One run of test files in the clone through run-slot, its exit code (0 green) and, for pytest alone, its output, which cutOf reads for the session-timeout line and which prints once the run ends; every other runner prints as it goes, since a bun chunk can run 20 minutes, its junit report written to <report>.
   tests: (
     session: string,
     clone: string,
     files: string[],
     report: string,
     runner: Runner,
-  ): number =>
-    Bun.spawnSync(testsArgv(session, clone, files, report, runner), {
-      stdout: "inherit",
-      stderr: "inherit",
-    }).exitCode ?? 1,
+  ): { code: number; out: string } => {
+    const argv = testsArgv(session, clone, files, report, runner)
+    if (runner !== "pytest")
+      return {
+        code: Bun.spawnSync(argv, { stdout: "inherit", stderr: "inherit" }).exitCode ?? 1,
+        out: "",
+      }
+    const run = Bun.spawnSync(argv, { stdout: "pipe", stderr: "pipe" })
+    process.stdout.write(run.stdout)
+    process.stderr.write(run.stderr)
+    return { code: run.exitCode ?? 1, out: `${run.stdout}${run.stderr}` }
+  },
   time: (): number => Date.now() / 1000,
 }
 
@@ -1187,7 +1202,7 @@ export const cmdMerge = (...args: string[]): void => {
   const stale = tests.length && runner === "pytest" ? staleVenv(clone) : undefined
   if (stale) {
     console.log(
-      `STALE-VENV on ${baseSha.slice(0, 7)}: ${join(clone, ".venv")} points at ${stale}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run uv sync in ${clone}, then the merge again`,
+      `STALE-VENV on ${baseSha.slice(0, 7)}: ${join(clone, ".venv")} points at ${stale}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run ~/.playground/ops/run-slot.sh ${session} -- /usr/bin/env -C ${clone} uv sync${existsSync(join(clone, "uv.lock")) ? " --frozen" : ""}, then the merge again`,
     )
     process.exitCode = 1
     return
@@ -1204,14 +1219,20 @@ export const cmdMerge = (...args: string[]): void => {
     for (const f of files) cases.set(f, casesIn(xml, f))
     return xml
   }
-  // A run the sandbox's deadline cut keeps the failed cases its report names as red; each other file it ran goes in cut, which TIMEOUT alone names and every red state leaves out, so a cut never reads as a red or a green.
-  const timedOut: { label: string; files: string[] }[] = []
+  // A run the sandbox's deadline or pytest's session timeout cut keeps the failed cases its report names as red; each other file it ran goes in cut, which TIMEOUT alone names and every red state leaves out, so a cut never reads as a red or a green.
+  const timedOut: { by: string; label: string; files: string[] }[] = []
   const cut = new Set<string>()
-  const timeout = (files: string[], xml: string | undefined, label: string): string[] => {
+  const timeout = (
+    files: string[],
+    xml: string | undefined,
+    label: string,
+    by: string,
+  ): string[] => {
     const { failed } = redIn(xml, files)
     const unreported = files.filter((f) => !failed.includes(f))
     for (const f of unreported) cut.add(f)
     timedOut.push({
+      by,
       label: `${label} (${files.length} file${files.length === 1 ? "" : "s"})`,
       files: unreported,
     })
@@ -1219,19 +1240,20 @@ export const cmdMerge = (...args: string[]): void => {
   }
   const redAlone = (f: string, label: string): boolean => {
     rmSync(report, { force: true })
-    const code = io.tests(session, clone, [f], report, runner!)
-    if (code === DEADLINE)
-      return timeout([f], readReport([f]), `${label}, a lone run of ${f}`).length > 0
-    if (code !== 0) return true
+    const run = io.tests(session, clone, [f], report, runner!)
+    const by = cutOf(run, runner!)
+    if (by) return timeout([f], readReport([f]), `${label}, a lone run of ${f}`, by).length > 0
+    if (run.code !== 0) return true
     const xml = readReport([f])
     return xml !== undefined && redIn(xml, [f]).leftOut.length === 0
   }
   const chunkRed = (files: string[], stage: string, label: string): string[] => {
     rmSync(report, { force: true })
-    const code = io.tests(session, clone, files, report, runner!)
-    if (code === 0) return []
+    const run = io.tests(session, clone, files, report, runner!)
+    if (run.code === 0) return []
     const xml = readReport(files)
-    if (code === DEADLINE) return timeout(files, xml, `${stage}, ${label}`)
+    const by = cutOf(run, runner!)
+    if (by) return timeout(files, xml, `${stage}, ${label}`, by)
     if (files.length === 1) return files
     const { failed, leftOut } = redIn(xml, files)
     const named = files.filter(
@@ -1295,9 +1317,9 @@ export const cmdMerge = (...args: string[]): void => {
   const canaryOnly = onMerge.filter(
     (f) => !atHead.includes(f) && !atBase.includes(f) && !cut.has(f),
   )
-  for (const { label, files } of timedOut)
+  for (const { by, label, files } of timedOut)
     console.log(
-      `TIMEOUT on ${c7}: ${label} hit the sandbox's deadline, so the files it had not reported read neither red nor clean: ${files.join(" ")}`,
+      `TIMEOUT on ${c7}: ${label} hit ${by}, so the files it had not reported read neither red nor clean: ${files.join(" ")}`,
     )
   if (timedOut.length) process.exitCode = 1
   if (canaryOnly.length) {
@@ -1443,7 +1465,7 @@ const USAGE = `A PR's review state, read from GitHub and git each time, with no 
   state.ts fresh <owner/repo> <n> <read-at> <digest>    exit 1 naming each body edit, comment, thread reply or review since pr's read line, else FRESH; chain it before the verdict's post
   state.ts wait <owner/repo> <n> <sha>                  block until the PR's head moves off <sha> or the PR closes (REST, every 5 minutes)
   state.ts checks <owner/repo> <n> <sha> [<check>...]  as wait, and also return once each gate check concludes at <sha>, one CHECK <conclusion> <name> line each; a red from before it started waits for its re-run. The gate checks are the names given after <sha>, else Audit, Lint, and Build and test
-  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline cut (exit 124) prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none, and prints STALE-VENV (exit 1) and runs none when a .pth in that .venv names a folder outside the clone, as a moved clone's old .venv does, uv sync in the clone its fix; the clone ends at <head>
+  state.ts merge <clone> <head> <base> <session>        the head's merge with <base>: CONFLICT <files> (exit 1); LOCK-CHANGED <files>, no tests run; else the touched tests on a local merge through run-slot as <session>, kept on this machine, the reds their junit report names run again on the merge, at the head and at <base>: CANARY-RED <tests> (exit 1), BATCH-RED <tests> for a red only beside the others, naming the issue to open or link for each in place of a second rerun, or CLEAN, then HEAD-RED (the PR's own), BASE-RED (canary's own, a red the head shares counted there when the head's failed cases are read and all fail at <base>) and NO-REPORT (a red run that named no file, all its files counted red); each run goes in chunks of at most 200 files, and a chunk the sandbox's deadline (exit 124) or pytest's session timeout (its session-timeout line) cut prints TIMEOUT <where>, chunk <i> of <n> (exit 1), its files reading red only for a failed case its report names; a clone with no test:file script runs pytest through <clone>/.venv/bin/python when it holds a pyproject.toml, else prints NO-RUNNER (exit 1) and runs none, and prints STALE-VENV (exit 1) and runs none when a .pth in that .venv names a folder outside the clone, as a moved clone's old .venv does, naming the fix, uv sync in the clone through run-slot (--frozen when it holds a uv.lock); the clone ends at <head>
   state.ts merge --conflict-only <clone> <head> <base>  the head's merge with <base> by merge-tree alone, running none of the PR's code (an outside author's PR): CONFLICT <files> (exit 1), else CLEAN
   state.ts touched-tests <clone> <base> <head>          the tests a change touches, one path per line, by SKILL.md's four rules
 

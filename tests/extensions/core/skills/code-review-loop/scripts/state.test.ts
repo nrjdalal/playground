@@ -1,4 +1,4 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, expect, spyOn, test } from "bun:test"
 import {
   mkdirSync,
   mkdtempSync,
@@ -2014,7 +2014,7 @@ const junit = (files: string[], red: string[]): string =>
     )
     .join("")}</testsuites>`
 
-// The fake run: `red` names a run's red files, `report` writes its report (undefined writes none), and `exit` gives its exit code, 0 when none is red and 1 otherwise unless the case gives its own.
+// The fake run: `red` names a run's red files, `report` writes its report (undefined writes none), `exit` gives its exit code, 0 when none is red and 1 otherwise unless the case gives its own, and `out` its output, empty unless the case gives its own.
 const runMerge = (
   repo: string,
   head: string,
@@ -2023,6 +2023,7 @@ const runMerge = (
   args: string[] = [repo, head, "canary", "probe-worker"],
   report: (files: string[], red: string[]) => string | undefined = junit,
   exit: (files: string[], red: string[]) => number = (_files, reds) => (reds.length ? 1 : 0),
+  out: (files: string[]) => string = () => "",
 ): { calls: string[][]; code: number | undefined; lines: string[]; runners: string[] } => {
   const real = { ...state.io }
   const calls: string[][] = []
@@ -2033,7 +2034,7 @@ const runMerge = (
     const reds = red(clone, files)
     const xml = report(files, reds)
     if (xml !== undefined) writeFileSync(path, xml)
-    return exit(files, reds)
+    return { code: exit(files, reds), out: out(files) }
   }
   const lines: string[] = []
   const realLog = console.log
@@ -2605,10 +2606,11 @@ const venvRepo = (src: (repo: string) => string): [string, string] => {
   return [repo, head]
 }
 
-test("13m merge on a Python clone whose .venv points at another folder names it and the fix, and runs no test (#3124)", () => {
+test("13m merge on a Python clone whose .venv points at another folder names it and the run-slot uv sync that fixes it, and runs no test (#3124, #3168)", () => {
   const old = join(scratch(), "old-clone", "src")
   mkdirSync(old, { recursive: true })
   const [repo, head] = venvRepo(() => old)
+  writeFiles(repo, { "uv.lock": "version = 1\n" })
   const canary = git(repo, "rev-parse", "--short=7", "canary")
   // every run exits 4 with no report, as pytest does when conftest.py's import of the project fails through the old folder's .pth
   const out = runMerge(
@@ -2620,7 +2622,7 @@ test("13m merge on a Python clone whose .venv points at another folder names it 
     () => 4,
   )
   expect(out.lines).toEqual([
-    `STALE-VENV on ${canary}: ${join(repo, ".venv")} points at ${old}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run uv sync in ${repo}, then the merge again`,
+    `STALE-VENV on ${canary}: ${join(repo, ".venv")} points at ${old}, outside the clone, as a moved clone's old .venv does, so no touched test ran; run ~/.playground/ops/run-slot.sh probe-worker -- /usr/bin/env -C ${repo} uv sync --frozen, then the merge again`,
   ])
   expect(out.code).toBe(1)
   expect(out.calls).toEqual([])
@@ -2633,6 +2635,99 @@ test("13n merge on a Python clone whose .venv points at the clone itself runs py
   const out = runMerge(repo, head)
   expect(out.lines).toEqual([`CLEAN on ${canary}: 1 touched tests`])
   expect([...new Set(out.runners)]).toEqual(["pytest"])
+})
+
+// Three Python test files on a fresh .venv; a run of more than one file hits pytest's session timeout after test_a and test_b, so its report names their cases alone and it exits 1, as pytest-timeout's shouldfail makes it, with the line it prints.
+const sessionCutRepo = (b: string): [string, string] => {
+  const [repo, head] = mergeRepo(
+    {
+      "tests/test_a.py": "green, changed\n",
+      "tests/test_b.py": b,
+      "tests/test_c.py": "green, changed\n",
+    },
+    { "b.txt": "b, from canary\n" },
+    { ...PY_BASE, "tests/test_b.py": "green\n", "tests/test_c.py": "green\n" },
+  )
+  writeFiles(repo, {
+    ".venv/bin/python": "",
+    ".venv/lib/python3.13/site-packages/_editable_impl_a.pth": `${join(repo, "src")}\n`,
+  })
+  return [repo, head]
+}
+const sessionCut = (repo: string, head: string) =>
+  runMerge(
+    repo,
+    head,
+    undefined,
+    undefined,
+    (files, reds) =>
+      junit(files.length > 1 ? files.filter((f) => !f.endsWith("test_c.py")) : files, reds),
+    (files, reds) => (files.length > 1 || reds.length ? 1 : 0),
+    (files) =>
+      files.length > 1
+        ? "2 passed\n!!!!!!!!!!!!!!!!!!!!! session-timeout: 600.0 sec exceeded !!!!!!!!!!!!!!!!!!!!!\n"
+        : "1 passed\n",
+  )
+
+test("13p merge reads a pytest run its session timeout cut, with passed cases and no failure, as TIMEOUT naming where, never NO-REPORT or BATCH-RED (#3169)", () => {
+  const [repo, head] = sessionCutRepo("green, changed\n")
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = sessionCut(repo, head)
+  expect(out.lines).toEqual([
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (3 files) hit pytest's session timeout (600.0 s), so the files it had not reported read neither red nor clean: tests/test_a.py tests/test_b.py tests/test_c.py`,
+  ])
+  expect(out.code).toBe(1)
+  expect(out.calls).toHaveLength(1)
+  expect(git(repo, "rev-parse", "HEAD")).toBe(head)
+})
+
+test("13q merge still reads a real failed case in a pytest run its session timeout cut as the PR's own red (#3169)", () => {
+  const [repo, head] = sessionCutRepo("RED in the PR\n")
+  const canary = git(repo, "rev-parse", "--short=7", "canary")
+  const out = sessionCut(repo, head)
+  expect(out.lines).toEqual([
+    `TIMEOUT on ${canary}: on the merge, chunk 1 of 1 (3 files) hit pytest's session timeout (600.0 s), so the files it had not reported read neither red nor clean: tests/test_a.py tests/test_c.py`,
+    "HEAD-RED: tests/test_b.py",
+  ])
+  expect(out.code).toBe(1)
+})
+
+test("13r cutOf names the sandbox's deadline by its exit and pytest's session timeout by its line, and only for a pytest run (#3169)", () => {
+  const line = "!!! session-timeout: 600.0 sec exceeded !!!"
+  expect(state.cutOf({ code: 124, out: "" }, "bun")).toBe("the sandbox's deadline")
+  expect(state.cutOf({ code: 1, out: line }, "pytest")).toBe("pytest's session timeout (600.0 s)")
+  expect(state.cutOf({ code: 1, out: line }, "bun")).toBeUndefined()
+  expect(state.cutOf({ code: 1, out: "1 failed" }, "pytest")).toBeUndefined()
+})
+
+test("13s io.tests pipes a pytest run's output for cutOf and prints it, and leaves every other runner's output inherited, so a bun chunk prints as it goes (#3169)", () => {
+  const seen: unknown[] = []
+  const spawn = spyOn(Bun, "spawnSync").mockImplementation(((_argv: string[], opts: unknown) => {
+    seen.push(opts)
+    return {
+      exitCode: 1,
+      stderr: Buffer.from(""),
+      stdout: Buffer.from("session-timeout: 600.0 sec exceeded\n"),
+    }
+  }) as unknown as typeof Bun.spawnSync)
+  const write = spyOn(process.stdout, "write").mockImplementation(() => true)
+  try {
+    expect(state.io.tests("probe-worker", "/c", ["t.py"], "/r.xml", "pytest")).toEqual({
+      code: 1,
+      out: "session-timeout: 600.0 sec exceeded\n",
+    })
+    expect(state.io.tests("probe-worker", "/c", ["t.test.ts"], "/r.xml", "bun")).toEqual({
+      code: 1,
+      out: "",
+    })
+  } finally {
+    spawn.mockRestore()
+    write.mockRestore()
+  }
+  expect(seen).toEqual([
+    { stderr: "pipe", stdout: "pipe" },
+    { stderr: "inherit", stdout: "inherit" },
+  ])
 })
 
 test("13o staleVenv reads each .pth file's absolute path lines alone: an import line, a relative line, the clone's own folder, a folder named .pth, a dangling .pth link and no .venv name none, and a linked .pth is read through (#3124)", () => {
