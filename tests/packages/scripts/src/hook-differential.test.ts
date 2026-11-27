@@ -13,7 +13,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs"
-import os, { tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 
 import {
@@ -37,6 +37,7 @@ import {
   store,
   stored,
   sweep,
+  TAKES_LOAD,
   TAKES_MAIN,
   type Check,
   unloaded,
@@ -761,47 +762,56 @@ describe("a GLM replay", () => {
 
 // A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no checkout of the repository, so the differential hands both sides the head's (PG-996)
 describe("a hook that reads the live load", () => {
-  // no-glm-heavy-path's shape: a push refused above a 5-minute load of 15
-  const gated: Check = (raw) =>
-    JSON.parse(raw).tool_input.command.startsWith("git push") && os.loadavg()[1] > 15
-      ? "refused"
-      : undefined
-  // a load that crosses 15 between every two reads, as a busy machine's may
-  const crossing = (run: () => Promise<unknown>) => async () => {
-    const live = os.loadavg
-    let reads = 0
-    os.loadavg = () => (reads++ % 2 === 0 ? [10, 10, 10] : [20, 20, 20])
-    try {
-      await run()
-    } finally {
-      os.loadavg = live
-    }
+  // no-glm-heavy-path's shape, in a tree of its own: a push refused above a 5-minute load of 15, read by a named import from a stand-in for node:os whose load crosses 15 between every two reads, as a busy machine's may, and guards running its refusal()
+  const tree = (name: string) => {
+    const hooks = join(DIR, "load-gated", name, "scripts", "hooks")
+    mkdirSync(hooks, { recursive: true })
+    writeFileSync(
+      join(hooks, "load.ts"),
+      "let reads = 0\nexport const loadavg = () => (reads++ % 2 === 0 ? [10, 10, 10] : [20, 20, 20])\n",
+    )
+    writeFileSync(
+      join(hooks, "no-glm-heavy-path.ts"),
+      'import { loadavg } from "./load"\nexport const check = async (raw: string, _env: unknown, load5: number = loadavg()[1]) => (JSON.parse(raw).tool_input.command.startsWith("git push") && load5 > 15 ? "refused" : undefined)\nexport const refusal = check\n',
+    )
+    writeFileSync(
+      join(hooks, "guards.ts"),
+      'import { refusal } from "./no-glm-heavy-path"\nexport const GUARDS = [{ factory: true, name: "no-glm-heavy-path", run: (raw: string, env: unknown) => refusal(raw, env) }]\nexport const check = async (raw: string, env: unknown, guards = GUARDS) => (await Promise.all(guards.map((g) => g.run(raw, env)))).find(Boolean)\n',
+    )
+    return hooks
   }
+  const push = [{ command: "git push origin x", cwd: "/h" }]
+  const same = { "newly allowed": 0, "newly refused": 0, same: 1 }
 
-  test(
-    "a replay judges both sides of a call under one load, so equal heads read the same",
-    crossing(async () => {
-      const list = [{ command: "git push origin x", cwd: "/h" }]
-      expect((await replay(gated, gated, list, "/h")).counts).toMatchObject({
-        "newly allowed": 0,
-        "newly refused": 0,
-        same: 1,
-      })
-    }),
-  )
+  test("a replay hands both sides of a call one load, so equal heads read the same", async () => {
+    const hook = join(tree("replay"), "no-glm-heavy-path.ts")
+    const gated = await checkOf(hook, "no-glm-heavy-path", "/main")
+    expect((await replay(gated, gated, push, "/h")).counts).toMatchObject(same)
+  })
 
-  test(
-    "a sweep judges both sides of a case under one load, so equal heads read the same",
-    crossing(async () => {
-      const { counts } = await sweep(gated, gated, [{ command: "git push origin x" }], "/h")
-      expect(counts).toMatchObject({ cases: 3, same: 3 })
-    }),
-  )
+  test("a sweep hands both sides of a case one load, so equal heads read the same", async () => {
+    const hook = join(tree("sweep"), "no-glm-heavy-path.ts")
+    const gated = await checkOf(hook, "no-glm-heavy-path", "/main")
+    const { counts } = await sweep(gated, gated, [{ command: "git push origin x" }], "/h")
+    expect(counts).toMatchObject({ cases: 3, same: 3 })
+  })
 
-  test("the run puts the live load back after each call", async () => {
-    const live = os.loadavg
-    await replay(gated, gated, [{ command: "git push origin x", cwd: "/h" }], "/h")
-    expect(os.loadavg).toBe(live)
+  test("guards runs each TAKES_LOAD guard's refusal() with that one load", async () => {
+    const gated = await checkOf(join(tree("guards"), "guards.ts"), "guards", "/main")
+    expect((await replay(gated, gated, push, "/h")).counts).toMatchObject(same)
+  })
+
+  test("each TAKES_LOAD hook's check() and refusal() take the load third", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    for (const name of TAKES_LOAD) {
+      const text = await Bun.file(join(hooks, `${name}.ts`)).text()
+      for (const fn of ["check", "refusal"])
+        expect(text).toMatch(
+          new RegExp(
+            `export async function ${fn}\\(\\s*raw: string,\\s*environment: Environment = process\\.env,\\s*load5: number`,
+          ),
+        )
+    }
   })
 })
 
