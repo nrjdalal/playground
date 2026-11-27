@@ -235,10 +235,9 @@ export async function cardNight(
   const tonight = offered(found, home, deps.out, kept)
     .filter((i) => !done.has(keyOf(i)))
     .slice(0, CARD_MAX)
-  const sentOf = sent ? { sent } : {}
-  if (!tonight.length) return { kept, ops, said: said.join("; "), ...sentOf }
+  if (!tonight.length) return { kept, ops, said: said.join("; "), ...(sent && { sent }) }
   const next = { at: deps.now(), id: deps.id(), items: tonight }
   ops.push(listLine(next))
   said.push(`list ${next.id} sent to Ops, ${tonight.length} items`)
-  return { card: next, kept, ops, said: said.join("; "), ...sentOf }
+  return { card: next, kept, ops, said: said.join("; "), ...(sent && { sent }) }
 }

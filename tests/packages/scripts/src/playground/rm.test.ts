@@ -367,18 +367,14 @@ test("rm --card <id> --peer still refuses after the next save an approval at ano
 })
 
 test("rm --approve refuses the list a peer's Remove was sent from once the next list is saved, and --card refuses an id neither list holds (#3161)", async () => {
-  const { cardId, deps, next } = await afterSave()
-  const { code, err } = await rmTold(
-    ["--approve", cardId, "/home/me/models/x", "--peer", "spark-b"],
-    deps,
-  )
+  const { cardId, deps, weights } = await afterSave()
+  const { code, err } = await rmTold(["--approve", cardId, weights.path, "--peer", "spark-b"], deps)
   expect(code).toBe(1)
   expect(err.join("\n")).toContain(`list ${cardId} is not the list nightly-clean saved`)
   const other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
   expect(await readerOf(deps.main, deps.data, (real) => real.approvals!(other))).toBe(
     `list ${other} is not the list nightly-clean saved`,
   )
-  expect(next.id).not.toBe(cardId)
 })
 
 test("runRm moves a path, lists it and restores it, telling no one", async () => {

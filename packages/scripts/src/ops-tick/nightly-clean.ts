@@ -871,6 +871,7 @@ export const nightlyClean =
         },
       )
       card = night.card
+      // A second run in one night, by hand, replaces `sent` with its own, so an earlier run's peer line is refused; the cron runs the beat once, at 03:00.
       sent = night.sent
       keptItems = night.kept
       for (const line of night.ops) await ctx.send("ops", line)
