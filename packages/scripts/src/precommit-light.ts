@@ -1,4 +1,4 @@
-// precommit:light: the checks that take seconds and bounce a commit or test:skills, run before a chain is queued through run-slot, so a bounce costs no place in the queue
+// precommit:light: the checks that take seconds and bounce a commit or test:skills, run before a chain is queued through run-slot, so a bounce costs no place in the queue; env-keys' build of @packages/env takes the commit slot first in a worktree whose turbo cache lacks it, as pre-commit's does
 import { join } from "node:path"
 
 export const CHECKS = [
